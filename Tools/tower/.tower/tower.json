@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6777,
-    "rev": 100096,
+    "rev": 100099,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -58124,6 +58124,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-12",
+          "by": "Main",
+          "text": "Ballot D-SCRIPT-HELPERS1 posted 2026-11-12 (owner question qbpgav13: the reworked D-FILE-STATEMENTS1 dropped the second point). It asks whether a named helper in a script file may use the script names; it recommends A (hidden arguments with an order check), reviewed by a fresh non-author agent with every probe rerun. Probes: $JET_SCRATCH_ROOT/lanes/Main/ballots/probes/D-SCRIPT-HELPERS1 (sh run.sh). E0107 stands until the owner votes."
+        },
+        {
           "at": "2026-11-06",
           "by": "Main",
           "text": "Main: E0202 retired in 8fe1586eaa (#6586 c8); a write through a temporary handle is now E0111. CardCleanup Q(a)."
@@ -58212,7 +58217,7 @@
       "parentId": "c0svnelx",
       "needsAcceptance": false,
       "created": "2026-10-21T11:49:42.286Z",
-      "updated": "2026-11-06T19:29:20.820Z",
+      "updated": "2026-11-12T22:04:25.947Z",
       "updatedBy": "Main",
       "goals": []
     },
@@ -74611,6 +74616,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-12T21:51:27.933Z"
+        },
+        {
+          "n": 187,
+          "text": "jet run and jet test check a #Test body the same way: a #Test body that jet test rejects is rejected by jet run too, with the same diagnostic (seed-b13 probe r08 in $JET_SCRATCH_ROOT/lanes/Main/ballots/probes/D-SCRIPT-HELPERS1). Proof: a case running both commands on that file with identical diagnostics.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-12T22:04:25.052Z"
         }
       ],
       "refs": [],
@@ -74621,9 +74635,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T00:04:45.539Z",
-      "updated": "2026-11-12T21:51:27.933Z",
+      "updated": "2026-11-12T22:04:25.052Z",
       "updatedBy": "Main",
-      "criteriaLastN": 186
+      "criteriaLastN": 187
     },
     {
       "id": "c0kyjdtx",
@@ -196737,6 +196751,285 @@
       "created": "2026-11-12T12:26:57.370Z",
       "outcome": "A",
       "ratifiedAt": "2026-11-12"
+    },
+    {
+      "id": "D-SCRIPT-HELPERS1",
+      "cardId": "c00ys8fj",
+      "group": "design",
+      "title": "Script helpers and the script's own names",
+      "situation": "A script is a Jet file of plain statements that runs top to bottom, with no `run: fn` wrapper. Scripts often define small helper functions. Today a helper can't use the names the script sets up. If the script says `count := 0`, a helper that adds to `count` is refused, and the error says to pass it as a parameter. The same lines work when written inside `run: fn`, so the rule surprises beginners and makes scripts longer than Python or JavaScript. This vote decides whether script helpers may use all of the script's names, only its unchanging names, or none, or whether those names become file-wide variables. We recommend letting helpers use them all, with every too-early call caught before the script runs. Three limits stay: a helper that changes a name can't be passed around or run in a task, and tests can't call a helper that uses script names.",
+      "gist": "May a named helper function in a script file use the names the script's own lines set up?",
+      "lesson": "A script's lines run top to bottom, and its helpers are named functions. Today Jet treats the script's names as private to those lines, so helpers can't use them. That comes from how the compiler builds scripts, not from a user need. Python, JavaScript, Lua, Swift and Kotlin let script functions use script names. Jet can do the same and still catch a too-early call before running, as Swift already does for its nested functions.",
+      "explainer": "A script file holds top-level statements and no `run: fn`; Jet runs its lines in order. A helper is a function declared at the top of a script with `name: fn(…) {…}`. A name is a binding such as `limit: 3` (fixed) or `count := 0` (changeable). A closure is an unnamed `fn() {…}` stored in a binding; it can use names around it. A `&` parameter lets a function change the caller's value. A hidden argument is one the compiler passes for you, so you never write it.",
+      "story": "Maya writes a short script that counts the words it notes. She adds a helper, `note`, that bumps `count` and prints progress against `limit`. Jet refuses it twice and tells her to pass `count` as a parameter. She moves the same lines into `run: fn`, and they work, which confuses her more. Every option below uses her exact program. A and D print three lines, B keeps today's errors, and C keeps the errors about `count`.",
+      "inWild": "Python: functions read module names when called; changing one needs `global`; a too-early call is a NameError at run time (run here, Python 3.13).\nJavaScript (Node 24 module): function declarations read and change module `let` names; a too-early call throws a ReferenceError at run time (run here).\nLua 5.4: a function sees a `local` declared above it; above the declaration the same name silently means a global (manual, not run).\nSwift: names at the top of the entry file are globals every function can use; only one file may hold top-level code (book, not run).\nSwift nested functions: they read and change the enclosing function's variables. The compiler refuses one that would capture a variable before its declaration ('closure captures … before it is declared'; compiler diagnostic, not run).\nKotlin scripts: the script compiles into a class, so its functions can use its top-level values (scripting proposal, not run).\nRust: a `fn` written inside a function can't use that function's locals, and error E0434 says to use a closure, like Jet today (error index, not run).\nRuby: `def` starts a new scope, so methods cannot see top-level locals, like Jet today (Ruby FAQ, not run).",
+      "detail": "Scope. This vote decides one rule: may a named function declared at the top of a script file use the script's top-level names? A script file holds top-level statements and no `run: fn`. The one-entry rule is unchanged: a file is a script or has `run: fn`, never both (E0621, probe p19). Scripts are never imported (E0620, probe p20_import). ALL_CAPS constants already reach every function (probe p03).\n\nCode. sema_script_entry turns a script's statements into a generated `run: fn` (Compiler/JetSema/Source/Sema/CheckProgram.jet:9141-9191). Bindings that are mutable or snake_case move into that body as entry locals (:9193-9199). Named functions stay module functions outside that body (:9153-9174). A function naming an entry local gets E0107 jet.UnknownName: 'Pass `name` as a parameter' (Compiler/JetSema/Source/Sema/Diagnostics.jet:325-341). Docs/spec/spec.md:304-308 states the rule; tests/ui/script_local_unseen_by_function.jet pins it.\n\nHistory. The ratified script-mode ballot D-SCRIPT-TOPLEVEL1 listed 'A function cannot read a variable from the script body' as a loss of its winning option. A later ruling made top-level bindings locals of the generated entry. The owner has since said that a function not seeing the script's names does not make sense. The rule follows from compiling helpers as separate module functions, not from a user need.\n\nProbes. Every current-behavior claim was run on seed-b13 in $JET_SCRATCH_ROOT/lanes/Main/ballots/probes/D-SCRIPT-HELPERS1. The file results.txt there holds the full output. Script files:\n\n```\np01 helper reads `total: 5`              -> E0107 \"`total` is a local of this file's top-level statements, which a function can't see\"\np02 closure `show := fn() {...}` reads it -> 5\np03 helper reads `LIMIT: 3`              -> 3\np04 helper writes `count := 0`           -> E0107\np05 closure writes `count` twice         -> 2\np06 closure made above `total: 5`        -> E0107 with the same \"function can't see\" text\np07 helper called above `total: 5`       -> E0107\np08 helper recursion fact(5)             -> 120\np09 closure recursion                    -> E0804 RecursiveLambda and E0102\np10 call above two helpers, one calling the other -> HI!\np11 helper as a map callback             -> [2, 4, 6]\np12 closure reading `factor` in map      -> [3, 6, 9]\np13 closure writing `count`, given to each -> 0 (the write is lost)\np14 task reads `total: 5`                -> 10\np15 task reads `count := 5`              -> 10\np17 `run: fn` file, function writes module `count` -> E0111 \"module state\"\np18 module value from process.args()     -> E0643 (module values are made while building)\nq15 task writes `count`                  -> E1101 ConcurrentCaptureNotOwned\np20 another file imports the script      -> E0620, plus E0357 on `total`\ns01 shared program                       -> E0107 on `count`, lines 4 and 5\ns02 shared program with parameters       -> 1/3 apple, 2/3 pear, done: 2\ns04 shared program with a closure        -> the same three lines\ns06 two script names in one string       -> only the first is reported\ns07 generic helper fn<T>, called above it -> 4\nq14 jet test on a script with #Test      -> 1 passed\nq17 `&Int` parameter in a script         -> 5, then 2\nq18 closure reads `total := 1`, then `total = 9` -> 1\n```\n\nInside `run: fn`, a nested `name: fn` is a closure. These probes show what a closure does today:\n\n```\np16, s03 nested helper reads locals      -> 5; the shared program prints all three lines\nq05 nested helper writes `count`         -> 2\nq02 nested helper made above `total`     -> E0107 \"Nothing named `total` exists here\"\nq03 call above the nested helper         -> E0102\nq04 helper made after `total`, called    -> 5\nq06 nested recursion                     -> E0804 and E0102\nq07 nested helper calls one made below   -> E0102 (q07b, made above: HI!)\nq08 nested reader as a map callback      -> [3, 6, 9]\nq09 nested writer given to each          -> 0 (the write is lost)\nq10 task calls a nested reader           -> 10\nq11 task writes `count` directly         -> E1101\nq12 task calls a nested writer           -> 0 (the write is lost, no error)\nq13 nested generic fn<T>                 -> E0003\nq16 nested reader, total 1 then 9        -> 1\n```\n\nReview probes. The adversarial review added r01-r10 in the same folder. Most write out by hand the call that A's rewrite would make; the rest check a rule A must keep:\n\n```\nr01 add(count, count): read Int and `&Int` of one name   -> 2 (allowed)\nr02 append_all(items, items): read list and `&` list     -> E0204 \"`items` is already shared in this call\"\nr03 f := bump, where bump has a `&` parameter            -> E0227 MarkedFunctionValue\nr04 task calls bump(count), `&` parameter                -> E1101\nr05 script helper makes its own `count := 5`             -> 5, then 0\nr06 the same lines inside `run: fn`                      -> E0118 NameAlreadyTaken\nr07 nested parameter named `count` inside `run: fn`      -> E0118\nr08 #Test reads `total`                                  -> jet run: 5; jet test: E0107\nr09 jet test on a script whose lines panic               -> 1 passed; the lines don't run\nr10 bump(count, count): two `&` of one name              -> E0204\n```\n\nWhy A is not a plain closure. A first draft made every helper a closure. The probes show that would take away what script helpers have today: recursion (p08), calls in any order (p10), generics (s07) and use as values (p11). It would also bring stale reads (q16) and lost writes (q09, q12). So A keeps helpers as real functions. The compiler hands each helper the script names it uses, as hidden arguments at each call.\n\nWrites through values. A helper that changes a name carries a hidden `&`. Jet already keeps any function with a `&` parameter direct-call-only (E0227, r03; spec.md:1127-1128). So A reuses E0227, with text naming the hidden write. In a task the hidden `&` is a captured write, E1101 (r04). Neither error can go without letting a function value hide a write, which E0227 exists to stop.\n\nShared and changed in one call. Jet refuses one call that shares a list and also changes it (E0204, r02, r10). Under A, `append_all(items)` is that call when the helper also changes `items`. The error must name the hidden write, and the spec's fix, `append_all(items.copy())`, works (spec.md:1482-1483). A plain number is fine (r01). Python and Node allow this sharing; Jet keeps its rule.\n\nSame spelling inside a helper. Inside `run: fn` a nested helper may not reuse an outer name as a parameter or local (E0118, r06, r07). Scripts that follow today's fix, a parameter named `count` (s02), and helpers with their own `count := 5` (r05) compile now. A keeps them compiling: a helper's own parameter or local hides the script name. A local also gets a tidy error, because `count := count + 1` in a helper makes a new name and leaves the script's `count` alone.\n\nStored helper values. A helper used as a value becomes an ordinary closure that holds its hidden read inputs, made at that point. Passed straight to `map`, it sees the current values. Stored and called after the script changes a `:=` name, it shows the old value, as a stored closure does today (q18). Direct calls always see the current value.\n\nRecursion. Helpers that call each other share one list of hidden inputs. If `even` calls `odd` and only `odd` changes `count`, both carry `&count`. Then `even` is direct-call-only too, and the E0227 text names the chain: `even` calls `odd`, which changes `count`.\n\nOrder. The check runs on the script's own lines: each call, each use of a helper as a value, each task, and each closure made there that calls a helper. Every name the helper reaches, through any helper it calls, must be bound above that line. The check is cautious: a call is refused even when the branch reading the name would not run. Reading a name a script line already moved is E0121 at the call.\n\nTests. `jet test` doesn't run a script's lines (r09), so a test has no script names (r08). A test that calls a helper using them gets E0107, naming the name and saying that a parameter fixes it. Helpers that need tests keep parameters, the s02 form, which works in both.\n\nTools. `jet fmt` changes nothing, because the source doesn't change. Hover and `jet inspect expand --facts callable-signature` list each helper's hidden inputs, marked read or change, beside its written parameters. Find-references and rename for `count` include the helpers that use it. Every error caused by a hidden input names the input and the line that binds it.\n\nSpeed and tiers. After the rewrite a call is the s02 call, with one extra argument per name reached. So it costs what hand-written parameters cost; nothing is measured yet. One pointer to all script names would pass less on long chains, but every call that also passes a script name would then clash under E0204. So A passes names one by one. The rewrite happens in the checker, before code generation, so O0, O1, O2 and web run the same calls.\n\nOne mechanism? A adds no new runtime mechanism: hidden inputs are ordinary read and `&` parameters, checked by E0204, E0227, E1101 and E0121. Users do meet two ways to reach outer names. A closure holds names from when it is made (q16, q18); a script helper takes them at each call. The split is real and named. It shows only when a `:=` name changes between making a closure and calling it.\n\nWhat doesn't carry over. Lines move from `run: fn` into a script unchanged, except the q16 pattern, which prints 1 inside `run: fn` and would print 9 in a script. Moving script helpers into `run: fn` loses recursion, any-order calls and generics (q06, q07, q13), and s02-style parameters become E0118 (r07). Methods in a script get no hidden inputs and keep E0107, because a method can be called through a trait where the call site isn't known.\n\nEdge cases. Each row is a script file; A, C and D are proposed and UNCHECKED, B is today's probed result:\n\n```\ncase                                            A (proposed)                  B (today)                          C (proposed)                D (proposed)\n1 helper reads `total`, called below it         5                             E0107 (p01)                        5                           5\n2 helper above `total: 5`, called below it      5                             E0107 (p01, p07)                   5                           5\n3 helper called above `total: 5`                E0107: not bound yet          E0107 (p07)                        E0107: not bound yet        E0107: not bound yet\n4 helper does `count += 1` twice                2                             E0107 (p04)                        E0107: `count` can change   2\n5 recursive helper fact(5)                      120                           120 (p08)                          120                         120\n6 helper calls a helper declared below          works                         works (p10)                        works                       works\n7 helper reading `factor` passed to map         [3, 6, 9]                     E0107; a closure works (p12)       [3, 6, 9]                   [3, 6, 9]\n8 helper writing `count` passed to each         E0227: call it directly (r03) E0107; a closure gives 0 (p13)     E0107                       the write lands\n9 task calls a helper that reads `total`        10                            E0107; a direct read is 10 (p14)   10                          10\n10 task calls a helper writing `count`          E1101 (r04)                   E0107; a direct write is E1101 (q15) E0107                     E1101 only with A's analysis\n11 #Test calls a helper that uses `total`       E0107: tests have no script names (r08, r09)  E0107 (r08)        as A                        E0107: never set in tests\n12 #Test calls a helper using no names          passes                        passes (q14)                       passes                      passes\n13 another file imports the script              E0620                         E0620 (p20_import)                 E0620                       E0620\n14 file also has `run: fn`                      E0621                         E0621 (p19)                        E0621                       E0621\n15 reader stored, then `total = 9`, then called old value, as q18             E0107; a closure prints 1 (q18)    E0107: `total` can change   9\n16 helper makes its own `count := 5`            5, then 0, tidy error         5, then 0 (r05)                    as A                        as A\n17 helper parameter named `count` (s02)         parameter hides it            works (s02)                        as A                        as A\n18 `append_all(items)`, helper changes `items`  E0204 naming the hidden write; `items.copy()` works  E0107  E0107                     E0204 only with A's analysis\n19 `even` calls `odd`, only `odd` changes `count`, `even` passed as a value  E0227 naming `odd`  E0107                          E0107 on `odd`              works\n```\n\nPeers run here. Python 3.13 and Node 24 ran peers/python_helpers.py and peers/node_helpers.mjs. Python printed `NameError: name 'total' is not defined` for a too-early call, then 5 and 2. Writing without `global` raised UnboundLocalError. Node printed `ReferenceError: Cannot access 'total' before initialization`, then 5, 2 and 5, so a callback's writes land. Lua, Swift, Kotlin, Rust and Ruby are cited from their documentation below and were not run.\n\nRight and wrong ways. Python and JavaScript let helpers use script names, but report a too-early call only when that line runs. Lua silently reads a global when the function sits above the `local`. Ruby and Rust refuse, like Jet today; users switch to closures, blocks or constants. Swift nested functions already reject a capture before its declaration at compile time, so A's order check follows known practice. A takes the reach of Python and JavaScript and moves their run-time failure to compile time.\n\nOption D. Swift makes top-level names of its entry file into globals. In Jet that is an exception to two rules. Module values are made while building (E0643, p18), and a function may not change module state, because every task can reach it (E0111, p17). D's extra gains over A are writing callbacks and stored helpers that see later changes. Both need a function value to hide a write, which E0227 refuses. Keeping Jet's checks needs A's per-helper analysis, and then D's gains disappear.\n\nSeparate defects found, outside this vote. A closure that writes a captured `:=` local loses the write when given as a callback (p13 and q09 print 0). A task that calls such a closure compiles and loses the write (q12), while a direct write is E1101 (q11). A closure made above a script name gets the 'function can't see' text (p06), though the cause is order. In one interpolated string only the first unknown script name is reported (s01, s06).\n\nMore defects. The spec says a closure that only reads a name has 'shared read access' (spec.md:1169), yet q16 and q18 print the old value 1 after `total = 9`. The spec or the closure code must change. `jet run` accepts a #Test body that `jet test` rejects (r08).\n\nShared work. A and C both need the order check, the hidden-argument rewrite and the same-spelling rule with its tidy error. They also need new E0107, E0204 and E0227 text, the hover and inspect rows, and UI cases for every table row on every tier. D needs the order check plus exceptions to E0111, E0643 and E0227. B needs none of that.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Helpers use the script's names",
+          "gist": "Helpers read and change script names; a call before a name is set fails to compile.",
+          "detail": "A named function at the top of a script may use the script's names, as the script's own lines do. The shared program prints `1/3 apple`, `2/3 pear` and `done: 2`. A helper reads a name's value at the moment it is called, and its writes change the script's name. A call that runs before a name it needs is bound is a compile error. Helpers stay ordinary functions: they recurse, call each other in any order, and can be generic.\n\nBeginners write helpers as in Python or JavaScript, and timing mistakes appear before the script runs. Experts keep control: a helper's own parameter with the same name hides the script's name, so today's s02 workaround keeps working. Imported files and `run: fn` programs keep full signatures. Hover lists each helper's hidden inputs.\n\nLimits. A helper that changes a script name can be called directly, but not passed as a value or run in a task (E0227, E1101). A call that passes a list the helper also changes is E0204; `items.copy()` fixes it. Tests can't call a helper that uses script names. A stored helper value keeps the values from when it was stored.\n\nGain: lines written inside `run: fn` work in a script too, with earlier errors than Python or JavaScript. Loss: a helper's signature no longer lists every input, but only inside one script file.",
+          "technical": "Proposed, UNCHECKED. The checker computes, for each script helper, the entry locals it reaches, including through helpers it calls. Helpers that call each other share one list. Each call passes them as hidden arguments. A name the helper or its callees change goes as `&`. Any other goes as an ordinary read parameter, which shares the value without copying it (r02's E0204 text says 'already shared'). After the rewrite every call is the explicit form of probe s02.\n\nExisting rules then apply unchanged, with text naming the hidden input. E0227 covers a changing helper used as a value (r03), and E1101 one called in a task (r04). E0204 covers a call that also passes the changed name (r02, r10). E0121 covers a read of a name a script line already moved. A helper used as a value becomes a closure holding its read inputs, made at that point, under the closure rules (spec.md:1167-1186).\n\nThe order check reuses E0107, with text naming the helper, the call chain, the name and its binding line. A helper's own parameter or local hides a script name of the same spelling; a local also gets a tidy error (it stops jet check and jet build, not jet run). Methods and `#Test` bodies get no hidden arguments.\n\nThe rewrite runs in the checker, before code generation, so O0, O1, O2 and web run the same calls. Hover, find-references and `jet inspect expand --facts callable-signature` show the hidden inputs. The change is additive. Today any helper that names an entry local fails (p01, p04), and helpers that reuse a script name's spelling (r05, s02) keep their meaning.",
+          "code": "limit: 3\ncount := 0\nnote: fn(word: String) {\n    count += 1\n    print(\"{count}/{limit} {word}\")\n}\nnote(\"apple\")\nnote(\"pear\")\nprint(\"done: {count}\")\n// Proposed output:\n// 1/3 apple\n// 2/3 pear\n// done: 2\n\n// Proposed errors:\n// [\"fig\"].each(note)   // E0227: `note` changes `count`, so call it directly\n// show: fn() { print(total) }\n// show()               // E0107: `show` reads `total`, which isn't bound yet\n// total: 5"
+        },
+        {
+          "key": "B",
+          "name": "Keep today's rule",
+          "gist": "Helpers see only their parameters, ALL_CAPS constants and other declarations.",
+          "detail": "Keep E0107. The shared program fails with two errors on `count` (probe s01). Beginners fix it with parameters: `note: fn(word: String, count: &Int, limit: Int)` called as `note(\"apple\", count, limit)` prints the three lines (s02). The other fix is a closure, `note := fn(word: String) {…}`, which also prints them (s04).\n\nExperts get signatures that list every input. Closures have limits: they can't recurse (p09), must be made below the names they use (p06), and copy values they only read (q18 prints 1 after `total = 9`). Gain: no new rule. Loss: lines that work inside `run: fn` (s03) fail in a script, and every call repeats the script's names.",
+          "technical": "Current behavior, probed on seed-b13. No change to CheckProgram.jet or Diagnostics.jet. The closure defects listed in detail (lost writes, misleading E0107 text, stale reads) need fixing under every option.",
+          "code": "limit: 3\ncount := 0\nnote: fn(word: String) {\n    count += 1\n    print(\"{count}/{limit} {word}\")\n}\nnote(\"apple\")\nnote(\"pear\")\nprint(\"done: {count}\")\n// Today (seed-b13, probe s01): 2 errors\n// E0107: `count` is a local of this file's top-level\n//   statements, which a function can't see (lines 4, 5)\n// Fix: Pass `count` as a parameter"
+        },
+        {
+          "key": "C",
+          "name": "Helpers see only fixed names",
+          "gist": "Helpers read names set with `:`; names set with `:=` still need parameters.",
+          "detail": "Helpers may read script names bound with `:`, which never change, but not names bound with `:=`. In the shared program `limit` works, and `count` is refused on lines 4 and 5. The fix passes `count` as an `&Int` parameter, as probe s05 does. The order check from A applies.\n\nBeginners meet two kinds of script names that act differently in helpers. Experts get helpers that never change script state, so any helper may run in a task or be passed as a value. Gain: no hidden writes. Loss: counters and totals, the common case, still need parameters, and tests still can't call a helper that reads script names.",
+          "technical": "Proposed, UNCHECKED. The same hidden-argument rewrite as A, limited to entry locals that are not mutable, with A's rules for same spellings, tests and order. A `:=` local named in a helper keeps E0107, with new text naming its `:=` binding.",
+          "code": "limit: 3\ncount := 0\nnote: fn(word: String) {\n    count += 1\n    print(\"{count}/{limit} {word}\")\n}\nnote(\"apple\")\nnote(\"pear\")\nprint(\"done: {count}\")\n// Proposed: `limit` is visible. `count` can change,\n// so lines 4 and 5 are E0107: pass `count` as a parameter."
+        },
+        {
+          "key": "D",
+          "name": "Script names become file-wide variables",
+          "gist": "Every script name lives for the whole run, like Swift's top-level names; any function, value or task can reach it.",
+          "detail": "Every name the script binds lives for the whole run, the way Swift treats the top-level names of its entry file. Helpers read and change it directly, with no hidden arguments. The shared program prints the same three lines. A helper passed as a callback can change `count`, as in Node, and a stored helper sees later changes.\n\nBeginners get Node's behavior. Experts lose two of Jet's guarantees. A function value can hide a write, so a call that passes `items` while a callback appends to it can't be checked. A task could read `count` while the script changes it. Gain: writing callbacks. Loss: those guarantees, or A's analysis added back, which removes the gain.",
+          "technical": "Proposed, UNCHECKED. Each entry local a function names becomes file storage, set when its line runs; A's order check still refuses a too-early use. This is an exception to two rules. Module values are made while building (E0643, p18), and a function may not change module state (E0111, p17). A writing callback is a function value that hides a write, which E0227 refuses (r03). Keeping E0204, E0227 and E1101 needs the same per-helper analysis as A.",
+          "code": "limit: 3\ncount := 0\nnote: fn(word: String) {\n    count += 1\n    print(\"{count}/{limit} {word}\")\n}\nnote(\"apple\")\nnote(\"pear\")\nprint(\"done: {count}\")\n// Proposed output: 1/3 apple, 2/3 pear, done: 2\n// D also allows a writing callback, as Node does:\n// add: fn(n: Int) { count += n }\n// [1, 2].each(add)   // count goes from 2 to 5"
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "A removes a rule that exists only because helpers are compiled outside the script's body. Lines written inside `run: fn` then work in a script too. Scripts gain the reach of Python and JavaScript, and Jet reports a too-early call before running, where they fail at run time. Helpers stay full functions, every existing safety check still applies, and every program that compiles today keeps its meaning.",
+        "gains": [
+          "Fewer parameters in scripts",
+          "Too-early calls caught before running",
+          "No current program changes meaning"
+        ],
+        "losses": [
+          {
+            "loss": "A helper's signature no longer lists every input.",
+            "mitigation": "This happens only inside one script file. Hover and `jet inspect expand` list each helper's hidden inputs, and every error caused by one names it. Imported files and `run: fn` programs keep every input in the signature."
+          },
+          {
+            "loss": "A helper that changes a script name can't be passed around or run in a task.",
+            "mitigation": "This is Jet's existing rule for any function with a `&` parameter (E0227, E1101), which stops a function value from hiding a write. The error names the write and offers a loop. Read-only helpers pass freely."
+          },
+          {
+            "loss": "Tests can't call a helper that uses script names, because `jet test` doesn't run the script's lines.",
+            "mitigation": "The error says so. A helper that needs tests takes parameters, the s02 form, which works in tests and in the script."
+          },
+          {
+            "loss": "A call that passes a list a helper also changes, such as `append_all(items)`, is refused (E0204), where Python and Node allow it.",
+            "mitigation": "The error names the hidden write and offers `append_all(items.copy())`, the spec's fix for the same clash in written arguments."
+          },
+          {
+            "loss": "Closures keep names from when they are made, while helpers read them at each call, so a stored helper value shows old values.",
+            "mitigation": "The difference shows only when a `:=` name changes between storing and calling. Direct calls and helpers passed straight to a call always see current values."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "It keeps a rule made by the compiler's build steps, and the same lines that work inside `run: fn` fail in a script."
+          },
+          {
+            "key": "C",
+            "reason": "It fixes reading, but counters and totals, the most common case, still need parameters."
+          },
+          {
+            "key": "D",
+            "reason": "Its only gains over A, writing callbacks and stored helpers that see later changes, need a function value to hide a write. Keeping Jet's checks against that turns D back into A."
+          }
+        ],
+        "tradeoff": "Script helpers gain hidden inputs, limited to one file, in exchange for shorter scripts with earlier errors. A helper that changes a name stays direct-call-only, and tested helpers keep their parameters."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: ReviewScriptHelpers. Reran every probe and both peers on seed-b13, all claims reproduced; probes r01-r10 showed writing helpers hit existing E0227, hidden `&` clashes under E0204, and E0118 and tests need rules. Repaired A's claims, table and losses, added option D and the Swift and Rust peers; A holds within the stated limits."
+      },
+      "checkInstructions": "Probes are in $JET_SCRATCH_ROOT/lanes/Main/ballots/probes/D-SCRIPT-HELPERS1. Run `sh run.sh` there; with no arguments it runs every probe the ballot cites on seed-b13 and writes results.txt. Run `python3 peers/python_helpers.py` and `node peers/node_helpers.mjs` for the peer rows.\n\nProposed behavior is UNCHECKED. After implementation, prove every row of the edge-case table on every tier with UI cases. Include the E0204, E0227, E1101 and E0121 texts that name a hidden input, and the same-spelling tidy error. Validate this payload with Tools/agent/ballots/Validate.jet.",
+      "surface": {
+        "gist": "May a helper function in a script use the names the script sets up, like `count`?",
+        "lesson": "A script's lines run top to bottom, and its helpers are named functions. Today helpers can't use the script's names. Python, JavaScript, Lua, Swift and Kotlin allow it. Jet can allow it and still catch a too-early call before the script runs.",
+        "trio": {
+          "current": {
+            "note": "Refused today; the same lines inside `run: fn` work.",
+            "code": "limit: 3\ncount := 0\nnote: fn(word: String) {\n    count += 1   // error: a function can't see `count`\n    print(\"{count}/{limit} {word}\")\n}\nnote(\"apple\")"
+          },
+          "wild": {
+            "lang": "Python",
+            "note": "Functions use script names when called; changing one needs `global`. A too-early call fails only at run time.",
+            "code": "limit = 3\ncount = 0\ndef note(word):\n    global count\n    count += 1\n    print(f\"{count}/{limit} {word}\")\nnote(\"apple\")   # 1/3 apple"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Helpers use the script's names",
+            "gist": "Helpers read and change script names. A call before a name is set fails to compile.",
+            "gains": [
+              "Lines from `run: fn` work in a script too",
+              "Too-early calls caught before running",
+              "Helpers can still recurse and call each other"
+            ],
+            "losses": [
+              "Not every input appears in the signature",
+              "Helpers that change a name can't be passed around",
+              "Tests can't call helpers that use script names"
+            ],
+            "proposed": {
+              "code": "limit: 3\ncount := 0\nnote: fn(word: String) {\n    count += 1\n    print(\"{count}/{limit} {word}\")\n}\nnote(\"apple\")\nnote(\"pear\")\nprint(\"done: {count}\")\n// Proposed output:\n// 1/3 apple\n// 2/3 pear\n// done: 2"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Keep today's rule",
+            "gist": "Helpers see only their parameters and ALL_CAPS constants.",
+            "gains": [
+              "Every input is in the signature",
+              "Nothing new to learn"
+            ],
+            "losses": [
+              "Lines that work in `run: fn` fail in a script",
+              "Every call repeats the script's names",
+              "The closure workaround can't recurse"
+            ],
+            "proposed": {
+              "code": "limit: 3\ncount := 0\nnote: fn(word: String) {\n    count += 1\n    print(\"{count}/{limit} {word}\")\n}\nnote(\"apple\")\nnote(\"pear\")\nprint(\"done: {count}\")\n// Today: 2 errors on `count`, lines 4 and 5\n// Fix: Pass `count` as a parameter"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Helpers see only fixed names",
+            "gist": "Helpers read names set with `:`. Names set with `:=` still need parameters.",
+            "gains": [
+              "Helpers never change script state",
+              "Every helper can run in a task"
+            ],
+            "losses": [
+              "Counters and totals still need parameters",
+              "Two kinds of script names act differently"
+            ],
+            "proposed": {
+              "code": "limit: 3\ncount := 0\nnote: fn(word: String) {\n    count += 1\n    print(\"{count}/{limit} {word}\")\n}\nnote(\"apple\")\nnote(\"pear\")\nprint(\"done: {count}\")\n// Proposed: `limit` is visible.\n// Lines 4 and 5: pass `count` as a parameter."
+            }
+          },
+          {
+            "key": "D",
+            "name": "Script names become file-wide variables",
+            "gist": "Script names live for the whole run, as in Swift.",
+            "gains": [
+              "Callbacks can change script names, as in Node"
+            ],
+            "losses": [
+              "A function value can hide a write",
+              "Tasks could race on script names"
+            ],
+            "proposed": {
+              "code": "limit: 3\ncount := 0\nnote: fn(word: String) {\n    count += 1\n    print(\"{count}/{limit} {word}\")\n}\nnote(\"apple\")\nnote(\"pear\")\nprint(\"done: {count}\")\n// Proposed output: the same three lines\nadd: fn(n: Int) { count += n }\n[1, 2].each(add)   // count becomes 5"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "It removes a rule that exists only because of how scripts are compiled. Scripts read like Python, and Jet reports a too-early call before running, not during.",
+          "gains": [
+            "Fewer parameters in scripts",
+            "Errors before running, not during",
+            "No current program changes meaning"
+          ],
+          "losses": [
+            {
+              "loss": "Not every input appears in a helper's signature.",
+              "mitigation": "Only in one script file; hover lists them."
+            },
+            {
+              "loss": "Helpers that change a name can't be passed around.",
+              "mitigation": "Jet's rule for any function that changes an input. The error offers a loop."
+            },
+            {
+              "loss": "Tests can't call helpers that use script names.",
+              "mitigation": "Give a tested helper parameters; that form works in tests and scripts."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Keeps a rule made by the compiler, so lines that work in `run: fn` fail in a script."
+            },
+            {
+              "key": "C",
+              "reason": "Counters and totals, the most common case, still need parameters."
+            },
+            {
+              "key": "D",
+              "reason": "Writing callbacks would let a function value hide a change, which Jet refuses."
+            }
+          ],
+          "tradeoff": "Helpers gain hidden inputs inside one script file, in exchange for shorter scripts with earlier errors."
+        }
+      },
+      "reports": [
+        {
+          "title": "Python execution model: resolution of names",
+          "url": "https://docs.python.org/3/reference/executionmodel.html#resolution-of-names",
+          "note": "Module names are globals that functions look up when they run."
+        },
+        {
+          "title": "Python global statement",
+          "url": "https://docs.python.org/3/reference/simple_stmts.html#the-global-statement",
+          "note": "Assigning a module name inside a function needs `global`."
+        },
+        {
+          "title": "MDN: let and the temporal dead zone",
+          "url": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/let#temporal_dead_zone_tdz",
+          "note": "Reading a `let` before its line runs throws ReferenceError at run time."
+        },
+        {
+          "title": "MDN: function declaration hoisting",
+          "url": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/function#hoisting",
+          "note": "Function declarations can be called above where they are written."
+        },
+        {
+          "title": "Lua 5.4 manual: visibility rules",
+          "url": "https://www.lua.org/manual/5.4/manual.html#3.5",
+          "note": "A local's scope starts at the statement after its declaration."
+        },
+        {
+          "title": "The Swift Programming Language: top-level code",
+          "url": "https://docs.swift.org/swift-book/documentation/the-swift-programming-language/declarations/#Top-Level-Code",
+          "note": "Top-level names are visible module-wide; at most one entry style per program."
+        },
+        {
+          "title": "The Swift Programming Language: nested functions and capturing values",
+          "url": "https://docs.swift.org/swift-book/documentation/the-swift-programming-language/closures/#Capturing-Values",
+          "note": "A nested function captures and can change the variables of the function around it."
+        },
+        {
+          "title": "Rust error index: E0434",
+          "url": "https://doc.rust-lang.org/error_codes/E0434.html",
+          "note": "An inner `fn` can't capture the outer function's locals; the fix is a closure."
+        },
+        {
+          "title": "Kotlin scripting support proposal",
+          "url": "https://github.com/Kotlin/KEEP/blob/master/proposals/scripting-support.md",
+          "note": "A script is compiled into a class; its body becomes the class constructor."
+        },
+        {
+          "title": "Ruby FAQ: scope of a local variable",
+          "url": "https://www.ruby-lang.org/en/documentation/faq/4/",
+          "note": "A method definition starts a new local-variable scope."
+        }
+      ],
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-12T22:04:24.095Z"
     }
   ],
   "questions": [
@@ -199965,6 +200258,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-12T22:04:25.947Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c00ys8fj",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-12T22:04:25.052Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0oev2ib",
+      "note": "#187 jet run and jet test check a #Test body the same way: a #Tes"
+    },
+    {
+      "at": "2026-11-12T22:04:24.095Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-SCRIPT-HELPERS1",
+      "note": "Script helpers and the script's own names"
+    },
     {
       "at": "2026-11-12T22:00:21.117Z",
       "by": "Main",
