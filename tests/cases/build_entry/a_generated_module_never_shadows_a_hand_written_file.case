@@ -1,0 +1,23 @@
+# Generation is additive: a file under `.jet/generated/` that this build did
+# not write, and that the lock does not record as generated, is never
+# overwritten or shadowed. `b.generate("first")` would replace a hand-written
+# `first.jet` there, so the build stops with E3510 before any step runs and
+# the hand-written bytes stay. Removing the file lets the same build pass.
+fixture: fixtures/generated_rounds_are_byte_identical_across_cold_builds
+artifact: app
+env: NO_COLOR=1
+mkdir: .jet/generated/main
+write: .jet/generated/main/first.jet = "first_value: fn() -> Int { 7 }\n"
+step shadowed: jet build main.jet --write-generated=on
+exit: 1
+stderr: ~ "E3510" # the registered shadow refusal
+stderr: ~ "`b.generate(\"first\")` would shadow the module at `.jet/generated/main/first.jet`" # names the generated module and the managed path
+file: .jet/generated/main/first.jet = "first_value: fn() -> Int { 7 }\n" # the hand-written bytes stay
+file: .jet/generated/main/second.jet absent # nothing was written
+remove: .jet/generated/main/first.jet
+step clean: jet build main.jet --write-generated=on
+exit: 0
+file: .jet/generated/main/first.jet = "first_value: fn() -> Int { 40 }\n"
+step launch: {work}/.jet/build/app
+exit: 0
+stdout: = "42\n"

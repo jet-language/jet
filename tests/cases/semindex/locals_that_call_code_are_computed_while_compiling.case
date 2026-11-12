@@ -1,6 +1,7 @@
-# (#4276 c48) An immutable `name: value` local that calls pure code is computed
-# while compiling and holds the value; one whose computation stops is quietly
-# left to run time with the reason, and the build reports nothing for it.
+# An immutable `name: value` local that calls pure code is computed while
+# compiling and holds the value; one whose computation stops or runs out of
+# the evaluator's steps is quietly left to run time with the reason, and the
+# build reports nothing for it.
 fixture: locals_that_call_code_are_computed_while_compiling.fixture
 step: jet inspect semindex computed.jet --json
 exit: 0
@@ -8,3 +9,10 @@ json: stdout doc $.semindex.definitions[?leaf_name="area"][0].detail.stage = {"w
 json: stdout doc $.semindex.definitions[?leaf_name="hello"][0].detail.stage = {"when":"build","value":"\"hello jet\""}
 json: stdout doc $.semindex.definitions[?leaf_name="risky"][0].detail.stage.when = "run"
 json: stdout doc $.semindex.definitions[?leaf_name="risky"][0].detail.stage.reason ~ "computing it stops" # the reason ends with the stop's diagnostic text, which is not part of this contract
+json: stdout doc $.semindex.definitions[?leaf_name="spun"][0].detail.stage.when = "run"
+json: stdout doc $.semindex.definitions[?leaf_name="spun"][0].detail.stage.reason ~ "computing it stops" # running out of steps is a stop
+json: stdout doc $.semindex.definitions[?leaf_name="spun"][0].detail.stage.reason ~ "fuel" # the stop names the spent step budget
+step: jet run computed.jet
+exit: 0
+stdout: ^= "58" # the run prints the computed result first
+stderr: !~ "fuel" # the fallback is quiet

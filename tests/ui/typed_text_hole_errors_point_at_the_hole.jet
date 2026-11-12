@@ -1,0 +1,16 @@
+// SQL, HTML and Sh text each own their holes: a hole value the head can't
+// carry is reported at that hole's own span in the literal, the same way for
+// all three heads.
+Point: struct {
+    x: Int
+}
+
+run: fn() {
+    spot: Point{x: 1}
+    query: SQL{"select * from points where x = {spot}"}
+    page: HTML{"<p>{spot}</p>"}
+    line: Sh{"echo {spot}"}
+    print(query.template())
+    print(page.text())
+    print(line.text())
+}
