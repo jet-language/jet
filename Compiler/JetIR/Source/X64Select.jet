@@ -104,6 +104,7 @@ use {
         x64_lea_rip,
         x64_load,
         x64_load_indexed,
+        x64_load_rip,
         x64_load_u8,
         x64_log,
         x64_log_stop,
@@ -1439,19 +1440,27 @@ ir_x64_alloc_entry: fn(f: IRFunction, al: IRX64Allocation, at: Int, symbol: Stri
     ""
 }
 
+// The runtime's process-ending flag (JetRuntime Main.jet main_process_ending)
+// and the data symbol the runtime object exports it as (BuildLibrary.jet
+// ir_build_library).
+IR_X64_PROCESS_ENDING_STORAGE: "main_process_ending"
+IR_X64_PROCESS_ENDING_SYMBOL: "jet_rt_process_ending"
+
 // jet_rt_block_release(block) inline: true when the caller's reference was
-// the last one. A count of 1 is the caller's alone (no other owner can
-// retain it meanwhile), so it is true without a write; an immortal count is
-// false; a count carrying the zero-at-free mark (bit 62, Refcount.jet
-// RC_ZERO_MARK) takes the routine in a slow path, which masks the mark off;
-// any other takes one `lock dec` (a plain dec in a single-thread program),
-// true when it reaches zero. The Bool is
-// fused into a following branch like jet_rt_block_unique's.
+// the last one and the process is not ending. A count of 1 is the caller's
+// alone (no other owner can retain it meanwhile), so it is last without a
+// write; an immortal count is false; a count carrying the zero-at-free mark
+// (bit 62, Refcount.jet RC_ZERO_MARK) takes the routine in a slow path,
+// which masks the mark off and reads the flag itself; any other takes one
+// `lock dec` (a plain dec in a single-thread program), last when it reaches
+// zero. A last reference is false once the process is ending (the flag's
+// word is nonzero, as jet_rt_rc_release reads it), so no drop walk runs at
+// exit; a shared count still steps down then, but no owner frees. The Bool
+// is fused into a following branch like jet_rt_block_unique's.
 ir_x64_block_release: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, at: Int, block: Int) Never! {
     reg: ir_x64_use(e, m, f, al, block, X64_RAX)
     x64_load(e.code, X64_RCX, reg, -24)
     x64_alu_ri(e.code, X64Alu.Cmp, X64_RCX, 1)
-    // ZF set: true.
     last: x64_jcc_rel32(e.code, X64Cond.E)
     x64_test_rr(e.code, X64_RCX, X64_RCX)
     // A negative count leaves ZF clear: false.
@@ -1460,8 +1469,15 @@ ir_x64_block_release: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64
     x64_shift_ri(e.code, X64Shift.Shr, X64_RCX, 62)
     marked: x64_jcc_rel32(e.code, X64Cond.NE)
     x64_count_step(e.code, reg, -24, false, !m.single_thread)
+    // Above zero leaves ZF clear: false.
+    shared: x64_jcc_rel32(e.code, X64Cond.NE)
     ir_x64_land(e, last)
+    // ZF set (true) when the flag's word is zero.
+    flag: x64_load_rip(e.code, X64_RCX)
+    e.relocs.push(X64Reloc{at: flag, target: X64RelocTarget.RuntimeData{symbol: IR_X64_PROCESS_ENDING_SYMBOL}})
+    x64_test_rr(e.code, X64_RCX, X64_RCX)
     ir_x64_land(e, immortal)
+    ir_x64_land(e, shared)
     fused: ir_x64_fusable(e, f, al, at)
     ir_x64_compare_result(e, m, f, al, at, X64Cond.E)
     slow := ir_x64_cold(IRX64ColdKind.Release, [Int]{marked})
@@ -4810,7 +4826,7 @@ ir_x64_test_jcc_target: fn(code: [U8], at: Int) -> Int Never! {
                 .Runtime(symbol) -> {
                     if symbol == "jet_std_math_fma" -> soft += 1
                 }
-                .Function(_) -> {}
+                .Function(_) | .RuntimeData(_) -> {}
             }
         }
         assert_eq(cells, 2)

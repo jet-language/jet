@@ -9,7 +9,7 @@
 use {
     jet_foundation.[CompilerThreads, compiler_apply_order, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_heaviest_first, compiler_transfer_rows]
     jet_backend.[
-        X64CompiledFunction, X64Data, X64DataID, X64DataReloc, X64DebugEncoding, X64DebugType, X64DebugTypeKind, X64DebugVariable, X64ExecutableResult,
+        X64CompiledFunction, X64Data, X64DataExport, X64DataID, X64DataReloc, X64DebugEncoding, X64DebugType, X64DebugTypeKind, X64DebugVariable, X64ExecutableResult,
         X64FunctionDebug, X64FunctionID, X64FunctionSource, X64LineRow, X64ModuleDebug, X64ObjectModule, X64Reloc, X64RuntimeExport, X64VariableRange, X64_FUNCTION_ALIGN,
         x64_object_functions_threads, x64_object_main, x64_object_main_debug,
     ]
@@ -473,7 +473,7 @@ ir_x64_object: fn(compiled: &&IRX64Result, debug_info: Bool) -> X64ExecutableRes
     task.group ir_x64_object_release {
         rest: task ir_x64_release_rest(released)
         dropped: task ir_x64_release_runs(released, -1)
-        objects.push(x64_object_functions_threads(program, functions, debug, [X64RuntimeExport]{X64RuntimeExport{function: X64FunctionID{value: -1}, symbol: "main"}}, threads, debug_info, false))
+        objects.push(x64_object_functions_threads(program, functions, debug, [X64RuntimeExport]{X64RuntimeExport{function: X64FunctionID{value: -1}, symbol: "main"}}, [X64DataExport]{}, threads, debug_info, false))
         _: rest.join() ?? panic(compiler_threads_failure_text(err))
         _: dropped.join() ?? panic(compiler_threads_failure_text(err))
     }
@@ -521,7 +521,7 @@ ir_x64_reached_only: fn(functions: &[X64CompiledFunction], debug: &[X64FunctionD
                             work.push(target.value)
                         }
                     }
-                    .Runtime(_) | .Data(_) -> {}
+                    .Runtime(_) | .Data(_) | .RuntimeData(_) -> {}
                 }
             }
         }
@@ -675,16 +675,17 @@ ir_x64_hot_order: fn(compiled: &IRX64Result, hot: [String]) -> Int Never! {
 // The relocatable object of a library module (moved in, every row moved
 // on): its functions with no `main`, each of `exports` (ir_build_library)
 // a global symbol of its IR function and, with a priority, a constructor or
-// destructor hook. `debug_info` as ir_x64_object. Every function and data
-// object is in a section of its own, so a link keeps only what it reaches.
-ir_x64_library_object: fn(compiled: &&IRX64Result, exports: [IRLibraryExport], debug_info: Bool) -> X64ExecutableResult Never! {
+// destructor hook, and each of `data_exports` a global symbol of its data
+// object. `debug_info` as ir_x64_object. Every function and data object is
+// in a section of its own, so a link keeps only what it reaches.
+ir_x64_library_object: fn(compiled: &&IRX64Result, exports: [IRLibraryExport], data_exports: [X64DataExport], debug_info: Bool) -> X64ExecutableResult Never! {
     owned := compiled.move()
     if owned.errors.len() > 0 -> return X64ExecutableResult{bytes: [U8]{}, errors: owned.errors.move()}
     program := ir_x64_object_module(owned)
     debug := compiler_take_rows<X64FunctionDebug>(owned.debug)
     functions := compiler_take_rows<X64CompiledFunction>(owned.functions)
     globals: loop row in exports -> X64RuntimeExport{function: X64FunctionID{value: row.function}, symbol: row.symbol, init_priority: row.init_priority, fini_priority: row.fini_priority, guards: row.guards.copy()}
-    x64_object_functions_threads(program, functions, debug, globals, owned.threads, debug_info, true)
+    x64_object_functions_threads(program, functions, debug, globals, data_exports, owned.threads, debug_info, true)
 }
 
 // The object writer's module of `owned`: its data, debug files and types

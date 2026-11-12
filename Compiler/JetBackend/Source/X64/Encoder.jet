@@ -515,6 +515,18 @@ x64_lea_rip: fn(code: &X64Code, dst: Int) -> Int Never! {
     at
 }
 
+// mov dst, [rip + disp32] (REX.W 8B /r, mod 00 rm 101); returns the offset of
+// the disp32 field, which ends the instruction, so it patches like a rel32.
+x64_load_rip: fn(code: &X64Code, dst: Int) -> Int Never! {
+    x64_log(code, X64EmitKind.Memory, -1, -1, -1)
+    x64_rex(code.bytes, true, dst, 0)
+    x64_byte(code.bytes, 0x8b)
+    x64_byte(code.bytes, ((dst.bit_and(7)) << 3).bit_or(5))
+    at: code.bytes.len()
+    x64_u32(code.bytes, 0)
+    at
+}
+
 // One-operand group 3 (REX.W F7 /n): neg 3, mul 4, imul 5, div 6, idiv 7.
 x64_group3: fn(code: &X64Code, extension: Int, reg: Int) Never! {
     if extension == 6 || extension == 7 -> x64_log(code, X64EmitKind.Div, -1, reg, -1)

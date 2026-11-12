@@ -10,7 +10,7 @@
 // builds each call of one as its machine operation (ir_intrinsic_call).
 
 use {
-    jet_backend.[LINK_FAULT_REPORT]
+    jet_backend.[LINK_FAULT_REPORT, X64DataExport]
     jet_foundation.[AccessConvention, DeclTable, Span, BodyCallArg, TConstantDef, FnBody, TImplDef, TTypeDef, Type, foundation_json_quote, name_rows_value]
     jet_sema.[SemaCheckedForeignFunction]
 }
@@ -31,12 +31,14 @@ IRExportABI: struct { symbol: String, parameters: [IRExportLayout], result: IREx
 
 // `errors` are the export, lifecycle and intrinsic problems (the module is
 // empty when there is any); `failures` the functions the builder could not
-// build. `abis` is sorted by symbol.
+// build. `abis` is sorted by symbol. `data` are the global data symbols of
+// the library object: the runtime storage a program's inline code reads.
 IRLibraryResult: struct {
     program: IRModule
     failures: [IRBuildFailure]
     errors: [String]
     exports: [IRLibraryExport]
+    data: [X64DataExport]
     abis: [IRExportABI]
 }
 
@@ -290,11 +292,16 @@ ir_build_library: fn(functions: &&[FnBody], decls: DeclTable, type_defs: &&[TTyp
     }
     if guard_problems.len() > 0 -> return ir_library_failed(guard_problems)
     abis.sort_by((left: IRExportABI, right: IRExportABI) -> left.symbol <=> right.symbol)
-    IRLibraryResult{program: m, failures: failures, errors: [String]{}, exports: globals, abis: abis}
+    // The process-ending flag the inline block release reads (X64Select.jet
+    // ir_x64_block_release), when this library holds it.
+    data := [X64DataExport]{}
+    ending: ir_lifecycle_guard(m, p, IR_X64_PROCESS_ENDING_STORAGE)
+    if ending >= 0 -> data.push(X64DataExport{data: ending, symbol: IR_X64_PROCESS_ENDING_SYMBOL})
+    IRLibraryResult{program: m, failures: failures, errors: [String]{}, exports: globals, data: data, abis: abis}
 }
 
 ir_library_failed: fn(errors: [String]) -> IRLibraryResult Never! {
-    IRLibraryResult{program: ir_module_new(), failures: [IRBuildFailure]{}, errors: errors, exports: [IRLibraryExport]{}, abis: [IRExportABI]{}}
+    IRLibraryResult{program: ir_module_new(), failures: [IRBuildFailure]{}, errors: errors, exports: [IRLibraryExport]{}, data: [X64DataExport]{}, abis: [IRExportABI]{}}
 }
 
 // Whether IR function `id` has a CallRuntime of `symbol`.

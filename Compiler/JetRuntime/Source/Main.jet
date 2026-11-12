@@ -29,12 +29,14 @@ main_exit_root := I64{0}
 // #5478: nonzero once this process is ending: process.exit's winning claim,
 // a stop the process root (jet_rt_main's, main_root_control) accepts, or
 // the program entry returning with no task in flight. From then on the heap
-// is the kernel's to reclaim: jet_rt_free returns at once and
-// jet_rt_rc_release gives up no owner, so no drop walks or frees a counted
-// block on any tier, while user cleanup (closes, guards, defers, exit
-// handlers, rollback hooks) still runs. A stop or exit ends the process;
-// only jet_rt_main's normal return clears it, for a loaded-image host that
-// runs another entry.
+// is the kernel's to reclaim: jet_rt_free returns at once, and
+// jet_rt_rc_release and a program's inline block release (JetIR
+// X64Select.jet ir_x64_block_release, which reads this storage as the
+// runtime object's data symbol jet_rt_process_ending) give up no owner, so
+// no drop walks or frees a counted block on any tier, while user cleanup
+// (closes, guards, defers, exit handlers, rollback hooks) still runs. A
+// stop or exit ends the process; only jet_rt_main's normal return clears
+// it, for a loaded-image host that runs another entry.
 main_process_ending := I64{0}
 main_root_control := I64{0}
 // jet_rt_main's 40-byte save area for main_root_control while it is set.

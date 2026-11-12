@@ -8,10 +8,15 @@ X64FunctionID: struct { value: Int }
 
 X64DataID: struct { value: Int }
 
+// A relocation's target: a compiled function, a runtime function (a call),
+// a data object of the module, or a runtime data object (its address, read
+// RIP-relative: the runtime object exports it, RuntimeObject.jet
+// X64DataExport).
 X64RelocTarget: enum {
     Function(id: X64FunctionID)
     Runtime(symbol: String)
     Data(id: X64DataID)
+    RuntimeData(symbol: String)
 }
 
 // A rel32 field at `at` (offset in the function's code) that must hold the

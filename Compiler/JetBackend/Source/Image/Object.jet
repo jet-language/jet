@@ -11,6 +11,9 @@
 //
 // Calls between compiled functions are resolved inside `.text`; data
 // addresses are `R_X86_64_PC32` relocations against the `.data` section.
+// The address of a runtime data object (the runtime's process-ending flag)
+// is an `R_X86_64_PC32` relocation against an undefined global symbol, which
+// the link binds to the runtime object's data export of that name.
 // Pointer words in `.data` use R_X86_64_64 in `.rela.data` against the
 // same section symbol. The module data is writable: the entry function fills
 // the String slots of frozen statics with runtime handles before the program
@@ -24,7 +27,8 @@
 // the calls and data addresses are relocations against those sections'
 // symbols: a link that keeps only the sections its roots reach
 // (Image/StaticLink.jet, Image/RuntimePack.jet) then keeps only the
-// functions and data a program reaches.
+// functions and data a program reaches. Its data exports (X64DataExport)
+// are global symbols of their data objects.
 
 use jet_foundation.[CompilerThreads, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, compiler_threads_single]
 
@@ -214,13 +218,13 @@ X64ObjectTextPart: struct {
 
 // A function range's `.text` bytes (from its first function's offset,
 // `start`, calls between functions patched) and `.rela.text` entries, in
-// function and relocation order. A runtime call's entry is written with
-// symbol 0: its byte offset in `relas` is in `runtime_at` and its symbol's
-// row in the range's own `imports` (first use order) in `runtime_local`; the
-// merge writes the object's symbol over it. With own sections the functions
-// are not padded and calls are relocations; per function its end in `text`
-// and in `relas` is in `text_ends` and `rela_ends`, and its alignment in
-// `aligns`.
+// function and relocation order. A runtime import's entry (a call or a data
+// address) is written with symbol 0: its byte offset in `relas` is in
+// `runtime_at` and its symbol's row in the range's own `imports` (first use
+// order) in `runtime_local`; the merge writes the object's symbol over it.
+// With own sections the functions are not padded and calls are relocations;
+// per function its end in `text` and in `relas` is in `text_ends` and
+// `rela_ends`, and its alignment in `aligns`.
 X64ObjectTextRows: struct {
     start: Int
     text: [U8]
@@ -291,17 +295,8 @@ x64_object_text_part: fn(inputs: Shared<X64ObjectTextShared>, part: Shared<X64Ob
                         else -> x64_patch_rel32(text, at - base, reads.value.offsets[row] - base)
                     }
                 }
-                .Runtime(symbol) -> {
-                    local := import_rows.get(symbol) ?? -1
-                    if local < 0 {
-                        local = imports.len()
-                        imports.push(symbol.copy())
-                        import_rows.add(symbol.copy(), local).drop("checked absent above")
-                    }
-                    runtime_at.push(relas.len())
-                    runtime_local.push(local)
-                    x64_object_rela_put(relas, at, 0, ELF64_R_X86_64_PLT32, -4)
-                }
+                .Runtime(symbol) -> x64_object_import(imports, import_rows, runtime_at, runtime_local, relas, at, symbol, ELF64_R_X86_64_PLT32)
+                .RuntimeData(symbol) -> x64_object_import(imports, import_rows, runtime_at, runtime_local, relas, at, symbol, ELF64_R_X86_64_PC32)
                 .Data(id) -> {
                     if {
                         id.value < 0 || id.value >= data_offsets.len() -> errors.push("{function.name}: data {id.value} is not in the module")
@@ -319,6 +314,21 @@ x64_object_text_part: fn(inputs: Shared<X64ObjectTextShared>, part: Shared<X64Ob
     }
     permit.value.outputs.push(X64ObjectTextRows{start: base, text: text.move(), relas: relas.move(), text_ends: text_ends.move(), rela_ends: rela_ends.move(), aligns: aligns.move(), runtime_at: runtime_at.move(), runtime_local: runtime_local.move(), imports: imports.move(), errors: errors.move()})
     1
+}
+
+// The `.rela.text` entry of a runtime import at `at`, a call (PLT32) or a
+// data address (PC32), with symbol 0 until the merge names its symbol
+// (X64ObjectTextRows).
+x64_object_import: fn(imports: &[String], import_rows: &[String:Int], runtime_at: &[Int], runtime_local: &[Int], relas: &[U8], at: Int, symbol: String, kind: Int) Never! {
+    local := import_rows.get(symbol) ?? -1
+    if local < 0 {
+        local = imports.len()
+        imports.push(symbol.copy())
+        import_rows.add(symbol.copy(), local).drop("checked absent above")
+    }
+    runtime_at.push(relas.len())
+    runtime_local.push(local)
+    x64_object_rela_put(relas, at, 0, kind, -4)
 }
 
 // A part's rows, after its thread joined.
@@ -384,8 +394,9 @@ x64_object_data_place: fn(data: [X64Data], row: Int, placed: &[Bool], order: &[I
 // for any thread count. With `debug_info` false the DWARF sections are empty
 // (the static link then carries none); `.eh_frame` is always written. With
 // `own_sections` (a library object) every function and data object is in a
-// section of its own (see the file comment).
-x64_object_functions_threads: fn(program: &&X64ObjectModule, functions: &&[X64CompiledFunction], debug: &&[X64FunctionDebug], exports: [X64RuntimeExport], threads: CompilerThreads, debug_info: Bool, own_sections: Bool) -> X64ExecutableResult Never! {
+// section of its own (see the file comment). Each of `data_exports` is a
+// global symbol of its data object.
+x64_object_functions_threads: fn(program: &&X64ObjectModule, functions: &&[X64CompiledFunction], debug: &&[X64FunctionDebug], exports: [X64RuntimeExport], data_exports: [X64DataExport], threads: CompilerThreads, debug_info: Bool, own_sections: Bool) -> X64ExecutableResult Never! {
     // Per function id + 1 its first function row (-1: none); the entry stub
     // `main` is id -1.
     max_id := -1
@@ -427,6 +438,18 @@ x64_object_functions_threads: fn(program: &&X64ObjectModule, functions: &&[X64Co
             sections.push(ELF64_OBJECT_FIRST_OWN + 2 * (functions.len() + at))
         }
         guard_sections.push(sections)
+    }
+    // Per data export, the row of its data object.
+    data_rows := [Int]{}
+    loop entry_row in data_exports {
+        at := -1
+        loop (index, object) in program.data {
+            if object.id.value == entry_row.data -> at = index
+        }
+        if at < 0 -> return X64ExecutableResult{bytes: [U8]{}, errors: [String]{"data export {entry_row.symbol}: data {entry_row.data} is not in the object"}}
+        if entry_row.symbol == "" || export_names.get(entry_row.symbol) != None -> return X64ExecutableResult{bytes: [U8]{}, errors: [String]{"empty or duplicate export symbol `{entry_row.symbol}`"}}
+        export_names.add(entry_row.symbol, true).drop("checked absent above")
+        data_rows.push(at)
     }
     if own_sections {
         hooks := 0
@@ -514,7 +537,8 @@ x64_object_functions_threads: fn(program: &&X64ObjectModule, functions: &&[X64Co
     if data_errors.len() > 0 -> return X64ExecutableResult{bytes: [U8]{}, errors: data_errors}
 
     // Symbols: null, section symbols, private functions, exported functions,
-    // then undefined runtime symbols. ELF requires all locals before globals.
+    // exported data, then undefined runtime symbols. ELF requires all locals
+    // before globals.
     symbols := [X64ObjectSymbol]{
         {name: "", info: 0, section: 0, value: 0, size: 0},
         {name: "", info: 3, section: ELF64_OBJECT_TEXT, value: 0, size: 0},
@@ -534,6 +558,11 @@ x64_object_functions_threads: fn(program: &&X64ObjectModule, functions: &&[X64Co
     loop entry_row in exports {
         index: function_rows[entry_row.function.value + 1]
         symbols.push(X64ObjectSymbol{name: entry_row.symbol, info: 0x12, section: x64_object_function_section(own_sections, index), value: offsets[index], size: functions[index].code.len()})
+    }
+    loop (index, entry_row) in data_exports {
+        row: data_rows[index]
+        section: if own_sections -> ELF64_OBJECT_FIRST_OWN + 2 * (functions.len() + row) else -> ELF64_OBJECT_RODATA
+        symbols.push(X64ObjectSymbol{name: entry_row.symbol, info: 0x11, section: section, value: data_offsets[row], size: program.data[row].bytes.len()})
     }
     // `.text` and `.rela.text`: consecutive function ranges on the threads
     // `threads` admits (x64_object_text_part), joined in function order; the
@@ -559,14 +588,16 @@ x64_object_functions_threads: fn(program: &&X64ObjectModule, functions: &&[X64Co
     imports := [String]{}
     import_rows := [String:Int]{}
     errors := [String]{}
-    first_import: first_global + exports.len()
-    // A runtime call to a name this object exports (the runtime's own
-    // compiler-inserted calls, such as jet_rt_string_drop) binds to that
-    // export's global: one symbol per name, never also an undefined one.
+    first_import: first_global + exports.len() + data_exports.len()
+    // A runtime import of a name this object exports (the runtime's own
+    // compiler-inserted calls, such as jet_rt_string_drop, and its inline
+    // code's data addresses) binds to that export's global: one symbol per
+    // name, never also an undefined one.
     export_rows := [String:Int]{}
     loop (index, entry_row) in exports {
         if (export_rows.get(entry_row.symbol) ?? -1) < 0 -> export_rows.add(entry_row.symbol, first_global + index).drop("checked absent above")
     }
+    loop (index, entry_row) in data_exports -> export_rows.add(entry_row.symbol, first_global + exports.len() + index).drop("export symbols are unique")
     loop part in parts {
         rows := x64_object_text_part_take(part)
         errors.extend(rows.errors)
