@@ -228,12 +228,17 @@ reach_test_sources: fn(dir: String, out: &[String]) {
     source: "plain: fn() -> Int Never! {{ other.value() }}\n\n// hidden\nLABEL: \"{{named}} 9lives\"\n"
     parsed: jet_driver_parse_one(JetDriverParseJob.Core{text: source, module_name: "core.devtools", owned_members: [String]{}, runtime: false, tested: false}, compiler_threads_single())
     words: parsed.words ?? panic("a Core unit has words")
+    // One row per name that reaches a lazy declaration, then the rest, which
+    // is empty. A constant is reached by its lowercase spelling too, and
+    // that row holds the constant's own spellings.
+    assert_eq(words.names, [String]{"plain", "LABEL", "label"})
+    assert_eq(words.spells.len(), 4)
+    assert_eq(words.spells[2], words.spells[1])
+    assert_eq(words.spells[3].len(), 0)
     spelled := [String]{}
-    loop row in words.spells {
-        loop key in row -> spelled.push("{words.words[key >> 2]}/{key.bit_and(3)}")
+    loop row in 0..<2 {
+        loop key in words.spells[row] -> spelled.push("{words.words[key >> 2]}/{key.bit_and(3)}")
     }
-    // One row per lazy declaration, then the rest, which is empty.
-    assert_eq(words.spells.len(), 3)
     assert_eq(spelled, [String]{"plain/0", "fn/0", "Int/0", "Never/0", "other/2", "value/1", "LABEL/0", "named/0"})
 }
 
