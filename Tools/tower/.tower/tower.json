@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6757,
-    "rev": 99743,
+    "nextNum": 6758,
+    "rev": 99745,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -96070,50 +96070,6 @@
       "criteriaLastN": 9
     },
     {
-      "id": "c0gdndep",
-      "num": 6702,
-      "title": "I1: reassigning a Close local in the entry `run` closes the old value twice (SIGSEGV, heap corruption)",
-      "body": "TlsLead found, Main reproduced with seed a0_039 (`jet run $JET_SCRATCH_ROOT/lanes/TlsLead/dev/bn/oob/close-reassign-repro.jet`, rc 139): `x = sub(x, y) ?? panic(..)` on a struct with a Close impl. In helper fn `same` the closes are correct (4). In `run` the identical block closes 4 times at scope end, one extra, and the extra close faults at 0x1/0x2 in Box.close. The same mis-close hits a non-entry fn in Bignum div_mpi (`x = sub_mpi(x, y) ?? return Err(err)` inside a loop) and corrupts the heap. It happens at -O none and full; --checked-alloc=true hides it; every RHS form tried reproduces it, including `nx := …; x = nx`. Safe Jet, so this is an I1 memory-safety violation.",
-      "kind": "bug",
-      "track": "epoch",
-      "epoch": "e4",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P2",
-      "plan": null,
-      "checkSteps": "a case (O0, O1, O2, web) reassigning Close locals in run, a helper, a loop with ?? return Err, and the nx := …; x = nx form prints the exact close count and order and exits 0; the TlsLead repro passes; the root cause is fixed in the drop/close lowering, not worked around per call shape",
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "Assigning through a write parameter (`x: &Box`, `x: &Box?`, `&self`) closes the old value exactly once before its drop; the seed skipped Close there entirely (SpeedLead-7b case, O0/O1/O2/web).",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "dev 5510a92a27 (SpeedLead-7b) with ef967b7c8a (SpeedLead-7): Close-then-drop on local and write-parameter reassignment; cases resource_close/* pass at O0/O1/O2 in integration b4b (census rc=0).",
-          "at": "2026-11-09T03:05:41.283Z"
-        }
-      ],
-      "refs": [],
-      "tags": [
-        "I1",
-        "safety",
-        "ownership"
-      ],
-      "goals": [],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-11-08T19:59:57.219Z",
-      "updated": "2026-11-09T03:06:12.941Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 1,
-      "completedAt": "2026-11-09T03:06:12.941Z"
-    },
-    {
       "id": "c0wz8yaf",
       "num": 6703,
       "title": "Prove the runtime OS edge safe: leaf contracts, model checking, fault injection, checked mode",
@@ -96375,61 +96331,6 @@
       "updated": "2026-11-09T20:47:55.604Z",
       "updatedBy": "Main",
       "criteriaLastN": 4
-    },
-    {
-      "id": "c09yzxgv",
-      "num": 6707,
-      "title": "I1: the seed runtime fast allocator path corrupts the heap in safe Jet ([U64] push loop SIGSEGV at address 0x1, layout-dependent)",
-      "body": "Found by TlsLead while running the Wycheproof ECDSA vectors. Two programs differ only in one string constant (a path), and both are safe Jet with no raw memory operations. With seed a0_040 one faults deterministically with SIGSEGV (invalid memory access at 0x1) inside a plain [U64] push loop (`words`, main.jet:83) at every optimization level; the other runs clean. With --checked-alloc=true both run clean and no bad free or write after free is reported, so the corruption comes from the fast allocator path or from codegen around it, depending on layout. Safe Jet must never fault on memory (I1). The repro is in TlsLead scratch at dev/ecdsa/repro_alloc (crash/main.jet vs nocrash.jet). Run it with the seed: jet run main.jet, with JET_TOOLCHAIN_ROOT set to the TlsLead split toolchain.",
-      "kind": "bug",
-      "track": "epoch",
-      "epoch": "e4",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P0",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-08",
-          "by": "Main",
-          "text": "Root cause (AllocLead, gdb watchpoints): this is #6702. Reassigning a Close local drops the old value first and closes it afterwards (ir_stmt_body .Assign in Compiler/JetIR/Source/BuildExpr.jet). The close increments the freed list buffer count word (incq -0x18(%rbx)), so a free-list link of 0 becomes 1, the buffer is wiped in place and freed twice, and the free list points the block at itself; the third allocation of that size then reads 0x1. --checked-alloc hides it because its 0xDF fill makes the count negative, which the runtime reads as a static buffer. SpeedLead-7/7b (batch b4) hold the fix; AllocLead-1 adds the regression case resource_close/reassigned_close_local_frees_its_old_buffer_once, which faults on all three tiers with seed a0_040."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "The root cause is named: allocator path, codegen or runtime, with the exact faulting write. The fix is at the root, and the TlsLead repro runs clean on every tier without --checked-alloc.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Root cause #6702 (Assign lowering dropped the old value before Close; the close glue's retain incq -0x18 hit the freed Mpi.p buffer). Fixed at the root by dev ef967b7c8a; the TlsLead repro (dev/ecdsa/repro_alloc/crash/main.jet) runs clean with the b5 compiler (dev 2a884927e5) at O0 (jet run), O1 (jet build) and O2 (jet build --release) without --checked-alloc: pass=141 fail=0.",
-          "at": "2026-11-09T03:05:43.476Z"
-        },
-        {
-          "n": 2,
-          "text": "A reduced regression case lands in tests/ and faults before the fix on every tier; JetTestKit or the cases suite runs it.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "dev 5ce4515fcb (AllocLead-1): tests/cases/resource_close/reassigned_close_local_frees_its_old_buffer_once faults on seed a0_040 at o0/o1/o2 and with --checked-alloc, and passes in integration b5 (cases suite).",
-          "at": "2026-11-09T03:05:45.038Z"
-        }
-      ],
-      "refs": [],
-      "tags": [],
-      "goals": [],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-11-08T22:17:15.953Z",
-      "updated": "2026-11-09T03:06:17.439Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 2,
-      "completedAt": "2026-11-09T03:06:17.439Z"
     },
     {
       "id": "c0ku1nvb",
@@ -98842,6 +98743,47 @@
       "updated": "2026-11-12T02:32:33.511Z",
       "updatedBy": "Main",
       "criteriaLastN": 5
+    },
+    {
+      "id": "c0s6y4cj",
+      "num": 6757,
+      "title": "sort_by with a Float key is an internal compiler error (ir.build unlowered)",
+      "body": "Found by G4Ports-1 on seed-b9 (dev f1a0ad460d), 2026-11-11: a sort_by call whose key function returns Float reaches codegen and fails with 'ir.build unlowered: ... sort_by with a Float key'. A backend rejection of checked code is an I2 internal error; sema owns the check (I3).",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e14",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "sort_by with a Float key has one checked meaning on every tier: either it sorts by a total order on Float that the Core API documents (NaN placement stated), or sema refuses it with a registered diagnostic naming the key type and the fix (sort_by_total or a key that is Ord). No path reaches ir.build unlowered. Cases on O0/O1/O2, plus a UI snapshot if it is a refusal.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-12T03:31:58.511Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G5"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-12T03:31:46.868Z",
+      "updated": "2026-11-12T03:31:58.511Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1
     }
   ],
   "decisions": [
@@ -199305,6 +199247,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-12T03:31:58.511Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0s6y4cj",
+      "note": "#1 sort_by with a Float key has one checked meaning on every ti"
+    },
+    {
+      "at": "2026-11-12T03:31:46.868Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0s6y4cj",
+      "note": "sort_by with a Float key is an internal compiler error (ir.build unlowered)"
+    },
     {
       "at": "2026-11-12T02:42:20.941Z",
       "by": "Main",
