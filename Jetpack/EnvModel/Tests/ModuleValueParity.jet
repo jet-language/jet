@@ -1,0 +1,152 @@
+// One source revision, every module-value consumer: environment fields,
+// image fields and fleet host overrides read the same top-level value through
+// the one evaluator, in the same dependency order with the same provenance,
+// and a permuted copy of the revision plans identically (#4276 c39).
+use {
+    jet_env_model.[FleetPlan, OptionPlan, envmodel_evaluate_env, envmodel_evaluate_source]
+    jet_foundation.[CtValue]
+    jet_pkg_model.[EntryContribution, FactValue]
+    files: core.files
+}
+
+// `PORT` comes from a pure helper and feeds every consumer; `label` and
+// `region` are sibling chains on top of it.
+MODULE_VALUE_SOURCE: `
+base_port: fn() -> Int { 8000 }
+
+PORT: comptime { base_port() + 1 }
+
+dev: module {
+    env.dev: Env{
+        port: PORT,
+        label: if port > 8000 -> "ready" else -> "waiting",
+    }
+}
+
+image.server: module {
+    from: packages.app,
+    expose: [PORT],
+}
+
+system.web: module { target: linux.x64, options: [tuning.port: PORT + 1, network.hostName: web-east, services.desktop.profile: .Default] }
+
+fleet.prod: module {
+    hosts: {
+        web1: system.web{ port: PORT, region: port + 1, options: [tuning.port: PORT + 1, network.hostName: web1] }
+    }
+}
+`
+
+// The same revision with its declarations and sibling fields reordered: the
+// value is declared after its readers and every chain is written backwards.
+MODULE_VALUE_SOURCE_PERMUTED: `
+fleet.prod: module {
+    hosts: {
+        web1: system.web{ options: [tuning.port: PORT + 1, network.hostName: web1], region: port + 1, port: PORT }
+    }
+}
+
+system.web: module { target: linux.x64, options: [tuning.port: PORT + 1, network.hostName: web-east, services.desktop.profile: .Default] }
+
+image.server: module {
+    expose: [PORT],
+    from: packages.app,
+}
+
+dev: module {
+    env.dev: Env{
+        label: if port > 8000 -> "ready" else -> "waiting",
+        port: PORT,
+    }
+}
+
+PORT: comptime { base_port() + 1 }
+
+base_port: fn() -> Int { 8000 }
+`
+
+#Test("module_value_consumers_read_one_value_in_one_order") {
+    dir: envmodel_test_oci_base_dir("module-value-parity")
+    plan: envmodel_evaluate_env(MODULE_VALUE_SOURCE, dir) ?? panic("the revision plans")
+    modules: envmodel_evaluate_source(MODULE_VALUE_SOURCE, dir) ?? panic("the revision evaluates")
+    env_entry := EntryContribution?{None}
+    loop evaluated in modules {
+        if evaluated.name == "dev" -> env_entry = Val(evaluated.entries[0].entry)
+    }
+    entry: env_entry ?? panic("the dev module has an environment entry")
+    assert_eq(envmodel_test_setting_value(entry, "port"), Val(FactValue.Text{value: "8001"}))
+    assert_eq(envmodel_test_setting_value(entry, "label"), Val(FactValue.Text{value: "ready"}))
+    assert_eq(plan.images[0].expose, [Int]{8001})
+    // A system option reading the value is evaluated; literal atoms keep their spelling.
+    assert_eq(plan.systems[0].options, [OptionPlan]{
+        OptionPlan{key: "tuning.port", value: "8002"},
+        OptionPlan{key: "network.hostName", value: "web-east"},
+        OptionPlan{key: "services.desktop.profile", value: ".Default"},
+    })
+    fleets := [FleetPlan]{}
+    loop evaluated in modules {
+        loop fleet in evaluated.fleets -> fleets.push(fleet)
+    }
+    assert_eq(fleets.len(), 1)
+    overrides: fleets[0].hosts[0].overrides ?? panic("web1 has an override")
+    values := [String: CtValue]{}
+    host_options := [OptionPlan]{}
+    loop field in overrides.fields {
+        if field.value == {
+            .Value(value) -> values[field.name] = value
+            .Options(options) -> host_options = options
+            .Platform(_) | .Packages(_) | .Services(_) -> {}
+        }
+    }
+    // The host override evaluates the same option the same way the system does.
+    assert_eq(host_options, [OptionPlan]{OptionPlan{key: "tuning.port", value: "8002"}, OptionPlan{key: "network.hostName", value: "web1"}})
+    assert_eq(values.get("port"), Val(CtValue.Int{value: 8001}))
+    assert_eq(values.get("region"), Val(CtValue.Int{value: 8002}))
+    found := false
+    loop row in overrides.provenance {
+        if row.field == "region" {
+            assert_eq(row.dependencies, [String]{"port"})
+            assert(row.pure)
+            found = true
+        }
+        if row.field == "port" -> assert_eq(row.dependencies, [String]{})
+    }
+    assert(found, "region provenance names its sibling")
+    files.remove_all(dir) ?? return
+}
+
+#Test("module_value_consumers_plan_a_permuted_revision_identically") {
+    dir: envmodel_test_oci_base_dir("module-value-permuted")
+    written: envmodel_evaluate_env(MODULE_VALUE_SOURCE, dir) ?? panic("the revision plans")
+    permuted: envmodel_evaluate_env(MODULE_VALUE_SOURCE_PERMUTED, dir) ?? panic("the permuted revision plans")
+    again: envmodel_evaluate_env(MODULE_VALUE_SOURCE, dir) ?? panic("the revision plans again")
+    assert_eq(written.images, permuted.images)
+    assert_eq(written.prompt, permuted.prompt)
+    assert_eq(written, again)
+    changed: envmodel_evaluate_env(MODULE_VALUE_SOURCE.replace("8000", "9000"), dir) ?? panic("the changed revision plans")
+    assert_eq(changed.images[0].expose, [Int]{9001})
+    assert(changed.images != written.images, "a changed value changes the plan")
+    files.remove_all(dir) ?? return
+}
+
+#Test("module_value_self_cycle_is_reported_before_any_consumer") {
+    source: "PORT: comptime {{ PORT + 1 }}\nimage.server: module {{ from: packages.app, expose: [PORT] }}\n"
+    dir: envmodel_test_oci_base_dir("module-value-self-cycle")
+    error: envmodel_test_env_error(envmodel_evaluate_env(source, dir))
+    assert_eq(error.code, "E0338")
+    assert(error.what.contains("PORT -> PORT"), error.what)
+    files.remove_all(dir) ?? return
+}
+
+#Test("module_value_multi_node_cycle_is_reported_before_any_consumer") {
+    source: "FIRST: comptime {{ SECOND + 1 }}\nSECOND: comptime {{ FIRST + 1 }}\nsystem.web: module {{ target: linux.x64, options: [tuning.port: FIRST] }}\n"
+    error: envmodel_test_env_error(envmodel_evaluate_env(source, envmodel_test_base_dir()))
+    assert_eq(error.code, "E0338")
+    assert(error.what.contains("FIRST -> SECOND -> FIRST"), error.what)
+}
+
+#Test("module_value_ambient_io_is_rejected_before_any_consumer") {
+    source: "HOST: comptime {{ read_file(\"/etc/hostname\") }}\nsystem.web: module {{ target: linux.x64, options: [network.hostName: HOST] }}\n"
+    error: envmodel_test_env_error(envmodel_evaluate_env(source, envmodel_test_base_dir()))
+    assert_eq(error.code, "E3402")
+}

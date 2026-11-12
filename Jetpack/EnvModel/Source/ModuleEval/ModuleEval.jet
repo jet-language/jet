@@ -362,7 +362,7 @@ envmodel_evaluate_host_override: fn(source: String, at: Int, original_span: Span
             }
             .Options(entries) -> {
                 options := [OptionPlan]{}
-                loop entry in entries -> options.push(OptionPlan{key: entry.key, value: envmodel_evaluate_host_option(entry.value, entry.value_span, source, prefix_len, scope, computed.values)})
+                loop entry in entries -> options.push(OptionPlan{key: entry.key, value: envmodel_evaluate_option_value(entry.value, envmodel_host_field_source(source, entry.value_span, prefix_len), scope, computed.values)})
                 HostOverrideValue.Options{values: options}
             }
             .Other(expr) -> HostOverrideValue.Value{value: envmodel_evaluate_expression(expr, computed.values, scope)}
@@ -392,16 +392,13 @@ envmodel_evaluate_host_override: fn(source: String, at: Int, original_span: Span
     Ok(HostOverride{fields: fields, source: source, provenance: provenance})
 }
 
-// Rust ModuleEval/System.rs:760-778. Symbolic option atoms keep their exact
-// spelling; resolved identifiers and real expressions use the pure evaluator.
-envmodel_evaluate_host_option: fn(expr: Expr, span: Span, source: String, prefix_len: Int, scope: ModuleEvalScope, resolved: [String: CtValue]) -> String EnvModelEvalError! {
-    symbolic: if expr == {
-        .Ident(name, _, _) -> !resolved.has_key(name)
-        .Field(_, _, _, _) | .Str(_, _, _) -> true
-        .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> false
-    }
-    value: if symbolic -> CtValue.Str{value: envmodel_host_field_source(source, span, prefix_len)} else -> envmodel_evaluate_expression(expr, resolved, scope)
-    Ok(ast_comptime_value_show(value))
+// One `options:` value, the same for system records and host overrides. A
+// value that reads a resolved module value goes through the pure module-value
+// evaluator; every other value (`laptop`, `devhost-gnome`, `"UTC"`,
+// `.Default`, `[22, 443]`) keeps its exact spelling `text`.
+envmodel_evaluate_option_value: fn(expr: Expr, text: String, scope: ModuleEvalScope, resolved: [String: CtValue]) -> String EnvModelEvalError! {
+    if envmodel_dependencies_for_expression(expr, resolved.keys().to_list()).len() == 0 -> return Ok(text)
+    Ok(ast_comptime_value_show(envmodel_evaluate_expression(expr, resolved, scope)))
 }
 
 // Rust ModuleEval/System.rs:780-784. Parser spans belong to the synthetic
