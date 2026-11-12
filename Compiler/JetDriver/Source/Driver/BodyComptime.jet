@@ -369,14 +369,15 @@ jet_driver_recheck_differences: fn(spliced: SemaGraphResult, full: SemaGraphResu
         if "{our_rows:Debug}" != "{their_rows:Debug}" -> differences.push("{name}: module rows differ")
         if differences.len() >= 20 -> return differences
     }
-    our_graph := spliced.copy()
-    our_graph.modules = [SemaGraphModuleResult]{}
-    our_graph.registration_graph = None
-    their_graph := full.copy()
-    their_graph.modules = [SemaGraphModuleResult]{}
-    their_graph.registration_graph = None
-    if "{our_graph:Debug}" != "{their_graph:Debug}" -> differences.push("graph rows differ")
+    if jet_driver_recheck_graph_rows(spliced) != jet_driver_recheck_graph_rows(full) -> differences.push("graph rows differ")
     differences
+}
+
+// The graph rows of `graph` outside its modules, as one display. The
+// registration graph stays out: it holds the shared lookup counters
+// (`Shared<SemaLookupCounters>`), which have no display.
+jet_driver_recheck_graph_rows: fn(graph: SemaGraphResult) -> String Never! {
+    "{graph.package_identity:Debug} {graph.entry_module_identity:Debug} {graph.imports:Debug} {graph.package_policies:Debug} {graph.core_usage:Debug} {graph.call_facts:Debug} {graph.hardware_use:Debug} {graph.comptime_requests:Debug} {graph.comptime_body_sources:Debug} {graph.compute_facts:Debug} {graph.names:Debug} {graph.diagnostics:Debug} {graph.complete} {graph.inferred_infallible:Debug} {graph.programs:Debug} {graph.outputs:Debug} {graph.memory_declarations:Debug} {graph.memory_projections:Debug}"
 }
 
 // The bodies of module `name` that differ between the splice (`ours`) and
