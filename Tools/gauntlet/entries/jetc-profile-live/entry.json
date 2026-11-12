@@ -1,0 +1,20 @@
+{
+  "name": "jetc-profile-live",
+  "mode": "tool",
+  "description": "Tools/perf/jetc-profile/live.sh and its Jet twin jetc-profile/live/run.jet, which attach perf to a running jetc for a few seconds (frame pointers, then a fresh DWARF window when most stacks came back truncated, unless JET_CALL_GRAPH picks one) and write the profile twin's reports. Sampling needs a live process the user may signal, and no pid names one on every machine, so the cases stop at the refusals before it: no arguments and too many, a pid or seconds that is not a positive whole number (zero, a suffix, a fraction, a trailing newline), and a pid no process has, which `kill -0` refuses with its status.",
+  "tool": {
+    "original": "Tools/perf/jetc-profile/live.sh",
+    "jet": "Tools/perf/jetc-profile/live/run.jet",
+    "cases": [
+      {"args": [], "exit": 2, "expected": "expected/empty.out"},
+      {"args": ["1", "2", "3"], "exit": 2, "expected": "expected/empty.out"},
+      {"args": ["0"], "exit": 2, "expected": "expected/empty.out"},
+      {"args": ["12x"], "exit": 2, "expected": "expected/empty.out"},
+      {"args": ["4242", "0"], "exit": 2, "expected": "expected/empty.out"},
+      {"args": ["4242", "1.5"], "exit": 2, "expected": "expected/empty.out"},
+      {"args": ["4242\n"], "exit": 2, "expected": "expected/empty.out"},
+      {"args": ["999999999"], "exit": 1, "expected": "expected/empty.out"},
+      {"args": ["999999999", "5"], "env": {"PERF": "", "JET_CALL_GRAPH": "none"}, "exit": 1, "expected": "expected/empty.out"}
+    ]
+  }
+}

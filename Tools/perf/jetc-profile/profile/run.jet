@@ -1,0 +1,462 @@
+// The Jet twin of Tools/perf/jetc-profile/profile.mjs: Jet-named reports from
+// the `perf script` output of a jetc process. A Rust symbol loses its hash
+// suffix, each jetc_<crate> becomes its Jet module, and each generated
+// `__jet_` name decodes back to the Jet path it encodes; the source map's file
+// inventory adds the declaration location of a name only one file declares.
+//
+//   jet Tools/perf/jetc-profile/profile/run.jet -- analyze PERF_SCRIPT MAP_JSON REPO OUT GRAPH
+//   jet Tools/perf/jetc-profile/profile/run.jet -- needs-dwarf SUMMARY_JSON
+//   jet Tools/perf/jetc-profile/profile/run.jet -- render FOLDED SVG
+//
+// analyze writes top.txt (the 30 frames on the most samples), phases.txt (the
+// compiler phase of each sample and a verdict), stacks.folded, flamegraph.svg
+// and summary.json into OUT; GRAPH names the call-graph mode they came from.
+// needs-dwarf exits 0 when that summary found most stacks truncated or
+// unresolved, else 1. render draws a folded stack file as the same flame graph.
+// A failure ends the run with its report on stderr and exit 1.
+use {
+    crypto: core.crypto
+    encoding: core.encoding
+    files: core.files
+    fmt: core.text.fmt
+    json: core.encoding.json
+    math: core.math
+    process: core.process
+    regex: core.regex
+    term: core.term
+    text: core.text
+}
+
+USAGE: "usage: profile.mjs analyze <perf.script> <map.json> <repo> <out> <graph> | needs-dwarf <summary.json> | render <folded> <svg>"
+MAP_SCHEMA: "jet-bootstrap-source-map/v2"
+WIDTH: 1400
+UNCLASSIFIED: "unclassified"
+// U+FFFD, what UTF-8 output writes for a lone surrogate.
+REPLACEMENT: "�"
+// The phases phases.txt lists, in its order.
+PHASES: [String]{"registration", "sema check", "comptime", "lowering", "optimization", "emission", "unclassified"}
+// The Jet module each jetc_<library> crate builds.
+MODULES: [String: String]{"jetfoundation": "JetFoundation", "jetsema": "JetSema", "jetcomptime": "JetComptime", "jetparser": "JetParser", "jetlexer": "JetLexer", "jetdriver": "JetDriver", "jeteval": "JetEval", "jetbackend": "JetBackend", "jetcli": "JetCli"}
+// The byte each `_` escape letter of a generated name stands for.
+ESCAPES: [String: String]{"_u": "_", "_d": ".", "_c": ":", "_s": "/", "_b": "\\", "_h": "-"}
+
+// A name `pattern` places: a phase, or a module.
+Rule: struct {
+    pattern: Regex
+    name: String
+}
+
+// The phases a frame's function names, the first that matches winning.
+FUNCTION_PHASES: [Rule]{
+    {pattern: Regex{"\b(?:jetcomptime|jeteval|jet_eval_|comptime_|ct_|sema_comptime|sema_expr_comptime|sema_check_comptime)"}, name: "comptime"},
+    {pattern: Regex{"\b(?:sema_registration_|sema_register_|registration_|register_)"}, name: "registration"},
+    {pattern: Regex{"\b(?:ir_x64_|x64_|emit_)"}, name: "emission"},
+    {pattern: Regex{"\b(?:ir_opt_|optimize_|optimization_)"}, name: "optimization"},
+    {pattern: Regex{"\b(?:ir_|lower_|lowering_)"}, name: "lowering"},
+    {pattern: Regex{"\b(?:sema_check_|sema_function_check|sema_expr_|sema_statement_|check_expression|check_program)"}, name: "sema check"},
+}
+// The phases a frame's crate guesses, for a stack no function places.
+CRATE_PHASES: [Rule]{
+    {pattern: Regex{"\b(?:jetsema::|sema_)"}, name: "sema check"},
+    {pattern: Regex{"\bjetbackend::"}, name: "emission"},
+    {pattern: Regex{"\bjetir::"}, name: "lowering"},
+}
+// The module a bare function name's prefix places it in.
+PREFIX_MODULES: [Rule]{
+    {pattern: Regex{"^sema_"}, name: "JetSema"},
+    {pattern: Regex{"^jet_(?:rust_emit|codegen)_"}, name: "JetCodegen"},
+    {pattern: Regex{"^jet_eval_"}, name: "JetEval"},
+    {pattern: Regex{"^mir_(?:pass|optimizer|lint)_"}, name: "JetOptimizer"},
+}
+
+#Decode
+MapFile: struct {
+    path: String
+    sha256: String{""}
+}
+
+#Decode
+SourceMap: struct {
+    schema: String{""}
+    files: [MapFile]
+}
+
+#Decode
+Summary: struct {
+    #Rename("needsDwarf") needs_dwarf: Bool{false}
+}
+
+// A declaration in one of the source map's files: where it is, the module its
+// path names (the directory under the top one), and whether the file still
+// holds the bytes the map recorded.
+Decl: struct {
+    location: String
+    module: String?
+    mapped: Bool
+}
+
+// The declarations by name: `slots` gives each name's place in `groups`.
+Index: struct {
+    slots: [String: Int]
+    groups: [[Decl]]
+}
+
+// Counts by key, in first-seen order.
+Counts: struct {
+    entries: [(key: String, count: Int)]
+    slots: [String: Int]
+}
+
+// A frame's samples: every sample it is on and those it is the leaf of.
+// `last` is the latest sample counted, so a recursive frame counts once.
+Row: struct {
+    name: String
+    inclusive: Int
+    own: Int
+    last: Int
+}
+
+Profile: struct {
+    samples: Int
+    short_stacks: Int
+    unresolved_roots: Int
+    jet_stacks: Int
+    rows: [Row]
+    row_slots: [String: Int]
+    folded: Counts
+    phases: Counts
+}
+
+#Encode
+TopRow: struct {
+    name: String
+    inclusive: Int
+    #Rename("self") own: Int
+}
+
+#[Encode, Rename(.Camel)]
+Report: struct {
+    samples: Int
+    graph: String
+    short_stacks: Int
+    unresolved_roots: Int
+    jet_stacks: Int
+    needs_dwarf: Bool
+    verdict: String
+    phases: Dyn
+    top: [TopRow]
+}
+
+// A flame graph node: its frame, its samples, and its children by frame in
+// first-seen order, each child's place in the node list in `slots`.
+Node: struct {
+    name: String
+    count: Int
+    children: [String]
+    slots: [String: Int]
+}
+
+run: fn() -> Never Err! {
+    args: process.args()
+    if {
+        args.len() == 6 && args[0] == "analyze" -> analyze(args[1], args[2], args[3], args[4], args[5])
+        args.len() == 2 && args[0] == "needs-dwarf" -> process.exit(if json.decode<Summary>(read_text(args[1])).needs_dwarf -> 0 else -> 1)
+        args.len() == 3 && args[0] == "render" -> files.write(args[2], render_folded(read_text(args[1])))
+        else -> process.fail(2, USAGE)
+    }
+    process.exit(0)
+}
+
+// The file's text; bytes that are not UTF-8 read as U+FFFD.
+read_text: fn(path: String) -[FS]> String Err! {
+    String.from_bytes_lossy(files.read_bytes(path))
+}
+
+// The Jet path a generated `__jet_` name encodes. The name escapes UTF-8
+// bytes, not scalars: `_u` `_d` `_c` `_s` `_b` `_h` are `_` `.` `:` `/` `\`
+// `-`, and `_xHH` is any byte. A `ct_` name is a comptime `$` name and a `__`
+// one a generated name.
+decode_jet: fn(identifier: String) -> String Never! {
+    body: identifier.remove_prefix("__jet_")
+    if body.starts_with("ct_") -> return "${body.remove_prefix("ct_")}"
+    if body.starts_with("__") -> return "[generated] {body.remove_prefix("__")}"
+    out := [U8]{}
+    at := 0
+    loop found in regex.matches(Regex{"_[udcsbh]|_x[0-9a-fA-F]{{2}}"}, body) {
+        out = out.concat(body.slice(at..<found.start).bytes()).concat(ESCAPES.get(found.text).map(byte -> byte.bytes()) ?? encoding.hex_to_bytes(found.text.remove_prefix("_x")) ?? [U8]{})
+        at = found.end
+    }
+    String.from_bytes_lossy(out.concat(body.slice(at..<body.len()).bytes()))
+}
+
+// A perf symbol as Jet names it: no Rust hash suffix, each jetc_<crate> its Jet
+// module, and each `__jet_` name decoded, except a flat name the source
+// declares, which the mangler leaves as written.
+jet_name: fn(symbol: String, index: Index) -> String Never! {
+    bare: regex.replace(Regex{"::h[0-9a-f]{{16}}\b"}, symbol, "")
+    moduled: Regex{"\bjetc_(jetfoundation|jetsema|jetcomptime|jetparser|jetlexer|jetdriver|jeteval|jetbackend|jetcli)\b"}.replace_all_with(bare, found -> MODULES[found.groups[0]])
+    declared: index.slots
+    Regex{"__jet_[A-Za-z0-9_]+"}.replace_all_with(moduled, found -> if declared.has_key(found.text.remove_prefix("__jet_")) -> found.text.remove_prefix("__jet_") else -> regex.replace_first(Regex{"^src::[^:]+::"}, decode_jet(found.text), ""))
+}
+
+// Every `name:` declaration in the files the source map lists, read from REPO.
+// A missing map only leaves the names without locations.
+source_index: fn(map_file: String, repo: String) -[Env, FS, IO]> Index Err! {
+    index := Index{slots: [String: Int]{}, groups: [[Decl]]{}}
+    if !files.exists(map_file) {
+        term.eprint("Source map unavailable: {map_file}; names still decoded, no declaration locations.")
+        return Ok(index)
+    }
+    map: json.decode<SourceMap>(read_text(map_file))
+    if map.schema != MAP_SCHEMA -> return Err("Unsupported source map schema: {map.schema}")
+    loop file in map.files {
+        filename: files.resolve(files.join(repo, file.path))
+        if !files.exists(filename) -> next
+        bytes: files.read_bytes(filename)
+        mapped: crypto.sha256(bytes).hex() == file.sha256
+        owner: file.path.split("/").to_list().get(1)
+        lines: String.from_bytes_lossy(bytes).split("\n").to_list()
+        loop line in 0..<lines.len() {
+            found: regex.match(Regex{"^\s*(?:pub\s+)?([$\p{{L}}_][\p{{L}}\p{{N}}_$]*):\s*(?:fn|struct|enum|trait)\b"}, lines[line]) ?? next
+            slot: slot_of(index.slots, index.groups.len(), found.groups[0])
+            if slot == index.groups.len() -> index.groups.push([Decl]{})
+            index.groups[slot].push(Decl{location: "{file.path}:{line + 1}", module: owner.copy(), mapped: mapped})  // copy: each declaration owns its module
+        }
+    }
+    Ok(index)
+}
+
+// The place of `key` in `slots`, which gives it `next` when it is new.
+slot_of: fn(slots: &[String: Int], next: Int, key: String) -> Int Never! {
+    if !slots.has_key(key) -> slots[key.copy()] = next  // copy: the slots and the list both hold the key
+    slots[key]
+}
+
+// ` [decl FILE:LINE]` for the innermost name in a Jet path that only one file
+// of its module declares, `(current source)` added when that file has changed
+// since the map; else "".
+declaration_location: fn(symbol: String, index: Index) -> String Never! {
+    found: regex.match(Regex{"\b(Jet[A-Za-z]+)::([$\p{{L}}\p{{N}}_:.]+)"}, symbol) ?? return ""
+    names := found.groups[1].split("::").to_list()
+    names.reverse()
+    loop name in names {
+        wanted: Val(found.groups[0].copy())  // copy: the filter keeps its own module
+        hits: index.groups[index.slots.get(name) ?? next].filter(decl -> decl.module == wanted)
+        if hits.len() == 1 -> return " [decl {hits[0].location}{if hits[0].mapped -> "" else -> " (current source)"}]"
+    }
+    ""
+}
+
+// A sample's phase: the leaf-most frame a function name places, else the
+// leaf-most a crate places, else unclassified. The generic arguments after
+// `<` never count, so clone<RegistrationGraph> under sema_function_check is
+// not registration.
+classify: fn(stack: [String]) -> String Never! {
+    loop rules in [FUNCTION_PHASES, CRATE_PHASES] {
+        loop frame in stack {
+            head: frame.partition("<").head.lower()
+            rule: rules.find(rule -> regex.is_match(rule.pattern, head)) ?? next
+            return rule.name.copy()  // copy: the phase table keeps its names
+        }
+    }
+    UNCLASSIFIED
+}
+
+xml: fn(value: String) -> String Never! {
+    value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;").replace("'", "&apos;")
+}
+
+pct: fn(count: Int, total: Int) -> String Never! {
+    "{fmt.decimal(100.0 * Float.from_int(count) / Float.from_int(total), 2)}%"
+}
+
+add: fn(counts: &Counts, key: String) Never! {
+    slot: slot_of(counts.slots, counts.entries.len(), key)
+    if slot == counts.entries.len() -> counts.entries.push((key: key, count: 0))
+    counts.entries[slot].count += 1
+}
+
+count_of: fn(counts: Counts, key: String) -> Int Never! {
+    counts.entries[counts.slots.get(key) ?? return 0].count
+}
+
+// A frame's display name: the Jet name, a bare function name that one file
+// declares or whose prefix places it qualified by its module, and the
+// declaration location. `names` keeps each symbol's result.
+normalize: fn(raw: String, index: Index, names: &[String: String]) -> String Never! {
+    if names.get(raw) == .Val(known) -> return known
+    name := jet_name(raw, index)
+    // Optimized Rust DWARF/perf may expose only the bare Jet function name.
+    if regex.match(Regex{"^([$\p{{L}}_][\p{{L}}\p{{N}}_$]*)(?:\.llvm\.[A-Za-z0-9]+)?$"}, name) == .Val(found) {
+        plain: found.groups[0]
+        decls: index.groups.get(index.slots.get(plain) ?? index.groups.len()) ?? [Decl]{}
+        owner: if decls.len() == 1 -> decls[0].module ?? "undefined" else -> PREFIX_MODULES.find(rule -> regex.is_match(rule.pattern, plain)).map(rule -> rule.name.copy()) ?? ""  // copy: the module table keeps its names
+        if owner != "" -> name = "{owner}::{found.groups[0]}"
+    }
+    shown: "{name}{declaration_location(name, index)}"
+    names[raw.copy()] = shown.copy()  // copy: the cache and the stack both keep the name
+    shown
+}
+
+// Counts one sample's stack, leaf first, into `profile` and empties it.
+flush: fn(profile: &Profile, stack: &[String]) Never! {
+    if stack.len() == 0 -> return
+    profile.samples += 1
+    if stack.len() <= 2 -> profile.short_stacks += 1
+    // The root frame unresolved: [unknown], a bare address or unknown, in any
+    // ASCII case.
+    if regex.is_match(Regex{"^(?:\[unknown\]|0x[0-9a-f]+|unknown)(?: |$)"}, stack[stack.len() - 1].to_ascii_lower()) -> profile.unresolved_roots += 1
+    if stack.any(frame -> regex.is_match(Regex{"\bJet[A-Za-z]+::"}, frame)) -> profile.jet_stacks += 1
+    add(profile.phases, classify(stack))
+    loop frame in stack {
+        slot: slot_of(profile.row_slots, profile.rows.len(), frame)
+        if slot == profile.rows.len() -> profile.rows.push(Row{name: frame.copy(), inclusive: 0, own: 0, last: 0})  // copy: the slots and the rows both hold the frame
+        if profile.rows[slot].last == profile.samples -> next
+        profile.rows[slot].last = profile.samples
+        profile.rows[slot].inclusive += 1
+    }
+    profile.rows[profile.row_slots[stack[0]]].own += 1
+    frames := stack.map(frame -> frame.replace(";", ":"))
+    frames.reverse()
+    add(profile.folded, frames.join(";"))
+    stack.clear()
+}
+
+analyze: fn(script: String, map_file: String, repo: String, out: String, graph: String) -[Env, FS, IO]> Err! {
+    index: source_index(map_file, repo)
+    names := [String: String]{}
+    profile := Profile{samples: 0, short_stacks: 0, unresolved_roots: 0, jet_stacks: 0, rows: [Row]{}, row_slots: [String: Int]{}, folded: Counts{entries: [(key: String, count: Int)]{}, slots: [String: Int]{}}, phases: Counts{entries: [(key: String, count: Int)]{}, slots: [String: Int]{}}}
+    stack := [String]{}
+    loop line in read_text(script).replace("\r\n", "\n").replace("\r", "\n").split("\n") {
+        // perf script callchain rows: address symbol (DSO), including (inlined).
+        frame: regex.match(Regex{"^\s+([0-9a-fA-F]+)\s+([^\n\r\u2028\u2029]+?)\s+\(([^()]*)\)(?:\s+\([iI][nN][lL][iI][nN][eE][dD]\))?\s*$"}, line)
+        if {
+            line.trim() == "" -> flush(profile, stack)
+            frame == .Val(row) -> stack.push(normalize(regex.replace(Regex{"\+0x[0-9a-f]+$"}, row.groups[1], ""), index, names))
+            // An event header starts a new sample. The callchain includes its
+            // leaf; don't count the header's copy of that leaf a second time.
+            regex.is_match(Regex{"^\S[^\n\r\u2028\u2029]*[0-9]+\.[0-9]+:"}, line) -> flush(profile, stack)
+            else -> {}
+        }
+    }
+    flush(profile, stack)
+    samples: profile.samples
+    if samples == 0 -> return Err("No CPU samples captured; check PID activity and perf permissions.")
+    ranked := profile.rows
+    ranked.sort_by((a, b) -> if a.inclusive != b.inclusive -> b.inclusive <=> a.inclusive else -> b.own <=> a.own)
+    rows: ranked.take(30).map(row -> TopRow{name: row.name.copy(), inclusive: row.inclusive, own: row.own}).to_list()  // copy: the report owns its names
+    top: rows.map(row -> "{pct(row.inclusive, samples).pad_start(7, " ")}  {pct(row.own, samples).pad_start(7, " ")}  {"{row.inclusive}".pad_start(5, " ")} {"{row.own}".pad_start(5, " ")}  {row.name}")
+    phases := profile.phases.entries.copy()  // copy: the summary keeps the first-seen order
+    phases.sort_by((a, b) -> b.count <=> a.count)
+    classified: samples - count_of(profile.phases, UNCLASSIFIED)
+    verdict: phases.find(phase -> phase.key != UNCLASSIFIED).map(winner -> "{winner.key} dominates classified samples: {pct(winner.count, samples)} of all samples, {pct(winner.count, classified)} of classified.") ?? "No compiler phase could be classified."
+    report: PHASES.map(phase -> "{pct(count_of(profile.phases, phase), samples).pad_start(7, " ")}  {"{count_of(profile.phases, phase)}".pad_start(5, " ")}  {phase}")
+    stacks := profile.folded.entries
+    stacks.sort_by((a, b) -> text.collate(a.key, b.key))
+    folded: "{stacks.map(entry -> "{entry.key} {entry.count}").join("\n")}\n"
+    files.create_dir_all(out)
+    files.write(files.join(out, "top.txt"), "Top 30 by inclusive samples ({samples} samples, {graph}; recursion counted once per sample)\nINCL %   SELF %   INCL  SELF  Jet module/function [declaration location]\n{top.map(line -> "{line}\n").join("")}")
+    files.write(files.join(out, "phases.txt"), "\nCompiler phases (nearest leaf-side recognizable Jet function; generic type names ignored):\n{report.map(line -> "{line}\n").join("")}Verdict: {verdict}\nStack quality: {pct(profile.short_stacks, samples)} <=2 frames; {pct(profile.unresolved_roots, samples)} unresolved roots; {pct(profile.jet_stacks, samples)} contain Jet symbols.\n")
+    files.write(files.join(out, "stacks.folded"), folded)
+    files.write(files.join(out, "flamegraph.svg"), render_folded(folded))
+    // Each phase's count, in the order the samples first named it (a map
+    // encodes in key order).
+    phase_counts := [(key: String, value: Dyn)]{}
+    loop phase in profile.phases.entries -> phase_counts.push((key: phase.key.copy(), value: phase.count.encode()))  // copy: the summary owns its keys
+    summary: Report{
+        samples: samples,
+        graph: graph.copy(),  // copy: the summary owns its text
+        short_stacks: profile.short_stacks,
+        unresolved_roots: profile.unresolved_roots,
+        jet_stacks: profile.jet_stacks,
+        needs_dwarf: profile.short_stacks * 2 > samples || profile.unresolved_roots * 2 > samples,
+        verdict: verdict,
+        phases: Dyn.Object(phase_counts),
+        top: rows,
+    }
+    files.write(files.join(out, "summary.json"), "{json.stringify(summary.encode(), 2)}\n")
+}
+
+// The folded stacks as a flame graph SVG, the root at the bottom and each
+// frame's full Jet name and samples in its hover title; an error when no line
+// holds a sample.
+render_folded: fn(folded: String) -> String Err! {
+    nodes := [Node]{{name: "all samples", count: 0, children: [String]{}, slots: [String: Int]{}}}
+    depth := 0
+    loop line in folded.trim().split("\n") {
+        found: regex.match(Regex{"^([^\n\r\u2028\u2029]*) ([1-9][0-9]*|0+[1-9][0-9]*)$"}, line) ?? next
+        count: Int.parse(found.groups[1]) ?? next
+        frames: found.groups[0].split(";").to_list()
+        depth = max(depth, frames.len())
+        nodes[0].count += count
+        at := 0
+        loop name in frames {
+            child: slot_of(nodes[at].slots, nodes.len(), name)
+            if child == nodes.len() {
+                nodes[at].children.push(name.copy())  // copy: the parent's children and the node both hold the frame
+                nodes.push(Node{name: name.copy(), count: 0, children: [String]{}, slots: [String: Int]{}})  // copy: the parent's children and the node both hold the frame
+            }
+            nodes[child].count += count
+            at = child
+        }
+    }
+    if nodes[0].count == 0 -> return Err("No folded samples to render")
+    height: (depth + 1) * 20 + 65
+    svg := [String]{
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{WIDTH}\" height=\"{height}\" viewBox=\"0 0 {WIDTH} {height}\">",
+        "<style>text{{font:12px monospace;pointer-events:none}}rect:hover{{stroke:black;stroke-width:1.5}}</style>",
+        "<rect width=\"100%\" height=\"100%\" fill=\"#fafafa\"/><text x=\"10\" y=\"22\">jetc CPU samples — {nodes[0].count} samples; root at bottom; hover for full Jet names/locations</text>",
+    }
+    draw(nodes, 0, 10.0, 0, height, svg)
+    svg.push("</svg>")
+    Ok("{svg.join("\n")}\n")
+}
+
+// Draws node `at` at `x` on row `level`, then its children left to right in
+// `localeCompare` order; a node narrower than 0.1 pixel draws no box.
+draw: fn(nodes: [Node], at: Int, x: Float, level: Int, height: Int, svg: &[String]) Never! {
+    total: nodes[0].count
+    node: nodes[at]
+    w: Float.from_int(node.count) / Float.from_int(total) * Float.from_int(WIDTH - 20)
+    y: height - 30 - level * 20
+    hash := 0
+    loop scalar in text.scalars(node.name) -> hash = (hash * 31 + lead_unit(scalar)) % 4294967296
+    if w >= 0.1 {
+        label: utf16_prefix(node.name, (Int.from_float(math.floor(w / 7.0)) ?? 0) - 1)
+        caption: if w > 14.0 -> "<text x=\"{fmt.decimal(x + 3.0, 3)}\" y=\"{y + 14}\">{xml(label)}</text>" else -> ""
+        svg.push("<g><title>{xml(node.name)} — {node.count} samples ({pct(node.count, total)})</title><rect x=\"{fmt.decimal(x, 3)}\" y=\"{y}\" width=\"{fmt.decimal(w, 3)}\" height=\"19\" fill=\"hsl({hash % 55},85%,{60 + hash % 18}%)\"/>{caption}</g>")
+    }
+    next_x := x
+    children := node.children.copy()  // copy: the node keeps its first-seen order
+    children.sort_by((a, b) -> text.collate(a, b))
+    loop name in children {
+        child: node.slots[name]
+        draw(nodes, child, next_x, level + 1, height, svg)
+        next_x += Float.from_int(nodes[child].count) / Float.from_int(total) * Float.from_int(WIDTH - 20)
+    }
+}
+
+// The first UTF-16 unit of one scalar: what `charCodeAt(0)` reads from each
+// character a JavaScript string iterates.
+lead_unit: fn(scalar: String) -> Int Never! {
+    b: scalar.bytes().map(byte -> Int.from_u8(byte))
+    if {
+        b.len() == 1 -> b[0]
+        b.len() == 2 -> (b[0] % 32) * 64 + b[1] % 64
+        b.len() == 3 -> ((b[0] % 16) * 64 + b[1] % 64) * 64 + b[2] % 64
+        else -> 55296 + ((((b[0] % 8) * 64 + b[1] % 64) * 64 + b[2] % 64) * 64 + b[3] % 64 - 65536) /% 1024
+    }
+}
+
+// The first `limit` UTF-16 units of `name`, as `slice` cuts them; a pair the
+// cut splits leaves its high half, which UTF-8 output writes as U+FFFD.
+utf16_prefix: fn(name: String, limit: Int) -> String Never! {
+    kept := [String]{}
+    units := 0
+    loop scalar in text.scalars(name) {
+        units += scalar.bytes().len() /% 3 + 1
+        if units > limit -> return "{kept.join("")}{if units == limit + 1 && scalar.bytes().len() == 4 -> REPLACEMENT else -> ""}"
+        kept.push(scalar)
+    }
+    kept.join("")
+}

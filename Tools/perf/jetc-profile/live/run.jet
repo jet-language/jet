@@ -1,0 +1,109 @@
+// The Jet twin of Tools/perf/jetc-profile/live.sh: samples a running jetc for
+// a few seconds with perf and writes the Jet-named reports of the profile twin
+// (profile/run.jet). It attaches only; it never starts or restarts the
+// compiler.
+//
+//   jet Tools/perf/jetc-profile/live/run.jet -- PID [SECONDS]
+//
+// SECONDS defaults to 20. PERF names the perf binary, else the one on PATH,
+// else the first runnable /nix/store/*-perf-linux-*/bin/perf. JET_CALL_GRAPH
+// is auto (the default: frame pointers, then a fresh DWARF window when most
+// stacks came back truncated or unresolved), fp or dwarf. JET_SOURCE_MAP names
+// the compiler's source map and JET_PROFILE_OUT the output directory; their
+// defaults and the roots under them come from Tools/agent/roots.sh's table.
+// A failure ends the run with its report on stderr and exit 1.
+use core.[files, process, regex, sys, term, time]
+
+USAGE: "usage: live.sh <pid> [seconds (default 20)]"
+DWARF: "dwarf,16384"
+
+// A run's paths and the programs it starts.
+Session: struct {
+    perf: String
+    pid: String
+    seconds: String
+    here: String
+    map: String
+    repo: String
+    out: String
+}
+
+run: fn() -> Never Err! {
+    args: process.args()
+    count: Regex{"^[1-9][0-9]*$"}
+    seconds: args.get(1) ?? "20"
+    if args.len() < 1 || args.len() > 2 || !regex.is_match(count, args[0]) || !regex.is_match(count, seconds) -> process.fail(2, USAGE)
+    pid: args[0]
+    alive: Sh{"kill -0 {pid}"}.status()
+    if alive != 0 -> process.exit(alive)
+    // The directory live.sh sits in: this program's parent.
+    here: files.normalize("{sys.executable()}/../..")
+    perf: process.env_nonempty("PERF") ?? process.which("perf") ?? store_perf()
+    if perf == "" || !files.can_execute(perf) -> process.fail(1, "Set PERF to a working perf binary.")
+    repo: process.env_nonempty("JET_REPO") ?? files.canonicalize(files.join(here, "../../.."))
+    // What sourcing roots.sh leaves set: the environment with the machine's
+    // env file over it, the two roots, and the map, output and call-graph
+    // settings over them.
+    loaded: sys.env_file("{sys.config_dir() ?? ""}/jet/env")
+    stamp: time.now().in_host_zone().format("%Y%m%d-%H%M%S")
+    roots: sys.env_text("""
+        JET_STATE_ROOT=${{JET_STATE_ROOT:-${{XDG_CACHE_HOME:-$HOME/.cache}}/jet-dev}}
+        JET_SCRATCH_ROOT=${{JET_SCRATCH_ROOT:-$JET_STATE_ROOT}}
+        JET_SOURCE_MAP=${{JET_SOURCE_MAP:-$JET_STATE_ROOT/stage1/run-loop6g/selfcheck/compiler.map.json}}
+        JET_PROFILE_OUT=${{JET_PROFILE_OUT:-$JET_SCRATCH_ROOT/sol/SolJetcProfile/jetc-{pid}-{stamp}}}
+        JET_CALL_GRAPH=${{JET_CALL_GRAPH:-auto}}
+        """, loaded)
+    out: roots["JET_PROFILE_OUT"]
+    files.create_dir_all(out)
+    mode: roots["JET_CALL_GRAPH"]
+    if !["auto", "fp", "dwarf"].contains(mode) -> process.fail(2, "JET_CALL_GRAPH must be auto, fp, or dwarf")
+    session: Session{perf: perf, pid: pid.copy(), seconds: seconds.copy(), here: here, map: roots["JET_SOURCE_MAP"], repo: repo, out: out.copy()}  // copy: the session owns its arguments and path
+    record(session, if mode == "dwarf" -> DWARF else -> "fp")
+    if mode == "auto" && profile(session, [String]{"needs-dwarf", files.join(out, "summary.json")}) == 0 {
+        term.eprint("Frame-pointer stacks are mostly truncated/unresolved; collecting a fresh DWARF window.")
+        files.rename(files.join(out, "perf.data"), files.join(out, "perf.fp.data"))
+        files.rename(files.join(out, "perf.script"), files.join(out, "perf.fp.script"))
+        files.rename(files.join(out, "summary.json"), files.join(out, "summary.fp.json"))
+        record(session, DWARF)
+    }
+    stdout := term.stdout()
+    stdout.write_bytes(files.read_bytes(files.join(out, "top.txt")))
+    stdout.write_bytes(files.read_bytes(files.join(out, "phases.txt")))
+    print("Artifacts: {out} (stacks.folded, flamegraph.svg, summary.json, perf.data, perf.script)")
+    process.exit(0)
+}
+
+// The first runnable perf in the Nix store; "" when there is none.
+store_perf: fn() -[FS]> String Err! {
+    files.glob("/nix/store/*-perf-linux-*/bin/perf").find(candidate -> files.can_execute(candidate)) ?? ""
+}
+
+// Samples the process for the session's seconds with call graph `graph`,
+// writes the symbolized samples to perf.script and analyzes them; a failing
+// step ends the program with its status, as `set -e` does.
+record: fn(session: Session, graph: String) -[Env, Exec, FS, IO]> () Err! {
+    out: session.out
+    term.eprint("Sampling PID {session.pid} for {session.seconds}s ({graph}); output: {out}")
+    data: files.join(out, "perf.data")
+    step(Sh{"{session.perf} record -m 8 -e cycles:u -F 99 -p {session.pid} -g {"--call-graph={graph}"} -o {data} -- sleep {session.seconds}"}.status())
+    // Inline expansion starts addr2line on the huge generated Rust image;
+    // symbol callchains plus the Jet declaration map are sufficient and
+    // memory-bounded.
+    script: files.join(out, "perf.script")
+    writer: files.create(script)
+    child: Sh{"{session.perf} script -i {data} --demangle --no-inline --max-stack 256 -F comm,pid,tid,time,event,ip,sym,dso"}.spec().stdin(.Inherit).stdout(.Stream).stderr(.Inherit).spawn()
+    loop chunk in child.stdout.chunks(65536) -> writer.write_all(chunk)
+    writer.flush()
+    step(process.exit_status(child.wait()))
+    step(profile(session, [String]{"analyze", script, session.map.copy(), session.repo.copy(), out.copy(), graph.copy()}))  // copy: the session keeps its paths
+}
+
+// Ends the program with the status of a step that failed.
+step: fn(status: Int) -[Exec]> {
+    if status != 0 -> process.exit(status)
+}
+
+// The profile twin's status on `args`, its output passed through.
+profile: fn(session: Session, args: [String]) -[Env, Exec]> Int Err! {
+    Sh{"{process.env_nonempty("JET") ?? "jet"} {files.join(session.here, "profile/run.jet")} --"}.extend(args).status()
+}

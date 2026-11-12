@@ -1,0 +1,24 @@
+// What a jetc-profile case produced (PortBars.jet runs this in the case
+// directory with the file holding the program's output): the printed text,
+// then each report the program wrote, out/'s files in name order and then
+// drawn.svg, under a `== PATH` line.
+use {
+    files: core.files
+    process: core.process
+}
+
+run: fn() {
+    printed: files.read(process.args()[0]) ?? process.fail(1, "{err}")
+    if printed != "" -> print(printed.remove_suffix("\n"))
+    written := [String]{}
+    if files.is_dir("out") {
+        names := (files.list_dir("out") ?? process.fail(1, "{err}")).map(entry -> "out/{entry.name}")
+        names.sort()
+        written = names
+    }
+    if files.exists("drawn.svg") -> written.push("drawn.svg")
+    loop path in written {
+        print("== {path}")
+        print((files.read(path) ?? process.fail(1, "{err}")).remove_suffix("\n"))
+    }
+}
