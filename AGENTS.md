@@ -115,8 +115,13 @@ judges every tool entry on all four bars. `Tools/agent/ScriptPairing.jet
 --check`, which every lane check runs,
 refuses a change that adds a script in another language without its pair,
 or that switches an entry before it passes every bar; browser-executed
-JavaScript, Nix files, and test and example subjects are exempt. `--census`
-lists every script in another language in the checkout and its pair.
+JavaScript, Nix files, test and example subjects, and the peer programs a
+gauntlet comparison runs Jet against (optimization fixtures' `peer-*`
+programs, an axis's non-Jet rails) are exempt. A library counts as covered
+once the entries' drivers (`Tools/gauntlet/harness/drivers/<entry>.mjs`)
+import every export it has, and a `*.test.mjs` once its imports are all
+paired or covered. `--census` lists every script in another language in the
+checkout and its pair, or the exports a library's drivers do not yet import.
 
 ## Greenfield cutover
 
