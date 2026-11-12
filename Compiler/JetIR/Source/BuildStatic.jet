@@ -18,7 +18,7 @@
 // A value the build cannot freeze (a Map whose key order the build does not
 // reproduce) keeps the constant on ir_comptime, built at each read.
 
-use jet_foundation.[Span, TComptimeEnumArg, TComptimeField, TComptimeMapEntry, TComptimeReport, TComptimeValue, TConstantDef, Type, name_rows_set, name_rows_value]
+use jet_foundation.[Span, TComptimeEnumArg, TComptimeField, TComptimeMapEntry, TComptimeReport, TComptimeValue, TConstantDef, Type, name_rows_set, name_rows_value, sha256_hex]
 
 // Bytes before a box's payload: the allocator's block header, whose first
 // word is the count (Refcount.jet jet_rt_block_retain).
@@ -154,6 +154,15 @@ ir_static_read: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, key: Str
     slot: ir_temp(m, b, row)
     ir_emit(b.f, IROp.Offset, slot, address, IR_STATIC_BOX_HEADER, -1, b.line)
     slot
+}
+
+// A read of compile-time literal `value` as type `ty` that borrows its static
+// object, as a constant read does (a computed local's value or a `comptime`
+// expression's): the program carries the value as data, never as code that
+// builds it part by part. Equal literals of one type share one object. -1
+// when the value has no static object.
+ir_static_literal_read: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: TComptimeValue) -> Int Never! {
+    ir_static_read(m, p, b, ty, "literal:{sha256_hex("{value:Debug}")}", value)
 }
 
 // The address of module storage `definition` (a mutable module binding): one

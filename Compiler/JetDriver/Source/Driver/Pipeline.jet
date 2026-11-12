@@ -1036,7 +1036,7 @@ jet_driver_comptime_function_closure: fn(
             next
         }
         loop dependency in checked.waiting_dependencies -> jet_driver_comptime_wait_add(waiting, dependency)
-        if module_value && impurity == None -> impurity = sema_comptime_call_facts_impurity(graph, checked.call_facts)
+        if module_value && impurity == None -> impurity = sema_comptime_call_facts_impurity(graph, checked.call_facts, local_value)
         if {
             !checked.obligations_pending && (!checked.complete || jet_driver_has_errors(checked.diagnostics)) -> {
                 loop diagnostic in checked.diagnostics -> diagnostics.push(diagnostic)
@@ -1400,20 +1400,21 @@ JetDriverModuleValueRefusal: struct {
 
 // Why the call sites `call_facts` keep an evaluation from running while
 // building, read from the run's graph in place; None when they keep it pure.
-jet_driver_comptime_impurity: fn(program: SemaProgramTables, call_facts: [SemaCallSiteFact]) -> String? Never! {
+// A local value also refuses the calls the runtime answers.
+jet_driver_comptime_impurity: fn(program: SemaProgramTables, call_facts: [SemaCallSiteFact], local_value: Bool) -> String? Never! {
     graph_option: program.registration_graph
     graph: graph_option ?? return Val("the staged comptime environment lost its registration graph")
-    sema_comptime_call_facts_impurity(graph, call_facts)
+    sema_comptime_call_facts_impurity(graph, call_facts, local_value)
 }
 
-// Why module value item check `checked` can't be computed while building, or
-// None when its evaluation may be tried: its compile-time check failed or
-// did not complete, or it calls anything impure.
-jet_driver_module_value_check_refusal: fn(program: SemaProgramTables, checked: SemaComptimeItemCheck) -> String? Never! {
+// Why module value or local value item check `checked` can't be computed
+// while building, or None when its evaluation may be tried: its compile-time
+// check failed or did not complete, or it calls anything impure.
+jet_driver_module_value_check_refusal: fn(program: SemaProgramTables, checked: SemaComptimeItemCheck, local_value: Bool) -> String? Never! {
     if jet_driver_first_error_since(checked.diagnostics, 0) == .Val(what) -> return Val("its compile-time check fails ({what})")
     request: checked.request ?? return Val("its compile-time check did not complete")
     if !checked.complete -> return Val("its compile-time check did not complete")
-    jet_driver_comptime_impurity(program, request.call_facts)
+    jet_driver_comptime_impurity(program, request.call_facts, local_value)
 }
 
 // The `what` of the first error of `diagnostics` from position `start` on.
@@ -2232,7 +2233,7 @@ jet_driver_comptime_run: fn(
                 if source.module_value {
                     // A module value whose compile-time check fails, or that
                     // calls anything impure, is refused untried.
-                    if jet_driver_module_value_check_refusal(programs[0], checked_item) == .Val(reason) {
+                    if jet_driver_module_value_check_refusal(programs[0], checked_item, false) == .Val(reason) {
                         jet_driver_module_value_refused(environments[0], programs[0], probe, available, source, false, reason, diagnostics)
                         refused_any = true
                         stop_mark = diagnostics.len()
@@ -2244,7 +2245,7 @@ jet_driver_comptime_run: fn(
                 // A local value whose compile-time check fails, or that calls
                 // anything impure, stays run-time code untried.
                 if source.local_value {
-                    if jet_driver_module_value_check_refusal(programs[0], checked_item) == .Val(reason) {
+                    if jet_driver_module_value_check_refusal(programs[0], checked_item, true) == .Val(reason) {
                         jet_driver_comptime_local_value_runs(values, source, reason)
                         made_progress = true
                         next

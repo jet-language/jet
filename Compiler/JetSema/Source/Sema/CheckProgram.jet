@@ -7339,11 +7339,23 @@ sema_comptime_codec_methods_add: fn(graph: SemaRegistrationGraph, ty: Type, modu
 // authority), or calls a body this program lacks without a row (an unknown
 // callee is maximal). A callee with a body is read through its own call sites
 // (the item's checked closure). Effects never run while building: a module
-// value whose evaluation is not pure is a build error (E0643).
-sema_comptime_call_facts_impurity: fn(graph: SemaRegistrationGraph, call_facts: [SemaCallSiteFact]) -> String? Never! {
+// value whose evaluation is not pure is a build error (E0643). With
+// `runtime_runs` (a local value), a call the runtime answers is refused too,
+// whatever its row: a Core call a runtime export answers, or a runtime
+// binding or other foreign body. Their rows grant authority but don't prove
+// the call pure: the runtime reads the process it runs in (the live and auth
+// registry cells, the clocks, the pid, entropy, the task and its cancel
+// state), and the compiler's own process would stand in for every run's.
+sema_comptime_call_facts_impurity: fn(graph: SemaRegistrationGraph, call_facts: [SemaCallSiteFact], runtime_runs: Bool) -> String? Never! {
     loop fact in call_facts {
         name: if fact.callee == .Val(callee) -> "`{sema_effect_comptime_callee_name(callee.key)}`" else if fact.intrinsic_api == .Val(api) -> "`{api}`" else -> "a function value"
         if fact.foreign_effect_root != None -> return Val("it calls foreign code ({name})")
+        if runtime_runs && fact.runtime_export -> return Val("it calls {name}, which the runtime answers from the running program")
+        if runtime_runs && fact.callee == .Val(callee) {
+            if sema_registration_callable_row(graph, callee.key) == .Val(row) {
+                if row == .Foreign(_, _) -> return Val("it calls foreign code ({name})")
+            }
+        }
         if fact.facts.effect_bound == .Val(row) {
             // A call with no named callee (a built-in such as `print`, or a
             // function value) is reported as the evaluation's own effect.

@@ -1,0 +1,18 @@
+use core.tasks
+
+count_up: fn(limit: Int) -> [Int] {
+    values := [Int]{}
+    loop value in 0..<limit -> values.push(value)
+    values
+}
+
+stages: fn() -> String {
+    small: count_up(8)
+    large: count_up(5000)
+    task: tasks.current_task()
+    "{small.len()} {large.len()} {task}"
+}
+
+run: fn() {
+    print(stages())
+}

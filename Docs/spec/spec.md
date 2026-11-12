@@ -582,7 +582,12 @@ the outside world, or stops while building, is a build error (E0643). In a
 block, an immutable `name: value` of Int arithmetic (`+`, `-`, `*`,
 negation) over literals and other folded bindings holds its value from the
 build on, at every optimization level; any other block value computes at run
-time, where O1 and O2 may still fold it. `NAME: comptime { value }` at file
+time, where O1 and O2 may still fold it. They never fold a value whose
+computation calls something the runtime answers from the running program
+(a clock, the task, the process, its environment or its live and auth
+stores): a build would bake its own process's answer. A folded value is laid
+out once as read-only data, as a module constant is, rather than built part by
+part at each use. `NAME: comptime { value }` at file
 scope, and `lanes: comptime { calculate() }` in a block, where names stay
 snake_case (D-SHAPE-CASE1), force evaluation of the single final expression
 while building: a failure stops the build with E3010 (D-PREP-SURFACE2=A).

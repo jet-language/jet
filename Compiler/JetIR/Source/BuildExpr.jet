@@ -2089,7 +2089,15 @@ ir_expr_slot: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: Int) -> 
             variant: if p.comptime_values -> preparation else if p.invocation -> build else -> runtime
             return ir_enum_value(m, p, b, expression_ty, owner.key, variant.key, BodyEnumPayload.Unit, span)
         }
-        .CtLit(value) -> return ir_comptime(m, p, b, expression_ty, value, span)
+        .CtLit(value) -> {
+            // A literal that freezes is static data, read as a constant is;
+            // any other is built in place.
+            if !ir_host_value_held(p, expression_ty) {
+                borrowed: ir_static_literal_read(m, p, b, expression_ty, value)
+                if borrowed >= 0 -> return borrowed
+            }
+            return ir_comptime(m, p, b, expression_ty, value, span)
+        }
         .ListLit(values) -> return ir_list_literal(m, p, b, expression_ty, values, span)
         .List(values, coercion) -> {
             if coercion == .Val(target) {

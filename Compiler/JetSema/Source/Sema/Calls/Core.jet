@@ -1122,8 +1122,10 @@ sema_call_core_record_effects: fn(record: CoreCallRecord, span: Span, type_args:
     }
     start: context.call_facts.len()
     accepted: sema_effect_record_intrinsic_fact(environment, program, scopes, context, api, span, facts, diagnostics)
-    if accepted && record.marker != None && context.call_facts.len() > start {
-        context.call_facts[context.call_facts.len() - 1].lifecycle = record.marker
+    if accepted && context.call_facts.len() > start {
+        last: context.call_facts.len() - 1
+        if record.marker != None -> context.call_facts[last].lifecycle = record.marker
+        context.call_facts[last].runtime_export = record.symbol != .SourceOwned
     }
     accepted
 }

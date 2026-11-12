@@ -1,0 +1,14 @@
+# A local that calls pure code is computed while compiling, a large value
+# included, which the program keeps as data. One whose calls the runtime
+# answers from the running program (here the task's identity) stays run-time
+# code quietly, with the reason.
+fixture: locals_the_runtime_answers_run_at_run_time.fixture
+step: jet inspect semindex stages.jet --json
+exit: 0
+json: stdout doc $.semindex.definitions[?leaf_name="small"][0].detail.stage.when = "build"
+json: stdout doc $.semindex.definitions[?leaf_name="large"][0].detail.stage.when = "build"
+json: stdout doc $.semindex.definitions[?leaf_name="task"][0].detail.stage.when = "run"
+json: stdout doc $.semindex.definitions[?leaf_name="task"][0].detail.stage.reason ~ "which the runtime answers from the running program" # the reason names the callee before this clause
+step: jet run stages.jet
+exit: 0
+stdout: ^= "8 5000 " # the counts, then the running task's identity
