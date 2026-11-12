@@ -1,0 +1,53 @@
+// The command half of the ConsoleRegistry example's console library: a
+// command takes at most three arguments, each a String, Int, Float or Bool.
+Command: struct {
+    help: String
+
+    impl Marker {
+        sites: [.Method]
+
+        expand: fn(self, target: Target) {
+            if target.params.len() > 4 {
+                reject(TooManyArguments{command: target.name, count: target.params.len() - 1})
+            }
+            if target.params.len() > 1 {
+                if target.params[1].type != "String" && target.params[1].type != "Int" && target.params[1].type != "Float" && target.params[1].type != "Bool" {
+                    reject(UnparsableArgument{command: target.name, param: target.params[1].name, type: target.params[1].type})
+                }
+            }
+            if target.params.len() > 2 {
+                if target.params[2].type != "String" && target.params[2].type != "Int" && target.params[2].type != "Float" && target.params[2].type != "Bool" {
+                    reject(UnparsableArgument{command: target.name, param: target.params[2].name, type: target.params[2].type})
+                }
+            }
+            if target.params.len() > 3 {
+                if target.params[3].type != "String" && target.params[3].type != "Int" && target.params[3].type != "Float" && target.params[3].type != "Bool" {
+                    reject(UnparsableArgument{command: target.name, param: target.params[3].name, type: target.params[3].type})
+                }
+            }
+        }
+    }
+}
+
+TooManyArguments: struct {
+    command: String
+    count: Int
+
+    impl Diagnostic {
+        what: fn(self) -> String { "command `{self.command}` takes {self.count} arguments, more than a console parses" }
+        why: fn(self) -> String { "a console command takes at most three arguments" }
+        fix: fn(self) -> String { "pass `{self.command}` fewer arguments, or split it into smaller commands" }
+    }
+}
+
+UnparsableArgument: struct {
+    command: String
+    param: String
+    type: String
+
+    impl Diagnostic {
+        what: fn(self) -> String { "command `{self.command}` takes `{self.param}: {self.type}`, which a console can't parse" }
+        why: fn(self) -> String { "a console parses each argument into a String, Int, Float or Bool" }
+        fix: fn(self) -> String { "declare `{self.param}` as a String, Int, Float or Bool, and build the `{self.type}` inside `{self.command}`" }
+    }
+}

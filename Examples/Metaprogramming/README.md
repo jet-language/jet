@@ -70,6 +70,7 @@ Run a lesson from the repository root, for example `jet run Examples/Metaprogram
 
 - [CallableCatalog](Reflection/CallableCatalog.jet) — Functions and methods reflect one typed parameter list.
 - [CallerLocation](Reflection/CallerLocation.jet) — Code-site facts (D-JAI-SITE1): a parameter whose default is `#caller` receives the place of each call that leaves it out, and `#here` is the place where it is written.
+- [ConsoleRegistry](Reflection/ConsoleRegistry/) — A command registry derived from metadata.
 - [FactPlane](Reflection/FactPlane.jet) — One folded program reads the registered build fact plane.
 - [FactReads](Reflection/FactReads.jet) — Every compiler-held plane uses one typed `@` read.
 - [FactSigil](Reflection/FactSigil.jet) — The fact sigil: compiler facts carry `$`.

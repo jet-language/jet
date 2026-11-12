@@ -1,0 +1,20 @@
+// A command's parameter types are checked when the registry is derived:
+// `teleport` takes a Point, which no command line parses.
+use cli
+
+Point: struct {
+    x: Float
+    y: Float
+}
+
+Game: struct {
+    #CLI.Command(help: "move the player")
+    teleport: fn(self, to: Point) -> String { "at {to.x}" }
+
+    #CLI.Command(help: "advance the clock")
+    step: fn(self, ticks: Int) -> String { "{ticks}" }
+}
+
+run: fn() {
+    print(Game{}.step(1))
+}

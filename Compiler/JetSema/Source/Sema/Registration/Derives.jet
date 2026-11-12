@@ -940,13 +940,18 @@ sema_derive_expand_str_parts: fn(expansion: &SemaDeriveExpansion, parts: [StrPar
     expanded
 }
 
-// A hole `{name}` over a template binding reads the binding's value; any
-// other hole expands as an expression.
+// A hole `{name}` over a template binding reads the binding's value, and a
+// hole over reflected facts (`{m.params[1].name}`,
+// `{m.marker(Help)?.text ?? ""}`) reads that fact; any other hole expands as
+// an expression.
 sema_derive_expand_hole: fn(expansion: &SemaDeriveExpansion, expression: Expr) -> Expr Never! {
     if expression == .Ident(name, span, _) {
         if sema_derive_scope_value(expansion, name) == .Val(value) {
             if sema_derive_literal_expr(value, span) == .Val(literal) -> return literal
         }
+    }
+    if sema_derive_static_value(expansion, expression) == .Val(value) {
+        if sema_derive_literal_expr(value, expr_span(expression)) == .Val(literal) -> return literal
     }
     sema_derive_expand_expr(expansion, expression)
 }

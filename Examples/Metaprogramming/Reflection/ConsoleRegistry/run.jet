@@ -1,0 +1,41 @@
+// A command registry derived from metadata. `#CLI.Console` reads the
+// methods marked `#CLI.Command` and writes `run`, which parses each argument
+// into the parameter's declared type before the call, and `help`, which lists
+// each command's typed parameters. Only the marked type's own methods become
+// commands: `plugin` declares `wipe`, and importing it does not add `wipe`
+// here.
+use cli
+use plugin
+
+#CLI.Console
+Game: struct {
+    name: String
+
+    #CLI.Command(help: "add an entity at a point")
+    spawn: fn(self, kind: String, x: Float, y: Float) -> String { "{self.name} spawned {kind} at ({x}, {y})" }
+
+    #CLI.Command(help: "advance the clock")
+    step: fn(self, ticks: Int, fast: Bool) -> String {
+        rate: if fast -> 10 else -> 1
+        "{self.name} advanced {ticks * rate} ticks"
+    }
+
+    #CLI.Command(help: "show the version")
+    version: fn(self) -> String { "{self.name} 1.0" }
+
+    // Not a command: no `#CLI.Command`.
+    reset: fn(self) -> String { "reset" }
+}
+
+run: fn() {
+    game: Game{name: "demo"}
+    print(game.help())
+    print(game.run(["spawn", "orc", "1.5", "-2"]))
+    print(game.run(["step", "3", "true"]))
+    print(game.run(["version"]))
+    print(game.run(["spawn", "orc", "east", "0"]))
+    print(game.run(["step", "3"]))
+    print(game.run(["reset"]))
+    print(game.run(["wipe"]))
+    print(plugin.Admin{}.run(["wipe"]))
+}

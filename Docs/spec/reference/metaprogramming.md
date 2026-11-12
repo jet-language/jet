@@ -408,6 +408,16 @@ reads `target.marker(T)` at every site kind a marker body runs on, and
 [`PackageMarker`](../../../Examples/Metaprogramming/Reflection/PackageMarker/run.jet)
 runs one on the package record: a header line above `package.jet`'s first
 field.
+[`ConsoleRegistry`](../../../Examples/Metaprogramming/Reflection/ConsoleRegistry/run.jet)
+builds a command registry this way in a plain library: `#CLI.Console` on a
+type reads its methods marked `#CLI.Command` and writes `run`, which parses
+each argument into the parameter's declared type before the call, and
+`help`, which lists each command's typed parameters and its marker's help
+text. The Command marker's own body rejects a parameter type no command line
+parses. Only the marked type's own methods become commands, so importing a
+package that declares commands adds none. A string hole in a template reads
+a reflected fact, such as `{m.params[1].name}` or
+`{m.marker(Command)?.help ?? ""}`, as that fact's literal.
 
 `M.reflect().uses` lists every use of the marker struct `M` in the whole
 program, a library's uses in the app build included. Each entry is a
