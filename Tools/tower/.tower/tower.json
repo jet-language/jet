@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6777,
-    "rev": 100093,
+    "rev": 100095,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -62169,6 +62169,11 @@
         {
           "at": "2026-11-12",
           "by": "Main",
+          "text": "c8 reproduces on seed-b13 (D-SCRIPT-HELPERS1 authoring, 2026-11-12, probes in $JET_SCRATCH_ROOT/lanes/Main/ballots/probes/D-SCRIPT-HELPERS1): a closure that writes a captured := local loses the write when passed as a callback, so each(...) leaves the value at 0 (p13, q09). A task that calls such a closure compiles and loses the write (q12), while writing the name directly in the task is refused with E1101 (q11), so the same write is refused in one spelling and silently dropped in the other. Closures also copy values they only read (q16, q18), against spec.md 'shared read access' (Docs/spec/spec.md:1167-1181). Rerun: sh run.sh p13.jet q09.jet q11.jet q12.jet q16.jet q18.jet in that directory."
+        },
+        {
+          "at": "2026-11-12",
+          "by": "Main",
           "text": "c2 items 1-4 are proved by G3Core-t1b (7dfa3007a5, PASS 1 each); item 5 (files.map(p).path ICE) is still open with G12Docs-4. c10 items b and c pass as fallback_break_keeps_later_locals_in_scope_on_every_tier and equality_with_a_constant_payload_compares_on_every_tier."
         },
         {
@@ -62634,7 +62639,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T11:17:59.631Z",
-      "updated": "2026-11-12T20:06:55.721Z",
+      "updated": "2026-11-12T21:51:26.878Z",
       "updatedBy": "Main",
       "goals": [
         "G3"
@@ -74597,6 +74602,15 @@
           "verifiedBy": null,
           "evidence": "Meet batch g6f on dev 2368741c9b with seed-b13 (jet@a0.0.45#6c8af19f74a2): every line for this criterion PASS, 0 FAIL, each at 24G. Summary at $JET_SCRATCH_ROOT/lanes/Lander/loop/out/meet-g6f/summary.txt.",
           "at": "2026-11-12T10:54:19.353Z"
+        },
+        {
+          "n": 186,
+          "text": "Two script-local diagnostic defects (seed-b13, D-SCRIPT-HELPERS1 probes in $JET_SCRATCH_ROOT/lanes/Main/ballots/probes/D-SCRIPT-HELPERS1): (1) a closure created above the script binding it reads gets E0107's 'a function can't see' text, though the cause is order (use before binding), so the Why and Fix lines must name the order and the binding's line (p06); (2) an interpolated string that uses two unknown script names reports only the first, where collect-all requires both (s01, s06). Proof: UI snapshots for both cases.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-12T21:51:27.933Z"
         }
       ],
       "refs": [],
@@ -74607,9 +74621,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T00:04:45.539Z",
-      "updated": "2026-11-12T21:39:24.178Z",
+      "updated": "2026-11-12T21:51:27.933Z",
       "updatedBy": "Main",
-      "criteriaLastN": 185
+      "criteriaLastN": 186
     },
     {
       "id": "c0kyjdtx",
@@ -199946,6 +199960,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-12T21:51:27.933Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0oev2ib",
+      "note": "#186 Two script-local diagnostic defects (seed-b13, D-SCRIPT-HELP"
+    },
+    {
+      "at": "2026-11-12T21:51:26.878Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c08s0ppt",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-12T21:47:39.518Z",
       "by": "Main",
