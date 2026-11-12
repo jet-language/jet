@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6775,
-    "rev": 100007,
+    "rev": 100011,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -88418,11 +88418,11 @@
         {
           "n": 1,
           "text": "Per the owner ruling of 2026-11-06 (A, calls never copy; D-CALLSITE-MARK2=A): a UI fixture shows `rows.push(item)` on a read parameter `item: [Int]` and `keep(item)` with an owning parameter both report E0201, a later use of a passed name reports E0209, and both pass when written `item.copy()`; the collect-all codemod inserts `.copy()` at every existing site in the same commit. `[item]` and `Box{items: item}` are outside this ruling.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T20:44:55.633Z"
+          "evidence": "G6Meta-91 landed on dev 30da4aef91 (the codemod is c78da98b1b): the ui row tests/ui/ownership/read_param_into_owning_argument_matches_across_call_forms.jet passes 1/1 on seed-b13 ($JET_SCRATCH_ROOT/lanes/Lander/loop/out/direct-G6Meta-91/1.out).",
+          "at": "2026-11-12T11:08:42.747Z"
         },
         {
           "n": 2,
@@ -88446,7 +88446,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-06T19:23:08.815Z",
-      "updated": "2026-11-09T20:44:59.458Z",
+      "updated": "2026-11-12T11:08:42.747Z",
       "updatedBy": "Main"
     },
     {
@@ -98364,7 +98364,7 @@
       "track": "epoch",
       "epoch": "e14",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": null,
       "checkSteps": null,
@@ -98376,6 +98376,11 @@
         {
           "at": "2026-11-12",
           "by": "Main",
+          "text": "Both criteria are met."
+        },
+        {
+          "at": "2026-11-12",
+          "by": "Main",
           "text": "Workaround G4Ports-ctfix (BodyComptime.jet): the JET_RECHECK_VERIFY comparison now skips the modules and registration_graph rows of SemaGraphResult, because their types hold Shared<SemaLookupCounters>. When c1 lands, restore the full comparison of those two rows in jet_driver_recheck_graph_rows in the same SUB, so the recheck verifies the registration graph again."
         }
       ],
@@ -98383,11 +98388,11 @@
         {
           "n": 1,
           "text": "Either :Debug display works for every type sema accepts in an interpolation, Shared<T> included (rendered as its inner value, the same on O0, O1 and O2), or sema refuses the interpolation with a registered diagnostic that has a UI snapshot. A case covers a struct field of type Shared<T> under :Debug. jet build --profile dev Compiler no longer has a path to ICE 101 on it.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-12T06:55:38.300Z"
+          "evidence": "G6Meta-89 landed on dev 5e488a6cbc: sema refuses :Debug of a struct with a Shared<T> field with E0112, and the ui row tests/ui/debug_display_of_a_shared_field_is_refused.jet passes 1/1 on seed-b13 ($JET_SCRATCH_ROOT/lanes/Lander/loop/out/direct-G6Meta-89/1.out).",
+          "at": "2026-11-12T11:08:38.370Z"
         },
         {
           "n": 2,
@@ -98407,9 +98412,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-12T06:55:29.337Z",
-      "updated": "2026-11-12T11:08:05.593Z",
+      "updated": "2026-11-12T11:08:41.160Z",
       "updatedBy": "Main",
-      "criteriaLastN": 2
+      "criteriaLastN": 2,
+      "completedAt": "2026-11-12T11:08:41.159Z"
     },
     {
       "id": "c012p9p9",
@@ -98712,11 +98718,11 @@
         {
           "n": 1,
           "text": "memory_semantics/strings_free_at_their_last_use tests strings made at run time (their size comes from a run-time input, so the compiler can't fold them), keeps its peak assertion, and passes for jet run at O0/O1/O2 and for the binary jet build --optimize=full produces. The compile-time rule is unchanged: no size bound makes a computable value fall back to run time.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-12T10:30:15.819Z"
+          "evidence": "G11Speed-G50c landed on dev ad118e5f34: the case reads its size from STRING_BYTES at run time, and its jet test line passes on seed-b13 at O0/O1/O2 (sweep g50c-6769). The --optimize=full binary (232,544 bytes) runs with STRING_BYTES=50000000, rc 0, printing one string live at each peak (sweep g50c-6769b, $JET_SCRATCH_ROOT/lanes/Lander/loop/out/meet-g50c-6769b/1.out). No compiler change: the compile-time rule is unchanged.",
+          "at": "2026-11-12T11:08:44.259Z"
         },
         {
           "n": 2,
@@ -98752,7 +98758,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-12T10:16:07.441Z",
-      "updated": "2026-11-12T10:57:03.266Z",
+      "updated": "2026-11-12T11:08:44.259Z",
       "updatedBy": "Main",
       "criteriaLastN": 4
     },
@@ -199874,6 +199880,34 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-12T11:08:44.259Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0xphd0i",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-12T11:08:42.747Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0pcddhe",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-12T11:08:41.160Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0phcs40",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-12T11:08:38.370Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0phcs40",
+      "note": "#1"
+    },
     {
       "at": "2026-11-12T11:08:05.593Z",
       "by": "Main",
