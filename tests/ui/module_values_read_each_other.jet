@@ -1,0 +1,10 @@
+// Module values that read each other in a cycle have no first value to
+// compute while building; the cycle is reported once, at the value it
+// closes on (E0338).
+FIRST: SECOND + 1
+SECOND: THIRD * 2
+THIRD: FIRST - 3
+
+run: fn() {
+    print(FIRST)
+}

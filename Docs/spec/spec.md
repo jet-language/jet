@@ -307,7 +307,8 @@ E0622. An immutable global's initializer is any expression, computed while
 building and stored in the program, and every read is an ordinary copy
 (D-MODULE-VALUE1, D-MODULE-BUILD1). No code runs before `run: fn`: an
 initializer that stops, reaches the outside world, or can't run while building
-is a build error (E0643), the same on every tier. A `name: Shared{value}`
+is a build error (E0643), the same on every tier, and so are initializers that
+read each other in a cycle, one that reads itself included (E0338). A `name: Shared{value}`
 global holds one process-wide cell: the build computes `value`, which must be
 literal data, and every read shares the one cell. Only an explicit
 `comptime { … }` reads build

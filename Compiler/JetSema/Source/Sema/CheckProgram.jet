@@ -7313,8 +7313,11 @@ sema_comptime_call_facts_impurity: fn(graph: SemaRegistrationGraph, call_facts: 
         name: if fact.callee == .Val(callee) -> "`{sema_effect_comptime_callee_name(callee.key)}`" else if fact.intrinsic_api == .Val(api) -> "`{api}`" else -> "a function value"
         if fact.foreign_effect_root != None -> return Val("it calls foreign code ({name})")
         if fact.facts.effect_bound == .Val(row) {
+            // A call with no named callee (a built-in such as `print`, or a
+            // function value) is reported as the evaluation's own effect.
+            reaches: if fact.callee == None -> "it" else -> name
             loop entry in row {
-                if !sema_comptime_effect_pure(entry.name) -> return Val("{name} reaches the outside world ({entry.name})")
+                if !sema_comptime_effect_pure(entry.name) -> return Val("{reaches} reaches the outside world ({entry.name})")
             }
             next
         }
@@ -8129,8 +8132,12 @@ sema_comptime_check_discriminant: fn(source: SemaComptimeItemSource, environment
     checked
 }
 
-sema_comptime_dependency_cycle_diagnostic: fn(name: String, span: Span) -> Diagnostic {
-    sema_unknown_name(name, span)
+// E0338: a compile-time item waits on itself through `chain`, the names around
+// the cycle from the item back to it, reported at the item's own value `span`.
+// The words are the package config evaluator's for the same cycle among
+// module-level values (envmodel_collect_comptime_globals).
+sema_comptime_dependency_cycle_diagnostic: fn(chain: [String], span: Span) -> Diagnostic {
+    sema_error("E0338", span, "computed module fields form a cycle: {chain.join(" -> ")}", "module-level comptime values must have a deterministic dependency order", "break the cycle by making one value independent or by moving the shared computation into a pure function")
 }
 
 // `type_caps` (sema_effect_type_caps) binds a struct's or enum's `#FX(…)` cap

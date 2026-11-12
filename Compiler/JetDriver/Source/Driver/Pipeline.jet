@@ -1176,13 +1176,33 @@ jet_driver_comptime_wait_cycle_from: fn(key: String, rows: [JetDriverComptimeWai
     false
 }
 
-jet_driver_comptime_dependency_cycle: fn(rows: [JetDriverComptimeWaitRow]) -> JetDriverComptimeWaitRow? {
+// The first circle among `rows`' dependencies, as its rows in order from the
+// one it closes on, or empty when no row waits on itself.
+jet_driver_comptime_dependency_cycle: fn(rows: [JetDriverComptimeWaitRow]) -> [JetDriverComptimeWaitRow] Never! {
     path := [String]{}
     finished := [String]{}
+    circle := [JetDriverComptimeWaitRow]{}
     loop row in rows {
-        if jet_driver_comptime_wait_cycle_from(row.key, rows, path, finished) -> return Val(row)
+        if !jet_driver_comptime_wait_cycle_from(row.key, rows, path, finished) -> next
+        // The search stops at the path's last row, on its first dependency
+        // already on the path: the row the circle closes on.
+        last: jet_driver_comptime_wait_row_find(rows, path[path.len() - 1]) ?? return circle
+        closing := path.len() - 1
+        loop dependency in last.dependencies {
+            index := 0
+            loop index < path.len() && path[index] != dependency -> index += 1
+            if index < path.len() {
+                closing = index
+                break
+            }
+        }
+        loop index in closing..<path.len() {
+            member: jet_driver_comptime_wait_row_find(rows, path[index]) ?? return circle
+            circle.push(member)
+        }
+        return circle
     }
-    None
+    circle
 }
 
 // The run's evaluator configuration for one evaluation. An IR evaluation
@@ -2459,13 +2479,12 @@ jet_driver_comptime_run: fn(
             }
             cycle := jet_driver_comptime_dependency_cycle(wait_rows)
             if {
-                cycle != None -> {
-                    cycle_row: cycle ?? {
-                        sema_comptime_body_work_flush(environments[0].comptime_body_publication, request.trace_sink, "sema.comptime")
-                        return jet_driver_comptime_run_result(values, checked_functions, trace, false, false)
-                    }
-                    cycle_diagnostic := sema_comptime_dependency_cycle_diagnostic(cycle_row.name, cycle_row.span)
-                    diagnostics.push(jet_driver_attach_program_source_location(cycle_diagnostic, programs[0], cycle_row.module_identity))
+                cycle.len() > 0 -> {
+                    chain := [String]{}
+                    loop member in cycle -> chain.push(member.name.copy())
+                    chain.push(cycle[0].name.copy())
+                    cycle_diagnostic := sema_comptime_dependency_cycle_diagnostic(chain, cycle[0].span)
+                    diagnostics.push(jet_driver_attach_program_source_location(cycle_diagnostic, programs[0], cycle[0].module_identity))
                 }
                 wait_rows.len() > 0 -> {
                     stalled := wait_rows[0]
