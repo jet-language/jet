@@ -4872,11 +4872,11 @@ of the optimizer rather than the intended work:
 The language example is
 [`Examples/Tooling/Performance/Bench.jet`](../../Examples/Tooling/Performance/Bench.jet),
 and the test command contract is covered by
-[`tests/measurement_tiers.rs`](../../tests/measurement_tiers.rs). The separate
-compiler-speed dashboard at [`Tools/perf/dashboard.sh`](../../Tools/perf/dashboard.sh)
-uses its own one-warmup, twenty-sample policy and six clean/no-change/edit
-production rows. Do not use dashboard numbers as a substitute for the
-`.measure` claim's execution record.
+[`tests/measurement_tiers.rs`](../../tests/measurement_tiers.rs). Compiler
+build speed is measured separately, by the throughput lanes in
+[Compile throughput](reference/compiler-speed.md#compile-throughput), with
+their own warmup and sampling policy. Do not use those numbers as a substitute
+for the `.measure` claim's execution record.
 
 ## Size-oriented builds and language tooling
 
