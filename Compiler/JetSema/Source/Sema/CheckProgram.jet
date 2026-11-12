@@ -93,6 +93,7 @@ use jet_foundation.[
     effect_scope_descriptor,
     expr_span,
     symbol_id,
+    checked_expr_type_id,
     checked_symbol_local,
     checked_test_artifact_fact,
     type_name,
@@ -2760,13 +2761,17 @@ sema_check_comptime_function: fn(graph: SemaRegistrationGraph, environment: &Sem
     // bound from its value, an obligation its callees' rows would settle) is
     // a consequence of the wait, never a finding.
     if waiting.len() > 0 -> diagnostics = [Diagnostic]{}
+    reachable := sema_comptime_environment_reachable_function_keys(environment, program, call_facts)
+    if checked.value == .Val(body) {
+        if program.registration_graph == .Val(resolved_graph) -> sema_comptime_drop_close_keys(resolved_graph, body.tree, module_identity, reachable)
+    }
     SemaComptimeFunctionResult{
         module_identity: module_identity,
         function_key: function_key,
         function: checked.value,
         waiting_dependencies: waiting,
         calls: calls,
-        reachable_function_keys: sema_comptime_environment_reachable_function_keys(environment, program, call_facts),
+        reachable_function_keys: reachable,
         call_facts: call_facts,
         hardware_use: sema_hardware_use_snapshot(checked.hardware_use),
         name_references: name_references,
@@ -7428,6 +7433,92 @@ sema_comptime_reachable_function_keys: fn(graph: SemaRegistrationGraph, call_fac
     keys
 }
 
+// The `close` methods the drops in checked tree `tree` (of module
+// `module_identity`) run, each added to `keys` once: no call fact records
+// them. JetIR closes a value a call or a literal makes when it drops (a
+// temporary at its statement's end, a binding at its scope's end) and a
+// place's old value when an assignment writes it, and a value closes each of
+// its fields and payloads that closes (ir_close_glue). A compile-time
+// closure checks each like a callee, so their call sites count toward the
+// evaluation's purity: a local value whose drops print runs with the program.
+sema_comptime_drop_close_keys: fn(graph: SemaRegistrationGraph, tree: BodyTree, module_identity: String, keys: &[String]) {
+    dropped := [Int]{}
+    loop node in tree.nodes {
+        made: node.kind == .Call(_, _, _) || node.kind == .IndirectCall(_, _, _, _) || node.kind == .MethodCall(_, _, _, _) || node.kind == .StaticCall(_, _, _, _, _) || node.kind == .CoreCall(_, _, _, _, _, _) || node.kind == .StructLit(_) || node.kind == .EnumCtor(_, _, _)
+        if made -> dropped.push(node.id)
+    }
+    loop statement in tree.stmts {
+        if statement == .Assign(_, _, value, _, _) -> dropped.push(value)
+    }
+    seen := [String:Bool]{}
+    loop id in dropped {
+        type_id: checked_expr_type_id(tree.expr_types, id) ?? next
+        sema_comptime_close_methods_add(graph, tree.types.types[type_id], module_identity, seen, keys)
+    }
+}
+
+// The `close` methods of the `Close` implementations of each nominal type
+// `ty` holds, itself or as an element, member, argument, field or payload,
+// `ty` named from module `module_identity`; `seen` holds the nominal keys
+// already read.
+sema_comptime_close_methods_add: fn(graph: SemaRegistrationGraph, ty: Type, module_identity: String, seen: &[String:Bool], keys: &[String]) {
+    if ty == {
+        .List(element) | .Option(element) | .Shared(element) | .Tagged(_, element) | .FixedList(element, _) -> sema_comptime_close_methods_add(graph, element, module_identity, seen, keys)
+        .Map(key, _, value) -> {
+            sema_comptime_close_methods_add(graph, key, module_identity, seen, keys)
+            sema_comptime_close_methods_add(graph, value, module_identity, seen, keys)
+        }
+        .Result(ok, err) -> {
+            sema_comptime_close_methods_add(graph, ok, module_identity, seen, keys)
+            sema_comptime_close_methods_add(graph, err, module_identity, seen, keys)
+        }
+        .Tuple(fields) -> loop field in fields -> sema_comptime_close_methods_add(graph, field.ty, module_identity, seen, keys)
+        .Union(members) -> loop member in members -> sema_comptime_close_methods_add(graph, member, module_identity, seen, keys)
+        .Named(_) | .Apply(_, _) -> {
+            if ty == .Apply(_, args) {
+                loop arg in args -> sema_comptime_close_methods_add(graph, arg, module_identity, seen, keys)
+            }
+            row: sema_type_resolve_nominal_row(graph, ty, module_identity) ?? return
+            nominal_key: graph.modules[row.module_index].nominals[row.row].symbol.id.key
+            if seen.get(nominal_key) != None -> return
+            seen[nominal_key.copy()] = true
+            loop reference in sema_registration_impl_rows_named(graph, graph.modules[row.module_index].nominals[row.row].symbol.name) {
+                implementation: graph.modules[reference.module_index].impls[reference.row]
+                symbol_name: if implementation.trait_symbol == .Val(trait_symbol) -> trait_symbol.name.copy() else -> ""
+                if implementation.trait_name != Val("Close") && symbol_name != "Close" -> next
+                if sema_type_graph_impl_target_nominal_key(graph, implementation) != Val(nominal_key) -> next
+                loop method in implementation.methods {
+                    if method.symbol.name == "close" -> sema_comptime_close_key_add(graph, keys, method.symbol.id.key)
+                }
+            }
+            // An `impl Close { … }` block in the type's own body, whose
+            // methods the nominal registers.
+            if graph.modules[row.module_index].nominals[row.row].source == .SourceAST(item) {
+                loop block in sema_registration_item_trait_blocks(item) {
+                    if block.trait_name != "Close" -> next
+                    loop method in graph.modules[row.module_index].nominals[row.row].methods {
+                        if method.symbol.name != "close" -> next
+                        loop written in block.methods {
+                            if written.span == method.declaration.span -> sema_comptime_close_key_add(graph, keys, method.symbol.id.key)
+                        }
+                    }
+                }
+            }
+            owner_identity: graph.modules[row.module_index].module_identity
+            loop field in graph.modules[row.module_index].nominals[row.row].fields -> sema_comptime_close_methods_add(graph, field.ty, owner_identity, seen, keys)
+            loop variant in graph.modules[row.module_index].nominals[row.row].variants {
+                if variant.payload_type == .Val(payload) -> sema_comptime_close_methods_add(graph, payload, owner_identity, seen, keys)
+            }
+        }
+        .Int | .Float | .Bool | .String | .Char | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Quantity(_, _) | .Measure(_) -> {}
+    }
+}
+
+sema_comptime_close_key_add: fn(graph: SemaRegistrationGraph, keys: &[String], key: String) {
+    if keys.contains(key) || sema_comptime_find_function_source_by_key(graph, key) == None -> return
+    keys.push(key.copy())
+}
+
 // The `encode` (under `encode`) and `decode` (under `decode`) methods a codec
 // target `ty` reaches by owner type (JetIR ir_serde_encode and
 // ir_dyn_decode), which no call fact records, `ty` named from module
@@ -8353,19 +8444,22 @@ sema_check_comptime_item_in: fn(environment: SemaScopeEnvironment, program: Sema
             required: checked_expected ?? expression.ty
             if expression.ty != required -> checked_expected = None
         }
+        published: sema_publish_expression(expression, context.arena.tree)
+        reachable := sema_comptime_reachable_function_keys(resolved_graph, context.call_facts)
+        sema_comptime_drop_close_keys(resolved_graph, published.tree, source.module_identity, reachable)
         request := SemaComptimeItemRequest{
             module_identity: source.module_identity,
             key: source.key,
             destination_key: source.destination_key,
             source_file: source.source_file,
             kind: source.kind,
-            expression: sema_publish_expression(expression, context.arena.tree),
+            expression: published,
             expected_type: checked_expected,
             span: source.span,
             dependencies: dependencies,
             calls: context.comptime_requests,
             hardware_use: sema_hardware_use_snapshot(context.hardware_use),
-            reachable_function_keys: sema_comptime_reachable_function_keys(resolved_graph, context.call_facts),
+            reachable_function_keys: reachable,
             call_facts: if source.module_value || source.runtime_check -> context.call_facts else -> [SemaCallSiteFact]{},
             effect_call: sema_effect_comptime_call_name(context.call_facts),
         }

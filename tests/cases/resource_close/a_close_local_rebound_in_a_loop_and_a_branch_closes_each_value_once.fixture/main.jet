@@ -1,0 +1,54 @@
+// A local whose value closes, rebound on every loop step and again in a
+// branch, closes each old value once at its rebinding and the last one when
+// its scope ends. The bindings that read the results (`first: rolled()`)
+// are only computed while compiling when the code they reach is pure, and
+// that code includes the `close` of every value it drops; it prints, so
+// they run when the program does.
+Stamp: struct {
+    name: String
+    n: Int
+
+    impl Close {
+        close: fn(&&self) {
+            print("close {self.name}")
+        }
+    }
+}
+
+stamp: fn(name: String, n: Int) -> Stamp {
+    Stamp{name: name, n: n}
+}
+
+// One binding, rebound on each step and then on one of two branches.
+rolled: fn() -> Int {
+    current := stamp("start", 0)
+    loop i in 1..<4 {
+        current = stamp("step{i}", current.n + i)
+    }
+    if current.n > 5 {
+        current = stamp("big", current.n * 2)
+    } else {
+        current = stamp("small", current.n)
+    }
+    current.n
+}
+
+// A fresh binding on each step, rebound on the even steps.
+churned: fn() -> Int {
+    total := 0
+    loop i in 0..<3 {
+        item := stamp("item{i}", i)
+        if i % 2 == 0 {
+            item = stamp("even{i}", i * 10)
+        }
+        total += item.n
+    }
+    total
+}
+
+run: fn() {
+    first: rolled()
+    print("rolled {first}")
+    second: churned()
+    print("churned {second}")
+}

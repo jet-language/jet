@@ -1,0 +1,25 @@
+# Claim: a local whose value closes, rebound on every step of a loop and again in a branch (`current = stamp(...)`), and a binding made fresh on each step and rebound on the even ones, closes every value exactly once on o0, o1, o2, with the checked allocator, and on web, though the immutable bindings that read the results (`first: rolled()`) could be computed while compiling (#6768).
+# Hand-derived: rolled binds start (0); steps 1..3 rebind it to step1 (1), step2 (3), step3 (6), each closing the value before it; 6 > 5 rebinds it to big (12), closing step3; big closes when rolled returns 12. churned's item0 is rebound to even0 (closing item0), and even0 closes at its step's end; item1 closes at its step's end; item2 is rebound to even2, then even2 closes; the total is 0 + 1 + 20 = 21. Before the fix the compile-time closure of `rolled` and `churned` held no `close`, since a drop's Close is no call fact, so nothing saw that it prints: both bindings were computed while compiling and none of the ten closes printed.
+fixture: a_close_local_rebound_in_a_loop_and_a_branch_closes_each_value_once.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet run --optimize=none main.jet
+exit: 0 # o0
+stdout: = a_close_local_rebound_in_a_loop_and_a_branch_closes_each_value_once.out # o0
+step: jet run --optimize=basic main.jet
+exit: 0 # o1
+stdout: = a_close_local_rebound_in_a_loop_and_a_branch_closes_each_value_once.out # o1
+step: jet run --optimize=full main.jet
+exit: 0 # o2
+stdout: = a_close_local_rebound_in_a_loop_and_a_branch_closes_each_value_once.out # o2
+step: jet run --checked-alloc main.jet
+exit: 0 # checked
+stdout: = a_close_local_rebound_in_a_loop_and_a_branch_closes_each_value_once.out # checked
+when tool node
+step: jet build --target web main.jet
+exit: 0
+step web: node app.js
+cwd: .jet/build
+exit: 0
+stdout: = a_close_local_rebound_in_a_loop_and_a_branch_closes_each_value_once.out # web
+end when
