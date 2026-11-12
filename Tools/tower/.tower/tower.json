@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6777,
-    "rev": 100120,
+    "rev": 100125,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -34687,6 +34687,24 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-11T11:07:27.842Z"
+        },
+        {
+          "n": 35,
+          "text": "Reflection inside a build-time (#run) function works on dev: no internal compiler error naming `type TypeInfo`, and the meta add_struct `typed` fixture checks without E0107. Found by the D-ADDSTRUCT-TYPE1 review on seed-b13 with the dev Core; prove with the fixture case on a dev-built compiler.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-12T23:02:05.919Z"
+        },
+        {
+          "n": 36,
+          "text": "TypeInfo.identity is a TypeId as D-META-REFLECT2 A ratified, not a String; every reader migrates in one cutover.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-12T23:02:06.841Z"
         }
       ],
       "refs": [
@@ -34709,12 +34727,12 @@
       "parentId": "c0zima4a",
       "needsAcceptance": false,
       "created": "2026-09-21T20:56:37.792Z",
-      "updated": "2026-11-12T10:54:05.854Z",
+      "updated": "2026-11-12T23:02:06.841Z",
       "updatedBy": "Main",
       "goals": [
         "G6"
       ],
-      "criteriaLastN": 34
+      "criteriaLastN": 36
     },
     {
       "id": "c02m1p02",
@@ -35006,6 +35024,24 @@
           "verifiedBy": null,
           "evidence": "Landed on dev 97462b6d92 (train t19, 0efcf91a49..97462b6d92), SUB G6Decl-2. Every test line of the SUB passes with the compiler built from the landed tree, after a census that is clean on every pass ($JET_SCRATCH_ROOT/lanes/Main/integ/t19/REPORT.md). Docs/spec/syntax-decisions.md has the D-META-LADDER1=A entry (the flat Meta effect family, root-only b.compiler(app), delegation with recorded handoffs, no macros), placed after the OPTIN2 and CONTROL2 supersession notes.",
           "at": "2026-11-11T04:40:49.020Z"
+        },
+        {
+          "n": 23,
+          "text": "meta.add_struct refuses any CompilerField.type that is not exactly one type: the build host check is a real one-type parse (or an identity check), not a blocked-character list. Today `type: \"I64, extra: String\"` adds a second field (ReviewAddStructType probe 2026-11-12). A cases row proves the refusal with a registered code.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-12T23:02:04.044Z"
+        },
+        {
+          "n": 24,
+          "text": "A text spelling of a dependency type in a generated module (`type: \"geo.Point\"`, `\"[geo.Point]\"`) never crashes the IR builder (\"unlowered\"): it either resolves or gets a sema diagnostic (I2/I3). A cases row covers both spellings.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-12T23:02:04.993Z"
         }
       ],
       "refs": [
@@ -35028,12 +35064,12 @@
       "parentId": "c0yfcz0w",
       "needsAcceptance": false,
       "created": "2026-09-21T20:56:51.106Z",
-      "updated": "2026-11-12T11:07:16.962Z",
+      "updated": "2026-11-12T23:02:04.993Z",
       "updatedBy": "Main",
       "goals": [
         "G6"
       ],
-      "criteriaLastN": 22
+      "criteriaLastN": 24
     },
     {
       "id": "c0l5ld15",
@@ -197345,6 +197381,196 @@
       "draft": false,
       "status": "open",
       "created": "2026-11-12T22:42:58.919Z"
+    },
+    {
+      "id": "D-ADDSTRUCT-TYPE1",
+      "cardId": "c02m1p02",
+      "group": "syntax",
+      "title": "How a build names a field's type when it declares a struct with meta.add_struct",
+      "situation": "A build can declare a new struct while it runs, by calling meta.add_struct with a list of fields. Each field record has a name and a type. Today the type is text, such as \"I64\", which the build host turns into source for the new struct. That text check only blocks a few characters, so the type \"I64, extra: String\" quietly adds a second field. The ratified rule also passes a reflected field's type, which reflection gives as a TypeId, not text, so the rule contradicts itself. This vote decides what a field's type is: a TypeId, text, or either. We recommend a TypeId, written by its name when the build file can see the type.",
+      "gist": "When a build declares a struct with meta.add_struct, is each field's type a TypeId, a text spelling, or either?",
+      "lesson": "A type passed as a value keeps its identity and is checked where it is written. A type passed as text is checked only when the build runs, and it is read again in the new struct's module, where its name can mean a different type.",
+      "explainer": "A TypeId is the compiler's name for one checked type. Reflection gives one for every field, as field.type. Programs cannot make a TypeId from text.\n\nA text spelling is a String such as \"I64\" or \"[Point]\". The build host pastes it into source for the new struct when the build runs.\n\nThe build function and the app can live in separate files. A build file sees only the types it declares or imports. A type only the app declares is invisible to it, unless both files import the module that declares it.\n\nA type written as a value means a type name where a value is expected, such as String in CompilerField{name: \"label\", type: String}. D-PRIM-TYPEKEY2 A ratifies this for a plain name where a Type is expected. It is not built yet.",
+      "story": "A build reads the fields of a struct called Source, drops one, and renames another. It adds two hand-written fields, label of type String and tags of type [String]. It then declares a new struct, Shape, from that list with meta.add_struct. Every option builds the same Shape; they differ in how the hand-written and reflected types are written.",
+      "inWild": "Zig builds a struct type at compile time with @Type, and each field's type is a type value, never a string. That works inside one compilation. Across the build-to-app split, Zig's build.zig passes values to the app by generating Zig source text (std.Build.Step.Options), so Zig also falls back to text there. C++26 reflection (P2996) declares a struct with define_aggregate, and each member's type is a reflection value such as ^^int. Rust procedural macros emit types as token streams, which the compiler checks only after expansion, like a text spelling. These outside facts were not re-checked for this ballot.",
+      "detail": "The ratified row reads: meta.add_struct(name, fields, scope: module) declares the struct name of fields, a list of CompilerField{name:, type:} records. Their names and types may be computed, as in a reflected field's f.type. The build host refuses a type that is not one type's spelling.\n\nD-META-REFLECT2 A (2026-09-21) says FieldInfo's type is a TypeId, an opaque compiler-issued identity that user code cannot make from casts or strings. D-REFLECT-FIELDTYPE1 A named that field type. So the row's own example passes a TypeId into a String slot, which the checker refuses (E0108).\n\nOn dev today the two CompilerField rows disagree. The core.compiler index field row says TypeId (commit G6Decl-72), the literal row says String, and a build that writes a literal crashed the IR. The staged fix G6Meta-addstruct1 makes both rows String. It fills the index with the printed type name and has reflected sites write field.type.name. Every other type in that index stays a TypeId.\n\nThe host's check is a block-list of characters (jet_driver_meta_type_text_plain in Compiler/JetDriver/Source/Driver/BuildAdapter.jet), not a type parser. Probe inject: the type \"I64, extra: String\" passed it. The generated struct got a second field, extra, and the app printed a value stored there. So the row's promise that the host refuses non-type text fails today.\n\nA TypeId's name is the type as its declaring module wrote it (type_name in Compiler/JetFoundation/Source/Types/Types.jet). The checker resolves such a name relative to the module that reads it. The new struct lives in a different module, which reads the name again in its own scope. A printed name can then fail to resolve there, or name a different type with the same short name.\n\nSome printed forms are display-only and do not parse at all, such as a quantity's Quantity<dimension, base; identity>. Probe roundtrip: \"Point\", \"Int?\", \"[String:Int]\" and \"fn(Int) -> Int\" worked as text. The spellings \"geo.Point\" and \"[geo.Point]\" for a dependency's type crashed the compiler.\n\nText can name types a build file cannot see. Probe split: a separate build.jet named the app-only type \"Point\" and the app printed 9. In that build file, the bare name Point is E0107. Probe forward: a second add_struct named the struct an earlier call made, \"Inner\", and also \"[Inner]\" and \"Inner?\"; the app printed 7.\n\nType written as a value is not built for any type. Probe typevalue: Type itself is E0119, and Point passed as an argument is E0636. [Point] parses as a list literal, and Int? parses as Int followed by the ? operator. Type arguments, as in name_of<[Point]>(), accept every spelling today.\n\nMigration under A: jet fix rewrites a String literal only when the text, read from the build file, names the same type the host finds in the app. A plain name or a compound spelling such as [String] is written without quotes. Anything else needs a hand edit: an app-only type, a type made earlier in the build, or computed text.\n\nIn this repository the edit is small. Four test files write literal types, all I64 or I32, and jet fix rewrites them. The bad_type case computes its text and becomes a check-error test. The typed and raw_denied cases already pass field.type. No example or Core file builds a CompilerField.",
+      "options": [
+        {
+          "key": "A",
+          "name": "A TypeId, with a type written as a value where a TypeId is expected",
+          "gist": "CompilerField.type is a TypeId. A reflected field.type passes as is; a hand-written type is written as a value, without quotes.",
+          "detail": "CompilerField.type becomes a TypeId. A reflected field's type passes as is. So does a field list from the core.compiler index, whose types are already TypeIds on dev.\n\nA type the build file can see is written as a value where a TypeId is expected. A name or path such as String or geo.Point extends D-PRIM-TYPEKEY2 A's rule from Type to TypeId. A compound spelling such as [String], Int? or Box<Int> is read the way D-REFLECT-TYPEINFO1 A reads reflect's argument: name lookup decides.\n\nA spelling with no value reading, such as a function type, gets a one-line alias, Callback: fn(Int) -> Int, and is written Callback. An alias names the same type.\n\nmeta.add_struct returns the TypeId of the struct it declares, so a later call in the same build can use it as a field type. A list or optional of that struct, such as [Inner], has no spelling. That struct is declared with meta.add(#code { … }), which needs only Meta.Generate; this path is unprobed.\n\nA type only the app declares is put in a module both files use. Probe split-b: after use shapes, build.jet resolves Point. A TypeId read from the app's types by reflection also passes.\n\nThe host writes each field from its TypeId, never from build text. It still refuses, when the build runs, a type the app cannot see, such as one declared only in a separate build file. A misspelled type is a check error at the call, and text is refused as a type mismatch (E0108).",
+          "code": "Source: struct { id: I64, secret: String, count: I32 }\n\nbuild: fn(b: Build) {\n    app: b.add_executable(\"app\", [\"main.jet\"], [])\n    meta: b.compiler(app)\n    // A type the build file can see is written as a value, without quotes.\n    fields := [CompilerField]{CompilerField{name: \"label\", type: String}, CompilerField{name: \"tags\", type: [String]}}\n    source: Source.reflect()\n    loop field in source.fields {\n        if field.name == \"secret\" -> next\n        name: if field.name == \"count\" -> \"total\" else -> field.name.copy()\n        // A reflected type is a TypeId and passes as is.\n        fields.push(CompilerField{name: name, type: field.type.copy()})\n    }\n    // add_struct returns Shape's TypeId for later fields.\n    shape: meta.add_struct(\"Shape\", fields, scope: \"shape\")\n    b.default(app)\n}"
+        },
+        {
+          "key": "B",
+          "name": "A text spelling, as today",
+          "gist": "CompilerField.type stays a String the build host reads. Reflected sites write field.type.name.",
+          "detail": "CompilerField.type stays a String. A hand-written type is its spelling in quotes, and a reflected field passes field.type.name. Any type the app can see can be named, including a type only the app declares and a struct an earlier call made.\n\nB must replace the host's block-list with a parser that accepts exactly one type, to close the hole probe inject found. That repair is part of this option. Errors still come only when the build runs.\n\nA reflected type loses its identity on the way. Its printed name is read again in the new module, where it can fail to resolve or name a different type. The index's CompilerField.type is then the only String type in an index of TypeIds.",
+          "code": "Source: struct { id: I64, secret: String, count: I32 }\n\nbuild: fn(b: Build) {\n    app: b.add_executable(\"app\", [\"main.jet\"], [])\n    meta: b.compiler(app)\n    // Every type is text, which the host reads when the build runs.\n    fields := [CompilerField]{CompilerField{name: \"label\", type: \"String\"}, CompilerField{name: \"tags\", type: \"[String]\"}}\n    source: Source.reflect()\n    loop field in source.fields {\n        if field.name == \"secret\" -> next\n        name: if field.name == \"count\" -> \"total\" else -> field.name.copy()\n        // A reflected type is turned back into its printed name.\n        fields.push(CompilerField{name: name, type: field.type.name.copy()})\n    }\n    meta.add_struct(\"Shape\", fields, scope: \"shape\")\n    b.default(app)\n}"
+        },
+        {
+          "key": "C",
+          "name": "Either a TypeId or a text spelling",
+          "gist": "CompilerField.type accepts a TypeId or a String. Reflected sites pass field.type; hand-written types stay quoted.",
+          "detail": "CompilerField.type accepts either, so the field needs a union type, TypeId | String. A reflected field passes field.type, a TypeId. A hand-written type is a quoted spelling, which the host reads when the build runs.\n\nTwo ways to name the same type stay in one field, against I8. The text path keeps every cost of B, including the parser repair.",
+          "code": "Source: struct { id: I64, secret: String, count: I32 }\n\nbuild: fn(b: Build) {\n    app: b.add_executable(\"app\", [\"main.jet\"], [])\n    meta: b.compiler(app)\n    // A hand-written type stays text.\n    fields := [CompilerField]{CompilerField{name: \"label\", type: \"String\"}, CompilerField{name: \"tags\", type: \"[String]\"}}\n    source: Source.reflect()\n    loop field in source.fields {\n        if field.name == \"secret\" -> next\n        name: if field.name == \"count\" -> \"total\" else -> field.name.copy()\n        // A reflected type passes as a TypeId.\n        fields.push(CompilerField{name: name, type: field.type.copy()})\n    }\n    meta.add_struct(\"Shape\", fields, scope: \"shape\")\n    b.default(app)\n}"
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "A keeps a type's identity from reflection to the new struct, and checks a hand-written type where it is written. No text a build computes reaches the new struct's source, so the block-list hole cannot occur. Every type in the core.compiler index stays a TypeId.",
+        "gains": [
+          "Reflected types and index field lists pass through unchanged",
+          "A misspelled type is a check error at the call, in the editor too",
+          "No text a build supplies is pasted into source"
+        ],
+        "losses": [
+          {
+            "loss": "Type text computed from data, such as a config file, can no longer be passed.",
+            "mitigation": "Map the data to types in code, as in if kind == \"int\" -> I64 else -> String. Each branch is checked. Refusing unchecked type text from outside is the point of A."
+          },
+          {
+            "loss": "A separate build file cannot name a type only the app declares.",
+            "mitigation": "Declare that type in a module both files use; probe split-b shows build.jet then resolves Point. A TypeId reflected from the app's types also passes."
+          },
+          {
+            "loss": "A list or optional of a struct made earlier in the same build, such as [Inner], has no spelling.",
+            "mitigation": "add_struct returns the new struct's TypeId, so a plain Inner field works. A struct with an [Inner] field is declared with meta.add(#code { … }), which needs only Meta.Generate."
+          },
+          {
+            "loss": "It needs checker work: TypeId values from names, and compound spellings read as values.",
+            "mitigation": "Both reuse ratified readings, D-PRIM-TYPEKEY2 A for names and D-REFLECT-TYPEINFO1 A for compound spellings. Neither is built, so A's build card builds them; a function type uses an alias."
+          },
+          {
+            "loss": "Two type-identity values, Type and TypeId, now share the plain-name spelling.",
+            "mitigation": "This split predates the ballot (D-PRIM-TYPEKEY2 A beside D-META-REFLECT2 A), and the expected type picks one. Merging them needs its own ballot."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B passes text that the host pastes into source when the build runs. Even with a real type parser, a reflected type loses its identity and is read again in another module, where its name can mean a different type."
+          },
+          {
+            "key": "C",
+            "reason": "C keeps two ways to name one type in one field, against I8, and its text path keeps every cost of B."
+          }
+        ],
+        "tradeoff": "Types keep their identity and are checked where they are written. In exchange, a type only the app declares must be imported by the build file or reflected."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: ReviewAddStructType. Probes on seed b13 showed the host's type check is a block-list (\"I64, extra: String\" added a field), and that text names app-only and same-build types a build file cannot. Repairs correct A's compound-type, host-check and migration claims, add B's parser repair and C's union type, and name A's remaining costs with mitigations."
+      },
+      "checkInstructions": "Read the CompilerField field and literal rows in Compiler/JetFoundation/Source/Registry/CoreRecordRows.jet. Read Compiler.add_struct and jet_driver_meta_type_text_plain in Compiler/JetDriver/Source/Driver/BuildAdapter.jet, and the meta.add_struct row in Docs/spec/syntax-decisions.md. Read type_name in Compiler/JetFoundation/Source/Types/Types.jet and sema_type_graph_lookup_symbol_at in Compiler/JetSema/Source/Sema/TypeRelations.jet.\n\nProbes ran with $JET_SCRATCH_ROOT/lanes/Main/integ/seed-b13/jet (a0.0.45-dev) and JET_TOOLCHAIN_ROOT set to the dev worktree .agent-worktrees/Main-dev-collectall. The installed a0.0.44 with the master Core has no CompilerField. Each probe is a one-file or two-file build under /tmp/addstruct-probe.\n\ninject: one field typed \"I64, extra: String\"; the build passes and the app prints shape.extra.\nforward: a second add_struct uses \"Inner\", \"[Inner]\" and \"Inner?\" from the first; prints 7.\nsplit: build.jet names the app-only \"Point\" as text; prints 9. split-a: Point.reflect() in that build.jet is E0107.\nsplit-b: build.jet with use shapes resolves Point; its reflect call then hits the seed's known TypeInfo lowering crash.\n\ntypevalue: Type is E0119, a Point argument is E0636, [Point] reads as a list, Int? as the ? operator.\ntypepos: name_of<[Point]>(), <Int?>, <Box<Int>>, <fn(Int) -> Int> and <[String: Int]> all compile and run.\nroundtrip: plain and compound text works; \"geo.Point\" and \"[geo.Point]\" crash the IR builder.\nmismatch: a String in an Int field is E0108.\n\nThe case tests/cases/build_entry/a_struct_made_from_reflected_fields_needs_no_meta_raw.case builds a struct from reflected fields and refuses a computed name and a bad type. Option A's type values for TypeId, add_struct's returned TypeId and the host's identity check are proposed and unbuilt. Validate this payload with Tools/agent/ballots/Validate.jet.",
+      "surface": {
+        "gist": "When a build declares a struct, is each field's type a TypeId, a text spelling, or either?",
+        "lesson": "A type passed as a value keeps its identity and is checked where it is written. A type passed as text is checked only when the build runs. It is read again in the new struct's module, where its name can mean another type.",
+        "trio": {
+          "current": {
+            "note": "The type is text, and reflected types are turned back into text. The text check only blocks a few characters.",
+            "code": "fields := [CompilerField]{CompilerField{name: \"label\", type: \"String\"}}\nsource: Source.reflect()\nloop field in source.fields {\n    fields.push(CompilerField{name: field.name.copy(), type: field.type.name.copy()})\n}\nmeta.add_struct(\"Shape\", fields, scope: \"shape\")\n// \"I64, extra: String\" passes and adds a second field."
+          },
+          "wild": {
+            "lang": "Zig",
+            "note": "Each field's type is a type value, never a string.",
+            "code": "const Shape = @Type(.{ .@\"struct\" = .{\n    .layout = .auto,\n    .fields = &.{\n        .{ .name = \"label\", .type = []const u8, .default_value_ptr = null, .is_comptime = false, .alignment = 0 },\n    },\n    .decls = &.{},\n    .is_tuple = false,\n} });"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "A TypeId",
+            "gist": "Reflected types pass as is; a hand-written type is written without quotes.",
+            "gains": [
+              "Types keep their identity and are checked where written",
+              "No build text is pasted into source"
+            ],
+            "losses": [
+              "Computed type text is refused",
+              "An app-only type must be imported by the build file"
+            ],
+            "proposed": {
+              "code": "// A type the build file can see is written without quotes.\nfields := [CompilerField]{CompilerField{name: \"label\", type: String}, CompilerField{name: \"tags\", type: [String]}}\nsource: Source.reflect()\nloop field in source.fields {\n    // A reflected type passes as is.\n    fields.push(CompilerField{name: field.name.copy(), type: field.type.copy()})\n}\n// Returns Shape's TypeId for later fields.\nshape: meta.add_struct(\"Shape\", fields, scope: \"shape\")"
+            }
+          },
+          {
+            "key": "B",
+            "name": "A text spelling, as today",
+            "gist": "The type is text the build host reads; reflected sites write field.type.name.",
+            "gains": [
+              "Any type the app can see can be named"
+            ],
+            "losses": [
+              "A bad type fails only when the build runs",
+              "Reflected types lose identity and can name another type",
+              "The host needs a real type parser"
+            ],
+            "proposed": {
+              "code": "fields := [CompilerField]{CompilerField{name: \"label\", type: \"String\"}, CompilerField{name: \"tags\", type: \"[String]\"}}\nsource: Source.reflect()\nloop field in source.fields {\n    fields.push(CompilerField{name: field.name.copy(), type: field.type.name.copy()})\n}\nmeta.add_struct(\"Shape\", fields, scope: \"shape\")"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Either one",
+            "gist": "The type is a TypeId or text; hand-written types stay quoted.",
+            "gains": [
+              "Reflected types pass as is",
+              "Text spellings keep working"
+            ],
+            "losses": [
+              "Two ways to name one type",
+              "Text spellings keep every cost of B"
+            ],
+            "proposed": {
+              "code": "fields := [CompilerField]{CompilerField{name: \"label\", type: \"String\"}, CompilerField{name: \"tags\", type: \"[String]\"}}\nsource: Source.reflect()\nloop field in source.fields {\n    fields.push(CompilerField{name: field.name.copy(), type: field.type.copy()})\n}\nmeta.add_struct(\"Shape\", fields, scope: \"shape\")"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A keeps a type's identity from reflection to the new struct, and checks a hand-written type where it is written. No build text reaches the new struct's source.",
+          "gains": [
+            "Types keep their identity",
+            "Misspelled types are check errors",
+            "No build text is pasted into source"
+          ],
+          "losses": [
+            {
+              "loss": "Computed type text is refused.",
+              "mitigation": "Map data to types in code, with one checked branch per type."
+            },
+            {
+              "loss": "A build file cannot name a type only the app declares.",
+              "mitigation": "Declare it in a module both files import, or pass a reflected TypeId."
+            },
+            {
+              "loss": "A list of a struct made in the same build has no spelling.",
+              "mitigation": "Declare that struct with meta.add(#code { … }), which needs only Meta.Generate."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Type text is checked only when the build runs, and reflected types lose their identity."
+            },
+            {
+              "key": "C",
+              "reason": "Two ways to name one type, and the text path keeps B's costs."
+            }
+          ],
+          "tradeoff": "Types keep their identity, but an app-only type must be imported by the build file."
+        }
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-12T23:02:03.179Z"
     }
   ],
   "questions": [
@@ -200573,6 +200799,41 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-12T23:02:06.841Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0yfcz0w",
+      "note": "#36 TypeInfo.identity is a TypeId as D-META-REFLECT2 A ratified,"
+    },
+    {
+      "at": "2026-11-12T23:02:05.919Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0yfcz0w",
+      "note": "#35 Reflection inside a build-time (#run) function works on dev:"
+    },
+    {
+      "at": "2026-11-12T23:02:04.993Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c02m1p02",
+      "note": "#24 A text spelling of a dependency type in a generated module ("
+    },
+    {
+      "at": "2026-11-12T23:02:04.044Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c02m1p02",
+      "note": "#23 meta.add_struct refuses any CompilerField.type that is not e"
+    },
+    {
+      "at": "2026-11-12T23:02:03.179Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-ADDSTRUCT-TYPE1",
+      "note": "How a build names a field's type when it declares a struct with meta.add_struct"
+    },
     {
       "at": "2026-11-12T23:01:03.370Z",
       "by": "Main",
