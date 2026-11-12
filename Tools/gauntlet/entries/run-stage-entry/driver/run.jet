@@ -1,0 +1,128 @@
+// The gauntlet driver of the kit's Stage module (#5072 c8), the twin of
+// Tools/gauntlet/harness/drivers/run-stage-entry.mjs: the staging export of
+// Tools/gauntlet/harness/run.mjs, stageEntry.
+//
+//   jet driver stage DIR RUNS DEV
+//
+// `stage` stages the comparison entry in DIR (its entry.json) under run/ and
+// measures it, RUNS samples to each measurement ("default" for the entry's
+// own count) and the dev tier only when DEV is "dev", with ./jet as the
+// `jet` it builds and runs with: fake-jet.txt, made executable. Every
+// measured command runs through the launcher, built into ./launch from
+// Tools/gauntlet/harness/launch.c. It shows the result as JSON indented by
+// two spaces, or the error that stopped it. A measurement (a time, a peak, a
+// latency, a ratio, a noise or a median) reads `<measured>`, as does what
+// follows from one: a comparison's verdict and status and the cache state a
+// run tier settles on. Sizes, counts, exit codes and source metrics stay.
+// This directory reads `<cwd>` and the checkout `<repo>`, and each `note:`
+// line a Jet program (Tools/agent/JetEnv.jet among them) prints on stderr is
+// left out, so where the checkout lives changes no output. The runs go
+// through Tools/agent/JetEnv.jet of the checkout that holds this driver, as
+// run.mjs runs them through that of its own.
+package: {
+    name: "run_stage_entry_driver"
+    version: "0.0.1"
+    deps: {
+        jet_gauntlet_kit: ../../../kit,
+    }
+}
+
+use {
+    jet_gauntlet_kit.[members, read_json, stage_entry, StageOptions]
+    files: core.files
+    json: core.encoding.json
+    process: core.process
+    sys: core.sys
+}
+
+USAGE: "usage: driver stage DIR RUNS DEV"
+
+// This driver's path below the checkout that holds it.
+DRIVER: "/Tools/gauntlet/entries/run-stage-entry/driver/run.jet"
+
+// The keys whose numbers are not measurements.
+KEPT: ["artifact_bytes", "binary_bytes", "bytes", "count", "exit_code", "exitCode", "loc", "resolution_ns", "source_bytes", "source_tokens", "tokens", "wasm_bytes"]
+// The keys whose text follows from a measurement; each entry of a `verdicts`
+// map reads as a `verdict`.
+DERIVED: ["cache_state", "status", "verdict"]
+
+// Whether a value follows from a measurement.
+Reading: enum {
+    Plain
+    Measured
+}
+
+// `value` at `key` with each measurement, and what follows from one, as
+// `<measured>`.
+masked: fn(value: Dyn, key: String, reading: Reading) -> Dyn {
+    if value == {
+        .Int(_) | .Float(_) | .Number(_) -> if KEPT.contains(key) -> value.copy() else -> Dyn.Text("<measured>")
+        .Array(items) -> Dyn.Array(items.map(item -> masked(item, key, reading)))
+        .Object(_) -> {
+            out := Dyn.object()
+            loop field in members(value) {
+                inner: if reading == .Measured || key == "comparisons" || field.key == "cache_state" -> Reading.Measured else -> Reading.Plain
+                out[field.key] = masked(field.value, if key == "verdicts" -> "verdict" else -> field.key, inner)
+            }
+            out
+        }
+        .Text(_) -> if reading == .Measured && DERIVED.contains(key) -> Dyn.Text("<measured>") else -> value.copy()
+        .Null | .Bool(_) | .Bytes(_) | .DateTime(_) -> value.copy()
+    }
+}
+
+// `text` without the `note:` lines of the stderr it shows as JSON: each runs
+// to its escaped newline or to the end of its string.
+without_notes: fn(text: String) -> String {
+    parts: text.split("note: ").to_list()
+    out := parts[0].copy()
+    loop part in parts[1..<parts.len()] {
+        line: part.find("\\n")
+        quote: part.find("\"")
+        out = if {
+            line >= 0 && (quote < 0 || line < quote) -> "{out}{part.slice(line + 2, part.len())}"
+            quote < 0 -> "{out}note: {part}"
+            else -> "{out}{part.slice(quote, part.len())}"
+        }
+    }
+    out
+}
+
+// Where the driver runs: this directory and the checkout that holds it.
+Place: struct {
+    cwd: String
+    repo: String
+}
+
+// `text` with this directory as `<cwd>` and the checkout as `<repo>`.
+local: fn(place: Place, text: String) -> String {
+    text.replace(place.cwd, "<cwd>").replace(place.repo, "<repo>")
+}
+
+// The error `message`: shown, then exit 1.
+fail: fn(place: Place, message: String) -> Never {
+    print(local(place, "error: {message}"))
+    process.exit(1)
+}
+
+// Stages the entry in `dir` with `runs` and `dev` as `stage` does.
+stage: fn(dir: String, runs: String, dev: String) {
+    place: Place{cwd: files.cwd(), repo: sys.executable().remove_suffix(DRIVER)}
+    jet: files.join(place.cwd, "jet")
+    files.copy("fake-jet.txt", jet) ?? fail(place, "cannot copy fake-jet.txt: {err}")
+    files.set_mode(jet, 0o755) ?? fail(place, "cannot make {jet} executable: {err}")
+    launcher: files.join(place.cwd, "launch")
+    built: process.cmd(["cc", "-O2", "-o", launcher.copy(), files.join(place.repo, "Tools/gauntlet/harness/launch.c")]).run()
+    if built.code != 0 -> fail(place, "cannot build the launcher: {built.errors.trim()}")
+    entry_dir: files.resolve(dir) ?? dir.copy()
+    entry: read_json(files.join(entry_dir, "entry.json")) ?? fail(place, "{dir}/entry.json is not a JSON file")
+    count: if runs == "default" -> None else -> Val(Int.parse(runs) ?? fail(place, "RUNS is not a whole number: {runs}"))
+    options: StageOptions{jet_bin: jet.copy(), runs: count, dev: dev == "dev", launcher: launcher.copy()}
+    result: stage_entry(place.repo, entry_dir, entry, files.join(place.cwd, "run"), options) ?? fail(place, "{err}")
+    print(without_notes(local(place, json.stringify(masked(result, "", .Plain), 2))))
+}
+
+run: fn() {
+    args: process.args()
+    if args.get(0) == Val("stage") && args.len() >= 4 -> stage(args[1], args[2], args[3]) else -> process.fail(64, USAGE)
+}

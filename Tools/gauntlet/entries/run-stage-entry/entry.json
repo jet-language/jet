@@ -1,0 +1,22 @@
+{
+  "name": "run-stage-entry",
+  "mode": "tool",
+  "description": "The staging of one comparison entry, stageEntry of Tools/gauntlet/harness/run.mjs, and its Jet twin, the Stage module of the jet_gauntlet_kit package (Tools/gauntlet/kit/Source/Stage.jet), #5072 c8, each run by a driver with a stand-in jet (fixtures/fake-jet.txt) and the launcher built from Tools/gauntlet/harness/launch.c: a batch entry with Python and Node peers, a declared non-applicable rail, a missing source and an unsupported language, timed on its AOT, run (repeat, edited and fresh-install cache states) and dev tiers; a batch-steps entry reset between its steps, with the dev tier unavailable; a generated fixture with the entry's default run count; an entry without expected output and one whose fixture generator is missing; a failed Jet build, a peer whose output differs and one that exits non-zero; a batch entry with a TCP peer started for each rail; a line service measured over its probes on each tier; and a web entry with a configured Jet build, its dist/ assets and the node rail's module graph sized. Every measurement, and what follows from one, reads <measured>.",
+  "tool": {
+    "original": "Tools/gauntlet/harness/drivers/run-stage-entry.mjs",
+    "jet": "Tools/gauntlet/entries/run-stage-entry/driver/run.jet",
+    "fixtures": "fixtures",
+    "cases": [
+      {"args": ["stage", "batch", "1", "dev"], "expected": "expected/batch.out"},
+      {"args": ["stage", "steps", "1", "no-dev"], "expected": "expected/steps.out"},
+      {"args": ["stage", "gen", "default", "dev"], "expected": "expected/gen.out"},
+      {"args": ["stage", "noexpected", "1", "dev"], "expected": "expected/noexpected.out"},
+      {"args": ["stage", "nofixture", "1", "no-dev"], "expected": "expected/nofixture.out"},
+      {"args": ["stage", "broken", "1", "dev"], "expected": "expected/broken.out"},
+      {"args": ["stage", "peer", "1", "dev"], "expected": "expected/peer.out"},
+      {"args": ["stage", "service", "1", "dev"], "expected": "expected/service.out"},
+      {"args": ["stage", "web", "1", "dev"], "expected": "expected/web.out"},
+      {"args": ["census"], "exit": 64, "expected": "expected/usage.out"}
+    ]
+  }
+}

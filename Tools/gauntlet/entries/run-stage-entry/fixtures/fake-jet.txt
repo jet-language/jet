@@ -1,0 +1,15 @@
+#!/bin/sh
+# A stand-in `jet` for the staging cases. `jet build run.jet` writes
+# .jet/build/run, which runs run.jet as a shell script with its `//` lines
+# left out; it fails when run.jet says FAIL_BUILD. `jet run run.jet -- ARG...`
+# and `jet dev --watch=off run.jet -- ARG...` run run.jet the same way.
+case "$1" in
+  build)
+    if grep -q FAIL_BUILD run.jet; then echo "run.jet: the build failed" >&2; exit 1; fi
+    mkdir -p .jet/build
+    printf '#!/bin/sh\nsed "/^\\/\\//d" "$(dirname "$0")/../../run.jet" | sh -s -- "$@"\n' > .jet/build/run
+    chmod +x .jet/build/run ;;
+  run) shift 3; sed '/^\/\//d' run.jet | sh -s -- "$@" ;;
+  dev) shift 4; sed '/^\/\//d' run.jet | sh -s -- "$@" ;;
+  *) echo "jet: unknown command $1" >&2; exit 2 ;;
+esac

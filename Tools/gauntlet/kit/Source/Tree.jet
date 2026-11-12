@@ -80,10 +80,21 @@ put_present: fn(object: &Dyn, key: String, value: Dyn?) {
     if value == .Val(found) -> object[key] = found
 }
 
+// The largest JSON text the kit parses, 1 GiB: JSON.parse reads report files
+// far past the 16 MiB a default parse allows.
+JSON_TEXT_BYTES: 1073741824
+
 // The JSON file at `path`; None when it cannot be read or is not JSON.
 read_json: fn(path: String) -[FS]> Dyn? {
     text: files.read(path) ?? return None
-    Val(json.parse(text) ?? return None)
+    Val(parse_json(text) ?? return None)
+}
+
+// `text` parsed as JSON up to JSON_TEXT_BYTES.
+parse_json: fn(text: String) -> Dyn EncodingError! {
+    limits := EncodingLimits.safe()
+    limits.max_item_bytes = JSON_TEXT_BYTES
+    json.parse_with_limits(text, limits)
 }
 
 #Test("a path reads members and indices; a missing step, a null and another type are absent") {
@@ -114,4 +125,10 @@ read_json: fn(path: String) -[FS]> Dyn? {
     put_present(out, "b", None)
     put_present(out, "c", Val(Dyn.Null))
     assert_eq(json.stringify(out), "{{\"a\":1,\"c\":null}}")
+}
+
+#Test("a JSON text past the default 16 MiB limit parses") {
+    filler: "x".repeat(17 * 1048576)
+    tree: parse_json("[\"{filler}\"]")
+    assert_eq(text_or_empty(tree, "0").count_bytes(), 17 * 1048576)
 }

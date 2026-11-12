@@ -1,0 +1,135 @@
+// The process tree of a harness command, read from /proc: which processes
+// it holds, how much memory they hold, and stopping them. The twins of
+// processTreePids, processTreeRssKb, signalProcessTree, processesEnded and
+// killProcessTree in Tools/gauntlet/harness/live-reload.mjs. A command runs
+// through Tools/agent/JetEnv.jet, which starts it in a process group of its
+// own and forwards no signal, so stopping a command signals every process
+// of its tree.
+use {
+    files: core.files
+    process: core.process
+    time: core.time
+}
+
+// How often a wait for processes to end looks again, in milliseconds.
+PROCESS_POLL_MS: 25
+
+// One process /proc shows: its parent and its resident set in KiB, when its
+// status names them.
+ProcessRow: struct {
+    pid: Int
+    parent: Int?
+    rss_kb: Int?
+}
+
+// Every process /proc shows now, or None when /proc cannot be read.
+process_rows: fn() -> [ProcessRow]? {
+    listed: files.list_dir("/proc") ?? return None
+    rows := [ProcessRow]{}
+    loop item in listed {
+        if !item.is_dir || !item.name.bytes().all(b -> b >= 48 && b <= 57) -> next
+        pid: Int.parse(item.name) ?? next
+        status: files.read("/proc/{item.name}/status") ?? next
+        row := ProcessRow{pid: pid, parent: None, rss_kb: None}
+        loop line in status.lines() {
+            if line.starts_with("PPid:") -> row.parent = parsed_int(line.remove_prefix("PPid:").trim())
+            if line.starts_with("VmRSS:") && line.ends_with(" kB") -> row.rss_kb = parsed_int(line.remove_prefix("VmRSS:").remove_suffix(" kB").trim())
+        }
+        rows.push(row)
+    }
+    Val(rows)
+}
+
+// `text` as a whole number, None when it is not one.
+parsed_int: fn(text: String) -> Int? {
+    Val(Int.parse(text) ?? return None)
+}
+
+// `root` and every process below it in `rows`, `root` first.
+process_tree: fn(rows: [ProcessRow], root: Int) -> [Int] {
+    tree := [root]
+    grown := true
+    loop grown {
+        grown = false
+        loop row in rows {
+            parent: row.parent ?? next
+            if tree.contains(parent) && !tree.contains(row.pid) {
+                tree.push(row.pid)
+                grown = true
+            }
+        }
+    }
+    tree
+}
+
+// The process `root` and every process below it, `root` first; `root`
+// alone when /proc cannot be read.
+process_tree_pids: fn(root: Int) -[FS]> [Int] {
+    rows: process_rows() ?? return [root]
+    process_tree(rows, root)
+}
+
+// The resident sets of the process `root` and every process below it, in
+// KiB, or None when /proc cannot be read or none of them names one.
+process_tree_rss_kb: fn(root: Int) -[FS]> Int? {
+    rows: process_rows() ?? return None
+    tree: process_tree(rows, root)
+    total := 0
+    found := false
+    loop row in rows {
+        rss: row.rss_kb ?? next
+        if tree.contains(row.pid) {
+            total += rss
+            found = true
+        }
+    }
+    if found -> Val(total) else -> None
+}
+
+// Sends the signal named `signal` ("TERM", "KILL") to each process of
+// `pids` and to the process group it leads; a process already gone is
+// passed over.
+signal_process_tree: fn(pids: [Int], signal: String) -[Exec]> {
+    targets := [String]{}
+    loop pid in pids {
+        targets.push("-{pid}")
+        targets.push("{pid}")
+    }
+    process.cmd(["kill", "-s", signal.copy(), "--"].concat(targets)).run().drop("a process that is already gone needs no signal")
+}
+
+// Whether the process `pid` is gone or a zombie.
+process_ended: fn(pid: Int) -> Bool {
+    stat: files.read("/proc/{pid}/stat") ?? return true
+    parts: stat.split(") ").to_list()
+    state: parts.last() ?? return true
+    state.starts_with("Z") || state.starts_with("X")
+}
+
+// Whether every process of `pids` ends within `timeout_ms`.
+processes_ended: fn(pids: [Int], timeout_ms: Int) -[FS, Time, Time.Wait]> Bool {
+    started: time.instant()
+    loop {
+        if pids.all(pid -> process_ended(pid)) -> return true
+        if started.elapsed_millis() >= timeout_ms -> return false
+        time.sleep(time.duration_ms(PROCESS_POLL_MS))
+    }
+}
+
+// Kills the process `root` and every process below it.
+kill_process_tree: fn(root: Int) -[Exec, FS]> {
+    signal_process_tree(process_tree_pids(root), "KILL")
+}
+
+#Test("a process tree is its root and every process below it, the root first") {
+    rows: [ProcessRow]{
+        {pid: 4, parent: Val(3), rss_kb: Val(40)},
+        {pid: 3, parent: Val(1), rss_kb: None},
+        {pid: 2, parent: Val(1), rss_kb: Val(20)},
+        {pid: 1, parent: Val(0), rss_kb: Val(10)},
+        {pid: 5, parent: None, rss_kb: Val(50)},
+    }
+    assert_eq(process_tree(rows, 1), [1, 3, 2, 4])
+    assert_eq(process_tree(rows, 3), [3, 4])
+    assert_eq(process_tree(rows, 9), [9])
+}

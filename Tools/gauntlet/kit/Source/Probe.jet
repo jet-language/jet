@@ -1,12 +1,17 @@
-// One HTTP probe of a service under measurement and whether its answer is
-// the one the entry expects. The twins of httpProbe and probeMatches in
-// Tools/gauntlet/harness/run.mjs.
+// One probe of a service under measurement, over HTTP or a line protocol,
+// whether its answer is the one the entry expects, and why not. The twins
+// of httpProbe, lineProbe, serviceProbe, probeMatches, probeMismatch and
+// headerMismatch in Tools/gauntlet/harness/run.mjs.
 use {
     client: core.http.client
     http: core.http
     json: core.encoding.json
+    net: core.net
     time: core.time
 }
+
+// How long one service probe may take, in milliseconds.
+PROBE_TIMEOUT_MS: 5000
 
 // Response headers a repeat of which Node drops, keeping the first.
 SINGLE_HEADERS: ["age", "authorization", "content-length", "content-type", "etag", "expires", "from", "host", "if-modified-since", "if-unmodified-since", "last-modified", "location", "max-forwards", "proxy-authorization", "referer", "retry-after", "server", "user-agent"]
@@ -125,6 +130,94 @@ node_headers: fn(fields: [http.Header]) -> Dyn {
         }
     }
     out
+}
+
+// What one probe of the line service on local `port` answered: `ok` and
+// the first line it sent (all it sent when it closed before a newline), or
+// the error of a probe that failed, and the latency in milliseconds. The
+// probe sends its `send` text, then closes its write side; a probe still
+// unanswered once `timeout_ms` pass fails.
+line_probe: fn(port: Int, probe: Dyn, timeout_ms: Int) -[Net, Time, Time.Wait]> Dyn {
+    started: time.instant()
+    address: net.socket_addr_parse("127.0.0.1:{port}") ?? return failed_probe("{err}", started)
+    stream := net.tcp_connect_timeout(address, timeout_ms) ?? return failed_probe(line_error(started, timeout_ms, "connect ECONNREFUSED 127.0.0.1:{port}"), started)
+    sent: if dyn_at(probe, "send") == .Null -> "" else -> js_text(dyn_at(probe, "send"))
+    net.tcp_write_text(stream, sent) ?? return closed_probe(stream, failed_probe("{err}", started))
+    net.tcp_shutdown(stream, NetShutdown.Write) ?? return closed_probe(stream, failed_probe("{err}", started))
+    body := [U8]{}
+    loop {
+        remaining: timeout_ms - started.elapsed_millis()
+        if remaining <= 0 -> return closed_probe(stream, failed_probe("line probe timeout", started))
+        ready: net.tcp_ready(stream, NetReadyInterest.Read, remaining) ?? return closed_probe(stream, failed_probe(line_error(started, timeout_ms, "{err}"), started))
+        if !net.ready_readable(ready) -> return closed_probe(stream, failed_probe("line probe timeout", started))
+        part: net.tcp_read_bytes(stream, 8192) ?? return closed_probe(stream, failed_probe("{err}", started))
+        if part.len() == 0 -> break
+        body = body.concat(part)
+        text: String.from_bytes_lossy(body)
+        if text.index_of("\n") == .Val(newline) -> return closed_probe(stream, answered_line(text.slice(0, newline + 1), started))
+    }
+    closed_probe(stream, answered_line(String.from_bytes_lossy(body), started))
+}
+
+// A line probe's error: a timeout once `timeout_ms` passed since `started`,
+// else `error`.
+line_error: fn(started: time.Instant, timeout_ms: Int, error: String) -> String {
+    if started.elapsed_millis() >= timeout_ms -> "line probe timeout" else -> error
+}
+
+// The line probe's answer `body`.
+answered_line: fn(body: &&String, started: time.Instant) -> Dyn {
+    out := Dyn.object()
+    out["ok"] = Dyn.Bool(true)
+    out["body"] = Dyn.Text(body)
+    out["latencyMs"] = latency(started)
+    out
+}
+
+// `result`, once `stream` is closed.
+closed_probe: fn(&stream: TCPStream, result: &&Dyn) -> Dyn {
+    net.tcp_close(stream).drop("the probe is answered whether or not its socket closes cleanly")
+    result
+}
+
+// One probe of the service on local `port` over `protocol`: a line probe
+// for "line", else an HTTP probe, each failing after 5 seconds.
+service_probe: fn(port: Int, probe: Dyn, protocol: String) -[Net, Time, Time.Wait]> Dyn {
+    if protocol == "line" -> line_probe(port, probe, PROBE_TIMEOUT_MS) else -> http_probe(port, probe, PROBE_TIMEOUT_MS)
+}
+
+// Why the answer `result` to `probe` over `protocol` is not the expected
+// one: the error of a probe that failed, else the first part that differs.
+probe_mismatch: fn(probe: Dyn, result: Dyn, protocol: String) -> String {
+    if !truthy_at(result, "ok") -> return js_text(dyn_at(result, "error"))
+    if protocol == "line" -> return "body {json_shown(value_at(result, "body"))}, expected {json_shown(value_at(probe, "expect"))}"
+    expected_status: value_at(probe, "expectStatus")
+    if expected_status != None && !strictly_equal(value_at(result, "status"), expected_status) -> return "status {js_text(dyn_at(result, "status"))}, expected {js_text(dyn_at(probe, "expectStatus"))}"
+    expected_body: value_at(probe, "expectBody")
+    if expected_body != None && !strictly_equal(value_at(result, "body"), expected_body) -> return "body {json_shown(value_at(result, "body"))}, expected {json_shown(expected_body)}"
+    header_mismatch(probe, result)
+}
+
+// The first expected header of `probe` the answer `result` lacks or
+// carries with another value.
+header_mismatch: fn(probe: Dyn, result: Dyn) -> String {
+    expected: dyn_at(probe, "expectHeaders")
+    if !is_header_map(expected) -> return "missing expected response headers"
+    lowered := Dyn.object()
+    if dyn_at(result, "headers") == .Object(_) {
+        loop header in members(dyn_at(result, "headers")) -> lowered[header.key.lower()] = header.value
+    }
+    loop header in members(expected) {
+        found: value_at(lowered, header.key.lower()) ?? return "header {header.key} is missing, expected {json.stringify(header.value)}"
+        if !header_matches(header.key, js_text(header.value), found) -> return "header {header.key} was {json.stringify(found)}, expected {json.stringify(header.value)}"
+    }
+    "response headers did not match expected values"
+}
+
+// `value` as JSON.stringify writes it; `undefined` for none.
+json_shown: fn(value: Dyn?) -> String {
+    found: value ?? return "undefined"
+    json.stringify(found)
 }
 
 #Test("a content type matches as a media type with sorted parameters; another header only trimmed") {
