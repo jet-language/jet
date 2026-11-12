@@ -1,0 +1,49 @@
+// The gauntlet driver of the kit's Result module (#5072 c8), the twin of
+// Tools/gauntlet/harness/drivers/run-result.mjs: the result-shape export of
+// Tools/gauntlet/harness/run.mjs, validateResultShape.
+//
+//   jet driver results MATRIX DIR
+//
+// DIR holds result JSON files, each checked in name order against MATRIX, a
+// gauntlet matrix.json, or against no matrix when MATRIX is `-`. Each file
+// shows its issues, one per line, or `ok` when it has none.
+package: {
+    name: "run_result_driver"
+    version: "0.0.1"
+    deps: {
+        jet_gauntlet_kit: ../../../kit,
+    }
+}
+
+use {
+    files: core.files
+    jet_gauntlet_kit.[read_json, result_shape_issues]
+    process: core.process
+}
+
+USAGE: "usage: driver results MATRIX DIR"
+
+// The JSON file `name`.
+input: fn(name: String) -> Dyn {
+    read_json(name) ?? process.fail(1, "{name} is not a JSON file")
+}
+
+print_results: fn(matrix: Dyn, dir: String) {
+    listed: files.list_dir(dir) ?? process.fail(1, "{dir} is not a directory")
+    names := listed.filter(item -> item.name.ends_with(".json")).map(item -> item.name.copy())
+    names.sort()
+    loop name in names {
+        issues: result_shape_issues(input(files.join(dir, name)), matrix)
+        if issues.len() == 0 -> print("{name}\tok")
+        loop issue in issues -> print("{name}\t{issue}")
+    }
+}
+
+run: fn() {
+    args: process.args()
+    command: args.get(0) ?? ""
+    if {
+        command == "results" && args.len() >= 3 -> print_results(if args[1] == "-" -> Dyn.Null else -> input(args[1]), args[2])
+        else -> process.fail(64, USAGE)
+    }
+}

@@ -1,0 +1,390 @@
+// The shape a measured entry's result must have before it is published: its
+// entry identity, status, language rows, Jet tiers and peer comparisons. The
+// twin of validateResultShape in Tools/gauntlet/harness/run.mjs.
+use {
+    combinatorics: core.math.combinatorics
+    json: core.encoding.json
+}
+
+// The statuses a result, a row, a tier or a comparison can carry.
+VALID_RESULT_STATUSES: ["ok", "not_applicable", "broken", "unavailable", "failed", "inconclusive"]
+// How a passed row or tier was verified.
+VALID_PASS_VERIFICATION_KINDS: ["byte_exact_stdout", "service_probe_sequence"]
+// Keys that would carry a selected or aggregate measurement, which a result
+// never holds (compared with `-` as `_` and in lower case).
+FORBIDDEN_SELECTION_KEYS: ["selected", "selected_peer", "selected_metric", "selected_best", "selected_value", "best", "winner", "average", "mean", "avg", "aggregate", "aggregates", "selection", "chosen"]
+// Metrics only an ahead-of-time build has.
+AOT_ONLY_METRICS: ["cold_build_seconds", "warm_build_seconds", "binary_bytes", "artifact_bytes", "wasm_bytes"]
+// The run-tier cache states a run tier must measure.
+GATED_RUN_CACHE_STATES: ["edited", "repeat"]
+// The peers compared on every declared tier; the others on the AOT tier only.
+RUN_TIER_PEERS: ["lua", "luajit", "python", "node"]
+// The tiers on which Jet/peer ratios are judged.
+RATIO_TIERS: ["aot", "run"]
+// How a peer's one measured row is bound to each Jet tier it is compared on.
+PEER_SAMPLE_BINDING: "immutable_peer_row_reused_per_declared_jet_tier"
+
+// What is wrong with `result`, a measured entry's result, each issue once in
+// the order found; `matrix` (null for none) adds the rails its cells require
+// and the cells it knows.
+result_shape_issues: fn(result: Dyn, matrix: Dyn) -> [String] {
+    if !(result == .Object(_)) -> return ["result is not an object"]
+    entry: value_at(result, "entry") ?? Dyn.Null
+    if !(entry == .Object(_)) -> return ["result is missing entry identity"]
+    name: text_at(entry, "name") ?? "<unnamed>"
+    languages: items_at(entry, "languages")
+    row_map: object_or_empty(value_at(result, "rows"))
+    comparison_map: object_or_empty(value_at(result, "comparisons"))
+    tier_map: object_or_empty(value_at(result, "jet_tiers"))
+    expected_peers: languages.filter_map(language -> text_at(language, "")).filter(language -> language != "jet" && language != "jet-expert").collect()
+    mode: text_at(entry, "mode") ?? ""
+    policy: tier_policy(mode)
+    metrics: comparison_metrics(mode)
+    non_applicable: value_at(entry, "non_applicable") ?? Dyn.Null
+
+    issues := selection_issues(value_at(result, "rows") ?? Dyn.Null, "{name}.rows")
+    issues.extend(selection_issues(value_at(result, "comparisons") ?? Dyn.Null, "{name}.comparisons"))
+    issues.extend(selection_issues(value_at(result, "jet_tiers") ?? Dyn.Null, "{name}.jet_tiers"))
+    if !is_entry_mode(value_at(entry, "mode")) -> issues.push("{name}: unsupported result mode {js_json(value_at(entry, "mode"))}")
+    if valid_status(value_at(result, "status")) == {
+        .Val(status) -> if status != "ok" -> issues.push("{name}: result status {status} is not publishable")
+        None -> issues.push("{name}: invalid result status {js_json(value_at(result, "status"))}")
+    }
+    if {
+        !(value_at(entry, "languages") == .Val(.Array(_))) || languages.len() == 0 -> issues.push("{name}: result has no declared language rows")
+        !all_distinct(languages) -> issues.push("{name}: result declares duplicate languages")
+        else -> {}
+    }
+    cells: items_at(entry, "cells")
+    if {
+        !(value_at(entry, "cells") == .Val(.Array(_))) || cells.len() == 0 -> issues.push("{name}: result has no declared matrix cells")
+        !all_distinct(cells) -> issues.push("{name}: result declares duplicate matrix cells")
+        else -> {}
+    }
+    if truthy(Val(matrix)) && value_at(entry, "cells") == .Val(.Array(_)) && value_at(matrix, "cells") == .Val(.Array(matrix_cells)) {
+        required := [String]{}
+        loop cell_id in cells {
+            found: matrix_cells.find(candidate -> is_value(value_at(candidate, "id"), cell_id)) ?? next
+            loop peer in matrix_peer_languages(matrix, Val(found)) {
+                if !required.contains(peer) -> required.push(peer)
+            }
+        }
+        loop peer in required {
+            if !languages.contains(Dyn.Text(peer)) -> issues.push("{name}/{peer}: required matrix rail is missing")
+        }
+    }
+
+    loop language_value in languages {
+        language: text_at(language_value, "") ?? {
+            issues.push("{name}: result declares non-string language {json.stringify(language_value)}")
+            next
+        }
+        issues.extend(row_issues(entry, name, language, row_map.get(language) ?? Dyn.Null, non_applicable, metrics))
+    }
+    loop row in members(row_map) {
+        if !languages.contains(Dyn.Text(row.key)) -> issues.push("{name}/{row.key}: result row is not declared")
+    }
+
+    loop rule in policy -> issues.extend(tier_issues(name, rule, tier_map.get(rule.tier) ?? Dyn.Null, metrics))
+    declared_tiers: policy.map(rule -> rule.tier)
+    loop tier in members(tier_map) {
+        if !declared_tiers.contains(tier.key) -> issues.push("{name}/jet/{tier.key}: tier is not declared for this mode")
+    }
+
+    if !(value_at(result, "comparisons") == .Val(.Object(_))) -> issues.push("{name}: missing peer comparison rows")
+    loop comparison in members(comparison_map) {
+        if !expected_peers.contains(comparison.key) -> issues.push("{name}/{comparison.key}: comparison row is not declared")
+    }
+    loop language in expected_peers {
+        issues.extend(comparison_issues(entry, name, language, comparison_map.get(language) ?? Dyn.Null, row_map.get(language), non_applicable, metrics))
+    }
+    if truthy(Val(matrix)) {
+        known: items_at(matrix, "cells").filter_map(cell -> value_at(cell, "id")).collect()
+        loop cell in cells {
+            if !known.contains(cell) -> issues.push("{name}: result declares unknown matrix cell {js_text(cell)}")
+        }
+    }
+    combinatorics.unique<String>(issues)
+}
+
+// What is wrong with the result row of one declared `language`.
+row_issues: fn(entry: Dyn, name: String, language: String, row: Dyn, non_applicable: Dyn, metrics: [String]) -> [String] {
+    prefix: "{name}/{language}"
+    if !(row == .Object(_)) -> return ["{prefix}: missing result row"]
+    issues := [String]{}
+    if text_at(row, "language") != Val(language) -> issues.push("{prefix}: row identity is {js_json(value_at(row, "language"))}")
+    status: valid_status(value_at(row, "status")) ?? {
+        issues.push("{prefix}: invalid row status {js_json(value_at(row, "status"))}")
+        return issues
+    }
+    if status == "not_applicable" {
+        if !truthy(non_applicable.get(language)) -> issues.push("{prefix}: row is not_applicable without a declared structural reason")
+        if text_at(row, "verification/status") != Val("not_applicable") -> issues.push("{prefix}: not_applicable row is missing not_applicable verification")
+        return issues
+    }
+    if status != "ok" {
+        issues.push("{prefix}: row status {status} is not publishable")
+        return issues
+    }
+    if is_true(row, "disqualified") -> issues.push("{prefix}: successful row is disqualified")
+    if !passed_verification(row) -> issues.push("{prefix}: successful row is missing valid passed verification")
+    measured: value_at(row, "metrics") ?? Dyn.Null
+    if !(measured == .Object(_)) {
+        issues.push("{prefix}: successful row is missing metrics")
+        return issues
+    }
+    if text_at(row, "provenance/base_language") != Val(base_language(language)) -> issues.push("{prefix}: source identity does not match declared language")
+    source: text_at(measured, "source_sha256") ?? ""
+    if source == "" || text_at(row, "provenance/source_sha256") != Val(source) -> issues.push("{prefix}: source hash does not match measured source")
+    loop metric in metrics {
+        if text_at(metric_applicability(entry, language, metric), "status") == Val("required") && !positive(measured.get(metric)) {
+            issues.push("{prefix}/{metric}: required row metric is missing or invalid")
+        }
+    }
+    issues
+}
+
+// What is wrong with the Jet result of one tier the entry's mode declares.
+tier_issues: fn(name: String, rule: TierRule, found: Dyn, metrics: [String]) -> [String] {
+    prefix: "{name}/jet/{rule.tier}"
+    if !(found == .Object(_)) -> return ["{prefix}: missing Jet tier result"]
+    status: valid_status(value_at(found, "status")) ?? return ["{prefix}: invalid tier status {js_json(value_at(found, "status"))}"]
+    issues := [String]{}
+    if rule.required && status != "ok" -> issues.push("{prefix}: required tier status {status}")
+    if status == "not_applicable" {
+        issues.push("{prefix}: declared Jet tier cannot be not_applicable")
+        return issues
+    }
+    if status != "ok" -> return issues
+    if !passed_verification(found) -> issues.push("{prefix}: successful tier is missing valid passed verification")
+    measured: value_at(found, "metrics") ?? Dyn.Null
+    if !(measured == .Object(_)) {
+        issues.push("{prefix}: successful tier is missing metrics")
+        return issues
+    }
+    loop metric in metrics {
+        if comparable_at_tier(metric, rule.tier) && !positive(measured.get(metric)) -> issues.push("{prefix}/{metric}: required tier metric is missing or invalid")
+    }
+    if rule.tier == "run" {
+        loop state in GATED_RUN_CACHE_STATES {
+            if text_at(found, "cache_states/{state}/status") != Val("ok") -> issues.push("{name}/jet/run/{state}: gated cache state is missing or not measured")
+        }
+    }
+    issues
+}
+
+// What is wrong with the comparison of Jet against one declared peer
+// `language`, whose row is `row`.
+comparison_issues: fn(entry: Dyn, name: String, language: String, comparison: Dyn, row: Dyn?, non_applicable: Dyn, metrics: [String]) -> [String] {
+    prefix: "{name}/{language}"
+    if !(comparison == .Object(_)) -> return ["{prefix}: missing peer comparison row"]
+    issues := [String]{}
+    status: value_at(comparison, "status")
+    if valid_status(status) == None -> issues.push("{prefix}: invalid comparison status {js_json(status)}")
+    peer_row: row ?? Dyn.Null
+    row_status: member(peer_row, "status") ?? Dyn.Text("unavailable")
+    if !is_value(status, row_status) -> issues.push("{prefix}: comparison status does not match peer row")
+    configuration: jet_configuration(language)
+    if text_at(comparison, "jet_configuration") != Val(configuration) -> issues.push("{prefix}: comparison uses {js_json(value_at(comparison, "jet_configuration"))} instead of {configuration}")
+    if !is_value(value_at(comparison, "applicable"), Dyn.Bool(row_status != Dyn.Text("not_applicable"))) -> issues.push("{prefix}: comparison applicability does not match peer row")
+    tiers: value_at(comparison, "tiers") ?? Dyn.Null
+    scopes := [(scope: String, sample: Dyn)]{(scope: "comparison", sample: value_at(comparison, "peer_sample") ?? Dyn.Null)}
+    loop tier in members(tiers) -> scopes.push((scope: "{tier.key} tier", sample: value_at(tier.value, "peer_sample") ?? Dyn.Null))
+    peer_source: member(peer_row, "metrics/source_sha256") ?? Dyn.Null
+    loop scope in scopes {
+        sample: scope.sample
+        matches: truthy(Val(sample)) && text_at(sample, "binding") == Val(PEER_SAMPLE_BINDING) && text_at(sample, "source") == Val("rows.{language}.metrics") && text_at(sample, "language") == Val((language)) && is_value(value_at(sample, "source_sha256"), peer_source)
+        if !matches -> issues.push("{prefix}/{scope.scope}: peer sample identity does not match its row")
+    }
+    expected: peer_tier_policy(entry, language)
+    declared: value_at(comparison, "tier_policy") ?? Dyn.Null
+    shown_policy: if declared == .Object(_) -> json.stringify(declared) else -> "{{}}"
+    if shown_policy != json.stringify(tier_policy_object(expected)) -> issues.push("{prefix}: comparison tier policy does not match the declared mode")
+    expected_tiers: expected.map(rule -> rule.tier)
+    loop tier in members(tiers) {
+        if !expected_tiers.contains(tier.key) -> issues.push("{prefix}/{tier.key}: comparison tier is not declared")
+    }
+    if text_at(comparison, "status") == Val("not_applicable") && truthy(non_applicable.get(language)) -> return issues
+    loop rule in expected {
+        ratio_tier: RATIO_TIERS.contains(rule.tier)
+        if !rule.required && !ratio_tier -> next
+        tier_comparison: tiers.get(rule.tier) ?? Dyn.Null
+        if !(tier_comparison == .Object(_)) {
+            issues.push("{prefix}/{rule.tier}: missing peer tier comparison")
+            next
+        }
+        if !ratio_tier -> next
+        cells: value_at(tier_comparison, "metrics") ?? Dyn.Null
+        loop metric in metrics {
+            cell_issue: metric_cell_issue(metric_applicability(entry, language, metric), metric, rule.tier, cells.get(metric) ?? Dyn.Null) ?? next
+            issues.push("{prefix}/{rule.tier}/{metric}: {cell_issue}")
+        }
+    }
+    issues
+}
+
+// What is wrong with the comparison cell `item` of `metric` on a ratio
+// tier, if anything.
+metric_cell_issue: fn(applicability: Dyn, metric: String, tier: String, item: Dyn) -> String? {
+    if text_at(applicability, "status") == Val("not_applicable") || !comparable_at_tier(metric, tier) {
+        if text_at(item, "status") != Val("not_applicable") -> return Val("required not_applicable cell is missing")
+        return None
+    }
+    measured: text_at(item, "status") == Val("measured")
+    if sub_millisecond(metric, value_at(item, "jet"), value_at(item, "peer")) {
+        ready: ["jet", "peer"].all(side -> text_at(item, "evidence/{side}/confidence/status") == Val("available") && truthy_at(item, "evidence/{side}/noise") && non_empty(value_at(item, "evidence/{side}/raw_samples")))
+        if !ready || !measured || value_at(item, "verdict") == .Val(.Null) -> return Val("sub-millisecond comparison lacks strict confidence evidence")
+    }
+    jet: number_at(item, "jet") ?? 0.0
+    peer: number_at(item, "peer") ?? 0.0
+    ratio: number_at(item, "ratio")
+    valid: measured && jet > 0.0 && peer > 0.0 && ratio == Val(jet / peer) && text_at(item, "verdict") == ratio_verdict(ratio)
+    if !valid -> return Val("missing or invalid independently measured cell")
+    None
+}
+
+// The Jet configuration a peer is matched with: `jet-expert` for an expert
+// peer, else `jet`.
+jet_configuration: fn(language: String) -> String { if language.ends_with("-expert") -> "jet-expert" else -> "jet" }
+
+// The tiers Jet is compared with `language` on: a run-tier peer on every
+// tier of the entry's mode, a compiled peer or an expert pair on the AOT
+// tier only.
+peer_tier_policy: fn(entry: Dyn, language: String) -> [TierRule] {
+    policy: tier_policy(text_at(entry, "mode") ?? "")
+    if !language.ends_with("-expert") && RUN_TIER_PEERS.contains(language) -> return policy
+    policy.filter(rule -> rule.tier == "aot")
+}
+
+// Tier rules as a result declares them: each tier to whether it is required.
+tier_policy_object: fn(rules: [TierRule]) -> Dyn {
+    shown := Dyn.object()
+    loop rule in rules -> shown[rule.tier] = Dyn{[String: Dyn]{"required": Dyn.Bool(rule.required)}}
+    shown
+}
+
+// The issues of every member of `value` (each element of an array) whose key
+// would hold a selected or aggregate measurement, at any depth.
+selection_issues: fn(value: Dyn, prefix: String) -> [String] {
+    issues := [String]{}
+    loop child in members(value) {
+        path: "{prefix}.{child.key}"
+        if FORBIDDEN_SELECTION_KEYS.contains(child.key.replace("-", "_").lower()) -> issues.push("{path}: selected or aggregate measurements are not allowed")
+        issues.extend(selection_issues(child.value, path))
+    }
+    issues
+}
+
+// The members of an object, or the elements of an array keyed by index; none
+// for another value.
+members: fn(value: Dyn) -> [(key: String, value: Dyn)] {
+    if value == {
+        .Object(rows) -> rows
+        .Array(list) -> {
+            out := [(key: String, value: Dyn)]{}
+            loop (index, item) in list -> out.push((key: "{index}", value: item))
+            out
+        }
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) -> []
+    }
+}
+
+// `value` when it is an object, else an empty one.
+object_or_empty: fn(value: Dyn?) -> Dyn {
+    if value == .Val(found) && found == .Object(_) -> return found
+    Dyn.object()
+}
+
+// The status `value` names when it is a valid one.
+valid_status: fn(value: Dyn?) -> String? {
+    if value == .Val(.Text(status)) && VALID_RESULT_STATUSES.contains(status) -> return Val(status)
+    None
+}
+
+// Whether a row or tier was verified, and passed, in a known way.
+passed_verification: fn(measured: Dyn) -> Bool {
+    text_at(measured, "verification/status") == Val("passed") && VALID_PASS_VERIFICATION_KINDS.contains(text_at(measured, "verification/kind") ?? "")
+}
+
+// Whether `metric` is compared on `tier`: every metric on the AOT tier, and
+// those an ahead-of-time build alone has on no other.
+comparable_at_tier: fn(metric: String, tier: String) -> Bool { tier == "aot" || !AOT_ONLY_METRICS.contains(metric) }
+
+// Whether a reading is a positive number.
+positive: fn(value: Dyn?) -> Bool {
+    found: value ?? return false
+    (number_at(found, "") ?? 0.0) > 0.0
+}
+
+// Whether a Jet or peer reading of `metric` is below a millisecond, where a
+// ratio needs strict confidence evidence.
+sub_millisecond: fn(metric: String, jet: Dyn?, peer: Dyn?) -> Bool {
+    limit: millisecond_in(metric) ?? return false
+    [jet, peer].any(value -> positive(value) && (number_at(value ?? Dyn.Null, "") ?? 0.0) < limit)
+}
+
+// A millisecond in the unit of `metric`, when it is a duration.
+millisecond_in: fn(metric: String) -> Float? {
+    if {
+        metric.ends_with("_seconds") -> Val(0.001)
+        metric.starts_with("service_latency_ms_") -> Val(1.0)
+        else -> None
+    }
+}
+
+// Whether `value` is present and equal to `expected`: `Dyn?` has no `==`.
+is_value: fn(value: Dyn?, expected: Dyn) -> Bool {
+    if value == .Val(found) -> return found == expected
+    false
+}
+
+// Whether `value` is a non-empty array or string.
+non_empty: fn(value: Dyn?) -> Bool {
+    if value == {
+        .Val(.Array(list)) -> list.len() > 0
+        .Val(.Text(text)) -> text != ""
+        .Val(_) | .None -> false
+    }
+}
+
+// Whether no two of `values` are the same value, as a JS Set sees them: a
+// scalar by its JSON, an array or object only as itself.
+all_distinct: fn(values: [Dyn]) -> Bool {
+    keys := [String]{}
+    loop index in 0..<values.len() {
+        key: if values[index] == {
+            .Array(_) | .Object(_) -> "#{index}"
+            .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) -> json.stringify(values[index])
+        }
+        keys.push(key)
+    }
+    combinatorics.unique<String>(keys).len() == keys.len()
+}
+
+// A value as JSON.stringify shows it in an issue: `undefined` when absent.
+js_json: fn(value: Dyn?) -> String {
+    found: value ?? return "undefined"
+    json.stringify(found)
+}
+
+#Test("a complete result has no issues, and each departure from its shape is an issue once") {
+    result: json.parse(`{"entry": {"name": "demo", "mode": "web-app", "languages": ["jet"], "cells": ["webfront.app"]}, "status": "ok", "rows": {"jet": {"language": "jet", "status": "ok", "verification": {"status": "passed", "kind": "byte_exact_stdout"}, "metrics": {"source_sha256": "abc", "runtime_first_stdout_seconds": 0.5, "runtime_wall_seconds": 0.5, "runtime_peak_rss_kb": 9, "cold_build_seconds": 1, "warm_build_seconds": 1, "binary_bytes": 9, "artifact_bytes": 9, "wasm_bytes": 9, "loc": 9, "source_bytes": 9, "tokens": 9, "source_tokens": 9}, "provenance": {"base_language": "jet", "source_sha256": "abc"}}}, "jet_tiers": {"aot": {"status": "ok", "verification": {"status": "passed", "kind": "byte_exact_stdout"}, "metrics": {"runtime_first_stdout_seconds": 0.5, "runtime_wall_seconds": 0.5, "runtime_peak_rss_kb": 9, "cold_build_seconds": 1, "warm_build_seconds": 1, "binary_bytes": 9, "artifact_bytes": 9, "wasm_bytes": 9, "loc": 9, "source_bytes": 9, "tokens": 9, "source_tokens": 9}}}, "comparisons": {}}`) ?? panic("result")
+    assert_eq(result_shape_issues(result, Dyn.Null), [String]{})
+    tampered := result.copy()
+    tampered["status"] = "failed"
+    tampered["mean"] = 1
+    tampered["jet_tiers"] = json.parse(`{"aot": {"status": "ok", "verification": {"status": "passed", "kind": "byte_exact_stdout"}, "best": 1}}`) ?? panic("tiers")
+    assert_eq(result_shape_issues(tampered, Dyn.Null), ["demo.jet_tiers.aot.best: selected or aggregate measurements are not allowed", "demo: result status failed is not publishable", "demo/jet/aot: successful tier is missing metrics"])
+    assert_eq(result_shape_issues(Dyn.Array([Dyn]{}), Dyn.Null), ["result is not an object"])
+}
+
+#Test("a sub-millisecond cell needs confidence evidence, and a ratio must be Jet over peer") {
+    bare: Dyn{[String: Dyn]{"status": "required"}}
+    fast: json.parse(`{"status": "measured", "jet": 0.0005, "peer": 0.001, "ratio": 0.5, "verdict": "win"}`) ?? panic("cell")
+    assert_eq(metric_cell_issue(bare, "runtime_wall_seconds", "run", fast), Val("sub-millisecond comparison lacks strict confidence evidence"))
+    slow: json.parse(`{"status": "measured", "jet": 2, "peer": 4, "ratio": 0.5, "verdict": "win"}`) ?? panic("cell")
+    assert_eq(metric_cell_issue(bare, "runtime_wall_seconds", "run", slow), None)
+    wrong: json.parse(`{"status": "measured", "jet": 2, "peer": 4, "ratio": 0.25, "verdict": "win"}`) ?? panic("cell")
+    assert_eq(metric_cell_issue(bare, "runtime_wall_seconds", "run", wrong), Val("missing or invalid independently measured cell"))
+    assert_eq(metric_cell_issue(bare, "binary_bytes", "run", slow), Val("required not_applicable cell is missing"))
+}
