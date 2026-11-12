@@ -1340,6 +1340,15 @@ jfmt_fmt_extern_fn: fn(f: &JetFmt, ef: ExternFn) {
 }
 
 jfmt_fmt_test: fn(f: &JetFmt, t: TestDef) {
+    // A property test's `#Pre(condition, message)` lines head it.
+    loop clause in t.pre {
+        jfmt_write(f, "#Pre(")
+        jfmt_fmt_expr(f, clause.cond, JFMT_PREC_OR_FALLBACK)
+        jfmt_write(f, ", ")
+        jfmt_fmt_expr(f, clause.message_expr, JFMT_PREC_OR_FALLBACK)
+        jfmt_write(f, ")")
+        jfmt_newline(f)
+    }
     jfmt_write(f, "#Test")
     // Unit-test block form is `#Test("name") { … }` — no
     // space before `(`. Property test form is
@@ -1717,9 +1726,10 @@ jfmt_fmt_func: fn(f: &JetFmt, func: Func) {
     // any markers, directly before `fn`, exactly where `method_in_type` reads it.
     // A name path (`Shape.area`) prints before `fn`; the build-time
     // `comptime` mark stays first after the markers.
-    // A member `priv` (parsed onto the method) survives; a narrowed module
-    // body's methods carry no written keyword.
-    if !func.is_pub && jfmt_source_priv_before(f, func.name_span.start) -> jfmt_write(f, "priv ")
+    // A member `priv` or `priv(package)` (parsed onto the method) survives; a
+    // narrowed module body's methods carry no written keyword.
+    privacy: if func.is_pub -> "" else -> jfmt_source_privacy_before(f, func.name_span.start)
+    if privacy.len() > 0 -> jfmt_write(f, privacy)
     if func.is_comptime -> jfmt_write(f, "comptime ")
     if func.external_type == .Val(owner) {
         jfmt_write(f, owner.name)
@@ -1954,7 +1964,12 @@ jfmt_fmt_param: fn(f: &JetFmt, p: Param) {
             jfmt_comma_end(f, multiline, source)
             jfmt_write(f, "]")
         } else {
+            // `...[A, B]` is the bound list, so an element type written in
+            // brackets keeps its parens: `...([Int])`.
+            bracketed: p.variadic && (p.ty == .List(_) || p.ty == .Map(_, _, _) || p.ty == .FixedList(_, _))
+            if bracketed -> jfmt_write(f, "(")
             jfmt_fmt_type_at(f, p.ty, Val(p.ty_span))
+            if bracketed -> jfmt_write(f, ")")
         }
         if p.declared_view_from_names == .Val(names) {
             if names.len() > 0 {
@@ -2503,13 +2518,13 @@ jfmt_fmt_const: fn(f: &JetFmt, c: ConstDef) {
             jfmt_write(f, " ")
         }
     }
-    // `#Persist` on a bare binding (not on `comptime`).
-    // Preserve `:` vs `:=`.
+    // `#Persist` on a binding, its value `comptime { … }` when the author
+    // wrote it so. Preserve `:` vs `:=`.
     if c.is_persist {
         jfmt_write(f, "#Persist ")
         jfmt_write(f, c.name)
         jfmt_write(f, if c.mutable -> " := " else -> ": ")
-        jfmt_fmt_expr(f, c.value, JFMT_PREC_OR_FALLBACK)
+        if c.is_comptime -> jfmt_fmt_prepared_value(f, c.value) else -> jfmt_fmt_expr(f, c.value, JFMT_PREC_OR_FALLBACK)
         return
     }
     // `#Static` / `#Inline` precede the constant's name,

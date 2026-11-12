@@ -29,7 +29,6 @@ use {
         SwitchArm,
         TextEdit,
         Type,
-        WebBucket,
         expr_span,
         name_start,
         type_name,
@@ -39,6 +38,7 @@ use {
         TOKEN_COMMA,
         TOKEN_EOF,
         TOKEN_GT,
+        TOKEN_IDENT,
         TOKEN_KW_PRIV,
         TOKEN_LBRACE,
         TOKEN_LBRACKET,
@@ -144,6 +144,11 @@ JetFmt: struct {
     // True while printing an `if` condition, where a `{` opens the body,
     // so a named payload keeps `.Value(value: x)` (jfmt_fmt_cond).
     in_condition: Bool{false}
+    // Where in `out` the expression statement being written starts, else -1
+    // (jfmt_expr_stmt_begin). A line that opens with `.Name{` or
+    // `.Name(…) {` is a scope member, so a named payload there keeps its
+    // parens.
+    stmt_head_at: Int{-1}
 }
 
 // Rust `Option<(Span, usize)>` from `source_list_span_after`.
@@ -373,16 +378,20 @@ jfmt_is_comment_kind: fn(kind: Int) -> Bool Never! {
     kind == TOKEN_LINE_COMMENT || kind == TOKEN_BLOCK_COMMENT
 }
 
-// The author wrote `priv` directly before a member name (`priv step: fn…`):
-// the last code token before `name_start` is the `priv` keyword.
-jfmt_source_priv_before: fn(f: JetFmt, name_start: Int) -> Bool Never! {
-    index := f.source_toks.len() - 1
-    loop index >= 0 {
+// The privacy word the author wrote directly before a member name: `priv `
+// (`priv step: fn…`), `priv(package) ` (`priv(package) width: fn…`), else
+// nothing.
+jfmt_source_privacy_before: fn(f: JetFmt, name_start: Int) -> String Never! {
+    code := [Token]{}
+    index := jfmt_first_token_at(f, name_start) - 1
+    loop index >= 0 && code.len() < 4 {
         token: f.source_toks[index]
-        if token.span.end <= name_start && !jfmt_is_comment_kind(token.kind) -> return token.kind == TOKEN_KW_PRIV
+        if !jfmt_is_comment_kind(token.kind) -> code.push(token.copy())
         index -= 1
     }
-    false
+    if code.len() > 0 && code[0].kind == TOKEN_KW_PRIV -> return "priv "
+    if code.len() < 4 || code[0].kind != TOKEN_RPAREN || code[1].kind != TOKEN_IDENT || code[2].kind != TOKEN_LPAREN || code[3].kind != TOKEN_KW_PRIV -> return ""
+    if jfmt_src_text(f, code[1].span.start, code[1].span.end) == "package" -> "priv(package) " else -> ""
 }
 
 jfmt_is_generated_label: fn(name: String) -> Bool Never! {
@@ -781,6 +790,21 @@ jfmt_write: fn(f: &JetFmt, text: String) Never! {
     f.at_line_start = false
     loop byte in text.bytes() -> f.out.push(byte)
     f.pending_blank = false
+}
+
+// Where in `out` the next write starts: a line's indent is written with its
+// first text.
+jfmt_write_at: fn(f: JetFmt) -> Int Never! {
+    if f.at_line_start -> f.out.len() + f.indent * JFMT_INDENT else -> f.out.len()
+}
+
+// Marks the start of the expression statement about to be written
+// (stmt_head_at) and returns the enclosing mark, which the caller restores
+// once the statement is written.
+jfmt_expr_stmt_begin: fn(f: &JetFmt) -> Int Never! {
+    saved: f.stmt_head_at
+    f.stmt_head_at = jfmt_write_at(f)
+    saved
 }
 
 jfmt_write_indent: fn(f: &JetFmt) Never! {
@@ -1367,7 +1391,9 @@ jfmt_try_inline_value_block: fn(f: &JetFmt, stmts: [Stmt], value: Expr) -> Bool 
     saved_col: f.col
     saved_line_start: f.at_line_start
     jfmt_write(f, " ")
+    saved_head: jfmt_expr_stmt_begin(f)
     jfmt_fmt_expr(f, value, JFMT_PREC_OR_FALLBACK)
+    f.stmt_head_at = saved_head
     jfmt_write(f, " }}")
     if f.col <= JFMT_MAX_WIDTH -> return true
     jfmt_truncate(f, saved_out)
@@ -1610,13 +1636,6 @@ jfmt_fmt_parse_accepts: fn(diagnostics: [Diagnostic]) -> Bool Never! {
 
 // ---- driver ----
 
-jfmt_web_bucket_name: fn(bucket: WebBucket) -> String Never! {
-    if bucket == {
-        .JS -> "JS"
-        .Wasm -> "Wasm"
-    }
-}
-
 jfmt_is_module_policy: fn(declaration: PolicyDeclaration) -> Bool Never! {
     if declaration.scope == {
         .Module -> true
@@ -1787,18 +1806,6 @@ jfmt_format_program_with_tokens: fn(prog: Program, src: String, source_toks: [To
     jfmt_format_program_with(f, prog)
 }
 
-// The page argument of a file's `#HTML(…)`, from its escaped text:
-// `Path{"…"}`, or `"…"` where the source wrote a plain string. That spelling
-// is the E0930 error `jet check` reports, so the formatter keeps it rather
-// than change the program.
-jfmt_html_page: fn(prog: Program, escaped: String) -> String Never! {
-    loop application in prog.rule_facts {
-        if application.target != None || application.marker.name != MARKER_HTML || application.marker.args.len() == 0 -> next
-        if application.marker.args[0] == .Expr(value) && value == .Str(_, _, _) -> return "\"{escaped}\""
-    }
-    "Path{{\"{escaped}\"}}"
-}
-
 jfmt_format_program_with: fn(f: &JetFmt, prog: Program) -> String {
     jfmt_fmt_launch_line(f)
     first := true
@@ -1811,32 +1818,25 @@ jfmt_format_program_with: fn(f: &JetFmt, prog: Program) -> String {
     loop marker in ordered_file_rules {
         if marker.name == MARKER_NO_PRELUDE -> ordered_file_rules_precede_imports = true
     }
-    web_default: (prog.default_target ?? "") == "web"
-    file_rule_count := 0
-    if prog.no_prelude -> file_rule_count += 1
-    if web_default -> file_rule_count += 1
-    if prog.web_target_ceiling != None -> file_rule_count += 1
-    if prog.html_path != None -> file_rule_count += 1
-    grouped_file_rules: file_rule_count > 1
+    // The file rules (`#NoPrelude`, `#Target(…)`, `#HTML(…)`) head the file,
+    // above its imports, in the order and spelling the author wrote them, as
+    // one `#[…]` list when there are two or more. Below an import a
+    // `#Target(JS)` would mark the next function, and `#Target(Web)` above a
+    // module is E0003.
+    file_rules := [Marker]{}
+    if !has_ordered_file_rules {
+        loop application in prog.rule_facts {
+            if application.target != None || !jfmt_rule_at(application, RuleSite.File) -> next
+            name: application.marker.name
+            if name == MARKER_NO_PRELUDE || name == MARKER_TARGET || name == MARKER_HTML -> file_rules.push(application.marker)
+        }
+    }
     if has_ordered_file_rules && ordered_file_rules_precede_imports {
         jfmt_fmt_marker_group(f, ordered_file_rules, "#", true)
         first = false
-    } else if !has_ordered_file_rules && grouped_file_rules {
-        rules := [String]{}
-        if prog.no_prelude -> rules.push("NoPrelude")
-        if web_default -> rules.push("Target(Web)")
-        if prog.web_target_ceiling == .Val(bucket) -> rules.push("Target({jfmt_web_bucket_name(bucket)})")
-        if prog.html_path == .Val(html_path) -> rules.push("HTML({jfmt_html_page(prog, jfmt_escape_str_lit(html_path))})")
-        jfmt_write(f, "#[{rules.join(", ")}]")
-        jfmt_newline(f)
+    } else if file_rules.len() > 0 {
+        jfmt_fmt_marker_group(f, file_rules, "#", true)
         first = false
-    }
-    // `#NoPrelude` is emitted before imports.
-    if prog.no_prelude && !grouped_file_rules && !has_ordered_file_rules {
-        if !first -> jfmt_newline(f)
-        first = false
-        jfmt_write(f, "#NoPrelude")
-        jfmt_newline(f)
     }
     // A file-head `#FX(…)` cap stays on the line above the imports it heads;
     // the empty, pure cap is the bare marker.
@@ -1858,43 +1858,6 @@ jfmt_format_program_with: fn(f: &JetFmt, prog: Program) -> String {
         if !first -> jfmt_blank_line_between_items(f)
         first = false
         jfmt_fmt_marker_group(f, ordered_file_rules, "#", true)
-    }
-    // Fixed post-import position.
-    if web_default && !grouped_file_rules && !has_ordered_file_rules {
-        if !first -> jfmt_blank_line_between_items(f)
-        first = false
-        jfmt_write(f, "#Target(Web)")
-        jfmt_newline(f)
-    }
-    if prog.web_target_ceiling == .Val(bucket) {
-        if !grouped_file_rules && !has_ordered_file_rules {
-            if !first -> jfmt_blank_line_between_items(f)
-            first = false
-            jfmt_write(f, "#Target({jfmt_web_bucket_name(bucket)})")
-            jfmt_newline(f)
-        }
-    }
-    // `#HTML(Path{"path.html"})`, or the plain string where the source wrote
-    // one (jfmt_html_page).
-    if prog.html_path == .Val(html_path) {
-        if !grouped_file_rules && !has_ordered_file_rules {
-            if !first -> jfmt_blank_line_between_items(f)
-            first = false
-            escaped: html_path.replace("\\", "\\\\").replace("\"", "\\\"")
-            jfmt_write(f, "#HTML({jfmt_html_page(prog, escaped)})")
-            jfmt_newline(f)
-        }
-    } else if !grouped_file_rules && !has_ordered_file_rules {
-        // A page named by an expression (`#HTML(PAGE)`) keeps its written
-        // argument; only a literal page is the canonical `Path{…}` above.
-        loop application in prog.rule_facts {
-            if application.target == None && application.marker.name == MARKER_HTML {
-                if !first -> jfmt_blank_line_between_items(f)
-                first = false
-                jfmt_fmt_marker_group(f, [Marker]{application.marker}, "#", true)
-                break
-            }
-        }
     }
     // Module-scoped `#Policy(...)` at a fixed position.
     module_policies := [PolicyDeclaration]{}

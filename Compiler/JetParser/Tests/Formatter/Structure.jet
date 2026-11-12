@@ -209,3 +209,53 @@ STRUCTURE_LAID_OUT: "pick: fn(n: Int) -> String {{\n    if {{\n        n == 1 ->
     assert_eq(formatted.structure_change ?? "none", "none")
     assert(formatted.text.contains("    #Meta(category: label) SIZE: comptime {{ capacity }}\n"))
 }
+
+// The format of `source` keeps its program and contains `kept`.
+structure_kept: fn(source: String, kept: String) {
+    formatted: jet_format_source(source, false)
+    assert_eq(formatted.structure_change ?? "none", "none")
+    assert(formatted.ok)
+    assert(formatted.text.contains(kept), "`{kept}` is not in:\n{formatted.text}")
+}
+
+#Test("a named payload that opens a statement keeps its parentheses") {
+    structure_kept("ready: fn(x: Int) -> State {{\n    if x > 0 -> return .Missing(fact: \"a\")\n    .Ready(value: x)\n}}\n", "    .Ready(value: x)\n")
+    structure_kept("ready: fn(x: Int) -> State {{ .Ready(value: x) }}\n", "{{ .Ready(value: x) }}")
+    structure_kept("ready: fn(x: Int) -> State {{\n    s: .Ready(value: x)\n    s\n}}\n", "s: .Ready{{value: x}}\n")
+}
+
+#Test("a value's bare try mark stays") {
+    structure_kept("pick: fn<T>(x: T?) -> T? {{\n    inner: keep(x?)\n    inner\n}}\n", "inner: keep(x?)\n")
+}
+
+#Test("a written Shared.new call stays a call, a cell stays a cell") {
+    structure_kept("cell: fn(items: [Int]) -> Shared<[Int]> {{\n    Shared.new(items.move())\n}}\n", "Shared.new(items.move())")
+    structure_kept("cell: fn(items: [Int]) -> Shared<[Int]> {{\n    Shared{{items}}\n}}\n", "Shared{{items}}")
+}
+
+#Test("a bracketed variadic element type keeps its parentheses") {
+    structure_kept("rows: fn(parts: ...([Int])) -> Int {{\n    parts.len()\n}}\n", "parts: ...([Int])")
+}
+
+#Test("a fenced statement keeps its fence in a one-line body") {
+    structure_kept("run: fn() {{\n    print(<:3..0:>)\n}}\n", "<:")
+}
+
+#Test("file rules head the file in their written order and spelling") {
+    structure_kept("#Target(Web)\nuse web: core.web\nhandlers: module {{\n    init: fn() {{}}\n}}\n", "#Target(Web)\n\nuse web: core.web\n")
+    structure_kept("#Target(JS)\nuse time: core.time\n\nrun: fn() {{}}\n", "#Target(JS)\n\nuse time: core.time\n")
+    structure_kept("#HTML(Path{{\"index.html\"}})\nuse ui: core.ui\n#[Target(Web), Target(JS)]\n\nrender: fn() {{}}\n", "#[HTML(Path{{\"index.html\"}}), Target(Web), Target(JS)]\n")
+    structure_kept("use lang: core.compiler.lang\n\n#Target(lang.Target.Web)\nhelper: fn() {{}}\n", "#Target(lang.Target.Web)\n")
+}
+
+#Test("a persisted binding keeps its comptime value") {
+    structure_kept("#Persist SEEDED: comptime {{ 20 + 1 }}\n", "#Persist SEEDED: comptime {{ 20 + 1 }}\n")
+}
+
+#Test("a property test keeps its Pre lines") {
+    structure_kept("#Pre(n > 0, \"a positive number\")\n#Test halving: fn(n: Int) {{\n    assert(n > 0)\n}}\n", "#Pre(n > 0, \"a positive number\")\n#Test halving: fn(n: Int) {{\n")
+}
+
+#Test("a module member keeps its package privacy") {
+    structure_kept("text: module {{\n    priv(package) width: fn() -> Int {{ 8 }}\n\n    priv pad: fn() -> Int {{ 1 }}\n}}\n", "    priv(package) width: fn() -> Int {{ 8 }}\n")
+}

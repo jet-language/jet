@@ -623,8 +623,13 @@ jfmt_source_has_blank_line: fn(bytes: [U8], start: Int, end: Int) -> Bool Never!
 }
 
 // Render a single simple statement (no leading indent/newline) for
-// the inline brace-body path. The caller guarantees `is_simple_stmt`.
+// the inline brace-body path. The caller guarantees `is_simple_stmt`. A
+// fenced statement (`<: … :>`) prints from its source, as in a body of lines.
 jfmt_fmt_stmt_inline: fn(f: &JetFmt, stmt: Stmt) {
+    if jfmt_fenced_statement_for(f, stmt) == .Val(fact) {
+        jfmt_fmt_fenced_statement(f, fact)
+        return
+    }
     jfmt_fmt_stmt(f, stmt)
 }
 
@@ -750,7 +755,9 @@ jfmt_fmt_stmt: fn(f: &JetFmt, stmt: Stmt) {
                     }
                 }
             } else {
+                saved_head: jfmt_expr_stmt_begin(f)
                 jfmt_fmt_expr(f, e, JFMT_PREC_OR_FALLBACK)
+                f.stmt_head_at = saved_head
             }
         }
         .Val(b) -> jfmt_fmt_binding(f, b)
@@ -1825,7 +1832,9 @@ jfmt_fmt_binding: fn(f: &JetFmt, b: Binding) {
 // `comptime { value }`.
 jfmt_fmt_prepared_value: fn(f: &JetFmt, value: Expr) {
     jfmt_write(f, "comptime {{ ")
+    saved_head: jfmt_expr_stmt_begin(f)
     jfmt_fmt_expr(f, value, JFMT_PREC_OR_FALLBACK)
+    f.stmt_head_at = saved_head
     jfmt_write(f, " }}")
 }
 

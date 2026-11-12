@@ -1198,6 +1198,7 @@ jfmt_enum_lit_arg_span: fn(arg: EnumLitArg) -> Span Never! {
 }
 
 jfmt_fmt_enum_lit: fn(f: &JetFmt, type_name: String, variant: String, variant_span: Span?, args: [EnumLitArg], leading_dot: Bool, span: Span) {
+    head_at: jfmt_write_at(f)
     if type_name.len() == 0 {
         if leading_dot -> jfmt_write(f, ".")
     } else {
@@ -1215,13 +1216,15 @@ jfmt_fmt_enum_lit: fn(f: &JetFmt, type_name: String, variant: String, variant_sp
         return
     }
     // Named payloads use braces; positional payloads keep the paren call
-    // form. In an `if` condition a `{` would open the body, so a named
-    // payload there keeps `(label: value)`.
+    // form. In an `if` condition a `{` would open the body, and at the head
+    // of a statement `.Name{` opens a scope member, so a named payload there
+    // keeps `(label: value)`.
     named: if args[0] == {
         .Named(_, _) -> true
         .Positional(_) -> false
     }
-    braces: named && !f.in_condition
+    statement_head: type_name.len() == 0 && leading_dot && f.stmt_head_at == head_at
+    braces: named && !f.in_condition && !statement_head
     jfmt_write(f, if braces -> "{{" else -> "(")
     source_start: if variant_span == .Val(source) -> source.end else -> span.start
     // The author's own payload group gives the layout: a named payload
@@ -1251,10 +1254,11 @@ jfmt_fmt_enum_lit: fn(f: &JetFmt, type_name: String, variant: String, variant_sp
 }
 
 jfmt_fmt_method_call: fn(f: &JetFmt, receiver: Expr, method: String, method_span: Span, owner_type_args: [Type], type_args: [Type], args: [CallArg]) {
-    // `Shared{value}` and a `Shared.new(value)` call print as `Shared{value}`,
-    // with `<T>` when the owner type is written.
+    // A `Shared{value}` cell prints as written, with `<T>` when the owner
+    // type is written. A written `Shared.new(value)` call stays a call: its
+    // value is passed, not moved into the cell.
     if receiver == .Ident(name, _, _) {
-        if name == "Shared" && method == "new" && args.len() == 1 {
+        if name == "Shared" && method == "new" && args.len() == 1 && args[0].flags.shared_operand {
             jfmt_write(f, "Shared")
             if owner_type_args.len() == 1 {
                 jfmt_write(f, "<")
@@ -1619,12 +1623,17 @@ jfmt_fmt_expr: fn(f: &JetFmt, expr: Expr, prec: Int) {
             jfmt_fmt_expr(f, inner, JFMT_PREC_OR_FALLBACK)
             jfmt_write(f, ")")
         }
+        // A value's bare `x?` (only before a `)`) and the context frame
+        // `x?(note)`. A call propagates by itself, so its bare mark (the
+        // retired `call()?`) is left out.
         .Try(inner, _, _, note, _) -> {
             jfmt_fmt_expr(f, inner, JFMT_PREC_POSTFIX)
             if note == .Val(context) {
                 jfmt_write(f, "?(")
                 jfmt_fmt_expr(f, context, JFMT_PREC_POSTFIX)
                 jfmt_write(f, ")")
+            } else if !parser_expression_is_call(inner) {
+                jfmt_write(f, "?")
             }
         }
         .OrFallback(value, fallback, _, _, _) -> {
