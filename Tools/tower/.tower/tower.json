@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6772,
-    "rev": 99950,
+    "nextNum": 6773,
+    "rev": 99955,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -99603,6 +99603,74 @@
       "updated": "2026-11-12T10:29:57.958Z",
       "updatedBy": "Main",
       "criteriaLastN": 1
+    },
+    {
+      "id": "c0gy2j07",
+      "num": 6772,
+      "title": "Tests fail under machine load: a wall-clock step limit turns slow into failed",
+      "body": "Owner, 2026-11-12: a test that fails under load, rather than passing more slowly, is a reliability defect. In the a0.0.45 admit of dev 2844b04984 (run beside a train build, landings and probes), about 200 rows across candidate chunks 2-5 and 8 were TIMEOUT or ERROR. 82 golden, 20 ui and 59 cases rows passed only on retry. Five browser_bidi and web_app rows ERRORed with an empty 'free-port probe failed', because the probe's own wall-clock timeout was reported without its reason. The root: JetTestKit gives every step a 60 s wall-clock timeout (Compiler/JetTestKit/Source/Exec.jet KitOptions timeout: 60, process.cmd(...).timeout), so a loaded host's slowness is judged as failure. The admit retry masks it instead of fixing it.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e14",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A test step's limit judges the work, not the host's load: JetTestKit bounds each step by the CPU time of the step's process tree (unaffected by other load). The wall-clock limit stays only as a hang guard, set far enough out that a loaded host can't reach it on a working step. A hit on either limit reports TIMEOUT with the limit kind, the CPU and wall seconds used, and the step. A Core.jet #Test proves a CPU-bound step that exceeds the CPU limit is TIMEOUT (cpu) and that a step sleeping past its wall guard is TIMEOUT (wall).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-12T10:41:37.693Z"
+        },
+        {
+          "n": 2,
+          "text": "Every helper inside a test step that has its own deadline reports a deadline miss with its reason, never as an ERROR with an empty message. This covers the free-port probe (kit_steps_free_ports, StepsTokens.jet) and any readiness or port wait in the case harness. A case forces the free-port probe past its deadline and checks the TIMEOUT reason.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-12T10:41:39.069Z"
+        },
+        {
+          "n": 3,
+          "text": "Load sweep: the corpus rows that were TIMEOUT, ERROR, or passed only on retry in the a0.0.45 admit are run again while a load generator holds every core busy (for example stress-ng at 2x the core count). Every row passes, and each failure found on the way is fixed at its root: either the harness limit, or a product deadline. A product deadline in Jet's runtime or Core (a BiDi handshake, a service delivery wait, a readiness wait) waits on its event or uses the user's own deadline, never a fixed wall time that load can exhaust. The rows, the generator and the result are recorded.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-12T10:41:40.693Z"
+        },
+        {
+          "n": 4,
+          "text": "The release gate stops masking load sensitivity: a row that fails and then passes on retry is reported in REPORT.md as a flaky row with its two outcomes, and fails the gate unless it carries a disposition that names an owning card.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-12T10:41:42.600Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G5"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-12T10:41:23.645Z",
+      "updated": "2026-11-12T10:41:42.600Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 4
     }
   ],
   "decisions": [
@@ -200218,6 +200286,41 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-12T10:41:42.600Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0gy2j07",
+      "note": "#4 The release gate stops masking load sensitivity: a row that "
+    },
+    {
+      "at": "2026-11-12T10:41:40.693Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0gy2j07",
+      "note": "#3 Load sweep: the corpus rows that were TIMEOUT, ERROR, or pas"
+    },
+    {
+      "at": "2026-11-12T10:41:39.069Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0gy2j07",
+      "note": "#2 Every helper inside a test step that has its own deadline re"
+    },
+    {
+      "at": "2026-11-12T10:41:37.693Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0gy2j07",
+      "note": "#1 A test step's limit judges the work, not the host's load: Je"
+    },
+    {
+      "at": "2026-11-12T10:41:23.645Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0gy2j07",
+      "note": "Tests fail under machine load: a wall-clock step limit turns slow into failed"
+    },
     {
       "at": "2026-11-12T10:38:44.520Z",
       "by": "owner",
