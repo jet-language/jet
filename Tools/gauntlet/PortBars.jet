@@ -97,9 +97,12 @@
 // dependency (`deps: { kit: ../kit, }` in the file's inline `package:` block)
 // counts each file of the package's Source directory that declares a name the
 // file's `use` lines take from it (`kit.[a, b]`, `kit.a`), then each file
-// there declaring a word such a counted file uses; a counted package file
-// reaches the path dependencies of its own package.jet the same way. Core,
-// Node built-ins and installed packages are never counted.
+// there declaring a name such a counted file refers to (`references`: a word
+// not written after a `.` that is called, is capitalized or is not a word
+// the file binds itself, so a local, parameter, field label, loop variable,
+// lambda parameter or pattern binding refers to nothing there); a counted
+// package file reaches the path dependencies of its own package.jet the same
+// way. Core, Node built-ins and installed packages are never counted.
 //
 // PROXY RULES. Branches are decisions, counted by one table per language that
 // spells the same kinds of decision (DECISION TABLES); a decision written in a
@@ -1051,6 +1054,75 @@ package_sources: fn(repo: String, dir: String, wanted: [String]) -[FS]> [String]
     out
 }
 
+// The text of token `at` of `list`, "" outside it.
+token_text: fn(list: [Token], at: Int) -> String Never! {
+    if at < 0 || at >= list.len() -> return ""
+    list[at].text.copy()
+}
+
+// Whether `word` starts with an ASCII capital letter.
+capitalized: fn(word: String) -> Bool Never! {
+    code: byte_at(word.bytes(), 0)
+    code >= 65 && code <= 90
+}
+
+// Whether token `at` of `list` opens a variant pattern: a `.` first on its
+// line or after `==`, `!=` or `|`, then a capitalized name and `(`.
+pattern_opens: fn(list: [Token], at: Int) -> Bool Never! {
+    if token_text(list, at) != "." || token_text(list, at + 2) != "(" -> return false
+    (list[at].first || ["==", "!=", "|"].contains(token_text(list, at - 1))) && capitalized(token_text(list, at + 1))
+}
+
+// The words a Jet file's tokens `list` bind: each word followed by `:` (a
+// declaration, local, parameter or field label), each `loop` variable, each
+// lambda parameter (after `(` or `,`, before `->`) and each binding of a
+// variant pattern (`pattern_opens`).
+bound_words: fn(list: [Token]) -> [String] Never! {
+    out := [String]{}
+    loop at in 0..<list.len() {
+        token: list[at]
+        after: token_text(list, at + 1)
+        if token.kind == .Word && (after == ":" || (after == "->" && ["(", ","].contains(token_text(list, at - 1)))) -> out.push(token.text.copy())
+        if token.kind == .Word && token.text == "loop" {
+            head := at + 1
+            loop head < list.len() && !list[head].first && list[head].text != "in" && list[head].text != "{{" -> head += 1
+            if token_text(list, head) == "in" {
+                loop bound in at + 1..<head {
+                    if list[bound].kind == .Word -> out.push(list[bound].text.copy())
+                }
+            }
+        }
+        if pattern_opens(list, at) {
+            depth := 0
+            inner := at + 2
+            loop inner < list.len() {
+                text: token_text(list, inner)
+                if text == "(" -> depth += 1
+                if text == ")" -> depth -= 1
+                if depth == 0 -> break
+                if list[inner].kind == .Word && token_text(list, inner - 1) != "." && !["(", "."].contains(token_text(list, inner + 1)) -> out.push(list[inner].text.copy())
+                inner += 1
+            }
+        }
+    }
+    out
+}
+
+// The names a Jet file's tokens `list` refer to, once each: each word not
+// written after a `.` (a member, method or variant) that is called (followed
+// by `(`), is capitalized (a type or constant) or is not one of the words
+// the file binds (`bound_words`).
+references: fn(list: [Token]) -> [String] Never! {
+    bound: bound_words(list)
+    out := [String]{}
+    loop at in 0..<list.len() {
+        token: list[at]
+        if token.kind != .Word || token_text(list, at - 1) == "." || out.contains(token.text) -> next
+        if token_text(list, at + 1) == "(" || capitalized(token.text) || !bound.contains(token.text) -> out.push(token.text.copy())
+    }
+    out
+}
+
 // The program at `path` in `repo`, written in `language`.
 program: fn(repo: String, path: String, language: Language) -[FS]> Program Never! {
     found := Program{paths: [String]{path.copy()}, counts: [Int]{}, tokens: [Token]{}}
@@ -1062,10 +1134,7 @@ program: fn(repo: String, path: String, language: Language) -[FS]> Program Never
         text: files.read(files.join(repo, file)) ?? ""
         listed: tokens(text, language)
         counted: if language == .Jet -> without_tests(listed) else -> listed
-        words := [String]{}
-        loop at in 0..<counted.len() {
-            if counted[at].kind == .Word -> words.push(counted[at].text.copy())
-        }
+        words: if language == .Jet -> references(counted) else -> [String]{}
         found.counts.push(counted.len())
         found.tokens.extend(counted)
         loop written in imports_of(text, language) {
@@ -1889,6 +1958,17 @@ run: fn() {
     twin: program(dir, "Tools/fx/twin/run.jet", .Jet)
     assert_eq(twin.paths, ["Tools/fx/twin/run.jet", "Tools/kit/Source/A.jet", "Tools/kit/Source/B.jet", "Tools/base/Source/D.jet"])
     assert_eq(package_names("use {{\n    kit.[alpha, beta]\n    one: kit.gamma\n}}\nuse kit.delta\n", "kit"), ["alpha", "beta", "gamma", "delta"])
+    files.remove_all(dir) ?? ()
+}
+
+#Test("a package file's names follow its references: never a local, parameter, label, loop variable, lambda parameter, pattern binding or member") {
+    dir: work_dir("references") ?? panic("a scratch directory cannot be made: {err}")
+    plant(dir, "Tools/kit/package.jet", "name: \"kit\"\nversion: \"0.0.1\"\n")
+    plant(dir, "Tools/kit/Source/A.jet", "alpha: fn(x: Int?, iota: Int) -> Int {{\n    gamma: 3\n    loop delta in [1, 2] -> print(delta)\n    if x == .Val(.Some(epsilon)) -> print(epsilon)\n    list: [1].map(eta -> eta + gamma + iota)\n    zeta() + list.beta() + Theta{{kappa: 1}}.kappa\n}}\n")
+    loop name in ["beta", "gamma", "delta", "epsilon", "zeta", "eta", "iota", "kappa"] -> plant(dir, "Tools/kit/Source/{name}.jet", "{name}: fn() -> Int {{ 1 }}\n")
+    plant(dir, "Tools/kit/Source/theta.jet", "Theta: struct {{ kappa: Int }}\n")
+    plant(dir, "Tools/fx/twin/run.jet", "package: {{\n    name: \"twin\"\n    version: \"0.0.1\"\n    deps: {{\n        kit: ../../kit,\n    }}\n}}\n\nuse kit.[alpha]\n\nrun: fn() {{ print(alpha(None, 1)) }}\n")
+    assert_eq(program(dir, "Tools/fx/twin/run.jet", .Jet).paths, ["Tools/fx/twin/run.jet", "Tools/kit/Source/A.jet", "Tools/kit/Source/theta.jet", "Tools/kit/Source/zeta.jet"])
     files.remove_all(dir) ?? ()
 }
 
