@@ -1,0 +1,27 @@
+# #6606 c1: a flag and its setting have one effect. `jet fmt --check`, the
+# setting `fmt.check` in the package's `commands:` block, and the same setting
+# in the user settings file each make `jet fmt` name the unformatted file and
+# exit 1 without writing it. With neither file, `jet fmt` writes.
+fixture: fmt_check_flag_and_its_settings_have_one_effect.fixture
+env: NO_COLOR=1
+copy: messy.source messy.jet
+step: jet fmt --check messy.jet
+exit: 1 # the flag
+stdout: ~ "messy.jet" # --check names the file
+file: messy.jet == messy.source # --check never writes
+copy: check.package package.jet
+step: jet fmt messy.jet
+exit: 1 # the package's setting
+stdout: ~ "messy.jet" # the setting names the file too
+file: messy.jet == messy.source # nor does the setting
+remove: package.jet
+mkdir: config/jet
+copy: check.settings config/jet/settings.jet
+step: jet fmt messy.jet
+env: XDG_CONFIG_HOME={work}/config
+exit: 1 # the user's setting
+stdout: ~ "messy.jet" # and so does the user's
+file: messy.jet == messy.source # nor the user's
+step: jet fmt messy.jet
+exit: 0 # with neither file, fmt writes
+file: messy.jet ~ "run: fn() { print(1) }" # the write happened

@@ -1,0 +1,22 @@
+# #6606 c1, c4: the keep-going family has one effect however it is given.
+# The flags --keep-going and --keep-going-report, their settings
+# `build.keep_going` and `build.keep_going_report` in the user settings file,
+# and the variables JET_KEEP_GOING and JET_KEEP_GOING_REPORT each make
+# `jet build` go on past its first failure and write the same census.
+fixture: keep_going_flag_setting_and_variable_write_one_census.fixture
+env: NO_COLOR=1
+step: jet build main.jet --keep-going --keep-going-report=flag.tsv
+exit: nonzero
+file: flag.tsv ~ "`broken`: lowered as a keep-going trap" # the flags: the trapped function is a census row
+file: flag.tsv ~ "`mismatched`: lowered as a keep-going trap: " # and so is the failed return check
+mkdir: config/jet
+copy: user.settings config/jet/settings.jet
+step: jet build main.jet
+env: XDG_CONFIG_HOME={work}/config
+exit: nonzero
+file: config/jet/census.tsv == flag.tsv # the settings write the same census, at a path relative to the settings file
+step: jet build main.jet
+env: JET_KEEP_GOING=1
+env: JET_KEEP_GOING_REPORT={work}/variable.tsv
+exit: nonzero
+file: variable.tsv == flag.tsv # the variables write the same census

@@ -1,0 +1,30 @@
+# #6606 c1, c4: the optimizer family has one effect however it is given. The
+# flag --opt-dump=run, its setting `inspect.opt_dump` in the user settings
+# file (`jet inspect decisions` keeps its group's word, so its settings are
+# inspect's), and the variable JET_OPT_DUMP each make `jet inspect decisions`
+# show run's IR before and after the O1 passes. Without any of them, no dump
+# is shown.
+fixture: opt_dump_flag_setting_and_variable_print_one_dump.fixture
+env: NO_COLOR=1
+step: jet inspect decisions --optimize=basic main.jet
+exit: 0
+stdout: !~ "before fn run" # no control: no dump
+step: jet inspect decisions --optimize=basic --opt-dump=run main.jet
+exit: 0
+stdout: ~ "before fn run" # the flag shows run's IR before the passes
+capture: flag = text stdout
+write: flag.out = "{cap:flag}"
+mkdir: config/jet
+copy: user.settings config/jet/settings.jet
+step: jet inspect decisions --optimize=basic main.jet
+env: XDG_CONFIG_HOME={work}/config
+exit: 0
+capture: setting = text stdout
+write: setting.out = "{cap:setting}"
+file: setting.out == flag.out # the setting shows the same dump
+step: jet inspect decisions --optimize=basic main.jet
+env: JET_OPT_DUMP=run
+exit: 0
+capture: variable = text stdout
+write: variable.out = "{cap:variable}"
+file: variable.out == flag.out # the variable shows the same dump

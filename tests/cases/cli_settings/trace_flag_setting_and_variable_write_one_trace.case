@@ -1,0 +1,24 @@
+# #6606 c1, c4: the trace family has one effect however it is given. The flag
+# --trace=FILE, its setting `check.trace` in the user settings file, and the
+# variable JET_TRACE_FILE each make `jet check` write its trace to the file.
+# A typed --trace=off beats the setting.
+fixture: trace_flag_setting_and_variable_write_one_trace.fixture
+env: NO_COLOR=1
+step: jet check main.jet --trace=flag.json
+exit: 0
+file: flag.json ~ "check" # the flag writes the trace
+mkdir: config/jet
+copy: user.settings config/jet/settings.jet
+step: jet check main.jet
+env: XDG_CONFIG_HOME={work}/config
+exit: 0
+file: config/jet/trace.json ~ "check" # the setting writes it at a path relative to the settings file
+remove: config/jet/trace.json
+step: jet check main.jet --trace=off
+env: XDG_CONFIG_HOME={work}/config
+exit: 0
+file: config/jet/trace.json absent # the typed flag wins over the setting
+step: jet check main.jet
+env: JET_TRACE_FILE={work}/variable.json
+exit: 0
+file: variable.json ~ "check" # the variable writes it too

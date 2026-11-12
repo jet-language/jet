@@ -1,0 +1,21 @@
+# #6606 c6: `jet env vars --command=check` lists every control `jet check`
+# takes, with its flag, variable, setting key, effective value and the source
+# that won: the default, the user settings file, the environment, or a flag
+# after `--`, which hides the variable it beats. The text and --json forms are
+# UI snapshots.
+fixture: env_vars_lists_each_control_with_the_source_that_won.fixture
+env: NO_COLOR=1
+mkdir: config/jet
+copy: user.settings config/jet/settings.jet
+step: jet env vars --command=check -- --trace-detail=functions
+env: XDG_CONFIG_HOME={work}/config
+env: JET_PHASE_COUNTERS=1
+env: JET_TRACE_DETAIL=phases
+exit: 0
+stdout: = env_vars_lists_each_control_with_the_source_that_won.text.out
+step: jet env vars --command=check --json -- --trace-detail=functions
+env: XDG_CONFIG_HOME={work}/config
+env: JET_PHASE_COUNTERS=1
+env: JET_TRACE_DETAIL=phases
+exit: 0
+stdout: = env_vars_lists_each_control_with_the_source_that_won.json.out
