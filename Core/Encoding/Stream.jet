@@ -13,25 +13,12 @@ use {
 
 // #4737: preserve insertion order without materializing a map or cloning a tree.
 object_entries: fn(value: Dyn) -> View<(key: String, value: Dyn)> Never! from value {
-    if value == .Object(_) {
-        #Unsafe("the Object variant was checked immediately before borrowing its ordered backing") {
-            return encoding.__object_entries_view(value)
-        }
-    }
+    if value == .Object(entries) -> return entries[0..<entries.len()]
     panic("Object entry view requires an Object")
 }
 
 object_from_entries: fn(entries: &&[(key: String, value: Dyn)]) -> Dyn Never! {
-    #Unsafe("transfer the owned ordered entries allocation into the native Object carrier") {
-        return encoding.__object_from_entries(entries)
-    }
-}
-
-bytes_payload: fn(value: Dyn) -> View<U8> Never! from value {
-    #Unsafe("check the private Bytes variant immediately before borrowing its backing") {
-        if value == .Bytes(_) -> return encoding.__bytes_view(value)
-    }
-    panic("byte payload requires a Bytes carrier")
+    Dyn.Object(entries)
 }
 
 typed_number: fn(text: &&String) -> Dyn Never! {
@@ -40,10 +27,9 @@ typed_number: fn(text: &&String) -> Dyn Never! {
     }
 }
 
+// Retains decoded JSON text until the target Decode contract is known.
 typed_string: fn(text: &&String) -> Dyn Never! {
-    #Unsafe("retain decoded JSON text until the target Decode contract is known") {
-        return encoding.__typed_text(text)
-    }
+    Dyn.Text(text)
 }
 
 // One codec's heap charge. Its owner holds it in place and lends it to
@@ -253,7 +239,7 @@ JSONPull: struct {
             if mem.__list_capacity<U8>(self.buffer) == 0 && !reserve<U8>(self.allocation, self.buffer, self.limits.buffer_bytes) -> return Err(self.item_error("read buffer"))
             self.buffer.clear()
             self.buffered = 0
-            count: encoding.__read_into(self.input, self.buffer, self.limits.buffer_bytes) ?? return Err(io_error(self.offset, self.line, self.column, err))
+            count: rt.read_into(self.input, self.buffer, self.limits.buffer_bytes) ?? return Err(io_error(self.offset, self.line, self.column, err))
             if count == 0 -> return Ok(None)
         }
         Ok(Val(self.buffer[self.buffered]))
@@ -358,7 +344,7 @@ JSONPull: struct {
             return Err(err)
         }
         capacity: mem.__list_capacity<U8>(bytes)
-        encoding.__utf8_validate(bytes) ?? {
+        rt.utf8_validate(bytes) ?? {
             self.allocation.release(capacity)
             return Err(self.error(.Syntax, "JSON string is not valid UTF-8"))
         }
@@ -498,7 +484,7 @@ JSONPull: struct {
             return Err(stream_error(.Syntax, start, self.line, self.column, "invalid JSON number"))
         }
         capacity: mem.__list_capacity<U8>(bytes)
-        encoding.__utf8_validate(bytes) ?? {
+        rt.utf8_validate(bytes) ?? {
             self.allocation.release(capacity)
             return Err(stream_error(.Syntax, start, self.line, self.column, "JSON number is not valid UTF-8"))
         }
@@ -701,7 +687,7 @@ JSONPull: struct {
     fold_text: fn(&self, value: &&String, heap: &FoldBudget) -> String EncodingError! {
         self.fold_charge(value.count_bytes(), heap)
         #Unsafe("transfer already validated UTF-8 storage to inspect its actual owned capacity") {
-            bytes: encoding.__text_into_bytes(value)
+            bytes: value.bytes()
             capacity: mem.__list_capacity<U8>(bytes)
             if !self.allocation.charge(capacity) -> return Err(self.item_error("record"))
             heap.tracked += capacity
@@ -1086,7 +1072,7 @@ sort_by_units: fn(units: [[Int]]) -> [Int] Never! {
 }
 
 text_from_bytes: fn(bytes: &&[U8]) -> String EncodingError! {
-    encoding.__utf8_validate(bytes) ?? return Err(stream_error(.Syntax, 0, 1, 1, err))
+    rt.utf8_validate(bytes) ?? return Err(stream_error(.Syntax, 0, 1, 1, err.message))
     #Unsafe("the shared UTF-8 validator just accepted this owned allocation") {
         return Ok(rt.bytes_into_text(bytes))
     }
@@ -1156,7 +1142,7 @@ JSONPush: struct {
 
     write_bytes: fn(&self, bytes: View<U8>) EncodingError! -[IO]> {
         self.ensure_total(bytes.len())
-        encoding.__write_bytes(self.output, bytes) ?? return Err(io_error(self.total, 1, self.total + 1, err))
+        rt.write_bytes(self.output, bytes) ?? return Err(io_error(self.total, 1, self.total + 1, err))
         self.total += bytes.len()
     }
 
@@ -1179,7 +1165,7 @@ JSONPush: struct {
 
     write_text: fn(&self, text: String) EncodingError! -[IO]> {
         self.ensure_total(text.count_bytes())
-        encoding.__write_text(self.output, text) ?? return Err(io_error(self.total, 1, self.total + 1, err))
+        rt.write_text(self.output, text) ?? return Err(io_error(self.total, 1, self.total + 1, err))
         self.total += text.count_bytes()
     }
 
@@ -1507,12 +1493,12 @@ JSONPush: struct {
             .Int(value) -> {
                 if !int_is_binary64(value) -> return Err(self.error(.Unsupported, "JCS requires Int exactly representable as IEEE 754 binary64; encode this integer as Text"))
                 number: jcs_number(Float{value})
-                encoded = encoding.__text_into_bytes(number)
+                encoded = number.bytes()
             }
             .Float(value) -> {
                 if !math.is_finite(value) -> return Err(self.error(.Unsupported, "JCS cannot encode a non-finite Float"))
                 number: jcs_number(value)
-                encoded = encoding.__text_into_bytes(number)
+                encoded = number.bytes()
             }
             .Text(value) -> encoded = self.canonical_quote(value)
             .ArrayStart | .ObjectStart -> {}
@@ -1536,7 +1522,7 @@ JSONPush: struct {
 
     flush: fn(&self) EncodingError! -[IO]> {
         if self.terminal == .Val(error) -> return Err(error)
-        encoding.__flush(self.output) ?? {
+        rt.flush(self.output) ?? {
             error: io_error(self.total, 1, self.total + 1, err)
             self.discard()
             self.terminal = Val(error)
@@ -1661,7 +1647,7 @@ parse_int64: fn(text: String) -> Int? Never! {
 }
 
 ascii_text: fn(bytes: &&[U8]) -> String Never! {
-    encoding.__utf8_validate(bytes) ?? panic("Core ASCII formatter produced invalid UTF-8")
+    rt.utf8_validate(bytes) ?? panic("Core ASCII formatter produced invalid UTF-8")
     out := ""
     #Unsafe("the shared UTF-8 validator accepted this exact owned formatter buffer") {
         out = rt.bytes_into_text(bytes)
@@ -1692,10 +1678,7 @@ plain_quoted: fn(bytes: [U8], open: Int) -> String? Never! {
 // Float display. Re-spell the existing shortest digits without another kernel.
 wire_float: fn(value: Float) -> String Never! {
     shown: "{value}"
-    bytes := [U8]{}
-    #Unsafe("transfer the owned UTF-8 String buffer before re-spelling its shortest digits") {
-        bytes = encoding.__text_into_bytes(shown)
-    }
+    bytes := shown.bytes()
     negative: bytes[0] == (U8{45})
     start: if negative -> 1 else -> 0
     decimal := -1
@@ -2053,11 +2036,11 @@ jsonl_writer: fn(output: &&FileWriter, limits: EncodingLimits) -> JSONLinesPush 
 
 #Test("owned UTF8 transfers preserve byte storage contents") {
     original: String.from_bytes([U8]{97, 240, 159, 153, 130, 122}) ?? panic("UTF-8 text")
+    bytes: original.bytes()
     #Unsafe("owned validated UTF-8 allocation transfers in the encoding source seam") {
-        bytes: encoding.__text_into_bytes(original)
         capacity: mem.__list_capacity<U8>(bytes)
         restored: rt.bytes_into_text(bytes)
-        roundtrip: encoding.__text_into_bytes(restored)
+        roundtrip: restored.bytes()
         assert_eq(mem.__list_capacity<U8>(roundtrip), capacity)
         assert_eq(roundtrip, [U8]{97, 240, 159, 153, 130, 122})
     }

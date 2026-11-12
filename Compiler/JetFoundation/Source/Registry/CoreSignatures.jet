@@ -537,36 +537,6 @@ core_sig_regex: fn(module_name: String, member: String) -> CoreTypedCallSignatur
     Val(core_sig(module_name, member, parameters, result))
 }
 
-core_sig_encoding_backing: fn(request: CoreCallSignatureRequest) -> CoreTypedCallSignature? {
-    module_name: request.module_name
-    member: request.member
-    read: AccessConvention.Read
-    write: AccessConvention.Write
-    move: AccessConvention.Move
-    unit: Type.Tuple{fields: [TypeTupleField]{}}
-    byte: core_sig_named("U8")
-    bytes: Type.List{element: byte}
-    tree: core_sig_named("Dyn")
-    entry: Type.Tuple{fields: [TypeTupleField]{TypeTupleField{name: "key", ty: Type.String}, TypeTupleField{name: "value", ty: tree}}}
-    entries: Type.List{element: entry}
-    cause: core_sig_named("EncodingCause")
-    if module_name != "core.encoding" -> return None
-    if member == "__read_byte" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(core_sig_named("FileReader"), write)}, Val(core_sig_result(Type.Option{inner: byte}, cause))))
-    if member == "__read_into" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(core_sig_named("FileReader"), write), core_sig_positional(bytes, write), core_sig_positional(Type.Int, read)}, Val(core_sig_result(Type.Int, cause))))
-    if member == "__write_bytes" || member == "__write_text" {
-        value_type: if member == "__write_bytes" -> core_sig_apply("View", byte) else -> Type.String
-        return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(core_sig_named("FileWriter"), write), core_sig_positional(value_type, read)}, Val(core_sig_result(unit, cause))))
-    }
-    if member == "__flush" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(core_sig_named("FileWriter"), write)}, Val(core_sig_result(unit, cause))))
-    if member == "__utf8_validate" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(bytes, read)}, Val(core_sig_result(unit, Type.String))))
-    if member == "__text_into_bytes" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.String, move)}, Val(bytes)))
-    if member == "__object_from_entries" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(entries, move)}, Val(tree)))
-    if member == "__object_entries_view" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(tree, read)}, Val(core_sig_apply("View", entry))))
-    if member == "__bytes_view" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(tree, read)}, Val(core_sig_apply("View", byte))))
-    if member == "__typed_text" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.String, move)}, Val(tree)))
-    None
-}
-
 // Rust `infer_core_call` `core.crypto.vault` typed-provider arm: one sealed
 // vault key type `T` (SigningKey or X25519SecretKey; a generic body defers
 // the bound to monomorphization) shapes every typed operation. Wrapped-key
@@ -656,7 +626,6 @@ core_sig_vault: fn(module_name: String, member: String) -> CoreTypedCallSignatur
 }
 
 core_sig_fixed: fn(request: CoreCallSignatureRequest) -> CoreTypedCallSignature? {
-    if core_sig_encoding_backing(request) == Val(backing) -> return Val(backing)
     if core_sig_vault(request.module_name, request.member) == Val(vault) -> return Val(vault)
     if core_web_fixed_signature(request.module_name, request.member) == Val(web) -> return Val(web)
     if core_sig_network(request) == Val(network) -> return Val(network)

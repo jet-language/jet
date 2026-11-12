@@ -1,0 +1,47 @@
+
+use {
+    encoding: core.encoding
+    json: core.encoding.json
+    files: core.files
+}
+
+// The codec's OS cause as a user `!` domain: a directory read and a write to
+// /dev/full fail through core.encoding's streams, and the cause they carry
+// propagates unchanged.
+read_cause: fn(path: String) -> Int encoding.EncodingCause! {
+    input: files.open(path) ?? panic("directory open")
+    reader := json.reader(input) ?? panic("reader")
+    if reader.next() == {
+        .Err(error) -> return Err(error.cause ?? panic("read without a cause"))
+        .Val(_) | .None -> return Ok(0)
+    }
+    Ok(0)
+}
+
+write_cause: fn(path: String) -> Int encoding.EncodingCause! {
+    output: files.create(path) ?? panic("full open")
+    writer := json.writer(output) ?? panic("writer")
+    writer.write(encoding.DataEvent.Null) ?? return Err(err.cause ?? panic("write without a cause"))
+    writer.flush() ?? return Err(err.cause ?? panic("flush without a cause"))
+    Ok(0)
+}
+
+relay: fn(result: Int encoding.EncodingCause!) -> Int encoding.EncodingCause! {
+    count: result ?? return Err(err)
+    Ok(count + 1)
+}
+
+show: fn(result: Int encoding.EncodingCause!) {
+    if result == {
+        .Ok(count) -> print("ok {count}")
+        .Err(cause) -> {
+            code: cause.os_code ?? -1
+            print("{cause.kind} {code}")
+        }
+    }
+}
+
+run: fn() {
+    show(relay(read_cause("{work}")))
+    show(relay(write_cause("/dev/full")))
+}

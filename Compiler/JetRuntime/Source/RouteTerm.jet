@@ -70,7 +70,7 @@ term_read_line: fn(value: I64) -> I64 {
     }
 }
 
-// One line of stdin for core.term.__stdin_line and the stdin line loop: its
+// One line of stdin for jet.runtime.term's stdin_line and the stdin line loop: its
 // text with every trailing LF and CR removed, 0 at end of input, or -1 with
 // jet_std::io_error_at(Read, "stdin") in `error`: errno through its IOError
 // arm, invalid UTF-8 (InvalidData) as Other. A line already whole in the
@@ -165,7 +165,7 @@ stdin_utf8_error: fn(error: I64) -> I64 {
     I64{-1}
 }
 
-// core.term.__stdin_line: Ok(None) at end of input, Ok(Some(line)), or the
+// jet.runtime.term stdin_line: Ok(None) at end of input, Ok(Some(line)), or the
 // stdin IOError (stdin_line_take).
 #Export(c) jet_stdin_line_raw: fn(some: I64, line: I64, error: I64) -> I64 {
     value: stdin_line_take(error)

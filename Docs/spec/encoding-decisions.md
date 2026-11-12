@@ -246,8 +246,9 @@ already-reserved frame storage to preserve its path.
   evidence belongs only to the XML fields below.
   XML parsing, projection, rendering, canonicalization, and reader policy are
   authored in Jet and share compiler-private `xml_engine` / `xml_kernel`
-  source parts. The reader's only input operation is the private `__read_into`
-  raw leaf: one read through the owned FileReader buffer into already-reserved
+  source parts. The reader's only input operation is the `priv` `read_into`
+  binding of `jet.runtime.encoding`: one read through the owned FileReader
+  buffer into already-reserved
   capacity, with no growth or retry; EOF and IO errors retain zero buffer length.
   XML coordinates distinguish UTF-8 byte offsets from scalar-based columns.
 ```jet
@@ -1354,18 +1355,20 @@ unexercised native carrier or runtime receipt.
 | Registered provider | Source policy consumer | Provider boundary |
 | --- | --- | --- |
 | `core.encoding.__edition` | `base32.jet` and `base64.jet` decode entry points | Resolved package edition intrinsic; source selects strict/legacy rules |
-| `core.encoding.__read_byte` | `stream.jet` JSON pull and `csv.jet` reader | Existing file read; source handles parsing, limits and lifecycle |
-| `core.encoding.__write_bytes` | `stream.jet` JSON push and `csv.jet` writer | Existing file write-all; source owns encoding and limits |
-| `core.encoding.__flush` | `stream.jet` JSON push and `csv.jet` writer | Existing file flush; source owns sticky terminal failure |
-| `core.encoding.__utf8_validate` | `cbor_parse.jet` text chunks and `stream.jet` text conversion | Existing strict validator; source chooses validation point and maps errors |
+| `jet.runtime.encoding.read_byte` (`priv`) | `CborStream.jet` reader | One byte from the owned FileReader (None at EOF); the OS failure is the EncodingCause error |
+| `jet.runtime.encoding.read_into` (`priv`) | `stream.jet` JSON pull, `csv.jet` and the XML reader | Existing file read into reserved capacity; source handles parsing, limits and lifecycle |
+| `jet.runtime.encoding.write_bytes` (`priv`) | `stream.jet` JSON push, `csv.jet`, the CBOR and XML writers | Existing file write-all of a borrowed byte window; source owns encoding and limits |
+| `jet.runtime.encoding.write_text` (`priv`) | `csv.jet` field output and `stream.jet` JSON push | Borrow UTF-8 storage for existing file write-all |
+| `jet.runtime.encoding.flush` (`priv`) | `stream.jet` JSON push, `csv.jet` and the XML writer | Existing file flush; source owns sticky terminal failure |
+| `jet.runtime.encoding.utf8_validate` (`priv`) | `CborParse.jet` text chunks, `CborStream.jet`, `csv.jet` queries and `stream.jet` text conversion | Existing strict validator; its Err message is the UTF-8 error text, and source chooses the validation point and maps errors |
 | `jet.runtime.encoding.bytes_into_text` (`priv`) | `stream.jet`, `csv.jet`, the CBOR and XML engines and `core.testing` validated text transfer | Borrow exact validated UTF-8 bytes; the String is one copy and the list stays the caller's |
 | `jet.runtime.encoding.string_byte` (`priv`) | `stream.jet`, the XML engine and `core.testing` checked string-byte accessors | Borrow byte only after source bounds proof |
-| `core.encoding.__object_from_entries` | `stream.jet` owned object construction | Move ordered entries into the existing native carrier |
-| `core.encoding.__write_text` | `csv.jet` field output and `stream.jet` JSON push | Borrow UTF-8 storage for existing file write-all |
-| `core.encoding.__text_into_bytes` | `stream.jet` record accounting and canonical numbers | Consume the text; its bytes are copied into the list and the text is released |
-| `core.encoding.__typed_text` | `stream.jet` typed-text retention | Move text into the existing private Decode carrier |
-| `core.encoding.__object_entries_view` | `stream.jet` checked Object view | Borrow ordered entries, preserving the owner |
-| `core.encoding.__bytes_view` | `stream.jet` checked Bytes view | Borrow payload, preserving the owner |
+
+Object construction and views, typed-text retention and text-to-bytes
+conversion need no provider: `Dyn.Object(entries)` moves the ordered entries
+into the Object carrier, `object_entries` borrows them through a checked
+`.Object(entries)` pattern bound `from value`, `Dyn.Text` keeps decoded text,
+and `String.bytes` copies a text's bytes.
 
 The native Object carrier remains an explicitly gated bridge: these transfers
 do not claim that the public `Map` shape has become an ordered source list.

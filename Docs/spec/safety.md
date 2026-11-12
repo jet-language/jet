@@ -211,10 +211,10 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 <!-- unsafe-ratchet:data
 {
   "schema": 1,
-  "total": 1424,
+  "total": 1419,
   "counts": {
     "Compiler": 746,
-    "Core": 176,
+    "Core": 171,
     "Docs": 8,
     "Examples": 41,
     "Jetpack": 9,
@@ -2031,14 +2031,14 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/DynCodec.jet",
-      "line": 110,
+      "line": 109,
       "column": 9,
       "reason": "runtime-init runs before any other thread exists"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/DynCodec.jet",
-      "line": 137,
+      "line": 136,
       "column": 9,
       "reason": "runtime-init runs before any other thread exists"
     },
@@ -5965,140 +5965,105 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Core",
       "file": "Core/Encoding/Stream.jet",
-      "line": 17,
-      "column": 9,
-      "reason": "the Object variant was checked immediately before borrowing its ordered backing"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Encoding/Stream.jet",
       "line": 25,
-      "column": 5,
-      "reason": "transfer the owned ordered entries allocation into the native Object carrier"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Encoding/Stream.jet",
-      "line": 31,
-      "column": 5,
-      "reason": "check the private Bytes variant immediately before borrowing its backing"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Encoding/Stream.jet",
-      "line": 38,
       "column": 5,
       "reason": "the shared parser validated this exact numeric lexeme"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/Stream.jet",
-      "line": 44,
-      "column": 5,
-      "reason": "retain decoded JSON text until the target Decode contract is known"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Encoding/Stream.jet",
-      "line": 366,
+      "line": 352,
       "column": 9,
       "reason": "the shared UTF-8 validator just accepted this owned byte allocation"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/Stream.jet",
-      "line": 506,
+      "line": 492,
       "column": 9,
       "reason": "the shared UTF-8 validator just accepted this owned ASCII token"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/Stream.jet",
-      "line": 511,
+      "line": 497,
       "column": 13,
       "reason": "retain a validated number lexeme in the private event carrier until typed decoding"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/Stream.jet",
-      "line": 703,
+      "line": 689,
       "column": 9,
       "reason": "transfer already validated UTF-8 storage to inspect its actual owned capacity"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/Stream.jet",
-      "line": 714,
+      "line": 700,
       "column": 9,
       "reason": "the private numeric event is projected only into the matching typed tree carrier"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/Stream.jet",
-      "line": 1090,
+      "line": 1076,
       "column": 5,
       "reason": "the shared UTF-8 validator just accepted this owned allocation"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/Stream.jet",
-      "line": 1102,
+      "line": 1088,
       "column": 5,
       "reason": "the byte position was checked against this String's storage length"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/Stream.jet",
-      "line": 1666,
+      "line": 1652,
       "column": 5,
       "reason": "the shared UTF-8 validator accepted this exact owned formatter buffer"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/Stream.jet",
-      "line": 1681,
+      "line": 1667,
       "column": 13,
       "reason": "every byte before the closing quote is printable ASCII, so it is whole UTF-8"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/Stream.jet",
-      "line": 1696,
-      "column": 5,
-      "reason": "transfer the owned UTF-8 String buffer before re-spelling its shortest digits"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Encoding/Stream.jet",
-      "line": 1842,
+      "line": 1825,
       "column": 13,
       "reason": "retain a validated number lexeme in the private event carrier"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/Stream.jet",
-      "line": 1847,
+      "line": 1830,
       "column": 13,
       "reason": "project the native compiler-private Bytes carrier into its event"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/Stream.jet",
-      "line": 1913,
+      "line": 1896,
       "column": 13,
       "reason": "classify the private Bytes carrier without borrowing or exposing its payload"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/Stream.jet",
-      "line": 2056,
+      "line": 2040,
       "column": 5,
       "reason": "owned validated UTF-8 allocation transfers in the encoding source seam"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/Stream.jet",
-      "line": 2093,
+      "line": 2076,
       "column": 5,
       "reason": "exercise the typed Encode byte carrier at the JSON preflight boundary"
     },
@@ -10199,13 +10164,13 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | crate/package | regions |
 | --- | ---: |
 | Compiler | 746 |
-| Core | 176 |
+| Core | 171 |
 | Docs | 8 |
 | Examples | 41 |
 | Jetpack | 9 |
 | Tools | 6 |
 | tests | 438 |
-| **total** | **1424** |
+| **total** | **1419** |
 
 ### Regions
 
@@ -10469,8 +10434,8 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Source/Display.jet | 26:5 | "writes one byte in an exclusively owned formatter buffer; value is in 0..255" |
 | Compiler | Compiler/JetRuntime/Source/Dyn.jet | 7:5 | "address borrows an initialized word in a live native Dyn or List" |
 | Compiler | Compiler/JetRuntime/Source/Dyn.jet | 10:5 | "address owns a writable word in a native Dyn or List" |
-| Compiler | Compiler/JetRuntime/Source/DynCodec.jet | 110:9 | "runtime-init runs before any other thread exists" |
-| Compiler | Compiler/JetRuntime/Source/DynCodec.jet | 137:9 | "runtime-init runs before any other thread exists" |
+| Compiler | Compiler/JetRuntime/Source/DynCodec.jet | 109:9 | "runtime-init runs before any other thread exists" |
+| Compiler | Compiler/JetRuntime/Source/DynCodec.jet | 136:9 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/EncodingErrors.jet | 5:5 | "borrows an initialized aligned word in a live encoding carrier or option input" |
 | Compiler | Compiler/JetRuntime/Source/EncodingErrors.jet | 8:5 | "owns a writable aligned word in a fresh encoding carrier or caller output" |
 | Compiler | Compiler/JetRuntime/Source/EnvOverlay.jet | 44:5 | "runtime-init runs before any other thread exists" |
@@ -11031,26 +10996,21 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Core | Core/Encoding/Json.jet | 125:5 | "preserve the shipped decoder's hidden wall-clock snapshot at its existing host boundary" |
 | Core | Core/Encoding/Json.jet | 1310:13 | "preserve the native compiler-private Dyn carriers in Core JSON event projection" |
 | Core | Core/Encoding/Json.jet | 1315:13 | "preserve the native compiler-private Dyn carriers in Core JSON event projection" |
-| Core | Core/Encoding/Stream.jet | 17:9 | "the Object variant was checked immediately before borrowing its ordered backing" |
-| Core | Core/Encoding/Stream.jet | 25:5 | "transfer the owned ordered entries allocation into the native Object carrier" |
-| Core | Core/Encoding/Stream.jet | 31:5 | "check the private Bytes variant immediately before borrowing its backing" |
-| Core | Core/Encoding/Stream.jet | 38:5 | "the shared parser validated this exact numeric lexeme" |
-| Core | Core/Encoding/Stream.jet | 44:5 | "retain decoded JSON text until the target Decode contract is known" |
-| Core | Core/Encoding/Stream.jet | 366:9 | "the shared UTF-8 validator just accepted this owned byte allocation" |
-| Core | Core/Encoding/Stream.jet | 506:9 | "the shared UTF-8 validator just accepted this owned ASCII token" |
-| Core | Core/Encoding/Stream.jet | 511:13 | "retain a validated number lexeme in the private event carrier until typed decoding" |
-| Core | Core/Encoding/Stream.jet | 703:9 | "transfer already validated UTF-8 storage to inspect its actual owned capacity" |
-| Core | Core/Encoding/Stream.jet | 714:9 | "the private numeric event is projected only into the matching typed tree carrier" |
-| Core | Core/Encoding/Stream.jet | 1090:5 | "the shared UTF-8 validator just accepted this owned allocation" |
-| Core | Core/Encoding/Stream.jet | 1102:5 | "the byte position was checked against this String's storage length" |
-| Core | Core/Encoding/Stream.jet | 1666:5 | "the shared UTF-8 validator accepted this exact owned formatter buffer" |
-| Core | Core/Encoding/Stream.jet | 1681:13 | "every byte before the closing quote is printable ASCII, so it is whole UTF-8" |
-| Core | Core/Encoding/Stream.jet | 1696:5 | "transfer the owned UTF-8 String buffer before re-spelling its shortest digits" |
-| Core | Core/Encoding/Stream.jet | 1842:13 | "retain a validated number lexeme in the private event carrier" |
-| Core | Core/Encoding/Stream.jet | 1847:13 | "project the native compiler-private Bytes carrier into its event" |
-| Core | Core/Encoding/Stream.jet | 1913:13 | "classify the private Bytes carrier without borrowing or exposing its payload" |
-| Core | Core/Encoding/Stream.jet | 2056:5 | "owned validated UTF-8 allocation transfers in the encoding source seam" |
-| Core | Core/Encoding/Stream.jet | 2093:5 | "exercise the typed Encode byte carrier at the JSON preflight boundary" |
+| Core | Core/Encoding/Stream.jet | 25:5 | "the shared parser validated this exact numeric lexeme" |
+| Core | Core/Encoding/Stream.jet | 352:9 | "the shared UTF-8 validator just accepted this owned byte allocation" |
+| Core | Core/Encoding/Stream.jet | 492:9 | "the shared UTF-8 validator just accepted this owned ASCII token" |
+| Core | Core/Encoding/Stream.jet | 497:13 | "retain a validated number lexeme in the private event carrier until typed decoding" |
+| Core | Core/Encoding/Stream.jet | 689:9 | "transfer already validated UTF-8 storage to inspect its actual owned capacity" |
+| Core | Core/Encoding/Stream.jet | 700:9 | "the private numeric event is projected only into the matching typed tree carrier" |
+| Core | Core/Encoding/Stream.jet | 1076:5 | "the shared UTF-8 validator just accepted this owned allocation" |
+| Core | Core/Encoding/Stream.jet | 1088:5 | "the byte position was checked against this String's storage length" |
+| Core | Core/Encoding/Stream.jet | 1652:5 | "the shared UTF-8 validator accepted this exact owned formatter buffer" |
+| Core | Core/Encoding/Stream.jet | 1667:13 | "every byte before the closing quote is printable ASCII, so it is whole UTF-8" |
+| Core | Core/Encoding/Stream.jet | 1825:13 | "retain a validated number lexeme in the private event carrier" |
+| Core | Core/Encoding/Stream.jet | 1830:13 | "project the native compiler-private Bytes carrier into its event" |
+| Core | Core/Encoding/Stream.jet | 1896:13 | "classify the private Bytes carrier without borrowing or exposing its payload" |
+| Core | Core/Encoding/Stream.jet | 2040:5 | "owned validated UTF-8 allocation transfers in the encoding source seam" |
+| Core | Core/Encoding/Stream.jet | 2076:5 | "exercise the typed Encode byte carrier at the JSON preflight boundary" |
 | Core | Core/Encoding/XmlEngine.jet | 139:5 | "all callers iterate or check the UTF-8 byte bounds before borrowing this byte" |
 | Core | Core/Encoding/XmlEngine.jet | 177:5 | "the caller selected a scalar-aligned window of validated UTF-8 bytes" |
 | Core | Core/Encoding/XmlEngine.jet | 2678:5 | "attribute whitespace compaction preserves the already validated UTF-8 byte sequence" |
@@ -11749,11 +11709,7 @@ the function body; they do not exempt a wrapper from the proof requirement.
   {"file":"Core/Encoding/Json.jet","function":"emit_coercion","proof":"json.jet:101-102 calls __coerce_emit with ordinary borrowed String text; it supplies no pointer, descriptor or callback. The reserved leaf preserves the existing stderr emission boundary, and the helper returns no borrowed storage. Caller-selected message bytes remain valid UTF-8 and cannot become an unchecked address or outlive the call as a native reference."},
   {"file":"Core/Encoding/Json.jet","function":"coerce_line","proof":"The gate at json.jet:109-110 calls __coerce_now with no arguments and assigns its owned Int clock snapshot. Subsequent interpolation(:112) is safe String construction. No caller can choose a raw memory operand or receive a host borrow through this parameterless scalar query."},
   {"file":"Core/Encoding/Json.jet","function":"append_events","proof":"json.jet:707-709 match each private Dyn.Number/TypedText/Bytes discriminant before projecting its initialized String/list into the corresponding typed DataEvent. Only owned enum payloads are returned; no mismatched variant access, pointer formation or borrowed backing view escapes. Public variants are recursively handled outside the gate(:712-735)."},
-  {"file":"Core/Encoding/Stream.jet","function":"object_entries","proof":"__object_entries_view requires an Object and returns a borrowed ordered backing view. stream.jet:11 checks that exact discriminant immediately before :13; other variants panic before the intrinsic. The result's `from value` lifetime at :10 ties the view to the same borrowed Dyn, so callers cannot keep it after releasing its owner or reinterpret another payload."},
-  {"file":"Core/Encoding/Stream.jet","function":"object_from_entries","proof":"__object_from_entries at stream.jet:21 receives a consuming list of typed String/Dyn entries, moving its sole allocation into an initialized Object carrier. No pointer, length or discriminant is supplied separately, and the caller cannot reuse the moved list. Arbitrary duplicate keys affect encoding policy, not the validity or ownership of the native payload."},
-  {"file":"Core/Encoding/Stream.jet","function":"bytes_payload","proof":"stream.jet:27 checks private Dyn.Bytes before __bytes_view on the same value; all other variants panic(:29). The View<U8> result is declared `from value`(:25), retaining the owner borrow rather than exporting an independent pointer. Callers cannot select a different variant's backing or use the view after the carrier's lifetime."},
   {"file":"Core/Encoding/Stream.jet","function":"typed_number","proof":"The gate at stream.jet:33-34 constructs the compiler-private Number enum from a consuming typed String; it does not reinterpret memory. Its source caller json.jet:562 is in Parser.number after numeric grammar validation and checked String construction(:561). The owned lexeme is retained for typed decoding, never used as an address or unchecked index; consumers use normal checked numeric parsing. Callers cannot corrupt enum layout or retain the moved String's storage."},
-  {"file":"Core/Encoding/Stream.jet","function":"typed_string","proof":"__typed_text at stream.jet:40 consumes an initialized String into the private typed-text carrier. UTF-8 is already guaranteed by the String type; this operation neither changes its bytes nor accepts a separately forgeable pointer/length. The caller loses ownership of the moved text and receives an owning Dyn enum, not an escaping borrow."},
   {"file":"Core/Encoding/Stream.jet","function":"read_string","proof":"stream.jet:294 validates the exact decoded byte list, returning Syntax and releasing tracked capacity on failure(:295-296). The __bytes_into_text gate(:299-300) immediately copies that same list without intervening mutation. Escaped or raw wire bytes therefore cannot bypass UTF-8 validation or expose a dangling parser buffer."},
   {"file":"Core/Encoding/Stream.jet","function":"number","proof":"Both gates discharge separate obligations: stream.jet:360 rejects invalid JSON numeric grammar and :365 rejects invalid UTF-8 before :371 copies that exact byte list into a String. Only after those checks does :375-376 construct DataEvent.Number when typed_numbers is enabled. The valid initialized lexeme moves into its matching carrier; no unchecked numeric payload reinterpretation or raw buffer reference reaches callers."},
   {"file":"Core/Encoding/Stream.jet","function":"fold_text","proof":"stream.jet:555 consumes a valid String into __text_into_bytes solely to measure allocation capacity. That byte list is not modified; :557 can fail before reconstruction, otherwise :559 immediately copies the unchanged UTF-8 list through __bytes_into_text. Budget checks affect retention, not validity; no caller receives the intermediate storage or can mutate it between conversions."},
@@ -11761,7 +11717,6 @@ the function body; they do not exempt a wrapper from the proof requirement.
   {"file":"Core/Encoding/Stream.jet","function":"text_from_bytes","proof":"stream.jet:834 strictly validates the caller's exact owned byte list, returning EncodingError on failure; :836 then immediately copies it through __bytes_into_text. No mutation or alternate allocation occurs between validation and transfer. Even arbitrary external byte input cannot return a String violating UTF-8 or retain a pointer into the list."},
   {"file":"Core/Encoding/Stream.jet","function":"byte_at","proof":"The unchecked __string_byte at stream.jet:845 is dominated by :841-842, which reject index < 0 or index >= text.count_bytes() before U64 conversion. The borrowed String remains live for the one-byte read; only copied U8 returns. Callers cannot cause a negative, out-of-storage or dangling pointer read through this helper."},
   {"file":"Core/Encoding/Stream.jet","function":"ascii_text","proof":"Despite its formatter-oriented name, ascii_text admits no unchecked caller assumption: stream.jet:1402 runs strict __utf8_validate on the exact owned list and panics on invalid UTF-8. Only the succeeding path at :1404-1405 copies it through __bytes_into_text, with no intervening write. Malformed formatter output cannot create an invalid String."},
-  {"file":"Core/Encoding/Stream.jet","function":"wire_float","proof":"The gate at stream.jet:1415-1416 only transfers the owned valid String produced by Float interpolation(:1413) into __text_into_bytes. It is the safe direction of the UTF-8 transfer and accepts no raw bytes or caller pointer. Later digit editing uses a separate list and checked ascii_text reconstruction; no alias to the moved String is retained."},
   {"file":"Core/Encoding/Stream.jet","function":"jsonl_tree_size","proof":"The gate at stream.jet:1648-1653 runs only in the fallback branch, after every public variant was sized (:1620-1644). It tests the private Dyn.Bytes discriminant without binding its payload (`.Bytes(_)`) and only chooses the error reason and kind; the branch always returns Err (:1654-1656). No payload, pointer or backing view is read or escapes."},
   {"file":"Core/Encoding/Stream.jet","function":"write_tree","proof":"Stream.jet is the Core-internal __core_encoding_stream package, whose reserved name keeps it out of user imports. The two #Unsafe regions (Stream.jet:1722-1724, :1727-1729) build the private DataEvent.Number and DataEvent.Bytes carriers from the payload of the Dyn .Number or .Bytes just matched, which was validated when that Dyn was built, and pass it on unchanged; nothing is read from or written to raw memory."},
   {"file":"Core/Encoding/Stream.jet","function":"plain_quoted","proof":"The gate at Stream.jet:1675-1677 copies bytes[open + 1..<at] into a String. The loop at :1672-1681 reaches it only at the first quote after open, and every earlier byte passed :1679 (no backslash, 32..126), so the slice is printable ASCII and whole UTF-8; open is a checked index (:1670) and at < bytes.len()."},

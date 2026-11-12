@@ -1,7 +1,7 @@
 // The IR builder's runtime routes: Core calls and builtin methods through
 // the route table (argument and result carriers, payloads).
 
-use jet_foundation.[CoreCallRecord, Span, SymbolID, Type, TypeTupleField, TBuiltinOp, BodyCallArg, BodyHandleOp, TCapture, TCaptureFacts, TClosureOp, TEffectFacts, TEffectSpan, NodeKind, TFailureCarrier, BodyFnValueKind, BodyLambda, BodyLambdaBody, TTryConvert, core_call_native_return_labels, checked_builtin_mutates_receiver, checked_generated_local, type_carrier_identity, BodyEnumArg, BodyEnumPayload, decl_id_index, name_rows_set, name_rows_value]
+use jet_foundation.[CoreCallRecord, Span, SymbolID, Type, TypeTupleField, TBuiltinOp, BodyCallArg, BodyHandleOp, TCapture, TCaptureFacts, TClosureOp, TEffectFacts, TEffectSpan, NodeKind, TFailureCarrier, BodyFnValueKind, BodyLambda, BodyLambdaBody, TTryConvert, core_call_native_return_labels, checked_builtin_mutates_receiver, checked_generated_local, type_carrier_identity, decl_id_index, name_rows_set, name_rows_value]
 
 // `list.push(value)`: grows the buffer to twice its capacity (at least 4)
 // when full, then stores the element at `len`.
@@ -4662,15 +4662,13 @@ IR_ROUTES_NATIVE_INDEX: comptime { [String]{"jet_bit_set_has", "jet_bitset_add",
 
 // Whether the builder lowers a Core call of route `name` itself, with no
 // runtime or environment route: an inline or leaf route, a special of
-// ir_core_call (crypto.wipe, channels and timer receivers, event policy,
-// object entries), or an Iter route
-// (BuildLazy.jet ir_lazy_symbol).
+// ir_core_call (crypto.wipe, channels and timer receivers, event policy), or
+// an Iter route (BuildLazy.jet ir_lazy_symbol).
 // IR Lint's registry check (Lint.jet ir_lint_core_routes) reads it.
 ir_route_builder_lowered: fn(name: String) -> Bool Never! {
     if IR_ROUTES_INLINE.contains(name) || ir_leaf_route(name) != None -> return true
     if name == "jet_raw_crypto_wipe" -> return true
     if name == "jet_std::channel" || name == "jet_std::channel_bounded" || name == "jet_std::after_value" || name == "jet_std::JetEvent::with_policy" -> return true
-    if name == "jet_raw_object_from_entries" || name == "jet_raw_object_entries_view" -> return true
     ir_lazy_symbol(name, Type.Apply{name: "Iter", args: [Type]{Type.Int}})
 }
 
@@ -5412,8 +5410,6 @@ ir_core_call_routed: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, rec
         .SourceOwned -> { return ir_fail_slot(b, span, "source-owned Core call {canonical.module_name}.{canonical.member}") }
     }
     ir_route_ambient_refusals(m, p, b, symbol, span)
-    if symbol == "jet_raw_object_from_entries" -> return ir_object_from_entries(m, p, b, ty, args, span)
-    if symbol == "jet_raw_object_entries_view" -> return ir_object_entries_view(m, p, b, ty, args, span)
     if symbol == "jet_testing_world" -> return ir_testing_world(m, p, b, args, span)
     if symbol == "jet_reflect_of" -> return ir_reflect_of(m, p, b, ty, args, span)
     if symbol == "jet_plugin_load" -> return ir_plugin_load(m, p, b, ty, args, span)
@@ -5784,42 +5780,6 @@ ir_core_crypto_wipe: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, args: [Int], 
     loop back in backs -> ir_emit(b.f, IROp.Load, back.slot, back.cell, 0, -1, b.line)
     ir_release(m, b, list)
     return -1
-}
-
-// `encoding.from_entries(entries)`: the canonical Dyn's Object over the
-// checked ordered entry List, which the box takes (a read argument is
-// copied).
-ir_object_from_entries: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, args: [Int], span: Span) -> Int Never! {
-    if args.len() != 1 -> return ir_fail_slot(b, span, "native value kernel jet_raw_object_from_entries requires one checked argument")
-    if ir_dyn_def(p, ty) == None -> return ir_fail_slot(b, span, "native Object kernel requires the canonical Dyn")
-    ir_enum_value(m, p, b, ty, "Dyn", "Object", BodyEnumPayload.Positional{args: [BodyEnumArg]{BodyEnumArg{value: args[0]}}}, span)
-}
-
-// `encoding.object_entries(value)`: a View over the canonical Dyn's Object
-// payload, its checked ordered entry List, which the borrowed Dyn keeps.
-ir_object_entries_view: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, args: [Int], span: Span) -> Int Never! {
-    if args.len() != 1 -> return ir_fail_slot(b, span, "native value kernel jet_raw_object_entries_view requires one checked argument")
-    dyn_row: ir_dyn_def(p, ir_ty(p, b, args[0])) ?? return ir_fail_slot(b, span, "native Object kernel requires the canonical Dyn")
-    found: ir_variant_index(p, dyn_row, "Object") ?? return ir_fail_slot(b, span, "canonical Dyn has no Object variant")
-    members: ir_variant_members(m, p, dyn_row, [Type]{}, found) ?? return ir_fail_slot(b, span, "Dyn.Object has no checked ordered entries storage")
-    if members.len() != 1 -> return ir_fail_slot(b, span, "Dyn.Object has no checked ordered entries storage")
-    entry: if ir_untag(m.types[members[0].ty].ty) == .List(element) -> element else -> { return ir_fail_slot(b, span, "Dyn.Object payload is not its checked ordered List") }
-    view_element: ir_view_element(ty) ?? return ir_fail_slot(b, span, "Object entries result is not a checked View")
-    row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
-    if ir_value_type(m, p, entry) != ir_value_type(m, p, view_element) -> return ir_fail_slot(b, span, "Object entries view must borrow the original checked entry type")
-    source: ir_expr(m, p, b, args[0])
-    if ir_failed(b) || source < 0 -> return -1
-    if b.fresh[source] -> return ir_fail_slot(b, span, "Object entries view must borrow the original checked entry type")
-    payload: if members[0].boxed -> ir_load_word(m, b, source, members[0].offset) else -> ir_address_at(m, b, source, members[0].offset)
-    window: ir_temp(m, b, row)
-    ir_emit(b.f, IROp.StackAddress, window, 24, 8, -1, b.line)
-    length: ir_load_word(m, b, payload, 0)
-    ir_emit(b.f, IROp.Store, -1, window, 0, length, b.line)
-    none: ir_word_const(m, b, 0)
-    ir_emit(b.f, IROp.Store, -1, window, 8, none, b.line)
-    data: ir_load_word(m, b, payload, 16)
-    ir_emit(b.f, IROp.Store, -1, window, 16, data, b.line)
-    window
 }
 
 // `tree.len()`: the length of an Array/Object/Bytes List or the scalar count

@@ -41,12 +41,6 @@ use jet_foundation.[
     TagMarker,
     TextEdit,
     Type,
-    ViewProvenance,
-    ViewProvenanceEntry,
-    ViewProvenanceMap,
-    ViewSource,
-    ViewSourcePath,
-    ViewSourceProjection,
     CoreCallSymbol,
     core_call,
     core_call_authority_boundary_at,
@@ -1356,34 +1350,11 @@ sema_call_core_materialize_authority_boundary: fn(record: CoreCallRecord, index:
         fallibility: TFailureCarrier.Infallible}, span)
 }
 
-// Checked Core source: a `<corelib>/` file of a `core.*` module. The
-// compiler-private leaves that any Core module may call share this one rule.
-sema_call_core_checked_source: fn(environment: SemaScopeEnvironment) -> Bool Never! {
-    environment.source_file.starts_with("<corelib>/") && environment.module_name.starts_with("core.")
-}
-
 sema_call_core_check_fixed_record: fn(record: CoreCallRecord, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     // Only the plugin boundary inserts the wire; Core reads it through
     // jet.runtime.files.
     if record.module_name == "core.plugin" && record.member == "__authority_to_wire" {
         diagnostics.push(sema_error("E0510", span, "Authority wire conversion is compiler-private", "only the checked plugin boundary inserts this conversion", "use core.plugin.load with a tightened Authority"))
-        return None
-    }
-    if record.module_name == "core.term" && record.member == "__stdin_line" {
-        if !sema_call_core_checked_source(environment) {
-            diagnostics.push(sema_error("E0510", span, "stdio raw leaves are compiler-private", "raw stdio operations are restricted to checked Core source", "use the public core.term API"))
-            return None
-        }
-    }
-    backing: record.module_name == "core.encoding" && (record.member == "__read_byte" || record.member == "__read_into" || record.member == "__write_bytes" || record.member == "__write_text" || record.member == "__flush" || record.member == "__utf8_validate" || record.member == "__text_into_bytes" || record.member == "__object_from_entries" || record.member == "__object_entries_view" || record.member == "__bytes_view" || record.member == "__typed_text")
-    checked_backing_source: environment.source_file.starts_with("<corelib>/") && (environment.module_name == "__core_encoding_stream" || environment.module_name == "__core_encoding_cbor_stream" || environment.module_name == "core.encoding.csv" || environment.module_name == "core.encoding.xml" || environment.module_name == "__core_encoding_xml_engine" || (record.member == "__utf8_validate" && environment.module_name == "__core_encoding_cbor_parse"))
-    if backing && !checked_backing_source {
-        diagnostics.push(sema_error("E0510", span, "encoding backing leaves are compiler-private", "raw carrier operations are restricted to vetted Core encoding internals", "use the public JSON or JSONL API"))
-        return None
-    }
-    audited: record.module_name == "core.encoding" && (record.member == "__object_from_entries" || record.member == "__object_entries_view" || record.member == "__bytes_view" || record.member == "__typed_text")
-    if audited && context.unsafe_depth == 0 {
-        diagnostics.push(sema_error("E0510", span, "raw encoding carrier access requires an audited #Unsafe region", "the caller must establish the carrier variant or byte bounds", "check the precondition immediately before the audited call"))
         return None
     }
     canonical_record: sema_call_core_record(record.module_name, record.member, args.len(), span, diagnostics) ?? return None
@@ -1438,13 +1409,6 @@ sema_call_core_check_fixed_record: fn(record: CoreCallRecord, args: [CallArg], t
     // and record the call fact; the native kernel takes no inferred generic.
     fallibility := sema_expression_failure_carrier(result_type)
     if !sema_call_core_record_effects(canonical_record, span, resolved_type_args, result_type, fallibility, [FunctionDefaultRef]{}, scopes, context, environment, program, diagnostics) -> return None
-    if canonical_record.module_name == "core.encoding" && (canonical_record.member == "__object_entries_view" || canonical_record.member == "__bytes_view") {
-        sources: [ViewSourcePath]{ViewSourcePath{source: ViewSource.Parameter{index: 0}, projections: [ViewSourceProjection]{}}}
-        provenance: ViewProvenanceMap{entries: [ViewProvenanceEntry]{ViewProvenanceEntry{slot: [String]{}, value: ViewProvenance{sources: sources, mutable: false}}}}
-        callable: Type.Fn{params: [Type]{}, ret: Val(result_type), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: Val(provenance)}
-        facts: sema_call_return_view_facts(callable, None, args, binding, scopes, state, span, diagnostics)
-        context.call_return_views.push(SemaCallReturnView{span: span, facts: facts})
-    }
     value: sema_call_core_tree(canonical_record, values, span, type_args, loop _ in values -> false, result_type, fallibility, None, environment, program, diagnostics) ?? return None
     sema_expression_call_expected(sema_call_with_binder_pins(pins, value, span), expected, environment, program, context, diagnostics)
 }

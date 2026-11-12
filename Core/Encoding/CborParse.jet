@@ -2,7 +2,7 @@
 // Unit policy helpers retain the same typed CBORError contract as value parses.
 use {
     core.encoding.[Dyn]
-    encoding: core.encoding
+    rt: jet.runtime.encoding
     core.encoding.cbor.[CBOROptions, CBORError, CBORErrorKind]
     stream: __core_encoding_stream
     math: core.math
@@ -168,7 +168,7 @@ Parser: struct {
                 if (head >> 5) != major || (head.bit_and(31)) == 31 -> return Err(failure(.Syntax, chunk, path, "indefinite CBOR string contains a wrong or indefinite chunk"))
                 length: self.argument(input, head.bit_and(31), chunk, path) ?? return Err(err)
                 if length > input.len() - self.cursor -> return Err(failure(.Truncated, input.len(), path, "CBOR byte/text string chunk is truncated"))
-                if major == 3 -> encoding.__utf8_validate(input[self.cursor..<(self.cursor + length)]) ?? return Err(failure(.Syntax, chunk, path, "CBOR text chunk is not UTF-8"))
+                if major == 3 -> rt.utf8_validate(input[self.cursor..<(self.cursor + length)]) ?? return Err(failure(.Syntax, chunk, path, "CBOR text chunk is not UTF-8"))
                 self.reserve<U8>(bytes, length, 1, chunk, path, what) ?? return Err(err)
                 piece: input[self.cursor..<(self.cursor + length)]
                 loop byte in piece -> bytes.push(byte)
@@ -409,9 +409,9 @@ widen_float: fn(bits: Int, exponent_bits: Int, fraction_bits: Int) -> Float Neve
     }
     loop bytes in cases {
         validation := String?{None}
-        if encoding.__utf8_validate(bytes) == {
+        if rt.utf8_validate(bytes) == {
             .Ok(_) -> {}
-            .Err(message) -> validation = Val(message)
+            .Err(error) -> validation = Val(error.message)
         }
         if String.from_bytes(bytes) == {
             .Ok(_) -> assert(validation == None)

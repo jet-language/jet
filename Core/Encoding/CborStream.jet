@@ -108,7 +108,7 @@ CBORPull: struct {
             return Ok(Val(byte))
         }
         byte := U8?{None}
-        if encoding.__read_byte(self.input) == {
+        if rt.read_byte(self.input) == {
             .Ok(value) -> { byte = value }
             .Err(cause) -> { return Err(io_error(self.total, self.path(), cause)) }
         }
@@ -319,7 +319,7 @@ CBORPull: struct {
             bytes := self.string(major, additional, start) ?? return Err(err)
             if major == 2 -> event = DataEvent.Bytes(bytes)
             else {
-                encoding.__utf8_validate(bytes) ?? return Err(error(.Syntax, start, self.path(), "CBOR text is not UTF-8"))
+                rt.utf8_validate(bytes) ?? return Err(error(.Syntax, start, self.path(), "CBOR text is not UTF-8"))
                 text := ""
                 #Unsafe("the exact CBOR text allocation passed strict UTF-8 validation") { text = rt.bytes_into_text(bytes) }
                 if key_expected {
@@ -590,7 +590,7 @@ CBORPush: struct {
             }
         }
         window: bytes[0..<bytes.len()]
-        encoding.__write_bytes(self.output, window) ?? {
+        rt.write_bytes(self.output, window) ?? {
             release<U8>(self.allocation, bytes)
             return Err(io_error(self.total, "$", err))
         }
@@ -691,7 +691,7 @@ CBORPush: struct {
 
     flush: fn(&self) EncodingError! -[IO, Time.Wait]> {
         if self.terminal == .Val(first) -> return Err(first.copy())
-        encoding.__flush(self.output) ?? return Err(self.fail(io_error(self.total, "$", err)))
+        rt.flush(self.output) ?? return Err(self.fail(io_error(self.total, "$", err)))
     }
 
     finish: fn(&self) EncodingError! -[IO, Time.Wait]> {

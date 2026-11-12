@@ -3,8 +3,8 @@ use jet_foundation.[
     CORE_CALL_COVERAGE_KNOWN, CORE_CALL_COVERAGE_SEMA, CoreCallCoverage,
     CoreCallFallibility, CoreCallPureRoute, CoreCallRecord,
     CoreCallResourceAccess, CoreCallSignature, CoreCallSymbol, CoreCapabilityContract,
-    CoreCapabilityKind, Type, core_call_projection_in,
-    core_call_source_member, core_call_typed_signature,
+    CoreCapabilityKind, core_call_projection_in,
+    core_call_source_member,
 ]
 
 core_source_owned_require: fn(ok: Bool, message: String) Never! {
@@ -50,9 +50,4 @@ core_source_owned_require: fn(ok: Bool, message: String) Never! {
         }
         core_source_owned_require(rejected, "executable projection rejected")
     }
-    signature: core_call_typed_signature("core.term", "__stdin_line", 0) ?? panic("missing stdio signature: __stdin_line")
-    returns: Type.Result{ok: Type.Option{inner: Type.String}, err: Type.Named{name: "IOError"}}
-    core_source_owned_require((signature.return_type ?? panic("missing stdio return type")) == returns, "stdio return contract")
-    core_source_owned_require(signature.parameters.len() == 0, "stdio arity")
-    core_source_owned_require(core_call_typed_signature("core.term", "__stdin_line", 1) == None, "stdio excess arguments rejected")
 }

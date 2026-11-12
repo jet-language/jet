@@ -1,0 +1,12 @@
+# #6615: EncodingCause is an error type, so a user `!` contract can carry the
+# OS cause of a core.encoding stream failure with its kind and os_code.
+requires: os-name:linux
+fixture: fixtures/encoding_cause_is_a_failure_domain_that_keeps_kind_and_os_code
+write: guest.jet fixtures/encoding_cause_is_a_failure_domain_that_keeps_kind_and_os_code/fixture.template
+step aot: jet build --allow=FS.Read,FS.Write guest.jet
+step aot_run: built
+stdout: = encoding_cause_is_a_failure_domain_that_keeps_kind_and_os_code.out
+stderr: empty
+step: jet run --allow=FS.Read,FS.Write guest.jet
+stdout: = encoding_cause_is_a_failure_domain_that_keeps_kind_and_os_code.out
+stderr: empty

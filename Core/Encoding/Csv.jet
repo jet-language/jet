@@ -390,7 +390,7 @@ query_text: fn(path: String) -[FS]> String [FieldError]! {
     if info.size > max -> return Err(query_read_error(path, "input exceeds the {max}-byte query bound"))
     bytes: files.read_at(path, 0, max + 1) ?? return Err(query_read_error(path, "{err}"))
     if bytes.len() > max -> return Err(query_read_error(path, "input grew beyond the {max}-byte query bound"))
-    encoding.__utf8_validate(bytes) ?? return Err(query_read_error(path, err))
+    rt.utf8_validate(bytes) ?? return Err(query_read_error(path, err.message))
     #Unsafe("the exact owned query bytes passed the shared strict UTF-8 validator") {
         return Ok(rt.bytes_into_text(bytes))
     }
@@ -654,7 +654,7 @@ CSVWriter: struct {
         self.buffer[0] = value
         self.buffer[1] = value
         window: self.buffer[0..<count]
-        encoding.__write_bytes(self.output, window) ?? return Err(self.io_error(err))
+        rt.write_bytes(self.output, window) ?? return Err(self.io_error(err))
     }
 
     close_record: fn(&self) EncodingError! -[IO]> {
@@ -665,7 +665,7 @@ CSVWriter: struct {
         self.buffer[0] = U8{13}
         self.buffer[1] = U8{10}
         window: self.buffer[0..<2]
-        encoding.__write_bytes(self.output, window) ?? return Err(self.io_error(err))
+        rt.write_bytes(self.output, window) ?? return Err(self.io_error(err))
         self.total += 2
         self.pending_crlf = false
     }
@@ -709,7 +709,7 @@ CSVWriter: struct {
                     self.byte(byte, if byte == (U8{34}) -> 2 else -> 1) ?? return Err(err)
                 }
                 self.byte(U8{34}, 1) ?? return Err(err)
-            } else { encoding.__write_text(self.output, field) ?? return Err(self.io_error(err)) }
+            } else { rt.write_text(self.output, field) ?? return Err(self.io_error(err)) }
         }
         self.total += wire
         self.pending_crlf = true
@@ -726,7 +726,7 @@ CSVWriter: struct {
 
     flush: fn(&self) EncodingError! -[IO]> {
         if self.terminal == .Val(error) -> return Err(error)
-        encoding.__flush(self.output) ?? {
+        rt.flush(self.output) ?? {
             error: self.io_error(err)
             self.terminal = Val(error)
             return Err(error)
@@ -812,7 +812,7 @@ CSVReader: struct {
             if mem.__list_capacity<U8>(self.buffer) == 0 && !stream.reserve<U8>(self.allocation, self.buffer, self.limits.buffer_bytes) -> return Err(self.capacity_error())
             self.buffer.clear()
             self.buffered = 0
-            count: encoding.__read_into(self.input, self.buffer, self.limits.buffer_bytes) ?? {
+            count: rt.read_into(self.input, self.buffer, self.limits.buffer_bytes) ?? {
                 error := codec_error(.IO, self.offset, self.line, self.column, self.path(), "file IO failed")
                 error.cause = Val(err)
                 return Err(error)

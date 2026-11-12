@@ -2,7 +2,7 @@
 // engine reused from origin/port/compiler@3aab69fde; every tier calls this API.
 use {
     core.encoding.[Dyn, EncodingCause, EncodingError, EncodingErrorKind, EncodingLimits]
-    encoding: core.encoding
+    rt: jet.runtime.encoding
     core.files.[FileReader, FileWriter]
     core.prelude.[min, max]
     mem: core.mem
@@ -203,7 +203,7 @@ XMLReader: struct {
             bytes := [U8]{}
             if !stream.reserve(self.allocation, bytes, read_bytes) -> return self.fail(heap_error(self.total))
             capacity: mem.__list_capacity<U8>(bytes)
-            count: encoding.__read_into(self.input, bytes, read_bytes) ?? {
+            count: rt.read_into(self.input, bytes, read_bytes) ?? {
                 self.allocation.release(capacity)
                 return self.fail(io_error(self.total, err))
             }
@@ -291,7 +291,7 @@ XMLWriter: struct {
             }
         }
         window: bytes[0..<bytes.len()]
-        encoding.__write_bytes(self.output, window) ?? {
+        rt.write_bytes(self.output, window) ?? {
             self.allocation.release(bytes.len())
             return self.fail(io_error(self.total, err))
         }
@@ -301,7 +301,7 @@ XMLWriter: struct {
 
     flush: fn(&self) EncodingError! -[IO]> {
         if self.terminal == .Val(error) -> return Err(error.copy())
-        encoding.__flush(self.output) ?? return self.fail(io_error(self.total, err))
+        rt.flush(self.output) ?? return self.fail(io_error(self.total, err))
     }
 
     finish: fn(&self) EncodingError! -[IO]> {
