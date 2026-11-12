@@ -2380,15 +2380,31 @@ jet_cli_wants_json: fn(owned: [String]) -> Bool Never! {
     json
 }
 
+// Whether the command line `raw` asks for machine output: `--json` typed
+// (jet_cli_wants_json), or remembered by the settings files for its command
+// (CommandLayers.jet), which jet_cli_plan adds after the typed words. A
+// refusal and a failed verb answer in this output, so a `json` setting has
+// the effect of the typed flag. `jet -e CODE` runs as the `jet <file>`
+// shorthand does, under `run`'s settings.
+jet_cli_settled_json: fn(raw: [String]) -[FS, Env]> Bool Never! {
+    owned: jet_cli_owned_flags(raw)
+    if jet_cli_wants_json(owned) -> return true
+    found: if jet_cli_eval_flag_at(raw) != None -> String?{Val("run")} else -> jet_cli_settings_word(owned)
+    word: found ?? return false
+    if jet_cli_command_flag_words(word, owned, false) == .Words(words) -> return words.contains("--json")
+    false
+}
+
 // Plan one `jet` invocation; `raw` is argv without the program name. Under
-// `--json` a refusal is the `cli` status envelope on stdout.
+// `--json`, typed or set (jet_cli_settled_json), a refusal is the `cli`
+// status envelope on stdout.
 jet_cli_front: fn(raw: [String]) -[FS, Env, Time, Exec, IO, FFI.C, FFI.Asm, Net]> JetCLIPlan Never! {
     plan: jet_cli_plan(raw)
     if plan == {
         .Refused(report, _, exit_code, notice) -> {
-            if jet_cli_wants_json(jet_cli_owned_flags(raw)) -> return jet_cli_done(jet_cli_report_status_json(report), notice, exit_code)
+            if jet_cli_settled_json(raw) -> return jet_cli_done(jet_cli_report_status_json(report), notice, exit_code)
         }
-        .Diagnostics(file, source, report, color, notice) -> return JetCLIPlan.Done{output: jet_cli_diagnostics_output(file, source, report, color, jet_cli_wants_json(jet_cli_owned_flags(raw)), notice)}
+        .Diagnostics(file, source, report, color, notice) -> return JetCLIPlan.Done{output: jet_cli_diagnostics_output(file, source, report, color, jet_cli_settled_json(raw), notice)}
         .Done(_) | .Check(_, _, _, _, _, _, _, _, _, _, _, _) | .CheckWorkspace(_, _, _, _, _, _, _, _, _, _) | .CheckPrelude(_, _, _, _, _, _) | .CheckCore(_, _, _, _, _) | .Build(_, _, _, _, _, _, _, _, _, _, _) | .LockedBuild(_, _) | .BuildPackage(_, _, _, _, _, _, _, _) | .Run(_, _, _, _, _, _, _, _, _, _, _, _) | .RunRemote(_, _, _, _, _, _, _, _) | .NativeSource(_, _, _, _, _) | .DevWeb(_, _, _, _, _, _, _, _) | .Jobs(_, _, _, _) | .Test(_, _, _, _, _, _) | .TestWorkspace(_, _, _, _, _, _, _, _) | .TestProfile(_, _, _, _, _, _) | .New(_, _, _, _, _, _) | .Doc(_, _, _, _, _) | .Emit(_, _, _, _, _, _) | .Eval(_, _, _, _, _) | .Fill(_, _, _) | .Structural(_, _, _) | .Review(_, _, _) | .Keygen(_, _, _) | .KeyBackup(_, _, _) | .Publish(_, _, _, _) | .Yank(_, _, _) | .Lint(_, _, _, _, _, _, _) | .Fmt(_) | .FmtLang(_, _) | .Fix(_, _, _, _, _, _, _, _, _) | .Inspect(_) | .InspectB(_) | .ForeignBind(_, _, _) | .Perf(_, _) | .Semindex(_, _, _) | .Find(_, _, _, _) | .Cache(_, _) | .Remote(_, _, _) | .Comparison(_, _, _) | .Try(_, _, _) | .Maintenance(_, _, _, _) | .Completion(_, _, _) | .Schema(_, _, _, _, _) | .Codemod(_, _, _, _, _) | .PolicyExplain(_, _, _, _, _, _) | .DiagnosticTypeExplain(_, _, _, _) | .BuildFactExplain(_, _, _, _, _, _, _) | .Gates(_, _, _, _, _) | .Output(_, _, _, _) | .Doctor(_, _, _, _) | .UpdateJet(_, _, _, _, _) | .AuditCopies(_, _, _, _, _) | .AuditForeign(_, _, _, _, _) | .CompilerService(_) | .Repl(_, _, _, _) | .LSP | .ReplChild(_) | .EvalExpression(_, _, _) | .Prove(_, _, _, _, _, _) | .Budget(_, _, _, _) | .AuditWrites(_, _, _, _, _) -> {}
     }
     plan

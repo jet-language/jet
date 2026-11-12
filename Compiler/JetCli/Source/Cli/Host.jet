@@ -3423,20 +3423,21 @@ jet_cli_alias_args: fn(argv: [String]) -> [String] Never! {
 // A compiling verb's compile traces through the process's one sink: the
 // target of the `--trace` control (Request.jet `jet_cli_trace_sink`).
 // A verb that holds a compile result ends the process itself (jet_cli_finish);
-// every other verb's output ends it here, as its `--json` outcome
-// (jet_cli_json_outcome), through jet_cli_finish too, so its ICE exits 101.
+// every other verb's output ends it here, as its `--json` outcome, typed or
+// set (jet_cli_json_outcome, jet_cli_settled_json), through jet_cli_finish
+// too, so its ICE exits 101. Only a failed verb's output depends on `--json`,
+// so only a failure reads the settings again.
 // This is round 3's entry shape: every seed (a0_001 included) checks and
 // lowers it.
 jet_cli_main: fn(args: [String]) {
     plan: jet_cli_front(args)
-    owned: jet_cli_owned_flags(args)
     recording := JetCLICheckRecording?{None}
     if jet_cli_check_receipt_begin(args, plan) == {
         .Replay(replayed) -> jet_cli_finish(replayed)
         .Run(claimed) -> recording = claimed
     }
     done: if jet_cli_plan_compiles(plan) -> jet_cli_compile_on_worker(plan, recording) else -> jet_cli_execute(plan)
-    output: jet_cli_json_outcome(jet_cli_wants_json(owned), done)
+    output: jet_cli_json_outcome(done.failure != None && jet_cli_settled_json(args), done)
     // A check that ends here (refused before its compile) is still recorded.
     if recording == .Val(claimed) -> jet_cli_check_receipt_publish(claimed, output, [JetCLIReceiptInput]{})
     jet_cli_finish(output)

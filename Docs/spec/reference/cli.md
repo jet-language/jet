@@ -630,10 +630,13 @@ of strings for a flag that repeats. A relative path a compiler control takes
 (`trace`, `keep_going_report`, `gc_trace`, `memory_ledger`) is resolved
 against the directory of the file that declares it. A compiler control's
 setting ranks below its environment variable, as `jet env vars --command=C`
-shows. A missing file holds no settings. A malformed file, an unknown key, a
-value of the wrong shape, or a flag that is typed each time (a permission, a
-destructive flag, or one that names what one run works on, E2117) is refused
-before the command does anything, each problem with its file and line.
+shows. A remembered flag has the effect of the typed one: with `check.json`
+set, a `jet check` that is refused or fails prints the same JSON status as
+`jet check --json`. A missing file holds no settings. A malformed file, an
+unknown key, a value of the wrong shape, or a flag that is typed each time (a
+permission, a destructive flag, or one that names what one run works on, E2117)
+is refused before the command does anything, each problem with its file and
+line.
 
 ## Jet-hosted `check`, `build`, `run`, `test`, `new`, and `fmt`
 
