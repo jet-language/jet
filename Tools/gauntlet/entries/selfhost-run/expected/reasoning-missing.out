@@ -1,0 +1,253 @@
+{
+  "schema": "jet.selfhost.receipt.v1",
+  "study": "#2955",
+  "status": "unresolved",
+  "generatedAt": "<time>",
+  "manifest": {
+    "path": "Tools/perf/selfhost/manifest.json",
+    "sha256": "228911abb8ebb6b7a7eaffd8e530d5bf42dc86d47993c95d2789b18211ec4d7f"
+  },
+  "runRoot": "<runRoot>",
+  "requested": {
+    "phase": "reasoning",
+    "mode": null,
+    "workloads": [
+      "scan-parse"
+    ]
+  },
+  "sourceBoundary": {
+    "productionCompiler": "Source/",
+    "comparisonRole": "read-only retained Rust-hosted compiler input",
+    "portStarted": false,
+    "versionMigration": false,
+    "releaseGateAdded": false
+  },
+  "evidencePolicy": {
+    "machine": {
+      "owner": "driver and later compiler/oracle runs",
+      "records": [
+        "identity",
+        "exit",
+        "stdout",
+        "stderr",
+        "latency",
+        "peak_rss",
+        "diagnostic",
+        "invalidation",
+        "source_complexity"
+      ],
+      "initialStatus": "unavailable"
+    },
+    "model": {
+      "owner": "explicit workload contract and independent oracle",
+      "records": [
+        "expected_values",
+        "expected_failures",
+        "ownership",
+        "effects",
+        "invalidation",
+        "target",
+        "resource_limits"
+      ],
+      "initialStatus": "unrun"
+    },
+    "human": {
+      "owner": "later consented reader/repair study",
+      "records": [
+        "cold_read",
+        "repair_friction",
+        "explain",
+        "predict",
+        "modify",
+        "derive"
+      ],
+      "initialStatus": "unavailable",
+      "simulatedReadersAreNotHumanEvidence": true
+    },
+    "trust": {
+      "rust": "independent same-job counterpart; agreement is comparison evidence, never proof of Jet correctness",
+      "foreign": "native artifact and ABI are retained trust assumptions unless separately checked; matching source filenames do not prove a loaded binary",
+      "bootstrap": "equal stage binaries would establish identity only, not semantic correctness"
+    }
+  },
+  "workloads": [
+    {
+      "id": "scan-parse",
+      "title": "Source scanning and parsing",
+      "status": "unrun",
+      "sourceDirectory": "Tools/perf/selfhost/workloads/scan-parse",
+      "workspace": "scan-parse",
+      "evidence": {
+        "identity": {
+          "algorithm": "sha256",
+          "aggregate": "8bfad089b9b604bec4328e556dd806ebed87bda5393ccd2c0f67b84a02cbe208",
+          "files": [
+            {
+              "path": "oracle.rs",
+              "bytes": 1400,
+              "sha256": "99095aced1a5d797f910b56c62f0a7571127f7526cdcb99743ce766bc88aa4f4"
+            },
+            {
+              "path": "package.jet",
+              "bytes": 61,
+              "sha256": "3fa135d063f358127417f71929790ef5ca4885d7ff6b92887af41ae121edee44"
+            },
+            {
+              "path": "run.jet",
+              "bytes": 1266,
+              "sha256": "e1579194c624f52b266a9cce78919015c7223aff51342e64e1c8c97188eae8e3"
+            }
+          ]
+        },
+        "sourceComplexity": {
+          "files": [
+            {
+              "path": "package.jet",
+              "bytes": 61,
+              "lines": 4,
+              "comments": 0,
+              "declarations": 0,
+              "controlForms": 0
+            },
+            {
+              "path": "run.jet",
+              "bytes": 1266,
+              "lines": 44,
+              "comments": 0,
+              "declarations": 4,
+              "controlForms": 6
+            }
+          ],
+          "totals": {
+            "bytes": 1327,
+            "lines": 48,
+            "comments": 0,
+            "declarations": 4,
+            "controlForms": 6
+          },
+          "interpretation": "machine source-shape counts only; not a readability or repair score"
+        },
+        "machine": {
+          "status": "unavailable",
+          "records": []
+        },
+        "model": {
+          "status": "unrun",
+          "contracts": {
+            "ownership": "tokens are read during parsing; returned AST nodes own their copied classification fields",
+            "effects": [],
+            "invalidation": "source bytes or lexer rules invalidate the parse and all derived AST facts; unrelated workload inputs remain reusable",
+            "memory": "bounded by 64 tokens and 256 AST nodes for this fixture",
+            "target": "hosted native and default interpreter; web is not applicable because this is a CLI batch job"
+          },
+          "expected": [
+            {
+              "id": "valid",
+              "expected": {
+                "exit": 0,
+                "stdout": "tokens=8 lexeme_bytes=26 identifiers=4 ast_nodes=8\nparse=ok root=keyword ownership=owned\n",
+                "stderr": ""
+              }
+            }
+          ]
+        },
+        "human": {
+          "status": "unavailable",
+          "records": [],
+          "note": "No participant observation is authored by this driver."
+        },
+        "trust": {
+          "rust": "independent same-job counterpart; agreement does not prove Jet semantics",
+          "foreign": "no foreign artifact in this workload",
+          "bootstrap": "retained Rust-host boundary is not a semantic correctness certificate"
+        },
+        "supportedModes": [
+          {
+            "mode": "check",
+            "status": "unrun"
+          },
+          {
+            "mode": "run",
+            "status": "unrun"
+          },
+          {
+            "mode": "run-interpret",
+            "status": "unrun"
+          },
+          {
+            "mode": "build",
+            "status": "unrun"
+          },
+          {
+            "mode": "run-release",
+            "status": "unrun"
+          }
+        ]
+      },
+      "oracle": null,
+      "jet": [],
+      "repair": null,
+      "reasoning": {
+        "status": "unavailable",
+        "reason": "missing reasoning capture: <cwd>/missing.json",
+        "tasks": [
+          {
+            "id": "explain",
+            "status": "unrun",
+            "evidenceClass": "model",
+            "prompt": "Explain why changing one token invalidates the AST but does not mutate the input token list.",
+            "expectedObservations": [
+              "input remains source-owned",
+              "AST result is a separate owned value",
+              "parse dependency changes"
+            ]
+          },
+          {
+            "id": "predict",
+            "status": "unrun",
+            "evidenceClass": "model",
+            "prompt": "Predict the valid case's token count, lexeme byte count, identifier count, and root kind before execution.",
+            "expectedObservations": [
+              "tokens=8",
+              "lexeme_bytes=26",
+              "identifiers=4",
+              "root=keyword"
+            ]
+          },
+          {
+            "id": "modify",
+            "status": "unrun",
+            "evidenceClass": "model",
+            "prompt": "Change the final identifier from right to value and state which observation changes.",
+            "expectedObservations": [
+              "only source identity and dependent AST text change",
+              "counts stay stable"
+            ]
+          },
+          {
+            "id": "derive",
+            "status": "unrun",
+            "evidenceClass": "model",
+            "prompt": "Derive the invalidation edge from source bytes to parse nodes.",
+            "expectedObservations": [
+              "source -> tokens -> AST"
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "summary": {
+    "unrun": 1
+  },
+  "goNoGo": {
+    "decision": "unresolved",
+    "portfolio": "unresolved",
+    "readiness": false,
+    "portApproval": "not-addressed",
+    "owner": "#217",
+    "portOwner": "#218",
+    "reason": "At least one workload, supported mode, oracle, repair, or reasoning obligation remains unrun, unavailable, or failed.",
+    "retainedBoundary": "The Rust same-job oracles and foreign artifacts remain explicit trust boundaries."
+  }
+}

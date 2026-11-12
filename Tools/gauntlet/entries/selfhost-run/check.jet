@@ -1,0 +1,48 @@
+// The job of a selfhost-run case, as facts (the harness runs it in the case
+// directory with the file holding the program's output): the receipt the
+// program printed, with what changes from run to run held fixed. That is the
+// run root and the case directory, wherever they appear, the time the receipt
+// was made, and every latency and peak memory figure; a JSON parser's own
+// wording of why a capture is not JSON is left out too.
+use {
+    files: core.files
+    json: core.encoding.json
+}
+
+MEASURED: [String]{"latencyMs", "peakRssBytes"}
+BROKEN: "invalid reasoning JSON"
+
+// `value` with `root` shown as <runRoot> and `here` as <cwd>, every measured
+// figure as <measured> and the parser's wording dropped.
+steady: fn(value: Dyn, root: String, here: String) -> Dyn {
+    if value == .Text(text) -> return Dyn.Text(if text.starts_with(BROKEN) -> BROKEN else -> text.replace(root, "<runRoot>").replace(here, "<cwd>"))
+    if value == .Array(list) {
+        out := [Dyn]{}
+        loop item in list -> out.push(steady(item, root, here))
+        return Dyn.Array(out)
+    }
+    if value == .Object(entries) {
+        out := Dyn.object()
+        loop entry in entries {
+            out[entry.key] = if MEASURED.contains(entry.key) -> Dyn.Text("<measured>") else -> steady(entry.value, root, here)
+        }
+        return out
+    }
+    value.copy()
+}
+
+#CLI
+Check: struct {
+    #Doc("The file holding the program's output") stdout: String
+}
+run: fn(check: Check) {
+    printed: files.read(check.stdout) ?? panic("no output file: {err}")
+    receipt: json.parse(printed) ?? panic("the output is not JSON: {err}")
+    root: (receipt.get("runRoot") ?? Dyn.Null).text() ?? panic("the receipt names no run root")
+    shown := steady(receipt, root, files.cwd() ?? panic("no working directory: {err}"))
+    shown["generatedAt"] = Dyn.Text("<time>")
+    print(json.stringify(shown, 2))
+    // With --output out/receipt.json the program writes the receipt there too.
+    written: files.read("out/receipt.json") ?? ""
+    if written != "" -> print("out/receipt.json {if written == printed -> "holds" else -> "differs from"} the printed receipt")
+}

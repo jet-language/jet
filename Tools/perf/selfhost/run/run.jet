@@ -1,0 +1,777 @@
+// The self-hosting study's driver (#5072 c20), the twin of
+// Tools/perf/selfhost/run.mjs. It runs the eight isolated workloads that
+// manifest.json declares and prints one JSON receipt of what it observed.
+//
+//   jet Tools/perf/selfhost/run/run.jet [--list] [--all] [--workload ID]...
+//       [--phase NAME] [--mode NAME] [--reasoning-file FILE] [--output FILE]
+//
+// Each workload is copied into a fresh run directory below $JET_SELFHOST_SCRATCH,
+// else the jet-dev state root's selfhost/. That root must lie outside the
+// repository. Each mode, oracle and repair gets its own copy of the workload
+// and its own stores. Jet commands run through Tools/agent/JetEnv.jet, and each
+// command's peak memory comes from its process receipt. A command that cannot
+// start, times out or prints more than 8 MiB stays in the receipt as such.
+// Nothing here approves a port: the go/no-go decision is at most
+// "owner-decision-required". A bad option, or a scratch root inside the
+// repository, is exit 2.
+use {
+    crypto: core.crypto
+    files: core.files
+    json: core.encoding.json
+    process: core.process
+    regex: core.regex
+    sys: core.sys
+    time: core.time
+    core.encoding.[Dyn, EncodingError]
+    core.regex.[RegexFlags]
+}
+
+// This driver's path below the checkout that holds it.
+DRIVER: "/Tools/perf/selfhost/run/run.jet"
+OUTPUT_LIMIT: 8388608
+PHASES: [String]{"identity", "complexity", "check", "build", "run", "repair", "reasoning", "all"}
+MODES: [String]{"check", "run", "run-interpret", "build", "run-release"}
+VALUE_OPTIONS: [String]{"--workload", "--phase", "--mode", "--reasoning-file", "--output"}
+REASONING_TASKS: [String]{"explain", "predict", "modify", "derive"}
+EVIDENCE_CLASSES: [String]{"machine", "model", "human"}
+CAPTURE_SCHEMA: "jet.selfhost.reasoning.capture.v1"
+ONE_EACH: "reasoning capture must contain exactly one explain, predict, modify, and derive task"
+NO_FOREIGN: "no foreign artifact in this workload"
+// Linux signal names by number, as a killed command's signal is reported.
+SIGNALS: [String]{"", "SIGHUP", "SIGINT", "SIGQUIT", "SIGILL", "SIGTRAP", "SIGABRT", "SIGBUS", "SIGFPE", "SIGKILL", "SIGUSR1", "SIGSEGV", "SIGUSR2", "SIGPIPE", "SIGALRM", "SIGTERM", "SIGSTKFLT", "SIGCHLD", "SIGCONT", "SIGSTOP", "SIGTSTP", "SIGTTIN", "SIGTTOU", "SIGURG", "SIGXCPU", "SIGXFSZ", "SIGVTALRM", "SIGPROF", "SIGWINCH", "SIGIO", "SIGPWR", "SIGSYS"}
+// Source-shape patterns over a workload's .jet files: a declaration starts a
+// line, and a control form is one of Jet's control keywords.
+DECLARATION: `^\s*(?:pub\s+)?(?:impl\b|[A-Za-z_][\w.]*(?:<[^>\n]*>)?:\s*(?:fn|struct|enum|module|trait)\b)`
+CONTROL_FORM: Regex{"\b(?:if|loop|match|task|return|break|continue)\b"}
+COMMENT_LINE: Regex{"^\s*//"}
+USAGE: [String]{
+    "usage: node Tools/perf/selfhost/run.mjs [options]",
+    "",
+    "  --list                    list the eight isolated workload contracts",
+    "  --all                     execute every requested phase",
+    "  --workload ID             select one workload (repeatable)",
+    "  --phase NAME              identity|complexity|check|build|run|repair|reasoning|all",
+    "  --mode NAME               check|run|run-interpret|build|run-release (for build/run)",
+    "  --reasoning-file FILE     consume a captured reasoning protocol JSON",
+    "  --output FILE             write the JSON receipt as well as stdout",
+    "  --help                    show this help",
+    "",
+    "No command is run unless --all or an execution phase is selected. Unrun and",
+    "unavailable results stay visible and never become readiness evidence.",
+}
+
+// The part of manifest.json the driver reads; the rest is passed on as it is.
+#Rename(.Camel)
+Manifest: struct { study: String, source_boundary: Dyn, evidence_policy: Dyn, defaults: Defaults, workloads: [Workload] }
+Defaults: struct { limits: Limits }
+#Rename(.Camel)
+Limits: struct { check_timeout_ms: Int, run_timeout_ms: Int, build_timeout_ms: Int }
+#Rename(.Camel)
+Workload: struct {
+    id: String, title: String, directory: String, entry: String, oracle: String
+    cases: [Case], supported_modes: [String], targets: Dyn, limits: Limits?, contract: Dyn
+    reasoning: [Task], native: NativePlan?, repair: RepairPlan?
+}
+// A case of `kind` "check" is a diagnostic: it is checked, never run.
+Case: struct { id: String, kind: String?, program: String?, expected: Dyn }
+#Rename(.Camel)
+Task: struct { id: String, prompt: String?, expected_observations: Dyn? }
+NativePlan: struct { build: String, artifact: String, trust: String? }
+#Rename(.Camel)
+RepairPlan: struct { program: String, replacement: Replacement, expected_program: String, expected_exit: Int }
+#Rename(.Camel)
+Replacement: struct { start: Int, end: Int, new_text: String }
+Expected: struct { exit: Int, stdout: String?, stderr: String?, diagnostic: ExpectedDiagnostic? }
+#Rename(.Camel)
+ExpectedDiagnostic: struct { code: String, file: String, line: Int, col: Int, span: Span, fix_text: String }
+Span: struct { start: Int, end: Int }
+// The fields of a reported diagnostic that a case's expected one is held to.
+SeenDiagnostic: struct { code: String?, file: String?, line: Int?, col: Int?, span: Span?, fix_edits: [FixEdit]? }
+FixEdit: struct { new_text: String?, span: Span? }
+
+#Error
+Refusal: struct {
+    message: String
+    impl Display {
+        display: fn(self) -> String { self.message.copy() }
+    }
+}
+
+Study: struct { repo: String, home: String, jet_env: String, manifest: Manifest }
+
+Options: struct {
+    list: Bool{false}
+    all: Bool{false}
+    help: Bool{false}
+    workloads: [String]{[String]{}}
+    phase: String?{None}
+    mode: String?{None}
+    reasoning_file: String?{None}
+    output: String?{None}
+}
+
+// One command's run: what it printed and how it ended.
+Ran: struct {
+    status: String, command: String, identity: Dyn, args: [String]
+    exit_code: Int?, signal: String?, stdout: String, stderr: String
+    latency_ms: Float, peak_rss_bytes: Int?
+}
+// A command's run held to a case's expectation.
+#Rename(.Camel)
+Comparison: struct { expected_exit: Int, actual_exit: Int?, stdout_exact: Bool?, stderr_exact: Bool?, diagnostic_exact: Bool? }
+Compared: struct { comparison: Comparison, matches: Bool }
+// An evidence record: its status and the receipt tree that shows it.
+Record: struct { status: String, tree: Dyn }
+// A Jet case's run, and whether it counts toward its mode.
+CaseRun: struct { tree: Dyn, applicable: Bool, matches: Bool, unavailable: Bool }
+ModeRow: struct { mode: String, status: String, record: Dyn? }
+Evaluated: struct { tree: Dyn, complete: Bool }
+#Rename(.Camel)
+Shape: struct { path: String, bytes: Int, lines: Int, comments: Int, declarations: Int, control_forms: Int }
+#Rename(.Camel)
+Totals: struct { bytes: Int, lines: Int, comments: Int, declarations: Int, control_forms: Int }
+#Rename(.Camel)
+TemplateTask: struct { id: String, status: String, evidence_class: String, prompt: String, expected_observations: Dyn }
+#Rename(.Camel)
+ObservedTask: struct { id: String, status: String, evidence_class: String, observation: String, source: Dyn }
+
+set_option: fn(options: &Options, option: String, value: String) {
+    if option == {
+        "--workload" -> options.workloads.push(value.copy())
+        "--phase" -> options.phase = Val(value.copy())
+        "--mode" -> options.mode = Val(value.copy())
+        "--reasoning-file" -> options.reasoning_file = Val(value.copy())
+        else -> options.output = Val(value.copy())
+    }
+}
+
+parse_args: fn(argv: [String], workloads: [Workload]) -> Options Refusal! {
+    options := Options{}
+    pending := ""
+    loop arg in argv {
+        if {
+            pending != "" && (arg == "" || arg.starts_with("--")) -> return Err(Refusal{message: "{pending} requires a value"})
+            pending != "" -> {
+                set_option(options, pending, arg)
+                pending = ""
+            }
+            arg == "--list" -> options.list = true
+            arg == "--all" -> options.all = true
+            arg == "--help" || arg == "-h" -> options.help = true
+            VALUE_OPTIONS.contains(arg) -> pending = arg
+            else -> return Err(Refusal{message: "unknown option: {arg}"})
+        }
+    }
+    if pending != "" -> return Err(Refusal{message: "{pending} requires a value"})
+    if !PHASES.contains(options.phase ?? "all") -> return Err(Refusal{message: "unknown phase: {options.phase ?? ""}"})
+    if !MODES.contains(options.mode ?? "check") -> return Err(Refusal{message: "unknown mode: {options.mode ?? ""}"})
+    known: workloads.map(workload -> workload.id.copy())
+    loop id in options.workloads {
+        if !known.contains(id) -> return Err(Refusal{message: "unknown workload: {id}"})
+    }
+    Ok(options)
+}
+
+// The member `key` of `tree`, null when it has none.
+at: fn(tree: Dyn, key: String) -> Dyn { tree.get(key) ?? Dyn.Null }
+
+digest: fn(path: String, bytes: [U8]) -> Dyn {
+    Dyn{[String: Dyn]{"path": path, "sha256": Dyn.Text(crypto.sha256(bytes).hex()), "bytes": bytes.len()}}
+}
+
+// The digest of the file at `path`, shown as `shown`, or null when there is none.
+file_digest: fn(path: String, shown: String) -> Dyn IOError! {
+    if !files.exists(path) -> return Ok(Dyn.Null)
+    Ok(digest(shown, files.read_bytes(path)))
+}
+
+// The program a command names, by its digest when it is a path to a file.
+command_identity: fn(command: String) -> Dyn IOError! {
+    if !command.contains("/") || !files.exists(command) -> return Ok(Dyn{[String: Dyn]{"path": command, "sha256": Dyn.Null, "bytes": Dyn.Null}})
+    Ok(digest(command, files.read_bytes(command)))
+}
+
+refuse_link: fn(path: String) Refusal! {
+    if files.is_symlink(path) -> return Err(Refusal{message: "symlink is not an isolated fixture input: {path}"})
+    Ok()
+}
+
+// `source` copied to `destination`, a fixture-state directory landing as the
+// .jet beside it. A symlink is refused.
+copy_tree: fn(source: String, destination: String) (IOError | Refusal)! {
+    refuse_link(source)
+    if !files.is_dir(source) {
+        files.create_dir_all(files.dirname(destination))
+        return files.copy(source, destination)
+    }
+    target: if files.basename(source) == "fixture-state" -> files.join(files.dirname(destination), ".jet") else -> destination
+    files.create_dir_all(target)
+    loop entry in files.list_dir(source) -> copy_tree(entry.path, files.join(target, entry.name))
+    Ok()
+}
+
+fresh_workspace: fn(source: String, workspace: String) -> String (IOError | Refusal)! {
+    copy_tree(source, workspace)
+    files.create_dir_all(files.join(workspace, "build"))
+    Ok(workspace)
+}
+
+// Every file below `root`, sorted; a symlink is refused.
+collect_files: fn(root: String) -> [String] (IOError | Refusal)! {
+    found := [String]{}
+    loop entry in files.list_dir(root) {
+        refuse_link(entry.path)
+        if entry.is_dir -> found.extend(collect_files(entry.path)) else -> found.push(entry.path)
+    }
+    found.sort()
+    Ok(found)
+}
+
+identity_for: fn(directory: String) -> Dyn (IOError | Refusal)! {
+    nul: String.from_bytes_lossy([U8]{U8{0}})
+    rows := [Dyn]{}
+    keys := [String]{}
+    loop path in collect_files(directory) {
+        name: files.relative(path, directory)
+        bytes: files.read_bytes(path)
+        sha: crypto.sha256(bytes).hex()
+        keys.push("{name}{nul}{sha}{nul}{bytes.len()}")
+        rows.push(Dyn{[String: Dyn]{"path": name, "bytes": bytes.len(), "sha256": sha}})
+    }
+    Ok(Dyn{[String: Dyn]{"algorithm": "sha256", "aggregate": Dyn.Text(crypto.sha256(keys.join("\n").bytes()).hex()), "files": Dyn.Array(rows)}})
+}
+
+// Machine counts of the shape of each .jet file below `directory`.
+complexity_for: fn(directory: String) -> Dyn (IOError | Refusal | RegexError)! {
+    multiline: RegexFlags{ignore_case: false, multiline: true, dot_matches_newline: false}
+    declaration: regex.compile_with(DECLARATION, multiline)
+    shapes := [Dyn]{}
+    total := Totals{bytes: 0, lines: 0, comments: 0, declarations: 0, control_forms: 0}
+    loop path in collect_files(directory) {
+        if !path.ends_with(".jet") -> next
+        source: files.read(path)
+        lines: source.split("\n").to_list()
+        shape: Shape{
+            path: files.relative(path, directory), bytes: source.bytes().len()
+            lines: if source == "" -> 0 else -> lines.len()
+            comments: lines.filter(line -> COMMENT_LINE.is_match(line)).len()
+            declarations: declaration.matches(source).len(), control_forms: CONTROL_FORM.matches(source).len()
+        }
+        total.bytes += shape.bytes
+        total.lines += shape.lines
+        total.comments += shape.comments
+        total.declarations += shape.declarations
+        total.control_forms += shape.control_forms
+        shapes.push(shape.encode())
+    }
+    Ok(Dyn{[String: Dyn]{"files": Dyn.Array(shapes), "totals": total.encode(), "interpretation": "machine source-shape counts only; not a readability or repair score"}})
+}
+
+mode_args: fn(entry: String, mode: String) -> [String] {
+    if mode == {
+        "check" -> [String]{"check", entry}
+        "run" -> [String]{"run", entry, "--watch=off"}
+        "run-interpret" -> [String]{"run", "--interpret", entry, "--watch=off"}
+        "build" -> [String]{"build", entry, "--release"}
+        else -> [String]{"run", "--release", entry, "--watch=off"}
+    }
+}
+
+timeout_ms: fn(study: Study, workload: Workload, phase: String) -> Int {
+    limits: workload.limits ?? study.manifest.defaults.limits
+    if phase == {
+        "check" -> limits.check_timeout_ms
+        "build" -> limits.build_timeout_ms
+        else -> limits.run_timeout_ms
+    }
+}
+
+// An environment variable a command runs with.
+Setting: struct { name: String, value: String }
+
+// The variables a command runs with beyond the caller's: its stores and
+// temporary directory below `root`, which are made here.
+command_environment: fn(root: String) -> [Setting] IOError! {
+    tmp: files.join(root, "tmp")
+    dirs: [Setting]{
+        {name: "JET_STORE_DIR", value: files.join(root, "store")}, {name: "JET_PACKAGE_STORE_DIR", value: files.join(root, "package-store")},
+        {name: "JET_FFI_CACHE_DIR", value: files.join(root, "ffi")}, {name: "JET_DEV_ORACLE_CACHE_DIR", value: files.join(root, "oracle-cache")},
+        {name: "JET_TEST_SCRATCH_DIR", value: files.join(root, "test-scratch")}, {name: "TMPDIR", value: tmp},
+    }
+    loop dir in dirs -> files.create_dir_all(dir.value)
+    Ok(dirs.concat([Setting]{{name: "CARGO_INCREMENTAL", value: "0"}, {name: "NO_COLOR", value: "1"}, {name: "TMP", value: tmp}, {name: "TEMP", value: tmp}}))
+}
+
+run_command: fn(command: String, args: [String], cwd: String, env: [Setting], timeout: Int) -> Ran IOError! {
+    started: time.unix_ns()
+    ran := Ran{status: "unavailable", command: command, identity: command_identity(command), args: args.copy(), exit_code: None, signal: None, stdout: "", stderr: "", latency_ms: 0.0, peak_rss_bytes: None}
+    spec := process.cmd([command].concat(args)).cwd(cwd).timeout(time.duration_ms(timeout)).output_limit(OUTPUT_LIMIT)
+    loop setting in env -> spec = spec.env(setting.name, setting.value)
+    if spec.run() == {
+        .Err(failure) -> ran.stderr = "{failure}"
+        .Ok(receipt) -> {
+            ran.status = if {
+                receipt.timed_out -> "timeout"
+                receipt.limit_hit != None -> "failed-output-limit"
+                receipt.code == 0 && receipt.signal == None -> "completed"
+                else -> "failed"
+            }
+            ran.exit_code = if receipt.signal == None -> Val(receipt.code) else -> None
+            ran.signal = receipt.signal.map(number -> SIGNALS.get(number) ?? "SIG{number}")
+            ran.stdout = receipt.output
+            ran.stderr = receipt.errors
+            ran.peak_rss_bytes = receipt.peak_memory_bytes
+        }
+    }
+    ran.latency_ms = Float{time.unix_ns() - started} / 1000000.0
+    Ok(ran)
+}
+
+ran_tree: fn(ran: Ran) -> Dyn {
+    Dyn{[String: Dyn]{
+        "status": ran.status, "command": ran.command, "commandIdentity": ran.identity, "args": ran.args,
+        "exitCode": ran.exit_code.encode(), "signal": ran.signal.encode(), "stdout": ran.stdout, "stderr": ran.stderr,
+        "latencyMs": ran.latency_ms, "peakRssBytes": ran.peak_rss_bytes.encode(),
+    }}
+}
+
+// The first diagnostic report among `text`'s JSON lines.
+parse_diagnostic: fn(text: String) -> Dyn? {
+    unset: [Dyn.Null, Dyn.Bool(false), Dyn.Text(""), Dyn.Int(0)]
+    loop line in text.split("\n") {
+        trimmed: line.trim()
+        if !trimmed.starts_with("{{") -> next
+        candidate: json.parse(trimmed) ?? next
+        if at(candidate, "schema") == Dyn.Text("jet.report/v1") || !unset.contains(at(candidate, "code")) -> return Val(candidate)
+    }
+    None
+}
+
+same_span: fn(seen: Span?, want: Span) -> Bool {
+    seen == Val(Span{start: want.start, end: want.end})
+}
+
+diagnostic_matches: fn(actual: Dyn?, want: ExpectedDiagnostic) -> Bool {
+    seen: (actual ?? return false).decode<SeenDiagnostic>() ?? return false
+    fixed := false
+    edits: seen.fix_edits ?? [FixEdit]{}
+    loop edit in edits {
+        fixed = fixed || (edit.new_text == Val(want.fix_text) && same_span(edit.span, want.span))
+    }
+    seen.code == Val(want.code) && seen.file.map(file -> files.basename(file)) == Val(want.file) && seen.line == Val(want.line) && seen.col == Val(want.col) && same_span(seen.span, want.span) && fixed
+}
+
+// Whether `got` is `want` exactly; null when the case states no `want` or
+// the mode, check, prints no output to hold.
+exact: fn(want: String?, got: String, mode: String) -> Bool? {
+    if mode == "check" -> None else -> want.map(text -> text == got)
+}
+
+compare: fn(ran: Ran, expected: Dyn, mode: String) -> Compared [FieldError]! {
+    want: expected.decode<Expected>()
+    comparison: Comparison{
+        expected_exit: want.exit, actual_exit: ran.exit_code
+        stdout_exact: exact(want.stdout, ran.stdout, mode), stderr_exact: exact(want.stderr, ran.stderr, mode)
+        diagnostic_exact: want.diagnostic.map(diagnostic -> diagnostic_matches(parse_diagnostic("{ran.stdout}\n{ran.stderr}"), diagnostic))
+    }
+    ended: ran.status == "completed" || (want.exit != 0 && ran.status == "failed")
+    matches: ended && ran.exit_code == Val(want.exit) && (comparison.stdout_exact ?? true) && (comparison.stderr_exact ?? true) && (comparison.diagnostic_exact ?? true)
+    Ok(Compared{comparison: comparison, matches: matches})
+}
+
+comparison_tree: fn(comparison: Comparison) -> Dyn {
+    Dyn{[String: Dyn]{
+        "expectedExit": comparison.expected_exit, "actualExit": comparison.actual_exit.encode(),
+        "stdoutExact": comparison.stdout_exact.encode(), "stderrExact": comparison.stderr_exact.encode(),
+        "diagnosticExact": comparison.diagnostic_exact.encode(),
+    }}
+}
+
+// The case a built program is held to: the first that runs.
+run_case: fn(workload: Workload) -> Case {
+    loop case in workload.cases {
+        if case.kind != Val("check") -> return case.copy()
+    }
+    workload.cases[0].copy()
+}
+
+// The workload's foreign provider, built in `workspace`; None when it has none.
+native_provider: fn(study: Study, workload: Workload, workspace: String, env: [Setting]) -> Record? (IOError | Refusal)! {
+    plan: workload.native ?? return Ok(None)
+    script: files.resolve(files.join(workspace, plan.build))
+    if !files.exists(script) {
+        return Ok(Val(Record{status: "unavailable", tree: Dyn{[String: Dyn]{"status": "unavailable", "reason": "missing native provider build script: {plan.build}"}}}))
+    }
+    ran: run_command("/bin/sh", [script], workspace, env, timeout_ms(study, workload, "build"))
+    artifact_path: files.resolve(files.join(workspace, plan.artifact))
+    native_root: files.dirname(artifact_path)
+    identity: if files.exists(native_root) -> identity_for(native_root) else -> Dyn.Null
+    artifact: file_digest(artifact_path, files.relative(artifact_path, workspace))
+    status: if ran.status == "completed" && artifact == Dyn.Null -> "failed" else -> ran.status.copy()
+    tree := ran_tree(ran)
+    tree["status"] = status
+    tree["toolchain"] = Dyn{[String: Dyn]{"command": "/bin/sh", "script": plan.build, "target": workload.targets}}
+    tree["artifact"] = artifact
+    tree["identity"] = identity
+    Ok(Val(Record{status: status, tree: tree}))
+}
+
+jet_cases: fn(study: Study, workload: Workload, mode: String, workspace: String, env: [Setting]) -> [CaseRun] (IOError | [FieldError])! {
+    runs := [CaseRun]{}
+    loop case in workload.cases {
+        diagnostic: case.kind == Val("check")
+        if mode != "check" && diagnostic {
+            runs.push(CaseRun{tree: Dyn{[String: Dyn]{"id": case.id, "status": "not-applicable", "reason": "diagnostic check case is not a runtime case"}}, applicable: false, matches: false, unavailable: false})
+            next
+        }
+        selected: if diagnostic -> "check" else -> mode
+        entry: case.program ?? workload.entry
+        argv: [String]{"jet"}.concat(if selected == "check" -> [String]{"check", entry, "--json"} else -> mode_args(entry, selected))
+        ran: run_command(study.jet_env, argv, workspace, env, timeout_ms(study, workload, selected))
+        compared: compare(ran, case.expected, selected)
+        tree: Dyn{[String: Dyn]{
+            "id": case.id, "mode": selected, "command": Dyn{[String: Dyn]{"program": study.jet_env, "args": argv}},
+            "result": ran_tree(ran), "matches": compared.matches, "comparison": comparison_tree(compared.comparison),
+        }}
+        runs.push(CaseRun{tree: tree, applicable: true, matches: compared.matches, unavailable: ran.status == "unavailable"})
+    }
+    Ok(runs)
+}
+
+// A runtime mode: its foreign provider built, then each case run.
+jet_mode: fn(study: Study, workload: Workload, mode: String, workspace: String, env: [Setting]) -> Record (IOError | Refusal | [FieldError])! {
+    native: if mode == "check" -> None else -> native_provider(study, workload, workspace, env)
+    built: native ?? Record{status: "completed", tree: Dyn.Null}
+    if built.status != "completed" {
+        return Ok(Record{status: built.status, tree: Dyn{[String: Dyn]{"mode": mode, "native": built.tree, "cases": Dyn.Array([Dyn]{})}}})
+    }
+    runs: jet_cases(study, workload, mode, workspace, env)
+    applicable: runs.filter(run -> run.applicable)
+    status: if {
+        applicable.len() > 0 && applicable.all(run -> run.matches) -> "observed"
+        applicable.any(run -> run.unavailable) -> "unavailable"
+        else -> "failed"
+    }
+    Ok(Record{status: status, tree: Dyn{[String: Dyn]{"mode": mode, "native": built.tree, "cases": Dyn.Array(runs.map(run -> run.tree.copy()))}}})
+}
+
+// The build mode: the foreign provider, the release build, then the built
+// program held to the workload's run case.
+jet_build: fn(study: Study, workload: Workload, mode: String, workspace: String, env: [Setting]) -> Record (IOError | Refusal | [FieldError])! {
+    built: native_provider(study, workload, workspace, env) ?? Record{status: "completed", tree: Dyn.Null}
+    build := Dyn{[String: Dyn]{"native": built.tree}}
+    if built.status != "completed" {
+        build["compiler"] = Dyn.Null
+        build["artifact"] = Dyn.Null
+        build["run"] = Dyn.Null
+        build["matches"] = false
+        return Ok(Record{status: built.status, tree: build})
+    }
+    compiler: run_command(study.jet_env, [String]{"jet"}.concat(mode_args(workload.entry, mode)), workspace, env, timeout_ms(study, workload, "build"))
+    artifact_path: files.join(files.join(workspace, "build"), "run")
+    artifact: file_digest(artifact_path, "build/run")
+    build["compiler"] = ran_tree(compiler)
+    build["artifact"] = artifact
+    build["run"] = Dyn.Null
+    build["comparison"] = Dyn.Null
+    build["matches"] = false
+    compiled: compiler.status == "completed" && compiler.exit_code == Val(0) && artifact != Dyn.Null
+    if compiled {
+        ran: run_command(artifact_path, [String]{}, workspace, env, timeout_ms(study, workload, "run"))
+        compared: compare(ran, run_case(workload).expected, "run")
+        build["run"] = ran_tree(ran)
+        build["comparison"] = comparison_tree(compared.comparison)
+        build["matches"] = compared.matches
+    }
+    status: if {
+        compiled && build["matches"] == Dyn.Bool(true) -> "observed"
+        compiler.status == "completed" -> "failed"
+        else -> compiler.status.copy()
+    }
+    Ok(Record{status: status, tree: build})
+}
+
+// The workload's Rust counterpart built and run, held to its run case.
+run_rust: fn(study: Study, workload: Workload, workspace: String, env: [Setting]) -> Dyn (IOError | [FieldError])! {
+    source: files.resolve(files.join(workspace, workload.oracle))
+    binary: files.join(workspace, "oracle-bin")
+    build: run_command("rustc", [String]{"--edition", "2021", source, "-O", "-o", binary}, workspace, env, timeout_ms(study, workload, "build"))
+    oracle := Dyn{[String: Dyn]{"build": ran_tree(build), "run": Dyn.Null, "matches": false, "comparison": Dyn.Null}}
+    if build.status == "completed" && build.exit_code == Val(0) {
+        ran: run_command(binary, [String]{}, workspace, env, timeout_ms(study, workload, "run"))
+        compared: compare(ran, run_case(workload).expected, "run")
+        oracle["run"] = ran_tree(ran)
+        oracle["matches"] = compared.matches
+        oracle["comparison"] = comparison_tree(compared.comparison)
+    }
+    oracle["artifact"] = file_digest(binary, "oracle-bin")
+    Ok(oracle)
+}
+
+reasoning_template: fn(workload: Workload) -> Dyn {
+    tasks := [Dyn]{}
+    loop id in REASONING_TASKS {
+        wanted: id.copy()
+        task: workload.reasoning.find(candidate -> candidate.id == wanted) ?? Task{id: id, prompt: None, expected_observations: None}
+        tasks.push(TemplateTask{id: id, status: "unrun", evidence_class: "model", prompt: task.prompt ?? "", expected_observations: task.expected_observations ?? Dyn.Array([Dyn]{})}.encode())
+    }
+    Dyn.Array(tasks)
+}
+
+verdict: fn(status: String, reason: String) -> Record {
+    Record{status: status, tree: Dyn{[String: Dyn]{"status": status, "reason": reason}}}
+}
+
+// A captured reasoning protocol, held to the workload: exactly the four
+// tasks, each with an observation and an evidence class, and no claim of
+// readiness or approval.
+validate_capture: fn(capture: Dyn, study: Study, workload: Workload) -> Record {
+    if at(capture, "schema") != Dyn.Text(CAPTURE_SCHEMA) -> return verdict("rejected", "reasoning capture schema is not {CAPTURE_SCHEMA}")
+    if at(capture, "study") != Dyn.Text(study.manifest.study.copy()) || at(capture, "workload") != Dyn.Text(workload.id.copy()) {
+        return verdict("rejected", "reasoning capture is attached to a different study or workload")
+    }
+    if at(capture, "readiness") == Dyn.Bool(true) || at(capture, "portApproval") == Dyn.Text("approved") {
+        return verdict("rejected", "reasoning capture cannot grant readiness or port approval")
+    }
+    entries: at(capture, "tasks").decode<[Dyn]>() ?? [Dyn]{}
+    ids: entries.map(entry -> at(entry, "id"))
+    if entries.len() != REASONING_TASKS.len() -> return verdict("rejected", ONE_EACH)
+    loop id in REASONING_TASKS {
+        if ids.count(Dyn.Text(id.copy())) != 1 -> return verdict("rejected", ONE_EACH)
+    }
+    tasks := [Dyn]{}
+    loop id in REASONING_TASKS {
+        entry: entries[ids.index_of(Dyn.Text(id.copy())) ?? 0]
+        observation: at(entry, "observation").decode<String>() ?? ""
+        class: at(entry, "evidenceClass").decode<String>() ?? ""
+        source: at(entry, "source")
+        if {
+            observation == "" -> return verdict("rejected", "reasoning task has no observation: {id}")
+            !EVIDENCE_CLASSES.contains(class) -> return verdict("rejected", "invalid evidence class for {id}")
+            source.decode<String?>() == .Err(_) -> return verdict("rejected", "invalid source provenance for {id}")
+        }
+        tasks.push(ObservedTask{id: id, status: "observed", evidence_class: class, observation: observation, source: source}.encode())
+    }
+    Record{status: "observed", tree: Dyn{[String: Dyn]{"status": "observed", "tasks": Dyn.Array(tasks)}}}
+}
+
+load_reasoning: fn(path: String?, study: Study, workload: Workload) -> Record {
+    file: path ?? return Record{status: "unrun", tree: Dyn{[String: Dyn]{"status": "unrun", "tasks": reasoning_template(workload)}}}
+    if !files.exists(file) {
+        return Record{status: "unavailable", tree: Dyn{[String: Dyn]{"status": "unavailable", "reason": "missing reasoning capture: {file}", "tasks": reasoning_template(workload)}}}
+    }
+    capture: json.parse(files.read(file) ?? return verdict("rejected", "invalid reasoning JSON: {err}")) ?? return verdict("rejected", "invalid reasoning JSON: {err}")
+    validate_capture(capture, study, workload)
+}
+
+// The workload's authored repair applied to its program, then checked.
+run_repair: fn(study: Study, workload: Workload, workspace: String, env: [Setting]) -> Dyn (IOError | Refusal)! {
+    plan: workload.repair ?? return Ok(verdict("not-applicable", "no authored repair protocol").tree)
+    source_path: files.join(workspace, plan.program)
+    if !files.exists(source_path) -> return Ok(verdict("unavailable", "missing repair program: {plan.program}").tree)
+    source: files.read(source_path)
+    span: plan.replacement
+    if span.start < 0 || span.end < span.start || span.end > source.len() -> return Err(Refusal{message: "repair span is outside the source"})
+    edited: "{source.slice(0, span.start)}{span.new_text}{source.slice(span.end, source.len())}"
+    files.write(files.join(workspace, "repair-candidate.jet"), edited)
+    ran: run_command(study.jet_env, [String]{"jet", "check", "repair-candidate.jet", "--json"}, workspace, env, timeout_ms(study, workload, "check"))
+    expected_path: files.join(workspace, plan.expected_program)
+    same: files.exists(expected_path) && files.read(expected_path) == edited
+    diagnostic: parse_diagnostic("{ran.stdout}\n{ran.stderr}")
+    status: if {
+        ran.status == "completed" && ran.exit_code == Val(plan.expected_exit) && same && diagnostic == None -> "observed"
+        ran.status == "completed" -> "failed"
+        else -> ran.status.copy()
+    }
+    Ok(Dyn{[String: Dyn]{
+        "status": status, "program": plan.program, "replacement": plan.replacement.encode(),
+        "editedIdentity": Dyn{[String: Dyn]{"sha256": Dyn.Text(crypto.sha256(edited.bytes()).hex()), "bytes": edited.bytes().len()}},
+        "result": ran_tree(ran), "expectedExit": plan.expected_exit, "expectedProgram": plan.expected_program,
+        "sourceMatchesExpected": same, "diagnostic": diagnostic.encode(),
+    }})
+}
+
+// Whether `phase` is requested, as itself or by --all or --phase all.
+requested: fn(options: Options, phase: String) -> Bool {
+    options.all || options.phase == Val("all") || options.phase == Val((phase))
+}
+
+// The modes a workload is run in: every supported one for all phases, else
+// the --mode (or the phase's own mode) of a build, check or run phase.
+modes_to_run: fn(workload: Workload, options: Options) -> [String] {
+    if requested(options, "all") -> return workload.supported_modes.copy()
+    phase: options.phase ?? ""
+    phase_modes: [String]{"build", "check", "run"}
+    if phase_modes.contains(phase) -> return [options.mode ?? phase]
+    [String]{}
+}
+
+evidence_tree: fn(workload: Workload, identity: Dyn, complexity: Dyn, rows: [ModeRow], records: [Dyn]) -> Dyn {
+    modes := [Dyn]{}
+    loop row in rows {
+        tree := Dyn{[String: Dyn]{"mode": row.mode, "status": row.status}}
+        if row.record == .Val(record) -> tree["record"] = record
+        modes.push(tree)
+    }
+    expected: workload.cases.map(case -> Dyn{[String: Dyn]{"id": case.id, "expected": case.expected}})
+    foreign: if workload.native == .Val(plan) -> plan.trust ?? NO_FOREIGN else -> NO_FOREIGN
+    Dyn{[String: Dyn]{
+        "identity": identity, "sourceComplexity": complexity,
+        "machine": Dyn{[String: Dyn]{"status": if records.len() > 0 -> "observed" else -> "unavailable", "records": Dyn.Array(records.copy())}},
+        "model": Dyn{[String: Dyn]{"status": "unrun", "contracts": workload.contract, "expected": Dyn.Array(expected)}},
+        "human": Dyn{[String: Dyn]{"status": "unavailable", "records": Dyn.Array([Dyn]{}), "note": "No participant observation is authored by this driver."}},
+        "trust": Dyn{[String: Dyn]{
+            "rust": "independent same-job counterpart; agreement does not prove Jet semantics", "foreign": foreign,
+            "bootstrap": "retained Rust-host boundary is not a semantic correctness certificate",
+        }},
+        "supportedModes": Dyn.Array(modes),
+    }}
+}
+
+// One workload through every requested phase, each in a fresh copy below
+// `run_root`.
+evaluate: fn(study: Study, workload: Workload, options: Options, run_root: String) -> Evaluated (IOError | Refusal | RegexError | [FieldError])! {
+    source: files.resolve(files.join(study.home, workload.directory))
+    workspace: fresh_workspace(source, files.join(run_root, workload.id))
+    identity: identity_for(source)
+    complexity: complexity_for(source)
+    reasoning: load_reasoning(options.reasoning_file.map(file -> files.resolve(file) ?? file), study, workload)
+    rows := workload.supported_modes.map(mode -> ModeRow{mode: mode, status: "unrun", record: None})
+    records := [Dyn]{}
+    jet := [Dyn]{}
+    status := if requested(options, "complexity") || requested(options, "identity") -> "specified" else -> "unrun"
+    to_run: modes_to_run(workload, options)
+    passed := to_run.len() > 0
+    loop mode in to_run {
+        if !workload.supported_modes.contains(mode) {
+            jet.push(Dyn{[String: Dyn]{"mode": mode, "status": "unsupported"}})
+            passed = false
+            next
+        }
+        mode_root: files.join(files.join(run_root, workload.id), "mode-{mode}")
+        mode_workspace: fresh_workspace(source, files.join(mode_root, "workspace"))
+        env: command_environment(files.join(mode_root, "environment"))
+        outcome: if mode == "build" -> jet_build(study, workload, mode, mode_workspace, env) else -> jet_mode(study, workload, mode, mode_workspace, env)
+        record: if mode == "build" -> outcome.tree.copy() else -> outcome.tree["cases"]
+        jet.push(if mode == "build" -> Dyn{[String: Dyn]{"mode": mode, "build": outcome.tree}} else -> outcome.tree)
+        wanted: mode.copy()
+        row: rows.position(candidate -> candidate.mode == wanted) ?? 0
+        rows[row].status = outcome.status.copy()
+        rows[row].record = Val(record.copy())
+        if outcome.status == "observed" -> records.push(Dyn{[String: Dyn]{"kind": mode, "record": record}})
+        passed = passed && outcome.status == "observed"
+    }
+    if passed -> status = "observed"
+    oracle := Dyn.Null
+    if requested(options, "all") {
+        oracle_root: files.join(files.join(run_root, workload.id), "oracle")
+        oracle_workspace: fresh_workspace(source, files.join(oracle_root, "workspace"))
+        oracle = run_rust(study, workload, oracle_workspace, command_environment(files.join(oracle_root, "environment")))
+        if at(oracle, "matches") == Dyn.Bool(true) && status != "observed" -> status = "oracle-observed"
+    }
+    repair := Dyn.Null
+    if requested(options, "repair") {
+        repair_root: files.join(files.join(run_root, workload.id), "repair")
+        repair_workspace: fresh_workspace(source, files.join(repair_root, "workspace"))
+        repair = run_repair(study, workload, repair_workspace, command_environment(files.join(repair_root, "environment")))
+    }
+    if status == "unrun" && reasoning.status == "observed" -> status = "reasoning-observed"
+    repaired: [Dyn.Text("observed"), Dyn.Text("not-applicable")].contains(at(repair, "status"))
+    complete: status == "observed" && records.len() > 0 && at(oracle, "matches") == Dyn.Bool(true) && repaired && reasoning.status == "observed"
+    tree: Dyn{[String: Dyn]{
+        "id": workload.id, "title": workload.title, "status": status,
+        "sourceDirectory": Dyn.Text(files.relative(source, study.repo)), "workspace": Dyn.Text(files.relative(workspace, run_root)),
+        "evidence": evidence_tree(workload, identity, complexity, rows, records),
+        "oracle": oracle, "jet": Dyn.Array(jet), "repair": repair, "reasoning": reasoning.tree,
+    }}
+    Ok(Evaluated{tree: tree, complete: complete})
+}
+
+failed_workload: fn(id: String, error: String) -> Evaluated {
+    unavailable: Dyn{[String: Dyn]{"status": "unavailable", "records": Dyn.Array([Dyn]{})}}
+    evidence: Dyn{[String: Dyn]{"machine": unavailable.copy(), "model": Dyn{[String: Dyn]{"status": "unrun"}}, "human": unavailable}}
+    Evaluated{tree: Dyn{[String: Dyn]{"id": id, "status": "failed", "error": "Error: {error}", "evidence": evidence}}, complete: false}
+}
+
+// How many workloads ended in each status, in the order statuses first appear.
+summarize: fn(items: [Evaluated]) -> Dyn {
+    counts := Dyn.object()
+    loop item in items {
+        status: at(item.tree, "status").text() ?? ""
+        counts[status] = Dyn.Int((at(counts, status).int() ?? 0) + 1)
+    }
+    counts
+}
+
+go_no_go: fn(items: [Evaluated], study: Study) -> Dyn {
+    observed: items.len() == study.manifest.workloads.len() && items.all(item -> item.complete)
+    Dyn{[String: Dyn]{
+        "decision": if observed -> "owner-decision-required" else -> "unresolved",
+        "portfolio": if observed -> "supported-within-scope" else -> "unresolved",
+        "readiness": false, "portApproval": "not-addressed", "owner": "#217", "portOwner": "#218",
+        "reason": if observed -> "All supported machine modes, same-job oracles, repairs, and reasoning captures were observed, but this portfolio cannot approve or certify a compiler port." else -> "At least one workload, supported mode, oracle, repair, or reasoning obligation remains unrun, unavailable, or failed.",
+        "retainedBoundary": "The Rust same-job oracles and foreign artifacts remain explicit trust boundaries.",
+    }}
+}
+
+state_root: fn() -> String {
+    cache: process.env_nonempty("XDG_CACHE_HOME") ?? files.join(process.env_get("HOME") ?? "", ".cache")
+    process.env_nonempty("JET_STATE_ROOT") ?? files.join(cache, "jet-dev")
+}
+
+// The selected workloads evaluated in a fresh run directory, as the receipt.
+receipt_for: fn(study: Study, options: Options) -> Dyn (IOError | Refusal)! {
+    // node's Date.toISOString: milliseconds, always three digits, then Z.
+    ms: time.now().to_unix_ms()
+    generated: "{time.from_unix_seconds(ms /% 1000).format_rfc3339().removesuffix("Z")}.{"{ms % 1000}".pad_start(3, "0")}Z"
+    scratch_root: files.resolve(process.env_get("JET_SELFHOST_SCRATCH") ?? files.join(state_root(), "selfhost"))
+    files.create_dir_all(scratch_root)
+    scratch: files.realpath(scratch_root)
+    repository: files.realpath(study.repo)
+    if scratch == repository || scratch.starts_with("{repository}/") -> return Err(Refusal{message: "selfhost scratch must be outside the repository: {scratch}"})
+    run_root: files.join(scratch_root, "run-{time.unix_ns()}")
+    files.create_dir_all(run_root)
+    items := [Evaluated]{}
+    ids := [String]{}
+    loop workload in study.manifest.workloads {
+        if options.workloads.len() > 0 && !options.workloads.contains(workload.id) -> next
+        ids.push(workload.id.copy())
+        items.push(evaluate(study, workload, options, run_root) ?? failed_workload(workload.id, "{err}"))
+    }
+    decision: go_no_go(items, study)
+    manifest_path: files.join(study.home, "manifest.json")
+    Ok(Dyn{[String: Dyn]{
+        "schema": "jet.selfhost.receipt.v1", "study": study.manifest.study,
+        "status": if decision["decision"] == Dyn.Text("owner-decision-required") -> "observed-within-scope" else -> "unresolved",
+        "generatedAt": generated,
+        "manifest": Dyn{[String: Dyn]{"path": Dyn.Text(files.relative(manifest_path, study.repo)), "sha256": Dyn.Text(crypto.sha256(files.read_bytes(manifest_path)).hex())}},
+        "runRoot": run_root,
+        "requested": Dyn{[String: Dyn]{"phase": options.phase ?? "all", "mode": options.mode.encode(), "workloads": ids}},
+        "sourceBoundary": study.manifest.source_boundary, "evidencePolicy": study.manifest.evidence_policy,
+        "workloads": Dyn.Array(items.map(item -> item.tree.copy())), "summary": summarize(items), "goNoGo": decision,
+    }})
+}
+
+run: fn() -> Never (IOError | EncodingError | [FieldError])! {
+    repo: sys.executable().remove_suffix(DRIVER)
+    home: files.join(repo, "Tools/perf/selfhost")
+    manifest: json.parse(files.read(files.join(home, "manifest.json"))).decode<Manifest>()
+    study: Study{repo: repo, home: home, jet_env: files.join(repo, "Tools/agent/JetEnv.jet"), manifest: manifest}
+    options: parse_args(process.args(), study.manifest.workloads) ?? process.fail(2, "selfhost driver error: Error: {err}")
+    if {
+        options.help -> print(USAGE.join("\n"))
+        options.list -> loop workload in study.manifest.workloads -> print("{workload.id}\t{workload.title}\tmodes={workload.supported_modes.join(",")}")
+        !options.all && options.phase == None -> print(USAGE.join("\n"))
+        else -> {
+            receipt: receipt_for(study, options) ?? process.fail(2, "selfhost driver error: Error: {err}")
+            serialized: json.stringify(receipt, 2)
+            if options.output == .Val(output) {
+                path: files.resolve(output)
+                files.create_dir_all(files.dirname(path))
+                files.write(path, "{serialized}\n")
+            }
+            print(serialized)
+        }
+    }
+    process.exit(0)
+}
