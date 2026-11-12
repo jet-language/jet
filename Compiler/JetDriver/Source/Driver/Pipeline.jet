@@ -1512,7 +1512,10 @@ jet_driver_module_values_refused: fn(
 // A check that reported nothing, completed and waits on no batch key named
 // no batch constant (naming one makes the check wait on its key: a constant
 // without a value is a dependency, sema_comptime_dependencies_from_references),
-// so landing the batch first changes neither its result nor its waits.
+// so landing the batch first changes neither its result nor its waits. A
+// local value's check is never unsettled: whatever it reports is withdrawn,
+// and one that fails or does not complete stays run-time code, which no
+// other item reads, so it stops and reports nothing.
 jet_driver_comptime_reads_batch: fn(keys: [String:Bool], waiting: [String], unsettled: Bool) -> Bool Never! {
     if unsettled -> return true
     loop key in waiting {
@@ -2171,7 +2174,7 @@ jet_driver_comptime_run: fn(
                 jet_driver_trace_step_end(request.trace_sink, "comptime.check", 1)
                 precheck = None
                 counters.items_checked += 1
-                if batch.entries.len() > 0 && jet_driver_comptime_reads_batch(batch.keys, checked_item.waiting_dependencies, checked_item.diagnostics.len() > 0 || !checked_item.complete) {
+                if batch.entries.len() > 0 && jet_driver_comptime_reads_batch(batch.keys, checked_item.waiting_dependencies, !source.local_value && (checked_item.diagnostics.len() > 0 || !checked_item.complete)) {
                     flushed := jet_driver_comptime_flush(request, batch, values, checked_functions, trace, programs[0], staging, counters, diagnostics)
                     batch = jet_driver_comptime_batch_new()
                     if flushed.progressed -> made_progress = true
@@ -2327,7 +2330,7 @@ jet_driver_comptime_run: fn(
                 if request.trace_sink == .Val(sink) -> sink.begin_item("comptime.closure", source.source_file, source.name)
                 closure := jet_driver_comptime_function_closure(environments[0], programs[0], probe, available, run_index, memory_plan, values, checked_functions, comptime_request, source.module_value || source.local_value, source.local_value, diagnostics)
                 jet_driver_trace_step_end(request.trace_sink, "comptime.closure", closure.functions.len())
-                if batch.entries.len() > 0 && jet_driver_comptime_reads_batch(batch.keys, closure.waiting_dependencies, diagnostics.len() > item_diagnostic_start || !closure.complete) {
+                if batch.entries.len() > 0 && jet_driver_comptime_reads_batch(batch.keys, closure.waiting_dependencies, !source.local_value && (diagnostics.len() > item_diagnostic_start || !closure.complete)) {
                     loop diagnostics.len() > item_diagnostic_start {
                         _ := diagnostics.pop()
                     }

@@ -1,0 +1,18 @@
+# Card #6759 c1: a local value whose compile-time check fails (`two` returns
+# from its body) stays run-time code and reports nothing, so it does not land
+# the batch the pass holds: `four` and `nine` still build one program. `two`
+# stays a site of its body, so the pass still lands the values in `pick`
+# alone (JetSema Comptime/LocalSplice.jet), which JET_RECHECK_VERIFY=1 checks
+# against the full recheck.
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JET_RECHECK_VERIFY=1
+write: main.jet = "square: fn(n: Int) -> Int {\n    n * n\n}\n\nhalf: fn(n: Int) -> Int? {\n    if n % 2 == 0 -> return Val(n /% 2)\n    None\n}\n\npick: fn() -> Int? {\n    four: square(2)\n    two: half(4) ?? return None\n    nine: square(3)\n    Val(four + two + nine)\n}\n\nrun: fn() {\n    print(\"{pick() ?? 0}\")\n}\n"
+step: jet run --trace main.jet
+exit: 0
+stdout: = "15\n"
+stderr: ~ "# comptime.programs_built = 1\n" # four and nine build one program
+stderr: !~ "# comptime.programs_built = 2\n" # the run-time `two` does not split the batch
+stderr: ~ "# sema.local_values_spliced = 1\n" # the values land in `pick`
+stderr: !~ "# sema.local_values_refused" # no fall back to the full recheck
+stderr: !~ "JET_RECHECK_VERIFY" # the spliced result is the full recheck's
