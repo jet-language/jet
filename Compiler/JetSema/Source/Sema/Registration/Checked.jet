@@ -1519,12 +1519,12 @@ sema_checked_inline_validation: fn(module_row: SemaRegistrationModule, registere
     if language == {
         "c" | "cpp" | "asm" -> {}
         else -> {
-            diagnostics.push(sema_error("E3220", inline.lang_span, "no inline foreign binder for `{inline.lang}` yet", "the inline foreign tier ships `c`, `cpp`, and `asm` first (the systems floor, card #501); other languages arrive on later polyglot cards", "use `#FFI(c)`, `#FFI(cpp)`, or `#FFI(asm)`"))
+            diagnostics.push(sema_error("E3220", inline.lang_span, "no inline foreign binder for `{inline.lang}` yet", "the inline foreign tier ships `c`, `cpp`, and `asm`; no other language has an inline binder yet", "use `#FFI(c)`, `#FFI(cpp)`, or `#FFI(asm)`"))
             return false
         }
     }
     if !registered.declaration.is_unsafe {
-        diagnostics.push(sema_error("E3215", inline.marker_span, "`#FFI({inline.lang})` needs an `#Unsafe(\"reason\")` gate", "`{inline.lang}` is an unsafe foreign language — an inline `{inline.lang}` body can break memory safety, so Jet requires you to state why it is sound to call (I1/S58)", "add the gate: `#[Unsafe(\"…\"), FFI({inline.lang})] name: fn …`"))
+        diagnostics.push(sema_error("E3215", inline.marker_span, "`#FFI({inline.lang})` needs an `#Unsafe(\"reason\")` gate", "`{inline.lang}` is an unsafe foreign language — an inline `{inline.lang}` body can break memory safety, so Jet requires you to state why it is sound to call", "add the gate: `#[Unsafe(\"…\"), FFI({inline.lang})] name: fn …`"))
         return false
     }
     scalar_valid := registered.declaration.type_params.len() == 0

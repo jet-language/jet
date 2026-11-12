@@ -198,11 +198,11 @@ sema_call_core_record_import_reference: fn(environment: SemaScopeEnvironment, pr
 sema_call_core_crypto_expert_gate: fn(module_name: String, member: String, span: Span, context: SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool Never! {
     if context.unsafe_depth > 0 -> return false
     if module_name == "core.crypto.expert" {
-        diagnostics.push(sema_error("E0510", span, "`core.crypto.expert.{member}` requires an audited `#Unsafe` region", "raw crypto primitives may only run inside an explicit expert-tier gate (I1)", "wrap the call in `#Unsafe(\"crypto expert: …\") {{ … }}` or use `crypto.seal`/`open` instead"))
+        diagnostics.push(sema_error("E0510", span, "`core.crypto.expert.{member}` requires an audited `#Unsafe` region", "raw crypto primitives may only run inside an explicit expert-tier gate", "wrap the call in `#Unsafe(\"crypto expert: …\") {{ … }}` or use `crypto.seal`/`open` instead"))
         return true
     }
     if module_name == "core.crypto.vault" && !sema_call_core_vault_safe_member(member) {
-        diagnostics.push(sema_error("E0510", span, "`{module_name}.{member}` requires an audited `#Unsafe` region", "raw key import may only run inside an explicit expert-tier gate (I1)", "wrap the call in `#Unsafe(\"vault key import: …\") {{ … }}`"))
+        diagnostics.push(sema_error("E0510", span, "`{module_name}.{member}` requires an audited `#Unsafe` region", "raw key import may only run inside an explicit expert-tier gate", "wrap the call in `#Unsafe(\"vault key import: …\") {{ … }}`"))
         return true
     }
     false
@@ -1366,7 +1366,7 @@ sema_call_core_check_fixed_record: fn(record: CoreCallRecord, args: [CallArg], t
     }
     // #1465: POSIX process/session control requires `#Unsafe` (I1); checking continues.
     if canonical_record.module_name == "core.sys" && context.unsafe_depth == 0 && sema_call_core_posix_control(canonical_record.member) {
-        diagnostics.push(sema_error("E3101", span, "`core.sys.{canonical_record.member}` requires an audited `#Unsafe` region", "POSIX process and session control can change credentials, signals, and process topology (I1)", "wrap the call in `#Unsafe(\"posix {canonical_record.member}: …\") {{ … }}` and gate the host OS with `comptime if #build.target.os` / `#Target(OS.*)`"))
+        diagnostics.push(sema_error("E3101", span, "`core.sys.{canonical_record.member}` requires an audited `#Unsafe` region", "POSIX process and session control can change credentials, signals, and process topology", "wrap the call in `#Unsafe(\"posix {canonical_record.member}: …\") {{ … }}` and gate the host OS with `comptime if #build.target.os` / `#Target(OS.*)`"))
     }
     actual_accesses: loop argument in args -> argument.convention
     signature: sema_call_core_typed_signature(canonical_record, args.len(), actual_accesses, [Type]{}) ?? {

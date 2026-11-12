@@ -1,0 +1,117 @@
+use id_files: core.files
+
+// User-facing diagnostic text speaks plain words: no registry what, why, fix
+// or meaning string and no runtime trap text names a card (`#501`), an
+// invariant (`I9`), a decision (`D-SHAPE3a`) or a criterion (`c109`). The
+// registry rows are read from the generated DiagnosticRows.jet and the trap
+// texts from the generated TrapMessages.jet, so a source row that carries an
+// id fails here once it is generated.
+
+// The integer type widths, which follow `I` without naming an invariant.
+DT_TYPE_WIDTHS: [String]{"8", "16", "32", "64", "128"}
+
+dt_is_digit: fn(byte: U8) -> Bool { Int.from_u8(byte) >= 48 && Int.from_u8(byte) <= 57 }
+
+dt_is_upper: fn(byte: U8) -> Bool { Int.from_u8(byte) >= 65 && Int.from_u8(byte) <= 90 }
+
+dt_is_lower: fn(byte: U8) -> Bool { Int.from_u8(byte) >= 97 && Int.from_u8(byte) <= 122 }
+
+dt_is_word: fn(byte: U8) -> Bool { dt_is_digit(byte) || dt_is_upper(byte) || dt_is_lower(byte) || byte == (U8{95}) }
+
+// Does the byte before `at` end a word, so a token may start at `at`.
+dt_starts_token: fn(bytes: [U8], at: Int) -> Bool { at == 0 || !dt_is_word(bytes[at - 1]) }
+
+// The end of the digit run that starts at `at`.
+dt_digits_end: fn(bytes: [U8], at: Int) -> Int {
+    end := at
+    loop {
+        if end >= bytes.len() || !dt_is_digit(bytes[end]) -> return end
+        end += 1
+    }
+}
+
+dt_ends_token: fn(bytes: [U8], at: Int) -> Bool { at >= bytes.len() || !dt_is_word(bytes[at]) }
+
+// Every internal id `text` names: `#` and three or more digits after a space,
+// `(`, `,`, `/` or the start (`[U8#4096]` is a type, not a card); `I` and
+// digits that are not a type width; `D-` and an uppercase name holding a
+// digit; `c` and two or more digits.
+dt_ids: fn(text: String) -> [String] {
+    bytes: text.bytes()
+    found := [String]{}
+    loop at in 0..<bytes.len() {
+        byte: bytes[at]
+        if byte == (U8{35}) {
+            before_ok: at == 0 || bytes[at - 1] == (U8{32}) || bytes[at - 1] == (U8{40}) || bytes[at - 1] == (U8{44}) || bytes[at - 1] == (U8{47})
+            end: dt_digits_end(bytes, at + 1)
+            if before_ok && end - at - 1 >= 3 -> found.push(s5_grammar_slice_bytes(text, at, end))
+            next
+        }
+        if !dt_starts_token(bytes, at) -> next
+        if byte == (U8{73}) {
+            end: dt_digits_end(bytes, at + 1)
+            if end > at + 1 && dt_ends_token(bytes, end) && !DT_TYPE_WIDTHS.contains(s5_grammar_slice_bytes(text, at + 1, end)) -> found.push(s5_grammar_slice_bytes(text, at, end))
+            next
+        }
+        if byte == (U8{99}) {
+            end: dt_digits_end(bytes, at + 1)
+            if end - at - 1 >= 2 && dt_ends_token(bytes, end) -> found.push(s5_grammar_slice_bytes(text, at, end))
+            next
+        }
+        if byte == (U8{68}) && at + 2 < bytes.len() && bytes[at + 1] == (U8{45}) && dt_is_upper(bytes[at + 2]) {
+            end := at + 2
+            digit := false
+            loop {
+                if end >= bytes.len() -> break
+                following: bytes[end]
+                if !dt_is_word(following) && following != (U8{45}) -> break
+                if dt_is_digit(following) -> digit = true
+                end += 1
+            }
+            if digit -> found.push(s5_grammar_slice_bytes(text, at, end))
+        }
+    }
+    found
+}
+
+// The quoted value of a `key: "…"` registry line, "" for any other line.
+dt_row_value: fn(line: String, keys: [String]) -> String {
+    trimmed: line.trim()
+    loop key in keys {
+        prefix: "{key}: \""
+        if trimmed.starts_with(prefix) -> return s5_grammar_slice_bytes(trimmed, prefix.bytes().len(), trimmed.bytes().len())
+    }
+    ""
+}
+
+// Every id in the text rows of the generated file at `path`: the `keys`
+// fields, or what follows `marker` on a line that is not a comment.
+dt_file_violations: fn(path: String, keys: [String], marker: String) -> [String] {
+    text: id_files.read(path) ?? panic("read {path}: {err}")
+    violations := [String]{}
+    loop (index, line) in text.split("\n").to_list() {
+        if line.trim().starts_with("//") -> next
+        value := dt_row_value(line, keys)
+        if marker != "" {
+            at: s5_grammar_find(line, marker, 0)
+            if at >= 0 -> value = s5_grammar_slice_bytes(line, at + marker.bytes().len(), line.bytes().len())
+        }
+        if value == "" -> next
+        ids: dt_ids(value)
+        if ids.len() > 0 -> violations.push("{path}:{index + 1}: names {ids.join(", ")}")
+    }
+    violations
+}
+
+#Test("diagnostic_text_id_scanner_finds_every_kind") {
+    guards_enter_root()
+    ids: dt_ids("needs a gate (I1/S58), see #501, (D-SHAPE3a) and c109; keeps I64, [U8#4096], issue#12 and c1")
+    assert_eq(ids, [String]{"I1", "#501", "D-SHAPE3a", "c109"})
+}
+
+#Test("diagnostic_text_names_no_internal_ids") {
+    guards_enter_root()
+    violations := dt_file_violations("Compiler/JetFoundation/Source/Registry/DiagnosticRows.jet", [String]{"meaning", "what", "why", "fix", "next"}, "")
+    loop violation in dt_file_violations("Compiler/JetRuntime/Source/TrapMessages.jet", [String]{}, "rt_static_text(\"") -> violations.push(violation)
+    assert(violations.len() == 0, "user-facing diagnostic text names internal ids; write it in plain words and regenerate (jet Tools/agent/DiagnosticRows.jet --write):\n{violations.join("\n")}")
+}

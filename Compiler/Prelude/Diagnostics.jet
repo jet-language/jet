@@ -1428,7 +1428,7 @@ ExplicitCopiesUnparsable: struct {
     impl Diagnostic {
         code: "E0122"
         stage: [.Tooling]
-        meaning: "`jet fmt --explicit-copies` wrote copy calls that do not parse; this is a compiler defect and the file is left unchanged (#3738)"
+        meaning: "`jet fmt --explicit-copies` wrote copy calls that do not parse; this is a compiler defect and the file is left unchanged"
         detail: true
         no_fix: .Behavior
         what: fn(self) -> String { "The copy calls for `{self.file}` do not parse, so `{self.file}` was left unchanged" }
@@ -2344,7 +2344,7 @@ PinnedPlaceMoved: struct {
 ReadDuringWriteWindow: struct {
     impl Diagnostic {
         code: "E0220"
-        meaning: "A place is read through its owner while an exclusive write window / pin into it is still live (card #1361, I2)"
+        meaning: "A place is read through its owner while an exclusive write window / pin into it is still live"
         detail: true
         what: fn(self) -> String { "A place is read through its owner while an exclusive write window into it is still live." }
         why: fn(self) -> String { "An exclusive window (a pin or a mutable view) already gives write access to that storage; reading the owner beside it would be rejected after lowering." }
@@ -3193,7 +3193,7 @@ InvalidScopedPolicy: struct {
 UninferableNewReceiver: struct {
     impl Diagnostic {
         code: "E0356"
-        meaning: "Inferred `.new(...)` has no expected receiver type (D-SHAPE3a)"
+        meaning: "Inferred `.new(...)` has no expected receiver type"
         detail: true
         what: fn(self) -> String { "`.new(...)` needs one known receiver type here" }
         why: fn(self) -> String { "The inferred constructor uses the surrounding expected type; Jet does not search a global constructor registry" }
@@ -4055,7 +4055,7 @@ ReservedRustcUnresolvedName: struct {
         code: "E0425"
         status: .Reserved
         no_fix: None
-        what: fn(self) -> String { "*Reserved — rustc unresolved-name code; never a Jet diagnostic (I2)*" }
+        what: fn(self) -> String { "*Reserved — rustc unresolved-name code; never a Jet diagnostic*" }
         why: fn(self) -> String { "The registered sema rule applies here" }
         fix: fn(self) -> String { "Follow the guidance for E0425" }
     }
@@ -4314,7 +4314,7 @@ HeapGrowthInLoop: struct {
         severity: .Lint
         lint_name: "heap_growth_in_loop"
         no_fix: .Behavior
-        what: fn(self) -> String { "Heap growth in a loop after `use core.mem` — consider an arena (c26)" }
+        what: fn(self) -> String { "Heap growth in a loop after `use core.mem` — consider an arena" }
         why: fn(self) -> String { "The registered sema rule applies here" }
         fix: fn(self) -> String { "Use an arena or another deliberate allocator for loop allocations." }
     }
@@ -4326,7 +4326,7 @@ HiddenContextAllocation: struct {
         severity: .Lint
         lint_name: "hidden_context_allocation"
         no_fix: .Behavior
-        what: fn(self) -> String { "Hidden allocation inside `#Context` without an allocator (c26)" }
+        what: fn(self) -> String { "Hidden allocation inside `#Context` without an allocator" }
         why: fn(self) -> String { "The registered sema rule applies here" }
         fix: fn(self) -> String { "Declare an allocator in `#Context` before allocating." }
     }
@@ -6731,7 +6731,7 @@ CBindingMemberMissing: struct {
 UnsupportedForeignLanguage: struct {
     impl Diagnostic {
         code: "E3220"
-        what: fn(self) -> String { "`#FFI(<lang>)` names a language with no inline foreign binder yet (systems floor ships `c`/`cpp`/`asm`, card #501)" }
+        what: fn(self) -> String { "`#FFI(<lang>)` names a language with no inline foreign binder yet (the inline foreign tier ships `c`, `cpp` and `asm`)" }
         why: fn(self) -> String { "The registered sema rule applies here" }
         fix: fn(self) -> String { "Use an inline foreign binder for `c`, `cpp`, or `asm`, or remove the unsupported language." }
     }
@@ -11003,7 +11003,7 @@ GcFailed: struct {
     impl Diagnostic {
         code: "E2110"
         stage: [.Jet]
-        meaning: "Automatic GC or its trace failed safely (cards #658/#659)"
+        meaning: "Automatic GC or its trace failed safely"
         detail: true
         no_fix: .Behavior
         what: fn(self) -> String { "Automatic memory management failed, or its trace cannot be reported." }
@@ -11029,7 +11029,7 @@ InvalidMemoryLedger: struct {
     impl Diagnostic {
         code: "E2112"
         stage: [.Jet]
-        meaning: "The cross-run memory witness ledger is missing, unsafe, oversized, malformed, or incompatible (card #1895)"
+        meaning: "The cross-run memory witness ledger is missing, unsafe, oversized, malformed, or incompatible"
         detail: true
         no_fix: .Behavior
         what: fn(self) -> String { "Memory ledger cannot be used: {self.detail}." }
@@ -11045,7 +11045,7 @@ PinnedBuildOption: struct {
     impl Diagnostic {
         code: "E2113"
         stage: [.Jet]
-        meaning: "A build-option flag tries to change a value `build: fn` pinned (#5005)"
+        meaning: "A build-option flag tries to change a value `build: fn` pinned"
         detail: true
         what: fn(self) -> String { "`{self.option}` is pinned to `{self.value}`, so the flag can't change it." }
         why: fn(self) -> String { "`b.pin(.option, .Value)` in `build: fn` fixes a build option for every build; a flag may only change values that aren't pinned." }
@@ -11057,7 +11057,7 @@ CrashReportWithoutBuild: struct {
     impl Diagnostic {
         code: "E2114"
         stage: [.Jet]
-        meaning: "`jet crash` read a report with no `Build <id>` line to find its debug info by (#6035)"
+        meaning: "`jet crash` read a report with no `Build <id>` line to find its debug info by"
         detail: true
         what: fn(self) -> String { "This crash report has no `Build <id> (names and lines: jet crash)` line." }
         why: fn(self) -> String { "`jet crash` names a release program's frames from the debug info its build saved under the build id the report gives; without that line it can't tell which build crashed." }
@@ -11071,7 +11071,7 @@ CrashSymbolsMissing: struct {
     impl Diagnostic {
         code: "E2115"
         stage: [.Jet]
-        meaning: "`jet crash` found no debug info for the report's build id under `.jet/symbols` (#6035)"
+        meaning: "`jet crash` found no debug info for the report's build id under `.jet/symbols`"
         detail: true
         what: fn(self) -> String { "No debug info for build `{self.build}` is in `.jet/symbols` here or in a directory above." }
         why: fn(self) -> String { "A release build saves its function names and lines under `.jet/symbols/.build-id/` in the project that built it; any other build, even of the same source, has another id." }
@@ -11088,7 +11088,7 @@ UnhandledSourceExtension: struct {
     impl Diagnostic {
         code: "E2116"
         stage: [.Jet]
-        meaning: "A command was given a file whose extension it doesn't handle (#6686)"
+        meaning: "A command was given a file whose extension it doesn't handle"
         detail: true
         no_fix: .Ambiguous
         what: fn(self) -> String { "`jet {self.command}` doesn't handle `.{self.extension}` files like `{self.file}`." }
@@ -11106,7 +11106,7 @@ FlagNotASetting: struct {
     impl Diagnostic {
         code: "E2117"
         stage: [.Jet]
-        meaning: "A settings layer names a flag that is typed each time it is meant: one that is destructive, names the operand of one run, or gives permissions (#6606)"
+        meaning: "A settings layer names a flag that is typed each time it is meant: one that is destructive, names the operand of one run, or gives permissions"
         detail: true
         what: fn(self) -> String { "`{self.key}` in {self.source} would remember `{self.flag}`, which you type each time you mean it." }
         why: fn(self) -> String { "A settings file applies a flag to every run, but `{self.flag}` is typed each time: {self.reason}." }
@@ -11123,7 +11123,7 @@ CcProjectInputsTooLarge: struct {
     impl Diagnostic {
         code: "E2118"
         stage: [.Jet]
-        meaning: "`jet cc` or `jet c++` would declare a project input set over its size or file-count cap (#6686)"
+        meaning: "`jet cc` or `jet c++` would declare a project input set over its size or file-count cap"
         detail: true
         no_fix: .Ambiguous
         what: fn(self) -> String { "`jet {self.command}` would declare {self.size} under `{self.root}` as compile inputs, over the {self.cap} cap." }
@@ -11138,7 +11138,7 @@ DeepCheckScopeMalformed: struct {
     impl Diagnostic {
         code: "E2119"
         stage: [.Jet]
-        meaning: "A `--deep-checks=<scope>` flag names no scope, or one that isn't names joined by `.` (#3029)"
+        meaning: "A `--deep-checks=<scope>` flag names no scope, or one that isn't names joined by `.`"
         detail: true
         no_fix: .Ambiguous
         what: fn(self) -> String { "`{self.argument}` isn't a deep-check scope." }
@@ -11154,7 +11154,7 @@ DeepCheckScopeUnknown: struct {
     impl Diagnostic {
         code: "E2120"
         stage: [.Jet]
-        meaning: "A `--deep-checks=<scope>` flag names no package, module, type or function of the program (#3029)"
+        meaning: "A `--deep-checks=<scope>` flag names no package, module, type or function of the program"
         detail: true
         no_fix: .Ambiguous
         what: fn(self) -> String { "`--deep-checks={self.scope}` names no package, module, type or function of this program." }
@@ -11171,7 +11171,7 @@ DeepCheckScopeHoldsNone: struct {
     impl Diagnostic {
         code: "E2121"
         stage: [.Jet]
-        meaning: "A `--deep-checks=<scope>` flag names declarations none of which holds a deep check (#3029)"
+        meaning: "A `--deep-checks=<scope>` flag names declarations none of which holds a deep check"
         detail: true
         no_fix: .Ambiguous
         what: fn(self) -> String { "`--deep-checks={self.scope}` selects {self.selected}, and none of them holds a deep check." }
@@ -11586,7 +11586,7 @@ RetiredLayoutHandle: struct {
         detail: true
         no_fix: None
         what: fn(self) -> String { "The constraint-layout type is named `Layout`, not `LayoutHandle`" }
-        why: fn(self) -> String { "One name for the solver/container value (I8)." }
+        why: fn(self) -> String { "The solver and container value has one name." }
         fix: fn(self) -> String { "Write `Layout` instead of `LayoutHandle`." }
     }
 }
@@ -11866,7 +11866,7 @@ DefaultNotConstant: struct {
         code: "E2414"
         detail: true
         what: fn(self) -> String { "A field's `{{…}}` default must be a compile-time constant." }
-        why: fn(self) -> String { "A decode/CLI/construction default fills a missing field, so it is baked into the program and its value has to be known at compile time. An expression that can only be computed at runtime has no fixed value to bake, and every tier must agree (I9). During `jet check`, Jet reports this diagnostic." }
+        why: fn(self) -> String { "A decode/CLI/construction default fills a missing field, so it is baked into the program and its value has to be known at compile time. An expression that can only be computed at runtime has no fixed value to bake, and every tier must agree on it. During `jet check`, Jet reports this diagnostic." }
         fix: fn(self) -> String { "Use a literal or a `comptime`-evaluable expression, e.g. `port: Int{{8080}}`, `env: String{{\"prod\"}}`, or `ports: [Int]{{[80, 443]}}`." }
     }
 }
@@ -12130,7 +12130,7 @@ LineStreamOutsideLoop: struct {
         stage: [.Compile]
         detail: true
         what: fn(self) -> String { "A line stream can only be used directly in a loop." }
-        why: fn(self) -> String { "`.lines()` hands back a lazy line reader meant to be iterated in place; storing it in a name would let it leave the loop, where it has no use. (The boundary is enforced in sema so codegen never has to lower a stray line stream — c109/I3.)" }
+        why: fn(self) -> String { "`.lines()` hands back a lazy line reader meant to be iterated in place; storing it in a name would let it leave the loop, where it has no use. (The boundary is enforced in sema so codegen never has to lower a stray line stream.)" }
         fix: fn(self) -> String { "Iterate it directly: `loop line in handle.lines() {{ … }}`." }
     }
 }
@@ -12539,7 +12539,7 @@ AppFeatureNotOnTarget: struct {
         detail: true
         fix_next: "Choose a target that supports the feature, or remove the feature."
         what: fn(self) -> String { "App feature `.{self.feature}` needs target `{self.required}`, but the resolved target is `{self.target}`." }
-        why: fn(self) -> String { "App is one type across targets, but each feature must be supported by the target selected by `#Target` or the package manifest; rejecting it in sema keeps native and web codegen on one meaning (I9). During `jet check`, Jet reports this diagnostic." }
+        why: fn(self) -> String { "App is one type across targets, but each feature must be supported by the target selected by `#Target` or the package manifest; rejecting it in sema keeps native and web codegen on one meaning. During `jet check`, Jet reports this diagnostic." }
         fix: fn(self) -> String { "Choose a build target that supports `.{self.feature}` (for example `#Target(JS)` for browser features or a native target for server features), or remove that feature." }
     }
 }
