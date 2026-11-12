@@ -845,9 +845,16 @@ test("measurement manifest covers every corpus entry and source pair", async () 
   assert.equal(rows.filter((row) => row.python !== null).length, manifest.corpus.python_pair_count);
   assert.deepEqual([...names].sort(), [...manifest.corpus.entry_names].sort());
 
-  const directories = (await fs.readdir(entriesDir, { withFileTypes: true }))
-    .filter((item) => item.isDirectory())
-    .map((item) => item.name);
+  // Tool entries ("mode": "tool") pair a repository script with its Jet twin;
+  // PortBars judges them (AGENTS.md, Tooling in other languages) and they never
+  // join the matrix denominator (run.mjs loadEntries), so the manifest covers
+  // every other entry.
+  const directories = [];
+  for (const item of await fs.readdir(entriesDir, { withFileTypes: true })) {
+    if (!item.isDirectory()) continue;
+    const entry = JSON.parse(await fs.readFile(path.join(entriesDir, item.name, "entry.json"), "utf8"));
+    if (entry.mode !== "tool") directories.push(item.name);
+  }
   assert.deepEqual([...names].sort(), [...directories].sort());
 
   const cellOwners = new Map();
