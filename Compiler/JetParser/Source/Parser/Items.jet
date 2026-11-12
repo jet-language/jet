@@ -256,10 +256,6 @@ parser_parse_item_or_import: fn(state: &JetParserState) -> ParsedItemOrImport {
             value: parser_parse_protocol(state, modifiers)
             return ParsedItemOrImport{item: Val(value), handled: true}
         }
-        parser_fact_decl_ahead(state) -> {
-            value: parser_parse_fact_decl(state)
-            return ParsedItemOrImport{item: Val(value), handled: true}
-        }
         parser_tag_decl_ahead(state) -> {
             value: parser_parse_tag_policy(state, modifiers)
             return ParsedItemOrImport{item: Val(value), handled: true}
@@ -321,6 +317,8 @@ parser_parse_item_or_import: fn(state: &JetParserState) -> ParsedItemOrImport {
         }
         token.kind == TOKEN_KW_STRUCT -> {
             value: parser_parse_struct(state, modifiers)
+            // A fact plane's struct declares the plane alone.
+            if value.fact == .Val(declaration) -> return ParsedItemOrImport{item: Val(Item.FactDecl{value: declaration}), handled: true}
             return ParsedItemOrImport{item: Val(Item.Struct{value: value}), handled: true, companions: parser_type_companions(value.marker, value.effect_impl)}
         }
         token.kind == TOKEN_KW_ENUM -> {
@@ -1990,6 +1988,7 @@ parser_parse_struct: fn(state: &JetParserState, modifiers: ParsedItemModifiers) 
             TOKEN_KW_IMPL -> {
                 if {
                     parser_value_at(state, 1) == "Marker" && parser_kind_at(state, 2) == TOKEN_LBRACE -> parser_parse_marker_impl(state, value)
+                    parser_value_at(state, 1) == "Fact" && parser_kind_at(state, 2) == TOKEN_LBRACE -> parser_parse_fact_impl(state, value)
                     parser_value_at(state, 1) == "Effect" && parser_kind_at(state, 2) == TOKEN_LBRACE -> {
                         parsed: parser_parse_effect_impl(state, value.name, value.effect_impl != None)
                         if parsed != None -> value.effect_impl = parsed
@@ -2046,6 +2045,7 @@ parser_parse_struct: fn(state: &JetParserState, modifiers: ParsedItemModifiers) 
     parser_apply_struct_markers(state, value, markers, modifiers.grouped_markers)
     value.cap = parser_type_fx_cap(state, markers, value.name, "type")
     parser_finish_marker_struct(state, value)
+    parser_finish_fact_struct(state, value)
     value.effect_impl = parser_finish_effect_type(state, value.name, value.name_span, value.effect_impl, [Variant]{})
     value
 }

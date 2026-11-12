@@ -7,61 +7,445 @@
 // D-TYPE2-PLANE1=A / D-TYPE2-FOUND1=A: compiler type planes are ordinary
 // readable Prelude rows. `@name` gives the row its dotted compiler namespace;
 // `@identity` states whether the plane contributes to carrier identity.
-fact TypeNominal(name: "Type.Nominal", holds: .Value, safe: .Gain, gates: [], identity: true)
-fact TypeInterval(name: "Type.Interval", holds: .Value, safe: .Gain, gates: [], identity: true)
-fact TypeLayout(name: "Type.Layout", holds: .Value, safe: .Gain, gates: [], identity: true)
-fact TypeMeasure(name: "Type.Measure", holds: .Value, safe: .Gain, gates: [], identity: true)
-fact TypeDimension(name: "Type.Dimension", holds: .Value, safe: .Gain, gates: [], identity: true)
-fact TypeClassification(name: "Type.Classification", holds: .Value, safe: .Gain, gates: [], identity: false)
-fact TypeExactness(name: "Type.Exactness", holds: .Value, safe: .Gain, gates: [], identity: true)
-fact TypeObligation(name: "Type.Obligation", holds: .Value, safe: .Gain, gates: [], identity: false)
+TypeNominal: struct {
+    impl Fact {
+        name: "Type.Nominal"
+        holds: .Value
+        safe: .Gain
+        gates: []
+        identity: true
+    }
+}
 
-fact Exactness(holds: .Value, safe: .Gain, gates: [approx, rounded, raw, wrapping, saturating, checked])
-fact Flow(holds: .Value, safe: .Gain, gates: [])
-fact Taint(holds: .Value, safe: .Gain, gates: [Scrub])
-fact Duty(holds: .Value, safe: .Discharge, gates: [detach, drop])
-fact Rights(holds: .Scope, safe: .Shrink, gates: [Unsafe, Impure, Grant])
-fact PackagePolicy(holds: .Scope, safe: .Shrink, gates: [Unsafe, Grant])
-fact BuildPackageName(name: "Build.Package.Name", holds: .Build, safe: .Gain, gates: [])
-fact BuildPackageVersion(name: "Build.Package.Version", holds: .Build, safe: .Gain, gates: [])
-fact BuildOS(name: "Build.OS", holds: .Build, safe: .Gain, gates: [])
-fact BuildProfile(name: "Build.Profile", holds: .Build, safe: .Gain, gates: [])
-fact BuildSettings(name: "Build.Settings", holds: .Build, safe: .Shrink, gates: [Force])
-fact BuildStampGit(name: "Build.Stamp.Git", holds: .Build, safe: .Gain, gates: [])
-fact BuildStampDirty(name: "Build.Stamp.Dirty", holds: .Build, safe: .Gain, gates: [])
-fact BuildStampToolchain(name: "Build.Stamp.Toolchain", holds: .Build, safe: .Gain, gates: [])
-fact BuildStampAt(name: "Build.Stamp.At", holds: .Build, safe: .Gain, gates: [])
-fact Effects(holds: .Value, safe: .Gain, gates: [])
-fact States(holds: .Value, safe: .Gain, gates: [])
-fact Sendability(holds: .Value, safe: .None, gates: [], proved_by: ownership)
-fact ViewProvenance(holds: .Value, safe: .None, gates: [], proved_by: ownership)
-fact Movedness(holds: .Value, safe: .None, gates: [], proved_by: ownership)
-fact Attribution(holds: .Value, safe: .None, gates: [])
-fact Origin(holds: .Value, safe: .None, gates: [])
-fact UnitScaleProvenance(holds: .Value, safe: .None, gates: [])
-fact Maturity(holds: .Value, safe: .None, gates: [])
+TypeInterval: struct {
+    impl Fact {
+        name: "Type.Interval"
+        holds: .Value
+        safe: .Gain
+        gates: []
+        identity: true
+    }
+}
+
+TypeLayout: struct {
+    impl Fact {
+        name: "Type.Layout"
+        holds: .Value
+        safe: .Gain
+        gates: []
+        identity: true
+    }
+}
+
+TypeMeasure: struct {
+    impl Fact {
+        name: "Type.Measure"
+        holds: .Value
+        safe: .Gain
+        gates: []
+        identity: true
+    }
+}
+
+TypeDimension: struct {
+    impl Fact {
+        name: "Type.Dimension"
+        holds: .Value
+        safe: .Gain
+        gates: []
+        identity: true
+    }
+}
+
+TypeClassification: struct {
+    impl Fact {
+        name: "Type.Classification"
+        holds: .Value
+        safe: .Gain
+        gates: []
+        identity: false
+    }
+}
+
+TypeExactness: struct {
+    impl Fact {
+        name: "Type.Exactness"
+        holds: .Value
+        safe: .Gain
+        gates: []
+        identity: true
+    }
+}
+
+TypeObligation: struct {
+    impl Fact {
+        name: "Type.Obligation"
+        holds: .Value
+        safe: .Gain
+        gates: []
+        identity: false
+    }
+}
+
+Exactness: struct {
+    impl Fact {
+        holds: .Value
+        safe: .Gain
+        gates: [approx, rounded, raw, wrapping, saturating, checked]
+    }
+}
+
+Flow: struct {
+    impl Fact {
+        holds: .Value
+        safe: .Gain
+        gates: []
+    }
+}
+
+Taint: struct {
+    impl Fact {
+        holds: .Value
+        safe: .Gain
+        gates: [Scrub]
+    }
+}
+
+Duty: struct {
+    impl Fact {
+        holds: .Value
+        safe: .Discharge
+        gates: [detach, drop]
+    }
+}
+
+Rights: struct {
+    impl Fact {
+        holds: .Scope
+        safe: .Shrink
+        gates: [Unsafe, Impure, Grant]
+    }
+}
+
+PackagePolicy: struct {
+    impl Fact {
+        holds: .Scope
+        safe: .Shrink
+        gates: [Unsafe, Grant]
+    }
+}
+
+BuildPackageName: struct {
+    impl Fact {
+        name: "Build.Package.Name"
+        holds: .Build
+        safe: .Gain
+        gates: []
+    }
+}
+
+BuildPackageVersion: struct {
+    impl Fact {
+        name: "Build.Package.Version"
+        holds: .Build
+        safe: .Gain
+        gates: []
+    }
+}
+
+BuildOS: struct {
+    impl Fact {
+        name: "Build.OS"
+        holds: .Build
+        safe: .Gain
+        gates: []
+    }
+}
+
+BuildProfile: struct {
+    impl Fact {
+        name: "Build.Profile"
+        holds: .Build
+        safe: .Gain
+        gates: []
+    }
+}
+
+BuildSettings: struct {
+    impl Fact {
+        name: "Build.Settings"
+        holds: .Build
+        safe: .Shrink
+        gates: [Force]
+    }
+}
+
+BuildStampGit: struct {
+    impl Fact {
+        name: "Build.Stamp.Git"
+        holds: .Build
+        safe: .Gain
+        gates: []
+    }
+}
+
+BuildStampDirty: struct {
+    impl Fact {
+        name: "Build.Stamp.Dirty"
+        holds: .Build
+        safe: .Gain
+        gates: []
+    }
+}
+
+BuildStampToolchain: struct {
+    impl Fact {
+        name: "Build.Stamp.Toolchain"
+        holds: .Build
+        safe: .Gain
+        gates: []
+    }
+}
+
+BuildStampAt: struct {
+    impl Fact {
+        name: "Build.Stamp.At"
+        holds: .Build
+        safe: .Gain
+        gates: []
+    }
+}
+
+Effects: struct {
+    impl Fact {
+        holds: .Value
+        safe: .Gain
+        gates: []
+    }
+}
+
+States: struct {
+    impl Fact {
+        holds: .Value
+        safe: .Gain
+        gates: []
+    }
+}
+
+Sendability: struct {
+    impl Fact {
+        holds: .Value
+        safe: .None
+        gates: []
+        proved_by: ownership
+    }
+}
+
+ViewProvenance: struct {
+    impl Fact {
+        holds: .Value
+        safe: .None
+        gates: []
+        proved_by: ownership
+    }
+}
+
+Movedness: struct {
+    impl Fact {
+        holds: .Value
+        safe: .None
+        gates: []
+        proved_by: ownership
+    }
+}
+
+Attribution: struct {
+    impl Fact {
+        holds: .Value
+        safe: .None
+        gates: []
+    }
+}
+
+Origin: struct {
+    impl Fact {
+        holds: .Value
+        safe: .None
+        gates: []
+    }
+}
+
+UnitScaleProvenance: struct {
+    impl Fact {
+        holds: .Value
+        safe: .None
+        gates: []
+    }
+}
+
+Maturity: struct {
+    impl Fact {
+        holds: .Value
+        safe: .None
+        gates: []
+    }
+}
 
 // D-STRUCT-PLANE1=A: the program's structure is a build-time fact plane. The
 // three rows share the one law and name the one written word that can loosen
 // each direction; their observed entries are compiler-only and erase before
 // runtime.
-fact StructureLiveness(name: "Structure.Liveness", holds: .Build, safe: .Gain, gates: ["_name"])
-fact StructureLifecycle(name: "Structure.Lifecycle", holds: .Build, safe: .Shrink, gates: ["policy allow"])
-fact StructureImportEdge(name: "Structure.ImportEdge", holds: .Build, safe: .Shrink, gates: ["manifest rule edit"])
+StructureLiveness: struct {
+    impl Fact {
+        name: "Structure.Liveness"
+        holds: .Build
+        safe: .Gain
+        gates: ["_name"]
+    }
+}
+
+StructureLifecycle: struct {
+    impl Fact {
+        name: "Structure.Lifecycle"
+        holds: .Build
+        safe: .Shrink
+        gates: ["policy allow"]
+    }
+}
+
+StructureImportEdge: struct {
+    impl Fact {
+        name: "Structure.ImportEdge"
+        holds: .Build
+        safe: .Shrink
+        gates: ["manifest rule edit"]
+    }
+}
 // D-FREESTAND-FACTS1=A: target availability is a closed Build fact plane.
 // A present row names a provider and digest; `absent` remains explicit. The
 // semantic effect and Authority planes stay separate from machine provision.
-fact TargetMemory(name: "Target.Memory", holds: .Build, safe: .Gain, gates: [provider, digest])
-fact TargetMmio(name: "Target.MMIO", holds: .Build, safe: .Gain, gates: [provider, digest, Unsafe])
-fact TargetAllocator(name: "Target.Allocator", holds: .Build, safe: .Gain, gates: [provider, digest])
-fact TargetPanic(name: "Target.Panic", holds: .Build, safe: .Gain, gates: [provider, digest])
-fact TargetStartup(name: "Target.Startup", holds: .Build, safe: .Gain, gates: [provider, digest])
-fact TargetIoRead(name: "IO.Read", holds: .Build, safe: .Gain, gates: [provider, digest])
-fact TargetIoWrite(name: "IO.Write", holds: .Build, safe: .Gain, gates: [provider, digest])
-fact TargetPanicReport(name: "Panic.Report", holds: .Build, safe: .Gain, gates: [provider, digest])
-fact TargetTimeWall(name: "Time.Wall", holds: .Build, safe: .Gain, gates: [provider, digest])
-fact TargetTimeMonotonic(name: "Time.Monotonic", holds: .Build, safe: .Gain, gates: [provider, digest])
-fact TargetTimeZoneData(name: "Time.ZoneData", holds: .Build, safe: .Gain, gates: [provider, digest])
-fact TargetTimeSleep(name: "Time.Sleep", holds: .Build, safe: .Gain, gates: [provider, digest])
-fact TargetEntropy(name: "Rand.Entropy", holds: .Build, safe: .Gain, gates: [provider, digest])
-fact TargetScheduler(name: "Target.Scheduler", holds: .Build, safe: .Gain, gates: [provider, digest])
+TargetMemory: struct {
+    impl Fact {
+        name: "Target.Memory"
+        holds: .Build
+        safe: .Gain
+        gates: [provider, digest]
+    }
+}
+
+TargetMmio: struct {
+    impl Fact {
+        name: "Target.MMIO"
+        holds: .Build
+        safe: .Gain
+        gates: [provider, digest, Unsafe]
+    }
+}
+
+TargetAllocator: struct {
+    impl Fact {
+        name: "Target.Allocator"
+        holds: .Build
+        safe: .Gain
+        gates: [provider, digest]
+    }
+}
+
+TargetPanic: struct {
+    impl Fact {
+        name: "Target.Panic"
+        holds: .Build
+        safe: .Gain
+        gates: [provider, digest]
+    }
+}
+
+TargetStartup: struct {
+    impl Fact {
+        name: "Target.Startup"
+        holds: .Build
+        safe: .Gain
+        gates: [provider, digest]
+    }
+}
+
+TargetIoRead: struct {
+    impl Fact {
+        name: "IO.Read"
+        holds: .Build
+        safe: .Gain
+        gates: [provider, digest]
+    }
+}
+
+TargetIoWrite: struct {
+    impl Fact {
+        name: "IO.Write"
+        holds: .Build
+        safe: .Gain
+        gates: [provider, digest]
+    }
+}
+
+TargetPanicReport: struct {
+    impl Fact {
+        name: "Panic.Report"
+        holds: .Build
+        safe: .Gain
+        gates: [provider, digest]
+    }
+}
+
+TargetTimeWall: struct {
+    impl Fact {
+        name: "Time.Wall"
+        holds: .Build
+        safe: .Gain
+        gates: [provider, digest]
+    }
+}
+
+TargetTimeMonotonic: struct {
+    impl Fact {
+        name: "Time.Monotonic"
+        holds: .Build
+        safe: .Gain
+        gates: [provider, digest]
+    }
+}
+
+TargetTimeZoneData: struct {
+    impl Fact {
+        name: "Time.ZoneData"
+        holds: .Build
+        safe: .Gain
+        gates: [provider, digest]
+    }
+}
+
+TargetTimeSleep: struct {
+    impl Fact {
+        name: "Time.Sleep"
+        holds: .Build
+        safe: .Gain
+        gates: [provider, digest]
+    }
+}
+
+TargetEntropy: struct {
+    impl Fact {
+        name: "Rand.Entropy"
+        holds: .Build
+        safe: .Gain
+        gates: [provider, digest]
+    }
+}
+
+TargetScheduler: struct {
+    impl Fact {
+        name: "Target.Scheduler"
+        holds: .Build
+        safe: .Gain
+        gates: [provider, digest]
+    }
+}

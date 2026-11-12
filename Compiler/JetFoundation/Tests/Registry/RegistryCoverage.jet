@@ -383,12 +383,16 @@ REGISTRY_COVERAGE_FFI_ROWS: [String]{"E0064", "E0704", "E0705", "E3215", "E3216"
     }
     assert_eq(registered.join(" "), names.join(" "))
     source: registry_coverage_files.read("Compiler/Prelude/Facts.jet") ?? panic("read Compiler/Prelude/Facts.jet: {err}")
+    // Each plane is a struct whose `impl Fact` block writes one setting per
+    // line, its `name` ahead of its `gates`.
     declared := [String]{}
+    plane_name := ""
     loop line in source.split("\n") {
-        if !line.starts_with("fact ") || !line.contains("gates: [provider") -> next
-        parts: line.split("name: \"").to_list()
-        if parts.len() < 2 -> next
-        declared.push(parts[1].split("\"").to_list()[0])
+        text: line.trim()
+        if line.ends_with(": struct {{") -> plane_name = ""
+        if text.starts_with("name: \"") -> plane_name = text.split("\"").to_list()[1]
+        // copy: the next plane's `name` line reassigns plane_name.
+        if text.starts_with("gates: [provider") && plane_name != "" -> declared.push(plane_name.copy())
     }
     assert_eq(declared.join(" "), names.join(" "))
     dossier := [String]{}

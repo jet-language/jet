@@ -1,8 +1,8 @@
-// Marker types (a struct's `impl Marker { … }` block), fact declarations and
-// bracketed marker groups. Fact parameters read typed arguments and fixed `$`
-// facts in one list. A marker's settings are the constants of the Core
-// `Marker` trait (Core/Prelude/Prelude.jet): the block is also the struct's
-// `impl Marker`, whose constants sema checks against the trait.
+// Marker types (a struct's `impl Marker { … }` block), fact planes (a
+// field-less struct's `impl Fact { … }` block) and bracketed marker groups.
+// A marker's settings are the constants of the Core `Marker` trait
+// (Core/Prelude/Prelude.jet): the block is also the struct's `impl Marker`,
+// whose constants sema checks against the trait.
 use {
     jet_foundation.[
         AccessConvention,
@@ -60,7 +60,6 @@ use {
         TOKEN_RBRACKET,
         TOKEN_RPAREN,
         TOKEN_UNIFIED_ARROW,
-        TOKEN_SEMI,
         Token,
     ]
 }
@@ -91,10 +90,6 @@ parser_marker_label: fn(marker: Marker, index: Int) -> String Never! {
         .Val(value) -> value.name
         .None -> ""
     }
-}
-
-parser_fact_decl_ahead: fn(state: &JetParserState) -> Bool Never! {
-    parser_current_kind(state) == TOKEN_IDENT && parser_value_at(state, 0) == "fact" && parser_kind_at(state, 1) == TOKEN_IDENT && parser_kind_at(state, 2) == TOKEN_LPAREN
 }
 
 // `impl Marker { … }` in a struct body: the marker's settings as
@@ -228,36 +223,48 @@ parser_finish_marker_struct: fn(state: &JetParserState, value: &StructDef) {
     value.marker = Val(declaration)
 }
 
-parser_parse_fact_decl: fn(state: &JetParserState) -> Item {
+// `impl Fact { … }` in a struct body: a compiler fact plane's settings as
+// `name: value` lines (`holds`, `safe`, `gates`, `name`, `identity`,
+// `proved_by`), read in the named form of marker settings. The struct
+// declares the plane and no type (parser_finish_fact_struct).
+parser_parse_fact_impl: fn(state: &JetParserState, value: &StructDef) {
     start: parser_bump(state)
-    name: parser_expect_name(state, "the fact name in `fact Name(params…)`")
-    params: parser_fact_decl_params(state)
-    end := parser_lookahead(state, -1).span
-    if parser_current_kind(state) == TOKEN_SEMI -> parser_bump(state)
-    Item.FactDecl{value: FactDecl{name: parser_value(state, name), name_span: name.span, params: params, span: parser_cover(start.span, end)}}
+    repeated: value.fact != None
+    if repeated -> parser_add_error_code(state, "E0908", start.span, "`{value.name}` has a second `impl Fact` block", "a struct declares one fact plane, so its settings share one block", "move these settings into the first `impl Fact` block")
+    parser_bump(state)
+    parser_expect(state, TOKEN_LBRACE, "`{{` to open the `impl Fact` body")
+    params := [MarkerDeclParam]{}
+    loop parser_current_kind(state) != TOKEN_RBRACE && parser_current_kind(state) != TOKEN_EOF && !parser_aborting(state) {
+        parser_skip_semicolons(state)
+        if parser_current_kind(state) == TOKEN_RBRACE -> break
+        token: parser_current(state)
+        if token.kind != TOKEN_IDENT || parser_kind_at(state, 1) != TOKEN_COLON {
+            found: parser_describe_token(state, token)
+            parser_add_error(state, token.span, "expected a fact setting, found {found}", "an `impl Fact` block holds only `name: value` settings", "write a setting such as `holds: .Value`")
+            break
+        }
+        name_token: parser_bump(state)
+        parser_bump(state)
+        parsed: parser_parse_expression(state, 1, 0)
+        parser_finish_statement(state)
+        params.push(MarkerDeclParam{name: parser_value(state, name_token), name_span: name_token.span, ty: None, value: Val(parsed.expr), variadic: false})
+    }
+    parser_expect(state, TOKEN_RBRACE, "`}}` to close the `impl Fact` body")
+    if repeated -> return
+    value.fact = Val(FactDecl{name: value.name, name_span: value.name_span, params: params, span: start.span})
 }
 
-// A fact's metadata reads `name: value`, the same named form as marker
-// settings. A name may be any written word, including a keyword.
-parser_fact_decl_params: fn(state: &JetParserState) -> [MarkerDeclParam] {
-    parser_expect(state, TOKEN_LPAREN, "`(` to open the fact's parameter list")
-    params := [MarkerDeclParam]{}
-    if parser_current_kind(state) != TOKEN_RPAREN {
-        loop !parser_aborting(state) {
-            token: parser_current(state)
-            keyword_name: token.kind != TOKEN_IDENT && parser_is_keyword_token(state, token)
-            name_token: if keyword_name -> parser_bump(state) else -> parser_expect_name(state, "a fact parameter name")
-            name: if token.kind == TOKEN_IDENT -> parser_value(state, name_token) else -> parser_text(state, name_token)
-            parser_expect(state, TOKEN_COLON, "`:` between the parameter name and its value")
-            value: parser_parse_expression_no_struct_lit(state, 1)
-            params.push(MarkerDeclParam{name: name, name_span: name_token.span, ty: None, value: Val(value.expr), variadic: false})
-            if parser_current_kind(state) == TOKEN_RPAREN -> break
-            parser_expect(state, TOKEN_COMMA, "`,` between fact parameters")
-            if parser_current_kind(state) == TOKEN_RPAREN -> break
-        }
+// A fact plane is a field-less struct whose one member is its `impl Fact`
+// block: the compiler tracks the plane, and no value of it exists. At the
+// struct's close the plane takes the struct's span.
+parser_finish_fact_struct: fn(state: &JetParserState, value: &StructDef) {
+    declaration := value.fact ?? return
+    members: value.fields.len() + value.methods.len() + value.trait_impls.len() + value.cli_bindings.len() + value.type_params.len()
+    if members > 0 || value.marker != None || value.effect_impl != None || value.state != None || value.validate_span != None {
+        parser_add_error(state, value.name_span, "the fact plane `{value.name}` declares more than its `impl Fact` block", "a fact plane is a field-less struct: the compiler tracks it, and no value of it exists", "remove every member but `impl Fact {{ … }}`")
     }
-    parser_expect(state, TOKEN_RPAREN, "`)` to close the fact's parameter list")
-    params
+    declaration.span = value.span
+    value.fact = Val(declaration)
 }
 
 // Rust `derive_body_items`: the body is a template, so nested `#loop`

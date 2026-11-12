@@ -69,11 +69,17 @@ run: fn() {}
     loop site in MARKER_SOURCE_SITES -> _: marker_test_decl("Uses: struct {{ impl Marker {{ sites: [.{site}] }} }}\nrun: fn() {{}}\n")
 }
 
-#Test("fact_declaration_parses_its_law_columns") {
-    program: parser_test_program(`fact Exactness(holds: .Value, safe: .Gain, gates: [approx, raw])
+#Test("fact_plane_struct_parses_its_law_columns") {
+    program: parser_test_program(`Exactness: struct {
+    impl Fact {
+        holds: .Value
+        safe: .Gain
+        gates: [approx, raw]
+    }
+}
 run: fn() {}
 `)
-    program.items[0] == .FactDecl(decl) ?? panic("fact declaration")
+    program.items[0] == .FactDecl(decl) ?? panic("fact plane")
     assert_eq(decl.name, "Exactness")
     names := [String]{}
     loop param in decl.params {
@@ -81,6 +87,56 @@ run: fn() {}
         assert(param.ty == None && param.value != None)
     }
     assert_eq(names, [String]{"holds", "safe", "gates"})
+    loop item in program.items {
+        if item == .Struct(_) -> panic("a fact plane declares no struct type")
+    }
+}
+
+#Test("fact_plane_struct_formats_stably") {
+    source: `TypeNominal: struct {
+    impl Fact {
+        name: "Type.Nominal"
+        holds: .Value
+        safe: .Gain
+        gates: []
+        identity: true
+    }
+}
+
+run: fn() {}
+`
+    assert_eq(parser_test_stable(source), source)
+}
+
+#Test("fact_plane_struct_refuses_other_members_and_a_second_block") {
+    members: parser_test_errors(`Flow: struct {
+    level: Int
+    impl Fact {
+        holds: .Value
+    }
+}
+run: fn() {}
+`)
+    assert(members.len() > 0 && members[0].what.contains("declares more than its `impl Fact` block"), "a field beside `impl Fact` is refused")
+    twice: parser_test_errors(`Flow: struct {
+    impl Fact {
+        holds: .Value
+    }
+    impl Fact {
+        safe: .Gain
+    }
+}
+run: fn() {}
+`)
+    assert_eq(parser_test_diagnostic(twice, "E0908").what, "`Flow` has a second `impl Fact` block")
+}
+
+#Test("the_fact_declaration_word_is_gone") {
+    diagnostics: parser_test_errors(`fact Exactness(holds: .Value, safe: .Gain, gates: [approx, raw])
+run: fn() {}
+`)
+    assert_eq(diagnostics[0].code, "E0003")
+    assert(diagnostics[0].what.contains("`fact` is not a Jet word"), diagnostics[0].what)
 }
 
 #Test("an_unknown_top_word_lists_the_declaration_forms") {

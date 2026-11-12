@@ -695,8 +695,7 @@ jfmt_fmt_item: fn(f: &JetFmt, item: Item) {
         // A marker or an effect name prints inside the struct or enum that
         // declares it (jfmt_fmt_marker_impl, jfmt_fmt_effect_impl).
         .EffectDecl(_) | .MarkerDecl(_) -> {}
-        // Fact declarations share marker parameter syntax, so
-        // use the same source-aware comma-list formatter.
+        // A fact plane prints as its field-less struct (jfmt_fmt_fact_decl).
         .FactDecl(declaration) -> jfmt_fmt_fact_decl(f, declaration)
         // Stage 1a: JetOS contribution modules retain their source-level
         // contribution shape; inline code modules use the typed formatter.
@@ -770,27 +769,32 @@ jfmt_impl_sugar_text: fn(f: JetFmt, i: ImplDef) -> [U8]? Never! {
     Val(text_bytes.move())
 }
 
-jfmt_fmt_fact_decl_params: fn(f: &JetFmt, params: [MarkerDeclParam], source_start: Int) {
-    source: jfmt_source_list_span_after(f, source_start, JFMT_DELIM_PAREN)
-    multiline: jfmt_comma_begin(f, params.len(), source)
-    loop index in 0..<params.len() {
-        param: params[index]
-        jfmt_comma_before(f, index, multiline, param.name_span.start)
-        jfmt_write(f, param.name)
-        jfmt_write(f, ": ")
-        if param.value == .Val(value) -> jfmt_fmt_expr(f, value, JFMT_PREC_OR_FALLBACK)
-        jfmt_comma_after(f, multiline, param.name_span.end)
-    }
-    jfmt_comma_end(f, multiline, source)
-}
-
+// A fact plane: its field-less struct holding the `impl Fact` block, one
+// setting per line in the order written.
 jfmt_fmt_fact_decl: fn(f: &JetFmt, declaration: FactDecl) {
-    jfmt_write(f, "fact ")
     jfmt_write(f, declaration.name)
-    jfmt_write(f, "(")
-    jfmt_fmt_fact_decl_params(f, declaration.params, declaration.name_span.end)
-    jfmt_write(f, ")")
+    jfmt_write(f, ": struct {{")
     jfmt_newline(f)
+    f.indent += 1
+    if declaration.params.len() == 0 {
+        jfmt_write(f, "impl Fact {{}}")
+    } else {
+        jfmt_write(f, "impl Fact {{")
+        jfmt_newline(f)
+        f.indent += 1
+        loop (index, param) in declaration.params {
+            value: param.value ?? next
+            if index > 0 -> jfmt_newline(f)
+            jfmt_emit_leading(f, param.name_span.start)
+            jfmt_write(f, param.name)
+            jfmt_write(f, ": ")
+            jfmt_fmt_expr(f, value, JFMT_PREC_OR_FALLBACK)
+        }
+        f.indent -= 1
+        jfmt_end_block(f)
+    }
+    f.indent -= 1
+    jfmt_end_block(f)
 }
 
 jfmt_fmt_protocol_decl: fn(f: &JetFmt, protocol: ProtocolDecl) {
