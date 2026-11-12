@@ -119,9 +119,13 @@ JavaScript, Nix files, test and example subjects, and the peer programs a
 gauntlet comparison runs Jet against (optimization fixtures' `peer-*`
 programs, an axis's non-Jet rails) are exempt. A library counts as covered
 once the entries' drivers (`Tools/gauntlet/harness/drivers/<entry>.mjs`)
-import every export it has, and a `*.test.mjs` once its imports are all
-paired or covered. `--census` lists every script in another language in the
-checkout and its pair, or the exports a library's drivers do not yet import.
+import every export it has, or, when no driver imports it, once every tool
+script that imports it, directly or through other importers, is paired or
+covered (its job is part of each importer's, so it is replaced only when all
+of them are); a `*.test.mjs` counts once its imports are all paired or
+covered. `--census` lists every script in another language in the checkout
+and its pair, or what keeps it unpaired: the exports a library's drivers do
+not yet import, or its importers that are neither paired nor covered.
 
 ## Greenfield cutover
 

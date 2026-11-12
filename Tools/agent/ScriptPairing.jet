@@ -42,9 +42,13 @@
 // runs a library's exports) imports by a relative path is covered by the
 // entries whose drivers import it once those drivers import every export
 // it has; until then it stays unpaired, and the census names the exports
-// no driver imports. A test script (`*.test.mjs`) is covered when each
-// script it imports relatively is paired or covered, and counts with those
-// entries, not as an unpaired tool.
+// no driver imports. A library no driver imports is covered by its
+// importers when every tool script that imports it, directly or through
+// other importers, is paired or covered: its job is part of each
+// importer's, so it is replaced only when all of them are; until then the
+// census names the importers that are not. A test script (`*.test.mjs`) is
+// covered when each script it imports relatively is paired or covered, and
+// counts with those entries, not as an unpaired tool or an importer.
 // The tool entries are the one home of which Jet program replaces which
 // script; the census is computed from the tree on demand and never stored.
 //
@@ -165,20 +169,28 @@ Cover: struct {
     taken: Import
 }
 
+// One relative import between two tool scripts of the checkout: `from`
+// imports `to`.
+Link: struct {
+    from: String
+    to: String
+}
+
 // How the entries cover a script no entry pairs: the entries that do, and
-// what keeps it uncovered (the exports no driver imports, or a test's
-// imports that are neither paired nor covered).
+// what keeps it uncovered (the exports no driver imports, the importers
+// that are neither paired nor covered, or a test's imports that are not).
 Coverage: struct {
     entries: [String]
     missing: [String]
 }
 
 // Every pairing the entries make, the imports of their drivers, the
-// problems of incomplete tool entries, and why each incomplete comparison
-// entry pairs nothing.
+// imports between the checkout's tool scripts, the problems of incomplete
+// tool entries, and why each incomplete comparison entry pairs nothing.
 Entries: struct {
     pairings: [Pairing]
     covers: [Cover]
+    links: [Link]
     problems: [String]
     incomplete: [Pairing]
 }
@@ -275,8 +287,9 @@ peer_program: fn(repo: String, path: String) -[FS]> Bool Never! {
     parts.len() > 2 && parts[1] != "jet" && files.is_dir(files.join(repo, "{AXES_ROOT}{parts[0]}/jet"))
 }
 
-// The relative imports (`from './lib.mjs'`) of the JavaScript file `path`,
-// with their paths in the checkout; none for another file.
+// The relative imports (`from './lib.mjs'`, or a literal `import('./lib.mjs')`,
+// which takes the whole module) of the JavaScript file `path`, with their
+// paths in the checkout; none for another file.
 js_imports: fn(repo: String, path: String) -[FS]> [Import] Never! {
     out := [Import]{}
     if !path.ends_with(".mjs") && !path.ends_with(".js") -> return out
@@ -285,7 +298,14 @@ js_imports: fn(repo: String, path: String) -[FS]> [Import] Never! {
     statement := ""
     loop line in text.lines() {
         trimmed: line.trim()
-        if statement == "" && !trimmed.starts_with("import ") -> next
+        if statement == "" && !trimmed.starts_with("import ") {
+            loaded: trimmed.partition("import(").tail.trim()
+            if !trimmed.starts_with("//") && (loaded.starts_with("'") || loaded.starts_with("\"")) {
+                specifier: loaded.slice(1, loaded.len()).partition(loaded.slice(0, 1)).head
+                if specifier.starts_with(".") -> out.push(Import{path: files.normalize("{dir}/{specifier}"), names: [String]{}, all: true})
+            }
+            next
+        }
         statement = "{statement} {trimmed}".trim()
         quoted: statement.partition(" from ").tail.trim()
         if !quoted.starts_with("'") && !quoted.starts_with("\"") {
@@ -378,9 +398,10 @@ subdirectories: fn(repo: String, root: String, found: &Entries) -[FS]> [String] 
 
 // The pairings, covers, problems and incomplete entries of every entry
 // under `repo`/ENTRIES_ROOT and every workload under WORKLOAD_ROOTS, in
-// name order.
-read_entries: fn(repo: String) -[FS]> Entries Never! {
-    found := Entries{pairings: [Pairing]{}, covers: [Cover]{}, problems: [String]{}, incomplete: [Pairing]{}}
+// name order, and the links between the tool scripts of `paths` (the
+// checkout's files).
+read_entries: fn(repo: String, paths: [String]) -[FS]> Entries Never! {
+    found := Entries{pairings: [Pairing]{}, covers: [Cover]{}, links: [Link]{}, problems: [String]{}, incomplete: [Pairing]{}}
     loop name in subdirectories(repo, ENTRIES_ROOT, found) {
         dir: "{ENTRIES_ROOT}/{name}"
         manifest: "{dir}/entry.json"
@@ -416,6 +437,13 @@ read_entries: fn(repo: String) -[FS]> Entries Never! {
         loop taken in js_imports(repo, known.path) -> covers.push(Cover{entry: known.pair.entry.copy(), taken: taken})
     }
     found.covers = covers
+    links := [Link]{}
+    loop path in paths {
+        if !path.ends_with(".mjs") && !path.ends_with(".js") -> next
+        if test_script(path) || class_of(repo, path) != .Script -> next
+        loop taken in js_imports(repo, path) -> links.push(Link{from: path.copy(), to: taken.path.copy()})
+    }
+    found.links = links
     found
 }
 
@@ -491,11 +519,22 @@ pair_of: fn(entries: Entries, path: String) -> Pair? Never! {
 // missing.
 covered: fn(coverage: Coverage) -> Bool Never! { coverage.entries.len() > 0 && coverage.missing.len() == 0 }
 
+// Whether `path` names a test script.
+test_script: fn(path: String) -> Bool Never! { TEST_SUFFIXES.any(suffix -> path.ends_with(suffix)) }
+
 // How the entries cover the script `path` without pairing it: a test
-// script by what it imports, any other as a library its drivers import.
+// script by what it imports, any other as a library.
 covering: fn(repo: String, entries: Entries, path: String) -[FS]> Coverage Never! {
-    if TEST_SUFFIXES.any(suffix -> path.ends_with(suffix)) -> return test_coverage(repo, entries, path)
-    library_coverage(repo, entries, path)
+    if test_script(path) -> return test_coverage(repo, entries, path)
+    script_coverage(repo, entries, path)
+}
+
+// How the entries cover the library `path`: by the drivers that import it
+// when any does, else by its importers.
+script_coverage: fn(repo: String, entries: Entries, path: String) -[FS]> Coverage Never! {
+    driven: library_coverage(repo, entries, path)
+    if driven.entries.len() > 0 -> return driven
+    importer_coverage(repo, entries, path)
 }
 
 // The entries whose driver imports the library `path`, in name order, and
@@ -515,13 +554,71 @@ library_coverage: fn(repo: String, entries: Entries, path: String) -[FS]> Covera
     Coverage{entries: names, missing: js_exports(repo, path).filter(name -> !taken.contains(name))}
 }
 
+// The tool scripts that import `path` directly.
+importers_of: fn(entries: Entries, path: String) -> [String] Never! {
+    out := [String]{}
+    loop link in entries.links {
+        if link.to == path && !out.contains(link.from) -> out.push(link.from.copy())
+    }
+    out
+}
+
+// How its importers cover the library `path`, which no driver imports:
+// every tool script that imports it, directly or through other importers,
+// must be reached, that is paired, covered by a driver, or imported only by
+// reached scripts (a least fixed point, so an import cycle that nothing
+// paired imports reaches nothing). The entries are the pairs of the paired
+// and driver-covered importers; each importer left unreached is missing.
+importer_coverage: fn(repo: String, entries: Entries, path: String) -[FS]> Coverage Never! {
+    closure := importers_of(entries, path)
+    at := 0
+    loop at < closure.len() {
+        current: closure[at].copy()
+        at += 1
+        loop importer in importers_of(entries, current) {
+            if importer != path && !closure.contains(importer) -> closure.push(importer.copy())
+        }
+    }
+    names := [String]{}
+    reached := [String]{}
+    loop importer in closure {
+        own: if pair_of(entries, importer) == .Val(pair) -> Coverage{entries: [String]{pair.entry.copy()}, missing: [String]{}} else -> library_coverage(repo, entries, importer)
+        if !covered(own) -> next
+        reached.push(importer.copy())
+        loop name in own.entries {
+            if !names.contains(name) -> names.push(name.copy())
+        }
+    }
+    grown := true
+    loop grown {
+        grown = false
+        loop importer in closure {
+            if reached.contains(importer) -> next
+            above: importers_of(entries, importer)
+            ready := above.len() > 0
+            loop name in above {
+                if !reached.contains(name) -> ready = false
+            }
+            if !ready -> next
+            reached.push(importer.copy())
+            grown = true
+        }
+    }
+    names.sort()
+    missing := [String]{}
+    loop importer in closure {
+        if !reached.contains(importer) -> missing.push(importer.copy())
+    }
+    Coverage{entries: names, missing: missing}
+}
+
 // The entries of the scripts the test script `path` imports, in name
 // order, and each import that is neither paired nor covered.
 test_coverage: fn(repo: String, entries: Entries, path: String) -[FS]> Coverage Never! {
     names := [String]{}
     missing := [String]{}
     loop taken in js_imports(repo, path) {
-        own: if pair_of(entries, taken.path) == .Val(pair) -> Coverage{entries: [String]{pair.entry.copy()}, missing: [String]{}} else -> library_coverage(repo, entries, taken.path)
+        own: if pair_of(entries, taken.path) == .Val(pair) -> Coverage{entries: [String]{pair.entry.copy()}, missing: [String]{}} else -> script_coverage(repo, entries, taken.path)
         if !covered(own) {
             missing.push(taken.path.copy())
             next
@@ -719,7 +816,7 @@ run: fn() {
     repo: repo_root()
     if args.len() == 1 && args[0] == "--census" {
         paths: checkout_files(repo, .Caller) ?? process.fail(64, err.message)
-        rows: census_rows(repo, paths, read_entries(repo))
+        rows: census_rows(repo, paths, read_entries(repo, paths))
         loop row in rows -> print(row)
         print(census_counts(rows))
         return
@@ -729,7 +826,7 @@ run: fn() {
     if args.len() != 1 && args.len() != 3 -> usage()
     added: added_files(repo, base, .Caller) ?? process.fail(64, err.message)
     changed: changed_files(repo, base, .Caller) ?? process.fail(64, err.message)
-    entries: read_entries(repo)
+    entries: read_entries(repo, checkout_files(repo, .Caller) ?? process.fail(64, err.message))
     refused := refusals(repo, added, entries)
     refused.extend(judge_refusals(repo, switched_entries(entries, changed)))
     if refused.len() == 0 {
@@ -808,12 +905,13 @@ plant: fn(dir: String, path: String, text: String) -[FS]> () {
     plant(dir, "{WORKLOAD_ROOTS[0]}/w99-echo/expected.out", "5\n")
     added: added_files(dir, "HEAD", .Own) ?? panic(err.message)
     assert(added.contains("Tools/stray/report.mjs") && added.contains("Compiler/JetCanvas/Source/CanvasAssets/js/clock.js"))
-    refused: refusals(dir, added, read_entries(dir))
+    refused: refusals(dir, added, read_entries(dir, checkout_files(dir, .Own) ?? panic(err.message)))
     assert_eq(refused.len(), 3)
     assert(refused[0].starts_with("{ENTRIES_ROOT}/half/python/main.py: a script in another language with no gauntlet pair (entry `half` is incomplete: it does not list `jet` among its languages); "))
     assert(refused[1].starts_with("Tools/stray/fetch: a script in another language with no gauntlet pair; "))
     assert(refused[2].starts_with("Tools/stray/report.mjs: a script in another language with no gauntlet pair; "))
-    rows: census_rows(dir, checkout_files(dir, .Own) ?? panic(err.message), read_entries(dir))
+    listed: checkout_files(dir, .Own) ?? panic(err.message)
+    rows: census_rows(dir, listed, read_entries(dir, listed))
     assert(rows.contains("Tools/count/count.py\tpaired\tcount Tools/count/Count.jet"))
     assert(rows.contains("{ENTRIES_ROOT}/count/fixtures/fake-git.sh\tpaired\tcount Tools/count/Count.jet"))
     assert(rows.contains("{ENTRIES_ROOT}/sum/python/main.py\tpaired\tsum {ENTRIES_ROOT}/sum/jet"))
@@ -829,19 +927,21 @@ plant: fn(dir: String, path: String, text: String) -[FS]> () {
     plant(dir, "Tools/perf/selfhost/workloads/ffi/native/build.sh", "#!/bin/sh\ncc -c foreign.c\n")
     plant(dir, "Tools/perf/selfhost/report.mjs", "console.log(1)\n")
     added: added_files(dir, "HEAD", .Own) ?? panic(err.message)
-    refused: refusals(dir, added, read_entries(dir))
+    listed: checkout_files(dir, .Own) ?? panic(err.message)
+    refused: refusals(dir, added, read_entries(dir, listed))
     assert_eq(refused.len(), 1)
     assert(refused[0].starts_with("Tools/perf/selfhost/report.mjs: a script in another language with no gauntlet pair; "))
-    rows: census_rows(dir, checkout_files(dir, .Own) ?? panic(err.message), read_entries(dir))
+    rows: census_rows(dir, listed, read_entries(dir, listed))
     assert(rows.contains("Tools/perf/selfhost/workloads/ffi/native/build.sh\tsubject\t"))
     assert(rows.any(row -> row.starts_with("Tools/perf/selfhost/report.mjs\tunpaired\t")))
     assert_eq(census_counts(rows), "scripts 2: paired 0, unpaired 1, browser 0, subject 1, covered 0, peer 0")
     files.remove_all(dir) ?? ()
 }
 
-#Test("a library whose every export a driver imports, and a test of it, are covered; peer programs are exempt; the rest is refused") {
+#Test("a library whose every export a driver imports, and a test of it, are covered; so is a paired original's helper; peer programs are exempt; the rest is refused") {
     dir: planted_repo()
-    plant(dir, "{DRIVERS_ROOT}tally.mjs", "import {{\n  add,\n  total as sum,\n}} from '../tally-lib.mjs';\nimport {{ used }} from \"../partial.mjs\";\nimport fs from 'node:fs';\nconsole.log(add(1, 2));\n")
+    plant(dir, "{DRIVERS_ROOT}tally.mjs", "import {{\n  add,\n  total as sum,\n}} from '../tally-lib.mjs';\nimport {{ used }} from \"../partial.mjs\";\nimport fs from 'node:fs';\nconsole.log(add(1, 2));\nawait import('../loaded.mjs');\n")
+    plant(dir, "Tools/gauntlet/harness/loaded.mjs", "export const loaded = 1;\nexport default loaded;\n")
     plant(dir, "Tools/gauntlet/harness/tally-lib.mjs", "export const add = (a, b) => a + b;\nexport async function total(list) {{ return 0; }}\n")
     plant(dir, "Tools/gauntlet/harness/tally-lib.test.mjs", "import {{ add }} from \"./tally-lib.mjs\";\n")
     plant(dir, "Tools/gauntlet/harness/partial.mjs", "export function used() {{}}\nconst spare = 1, other = 2;\nexport {{\n  spare, // kept\n  other as renamed,\n}};\n")
@@ -861,31 +961,66 @@ plant: fn(dir: String, path: String, text: String) -[FS]> () {
     plant(dir, "{AXES_ROOT}reload/js/server.mjs", "console.log(1)\n")
     plant(dir, "{AXES_ROOT}reload/driver.mjs", "console.log(1)\n")
     plant(dir, "{AXES_ROOT}gen/js/build.mjs", "console.log(1)\n")
-    entries: read_entries(dir)
+    entries: read_entries(dir, checkout_files(dir, .Own) ?? panic(err.message))
     imports: js_imports(dir, "{DRIVERS_ROOT}tally.mjs")
-    assert_eq(imports.map(taken -> taken.path.copy()), [String]{"Tools/gauntlet/harness/tally-lib.mjs", "Tools/gauntlet/harness/partial.mjs"})
+    assert_eq(imports.map(taken -> taken.path.copy()), [String]{"Tools/gauntlet/harness/tally-lib.mjs", "Tools/gauntlet/harness/partial.mjs", "Tools/gauntlet/harness/loaded.mjs"})
+    assert(imports[2].all)
     assert_eq(imports[0].names, [String]{"add", "total"})
     assert_eq(js_exports(dir, "Tools/gauntlet/harness/partial.mjs"), [String]{"used", "spare", "renamed"})
     refused: refusals(dir, added_files(dir, "HEAD", .Own) ?? panic(err.message), entries)
-    assert_eq(refused.len(), 7)
+    assert_eq(refused.len(), 6)
     assert(refused[0].starts_with("{AXES_ROOT}gen/js/build.mjs: a script in another language with no gauntlet pair; "))
     assert(refused[1].starts_with("{AXES_ROOT}reload/driver.mjs: a script in another language with no gauntlet pair; "))
     assert(refused[2].starts_with("Tools/gauntlet/harness/other.test.mjs: a script in another language with no gauntlet pair (missing: Tools/gauntlet/harness/stray.mjs); "))
     assert(refused[3].starts_with("Tools/gauntlet/harness/partial.mjs: a script in another language with no gauntlet pair (missing: spare, renamed); "))
     assert(refused[4].starts_with("Tools/gauntlet/harness/partial.test.mjs: a script in another language with no gauntlet pair (missing: Tools/gauntlet/harness/partial.mjs); "))
     assert(refused[5].starts_with("Tools/gauntlet/harness/stray.mjs: a script in another language with no gauntlet pair; "))
-    assert(refused[6].starts_with("Tools/tool/helper.mjs: a script in another language with no gauntlet pair; "))
     rows: census_rows(dir, checkout_files(dir, .Own) ?? panic(err.message), entries)
     assert(rows.contains("{DRIVERS_ROOT}tally.mjs\tpaired\ttally Tools/tally/Tally.jet"))
     assert(rows.contains("Tools/gauntlet/harness/tally-lib.mjs\tcovered\ttally"))
+    assert(rows.contains("Tools/gauntlet/harness/loaded.mjs\tcovered\ttally"))
     assert(rows.contains("Tools/gauntlet/harness/tally-lib.test.mjs\tcovered\ttally"))
     assert(rows.contains("Tools/gauntlet/harness/partial.mjs\tunpaired\tmissing: spare renamed"))
     assert(rows.contains("Tools/gauntlet/harness/partial.test.mjs\tunpaired\tmissing: Tools/gauntlet/harness/partial.mjs"))
     assert(rows.contains("Tools/gauntlet/harness/other.test.mjs\tunpaired\tmissing: Tools/gauntlet/harness/stray.mjs"))
-    assert(rows.contains("Tools/tool/helper.mjs\tunpaired\t"))
+    assert(rows.contains("Tools/tool/helper.mjs\tcovered\ttool"))
     assert(rows.contains("{OPTIMIZATION_FIXTURES}sum/peer-node.mjs\tpeer\t"))
     assert(rows.contains("{AXES_ROOT}reload/js/server.mjs\tpeer\t"))
-    assert_eq(census_counts(rows), "scripts 13: paired 2, unpaired 7, browser 0, subject 0, covered 2, peer 2")
+    assert_eq(census_counts(rows), "scripts 14: paired 2, unpaired 6, browser 0, subject 0, covered 4, peer 2")
+    files.remove_all(dir) ?? ()
+}
+
+#Test("a library its importers cover: every script that imports it, directly or through others, is paired or covered") {
+    dir: planted_repo()
+    plant(dir, "Tools/one/one.mjs", "import {{ solo }} from './solo.mjs';\nimport {{ shared }} from '../common/shared.mjs';\nimport {{ mid }} from './mid.mjs';\n")
+    plant(dir, "Tools/one/One.jet", "run: fn() {{ print(1) }}\n")
+    plant(dir, "{ENTRIES_ROOT}/one/entry.json", "{{\"name\": \"one\", \"mode\": \"tool\", \"tool\": {{\"original\": \"Tools/one/one.mjs\", \"jet\": \"Tools/one/One.jet\", \"cases\": [{{\"args\": [], \"expected\": \"expected/plain.out\"}}]}}}}\n")
+    plant(dir, "{ENTRIES_ROOT}/one/expected/plain.out", "1\n")
+    // Imported only by a paired original.
+    plant(dir, "Tools/one/solo.mjs", "export const solo = 1;\n")
+    // Imported by the paired original and by one unpaired script.
+    plant(dir, "Tools/common/shared.mjs", "export const shared = 1;\n")
+    plant(dir, "Tools/loose/loose.mjs", "import {{ shared }} from '../common/shared.mjs';\n")
+    // A two-level chain under the paired original.
+    plant(dir, "Tools/one/mid.mjs", "import {{ deep }} from './deep.mjs';\nexport const mid = 1;\n")
+    plant(dir, "Tools/one/deep.mjs", "export const deep = 1;\n")
+    // A cycle nothing paired imports.
+    plant(dir, "Tools/ring/a.mjs", "import {{ b }} from './b.mjs';\nexport const a = 1;\n")
+    plant(dir, "Tools/ring/b.mjs", "import {{ a }} from './a.mjs';\nexport const b = 1;\n")
+    listed: checkout_files(dir, .Own) ?? panic(err.message)
+    entries: read_entries(dir, listed)
+    refused: refusals(dir, added_files(dir, "HEAD", .Own) ?? panic(err.message), entries)
+    assert_eq(refused.len(), 4)
+    assert(refused[0].starts_with("Tools/common/shared.mjs: a script in another language with no gauntlet pair (missing: Tools/loose/loose.mjs); "))
+    assert(refused[1].starts_with("Tools/loose/loose.mjs: a script in another language with no gauntlet pair; "))
+    assert(refused[2].starts_with("Tools/ring/a.mjs: a script in another language with no gauntlet pair (missing: Tools/ring/b.mjs); "))
+    assert(refused[3].starts_with("Tools/ring/b.mjs: a script in another language with no gauntlet pair (missing: Tools/ring/a.mjs); "))
+    rows: census_rows(dir, listed, entries)
+    assert(rows.contains("Tools/one/solo.mjs\tcovered\tone"))
+    assert(rows.contains("Tools/one/mid.mjs\tcovered\tone"))
+    assert(rows.contains("Tools/one/deep.mjs\tcovered\tone"))
+    assert(rows.contains("Tools/common/shared.mjs\tunpaired\tmissing: Tools/loose/loose.mjs"))
+    assert_eq(census_counts(rows), "scripts 8: paired 1, unpaired 4, browser 0, subject 0, covered 3, peer 0")
     files.remove_all(dir) ?? ()
 }
 
@@ -893,7 +1028,7 @@ plant: fn(dir: String, path: String, text: String) -[FS]> () {
     dir: planted_repo()
     plant(dir, "Tools/count/count.py", "print(3)\n")
     plant(dir, "{ENTRIES_ROOT}/count/entry.json", "{{\"name\": \"count\", \"mode\": \"tool\", \"tool\": {{\"original\": \"Tools/count/count.py\", \"jet\": \"Tools/count/Count.jet\", \"fixtures\": \"fixtures\", \"cases\": [{{\"expected\": \"expected/plain.out\", \"check\": \"check.sh\"}}]}}}}\n")
-    refused: refusals(dir, added_files(dir, "HEAD", .Own) ?? panic(err.message), read_entries(dir))
+    refused: refusals(dir, added_files(dir, "HEAD", .Own) ?? panic(err.message), read_entries(dir, checkout_files(dir, .Own) ?? panic(err.message)))
     assert_eq(refused.len(), 2)
     assert(refused[0].starts_with("Tools/count/count.py: a script in another language with no gauntlet pair; "))
     assert_eq(refused[1], "tool entry `{ENTRIES_ROOT}/count`: its Jet twin `Tools/count/Count.jet` does not exist; its fixtures `{ENTRIES_ROOT}/count/fixtures` are not a directory; case 1 has no `args` array; case 1's expected output `{ENTRIES_ROOT}/count/expected/plain.out` does not exist; case 1's check `{ENTRIES_ROOT}/count/check.sh` is not a Jet program")
@@ -906,7 +1041,7 @@ plant: fn(dir: String, path: String, text: String) -[FS]> () {
         Pairing{path: "{ENTRIES_ROOT}/count/count.py", pair: twin},
         Pairing{path: "{ENTRIES_ROOT}/count/fixtures/", pair: twin},
         Pairing{path: "Tools/sum/sum.py", pair: Pair{entry: "sum", twin: "Tools/sum/Sum.jet"}},
-    }, covers: [Cover]{}, problems: [String]{}, incomplete: [Pairing]{}}
+    }, covers: [Cover]{}, links: [Link]{}, problems: [String]{}, incomplete: [Pairing]{}}
     assert_eq(switched_entries(entries, [String]{"README.md", "Tools/count/count.py"}), [String]{})
     assert_eq(switched_entries(entries, [String]{"{ENTRIES_ROOT}/count/count.py", "Tools/count/count.py"}), [String]{"count"})
     assert_eq(switched_entries(entries, [String]{"Tools/count/Count.jet"}), [String]{"count"})

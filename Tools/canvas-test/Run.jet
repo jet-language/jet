@@ -83,7 +83,7 @@ driver_lifecycle: fn(args: [String]) {
         answer_bidi(d) ?? fail(err.message)
         cdp: d.session.protocol("cdp") ?? fail("Chromium has no CDP channel: {err}")
         reply: cdp.send("Browser.getVersion", "{{}}") ?? fail("Browser.getVersion failed: {err}")
-        product: text(at(json.parse(reply) ?? Dyn.Null, "product"))
+        product: text(at(json.parse(reply) ?? Dyn.Null, "result.product"))
         if product == "" -> fail("Browser.getVersion named no product: {reply}")
         if !d.session.privacy().isolated_profiles() -> fail("Chromium sessions do not have isolated profiles")
     }

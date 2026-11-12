@@ -1,0 +1,56 @@
+// The gauntlet driver of Tools/canvas-test/Run.jet driver-lifecycle (#5072
+// c3), the twin of Tools/gauntlet/harness/drivers/canvas-driver-lifecycle.mjs:
+// it pins Chromium and its chromedriver in the working directory's .jet/lock
+// (`jetpack browser lock`), where Run.jet's core.web.browser reads them, and
+// runs Run.jet there.
+//
+//   jet driver driver-lifecycle [COUNT]
+//
+// Chromium is $CHROMIUM and chromedriver $CHROMEDRIVER, each when set, else
+// its build from the nixpkgs revision the repository's flake.lock pins, so
+// the check runs the same on any machine with the repository's nix inputs.
+// A browser that cannot be locked (jetpack says why) leaves no lock, and
+// Run.jet refuses the missing lock.
+use {
+    files: core.files
+    json: core.encoding.json
+    process: core.process
+    sys: core.sys
+    core.encoding.[EncodingError]
+    core.process.[Sh]
+}
+
+USAGE: "usage: driver driver-lifecycle [COUNT]"
+
+// This driver's path below the checkout that holds it.
+DRIVER: "/Tools/gauntlet/entries/canvas-driver-lifecycle/driver/run.jet"
+
+// The part of flake.lock that names the pinned nixpkgs.
+FlakeLock: struct { nodes: FlakeNodes }
+FlakeNodes: struct { nixpkgs: FlakeNode }
+FlakeNode: struct { locked: FlakeRevision }
+FlakeRevision: struct { owner: String, repo: String, rev: String }
+
+// The nixpkgs revision `repo`'s flake.lock pins, as a flake reference.
+pinned_nixpkgs: fn(repo: String) -> String (IOError | EncodingError | [FieldError])! {
+    tree: json.parse(files.read(files.join(repo, "flake.lock")))
+    pinned: tree.decode<FlakeLock>().nodes.nixpkgs.locked
+    Ok("github:{pinned.owner}/{pinned.repo}/{pinned.rev}")
+}
+
+// The program `name` of the nixpkgs package `name` that `nixpkgs` builds;
+// nix says why when it cannot.
+built: fn(nixpkgs: String, name: String) -> String IOError! {
+    Ok("{Sh{argv: [String]{"nix", "build", "--no-link", "--print-out-paths", "{nixpkgs}#{name}"}}.text()}/bin/{name}")
+}
+
+run: fn() -> Never (IOError | EncodingError | [FieldError])! {
+    args: process.args()
+    if args.first() != Val("driver-lifecycle") -> process.fail(2, USAGE)
+    repo: sys.executable().remove_suffix(DRIVER)
+    nixpkgs: pinned_nixpkgs(repo)
+    chromium: process.env_get("CHROMIUM") ?? built(nixpkgs, "chromium")
+    chromedriver: process.env_get("CHROMEDRIVER") ?? built(nixpkgs, "chromedriver")
+    _: Sh{argv: [String]{"jetpack", "browser", "lock", "chromium", "--binary", chromium, "--protocol", "bidi-2025.5", "--driver", chromedriver}}.ok()
+    process.exec([String]{"jet", "run", "--allow=Env,Exec,FS,IO,Net,Time", "{repo}/Tools/canvas-test/Run.jet", "--"}.concat(args))
+}
