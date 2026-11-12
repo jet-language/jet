@@ -137,6 +137,14 @@ reach_test_constants: fn(load: JetDriverLoadResult, module_name: String) -> [Str
     assert_eq(reach_test_functions(limited, "core.devtools"), [String]{"plain", "limited"})
 }
 
+#Test("a Core constant read in another case stays, so its E1004 can suggest it") {
+    owner: "plain: fn() -> Int Never! {{ 1 }}\n\nLIMIT: 3\n\nOTHER: 4\n"
+    lower: reach_test_load_owner("use tools: core.devtools\nrun: fn() {{ print(tools.limit) }}\n", owner)
+    assert_eq(reach_test_constants(lower, "core.devtools"), [String]{"LIMIT"})
+    exact: reach_test_load_owner("use tools: core.devtools\nrun: fn() {{ print(tools.plain()) }}\n", owner)
+    assert_eq(reach_test_constants(exact, "core.devtools"), [String]{})
+}
+
 // The load of `source` beside the one Core module `module_name`, whose text
 // is `text` and whose cutover members are `owned`.
 reach_test_load_module: fn(source: String, module_name: String, owned: [String], text: String) -> JetDriverLoadResult {
