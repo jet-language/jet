@@ -7,8 +7,13 @@ use {
     process: core.process
 }
 
-run: fn() {
-    printed: files.read(process.args()[0]) ?? process.fail(1, "{err}")
+#CLI
+Check: struct {
+    #Doc("The file holding the program's output") stdout: String
+}
+
+run: fn(check: Check) {
+    printed: files.read(check.stdout) ?? process.fail(1, "{err}")
     if printed != "" -> print(printed.remove_suffix("\n"))
     written := [String]{}
     if files.is_dir("out") {

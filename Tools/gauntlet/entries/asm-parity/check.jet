@@ -18,9 +18,14 @@ use {
 // The Markdown columns a gains run prints the same every time.
 STEADY: [String]{"program", "base bytes", "candidate bytes", "ceiling bytes", "output"}
 
-run: fn() {
+#CLI
+Check: struct {
+    #Doc("The file holding the program's output") stdout: String
+}
+
+run: fn(check: Check) {
     here: files.collapse(files.absolute(".") ?? process.fail(1, "{err}"))
-    printed: files.read(process.args()[0]) ?? process.fail(1, "{err}")
+    printed: files.read(check.stdout) ?? process.fail(1, "{err}")
     keep := [Bool]{}
     loop line in printed.lines() {
         text: line.replace(here, "<case>")
