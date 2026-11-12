@@ -615,8 +615,11 @@ sema_compiler_events_binding: fn(name: String, ty: Type?, init: Expr, span: Span
     Stmt.Val{binding: Binding{mutable: false, markers: [Marker]{}, reactive_upgrade: false, meta: None, name: name.copy(), name_span: span, sigil_span: None, pattern: None, ty: ty.copy(), ty_span: typed_span, init: init.copy(), is_comptime: false, ct: None, uninit: false, arena_view: false, string_view: false, gc_promotion: None, gc_transferred: false}}
 }
 
-// The marker struct whose value `m` is: the struct `m` writes (`Traced{}`),
-// else the type `m` checks as. Anything else is E1134.
+// The marker struct whose value `m` is: the declaration of the struct `m`
+// checks as, found through its registered type, so a build program that
+// names the root's types through their module (`main.Traced`) finds the same
+// struct; else the struct `m` writes (`Traced{}`), by name. Anything else is
+// E1134.
 sema_compiler_events_marker: fn(marked: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> MarkerDecl? {
     watched: sema_check_expression(marked, None, environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
     written := ""
@@ -626,7 +629,12 @@ sema_compiler_events_marker: fn(marked: Expr, environment: SemaScopeEnvironment,
         written = name.copy()
     }
     declaration := MarkerDecl?{None}
-    if written != "" && program.registration_graph == .Val(graph) -> declaration = sema_marker_module_resolve(graph, environment.module_identity, written).declaration
+    if program.registration_graph == .Val(graph) {
+        if sema_type_resolve_nominal_row(graph, watched.ty, environment.module_identity) == .Val(row) {
+            declaration = sema_marker_module_declaration_by_span(graph.modules[row.module_index].program.items, graph.modules[row.module_index].nominals[row.row].symbol.span)
+        }
+        if declaration == None && written != "" -> declaration = sema_marker_module_resolve(graph, environment.module_identity, written).declaration
+    }
     if declaration == None {
         shown: if written == "" -> "this value" else -> "`{written}`"
         diagnostics.push(sema_error("E1134", expr_span(marked), "{shown} is not a marker", "`meta.events` watches the functions that carry the marker of the watched value's type, so the value is a marker struct's (one with an `impl Marker` block)", "watch a marker struct value visible here, as in `.Functions{{marked: Traced{{}}}}`"))
