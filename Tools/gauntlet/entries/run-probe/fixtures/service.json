@@ -1,0 +1,53 @@
+{
+  "routes": {
+    "/json": {"raw": "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 11\r\nConnection: close\r\n\r\n{\"ok\":true}"},
+    "/wrong": {"raw": "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 11\r\nConnection: close\r\n\r\n{\"ok\":true}"},
+    "/missing": {"raw": "HTTP/1.1 200 OK\r\nContent-Length: 11\r\nConnection: close\r\n\r\n{\"ok\":true}"},
+    "/params": {"raw": "HTTP/1.1 200 OK\r\nContent-Type:  Text/HTML ; Q=1 ;charset=UTF-8 \r\nX-Trace: abc\r\nContent-Length: 2\r\nConnection: close\r\n\r\nhi"},
+    "/repeats": {"raw": "HTTP/1.1 200 OK\r\nX-Many: a\r\nSet-Cookie: a=1\r\nServer: one\r\nx-many: b\r\nSet-Cookie: b=2\r\nServer: two\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"},
+    "/status": {"raw": "HTTP/1.1 404 Not Found\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: 4\r\nConnection: close\r\n\r\nnope"},
+    "/created": {"raw": "HTTP/1.1 201 Created\r\nLocation: /items/7\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"},
+    "/redirect": {"raw": "HTTP/1.1 302 Found\r\nLocation: /json\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"},
+    "/chunked": {"raw": "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n5\r\nhello\r\n6\r\n world\r\n0\r\n\r\n"},
+    "/unicode": {"raw": "HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: 13\r\nConnection: close\r\n\r\nhéllo ✓ ok"},
+    "/until-close": {"raw": "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\nread to the end"},
+    "/server-error": {"raw": "HTTP/1.1 503 Service Unavailable\r\nRetry-After: 1\r\nContent-Length: 8\r\nConnection: close\r\n\r\nstarting"},
+    "/echo": {"echo": true},
+    "/echo?id=7&x=y": {"echo": true},
+    "/slow": {"delayMs": 1500, "raw": "HTTP/1.1 200 OK\r\nContent-Length: 4\r\nConnection: close\r\n\r\nlate"},
+    "/drop": {"drop": true}
+  },
+  "probes": [
+    {"name": "json-matches", "probe": {"method": "GET", "path": "/json", "expectStatus": 200, "expectBody": "{\"ok\":true}", "expectHeaders": {"Content-Type": "application/json"}}},
+    {"name": "json-other-type", "probe": {"method": "GET", "path": "/wrong", "expectStatus": 200, "expectBody": "{\"ok\":true}", "expectHeaders": {"Content-Type": "application/json"}}},
+    {"name": "json-no-type", "probe": {"method": "GET", "path": "/missing", "expectStatus": 200, "expectBody": "{\"ok\":true}", "expectHeaders": {"Content-Type": "application/json"}}},
+    {"name": "json-no-expected-headers", "probe": {"method": "GET", "path": "/json", "expectStatus": 200, "expectBody": "{\"ok\":true}"}},
+    {"name": "params-sorted", "probe": {"path": "/params", "expectHeaders": {"content-type": "text/html;charset=UTF-8;q=1", "X-TRACE": " abc "}}},
+    {"name": "params-value-case", "probe": {"path": "/params", "expectHeaders": {"content-type": "text/html; charset=utf-8; q=1"}}},
+    {"name": "params-missing-one", "probe": {"path": "/params", "expectHeaders": {"content-type": "text/html; charset=UTF-8"}}},
+    {"name": "repeats-joined", "probe": {"path": "/repeats", "expectHeaders": {"x-many": "a, b", "server": "one"}}},
+    {"name": "repeats-cookie-array", "probe": {"path": "/repeats", "expectHeaders": {"set-cookie": "a=1"}}},
+    {"name": "status-expected", "probe": {"path": "/status", "expectStatus": 404, "expectBody": "nope", "expectHeaders": {"Content-Type": "text/plain;charset=utf-8"}}},
+    {"name": "status-unexpected", "probe": {"path": "/status", "expectStatus": 200, "expectHeaders": {"Content-Type": "text/plain; charset=utf-8"}}},
+    {"name": "created-empty", "probe": {"method": "POST", "path": "/created", "body": "", "expectStatus": 201, "expectBody": "", "expectHeaders": {"location": "/items/7"}}},
+    {"name": "redirect-not-followed", "probe": {"path": "/redirect", "expectStatus": 302, "expectHeaders": {"Location": "/json"}}},
+    {"name": "chunked-body", "probe": {"path": "/chunked", "expectBody": "hello world", "expectHeaders": {"content-type": "text/plain"}}},
+    {"name": "unicode-body", "probe": {"path": "/unicode", "expectBody": "héllo ✓ ok", "expectHeaders": {"content-type": "text/plain; charset=utf-8"}}},
+    {"name": "body-until-close", "probe": {"path": "/until-close", "expectBody": "read to the end", "expectHeaders": {"content-type": "text/plain"}}},
+    {"name": "server-error", "probe": {"path": "/server-error", "expectStatus": 200, "expectHeaders": {"retry-after": "1"}}},
+    {"name": "echo-post", "probe": {"method": "POST", "path": "/echo", "body": "hello", "expectBody": "POST /echo 5 hello", "expectHeaders": {"content-type": "text/plain"}}},
+    {"name": "echo-put-number", "probe": {"method": "PUT", "path": "/echo", "body": 42, "expectStatus": 200, "expectHeaders": {"content-type": "text/plain"}}},
+    {"name": "echo-null-body", "probe": {"method": "POST", "path": "/echo", "body": null, "expectBody": "POST /echo 4 null", "expectHeaders": {"content-type": "text/plain"}}},
+    {"name": "echo-unicode-body", "probe": {"method": "POST", "path": "/echo", "body": "naïve ✓", "expectHeaders": {"content-type": "text/plain"}}},
+    {"name": "echo-delete", "probe": {"method": "DELETE", "path": "/echo", "expectStatus": 200, "expectHeaders": {"content-type": "text/plain"}}},
+    {"name": "echo-query", "probe": {"path": "/echo?id=7&x=y", "expectBody": "GET /echo?id=7&x=y 0 ", "expectHeaders": {"content-type": "text/plain"}}},
+    {"name": "default-path", "probe": {"expectStatus": 404, "expectHeaders": {"content-length": "0"}}},
+    {"name": "unknown-path", "probe": {"path": "/nowhere", "expectStatus": 404, "expectHeaders": {"content-length": "0"}}},
+    {"name": "slow-times-out", "probe": {"path": "/slow", "expectStatus": 200, "expectHeaders": {"content-length": "4"}}, "timeoutMs": 300},
+    {"name": "slow-within-time", "probe": {"path": "/slow", "expectBody": "late", "expectHeaders": {"content-length": "4"}}, "timeoutMs": 4000},
+    {"name": "dropped", "probe": {"path": "/drop", "expectStatus": 200, "expectHeaders": {"content-length": "0"}}}
+  ],
+  "refused": [
+    {"name": "refused", "probe": {"path": "/json", "expectStatus": 200, "expectHeaders": {"Content-Type": "application/json"}}}
+  ]
+}

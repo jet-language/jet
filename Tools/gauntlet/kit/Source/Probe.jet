@@ -1,0 +1,158 @@
+// One HTTP probe of a service under measurement and whether its answer is
+// the one the entry expects. The twins of httpProbe and probeMatches in
+// Tools/gauntlet/harness/run.mjs.
+use {
+    client: core.http.client
+    http: core.http
+    json: core.encoding.json
+    time: core.time
+}
+
+// Response headers a repeat of which Node drops, keeping the first.
+SINGLE_HEADERS: ["age", "authorization", "content-length", "content-type", "etag", "expires", "from", "host", "if-modified-since", "if-unmodified-since", "last-modified", "location", "max-forwards", "proxy-authorization", "referer", "retry-after", "server", "user-agent"]
+
+// What one HTTP probe of the service on local `port` answered: `ok`, then
+// the status, headers (named in lowercase, repeats merged as Node merges
+// them) and body of a response, or the error of a request that failed, and
+// the latency in milliseconds. `probe` names the `method` (GET by default),
+// `path` and `body`; a request that takes `timeout_ms` fails.
+http_probe: fn(port: Int, probe: Dyn, timeout_ms: Int) -[Net, Time, Time.Wait]> Dyn {
+    started: time.instant()
+    method: or_text(member(probe, "method"), "GET")
+    path: if truthy_at(probe, "path") -> js_text(dyn_at(probe, "path")) else -> "/"
+    request := client.request(method, "http://127.0.0.1:{port}{path}").timeout(timeout_ms).redirects(0)
+    if value_at(probe, "body") == .Val(sent) -> request = request.body(js_text(sent))
+    answer: request.send() ?? return failed_probe(probe_error(err, port, started, timeout_ms), started)
+    body: answer.text() ?? return failed_probe(probe_error(err, port, started, timeout_ms), started)
+    out := Dyn.object()
+    out["ok"] = Dyn.Bool(true)
+    out["status"] = Dyn.Int(answer.status())
+    out["headers"] = node_headers(answer.headers.fields)
+    out["body"] = Dyn.Text(body)
+    out["latencyMs"] = latency(started)
+    out
+}
+
+// Whether the answer `result` to `probe` over `protocol` is the expected
+// one: a line service's body is the expected line; an HTTP service's
+// status and body are the expected ones when the probe names them, and its
+// headers carry every expected header.
+probe_matches: fn(probe: Dyn, result: Dyn, protocol: Dyn) -> Bool {
+    if !truthy_at(result, "ok") -> return false
+    if protocol == Dyn.Text("line") -> return strictly_equal(value_at(result, "body"), value_at(probe, "expect"))
+    expected_status: value_at(probe, "expectStatus")
+    expected_body: value_at(probe, "expectBody")
+    (expected_status == None || strictly_equal(value_at(result, "status"), expected_status)) &&
+        (expected_body == None || strictly_equal(value_at(result, "body"), expected_body)) &&
+        expected_headers_match(dyn_at(probe, "expectHeaders"), dyn_at(result, "headers"))
+}
+
+// Whether the response headers `actual` carry every header of `expected`,
+// named in any case, a content type compared as a media type.
+expected_headers_match: fn(expected: Dyn, actual: Dyn) -> Bool {
+    if !is_header_map(expected) || !(actual == .Object(_)) -> return false
+    lowered := Dyn.object()
+    loop header in members(actual) -> lowered[header.key.lower()] = header.value
+    members(expected).all(header -> header_matches(header.key, js_text(header.value), dyn_at(lowered, header.key.lower())))
+}
+
+// Whether the response header `found` is a string that compares equal to
+// the expected `value` of the header `name`.
+header_matches: fn(name: String, value: String, found: Dyn) -> Bool {
+    if found == .Text(actual) -> return normalized_header_value(name, actual) == normalized_header_value(name, value)
+    false
+}
+
+// A header value as it is compared: trimmed; a content type's media type
+// and parameter names also in lowercase and its parameters sorted.
+normalized_header_value: fn(name: String, value: String) -> String {
+    trimmed: value.trim()
+    if name.lower() != "content-type" -> return trimmed
+    parts: trimmed.split(";").to_list()
+    parameters := parts.slice(1, parts.len()).map(part -> normalized_parameter(part))
+    parameters.sort()
+    [parts[0].trim().lower()].concat(parameters).join(";")
+}
+
+// A content-type parameter as it is compared: its name trimmed and in
+// lowercase, its value trimmed.
+normalized_parameter: fn(part: String) -> String {
+    pieces: part.split("=").to_list()
+    if pieces.len() == 1 -> return part.trim().lower()
+    "{pieces[0].trim().lower()}={pieces.slice(1, pieces.len()).join("=").trim()}"
+}
+
+// The probe's answer when the request failed.
+failed_probe: fn(error: String, started: time.Instant) -> Dyn {
+    out := Dyn.object()
+    out["ok"] = Dyn.Bool(false)
+    out["error"] = Dyn.Text(error.copy())
+    out["latencyMs"] = latency(started)
+    out
+}
+
+// The error Node gives for a request to local `port` that failed: a request
+// still unanswered once `timeout_ms` passed since `started` timed out, one
+// that could not connect was refused, and any other one hung up.
+probe_error: fn(error: HTTPError, port: Int, started: time.Instant, timeout_ms: Int) -> String {
+    if {
+        error == .Timeout(_) || started.elapsed().ns >= timeout_ms * 1000000 -> "HTTP probe timeout"
+        error == .Connect(_) -> "connect ECONNREFUSED 127.0.0.1:{port}"
+        else -> "socket hang up"
+    }
+}
+
+// The milliseconds since `started`.
+latency: fn(started: time.Instant) -> Dyn {
+    Dyn.Float(Float.from_int(started.elapsed().ns) / Float{1000000.0})
+}
+
+// Response headers as Node gives them: each name in lowercase once, in the
+// order first seen; a repeated set-cookie as an array, a repeated cookie
+// joined by `; `, a repeat of a single-valued header dropped and any other
+// repeat joined by `, `.
+node_headers: fn(fields: [http.Header]) -> Dyn {
+    out := Dyn.object()
+    loop field in fields {
+        name: field.name.lower()
+        seen: dyn_at(out, name)
+        out[name] = if {
+            name == "set-cookie" -> Dyn.Array(items_at(seen, "").concat([Dyn.Text(field.value.copy())]))
+            seen == .Text(first) && SINGLE_HEADERS.contains(name) -> Dyn.Text(first)
+            seen == .Text(first) && name == "cookie" -> Dyn.Text("{first}; {field.value}")
+            seen == .Text(first) -> Dyn.Text("{first}, {field.value}")
+            else -> Dyn.Text(field.value.copy())
+        }
+    }
+    out
+}
+
+#Test("a content type matches as a media type with sorted parameters; another header only trimmed") {
+    assert_eq(normalized_header_value("Content-Type", " Text/HTML ; Q=1 ; charset=UTF-8 ; flag "), "text/html;charset=UTF-8;flag;q=1")
+    assert_eq(normalized_header_value("X-Trace", " Abc "), "Abc")
+    assert(expected_headers_match(Dyn{[String: Dyn]{"content-type": "text/html;charset=UTF-8"}}, Dyn{[String: Dyn]{"Content-Type": "text/html; charset=UTF-8"}}))
+    assert(!expected_headers_match(Dyn{[String: Dyn]{"content-type": "text/html; charset=utf-8"}}, Dyn{[String: Dyn]{"content-type": "text/html; charset=UTF-8"}}))
+    assert(!expected_headers_match(Dyn.object(), Dyn{[String: Dyn]{"content-type": "text/html"}}))
+}
+
+#Test("a probe matches only an answer that is ok and as expected") {
+    answer: Dyn{[String: Dyn]{"ok": Dyn.Bool(true), "status": Dyn.Int(200), "body": "hi", "headers": Dyn{[String: Dyn]{"content-type": "text/plain"}}}}
+    probe: Dyn{[String: Dyn]{"expectStatus": Dyn.Int(200), "expectBody": "hi", "expectHeaders": Dyn{[String: Dyn]{"Content-Type": "text/plain"}}}}
+    assert(probe_matches(probe, answer, Dyn.Text("http")))
+    assert(!probe_matches(Dyn{[String: Dyn]{"expectStatus": Dyn.Null, "expectHeaders": Dyn{[String: Dyn]{"Content-Type": "text/plain"}}}}, answer, Dyn.Text("http")))
+    assert(!probe_matches(Dyn{[String: Dyn]{"expectStatus": Dyn.Int(200)}}, answer, Dyn.Null))
+    assert(probe_matches(Dyn{[String: Dyn]{"expect": "hi"}}, answer, Dyn.Text("line")))
+    assert(!probe_matches(probe, Dyn{[String: Dyn]{"ok": Dyn.Bool(false)}}, Dyn.Text("http")))
+}
+
+#Test("repeated response headers merge as Node merges them") {
+    fields: [http.Header]{
+        http.Header{name: "Set-Cookie", value: "a=1"},
+        http.Header{name: "X-Many", value: "a"},
+        http.Header{name: "set-cookie", value: "b=2"},
+        http.Header{name: "x-many", value: "b"},
+        http.Header{name: "Server", value: "one"},
+        http.Header{name: "Server", value: "two"},
+    }
+    assert_eq(json.stringify(node_headers(fields)), "{{\"set-cookie\":[\"a=1\",\"b=2\"],\"x-many\":\"a, b\",\"server\":\"one\"}}")
+}

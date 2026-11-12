@@ -672,14 +672,19 @@ listed: fn(values: [Dyn], wanted: Dyn?) -> Bool {
 }
 
 // Whether two JSON values are the same as JS's `===` sees them: scalars by
-// value, arrays and objects never (each one parsed is its own), and two
-// absent values alike.
+// value (a number whole or fractional alike), arrays and objects never (each
+// one parsed is its own), and two absent values alike.
 strictly_equal: fn(left: Dyn?, right: Dyn?) -> Bool {
     if left == {
         .None -> right == None
         .Val(.Array(_)) | .Val(.Object(_)) -> false
-        .Val(found) -> is_value(right, found)
+        .Val(found) -> is_value(right, found) || same_number(found, right ?? Dyn.Null)
     }
+}
+
+// Whether two values are the same number, as JSON shows them.
+same_number: fn(left: Dyn, right: Dyn) -> Bool {
+    number_at(left, "") != None && number_at(right, "") != None && json.stringify(left) == json.stringify(right)
 }
 
 // How many of `values` are `wanted`.

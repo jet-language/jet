@@ -1,0 +1,152 @@
+// The gauntlet driver of the kit's Probe module (#5072 c8), the twin of
+// Tools/gauntlet/harness/drivers/run-probe.mjs: the HTTP probe exports of
+// Tools/gauntlet/harness/run.mjs, httpProbe and probeMatches.
+//
+//   jet driver matches FILE
+//   jet driver probe FILE
+//
+// `matches` judges each case of the JSON array in FILE, a `probe`, the
+// `result` it got and the service's `protocol`, and shows its name and
+// whether the result matches. `probe` serves the `routes` of the JSON object
+// in FILE on a free local port, one connection at a time, each the raw
+// response bytes of its `raw` (after `delayMs`), the request's method,
+// target, body length and body for `echo`, nothing for `drop` and a 404 for
+// an unknown target; it then sends each of its `probes` (a `name`, the
+// `probe` and its `timeoutMs`), stops serving and sends each of its
+// `refused` probes to the closed port. Each probe shows its name, what it
+// answered (`ok`, then the status, headers and body or the error, with the
+// port as PORT, and whether a latency was measured) and whether that
+// matches the probe.
+package: {
+    name: "run_probe_driver"
+    version: "0.0.1"
+    deps: {
+        jet_gauntlet_kit: ../../../kit,
+    }
+}
+
+use {
+    jet_gauntlet_kit.[dyn_at, http_probe, int_at, items_at, members, number_at, probe_matches, put_present, read_json, text_at, text_or_empty, truthy_at]
+    json: core.encoding.json
+    net: core.net
+    process: core.process
+    time: core.time
+}
+
+USAGE: "usage: driver matches FILE | probe FILE"
+
+// What an unknown target answers.
+NOT_FOUND: "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+
+// A request the fixture service read: its method, target and body.
+Asked: struct {
+    method: String
+    target: String
+    body: String
+}
+
+print_matches: fn(file: String) {
+    cases: read_json(file) ?? process.fail(1, "{file} is not a JSON file")
+    loop item in items_at(cases, "") {
+        print("{text_or_empty(item, "name")}\t{probe_matches(dyn_at(item, "probe"), dyn_at(item, "result"), dyn_at(item, "protocol"))}")
+    }
+}
+
+print_probes: fn(file: String) {
+    spec: read_json(file) ?? process.fail(1, "{file} is not a JSON file")
+    routes: dyn_at(spec, "routes")
+    probes: items_at(spec, "probes")
+    connections: probes.len()
+    { sender, receiver: addresses }: channel<String>()
+    server: task {
+        listener: net.tcp_listen("127.0.0.1:0") ?? panic("the fixture service cannot listen: {err}")
+        sender.send(listener.local_addr() ?? panic("the fixture service has no address: {err}"))
+        serve(listener, routes, connections)
+    }
+    address: addresses.receive() ?? process.fail(1, "the fixture service did not start")
+    port: Int.parse(address.split(":").to_list().last() ?? "") ?? process.fail(1, "the fixture service address {address} has no port")
+    loop item in probes -> print_probe(item, port, int_at(item, "timeoutMs") ?? 5000)
+    server.join() ?? process.fail(1, "the fixture service failed")
+    loop item in items_at(spec, "refused") -> print_probe(item, port, 5000)
+}
+
+print_probe: fn(item: Dyn, port: Int, timeout_ms: Int) {
+    probe: dyn_at(item, "probe")
+    result: http_probe(port, probe, timeout_ms)
+    print("{text_or_empty(item, "name")}\t{json.stringify(shown(result, port))}\t{probe_matches(probe, result, Dyn.Text("http"))}")
+}
+
+// What a probe answered, as the driver shows it.
+shown: fn(result: Dyn, port: Int) -> Dyn {
+    out := Dyn.object()
+    out["ok"] = dyn_at(result, "ok")
+    loop key in ["status", "headers", "body"] -> put_present(out, key, value_of(result, key))
+    if text_at(result, "error") == .Val(error) -> out["error"] = Dyn.Text(error.replace("{port}", "PORT"))
+    out["latency"] = Dyn.Bool((number_at(result, "latencyMs") ?? -1.0) >= 0.0)
+    out
+}
+
+// The member `key` of `result`, when it has one.
+value_of: fn(result: Dyn, key: String) -> Dyn? {
+    members(result).find(row -> row.key == key).map(row -> row.value)
+}
+
+// Serves `routes` on `listener`, one connection at a time, for
+// `connections` connections.
+serve: fn(listener: TCPListener, routes: Dyn, connections: Int) {
+    loop _ in 0..<connections {
+        stream: listener.accept() ?? return
+        asked: read_request(stream)
+        target: asked.target.copy()
+        route: members(routes).find(row -> row.key == target).map(row -> row.value)
+        if route == .Val(found) && truthy_at(found, "drop") {
+            stream.close() ?? ()
+            next
+        }
+        delay: if route == .Val(found) -> int_at(found, "delayMs") ?? 0 else -> 0
+        if delay > 0 -> time.sleep(Duration{ns: delay * 1000000})
+        stream.write_all(response(route, asked).bytes()) ?? ()
+        stream.close() ?? ()
+    }
+}
+
+// The request on `stream` once its head and body are complete.
+read_request: fn(stream: TCPStream) -> Asked {
+    text := ""
+    loop {
+        if complete(text) == .Val(asked) -> return asked
+        chunk: stream.read_text(8192) ?? ""
+        if chunk == "" -> return Asked{method: "", target: "", body: ""}
+        text = "{text}{chunk}"
+    }
+}
+
+// The request in `text` when its head and body are complete.
+complete: fn(text: String) -> Asked? {
+    parts: text.split("\r\n\r\n").to_list()
+    if parts.len() < 2 -> return None
+    head: parts[0].split("\r\n").to_list()
+    body: parts.slice(1, parts.len()).join("\r\n\r\n")
+    length: head.slice(1, head.len()).map(line -> line.split(":").to_list()).find(pieces -> pieces[0].trim().lower() == "content-length")
+    want: if length == .Val(pieces) -> Int.parse(pieces.slice(1, pieces.len()).join(":").trim()) ?? 0 else -> 0
+    if body.bytes().len() < want -> return None
+    request_line: head[0].split(" ").to_list()
+    Val(Asked{method: request_line.get(0) ?? "", target: request_line.get(1) ?? "", body: body})
+}
+
+// The raw response `route` gives `asked`.
+response: fn(route: Dyn?, asked: Asked) -> String {
+    found: route ?? return NOT_FOUND
+    if !truthy_at(found, "echo") -> return text_or_empty(found, "raw")
+    shown: "{asked.method} {asked.target} {asked.body.bytes().len()} {asked.body}"
+    "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {shown.bytes().len()}\r\nConnection: close\r\n\r\n{shown}"
+}
+
+run: fn() {
+    args: process.args()
+    if {
+        args.get(0) == Val("matches") && args.len() >= 2 -> print_matches(args[1])
+        args.get(0) == Val("probe") && args.len() >= 2 -> print_probes(args[1])
+        else -> process.fail(64, USAGE)
+    }
+}

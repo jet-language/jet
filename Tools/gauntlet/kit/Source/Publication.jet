@@ -1,0 +1,234 @@
+// Whether a gauntlet run may be published, as the full matrix or as one
+// axis, and every blocker that stops it. The twin of publicationState in
+// Tools/gauntlet/harness/run.mjs.
+use {
+    combinatorics: core.math.combinatorics
+    json: core.encoding.json
+    text: core.text
+}
+
+// The publication state of `run`, the object run.mjs hands publicationState:
+// its `fullScope`, `loaded` and `skipped` entries, `matrix`, `manifest`,
+// `sourceMeasurements`, measured `results`, `scoreboard`, `axes`,
+// `validationIssues` and, for a run of one axis, its `axisId`.
+publication_state: fn(run: Dyn) -> Dyn {
+    axis_id: dyn_at(run, "axisId")
+    if axis_id != Dyn.Null -> return axis_publication(run, axis_id)
+    blockers := items_at(run, "validationIssues")
+    loaded: items_at(run, "loaded")
+    skipped: items_at(run, "skipped")
+    results: items_at(run, "results")
+    matrix: dyn_at(run, "matrix")
+    manifest: dyn_at(run, "manifest")
+    scoreboard: dyn_at(run, "scoreboard")
+    sources: dyn_at(run, "sourceMeasurements")
+    matrix_cells: items_at(matrix, "cells")
+    board_cells: items_at(scoreboard, "cells")
+    full_scope: truthy_at(run, "fullScope")
+
+    loop issue in strict_performance_policy_issues(matrix) -> blockers.push(Dyn.Text(issue))
+    loop result in results {
+        loop issue in result_shape_issues(result, matrix) -> blockers.push(Dyn.Text(issue))
+    }
+    blockers.extend(items_at(scoreboard, "validation_issues"))
+    if !full_scope -> blockers.push(Dyn.Text("run scope is partial; full matrix publication requires no --entry"))
+    if skipped.len() > 0 -> blockers.push(Dyn.Text("skipped entries: {skipped.map(item -> joined(dyn_at(item, "name"))).join(", ")}"))
+    if {
+        !truthy_at(sources, "") -> blockers.push(Dyn.Text("source measurements are missing"))
+        truthy_at(manifest, "") && !truthy_at(sources, "coverage/denominator_pass") -> blockers.push(Dyn.Text("source measurement denominator is incomplete"))
+        else -> {}
+    }
+
+    expected_names: loaded.map(item -> member(item, "directoryName") ?? member(item, "entry/name") ?? Dyn.Null)
+    actual_names: results.map(result -> member(result, "entry/name") ?? Dyn.Null)
+    if results.len() != loaded.len() -> blockers.push(Dyn.Text("result denominator is {results.len()}/{loaded.len()}"))
+    if !all_distinct(actual_names) -> blockers.push(Dyn.Text("result entry identities are duplicated"))
+    if !same_values(expected_names, actual_names) -> blockers.push(Dyn.Text("result entry identities do not match the loaded corpus order"))
+    matrix_ids: matrix_cells.map(cell -> dyn_at(cell, "id"))
+    if board_cells.len() != matrix_cells.len() -> blockers.push(Dyn.Text("scoreboard cell denominator is {board_cells.len()}/{matrix_cells.len()}"))
+    loop cell in board_cells {
+        if !listed(matrix_ids, Val(dyn_at(cell, "id"))) -> blockers.push(Dyn.Text("scoreboard declares unknown matrix cell {template(value_at(cell, "id"))}"))
+    }
+    required_axes: members(dyn_at(manifest, "axes")).filter(row -> text_at(row.value, "status") == Val("required")).map(row -> row.key.copy())
+    allowed: items_at(manifest, "corpus/allowed_uncovered_cells")
+
+    loop cell in matrix_cells {
+        id: dyn_at(cell, "id")
+        shown_id: template(value_at(cell, "id"))
+        record: last_with_id(board_cells, id)
+        count: entry_count(dyn_at(record, "entries"))
+        if count != Val(1) && !listed(allowed, Val(id)) -> blockers.push(Dyn.Text("{shown_id}: expected exactly one published entry, found {count_text(count)}"))
+        loop failure in items_at(record, "metric_failures") {
+            metric: or_text(member(failure, "metric"), "metric")
+            peer_failures: items_at(failure, "peers")
+            loop peer_failure in peer_failures {
+                reasons := [dyn_at(peer_failure, "reason")]
+                reasons.extend(items_at(failure, "reasons"))
+                kept: distinct_values(reasons.filter(reason -> truthy_at(reason, "")))
+                detail: if kept.len() > 0 -> " ({kept.map(reason -> js_text(reason)).join("; ")})" else -> ""
+                verdict: or_text(member(peer_failure, "verdict"), or_text(member(failure, "verdict"), "unmeasured"))
+                blockers.push(Dyn.Text("{shown_id}/{or_text(member(peer_failure, "peer"), "peer")}/{metric}: metric {verdict}{detail}"))
+            }
+            if peer_failures.len() == 0 {
+                reason: if truthy_at(failure, "reason") -> " ({js_text(dyn_at(failure, "reason"))})" else -> ""
+                blockers.push(Dyn.Text("{shown_id}/{or_text(member(failure, "peer"), "peer")}/{metric}: metric {or_text(member(failure, "verdict"), "unmeasured")}{reason}"))
+            }
+        }
+    }
+    covered: results.flat_map(result -> items_at(result, "entry/cells"))
+    uncovered := [Dyn]{}
+    loop id in matrix_ids {
+        if !listed(covered, Val(id)) && !listed(allowed, Val(id)) -> uncovered.push(id)
+    }
+    if uncovered.len() > 0 -> blockers.push(Dyn.Text("unexpected uncovered matrix cells: {uncovered.map(id -> joined(id)).join(", ")}"))
+    expected_count: member(manifest, "corpus/entry_count") ?? Dyn.Int(loaded.len())
+    if full_scope && int_at(expected_count, "") != Val(loaded.len()) -> blockers.push(Dyn.Text("entry denominator is {loaded.len()}/{js_text(expected_count)}"))
+    if (number_at(scoreboard, "summary/unmeasured_required") ?? 0.0) > 0.0 -> blockers.push(Dyn.Text("{js_text(dyn_at(scoreboard, "summary/unmeasured_required"))} required matrix cells are unmeasured"))
+    if (number_at(scoreboard, "summary/metric_unmeasured") ?? 0.0) > 0.0 -> blockers.push(Dyn.Text("{js_text(dyn_at(scoreboard, "summary/metric_unmeasured"))} required metric cells are unmeasured"))
+
+    axes: members(dyn_at(run, "axes"))
+    axis_ids: axes.map(row -> row.key.copy())
+    loop id in required_axes {
+        if !axis_ids.contains(id) -> blockers.push(Dyn.Text("{id} axis is missing"))
+    }
+    loop row in axes {
+        record: if row.value == .Object(_) || row.value == .Array(_) -> row.value.copy() else -> Dyn.object()
+        required: is_true(record, "required") || required_axes.contains(row.key)
+        if required && text_at(record, "status") != Val("complete") -> blockers.push(Dyn.Text("{row.key} axis is {or_text(member(record, "status"), "unreported")}"))
+        if required && text_at(record, "publication/status") != Val("ready") -> blockers.push(Dyn.Text("{row.key} axis publication is {or_text(member(record, "publication/status"), "unreported")}"))
+        loop blocker in items_at(record, "publication/blockers") -> blockers.push(Dyn.Text("{row.key}: {js_text(blocker)}"))
+    }
+    loop owner in items_at(scoreboard, "loss_owners/unresolved") {
+        category: or_text(member(owner, "category"), "unknown category")
+        blockers.push(Dyn.Text("{template(value_at(owner, "entry"))}/{or_text(member(owner, "peer"), "peer")}/{or_text(member(owner, "metric"), "metric")} ({category}): loss owner {or_text(member(owner, "card"), "is not declared")} is not live"))
+    }
+    cells := combinatorics.unique<String>(allowed.filter_map(cell -> text_at(cell, "")).to_list())
+    cells.sort_by((left: String, right: String) -> text.collate(left, right))
+    state(if full_scope -> "full_matrix" else -> "partial_entry", blockers, cells)
+}
+
+// The publication state of the one axis `axis_id` of `run`.
+axis_publication: fn(run: Dyn, axis_id: Dyn) -> Dyn {
+    id: js_text(axis_id)
+    blockers := items_at(run, "validationIssues")
+    axis: axis_record(dyn_at(run, "axes"), id)
+    if {
+        !truthy_at(axis, "") -> blockers.push(Dyn.Text("{id} axis is missing"))
+        else -> {
+            if text_at(axis, "status") != Val("complete") -> blockers.push(Dyn.Text("{id} axis is {or_text(member(axis, "status"), "unreported")}"))
+            if text_at(axis, "publication/status") != Val("ready") -> blockers.push(Dyn.Text("{id} axis publication is {or_text(member(axis, "publication/status"), "unreported")}"))
+            blockers.extend(items_at(axis, "publication/blockers"))
+        }
+    }
+    state("axis_{id}", blockers, [])
+}
+
+// The state with the distinct non-empty string `blockers`, complete when there
+// are none.
+state: fn(scope: String, blockers: [Dyn], allowed: [String]) -> Dyn {
+    kept: combinatorics.unique<String>(blockers.filter_map(blocker -> text_at(blocker, "")).filter(blocker -> blocker != "").to_list())
+    out := Dyn.object()
+    out["scope"] = Dyn.Text(scope.copy())
+    out["status"] = Dyn.Text(if kept.len() > 0 -> "incomplete" else -> "complete")
+    out["complete"] = Dyn.Bool(kept.len() == 0)
+    out["blockers"] = Dyn.Array(kept.map(blocker -> Dyn.Text(blocker.copy())))
+    out["allowed_uncovered_cells"] = Dyn.Array(allowed.map(cell -> Dyn.Text(cell.copy())))
+    out
+}
+
+// The member `id` of `axes` (an array's element by index), null when absent.
+axis_record: fn(axes: Dyn, id: String) -> Dyn {
+    loop row in members(axes) {
+        if row.key == id -> return row.value.copy()
+    }
+    Dyn.Null
+}
+
+// The last of `cells` whose `id` is `id`, as a Map built from them keeps it;
+// null when none is.
+last_with_id: fn(cells: [Dyn], id: Dyn) -> Dyn {
+    found := Dyn.Null
+    loop cell in cells {
+        if strictly_equal(Val(dyn_at(cell, "id")), Val(id)) -> found = cell.copy()
+    }
+    found
+}
+
+// How many entries a cell's `entries` lists (none when absent); None for a
+// value with no length.
+entry_count: fn(entries: Dyn) -> Int? {
+    if entries == .Array(list) -> return Val(list.len())
+    if entries == .Null -> return Val(0)
+    None
+}
+
+// Whether `left` and `right` hold the same values in the same order.
+same_values: fn(left: [Dyn], right: [Dyn]) -> Bool {
+    if left.len() != right.len() -> return false
+    loop index in 0..<left.len() {
+        if !strictly_equal(Val(left[index]), Val(right[index])) -> return false
+    }
+    true
+}
+
+// The distinct `values` in first-seen order, as a Set keeps them.
+distinct_values: fn(values: [Dyn]) -> [Dyn] {
+    out := [Dyn]{}
+    loop value in values {
+        if !listed(out, Val(value)) -> out.push(value.copy())
+    }
+    out
+}
+
+// A value as a template literal shows it, `fallback` when it is absent or null.
+or_text: fn(value: Dyn?, fallback: String) -> String {
+    found: value ?? return fallback
+    js_text(found)
+}
+
+// A value as a template literal shows it: `undefined` when absent.
+template: fn(value: Dyn?) -> String {
+    found: value ?? return "undefined"
+    js_text(found)
+}
+
+// A value as an array's `join` shows it: null as nothing.
+joined: fn(value: Dyn) -> String {
+    if value == .Null -> return ""
+    js_text(value)
+}
+
+// A length as a template literal shows it: `undefined` for a value with none.
+count_text: fn(count: Int?) -> String {
+    found: count ?? return "undefined"
+    "{found}"
+}
+
+#Test("an axis run is complete only when its axis is complete and ready, and carries the axis's blockers") {
+    axes: "{{\"build\": {{\"status\": \"complete\", \"publication\": {{\"status\": \"ready\", \"blockers\": []}}}}, \"fuzz\": {{\"status\": \"partial\", \"publication\": {{\"blockers\": [\"seed 3 crashed\", \"\", 7]}}}}}}"
+    ready: publication_state(json.parse("{{\"axisId\": \"build\", \"axes\": {axes}}}") ?? panic("run"))
+    assert_eq(json.stringify(ready), "{{\"scope\":\"axis_build\",\"status\":\"complete\",\"complete\":true,\"blockers\":[],\"allowed_uncovered_cells\":[]}}")
+    partial: publication_state(json.parse("{{\"axisId\": \"fuzz\", \"axes\": {axes}, \"validationIssues\": [\"bad input\"]}}") ?? panic("run"))
+    assert_eq(json.stringify(dyn_at(partial, "blockers")), "[\"bad input\",\"fuzz axis is partial\",\"fuzz axis publication is unreported\",\"seed 3 crashed\"]")
+    missing: publication_state(json.parse("{{\"axisId\": \"lint\", \"axes\": {axes}}}") ?? panic("run"))
+    assert_eq(json.stringify(dyn_at(missing, "blockers")), "[\"lint axis is missing\"]")
+}
+
+#Test("a full run names each missing part, and its allowed uncovered cells are sorted as a reader expects") {
+    run: "{{\"fullScope\": false, \"loaded\": [{{\"directoryName\": \"a\"}}], \"skipped\": [{{\"name\": \"b\"}}, {{}}], \"results\": [], \"manifest\": {{\"corpus\": {{\"allowed_uncovered_cells\": [\"z.cell\", \"B.cell\", \"a.cell\", \"z.cell\"]}}, \"axes\": {{\"build\": {{\"status\": \"required\"}}}}}}}}"
+    found: publication_state(json.parse(run) ?? panic("run"))
+    blockers: texts_at(found, "blockers")
+    assert_eq(text_at(found, "scope"), Val("partial_entry"))
+    assert(blockers.contains("run scope is partial; full matrix publication requires no --entry") && blockers.contains("skipped entries: b, ") && blockers.contains("source measurements are missing"))
+    assert(blockers.contains("result denominator is 0/1") && blockers.contains("result entry identities do not match the loaded corpus order") && blockers.contains("build axis is missing"))
+    assert_eq(texts_at(found, "allowed_uncovered_cells"), ["a.cell", "B.cell", "z.cell"])
+}
+
+#Test("each cell needs one published entry unless allowed, and each metric failure is named by peer") {
+    matrix: "{{\"cells\": [{{\"id\": \"a.cell\"}}, {{\"id\": \"b.cell\"}}]}}"
+    board: "{{\"cells\": [{{\"id\": \"a.cell\", \"entries\": [\"x\"], \"metric_failures\": [{{\"metric\": \"loc\", \"verdict\": \"loss\", \"reasons\": [\"slow\", \"slow\"], \"peers\": [{{\"peer\": \"lua\", \"reason\": \"slow\"}}, {{}}]}}, {{\"peer\": \"node\", \"reason\": \"big\"}}]}}, {{\"id\": \"b.cell\", \"entries\": {{}}}}]}}"
+    found: publication_state(json.parse("{{\"matrix\": {matrix}, \"scoreboard\": {board}}}") ?? panic("run"))
+    blockers: texts_at(found, "blockers")
+    assert(blockers.contains("a.cell/lua/loc: metric loss (slow)") && blockers.contains("a.cell/peer/loc: metric loss (slow)") && blockers.contains("a.cell/node/metric: metric unmeasured (big)"))
+    assert(blockers.contains("b.cell: expected exactly one published entry, found undefined") && blockers.contains("unexpected uncovered matrix cells: a.cell, b.cell"))
+}

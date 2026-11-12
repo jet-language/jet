@@ -1,0 +1,45 @@
+// The gauntlet driver of the kit's Publication module (#5072 c8), the twin
+// of Tools/gauntlet/harness/drivers/run-publication.mjs: the publication
+// export of Tools/gauntlet/harness/run.mjs, publicationState.
+//
+//   jet driver publication DIR
+//
+// DIR holds JSON files, each the object a run hands publicationState (its
+// `fullScope`, `loaded` and `skipped` entries, `matrix`, `manifest`,
+// `sourceMeasurements`, `results`, `scoreboard`, `axes`, `validationIssues`
+// and, for a run of one axis, `axisId`); each is judged in name order and
+// shown as the file name and the publication state as JSON.
+package: {
+    name: "run_publication_driver"
+    version: "0.0.1"
+    deps: {
+        jet_gauntlet_kit: ../../../kit,
+    }
+}
+
+use {
+    files: core.files
+    jet_gauntlet_kit.[publication_state, read_json]
+    json: core.encoding.json
+    process: core.process
+}
+
+USAGE: "usage: driver publication DIR"
+
+print_publications: fn(dir: String) {
+    listed: files.list_dir(dir) ?? process.fail(1, "{dir} is not a directory")
+    names := listed.filter(item -> item.name.ends_with(".json")).map(item -> item.name.copy())
+    names.sort()
+    loop name in names {
+        run: read_json(files.join(dir, name)) ?? process.fail(1, "{name} is not a JSON file")
+        print("{name}\t{json.stringify(publication_state(run))}")
+    }
+}
+
+run: fn() {
+    args: process.args()
+    if {
+        args.get(0) == Val("publication") && args.len() >= 2 -> print_publications(args[1])
+        else -> process.fail(64, USAGE)
+    }
+}

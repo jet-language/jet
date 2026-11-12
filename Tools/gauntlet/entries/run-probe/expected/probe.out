@@ -1,0 +1,29 @@
+json-matches	{"ok":true,"status":200,"headers":{"content-type":"application/json","content-length":"11","connection":"close"},"body":"{\"ok\":true}","latency":true}	true
+json-other-type	{"ok":true,"status":200,"headers":{"content-type":"text/plain","content-length":"11","connection":"close"},"body":"{\"ok\":true}","latency":true}	false
+json-no-type	{"ok":true,"status":200,"headers":{"content-length":"11","connection":"close"},"body":"{\"ok\":true}","latency":true}	false
+json-no-expected-headers	{"ok":true,"status":200,"headers":{"content-type":"application/json","content-length":"11","connection":"close"},"body":"{\"ok\":true}","latency":true}	false
+params-sorted	{"ok":true,"status":200,"headers":{"content-type":"Text/HTML ; Q=1 ;charset=UTF-8","x-trace":"abc","content-length":"2","connection":"close"},"body":"hi","latency":true}	true
+params-value-case	{"ok":true,"status":200,"headers":{"content-type":"Text/HTML ; Q=1 ;charset=UTF-8","x-trace":"abc","content-length":"2","connection":"close"},"body":"hi","latency":true}	false
+params-missing-one	{"ok":true,"status":200,"headers":{"content-type":"Text/HTML ; Q=1 ;charset=UTF-8","x-trace":"abc","content-length":"2","connection":"close"},"body":"hi","latency":true}	false
+repeats-joined	{"ok":true,"status":200,"headers":{"x-many":"a, b","set-cookie":["a=1","b=2"],"server":"one","content-length":"0","connection":"close"},"body":"","latency":true}	true
+repeats-cookie-array	{"ok":true,"status":200,"headers":{"x-many":"a, b","set-cookie":["a=1","b=2"],"server":"one","content-length":"0","connection":"close"},"body":"","latency":true}	false
+status-expected	{"ok":true,"status":404,"headers":{"content-type":"text/plain; charset=utf-8","content-length":"4","connection":"close"},"body":"nope","latency":true}	true
+status-unexpected	{"ok":true,"status":404,"headers":{"content-type":"text/plain; charset=utf-8","content-length":"4","connection":"close"},"body":"nope","latency":true}	false
+created-empty	{"ok":true,"status":201,"headers":{"location":"/items/7","content-length":"0","connection":"close"},"body":"","latency":true}	true
+redirect-not-followed	{"ok":true,"status":302,"headers":{"location":"/json","content-length":"0","connection":"close"},"body":"","latency":true}	true
+chunked-body	{"ok":true,"status":200,"headers":{"content-type":"text/plain","transfer-encoding":"chunked","connection":"close"},"body":"hello world","latency":true}	true
+unicode-body	{"ok":true,"status":200,"headers":{"content-type":"text/plain; charset=utf-8","content-length":"13","connection":"close"},"body":"héllo ✓ ok","latency":true}	true
+body-until-close	{"ok":true,"status":200,"headers":{"content-type":"text/plain","connection":"close"},"body":"read to the end","latency":true}	true
+server-error	{"ok":true,"status":503,"headers":{"retry-after":"1","content-length":"8","connection":"close"},"body":"starting","latency":true}	false
+echo-post	{"ok":true,"status":200,"headers":{"content-type":"text/plain","content-length":"18","connection":"close"},"body":"POST /echo 5 hello","latency":true}	true
+echo-put-number	{"ok":true,"status":200,"headers":{"content-type":"text/plain","content-length":"14","connection":"close"},"body":"PUT /echo 2 42","latency":true}	true
+echo-null-body	{"ok":true,"status":200,"headers":{"content-type":"text/plain","content-length":"17","connection":"close"},"body":"POST /echo 4 null","latency":true}	true
+echo-unicode-body	{"ok":true,"status":200,"headers":{"content-type":"text/plain","content-length":"24","connection":"close"},"body":"POST /echo 10 naïve ✓","latency":true}	true
+echo-delete	{"ok":true,"status":200,"headers":{"content-type":"text/plain","content-length":"15","connection":"close"},"body":"DELETE /echo 0 ","latency":true}	true
+echo-query	{"ok":true,"status":200,"headers":{"content-type":"text/plain","content-length":"21","connection":"close"},"body":"GET /echo?id=7&x=y 0 ","latency":true}	true
+default-path	{"ok":true,"status":404,"headers":{"content-length":"0","connection":"close"},"body":"","latency":true}	true
+unknown-path	{"ok":true,"status":404,"headers":{"content-length":"0","connection":"close"},"body":"","latency":true}	true
+slow-times-out	{"ok":false,"error":"HTTP probe timeout","latency":true}	false
+slow-within-time	{"ok":true,"status":200,"headers":{"content-length":"4","connection":"close"},"body":"late","latency":true}	true
+dropped	{"ok":false,"error":"socket hang up","latency":true}	false
+refused	{"ok":false,"error":"connect ECONNREFUSED 127.0.0.1:PORT","latency":true}	false
