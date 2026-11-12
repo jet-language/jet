@@ -9168,20 +9168,51 @@ sema_failure_reconcile_infallible: fn(modules: &[SemaGraphModuleResult], project
     loop key in projected -> keys[key] = true
     loop module_index in 0..<modules.len() {
         loop function_index in 0..<modules[module_index].functions.len() {
-            if keys.get(modules[module_index].functions[function_index].key) == None -> next
-            if modules[module_index].functions[function_index].ret == .Val(.Result(ok, _)) {
-                ret: Type.Result{ok: ok, err: Type.Named{name: "Never"}}
-                modules[module_index].functions[function_index].ret = Val(ret)
-                failure: sema_failure_carrier(Val(ret))
-                sema_body_fact_return(modules[module_index].functions[function_index].tree, ret, failure)
-                modules[module_index].functions[function_index].failure_carrier = failure
-            }
+            if keys.get(modules[module_index].functions[function_index].key) != None -> sema_failure_reconcile_function(modules[module_index].functions[function_index])
         }
         loop fact_index in 0..<modules[module_index].call_facts.len() {
             if !modules[module_index].call_facts[fact_index].discarded_if_infallible -> next
             if modules[module_index].call_facts[fact_index].callee == .Val(callee) && keys.get(callee.key) != None -> modules[module_index].call_facts[fact_index].discarded = true
         }
     }
+}
+
+// One projected function's checked signature names the `T Never!` carrier
+// (sema_failure_reconcile_infallible).
+sema_failure_reconcile_function: fn(function: &FnBody) Never! {
+    if function.ret == .Val(.Result(ok, _)) {
+        ret: Type.Result{ok: ok, err: Type.Named{name: "Never"}}
+        function.ret = Val(ret)
+        failure: sema_failure_carrier(Val(ret))
+        sema_body_fact_return(function.tree, ret, failure)
+        function.failure_carrier = failure
+    }
+}
+
+// The checked type definitions a finalization reads: every staged module's.
+sema_stage_checked_types: fn(modules: [SemaGraphModuleResult]) -> [TTypeDef] Never! {
+    checked_types := [TTypeDef]{}
+    loop staged_module in modules {
+        loop type_definition in staged_module.declarations.type_defs -> checked_types.push(type_definition.copy())
+    }
+    checked_types
+}
+
+// Adds the diagnostics `comptime_functions` bring a finalization to
+// `diagnostics`; whether they leave it complete. A pending result's
+// obligations reach the failure solve through the body pass that reuses it
+// (sema_comptime_push_obligations).
+sema_comptime_function_diagnostics: fn(comptime_functions: [SemaComptimeFunctionResult], diagnostics: &[Diagnostic]) -> Bool Never! {
+    mark: sema_failure_obligation_mark()
+    complete := true
+    loop result in comptime_functions {
+        loop diagnostic in result.diagnostics {
+            if result.obligations_pending && sema_failure_obligation_callee(diagnostic, mark) != None -> next
+            diagnostics.push(diagnostic.copy())
+        }
+        if !result.complete && !result.obligations_pending -> complete = false
+    }
+    complete
 }
 
 // A file of top-level statements is a program: with no `run: fn` of its own,
@@ -9366,21 +9397,9 @@ sema_finalize_graph: fn(resolved: &&SemaRegistrationGraph, trail: &SemaGraphTrai
     resolved_graph.counting = false
     hook_access: sema_host_hook_access(host_hooks)
     diagnostics := stage.diagnostics
-    checked_types := [TTypeDef]{}
-    loop staged_module in stage.modules {
-        loop type_definition in staged_module.declarations.type_defs -> checked_types.push(type_definition.copy())
-    }
+    checked_types: sema_stage_checked_types(stage.modules)
     complete := resolved_graph.complete && stage.complete
-    obligation_mark: sema_failure_obligation_mark()
-    loop result in comptime_functions {
-        // A pending result's obligations reach the failure solve through the
-        // body pass that reuses it (sema_comptime_push_obligations).
-        loop diagnostic in result.diagnostics {
-            if result.obligations_pending && sema_failure_obligation_callee(diagnostic, obligation_mark) != None -> next
-            diagnostics.push(diagnostic.copy())
-        }
-        if !result.complete && !result.obligations_pending -> complete = false
-    }
+    if !sema_comptime_function_diagnostics(comptime_functions, diagnostics) -> complete = false
     if session == .Val(cache) -> sema_incremental_begin(cache, resolved_graph, values, comptime_functions, checked_types)
     // Derived methods and deferred Core bodies are demanded afresh by this
     // pass's checks. A compile that checks every Core body (`jet check Core`)

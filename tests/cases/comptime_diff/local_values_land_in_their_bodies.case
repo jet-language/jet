@@ -1,0 +1,15 @@
+# Card #6759 c1: a comptime pass that lands only local values lands them in
+# the bodies that hold them (JetSema Comptime/LocalSplice.jet) instead of
+# checking the whole program again. Under JET_RECHECK_VERIFY=1 the pass also
+# checks the whole program again and stops the compile on any difference,
+# a body checked by only one of the two included, so that bound is zero.
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JET_RECHECK_VERIFY=1
+write: main.jet = "square: fn(n: Int) -> Int {\n    n * n\n}\n\nsum_squares: fn(values: [Int]) -> Int {\n    total := 0\n    loop value in values -> total += square(value)\n    total\n}\n\nrepeat: fn(word: String, times: Int) -> String {\n    out := \"\"\n    loop _ in 0..<times -> out = \"{out}{word}\"\n    out\n}\n\nshow: fn(count: Int) -> String {\n    label: repeat(\"=\", 2)\n    \"{label}{count}\"\n}\n\nrun: fn() {\n    four: square(2)\n    total: sum_squares([Int]{1, 2, 3})\n    word: repeat(\"ab\", 3)\n    print(\"{four} {total} {word} {show(four)}\")\n}\n"
+step: jet run --trace main.jet
+exit: 0
+stdout: = "4 14 ababab ==4\n"
+stderr: ~ "# sema.local_values_spliced = 2\n" # `run` and `show`, one pass, no second finalization
+stderr: !~ "# sema.local_values_refused" # no pass fell back to the full recheck
+stderr: !~ "JET_RECHECK_VERIFY" # the spliced result is the full recheck's

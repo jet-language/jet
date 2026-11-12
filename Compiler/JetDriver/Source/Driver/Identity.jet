@@ -295,6 +295,11 @@ JetDriverCompileRequest: struct {
     // `jet check Core`: every declaration of each loaded Core module loads
     // and every Core body is checked, called or not, as under JET_KEEP_GOING.
     every_core_body: Bool{false}
+    // JET_RECHECK_VERIFY=1, a compiler test's switch: each body comptime
+    // pass that splices its local values (JetSema Comptime/LocalSplice.jet)
+    // also finalizes again, and any difference between the two results is an
+    // internal problem (BodyComptime.jet jet_driver_recheck_differences).
+    recheck_verify: Bool{false}
     // `jet test` of a Core source: the Core row path (`Core/Encoding/Cbor.jet`)
     // whose unit keeps its #Test controls (Loader.jet JetDriverParseJob.Core)
     // and whose tests the run collects (Pipeline.jet jet_driver_test_modules),

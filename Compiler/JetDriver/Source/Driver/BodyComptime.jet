@@ -4,6 +4,7 @@
 use {
     jet_foundation.[
         Diagnostic,
+        FnBody,
     ]
     jet_sema.[
         SemaComptimeBodySource,
@@ -19,6 +20,7 @@ use {
         SemaGraphTrail,
         sema_graph_trail_undo,
         sema_finalize_graph,
+        sema_local_value_splice,
     ]
 }
 
@@ -291,8 +293,39 @@ jet_driver_comptime_body_pass: fn(
             Val("body comptime rechecking made no staged-value progress"),
         ), registration)
     }
+    earlier_values := values.move()
+    earlier_functions := functions.move()
     values = run.values.move()
     functions = run.functions.move()
+    // A pass that landed only local values lands them in the bodies that
+    // hold them (JetSema Comptime/LocalSplice.jet); under `recheck_verify`
+    // the full recheck runs too, and the two results must agree.
+    full_input := SemaGraphResult?{None}
+    if request.recheck_verify -> full_input = Val(current_graph.copy())
+    splice := sema_local_value_splice(registration, run.trail, current_graph, body_sources, earlier_values, earlier_functions, values, functions, request.eval_config.host_hooks, request.compiler_threads, request.trace_sink)
+    registration = splice.graph.move()
+    if splice.spliced {
+        if full_input.move() == .Val(unspliced) {
+            full := jet_driver_recheck_comptime_bodies(registration, run.trail, stage, unspliced, body_sources, values, functions, request)
+            verified := full.registration_graph.move()
+            full.registration_graph = None
+            registration = verified.move() ?? panic("body finalization lost its registration graph")
+            differences: jet_driver_recheck_differences(current_graph, full)
+            if differences.len() > 0 {
+                lines: differences.join("\n")
+                sema_graph_trail_undo(registration, run.trail)
+                return jet_driver_comptime_body_returning(jet_driver_comptime_body_failure(
+                    current_graph, values, functions, trace,
+                    Val("JET_RECHECK_VERIFY: the spliced local values differ from the full recheck:\n{lines}"),
+                ), registration)
+            }
+        }
+        sema_graph_trail_undo(registration, run.trail)
+        return jet_driver_comptime_body_pass(
+            registration, stage, current_graph, values, functions, trace,
+            load, request, diagnostics, pass,
+        )
+    }
     // The run's graph already carries every value: the recheck finalizes it
     // in place instead of copying the registration graph.
     rechecked := jet_driver_recheck_comptime_bodies(
@@ -307,6 +340,65 @@ jet_driver_comptime_body_pass: fn(
         registration, stage, rechecked, values, functions, trace,
         load, request, diagnostics, pass,
     )
+}
+
+// JET_RECHECK_VERIFY (JetDriverCompileRequest.recheck_verify): the first
+// rows, at most 20, in which the result of a pass that spliced its local
+// values (`spliced`) differs from the full recheck of that pass (`full`),
+// one line each. A body only one of them checked is listed by its key.
+jet_driver_recheck_differences: fn(spliced: SemaGraphResult, full: SemaGraphResult) -> [String] Never! {
+    differences := [String]{}
+    if spliced.modules.len() != full.modules.len() {
+        differences.push("modules: {spliced.modules.len()} spliced, {full.modules.len()} rechecked")
+        return differences
+    }
+    loop module_index in 0..<spliced.modules.len() {
+        ours: spliced.modules[module_index]
+        theirs: full.modules[module_index]
+        name: ours.module_identity
+        jet_driver_recheck_body_differences(name, ours.functions, theirs.functions, differences)
+        if "{ours.call_facts:Debug}" != "{theirs.call_facts:Debug}" -> differences.push("{name}: call facts differ")
+        if "{ours.name_references:Debug}" != "{theirs.name_references:Debug}" -> differences.push("{name}: name references differ")
+        if "{ours.comptime_body_sources:Debug}" != "{theirs.comptime_body_sources:Debug}" -> differences.push("{name}: body comptime sites differ")
+        if "{ours.diagnostics:Debug}" != "{theirs.diagnostics:Debug}" -> differences.push("{name}: diagnostics differ")
+        if "{ours.failure_facts:Debug}" != "{theirs.failure_facts:Debug}" -> differences.push("{name}: failure facts differ")
+        our_rows := ours.copy()
+        our_rows.functions = [FnBody]{}
+        their_rows := theirs.copy()
+        their_rows.functions = [FnBody]{}
+        if "{our_rows:Debug}" != "{their_rows:Debug}" -> differences.push("{name}: module rows differ")
+        if differences.len() >= 20 -> return differences
+    }
+    our_graph := spliced.copy()
+    our_graph.modules = [SemaGraphModuleResult]{}
+    our_graph.registration_graph = None
+    their_graph := full.copy()
+    their_graph.modules = [SemaGraphModuleResult]{}
+    their_graph.registration_graph = None
+    if "{our_graph:Debug}" != "{their_graph:Debug}" -> differences.push("graph rows differ")
+    differences
+}
+
+// The bodies of module `name` that differ between the splice (`ours`) and
+// the recheck (`theirs`), into `differences`: each body by its key, or, when
+// the two checked different bodies, each body only one of them checked.
+jet_driver_recheck_body_differences: fn(name: String, ours: [FnBody], theirs: [FnBody], differences: &[String]) Never! {
+    if ours.len() == theirs.len() {
+        loop index in 0..<ours.len() {
+            if "{ours[index]:Debug}" != "{theirs[index]:Debug}" -> differences.push("{name}: body {ours[index].key} differs")
+        }
+        return
+    }
+    rechecked := [String:Bool]{}
+    loop function in theirs -> rechecked[function.key] = true
+    kept := [String:Bool]{}
+    loop function in ours {
+        kept[function.key] = true
+        if rechecked.get(function.key) == None -> differences.push("{name}: body {function.key} checked only in the splice")
+    }
+    loop function in theirs {
+        if kept.get(function.key) == None -> differences.push("{name}: body {function.key} checked only in the recheck")
+    }
 }
 
 // As jet_driver_orchestrate_comptime_bodies: the registration graph moves in

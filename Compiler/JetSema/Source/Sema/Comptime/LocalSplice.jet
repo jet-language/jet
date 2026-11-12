@@ -1,0 +1,317 @@
+// A body comptime pass whose landed sites are all local values
+// (LocalValues.jet) changes only the bodies that hold them: a binding checks
+// its initializer in full before its value replaces the call, so the facts
+// that check records are the same with the value as without it. Instead of
+// finalizing the whole program again (sema_finalize_graph), the pass checks
+// only the owner functions again, the way a Core demand wave checks named
+// bodies (graph.core_wave_rows), once with the values the finalized result
+// was checked against and once with the pass's values, and splices the
+// second check's bodies into the finalized result.
+//
+// The first check proves the splice. Its owner bodies, given the stamps the
+// whole-program passes put on a body (sema_local_splice_settle), must equal
+// the finalized ones, so the check is the one the finalization made. And
+// every row a module merges across its function checks (SemaModuleBodyRows)
+// must be the same in both checks, but for the landed sites leaving
+// `comptime_body_sources`: the call facts, hardware use, name references,
+// comptime requests, compute facts, `exact_int_reachable`, copy events,
+// diagnostics, `complete`, failure facts, incomplete reasons, injected
+// functions and their keys, and tests. The comptime function results must
+// bring the same diagnostics too. Then every whole-program pass after the
+// body pass (failure solve and recheck, effects, taint, Core usage, names)
+// reads what it read in the finalization, so its rows stand, and the stamps
+// it put on the owners carry over. When any of this fails, or a site is not
+// a local value, the caller finalizes again.
+use jet_foundation.[
+    CompilerThreads,
+    CompilerTraceSink,
+    Diagnostic,
+    FnBody,
+    TargetHardwareUse,
+    TTestFact,
+    Type,
+]
+
+// The rows of one module result that its function checks fill, moved out so
+// a check can fill them afresh (sema_module_body_rows_take).
+SemaModuleBodyRows: struct {
+    functions: [FnBody]
+    call_facts: [SemaCallSiteFact]
+    hardware_use: TargetHardwareUse
+    name_references: [SemaNameReferenceFact]
+    comptime_requests: [SemaComptimeRequest]
+    comptime_body_sources: [SemaComptimeBodySource]
+    compute_facts: [SemaComputeFunctionFacts]
+    exact_int_reachable: Bool
+    copy_events: [SemaCopyEvent]
+    diagnostics: [Diagnostic]
+    complete: Bool
+    failure_facts: [SemaFunctionFailureFacts]
+    incomplete_reasons: [String]
+    injected_function_keys: [String]
+    tests: [TTestFact]
+}
+
+// Moves the function-check rows of `modules[index]` out, leaving them empty.
+// The result and the ones after it move out of the list and back in, so no
+// row is copied.
+sema_module_body_rows_take: fn(modules: &[SemaGraphModuleResult], index: Int) -> SemaModuleBodyRows Never! {
+    later := [SemaGraphModuleResult]{}
+    loop modules.len() > index + 1 {
+        moved := modules.pop() ?? break
+        later.push(moved)
+    }
+    result := modules.pop() ?? panic("a local value splice lost its owner module")
+    rows := SemaModuleBodyRows{
+        functions: result.functions.move(),
+        call_facts: result.call_facts.move(),
+        hardware_use: result.hardware_use.move(),
+        name_references: result.name_references.move(),
+        comptime_requests: result.comptime_requests.move(),
+        comptime_body_sources: result.comptime_body_sources.move(),
+        compute_facts: result.compute_facts.move(),
+        exact_int_reachable: result.exact_int_reachable,
+        copy_events: result.copy_events.move(),
+        diagnostics: result.diagnostics.move(),
+        complete: result.complete,
+        failure_facts: result.failure_facts.move(),
+        incomplete_reasons: result.incomplete_reasons.move(),
+        injected_function_keys: result.injected_function_keys.move(),
+        tests: result.tests.move(),
+    }
+    result.functions = [FnBody]{}
+    result.call_facts = [SemaCallSiteFact]{}
+    result.hardware_use = sema_hardware_empty_use()
+    result.name_references = [SemaNameReferenceFact]{}
+    result.comptime_requests = [SemaComptimeRequest]{}
+    result.comptime_body_sources = [SemaComptimeBodySource]{}
+    result.compute_facts = [SemaComputeFunctionFacts]{}
+    result.exact_int_reachable = false
+    result.copy_events = [SemaCopyEvent]{}
+    result.diagnostics = [Diagnostic]{}
+    result.complete = true
+    result.failure_facts = [SemaFunctionFailureFacts]{}
+    result.incomplete_reasons = [String]{}
+    result.injected_function_keys = [String]{}
+    result.tests = [TTestFact]{}
+    modules.push(result)
+    loop later.len() > 0 {
+        moved := later.pop() ?? break
+        modules.push(moved)
+    }
+    rows
+}
+
+// Moves `rows` back into `modules[index]`, as sema_module_body_rows_take
+// moved them out.
+sema_module_body_rows_put: fn(modules: &[SemaGraphModuleResult], index: Int, rows: &&SemaModuleBodyRows) Never! {
+    owned := rows.move()
+    later := [SemaGraphModuleResult]{}
+    loop modules.len() > index + 1 {
+        moved := modules.pop() ?? break
+        later.push(moved)
+    }
+    result := modules.pop() ?? panic("a local value splice lost its owner module")
+    result.functions = owned.functions.move()
+    result.call_facts = owned.call_facts.move()
+    result.hardware_use = owned.hardware_use.move()
+    result.name_references = owned.name_references.move()
+    result.comptime_requests = owned.comptime_requests.move()
+    result.comptime_body_sources = owned.comptime_body_sources.move()
+    result.compute_facts = owned.compute_facts.move()
+    result.exact_int_reachable = owned.exact_int_reachable
+    result.copy_events = owned.copy_events.move()
+    result.diagnostics = owned.diagnostics.move()
+    result.complete = owned.complete
+    result.failure_facts = owned.failure_facts.move()
+    result.incomplete_reasons = owned.incomplete_reasons.move()
+    result.injected_function_keys = owned.injected_function_keys.move()
+    result.tests = owned.tests.move()
+    modules.push(result)
+    loop later.len() > 0 {
+        moved := later.pop() ?? break
+        modules.push(moved)
+    }
+}
+
+// The merged rows of `rows` the whole-program passes read, as one text:
+// all but the bodies and the body comptime sites.
+sema_module_body_rows_text: fn(rows: SemaModuleBodyRows) -> String Never! {
+    "calls={rows.call_facts:Debug};hardware={rows.hardware_use:Debug};names={rows.name_references:Debug};requests={rows.comptime_requests:Debug};compute={rows.compute_facts:Debug};exact={rows.exact_int_reachable};copies={rows.copy_events:Debug};diagnostics={rows.diagnostics:Debug};complete={rows.complete};failures={rows.failure_facts:Debug};incomplete={rows.incomplete_reasons:Debug};injected={rows.injected_function_keys:Debug};tests={rows.tests:Debug}"
+}
+
+// The position of the one function `key` in `functions`; None when there is
+// none or more than one.
+sema_local_splice_slot: fn(functions: [FnBody], key: String) -> Int? Never! {
+    found := Int?{None}
+    loop index in 0..<functions.len() {
+        if functions[index].key != key -> next
+        if found != None -> return None
+        found = Val(index)
+    }
+    found
+}
+
+// Puts on a freshly checked `body` what the whole-program passes after the
+// body pass put on its finalized check `finalized`: the projected `T Never!`
+// carrier (sema_failure_reconcile_infallible), the solved effects and their
+// scope frames (sema_effects_check_modules), the masked branches and the
+// fixed tags (sema_mark_masked_branches). The fresh body's types are its
+// finalized check's, less those of the replaced initializers, so it carries
+// a fixed tag only when the finalized body did.
+sema_local_splice_settle: fn(body: &FnBody, finalized: FnBody) Never! {
+    if finalized.ret == .Val(.Result(_, err)) {
+        never: Type.Named{name: "Never"}
+        if err == never && body.ret != finalized.ret -> sema_failure_reconcile_function(body)
+    }
+    body.effects = finalized.effects.copy()
+    body.effect_scope = finalized.effect_scope.copy()
+    body.masked = finalized.masked.copy()
+    if finalized.fixed_tags.len() > 0 && sema_fixed_types(body.tree.types.types, finalized.fixed_tags) -> body.fixed_tags = finalized.fixed_tags.copy()
+}
+
+// The sources of `sources` that are not landed (`landed` holds their
+// `module\nkey`).
+sema_local_splice_unlanded: fn(sources: [SemaComptimeBodySource], landed: [String:Bool]) -> [SemaComptimeBodySource] Never! {
+    kept := [SemaComptimeBodySource]{}
+    loop source in sources {
+        if landed.get("{source.module_identity}\n{source.key}") == None -> kept.push(source.copy())
+    }
+    kept
+}
+
+// Whether the two checks of the owner modules (`earlier` against the
+// finalized values, which it takes, and `after` against the pass's) let the
+// splice stand, as the file comment says. `owners` holds the owner function
+// keys, `landed` the `module\nkey` of each landed site.
+sema_local_splice_holds: fn(modules: [SemaGraphModuleResult], owner_modules: [Int], owners: [String:Bool], landed: [String:Bool], earlier: &&[SemaModuleBodyRows], after: [SemaModuleBodyRows]) -> Bool Never! {
+    before := earlier.move()
+    settled_owners := 0
+    position := owner_modules.len()
+    loop before.len() > 0 {
+        position -= 1
+        old := before.pop() ?? break
+        new: after[position]
+        module_index: owner_modules[position]
+        if sema_module_body_rows_text(old) != sema_module_body_rows_text(new) -> return false
+        kept: sema_local_splice_unlanded(old.comptime_body_sources, landed)
+        if "{kept:Debug}" != "{new.comptime_body_sources:Debug}" -> return false
+        if old.functions.len() != new.functions.len() -> return false
+        checked := old.functions.move()
+        index := checked.len()
+        loop checked.len() > 0 {
+            index -= 1
+            function := checked.pop() ?? break
+            if new.functions[index].key != function.key -> return false
+            if owners.get(function.key) == None {
+                if "{function:Debug}" != "{new.functions[index]:Debug}" -> return false
+                next
+            }
+            slot: sema_local_splice_slot(modules[module_index].functions, function.key) ?? return false
+            sema_local_splice_settle(function, modules[module_index].functions[slot])
+            if "{function:Debug}" != "{modules[module_index].functions[slot]:Debug}" -> return false
+            settled_owners += 1
+        }
+    }
+    settled_owners == owners.len()
+}
+
+// What sema_local_value_splice hands back: the graph, and whether the pass's
+// values landed.
+SemaLocalValueSplice: struct {
+    graph: SemaRegistrationGraph
+    spliced: Bool
+}
+
+// Lands the pass's local values in `finalized`, the result of
+// `sema_finalize_graph` over `earlier_values` and `earlier_functions`, when
+// the file comment's conditions hold. The graph moves in and comes back with
+// its edits on `trail`, as sema_finalize_graph's do. `landed` are the pass's
+// sites; `values` and `comptime_functions` the pass's results.
+sema_local_value_splice: fn(
+    resolved: &&SemaRegistrationGraph,
+    trail: &SemaGraphTrail,
+    finalized: &SemaGraphResult,
+    landed: [SemaComptimeItemSource],
+    earlier_values: [SemaComptimeItemValue],
+    earlier_functions: [SemaComptimeFunctionResult],
+    values: [SemaComptimeItemValue],
+    comptime_functions: [SemaComptimeFunctionResult],
+    host_hooks: Shared<SemaRegistrationHostHooks>,
+    threads: CompilerThreads,
+    trace_sink: CompilerTraceSink?,
+) -> SemaLocalValueSplice {
+    graph := resolved.move()
+    if !finalized.complete || landed.len() == 0 -> return SemaLocalValueSplice{graph: graph.move(), spliced: false}
+    landed_keys := [String:Bool]{}
+    loop source in landed {
+        if !source.local_value -> return SemaLocalValueSplice{graph: graph.move(), spliced: false}
+        landed_keys["{source.module_identity}\n{source.key}"] = true
+    }
+    // The comptime function results bring the finalization's diagnostics.
+    earlier_diagnostics := [Diagnostic]{}
+    earlier_complete: sema_comptime_function_diagnostics(earlier_functions, earlier_diagnostics)
+    pass_diagnostics := [Diagnostic]{}
+    pass_complete: sema_comptime_function_diagnostics(comptime_functions, pass_diagnostics)
+    if earlier_complete != pass_complete || "{earlier_diagnostics:Debug}" != "{pass_diagnostics:Debug}" -> return SemaLocalValueSplice{graph: graph.move(), spliced: false}
+    owners := [String:Bool]{}
+    owner_modules := [Int]{}
+    found := [String:Bool]{}
+    loop module_index in 0..<finalized.modules.len() {
+        loop source in finalized.modules[module_index].comptime_body_sources {
+            site: "{source.module_identity}\n{source.key}"
+            if landed_keys.get(site) == None -> next
+            if source.function_key == "" -> return SemaLocalValueSplice{graph: graph.move(), spliced: false}
+            found[site] = true
+            owners[source.function_key] = true
+            if !owner_modules.contains(module_index) -> owner_modules.push(module_index)
+        }
+    }
+    if found.len() != landed_keys.len() -> return SemaLocalValueSplice{graph: graph.move(), spliced: false}
+    // As sema_finalize_graph: no lookup counting across the body threads.
+    trail.entries.push(SemaGraphUndo.Counting{old: graph.counting})
+    graph.counting = false
+    graph.core_wave_rows = owners.copy()
+    hook_access: sema_host_hook_access(host_hooks)
+    checked_types: sema_stage_checked_types(finalized.modules)
+    held := [SemaModuleBodyRows]{}
+    loop module_index in owner_modules -> held.push(sema_module_body_rows_take(finalized.modules, module_index))
+    earlier_facts := [SemaPassFacts]{}
+    earlier_graph := sema_finalize_check_modules(graph, earlier_values, earlier_functions, checked_types, owner_modules, true, hook_access, threads, None, "sema.local_values", trace_sink, earlier_facts, finalized.modules)
+    graph = earlier_graph.move()
+    before := [SemaModuleBodyRows]{}
+    loop module_index in owner_modules -> before.push(sema_module_body_rows_take(finalized.modules, module_index))
+    pass_facts := [SemaPassFacts]{}
+    pass_graph := sema_finalize_check_modules(graph, values, comptime_functions, checked_types, owner_modules, true, hook_access, threads, None, "sema.local_values", trace_sink, pass_facts, finalized.modules)
+    graph = pass_graph.move()
+    after := [SemaModuleBodyRows]{}
+    loop module_index in owner_modules -> after.push(sema_module_body_rows_take(finalized.modules, module_index))
+    graph.core_wave_rows = [String:Bool]{}
+    row := owner_modules.len()
+    loop held.len() > 0 {
+        row -= 1
+        rows := held.pop() ?? break
+        sema_module_body_rows_put(finalized.modules, owner_modules[row], rows)
+    }
+    holds: sema_local_splice_holds(finalized.modules, owner_modules, owners, landed_keys, before, after)
+    counter: if holds -> "counters.sema.local_values_spliced" else -> "counters.sema.local_values_refused"
+    if trace_sink == .Val(sink) -> sink.progress(counter, owners.len(), -1)
+    if !holds -> return SemaLocalValueSplice{graph: graph.move(), spliced: false}
+    row = owner_modules.len()
+    loop after.len() > 0 {
+        row -= 1
+        rows := after.pop() ?? break
+        module_index: owner_modules[row]
+        checked := rows.functions.move()
+        loop checked.len() > 0 {
+            function := checked.pop() ?? break
+            if owners.get(function.key) == None -> next
+            slot: sema_local_splice_slot(finalized.modules[module_index].functions, function.key) ?? panic("a spliced local value lost its owner function")
+            sema_local_splice_settle(function, finalized.modules[module_index].functions[slot])
+            finalized.modules[module_index].functions[slot] = function.move()
+        }
+        finalized.modules[module_index].comptime_body_sources = sema_local_splice_unlanded(finalized.modules[module_index].comptime_body_sources, landed_keys)
+    }
+    finalized.comptime_body_sources = sema_local_splice_unlanded(finalized.comptime_body_sources, landed_keys)
+    SemaLocalValueSplice{graph: graph.move(), spliced: true}
+}
