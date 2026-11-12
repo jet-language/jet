@@ -18,10 +18,14 @@ PKG_MANIFEST_BLOCKS: #run { [String]{"deps", "packages", "services", "outputs", 
 PKG_MANIFEST_SCALAR_FIELDS: #run { [String]{MANIFEST_FIELD_NAME, MANIFEST_FIELD_VERSION, "jet", "source", "edition", "description", "license", "repository", "target", "runtime", "allocator", "log", "members", "configs"} }
 
 // The Jet declarations beside the manifest blocks in `package.jet`, with every
-// manifest block blanked, or None when no top-level `build: fn` remains.
+// manifest block and package marker blanked, or None when no top-level
+// `build: fn` remains.
 pkg_build_entry_source: fn(text: String) -> String? Never! {
     masked := text.bytes()
     pkg_mask_manifest_blocks(text.bytes(), masked)
+    if pkg_package_markers(text) == .Ok(markers) {
+        loop marker in markers -> pkg_blank_range(masked, marker.start, marker.end)
+    }
     source: String.from_bytes(masked) ?? return None
     if !pkg_has_top_level_build_function(source.bytes()) -> return None
     Val(source)
@@ -383,6 +387,9 @@ pkg_extract_inline_package: fn(source: String) -> InlinePackageBlock? InlinePack
             duplicate_end: pkg_balanced_block_end(bytes, duplicate.end) ?? bytes.len()
             return Err(InlinePackageError.Duplicate{first: block.span, duplicate: Span{start: duplicate.start, end: duplicate_end}})
         }
+        // The header markers of a Package record are `package.jet`'s; the
+        // field reader would take a `#` at the head of these braces for one.
+        if pkg_bytes_code(bytes, pkg_skip_inline_trivia(bytes, block.body_span.start)) == 35 -> return Err(InlinePackageError.Malformed{span: block.span, detail: "a marker isn't a field of the inline Package record"})
         return Ok(Val(block))
     }
     if pkg_find_top_level_inline_package(bytes, first) == .Val(found) {
@@ -540,4 +547,79 @@ pkg_skip_inline_string: fn(bytes: [U8], start: Int) -> Int Never! {
         i += 1
     }
     bytes.len()
+}
+
+// A marker written on the package record: a header line
+// above `package.jet`'s first field, `#Traced` or `#Traced(level: 2)`, and
+// `#dep.Name` for a marker a dependency declares. `name` is the name as
+// written, `args` the text between the parentheses ("" for none), and
+// `start`/`end` the bytes of the whole marker in the file.
+PackageMarker: struct {
+    name: String
+    args: String
+    start: Int
+    end: Int
+}
+
+// The markers of `package.jet`'s header, in order: each `#` before the first
+// field, with only whitespace and comments around them. A `#` that starts no
+// name, or an argument list left open, is malformed.
+pkg_package_markers: fn(text: String) -> [PackageMarker] PackageParseError! {
+    bytes: text.bytes()
+    markers := [PackageMarker]{}
+    at := pkg_skip_inline_trivia(bytes, 0)
+    loop pkg_bytes_code(bytes, at) == 35 {
+        start: at
+        cursor := at + 1
+        loop pkg_bytes_is_word(pkg_bytes_code(bytes, cursor)) || (cursor > start + 1 && pkg_bytes_code(bytes, cursor) == 46 && pkg_bytes_is_word(pkg_bytes_code(bytes, cursor + 1))) -> cursor += 1
+        if cursor == start + 1 -> return Err(PackageParseError.MalformedField("#"))
+        name: pkg_bytes_text(bytes, start + 1, cursor)
+        args := ""
+        if pkg_bytes_code(bytes, cursor) == 40 {
+            close: pkg_package_marker_args_end(bytes, cursor) ?? return Err(PackageParseError.MalformedField("#{name}("))
+            args = pkg_bytes_text(bytes, cursor + 1, close - 1).trim()
+            cursor = close
+        }
+        markers.push(PackageMarker{name: name, args: args, start: start, end: cursor})
+        at = pkg_skip_inline_trivia(bytes, cursor)
+    }
+    Ok(markers)
+}
+
+// The offset just past the `)` that closes the argument list opening at
+// `open`, skipping strings, comments and nested delimiters; None when it
+// never closes.
+pkg_package_marker_args_end: fn(bytes: [U8], open: Int) -> Int? Never! {
+    depth := 0
+    i := open
+    loop i < bytes.len() {
+        code: Int.from_u8(bytes[i])
+        if code == 34 || code == 39 {
+            i = pkg_skip_inline_string(bytes, i)
+            next
+        }
+        if code == 47 && pkg_bytes_code(bytes, i + 1) == 47 {
+            i = pkg_skip_inline_line_comment(bytes, i)
+            next
+        }
+        if code == 47 && pkg_bytes_code(bytes, i + 1) == 42 {
+            i = pkg_skip_block_comment(bytes, i)
+            next
+        }
+        if code == 40 || code == 91 || code == 123 -> depth += 1
+        if code == 41 || code == 93 || code == 125 {
+            depth -= 1
+            if depth == 0 -> return if code == 41 -> Val(i + 1) else -> None
+        }
+        i += 1
+    }
+    None
+}
+
+// `text` with each of `markers` blanked, every offset and line ending kept:
+// the record the field readers see.
+pkg_package_markers_masked: fn(text: String, markers: [PackageMarker]) -> String Never! {
+    masked := text.bytes()
+    loop marker in markers -> pkg_blank_range(masked, marker.start, marker.end)
+    String.from_bytes(masked) ?? text
 }

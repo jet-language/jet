@@ -128,9 +128,9 @@ use {
         sema_unknown_module_alias,
     ]
     jet_pkg_model.[
-        ImportBoundary, PackageFacts, PackageGrant, PackageParseError, pkg_build_entry_source, pkg_inline_deps_collect, pkg_inline_deps_is_pinned,
+        ImportBoundary, PackageFacts, PackageGrant, PackageMarker, PackageParseError, pkg_build_entry_source, pkg_inline_deps_collect, pkg_inline_deps_is_pinned,
         pkg_inline_deps_l0203_unpinned, pkg_inline_deps_valid_package_name,
-        pkg_inline_deps_version_matches, pkg_lex_workspace_declaration, pkg_manifest_parse_diagnostic,
+        pkg_inline_deps_version_matches, pkg_lex_workspace_declaration, pkg_manifest_parse_diagnostic, pkg_package_markers, pkg_package_markers_masked,
     ]
     jetpack_foundation.[DEFAULT_ENTRY_FILE]
 }
@@ -1129,7 +1129,16 @@ jet_driver_parse_package_root: fn(snapshot: JetDriverAuthorizedSourceSnapshot, r
     }
     manifest_path := jet_driver_display_path(entry_root, root.files[manifest].path)
     manifest_diagnostic_start: diagnostics.len()
-    lexed: lex_config(source.bytes())
+    // `package.jet`'s header markers are kept; the fields are read with
+    // them blanked, at their own offsets.
+    markers := [PackageMarker]{}
+    if inline_carrier == None {
+        if pkg_package_markers(source) == {
+            .Ok(found) -> markers = found
+            .Err(error) -> diagnostics.push(pkg_manifest_parse_diagnostic(manifest_path, error))
+        }
+    }
+    lexed: lex_config(pkg_package_markers_masked(source, markers).bytes())
     loop diagnostic in lexed.diagnostics -> diagnostics.push(diagnostic)
     tokens: lexed.tokens
     name := ""
@@ -1415,7 +1424,7 @@ jet_driver_parse_package_root: fn(snapshot: JetDriverAuthorizedSourceSnapshot, r
         diagnostic_index += 1
     }
     identity: jet_driver_package_identity(name, version ?? "")
-    JetDriverPackageInfo{root_index: root_index, root_path: root.canonical_path, identity: identity, name: name, version: version, edition: edition, runtime_ceiling: runtime_ceiling, allocator_policy: allocator_policy, log_filter: log_filter, authority_allow: authority_allow, authority_deny: authority_deny, authority_needs: authority_needs, authority_grants: authority_grants.move(), entry: entry, manifest_path: Val(manifest_path), policy_declarations: policy_declarations.move(), policy_unsafe_paths: policy_unsafe_paths.move(), policy_expert: policy_expert, policy_lints_deny: policy_lints_deny.move(), policy_harden: policy_harden, inline_package: inline_carrier != None, configs: configs.move(), dependencies: dependencies, outputs: outputs, settings: settings.move(), profile_settings: profile_settings.move(), boundaries: boundaries.move()}
+    JetDriverPackageInfo{root_index: root_index, root_path: root.canonical_path, identity: identity, name: name, version: version, edition: edition, runtime_ceiling: runtime_ceiling, allocator_policy: allocator_policy, log_filter: log_filter, authority_allow: authority_allow, authority_deny: authority_deny, authority_needs: authority_needs, authority_grants: authority_grants.move(), entry: entry, manifest_path: Val(manifest_path), policy_declarations: policy_declarations.move(), policy_unsafe_paths: policy_unsafe_paths.move(), policy_expert: policy_expert, policy_lints_deny: policy_lints_deny.move(), policy_harden: policy_harden, inline_package: inline_carrier != None, configs: configs.move(), dependencies: dependencies, outputs: outputs, settings: settings.move(), profile_settings: profile_settings.move(), boundaries: boundaries.move(), markers: markers.move()}
 }
 
 // The source text of tokens `start..<end` (comments dropped), and a lone

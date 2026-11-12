@@ -104,15 +104,19 @@ pkg_manifest_lexed: fn(text: String) -> Lexed? Never! {
 }
 
 // Parse the shared Package/Config field vocabulary. `config` rejects the
-// package-only fields.
+// package-only fields; a Package's header markers (pkg_package_markers) are
+// kept, and the fields are read with them blanked.
 pkg_parse_common: fn(text: String, origin: String, config: Bool) -> PackageFacts PackageParseError! {
-    if pkg_retired_record_head_spans(text).len() > 0 -> return Err(PackageParseError.RetiredRecordHead)
+    markers: if config -> [PackageMarker]{} else -> pkg_package_markers(text)
+    record: pkg_package_markers_masked(text, markers)
+    if pkg_retired_record_head_spans(record).len() > 0 -> return Err(PackageParseError.RetiredRecordHead)
     facts := PackageFacts.default()
     facts.origin = origin
+    facts.markers = markers
     inline := [InlineConfigDecl]{}
     inline_names := [String]{}
     seen := [String]{}
-    loop entry in pkg_top_level_entries(pkg_strip_comments(text)) {
+    loop entry in pkg_top_level_entries(pkg_strip_comments(record)) {
         if !config {
             if pkg_config_wrapper(entry) == .Val(wrapper) {
                 if inline_names.contains(wrapper.key) -> return Err(PackageParseError.Composition("inline Config `{wrapper.key}` is declared more than once"))

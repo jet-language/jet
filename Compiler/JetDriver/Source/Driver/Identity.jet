@@ -2,7 +2,7 @@ use {
     core.build.[BuildGraphNode]
     // Source, module, and package identities remain separate at the driver boundary.
     jet_sema.[SemaOutputIntent]
-    jet_pkg_model.[BuildStamp, ImportBoundary, LockedBuildContribution, PackageEffects, PackageGrant]
+    jet_pkg_model.[BuildStamp, ImportBoundary, LockedBuildContribution, PackageEffects, PackageGrant, PackageMarker]
     jet_foundation.[
         AppAuthorizedDirectory,
         AppRouteRoot,
@@ -619,6 +619,9 @@ JetDriverPackageInfo: struct {
     // `boundaries: { deny: [...] }`: denied import edges
     // between this package's modules and any loaded module (Boundaries.jet).
     boundaries: [ImportBoundary]{[ImportBoundary]{}}
+    // The markers `package.jet`'s header writes on the package record, in
+    // order (pkg_package_markers), each placed in `manifest_path`.
+    markers: [PackageMarker]{[PackageMarker]{}}
 }
 
 JetDriverPackageOutputs: struct {

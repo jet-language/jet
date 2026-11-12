@@ -3,7 +3,7 @@
 use {
     jet_pkg_model.[
         AuthorityResolver, ComposeError, ConfigFacts, ManifestEntry, PackageFacts, PackageOutputKind,
-        PackageParseError, pkg_format_source, pkg_path_file_name, pkg_path_parent,
+        PackageParseError, pkg_build_entry_source, pkg_extract_inline_package, pkg_format_source, pkg_path_file_name, pkg_path_parent,
     ]
     files: core.files
 }
@@ -363,4 +363,59 @@ pkg_facts_assert_nested_entry_rejected: fn(label: String, entry_source: String, 
     assert_eq(inline.facts.name, "inline-demo")
     assert_eq(inline.facts.version, Val("1.2.3"))
     assert_eq(inline.block.body(source).trim_start(), "name: \"inline-demo\"\nversion: \"1.2.3\"\n")
+}
+
+// Package header markers: lines above `package.jet`'s first field. They are
+// kept in order with their argument text, never read as fields, and the
+// formatter, the build entry and the semantic digest all see them.
+#Test("package header markers are kept beside the fields") {
+    source: "// app\n#Traced\n#tools.Audit(level: 2, name: \"x\")\nname: \"demo\"\n"
+    facts: PackageFacts.parse(source, "package.jet") ?? panic("parses: {err}")
+    assert_eq(facts.name, "demo")
+    assert_eq(facts.markers.len(), 2)
+    assert_eq(facts.markers[0].name, "Traced")
+    assert_eq(facts.markers[0].args, "")
+    assert_eq(facts.markers[0].start, 7)
+    assert_eq(facts.markers[0].end, 14)
+    assert_eq(facts.markers[1].name, "tools.Audit")
+    assert_eq(facts.markers[1].args, "level: 2, name: \"x\"")
+    plain: PackageFacts.parse("name: \"demo\"\n", "package.jet") ?? panic("plain parses")
+    assert(plain.markers.len() == 0)
+    assert(facts.semantic_digest() != plain.semantic_digest())
+}
+
+#Test("malformed or misplaced package markers are refused") {
+    cases: [String]{"#(x)\nname: \"demo\"\n", "#Traced(level: 2\nname: \"demo\"\n", "name: \"demo\"\n#Traced\n"}
+    loop source in cases {
+        if PackageFacts.parse(source, "package.jet") == {
+            .Err(error) -> assert(error.message().contains("malformed Package field"))
+            .Ok(_) -> panic("refused: {source}")
+        }
+    }
+    if pkg_extract_inline_package("package: {{ #Traced\nname: \"demo\" }}\nrun: fn() {{}}\n") == {
+        .Err(error) -> assert(error.message().contains("marker"))
+        .Ok(_) -> panic("a marker inside the inline Package braces is refused")
+    }
+}
+
+#Test("formatter and build entry keep package markers") {
+    source: "#Traced\n#Audit( level: 2 )\nname:  \"demo\"\n"
+    formatted: pkg_format_source(source, "package.jet") ?? panic("formats: {err}")
+    assert_eq(formatted, "#Traced\n#Audit(level: 2)\nname: \"demo\"\n")
+    reparsed: PackageFacts.parse(formatted, "package.jet") ?? panic("reparses")
+    assert_eq(reparsed.markers.len(), 2)
+    with_build: "#Traced\nname: \"demo\"\nbuild: fn(b: Build) {{}}\n"
+    entry: pkg_build_entry_source(with_build) ?? panic("the build entry stays")
+    assert(!entry.contains("#Traced"))
+    assert(entry.contains("build: fn"))
+    assert_eq(entry.bytes().len(), with_build.bytes().len())
+}
+
+#Test("the comments above the header markers stay above them") {
+    source: "// The package.\n// Two lines.\n\n#Traced\nname: \"demo\" // the name\n"
+    formatted: pkg_format_source(source, "package.jet") ?? panic("formats: {err}")
+    assert_eq(formatted, source)
+    assert_eq(pkg_format_source(formatted, "package.jet") ?? panic("reformats: {err}"), formatted)
+    tight: "// The package.\n#Traced\n// Before the fields.\nname: \"demo\"\n"
+    assert_eq(pkg_format_source(tight, "package.jet") ?? panic("formats: {err}"), tight)
 }

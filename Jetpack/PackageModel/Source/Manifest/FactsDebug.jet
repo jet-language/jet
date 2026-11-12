@@ -310,6 +310,9 @@ pkg_facts_semantic_text: fn(facts: PackageFacts) -> String Never! {
         "policy_deps={pkg_debug_opt_str_list(policy.deps)};policy_claims_min={pkg_debug_claims(policy.claims_min)};policy_contain={pkg_debug_str_set(policy.contain)};policy_harden={pkg_debug_bool(policy.harden)};",
         "policy_licenses={pkg_debug_opt_str_list(policy.licenses)};policy_source_maps={pkg_debug_source_maps(policy.source_maps)};policy_exceptions={pkg_debug_exceptions(policy.exceptions)};",
     }
+    // The header markers change what the package compiles to; a package with
+    // none keeps the digest it had before markers existed.
+    loop marker in facts.markers -> lines.push("marker={pkg_debug_str(marker.name)};args={pkg_debug_str(marker.args)};")
     loop name in pkg_manifest_sorted(facts.inline_configs.keys().to_list()) {
         config: facts.inline_configs[name]
         lines.push("inline_config={pkg_debug_str(name)};name={pkg_debug_opt_str(config.name)};version={pkg_debug_opt_str(config.version)};source={pkg_debug_opt_str(config.source)};deps={pkg_debug_deps(config.deps)};services={pkg_debug_services(config.services)};outputs={pkg_debug_outputs(config.outputs)};environments={pkg_debug_environments(config.environments)};defaults={pkg_debug_str_map(config.defaults)};")

@@ -43,7 +43,8 @@ ManifestBody: struct {
 // record, and one on a `{` line stays after the `{`. An entry with a comment
 // in its key, before its record's `{`, or in a value that is not a record is
 // kept as written. The output holds the input's comments in order, byte for
-// byte, or the source is refused.
+// byte, or the source is refused. A Package's header markers come first,
+// one per line, as written, after the comments above the first of them.
 pkg_format_source: fn(text: String, origin: String) -> String PackageFormatError! {
     source: pkg_manifest_source(text)
     trimmed: source.masked.trim()
@@ -59,9 +60,29 @@ pkg_format_source: fn(text: String, origin: String) -> String PackageFormatError
     } else {
         if PackageFacts.parse(text, origin) == .Err(error) -> return Err(PackageFormatError{message: error.message()})
     }
-    body: pkg_format_body(source, 0, source.masked.bytes().len(), 0, true)
+    markers: if is_config -> [PackageMarker]{} else -> pkg_package_markers(text) ?? return Err(PackageFormatError{message: err.message()})
+    // The comments above the first header marker stay above the header, a
+    // blank line after one kept, one at most.
+    first: if markers.len() > 0 -> markers[0].start else -> 0
+    leading := ""
+    last_end := -1
+    loop comment in source.comments {
+        if comment.start >= first -> break
+        if last_end >= 0 && pkg_format_newlines(pkg_binder_slice(source.masked, last_end, comment.start)) > 1 -> leading = "{leading}\n"
+        leading = "{leading}{pkg_binder_slice(source.text, comment.start, comment.end)}\n"
+        last_end = comment.end
+    }
+    if last_end >= 0 && pkg_format_newlines(pkg_binder_slice(source.masked, last_end, first)) > 1 -> leading = "{leading}\n"
+    header := leading
+    loop marker in markers {
+        header = if marker.args == "" -> "{header}#{marker.name}\n" else -> "{header}#{marker.name}({marker.args})\n"
+    }
+    // The record the field readers see: the header markers blanked, at the
+    // same offsets, read from the first marker on.
+    record: ManifestSource{text: source.text, masked: pkg_package_markers_masked(source.masked, markers), comments: source.comments}
+    body: pkg_format_body(record, first, record.masked.bytes().len(), 0, true)
     if body.entries == 0 -> return Err(PackageFormatError{message: "Package or Config source has no fields"})
-    formatted: "{body.lines.join("\n")}\n"
+    formatted: "{header}{body.lines.join("\n")}\n"
     if pkg_comment_texts(formatted) != pkg_comment_texts(text) -> return Err(PackageFormatError{message: "Package or Config formatter would move a comment out of order in `{origin}`"})
     Ok(formatted)
 }
