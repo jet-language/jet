@@ -2641,21 +2641,6 @@ UnknownDevtoolsField: struct {
     }
 }
 
-UnpublishedDevtoolsField: struct {
-    panel: String
-    field: String
-
-    impl Diagnostic {
-        code: "E1414"
-        meaning: "Devtools panel state field has no publication"
-        detail: true
-        fix_next: "Publish the panel field with its declared type."
-        what: fn(self) -> String { "Devtools panel `{self.panel}` state field `{self.field}` has no publication" }
-        why: fn(self) -> String { "Every panel state field must have a checked `core.devtools.publish` site" }
-        fix: fn(self) -> String { "Publish `field: .{self.field}` with the field's declared type" }
-    }
-}
-
 ImplOnBuiltinType: struct {
     impl Diagnostic {
         code: "E0301"
@@ -6261,22 +6246,6 @@ ParkedTasksAtExit: struct {
     }
 }
 
-ForeignFunctionFailed: struct {
-    msg: String
-
-    impl Diagnostic {
-        code: "E3014"
-        stage: [.Runtime]
-        moment: .Run
-        meaning: "A foreign function failed across a runtime boundary with Jet source location, function name, and source-line context"
-        detail: true
-        no_fix: .Behavior
-        what: fn(self) -> String { "`foreign function failed: {self.msg}`" }
-        why: fn(self) -> String { "The foreign implementation or its ABI boundary rejected the call, so Jet stopped instead of fabricating a result." }
-        fix: fn(self) -> String { "Fix the foreign function or handle its documented failure before calling it again." }
-    }
-}
-
 UnhandledEntryFailure: struct {
     msg: String
 
@@ -7309,20 +7278,6 @@ ReplFuelExhausted: struct {
     }
 }
 
-ReplFeatureNotSupported: struct {
-    feature: String
-
-    impl Diagnostic {
-        code: "E1802"
-        stage: [.Repl]
-        meaning: "Hard-rejected feature in the REPL (FFI, tasks, `#Unsafe`, OS-level APIs)"
-        detail: true
-        what: fn(self) -> String { "The REPL can't run `{self.feature}`." }
-        why: fn(self) -> String { "The REPL is for learning Jet; some features — FFI, tasks/channels, `#Unsafe`, and OS-level APIs — need a full program. A `jet repl` run reports this limitation." }
-        fix: fn(self) -> String { "Run `jet run <file.jet>` or `jet build <file.jet>` to use the full compiler." }
-    }
-}
-
 ApplicationAuthorityDenied: struct {
     impl Diagnostic {
         code: "E1803"
@@ -8322,19 +8277,6 @@ OsConfigNotFound: struct {
         what: fn(self) -> String { "The `jet os` config file doesn't exist." }
         why: fn(self) -> String { "A bare host loads `./config.jet`; `host@root` loads `root/config.jet` when `root` is a directory, or the file named by `root`." }
         fix: fn(self) -> String { "Create it with `jet os init <host>`, or pass an external root as `host@root`." }
-    }
-}
-
-UseExecutablePackage: struct {
-    impl Diagnostic {
-        code: "E0982"
-        stage: [.Jetpack]
-        meaning: "`use <pkg>` names an `executable` package — executables go on PATH, not `use` (U17)"
-        detail: true
-        no_fix: .Behavior
-        what: fn(self) -> String { "`use <pkg>` named a package that is realized as an `executable`." }
-        why: fn(self) -> String { "U17: one import concept (`use`) covers files, modules, and `library` packages; an `executable` package installs a binary on your PATH — you run it, you don't import its code." }
-        fix: fn(self) -> String { "Remove the `use`, and run the executable's binary instead; or, if you meant to import its code, change the package to `library` in `package.jet`." }
     }
 }
 
@@ -11275,19 +11217,6 @@ DebugSessionQuit: struct {
     }
 }
 
-DevTypeSurfaceChanged: struct {
-    impl Diagnostic {
-        code: "E2210"
-        stage: [.Tooling]
-        meaning: "A `jet dev` edit changed a type surface, so the dev loop restarts instead of swapping (c77)"
-        detail: true
-        no_fix: .Behavior
-        what: fn(self) -> String { "This edit changed a type, so `jet dev` is restarting instead of swapping (the message names what changed — a struct field, an enum variant, or a function signature)." }
-        why: fn(self) -> String { "A hot swap re-applies code while the program's types stay the same; changing the shape of your data means the running code is rebuilt cleanly from the new types." }
-        fix: fn(self) -> String { "Nothing to fix — `jet dev` restarted with the new types; this note just explains why the swap became a restart. Type-stable edits (function bodies, statements) swap without a restart." }
-    }
-}
-
 RetiredJitGap: struct {
     impl Diagnostic {
         code: "E2211"
@@ -12202,25 +12131,6 @@ WholeFileRead: struct {
         what: fn(self) -> String { "(reserved) `fs.read` loads the whole file into memory at once." }
         why: fn(self) -> String { "For large files this can exhaust memory; streaming reads use bounded space." }
         fix: fn(self) -> String { "Use `files.open(path)?` and `loop line in handle.lines() {{ … }}` to stream line-by-line. Not emitted yet." }
-    }
-}
-
-HiddenCostInLoop: struct {
-    operation: String
-    fix_text: String
-
-    impl Diagnostic {
-        code: "L2510"
-        severity: .Lint
-        lint_name: "hidden_cost_in_loop"
-        meaning: "Hidden dynamic cost inside a loop"
-        detail: true
-        edit: .SourceEdit
-        no_fix: None
-        fix_safety: .NeedsReview
-        what: fn(self) -> String { "{self.operation} repeats inside a loop." }
-        why: fn(self) -> String { "A repeated copy or representation fallback can make a growing value's cost super-linear." }
-        fix: fn(self) -> String { "Call `{self.fix_text}` on the highlighted expression to make the copy explicit." }
     }
 }
 

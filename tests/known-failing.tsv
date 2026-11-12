@@ -51,7 +51,6 @@ tests/ui_lint/build_entry_liveness	#6006	check not ported: L0530, L0104; L0102 f
 tests/ui_lint/ownership/shared_auto_clone_in_loop_is_lint	#6006	check not ported: L0104
 tests/ui_lint/prelude_shadow_warn	#6006	check not ported: L0104
 tests/ui_lint/busy_spin	#6006	check not ported: L0528
-tests/ui_lint/cost_hidden_in_loop	#6006	check not ported: L2510
 tests/ui_lint/redundant_tail_return	#6006	stale fixture: an `if value == {…}` table with no `else` is now E0003, so L0513's trigger no longer compiles
 tests/ui/task_spawn_parameters	#6425	check not ported: E1102, E0405, E0112; the parser rejects `task (x: Int) -> x` with E0003 first
 tests/ui/source_nesting_limit	#6425	check not ported: E1403; the parser stops at depth 254 with E0003 first
@@ -61,7 +60,6 @@ tests/ui/inline_module_return_type_mismatch	#6425	check not ported: E0080 (repor
 tests/ui/comptime_impure	#4926	E3410 (Tier-2 comptime effect) replaces E3401 and E0107
 tests/ui/pure/pure_fn_comptime_block_is_excluded_from_runtime_check	#4926	E3410 (Tier-2 comptime effect) replaces E3401
 tests/ui/runtime_rng_backward	#5010	a stop raised in Core source (RNG.int's __numeric_stop) has no caller location, so E3010 prints no `-->` line
-tests/ui/runtime_e3014	#6366	ir.build unlowered: foreign import requires a checked direct C scalar signature (no IR lowering for extern rust)
 tests/ui/project_module_duplicate	#4275	fixture has no package.jet (E2393), and inside a package an inline `module` declaration is not a project module (E0603, no E0606)
 tests/ui/project_module_invalid	#4275	fixture has no package.jet (E2393), and inside a package an inline `module` declaration is not a project module
 tests/ui/project_module_missing	#4275	fixture has no package.jet, so the import is E2393 ImportWithoutProject, not E0603
@@ -179,16 +177,13 @@ tests/cases/corelib_parts_encoding_streams/process_spec_and_csv_reader_runtime_c
 tests/cases/corelib_parts_system/json_decode_preserves_scalar_strings.case	#5454	`json.decode` still coerces numeric and boolean strings (Core/Encoding/Json.jet `decode` → `coerce_tree`), so a's `"8080"` arrives as `.Int` and prints nothing; 8bcfbeb87d moved these assertions to strict Dyn decode
 tests/cases/dev_parts_routine/aggregate_trait_returns_match_aot_and_default_dev_in_both_impl_orders.case	#5454	FAIL: `jet build aggregate_trait_returns.jet` exits 1 (expected 0): Error [E2417]: Explicit failure domain `String (text)` is not an Error type
 tests/cases/dev_parts_routine/body_only_edit_is_type_stable.case	#5454	REFUSED read_bytes: the testkit session `recv` is not implemented yet, and the original reads the live session output
-tests/cases/dev_parts_routine/enum_variant_change_emits_e2210.case	#5454	REFUSED read_bytes: the testkit session `recv` is not implemented yet, and the original reads the live session output
 tests/cases/dev_parts_routine/fixed_width_mixed_sign_shift_counts_trap_across_tiers.case	#5454	`jet run shl_negative.jet` stops with the generic E3010 "Value doesn't fit in destination type": the mixed-sign count is narrowed before the shift, so the ShiftOutOfRange trap text never prints
-tests/cases/dev_parts_routine/fn_signature_change_emits_e2210.case	#5454	REFUSED read_bytes: the testkit session `recv` is not implemented yet, and the original reads the live session output
 tests/cases/dev_parts_routine/jit_1216_adversarial_regressions.case	#5454	stm_return: a bare `return` inside `#Transact(tx)` keeps the write, so `jet run` prints 9 where the original rolls back and prints 1
 tests/cases/dev_parts_routine/package_callable_survives_dev_and_run_watch_reload.case	#5454	REFUSED read_bytes: the testkit session `recv` is not implemented yet, and the original reads the live session output
 tests/cases/dev_parts_routine/persist_binding_survives_hot_swap_and_resets_on_shape_change.case	#5454	REFUSED read_bytes: the testkit session `recv` is not implemented yet, and the original reads the live session output
 tests/cases/dev_parts_routine/persist_example_survives_hot_reload.case	#5454	REFUSED read_bytes: the testkit session `recv` is not implemented yet, and the original reads the live session output
 tests/cases/dev_parts_routine/place_split_planner_preserves_order_and_nested_owners.case	#5454	`jet build place_split.jet` reports E0220: `adjacent.values[2..3]` can't be read while the disjoint `adjacent_first` window into `adjacent.values[0..1]` is live (no disjoint-slice split)
 tests/cases/dev_parts_routine/resident_jit_fidelity_matches_runtime_contract.case	#5454	FAIL: `jet run jet_jit_fidelity_valid_interp.jet` exits 1 (expected 0): Error [E2104]: The Jet backend can't build `jet_jit_fidelity_valid_interp.jet` yet: override_fidelity [function:perf.override_fidelity]: numeric conversion from F32 to Float at <corelib>/Core/Perf/Perf.jet:1127..1135 reset_fidelity [funct
-tests/cases/dev_parts_routine/struct_field_change_emits_e2210.case	#5454	REFUSED read_bytes: the testkit session `recv` is not implemented yet, and the original reads the live session output
 tests/cases/dev_parts_routine/unused_expanding_generic_body_does_not_expand_the_instantiation_worklist.case	#5454	`jet run unused_expanding_generic_body.jet` exits 1 with UnknownFunction "`Grow` has no method `unused`" at line 8; the original runs the unreachable expanding method's caller and prints 7
 tests/cases/dev_parts_routine/wrapped_returned_view_fields_match_aot_and_default_dev.case	#5454	FAIL: `jet build wrapped_returned_view_fields.jet` exits 1 (expected 0): Error [E2417]: Explicit failure domain `String (text)` is not an Error type
 tests/cases/dev_parts_tier_parity/ui_and_web_match_interpreter_default_run_and_aot_web_web_app.case	#5454	`jet run web_app.jet` serves until stopped and hits the case's 30 s limit; Examples/Apps/Web/WebApp.case marks the example `run: none`, and the pinned Examples/Apps/Web/WebApp.out no longer exists
@@ -227,7 +222,6 @@ tests/cases/unit_family/user_dimensions_compose_and_named_derived_units_share_th
 tests/cases/unit_family/exact_concrete_coercion_uses_the_value_not_only_the_scale_denominator.case	#6004	Error [E0127]: This implicit unit conversion would round
 tests/cases/cli_parts_surface/cost_cli_projects_generic_specializations.case	#6652	cost producer not built: `jet explain --cost` is an unbuilt form (E2104)
 tests/cases/cli_parts_surface/cost_cli_rejects_incomplete_reachable_projection.case	#6652	cost producer not built: `jet lint --cost` and `jet explain --cost` are unbuilt forms (E2104), and `jet check` does not reject an incomplete reachable cost projection
-tests/cases/cli_parts_surface/cost_cli_surfaces_hot_loop_rows_and_optimizer_proofs.case	#6652	cost producer not built: `jet lint --cost` and `jet explain --cost` are unbuilt forms (E2104), and `jet check` reports no L2510 hidden-cost warnings
 tests/cases/unit_family/measure_rules_cover_fixed_lengths_and_matrix_shapes.case	#6004	Error [E0113]: This value is [Int], but `join` returns [Int#5]
 tests/cases/unit_family/rounded_conversion_rejects_float_precision_loss_and_bounds_huge_digits.case	#6004	Error [E0127]: This unit conversion overflows its runtime representation
 tests/cases/unit_family/poundforce_uses_the_exact_defined_ratio_across_execution_tiers.case	#6004	Error [E2104]: The Jet backend can't build `main.jet` yet:\nrun [function:main.run]: expression UnitConvert at main.jet:25..72
@@ -265,7 +259,6 @@ tests/cases/authority/authority_plan_refuses_before_spawn_on_all_hosted_tiers.ca
 tests/cases/authority/authority_process_binds_exact_resource_grants.case	#5454	jet run main.jet: refused (exit 0, expected 0; stdout is "refused ", expected "planned ")
 tests/cases/authority/authority_process_linux_bwrap_runs_and_denies_host_read.case	#5454	jet run ok/main.jet: Error [E1004]: `core.process` has no item `workspace` (exit 1, expected 0; stdout is "", expected "sandboxed ")
 tests/cases/authority/authority_process_plan_and_receipt_share_the_policy_digest.case	#5454	process.workspace() plan() returns Err, so the run prints `refused` instead of the two `true` digest lines
-tests/cases/authority/erased_devtools_publications_do_not_feed_panel_state.case	#5454	`jet check main.jet` exits 0 with only L0530 warnings; the erased devtools publication is accepted, and no E1414 is reported
 tests/cases/cffi/cffi_close_capability_round_trips_through_the_native_c_boundary.case	#5454	`jet build main.jet` exits 1 with E0905 "`Handle` isn't `Close`": the foreign close contract does not give the C handle a `Close` impl
 tests/cases/cffi/cffi_write_capability_round_trips_through_the_native_c_boundary.case	#6366	`jet build main.jet` is E2104 "calling `c.make` is not built yet": the native backend has no C ABI marshalling for a struct (Pair) result or a moved struct parameter
 tests/cases/cffi/foreign_close_contract_registers_only_a_matching_consuming_function.case	#5454	jet check valid/main.jet: Error [E0905]: `String` isn't `Close` (exit 1, expected 0)
@@ -373,19 +366,15 @@ tests/cases/repl/repl_declared_types_survive_empty_and_absent_values.case	#6418	
 tests/cases/repl/repl_deny_rand_blocks_draw_and_mutating_shuffle.case	#6418	`jet repl` is not built yet (E2104)
 tests/cases/repl/repl_docs_resolve_imported_core_module_member.case	#6418	`jet repl` is not built yet (E2104)
 tests/cases/repl/repl_effect_needs_lexical_grant_even_with_allow_flag.case	#6418	`jet repl` is not built yet (E2104)
-tests/cases/repl/repl_hard_reject_extern_rust.case	#6418	`jet repl` is not built yet (E2104)
-tests/cases/repl/repl_hard_reject_unsafe.case	#6418	`jet repl` is not built yet (E2104)
 tests/cases/repl/repl_history_limit_and_corrupt_tail_recover_visibly.case	#6418	the cooked `jet repl` (Repl.jet) keeps no history file: the first session leaves no `$XDG_STATE_HOME/jet/repl-history`
 tests/cases/repl/repl_history_off_is_session_only_and_visible_storage_failure_falls_back.case	#6418	`jet repl` is not built yet (E2104)
 tests/cases/repl/repl_history_persists_only_successes_searches_clears_and_is_private.case	#6418	`jet repl` is not built yet (E2104)
 tests/cases/repl/repl_history_rejects_symlinked_state_parent_without_chmod_or_escape.case	#6418	`jet repl` is not built yet (E2104)
-tests/cases/repl/repl_http_client_import_hard_rejected.case	#6418	`jet repl` is not built yet (E2104)
 tests/cases/repl/repl_imaginary_literal_uses_the_unit_path.case	#6418	`jet repl` is not built yet (E2104)
 tests/cases/repl/repl_process_boundary_uses_the_passed_authority_value.case	#6418	`jet repl` is not built yet (E2104)
 tests/cases/repl/repl_range_fact_proves_fixed_list_index.case	#6418	`jet repl` is not built yet (E2104)
 tests/cases/repl/repl_raw_f3_search_recalls_and_submits_persistent_history.case	#6418	`jet repl` is not built yet (E2104)
 tests/cases/repl/repl_stream_break_runs_deferred_close.case	#6418	`jet repl` is not built yet (E2104)
-tests/cases/repl/repl_use_repl_incompatible_module_hard_rejected.case	#6418	`jet repl` is not built yet (E2104)
 tests/cases/repl/repl_raw_bindings_are_live_in_side_pane.case	#6418	unbuilt raw REPL: the self-hosted `jet repl` (Repl.jet) is the cooked line loop and always prints "interactive keys require a TTY", so key bindings, completion, F1 docs, the ^B pane, pin/fold/rerun keys, multiline redraw and Ctrl-C handling never run
 tests/cases/repl/repl_raw_color_highlights_live_input.case	#6418	unbuilt raw REPL: the self-hosted `jet repl` (Repl.jet) is the cooked line loop and always prints "interactive keys require a TTY", so key bindings, completion, F1 docs, the ^B pane, pin/fold/rerun keys, multiline redraw and Ctrl-C handling never run
 tests/cases/repl/repl_raw_completion_menu_selects_shared_symbol.case	#6418	unbuilt raw REPL: the self-hosted `jet repl` (Repl.jet) is the cooked line loop and always prints "interactive keys require a TTY", so key bindings, completion, F1 docs, the ^B pane, pin/fold/rerun keys, multiline redraw and Ctrl-C handling never run
@@ -814,7 +803,6 @@ tests/cases/jetpack_offline/selected_workspace_run_propagates_unsafe_metadata_fa
 tests/cases/jetpack_platform/platform_gate_reaches_store_authenticated_lease_service.case	#6317	REFUSED: hangar-verified-realization the case kit has no form that realizes a Hangar-verified package through the real Store verification path
 tests/cases/jetpack_platform/platform_tier_gate_exercises_native_lease_diagnostics_and_audit.case	#6317	REFUSED: hangar-verified-realization the case kit has no form that realizes a Hangar-verified package through the real Store verification path
 tests/cases/library_outputs/default_library_rejects_cross_target_before_publication.case	#6317	REFUSED: build-target the case kit has no `{jet-build-target}` token
-tests/cases/lib_use/executable_is_not_importable.case	#6317	REFUSED: hangar-verified-realization the case kit has no form that realizes a Hangar-verified package through the real Store verification path
 tests/cases/lib_use/realized_library_is_consumed_with_use.case	#6317	REFUSED: hangar-verified-realization the case kit has no form that realizes a Hangar-verified package through the real Store verification path
 tests/cases/pkg/cli_publish_existing_key_bypasses_entropy_keygen.case	#6317	REFUSED: crypto-provider-failure there is no way to install a failing entropy provider for the command under test
 tests/cases/pkg/cli_publish_pushes_index_and_enforces_immutability_e1234.case	#6317	REFUSED: package-tests the case kit has no form for the original package test helpers (registry, review and advisory fixtures)
@@ -849,7 +837,6 @@ tests/cases/cffi/cffi_card436_c_abi_shapes_round_trip.case	#6366	jet build main.
 tests/cases/cffi/cffi_repr_c_enums_match_native_c_layout.case	#6366	jet build main.jet: E2104 "calling `c.repr_packet` is not built yet": the native backend has no C ABI marshalling for the #Layout(c, tag: U8) payload enum Packet (exit 1, expected 0)
 tests/cases/cffi/cffi_raw_status_out_pointer_reads_only_on_success.case	#6366	jet build main.jet: E2104 "calling `c.store_load` is not built yet": the native backend has no C ABI marshalling for the raw pointer parameter out (*Record) (exit 1, expected 0)
 tests/cases/cffi/cffi_sysv64_abi_executes_native_symbol.case	#6366	jet build main.jet: E2104 "calling `c.add` is not built yet": the native backend calls only through the C convention, not #ABI(sysv64) (exit 1, expected 0)
-tests/cases/diagnostics_coverage/ffi_runtime_stop_keeps_one_jet_source_frame.case	#6366	the built binary stops with Stop [E3001] `panic: a foreign function panicked` --> <core.prelude>:0, not Stop [E3014] with the frame `--> ffi.jet:7 in run`
 tests/cases/cffi/cobol_cache_without_descriptor_rejects_abi_unknown.case	#6366	jet check main.jet: `use payroll: cobol.payroll` with a .jet/bindings/cobol cache reports E1002 `cobol` is reserved, not E3208 for the missing descriptor
 tests/cases/pkg/foreign_package_provider_fetch_lock_and_locked_round_trip.case	#6418	`jet fetch` is not built yet (E2104)
 tests/cases/polyglot_systems/cpp_clang_ast_binder_links_external_namespace_and_on_demand_surface.case	#6418	`jet run main.jet`: the generated `.jet/bindings/cpp/counter.jet` defines `apply` twice (DuplicateDefinition)

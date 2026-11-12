@@ -2932,8 +2932,8 @@ namespace (S51).
 A realized `library` package is another module-search root, so its public
 items are used with the same `use package;` and `package.item` syntax. The
 package must already be realized: compilation does not realize dependencies on
-demand. An `executable` package belongs on `PATH`, not in `use`; naming one in
-an import is **E0982**. A declared library that has not been realized is
+demand. An `executable` package belongs on `PATH`, not in `use`; refusing one
+named in an import is card #6040's work. A declared library that has not been realized is
 **E0983**. If a package omits `kind`, its staged `bin/` output or top-level
 `run` function makes it an executable; otherwise it is a library. An explicit
 kind takes precedence. A single-file `jet run` or `jet build` still requires
@@ -5056,8 +5056,8 @@ execution opens the canonical executable before authorization and launches that
 exact descriptor. Stdin is closed unless a separately authorized stream
 surface supplies it. The child starts in the verified project directory with an
 empty environment; stdout and stderr are captured. Interrupts target the
-process group, which the REPL kills and reaps after 30 seconds. Native-only
-features report E1802.
+process group, which the REPL kills and reaps after 30 seconds. Every accepted
+input runs on the shared checked path; the REPL refuses no feature by name.
 
 ### Multiline input
 

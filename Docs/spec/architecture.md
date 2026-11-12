@@ -1250,7 +1250,8 @@ snapshots):
 `freeze` does not add a backend policy rail. Its `Frozen` flow fact is lowered
 to the existing owned clone/materialization in the checked program, so every
 back end consumes one checked meaning. The
-REPL remains an interpreter-only surface and rejects task execution with E1802;
+REPL runs every accepted input on the shared checked path, so task execution
+there is checked like any program;
 pure `freeze(x)` evaluation is still a value operation.
 
 These boundary guarantees do not imply deadlock freedom. See the [Deadlock stance](spec.md#deadlock-stance)

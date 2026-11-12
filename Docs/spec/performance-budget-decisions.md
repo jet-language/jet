@@ -914,7 +914,7 @@ The five reportable cost rows are:
 5. **Generic representation fallback:** a collection uses its generic
    representation because no shape proof selected a direct representation.
 
-The sema checker supplies view-copy `L2510` rows. The checked program supplies
+The sema checker supplies view-copy hidden-cost lint rows (card #6652). The checked program supplies
 the other four rows and the complete explain projection. Before projection, the
 shared cost seam requires every sema-checked reachable callable to have a
 matching checked body. Type-parameterized, foreign, and otherwise uncovered
@@ -926,11 +926,11 @@ reconstruct cost from emitted code.
 
 ```jet
 loop item in items {
-    out.push(item.view())        // view materialization: L2510 when semantic
-    counts[item.key] += 1        // map copy-on-write: L2510 when semantic
-    total += item                // exact-Int spill: L2510 when semantic
-    result: read(item)         // outcome construction: L2510 when semantic
-    value := items[index]        // generic fallback: L2510 when semantic
+    out.push(item.view())        // view materialization: hidden-cost lint when semantic
+    counts[item.key] += 1        // map copy-on-write: hidden-cost lint when semantic
+    total += item                // exact-Int spill: hidden-cost lint when semantic
+    result: read(item)         // outcome construction: hidden-cost lint when semantic
+    value := items[index]        // generic fallback: hidden-cost lint when semantic
 }
 ```
 

@@ -1185,7 +1185,7 @@ function references, including source methods and selected outputs. A reachable
 callable without a complete checked body or specialization refuses with E2104;
 it never produces a clean-cost claim. The collector retains nested loop depth
 through control flow and closure bodies. `lint --cost` merges and deduplicates
-L2510 diagnostics, omits optimizer-proven removals, and reports retained costs
+hidden-cost lint rows (card #6652), omits optimizer-proven removals, and reports retained costs
 inside loops. View-materialization lints remain sema-owned. Findings exit 1
 on stderr (diagnostic JSON Lines under `--json`); clean invocations exit 0.
 Bare `inspect explain-build <file>` selects the authorized invocation entry
