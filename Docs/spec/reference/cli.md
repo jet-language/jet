@@ -915,7 +915,12 @@ paths preserve `JET_TEST_CAPTURE`, `JET_TEST_FILTER`, `JET_TEST_SHUFFLE_SEED`,
 `JET_PROJECT_ROOT`. Native outcomes use process-private framed record files,
 never stdout, kept in memory: in the per-user runtime directory
 (`XDG_RUNTIME_DIR`), else `/dev/shm`, and in `.jet/build` only on a host with
-neither. After a fatal trap only unreported tests rerun individually,
+neither. A run removes its own harness and record files on every exit path;
+one killed before that leaves them, and the next `jet test` removes every
+`.test_<stem>.<pid>` file in both directories whose process is gone (where
+`/proc` lists the live ones). A record file the run can't create, write or
+read (a full runtime directory) is E2105 naming the file and the operating
+system's reason. After a fatal trap only unreported tests rerun individually,
 one child per core at a time (fewer when free memory can't hold 1 GiB per
 child; one at a time under `--serial`), reported in test order.
 Output checks run after joins in the same batch process. If that process

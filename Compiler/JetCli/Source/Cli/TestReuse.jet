@@ -55,15 +55,16 @@ JetCLITestReuseHow: enum { Plain Reused Logged }
 
 // `jet_cli_native_test_run` through the store: the stored outcomes when
 // `reuse` has them and its reads are unchanged, else a run whose reads are
-// logged for jet_cli_test_reuse_keep. No `reuse` runs the tests plainly.
-jet_cli_test_reuse_run: fn(reuse: JetCLITestReuse?, how: &JetCLITestReuseHow, spec: ProcessSpec, tests: [JetNativeTestCase], check_names: [String], unrun_check_report: fn() -> String Never!, serial: Bool, records_path: String, time_limit: Duration?) -> JetNativeTestOutcomes Err! {
+// logged for jet_cli_test_reuse_keep. No `reuse` runs the tests plainly. A
+// records file the run can't create, write or read sets `fault`.
+jet_cli_test_reuse_run: fn(reuse: JetCLITestReuse?, how: &JetCLITestReuseHow, spec: ProcessSpec, tests: [JetNativeTestCase], check_names: [String], unrun_check_report: fn() -> String Never!, serial: Bool, records_path: String, time_limit: Duration?, fault: &JetNativeTestRecordsFault?) -> JetNativeTestOutcomes Err! {
     if reuse == .Val(store) {
         if jet_cli_test_reuse_lookup(store) == .Val(kept) {
             how = .Reused
             return Ok(kept)
         }
         if test_reuse_files.write(store.reads, "") == .Ok(_) {
-            run: jet_cli_native_test_run(spec.env(JET_CLI_TEST_READS_ENV, store.reads), tests, check_names, unrun_check_report, serial, records_path, time_limit) ?? {
+            run: jet_cli_native_test_run(spec.env(JET_CLI_TEST_READS_ENV, store.reads), tests, check_names, unrun_check_report, serial, records_path, time_limit, fault) ?? {
                 test_reuse_files.remove(store.reads).drop("the run already failed")
                 return Err(err)
             }
@@ -71,7 +72,7 @@ jet_cli_test_reuse_run: fn(reuse: JetCLITestReuse?, how: &JetCLITestReuseHow, sp
             return Ok(run)
         }
     }
-    jet_cli_native_test_run(spec, tests, check_names, unrun_check_report, serial, records_path, time_limit)
+    jet_cli_native_test_run(spec, tests, check_names, unrun_check_report, serial, records_path, time_limit, fault)
 }
 
 // The stored outcomes of `reuse` when every read they keep is unchanged.

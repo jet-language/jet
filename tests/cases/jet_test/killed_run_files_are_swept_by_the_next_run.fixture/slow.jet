@@ -1,0 +1,12 @@
+use {
+    files: core.files
+    time: core.time
+}
+
+// Holds its run open until the case makes `release`, at most a minute.
+#Test("waits for its release") {
+    loop _ in 0..<6000 {
+        if files.exists("release") -> return
+        time.sleep(10ms)
+    }
+}

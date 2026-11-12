@@ -1,0 +1,26 @@
+# #6577 c2: a `jet test` killed before its own cleanup leaves its per-run
+# files behind, the harness in .jet/build and the records in the runtime
+# directory. The next run removes every one whose process is gone, and
+# leaves none of its own.
+requires: tool:sh
+fixture: killed_run_files_are_swept_by_the_next_run.fixture
+env: NO_COLOR=1
+env: XDG_RUNTIME_DIR={work}/runtime
+mkdir: runtime
+spawn slow: jet test slow.jet
+poll started: sh -c 'ls -A runtime' until exit: 0 && stdout: ~ ".records.batch" timeout 120s every 20ms # the harness batch is running
+signal slow: KILL
+wait: slow
+exit: any # the run is killed by the case; its exit status is not part of the contract
+entries: runtime name ^= ".test_slow." >= 1 # the killed run's records stay behind
+entries: .jet/build name ^= ".test_slow." = 1 # and so does its harness
+# The orphaned harness finishes its test and writes its record, so no live
+# process touches the files when the next run starts.
+mkdir: release
+poll recorded: sh -c 'for f in runtime/.test_slow.*.records.batch; do test -s "$f" || exit 1; done' until exit: 0 timeout 60s every 20ms
+sleep: 250ms
+step: jet test quick.jet
+exit: 0
+stdout: ~ "adds" # the next run's own test
+entries: runtime name ^= ".test_" = 0 # no records of the killed run or of this one
+entries: .jet/build name ^= ".test_" = 0 # no harness of either

@@ -222,13 +222,26 @@ jet_native_test_failure: fn(test: JetNativeTestCase, receipt: ProcessReceipt) ->
     "0 {test.name.bytes().len()} {receipt.output.bytes().len()} {message.bytes().len()} -\n{test.name}{receipt.output}{message}"
 }
 
-jet_native_test_read_records: fn(path: String, receipt: ProcessReceipt, contracts: &[JetNativeTestContract]) -> [JetNativeTestRecord] Err! {
+// A records file the run couldn't create, write or read, at `path`, and the
+// operating system's reason: the host's trouble (a full runtime directory is
+// ENOSPC), never a compiler bug, so `jet test` reports it as E2105.
+JetNativeTestRecordsFault: struct { path: String, cause: String }
+
+jet_native_test_read_records: fn(path: String, receipt: ProcessReceipt, contracts: &[JetNativeTestContract], fault: &JetNativeTestRecordsFault?) -> [JetNativeTestRecord] Err! {
     text: native_test_files.read(path) ?? {
         native_test_files.remove(path).drop("the record read already failed")
+        fault = Val(JetNativeTestRecordsFault{path: path.copy(), cause: jet_cli_io_error_text(err)})
         return Err("couldn't read native test records: {err}")
     }
     native_test_files.remove(path).drop("child records are process-private and one-shot")
-    if receipt.signal == None && receipt.code == 103 -> return Err("native test record I/O failed: {receipt.errors}")
+    // Exit 103: the child couldn't write its records (BuildTests.jet
+    // ir_test_append), and its stderr says why; it is silent only when it
+    // was given no records file.
+    if receipt.signal == None && receipt.code == 103 {
+        shown: receipt.errors.trim()
+        fault = Val(JetNativeTestRecordsFault{path: path.copy(), cause: if shown == "" -> "the test harness was given no records file" else -> shown.copy()})
+        return Err("native test record I/O failed: {receipt.errors}")
+    }
     jet_cli_native_test_records(text, !receipt.success, contracts)
 }
 
@@ -270,6 +283,47 @@ jet_cli_native_test_records_dir: fn(fallback: String) -> String Never! {
     fallback.copy()
 }
 
+// The process a `jet test` per-run file belongs to: its name is
+// `.test_<stem>.<pid>` (the harness), then `.records`, `.records.batch`,
+// `.records.<test>`, `.records.reads` or `.coverage` after it (Host.jet
+// jet_cli_test_result), or `.<pid>.new` (the harness being written,
+// jet_cli_native_write). None for any other name.
+jet_cli_native_test_file_pid: fn(name: String) -> Int? Never! {
+    if !name.starts_with(".test_") -> return None
+    parts: name.split(".").to_list()
+    end := parts.len()
+    loop (index, part) in parts {
+        if index > 2 && (part == "records" || part == "coverage" || part == "new") {
+            end = index
+            break
+        }
+    }
+    if end < 3 -> return None
+    digits: parts[end - 1]
+    if digits == "" -> return None
+    loop byte in digits.bytes() {
+        if byte < (U8{48}) || byte > (U8{57}) -> return None
+    }
+    pid: Int.parse(digits) ?? return None
+    if pid <= 0 -> return None
+    Val(pid)
+}
+
+// Removes from `dir` the per-run files of every `jet test` whose process is
+// gone: one killed before its own cleanup (a timeout, the OOM killer, a
+// signal) leaves its harness and records behind, and they would fill a
+// memory-backed runtime directory. A live run's files stay. Only where
+// /proc tells a live process from a gone one.
+jet_cli_native_test_sweep: fn(dir: String) Never! {
+    if !native_test_files.is_dir("/proc/self") -> return
+    entries: native_test_files.list_dir(dir) ?? return
+    loop entry in entries {
+        pid: jet_cli_native_test_file_pid(entry.name) ?? next
+        if native_test_files.is_dir("/proc/{pid}") -> next
+        native_test_files.remove("{dir}/{entry.name}").drop("another run may have swept it first")
+    }
+}
+
 // Memory each concurrently rerun test child may claim.
 JET_NATIVE_TEST_CHILD_MEMORY: 1073741824
 
@@ -292,9 +346,9 @@ jet_cli_native_test_width: fn(cores: Int, available: Int?, claim: Int) -> Int Ne
 // (E3013 parked tasks at process exit, a teardown fault) fails that test with
 // the fatal text: the process outlived the body, so the record alone isn't
 // the test's whole outcome.
-jet_native_test_one: fn(test: JetNativeTestCase, receipt: ProcessReceipt, path: String, contracts: &[JetNativeTestContract]) -> String Err! {
+jet_native_test_one: fn(test: JetNativeTestCase, receipt: ProcessReceipt, path: String, contracts: &[JetNativeTestContract], fault: &JetNativeTestRecordsFault?) -> String Err! {
     start: contracts.len()
-    records: jet_native_test_read_records(path, receipt, contracts)
+    records: jet_native_test_read_records(path, receipt, contracts, fault)
     // A child that died before its record still ran only `test`.
     left := [Int]{}
     loop at in start..<contracts.len() {
@@ -336,7 +390,8 @@ jet_native_test_alone_run: fn(spec: ProcessSpec) -> ProcessReceipt IOError! {
 // output checks need the batch's state, so with checks the batch still runs,
 // bounded by the limit for each test and check, and only the tests it left
 // unreported rerun alone at the limit.
-jet_cli_native_test_run: fn(spec: ProcessSpec, tests: [JetNativeTestCase], check_names: [String], unrun_check_report: fn() -> String Never!, serial: Bool, records_path: String, time_limit: Duration?) -> JetNativeTestOutcomes Err! {
+// A records file it can't create, write or read sets `fault`.
+jet_cli_native_test_run: fn(spec: ProcessSpec, tests: [JetNativeTestCase], check_names: [String], unrun_check_report: fn() -> String Never!, serial: Bool, records_path: String, time_limit: Duration?, fault: &JetNativeTestRecordsFault?) -> JetNativeTestOutcomes Err! {
     clean: spec.env_remove("JET_NATIVE_TEST_ID").env_remove("JET_NATIVE_TEST_REPORT_PATH").env_remove("JET_NATIVE_TEST_RECORDS_PATH")
     // The spec each test that runs alone starts from.
     alone := clean.env_remove("JET_NATIVE_TEST_ID")
@@ -354,7 +409,10 @@ jet_cli_native_test_run: fn(spec: ProcessSpec, tests: [JetNativeTestCase], check
         loop test in tests -> missing.push(test.copy())
     } else {
         batch_path: "{records_path}.batch"
-        native_test_files.write(batch_path, "") ?? return Err("couldn't create native test records: {err}")
+        native_test_files.write(batch_path, "") ?? {
+            fault = Val(JetNativeTestRecordsFault{path: batch_path.copy(), cause: jet_cli_io_error_text(err)})
+            return Err("couldn't create native test records: {err}")
+        }
         batch_spec := clean.env("JET_NATIVE_TEST_RECORDS_PATH", batch_path)
         if time_limit == .Val(limit) {
             batch_spec = batch_spec.timeout(limit * (tests.len() + check_names.len()))
@@ -367,7 +425,7 @@ jet_cli_native_test_run: fn(spec: ProcessSpec, tests: [JetNativeTestCase], check
         errors.push(batch.errors)
         batch_success = batch.success
         batch_errors = batch.errors
-        completed: jet_native_test_read_records(batch_path, batch, observed)
+        completed: jet_native_test_read_records(batch_path, batch, observed, fault)
         // An unserial batch joins its tests after spawning them all, so its
         // failures can't name a test.
         if !serial {
@@ -397,12 +455,15 @@ jet_cli_native_test_run: fn(spec: ProcessSpec, tests: [JetNativeTestCase], check
     if serial {
         loop test in missing {
             path: "{records_path}.{test.id}"
-            native_test_files.write(path, "") ?? return Err("couldn't create selected native test records: {err}")
+            native_test_files.write(path, "") ?? {
+                fault = Val(JetNativeTestRecordsFault{path: path.copy(), cause: jet_cli_io_error_text(err)})
+                return Err("couldn't create selected native test records: {err}")
+            }
             receipt: jet_native_test_alone_run(alone.env("JET_NATIVE_TEST_ID", "{test.id}").env("JET_NATIVE_TEST_RECORDS_PATH", path)) ?? {
                 native_test_files.remove(path).drop("selected native test spawn already failed")
                 return Err("couldn't run native test {test.name}: {err}")
             }
-            wire: jet_native_test_one(test, receipt, path, observed)
+            wire: jet_native_test_one(test, receipt, path, observed, fault)
             if !receipt.success -> fatal_attributed = true
             // A fatal receipt's raw streams already live inside its failure
             // outcome. Successful tests' uncaptured streams remain separate.
@@ -426,6 +487,7 @@ jet_cli_native_test_run: fn(spec: ProcessSpec, tests: [JetNativeTestCase], check
                 test: missing[index]
                 path: "{records_path}.{test.id}"
                 native_test_files.write(path, "") ?? {
+                    fault = Val(JetNativeTestRecordsFault{path: path.copy(), cause: jet_cli_io_error_text(err)})
                     spawn_error = Val("couldn't create selected native test records: {err}")
                     break
                 }
@@ -443,7 +505,7 @@ jet_cli_native_test_run: fn(spec: ProcessSpec, tests: [JetNativeTestCase], check
                     wait_error = Val("couldn't wait for native test {running.test.name}: {err}")
                     next
                 }
-                wire: jet_native_test_one(running.test, receipt, running.path, observed) ?? {
+                wire: jet_native_test_one(running.test, receipt, running.path, observed, fault) ?? {
                     wait_error = Val(err.message)
                     next
                 }
@@ -481,10 +543,14 @@ jet_cli_native_test_run: fn(spec: ProcessSpec, tests: [JetNativeTestCase], check
     Ok(JetNativeTestOutcomes{wires: wires, outputs: outputs, errors: errors, contracts: jet_native_test_contracts_unique(observed, tests)})
 }
 
-// The canonical report of `outcomes`, by the harness `spec` names.
-jet_cli_native_test_report: fn(spec: ProcessSpec, outcomes: JetNativeTestOutcomes, records_path: String) -> JetNativeTestRun Err! {
+// The canonical report of `outcomes`, by the harness `spec` names; a records
+// file it can't write sets `fault`.
+jet_cli_native_test_report: fn(spec: ProcessSpec, outcomes: JetNativeTestOutcomes, records_path: String, fault: &JetNativeTestRecordsFault?) -> JetNativeTestRun Err! {
     clean: spec.env_remove("JET_NATIVE_TEST_ID").env_remove("JET_NATIVE_TEST_REPORT_PATH").env_remove("JET_NATIVE_TEST_RECORDS_PATH")
-    native_test_files.write(records_path, outcomes.wires.join("")) ?? return Err("couldn't write native test outcomes: {err}")
+    native_test_files.write(records_path, outcomes.wires.join("")) ?? {
+        fault = Val(JetNativeTestRecordsFault{path: records_path.copy(), cause: jet_cli_io_error_text(err)})
+        return Err("couldn't write native test outcomes: {err}")
+    }
     reported: clean.env("JET_NATIVE_TEST_REPORT_PATH", records_path).run() ?? {
         native_test_files.remove(records_path).drop("report already failed")
         return Err("couldn't run native test report: {err}")
@@ -521,6 +587,40 @@ jet_cli_native_test_wire_parts: fn(wire: String) -> JetNativeTestWire Err! {
 jet_cli_native_test_wire: fn(parts: JetNativeTestWire) -> String Never! {
     property: if parts.property == .Val(run) -> "{run.cases}/{run.rejected}/{run.seed}" else -> "-"
     "{parts.flags} {parts.name.bytes().len()} {parts.stdout.bytes().len()} {parts.stderr.bytes().len()} {property}\n{parts.name}{parts.stdout}{parts.stderr}"
+}
+
+#Test("a per-run file names its process after the stem, before any suffix") {
+    assert_eq(jet_cli_native_test_file_pid(".test_a.41"), Val(41))
+    assert_eq(jet_cli_native_test_file_pid(".test_a.1.41.records"), Val(41))
+    assert_eq(jet_cli_native_test_file_pid(".test_a.41.records.batch"), Val(41))
+    assert_eq(jet_cli_native_test_file_pid(".test_a.41.records.7"), Val(41))
+    assert_eq(jet_cli_native_test_file_pid(".test_a.41.records.reads"), Val(41))
+    assert_eq(jet_cli_native_test_file_pid(".test_a.41.coverage"), Val(41))
+    assert_eq(jet_cli_native_test_file_pid(".test_a.41.41.new"), Val(41))
+    assert_eq(jet_cli_native_test_file_pid(".test_a.records.41"), Val(41))
+    assert_eq(jet_cli_native_test_file_pid(".test_a"), None)
+    assert_eq(jet_cli_native_test_file_pid(".test_a.x1.records"), None)
+    assert_eq(jet_cli_native_test_file_pid(".test_a.0"), None)
+    assert_eq(jet_cli_native_test_file_pid("main.41"), None)
+}
+
+// No Linux process is 4194305: PID_MAX_LIMIT caps every PID at 2^22.
+#Test("the sweep removes a gone run's files and keeps a live run's and every other file") {
+    if !native_test_files.is_dir("/proc/self") -> return
+    scratch: native_test_files.temp_dir("jet-native-test-sweep") ?? panic("a scratch directory: {err}")
+    dir: scratch.path
+    live: native_test_sys.pid()
+    kept: [String]{".test_a.{live}", ".test_a.{live}.records.batch", ".test_a.{live}.coverage", ".test_a", "notes.4194305"}
+    gone: [String]{".test_a.4194305", ".test_a.4194305.records.batch", ".test_a.4194305.records.7", ".test_a.4194305.4194305.new"}
+    loop name in kept {
+        native_test_files.write("{dir}/{name}", "") ?? panic("write {name}: {err}")
+    }
+    loop name in gone {
+        native_test_files.write("{dir}/{name}", "") ?? panic("write {name}: {err}")
+    }
+    jet_cli_native_test_sweep(dir)
+    loop name in kept -> assert(native_test_files.exists("{dir}/{name}"))
+    loop name in gone -> assert(!native_test_files.exists("{dir}/{name}"))
 }
 
 #Test("native test records preserve UTF-8 and embedded newlines") {

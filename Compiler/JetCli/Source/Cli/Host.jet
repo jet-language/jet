@@ -2129,6 +2129,11 @@ jet_cli_test_result: fn(file: String, source: String, doctests: [JetCLIDoctestFi
     }
     build_dir: "{root}/.jet/build"
     cli_files.create_dir_all(build_dir) ?? return jet_cli_build_failed("couldn't create the build directory {build_dir}: {err}", jet_cli_why("E2105"), "check that the project directory is writable", color)
+    // A run killed before its own cleanup leaves its harness and records
+    // behind; every one whose process is gone goes before this run adds its
+    // own.
+    jet_cli_native_test_sweep(build_dir)
+    jet_cli_native_test_sweep(jet_cli_native_test_records_dir(build_dir))
     // Process-private: concurrent `jet test` runs of one file never replace
     // an executable another is launching.
     stem: ".test_{jet_cli_stem(file)}.{cli_process.current_pid()}"
@@ -2244,7 +2249,13 @@ jet_cli_test_result: fn(file: String, source: String, doctests: [JetCLIDoctestFi
     if replay_record == .Val(recording) -> spec = spec.env(JET_CLI_REPLAY_TIME_ENV, "{recording.run.time_ms}")
     time_limit := Duration?{None}
     limit_setting: test_settings_time_limit_ms(options.settings)
-    if limit_setting == .Val(limit_ms) -> time_limit = Val(Duration.milliseconds(limit_ms) ?? return jet_cli_ice("the test time limit of {limit_ms} ms is out of range"))
+    if limit_setting == .Val(limit_ms) {
+        limit: Duration.milliseconds(limit_ms) ?? {
+            cli_files.remove(binary).drop("the run already failed")
+            return jet_cli_ice("the test time limit of {limit_ms} ms is out of range")
+        }
+        time_limit = Val(limit)
+    }
     // The children's outcome records stay in memory: no test writes the disk.
     records_path: "{jet_cli_native_test_records_dir(build_dir)}/{stem}.records"
     // A plain run goes through the test-result store (TestReuse.jet) only
@@ -2258,9 +2269,11 @@ jet_cli_test_result: fn(file: String, source: String, doctests: [JetCLIDoctestFi
         reuse = jet_cli_test_reuse_at(root, binary, settings, records_path)
     }
     how := JetCLITestReuseHow.Plain
-    run: jet_cli_test_reuse_run(reuse, how, spec, native_tests, check_names, jet_cli_native_test_unrun_check_report, options.serial, records_path, time_limit) ?? {
+    records_fault := JetNativeTestRecordsFault?{None}
+    run: jet_cli_test_reuse_run(reuse, how, spec, native_tests, check_names, jet_cli_native_test_unrun_check_report, options.serial, records_path, time_limit, records_fault) ?? {
         cli_files.remove(binary).drop("the native run already failed")
         if coverage -> cli_files.remove(coverage_path).drop("the native run already failed")
+        if records_fault == .Val(fault) -> return jet_cli_test_records_failed(fault, color)
         return jet_cli_ice(err.message)
     }
     covered_report := ""
@@ -2299,8 +2312,9 @@ jet_cli_test_result: fn(file: String, source: String, doctests: [JetCLIDoctestFi
             }
         }
     }
-    ran: jet_cli_native_test_report(spec, JetNativeTestOutcomes{wires: wires, outputs: run.outputs, errors: run.errors, contracts: run.contracts.copy()}, records_path) ?? {
+    ran: jet_cli_native_test_report(spec, JetNativeTestOutcomes{wires: wires, outputs: run.outputs, errors: run.errors, contracts: run.contracts.copy()}, records_path, records_fault) ?? {
         cli_files.remove(binary).drop("the native run already failed")
+        if records_fault == .Val(fault) -> return jet_cli_test_records_failed(fault, color)
         return jet_cli_ice(err.message)
     }
     cli_files.remove(binary).drop("the harness is one-shot; a leftover binary is harmless")
@@ -2389,6 +2403,13 @@ jet_cli_test_native_failure: fn(file: String, failure: JetCLINativeFailure, colo
         .Runtime(what) -> jet_cli_build_failed(what, jet_cli_why("E2105"), "package the matching test runtime beside jet", color)
         .Foreign(message) -> jet_cli_build_failed("couldn't realize C dependencies for `{file}`: {message}", jet_cli_why("E2105"), "check the declared C source/library paths and the installed C toolchain", color)
     }
+}
+
+// E2105 for a records file `jet test` couldn't create, write or read: the
+// file and the operating system's reason (a full runtime directory says "No
+// space left on device"), never a compiler bug.
+jet_cli_test_records_failed: fn(fault: JetNativeTestRecordsFault, color: Bool) -> JetDriverVerbOutput Never! {
+    jet_cli_build_failed("Can't use the test records file `{fault.path}`: {fault.cause}", jet_cli_why("E2105"), "Free space where the test records go (XDG_RUNTIME_DIR, else /dev/shm, else .jet/build) or make it writable, then run the tests again", color)
 }
 
 jet_cli_compile_test: fn(file: String, source: String, color: Bool, verbose: Bool, threads: Int?, options: JetCLITestOptions, trace_sink: JetCLITraceSink?) -> JetDriverVerbOutput {

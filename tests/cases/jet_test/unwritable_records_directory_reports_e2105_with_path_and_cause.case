@@ -1,0 +1,16 @@
+# #6577 c2: a records file `jet test` can't create (a full runtime
+# directory is ENOSPC; a read-only one, as here, is EACCES) is E2105 naming
+# the file and the operating system's reason, not an internal compiler error.
+# The stderr is pinned byte-equal on both sides of the run's PID, the one
+# part of the file name that changes from run to run.
+fixture: killed_run_files_are_swept_by_the_next_run.fixture
+env: NO_COLOR=1
+env: XDG_RUNTIME_DIR={work}/runtime
+mkdir: runtime
+chmod: runtime 0555
+step: jet test quick.jet
+exit: 1
+stderr.split(".test_quick.", 0): = unwritable_records_directory_reports_e2105_with_path_and_cause.head.stderr # the registered E2105 render up to the file's PID
+stderr.after_first(".records.batch"): = unwritable_records_directory_reports_e2105_with_path_and_cause.tail.stderr # the batch records file, the operating system's reason, Why, Fix and More
+stderr: ~ "{work}/runtime/.test_quick." # the file is in the runtime directory
+stderr: !~ "internal compiler error" # not a compiler bug
