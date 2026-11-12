@@ -157,13 +157,15 @@ x64_comptime_filter: fn(stdout: Bool, cookie: Int) -> [U8] Never! {
 // inside an admitted `#Impure` block. A file call is allowed unless it names
 // a descriptor the child started with; any other reissue returns -4095, and
 // the handler refuses it as it refused the call. A call without the cookie
-// goes on to the refusal block.
+// goes on to the refusal block. Classic BPF jumps only forward, so the
+// descriptor check ends in its own -4095 return.
 x64_comptime_admit_block: fn(program: &[X64ComptimeBpf], cookie: Int) Never! {
     start: program.len()
     calls: X64_COMPTIME_FILE_CALLS
     unadmitted: start + 5 + calls.len()
     fd_check: unadmitted + 1
-    allow: fd_check + 2
+    fd_refused: fd_check + 2
+    allow: fd_refused + 1
     rest: allow + 1
     program.push(X64ComptimeBpf{code: X64_BPF_LD_W_ABS, k: 56, jt: -1, jf: -1})
     program.push(X64ComptimeBpf{code: X64_BPF_JEQ_K, k: cookie.bit_and(4294967295), jt: -1, jf: rest})
@@ -175,7 +177,8 @@ x64_comptime_admit_block: fn(program: &[X64ComptimeBpf], cookie: Int) Never! {
     }
     program.push(X64ComptimeBpf{code: X64_BPF_RET_K, k: X64_SECCOMP_RET_UNADMITTED, jt: -1, jf: -1})
     program.push(X64ComptimeBpf{code: X64_BPF_LD_W_ABS, k: 16, jt: -1, jf: -1})
-    program.push(X64ComptimeBpf{code: X64_BPF_JGE_K, k: X64_COMPTIME_FIRST_OPENED_FD, jt: allow, jf: unadmitted})
+    program.push(X64ComptimeBpf{code: X64_BPF_JGE_K, k: X64_COMPTIME_FIRST_OPENED_FD, jt: allow, jf: fd_refused})
+    program.push(X64ComptimeBpf{code: X64_BPF_RET_K, k: X64_SECCOMP_RET_UNADMITTED, jt: -1, jf: -1})
     program.push(X64ComptimeBpf{code: X64_BPF_RET_K, k: X64_SECCOMP_RET_ALLOW, jt: -1, jf: -1})
     if program.len() != rest -> panic("comptime seccomp layout: the cookie check ends at {rest}, the program has {program.len()} instructions")
 }
@@ -230,4 +233,14 @@ x64_comptime_bpf_bytes: fn(program: [X64ComptimeBpf]) -> [U8] Never! {
         loop shift in 0..<4 -> bytes.push(U8{(row.k >> (8 * shift)).bit_and(255)})
     }
     bytes
+}
+
+#Test("the comptime seccomp program encodes, every jump forward and in range, with and without standard output") {
+    modes: [Bool]{false, true}
+    loop (index, stdout) in modes {
+        // The header (3), the cookie check (10 + its file calls) and the
+        // refusal block (11 + its free calls + the write descriptors).
+        expected: 24 + X64_COMPTIME_FILE_CALLS.len() + X64_COMPTIME_ALLOWED.len() + 2 + index
+        assert_eq(x64_comptime_filter(stdout, 81985529216486895).len(), 8 * expected)
+    }
 }
