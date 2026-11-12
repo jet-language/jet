@@ -5,9 +5,11 @@
 // The compiler tables are authoritative for what Jet ships. Each recorded
 // competitor surface is authoritative for what that language ships. This file
 // holds only the comparison policy and the reader of those tables; Core.jet's
-// declarations are read and gated by Tools/agent/CoreSourceRows.jet, whose
-// `--facts` this tool reads. The runtime JSON report is generated from those
-// inputs; --check rebuilds it and never reads the report.
+// declarations are read and gated by the compiler build
+// (Compiler/JetFoundation/Source/CoreDeclarations), and this tool reads the
+// built tables through `jet inspect structure core --json`. The runtime JSON
+// report is generated from those inputs; --check rebuilds it and never reads
+// the report.
 //
 // The ledger is a report. It records what is true today. It does not track
 // work, and coverage is a number it prints rather than a gate.
@@ -40,7 +42,7 @@ CORE_SOURCE_PATH: "Compiler/Prelude/Core.jet"
 // The Core rows with no Core.jet declaration: typed fixed-signature members,
 // built-in receiver methods, and the lowering-owned extension calls.
 CORE_SURFACE_INVENTORY_PATH: "Compiler/Prelude/CoreSurfaceInventory.jet"
-CORE_CALL_EXTENSIONS_PATH: "Compiler/Prelude/CoreCallExtensions.jet"
+CORE_CALL_EXTENSIONS_PATH: "Compiler/JetFoundation/Source/Registry/CoreCallExtensions.jet"
 // The Jet tables an inventory `receivers` row reads receiver methods from, and
 // the sema sources a `methods` row's names must be spelled in.
 BUILTIN_METHODS_PATH: "Compiler/JetFoundation/Source/Registry/BuiltinMethods.jet"
@@ -48,10 +50,6 @@ BUILTIN_STATICS_PATH: "Compiler/JetFoundation/Source/Registry/BuiltinStatics.jet
 COLLECTIONS_PATH: "Compiler/JetFoundation/Source/Collections.jet"
 CORE_SOURCE_PARTS_PATH: "Compiler/Prelude/CoreSourceParts.tsv"
 SEMA_SOURCE_DIR: "Compiler/JetSema/Source"
-// The generator of every Core view and the gate of Core.jet's declarations,
-// run by $JET, else `jet` on PATH: its `--check` refuses a stale view and its
-// `--facts` prints the Core module inventory this ledger compares.
-CORE_ROWS_GENERATOR_PATH: "Tools/agent/CoreSourceRows.jet"
 // The owner-controlled syntax registry: every Syntax string constant a Core.jet
 // dispatcher row or the core.mem tier map names.
 SYNTAX_DIR: "Compiler/JetFoundation/Data/Syntax"
@@ -1093,7 +1091,7 @@ Inventory: struct {
     collections: [Collection]
 }
 
-// One Core module fact from CoreSourceRows.jet --facts.
+// One Core module fact from `jet inspect structure core --json`.
 ModuleFact: struct {
     name: String
     members: [String]
@@ -1122,7 +1120,6 @@ BUILTIN_ROW: Regex{"receiver: BuiltinMethodReceiver\.([A-Za-z]+), name: \x22([^\
 COLLECTION_ROW: Regex{"receivers: CollectionReceivers\.([A-Za-z]+), name: \x22([^\x22]+)\x22.*status: CollectionStatus\.([A-Za-z]+)"}
 STATIC_ROW: Regex{"\{{module_name: \x22([^\x22]*)\x22, owner: \x22([^\x22]+)\x22, method: \x22([^\x22]+)\x22"}
 CONVERSION_ROW: Regex{"\{{method: \x22([^\x22]+)\x22, source: \x22[^\x22]+\x22\}}"}
-SOURCE_MODULE_ROW: Regex{"^source_module\s+(\S+)\s+path\s+(\S+)\s"}
 SEMA_LITERAL: Regex{"\x22([A-Za-z_][A-Za-z0-9_]*)\x22"}
 INVENTORY_ROW: Regex{"^(fixed_sig|receivers|methods)\s+(\S+)\s+\{{\s*([^{{}}]*?)\s*\}}$"}
 RECEIVER_SOURCE: Regex{"^(builtin|collection|static|numeric|type):([A-Za-z_][A-Za-z0-9_.]*)$"}
@@ -1146,12 +1143,11 @@ walk_sema: fn(root: String, directory: String, spelled: &[String: Bool]) -[FS]> 
     Ok(0)
 }
 
-jet_receiver_tables: fn(root: String) -[FS]> ReceiverTables LedgerError! {
+jet_receiver_tables: fn(root: String, module_paths: [String: [String]]) -[FS]> ReceiverTables LedgerError! {
     builtin := [String: [String]]{}
     collection := [String: [String]]{}
     statics := [String: [String]]{}
     numeric := [String]{}
-    module_paths := [String: [String]]{}
     loop line in split_lines(read_source(root, BUILTIN_METHODS_PATH) ?? return Err(err)) {
         if BUILTIN_ROW.match(line) == .Val(row) -> record_name(builtin, row.group(1) ?? "", row.group(2) ?? "")
     }
@@ -1179,17 +1175,9 @@ jet_receiver_tables: fn(root: String) -[FS]> ReceiverTables LedgerError! {
             if !numeric.contains(method) -> numeric.push(method)
         }
     }
-    loop line in split_lines(read_source(root, CORE_SOURCE_PATH) ?? return Err(err)) {
-        if SOURCE_MODULE_ROW.match(line) == .Val(row) -> record_name(module_paths, row.group(1) ?? "", row.group(2) ?? "")
-    }
-    loop line in split_lines(read_source(root, CORE_SOURCE_PARTS_PATH) ?? return Err(err)) {
-        if line.starts_with("#") -> next
-        cells: line.split("\t").to_list()
-        if cells.len() > 2 -> record_name(module_paths, cells[1], cells[2])
-    }
     sema_names := [String: Bool]{}
     walk_sema(root, SEMA_SOURCE_DIR, sema_names) ?? return Err(err)
-    Ok(ReceiverTables{builtin: builtin, collection: collection, statics: statics, numeric: numeric, module_paths: module_paths, sema_names: sema_names})
+    Ok(ReceiverTables{builtin: builtin, collection: collection, statics: statics, numeric: numeric, module_paths: module_paths.copy(), sema_names: sema_names})
 }
 
 // One receivers source: `builtin:<BuiltinMethodReceiver>`,
@@ -1290,10 +1278,10 @@ core_type_methods: fn(root: String, paths: [String], type_name: String) -[FS]> [
 // tables, so the inventory follows the compiler. A methods row names only the
 // methods sema checks in code with no table to read; each must be spelled in
 // sema and must not already come from the container's receivers.
-core_surface_inventory: fn(root: String, modules: [ModuleFact]) -[FS]> Inventory LedgerError! {
+core_surface_inventory: fn(root: String, modules: [ModuleFact], module_paths: [String: [String]]) -[FS]> Inventory LedgerError! {
     source: read_source(root, CORE_SURFACE_INVENTORY_PATH) ?? return Err(err)
     known: loop entry in modules -> entry.name.copy()
-    tables: jet_receiver_tables(root) ?? return Err(err)
+    tables: jet_receiver_tables(root, module_paths) ?? return Err(err)
     pairs := [String]{}
     fixed_modules := [String]{}
     derived := [Collection]{}
@@ -3271,18 +3259,47 @@ core_api_gate: fn(root: String, rows: [Row], entries_in: [SurfaceEntry], surface
 
 // ---- Ledger -------------------------------------------------------------------
 
-// The Core rows generator, run by $JET, else `jet` on PATH: its stdout when
-// `capture`, else inherited.
-core_rows: fn(root: String, flag: String, capture: Bool) -[Env, Exec, FS, IO, Time, Time.Wait]> String LedgerError! {
+// The compiler's Core structure (`jet inspect structure core --json`, run by
+// $JET, else `jet` on PATH, from `root`): Core.jet's modules and the Core
+// sources the compiler loads, as the build computed them.
+core_structure: fn(root: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Dyn LedgerError! {
     jet: process.env_get_or("JET", process.which("jet") ?? "jet")
-    argv := [String]{jet, CORE_ROWS_GENERATOR_PATH}
-    if flag != "" -> argv.push(flag.copy())
-    spec := process.cmd(argv).cwd(root).stdin(.Inherit).stderr(.Inherit).output_limit(OUTPUT_LIMIT)
-    spec = if capture -> spec.stdout(.Capture) else -> spec.stdout(.Inherit)
+    argv: [String]{jet, "inspect", "structure", "core", "--json"}
+    spec: process.cmd(argv).cwd(root).stdin(.Inherit).stderr(.Inherit).stdout(.Capture).output_limit(OUTPUT_LIMIT)
     ran: process.run_all([ProcessSpec]{spec}, 1) ?? return Err(fail("{argv.join(" ")} could not start: {err}"))
     receipt: ran[0] ?? return Err(fail("{argv.join(" ")} could not start: {err}"))
     if receipt.code != 0 || receipt.signal != None || receipt.timed_out -> return Err(fail("Command failed: {argv.join(" ")}"))
-    Ok(receipt.output)
+    answer: json.parse(receipt.output) ?? return Err(fail("{argv.join(" ")} printed no JSON: {err}"))
+    core: field(answer, "core")
+    if !has_field(core, "modules") || !has_field(core, "sources") -> return Err(fail("{argv.join(" ")} printed no Core modules and sources"))
+    Ok(core)
+}
+
+// The ledger's module inventory: each Core.jet module with its members, its
+// Core.jet line, its type exports and its dependencies.
+core_module_inventory: fn(core: Dyn) -> Dyn Never! {
+    out := [Dyn]{}
+    loop entry in items(field(core, "modules")) {
+        types := [Dyn]{}
+        loop leaf in items(field(entry, "type_exports")) {
+            item := Dyn.object()
+            item["name"] = field(leaf, "name")
+            item["kind"] = jtext(if text_field(leaf, "kind") == "crypto_nominal" -> "crypto_nominal" else -> "plain")
+            item["variants"] = if has_field(leaf, "variants") -> field(leaf, "variants") else -> Dyn.Array([Dyn]{})
+            item["genericArity"] = field(leaf, "arity")
+            types.push(item)
+        }
+        name: text_field(entry, "module")
+        fact := Dyn.object()
+        fact["module"] = jtext(name)
+        fact["rawModules"] = Dyn.Array([Dyn]{jtext("{name} (Prelude/Core.jet)")})
+        fact["members"] = field(entry, "members")
+        fact["sourceLine"] = field(entry, "source_line")
+        fact["types"] = Dyn.Array(types)
+        fact["dependencies"] = field(entry, "dependencies")
+        out.push(fact)
+    }
+    Dyn.Array(out)
 }
 
 module_facts: fn(facts: Dyn) -> [ModuleFact] Never! {
@@ -3290,6 +3307,19 @@ module_facts: fn(facts: Dyn) -> [ModuleFact] Never! {
     loop entry in items(facts) {
         line: int_of(field(entry, "sourceLine")) ?? -1
         out.push(ModuleFact{name: text_field(entry, "module"), members: text_items(field(entry, "members")), source_line: line})
+    }
+    out
+}
+
+// The Core source paths of each public module: its Core.jet source modules,
+// then the compiler-private parts it owns, in load order. Runtime units belong
+// to no module's receivers.
+core_module_paths: fn(core: Dyn) -> [String: [String]] Never! {
+    out := [String: [String]]{}
+    loop source in items(field(core, "sources")) {
+        if field(source, "runtime") == .Bool(true) -> next
+        owner: text_field(source, "owner")
+        record_name(out, if owner != "" -> owner else -> text_field(source, "module"), text_field(source, "path"))
     }
     out
 }
@@ -3319,11 +3349,10 @@ Built: struct {
 build_ledger: fn(root: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Built LedgerError! {
     entries_in: load_surfaces(root) ?? return Err(err)
     containers: canonical_containers(entries_in)
-    facts_text: core_rows(root, "--facts", true) ?? return Err(err)
-    facts: json.parse(facts_text) ?? return Err(fail("{CORE_ROWS_GENERATOR_PATH} --facts printed no JSON: {err}"))
-    core_rows(root, "--check", false) ?? return Err(err)
+    core: core_structure(root) ?? return Err(err)
+    facts: core_module_inventory(core)
     modules: module_facts(facts)
-    inventory: core_surface_inventory(root, modules) ?? return Err(err)
+    inventory: core_surface_inventory(root, modules, core_module_paths(core)) ?? return Err(err)
     bindings_source: read_source(root, CORE_CONFORMANCE_PATH) ?? return Err(err)
     bindings: fixture_bindings(bindings_source) ?? return Err(err)
     surfaces: index_surfaces(entries_in)
@@ -4404,7 +4433,6 @@ check_mode: fn(root: String) -[Env, Exec, FS, IO, Time, Time.Wait]> String Ledge
 }
 
 write_mode: fn(root: String) -[Env, Exec, FS, IO, Time, Time.Wait]> String LedgerError! {
-    core_rows(root, "", false) ?? return Err(err)
     built: build_ledger(root) ?? return Err(err)
     path: "{root}/{RUNTIME_LEDGER_PATH}"
     files.create_dir_all(files.dirname(path)) ?? return Err(fail("cannot create {files.dirname(path)}: {err}"))
@@ -4483,7 +4511,8 @@ release_mode: fn(root: String) -[Env, Exec, FS, IO, Time, Time.Wait]> String Led
 // just as happily with every gate deleted. Each fixture below takes the real
 // ledger, breaks exactly one thing, and requires the matching gate to reject
 // it. A gate that stops firing fails here rather than going quiet in CI. The
-// Core.jet parser fixtures live with the parser, in CoreSourceRows.jet's tests.
+// Core.jet parser fixtures live with the parser, in
+// Compiler/JetFoundation/Tests/CoreDeclarations.jet.
 
 // `value` with the item at `path` changed: "set" replaces it with `new_value`
 // (adding a missing key), "remove" drops it, "pop" drops an array's last item,

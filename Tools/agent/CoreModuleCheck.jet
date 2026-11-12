@@ -2,8 +2,8 @@
 // Every public Core module must pass `jet check` when a program imports it
 // alone. A whole-program build only checks the Core items its callers reach, so
 // a module whose own source no longer checks stays hidden until some program
-// imports it. This sweep checks each `module … exports` row of
-// Compiler/Prelude/Core.jet in its own one-import probe, then every Core body,
+// imports it. This sweep checks each public Core module the compiler declares
+// (`$JET inspect structure core --json`) in its own one-import probe, then every Core body,
 // called or not, as `jet check Core` (the row EVERY_BODY), and reports every
 // failing row, not the first one.
 //
@@ -17,7 +17,6 @@ use {
     files: core.files
     json: core.encoding.json
     process: core.process
-    regex: core.regex
     sys: core.sys
     term: core.term
     time: core.time
@@ -80,17 +79,19 @@ option: fn(args: [String], name: String) -> String? Never! {
     None
 }
 
-// `module <name> exports { … }` rows name the importable Core modules.
-core_modules: fn(core_jet: String) -[Exec, IO]> [String] Never! {
-    row: regex.compile("^module\\s+([a-z_][a-z0-9_.]*)\\s+exports\\b") ?? panic("module row pattern: {err}")
+// The importable Core modules, once each, from `structure` (the output of
+// `jet inspect structure core --json`).
+core_modules: fn(structure: String) -> [String] CheckError! {
+    answer: json.parse(structure) ?? return Err(problem("`jet inspect structure core --json` printed no JSON: {err}"))
+    core: answer.get("core") ?? return Err(problem("`jet inspect structure core --json` printed no `core` object"))
+    listed: core.get("modules") ?? return Err(problem("`jet inspect structure core --json` printed no Core modules"))
+    rows: if listed == .Array(entries) -> entries.copy() else -> return Err(problem("`jet inspect structure core --json` printed no Core module list"))
     modules := [String]{}
-    loop line in core_jet.split("\n") {
-        loop found in row.matches(line) {
-            name: found.group(1) ?? ""
-            if !modules.contains(name) -> modules.push(name)
-        }
+    loop entry in rows {
+        named: entry.get("module") ?? next
+        if named == .Text(name) && !modules.contains(name) -> modules.push(name.copy())
     }
-    modules
+    Ok(modules)
 }
 
 probe_source: fn(name: String) -> String Never! {
@@ -251,8 +252,9 @@ main: fn(args: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> Int CheckError! 
     jobs: Int.parse(jobs_text) ?? 0
     if jobs < 1 || jobs > MAX_JOBS || "{jobs}" != jobs_text -> return Err(problem("--jobs takes 1..{MAX_JOBS}"))
     root: repo_root() ?? return Err(err)
-    core_jet: files.read("{root}/Compiler/Prelude/Core.jet") ?? return Err(problem("Compiler/Prelude/Core.jet cannot be read: {err}"))
-    known: core_modules(core_jet)
+    asked: process.cmd([String]{jet, "inspect", "structure", "core", "--json"}).cwd(root).env("NO_COLOR", "1").output_limit(4194304).run() ?? return Err(problem("`{jet} inspect structure core --json` could not start: {err}"))
+    if asked.code != 0 || asked.signal != None -> return Err(problem("`{jet} inspect structure core --json` failed: {asked.errors.trim()}"))
+    known: core_modules(asked.output) ?? return Err(err)
     modules: if option(args, "--only") == .Val(only) -> only.split(",").to_list().filter(name -> name != "") else -> known.copy()
     unknown: modules.filter(name -> !known.contains(name))
     if unknown.len() > 0 -> return Err(problem("not a Core module: {unknown.join(", ")}"))
@@ -288,15 +290,10 @@ main: fn(args: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> Int CheckError! 
     if problems.len() > 0 -> 1 else -> 0
 }
 
-#Test("core modules come from the module export rows, once each") {
-    text: [String]{
-        "module core exports {{ print }} types {{ }}",
-        "source_module core.text path Core/Text/Text.jet alias core_text owns {{ trim }}",
-        "module core.text exports {{ trim }}",
-        "module core.text exports {{ trim }}",
-        "// module core.ghost exports {{ x }}",
-    }.join("\n")
-    assert_eq(core_modules(text), [String]{"core", "core.text"})
+#Test("core modules come from the compiler's Core structure, once each") {
+    text: "{{\"core\":{{\"modules\":[{{\"module\":\"core\",\"members\":[\"print\"]}},{{\"module\":\"core.text\",\"members\":[\"trim\"]}},{{\"module\":\"core.text\",\"members\":[\"trim\"]}}]}}}}"
+    assert_eq(core_modules(text) ?? panic("the structure was refused: {err.message}"), [String]{"core", "core.text"})
+    assert(core_modules("{{\"core\":{{}}}}") == .Err(_))
 }
 
 #Test("the probe imports exactly one module") {

@@ -111,9 +111,23 @@ suite_setup: fn(rows: TestRows) -> SuiteSetup? {
 // A child jet in the checkout, without the profile run's own settings, so a
 // child `jet test` runs its own tests and writes its own evidence.
 jet_command: fn(setup: SuiteSetup, jet: String, args: [String]) -> ProcessSpec {
+    jet_child(setup, jet, args).env("JET_TOOLCHAIN_ROOT", setup.checkout)
+}
+
+// A child jet on the engine unit in `project`: it reads the toolchain tree
+// Assemble.jet staged beside the project, so it runs without
+// JET_TOOLCHAIN_ROOT.
+jetpack_unit_command: fn(setup: SuiteSetup, args: [String], project: String) -> ProcessSpec {
+    jet_child(setup, setup.jet, args).cwd(project).env_remove("JET_TOOLCHAIN_ROOT")
+}
+
+// The child jet of both: the profile run's own settings removed, and the
+// checkout as JETPACK_TEST_REPO_ROOT, the repository whose committed files
+// the Jetpack claims read.
+jet_child: fn(setup: SuiteSetup, jet: String, args: [String]) -> ProcessSpec {
     argv := [String]{jet}
     loop arg in args -> argv.push(arg.copy())
-    spec := process.cmd(argv).cwd(setup.checkout).env("JET_TOOLCHAIN_ROOT", setup.checkout)
+    spec := process.cmd(argv).cwd(setup.checkout).env("JETPACK_TEST_REPO_ROOT", setup.checkout)
     names: sys.vars() ?? [String]{}
     loop name in names {
         if name.starts_with("JET_TEST_") || name.starts_with("JET_NATIVE_TEST_") || name.starts_with("JET_EVIDENCE_") {
@@ -343,7 +357,7 @@ jetpack_prepare: fn(rows: TestRows, setup: SuiteSetup) -> JetpackPrep {
     }
     project: files.join(hosted, "project")
     prep.engine = files.join(project, ".jet/build/jetpack")
-    prep.build = Val(jet_command(setup, setup.jet, [String]{"build", "src/jetpack.jet"}).cwd(project))
+    prep.build = Val(jetpack_unit_command(setup, [String]{"build", "src/jetpack.jet"}, project))
     prep
 }
 
@@ -373,7 +387,7 @@ jetpack_engine_rows: fn(rows: TestRows, setup: SuiteSetup, prep: JetpackPrep, bu
         args.push("--filter")
         args.push(rows.filter.copy())
     }
-    receipt: jet_command(setup, setup.jet, args).cwd(files.join(prep.assembled, "project")).env("JET_BIN", setup.jet).env("JETPACK_BIN", prep.engine).run() ?? {
+    receipt: jetpack_unit_command(setup, args, files.join(prep.assembled, "project")).env("JET_BIN", setup.jet).env("JETPACK_BIN", prep.engine).run() ?? {
         rows.fail(unit, "couldn't run `jet test` on the engine unit: {err}")
         return none
     }

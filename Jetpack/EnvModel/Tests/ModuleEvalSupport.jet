@@ -18,11 +18,12 @@ envmodel_test_base_dir: fn() -[Env]> String {
 }
 
 // The repository root the committed fixtures are read from (Rust
-// `CARGO_MANIFEST_DIR/../..`): JET_TOOLCHAIN_ROOT, which check.sh exports as
-// the Jet tree it runs from. The claims run inside an assembled scratch
-// project, so the working directory is never that tree.
+// `CARGO_MANIFEST_DIR/../..`): JETPACK_TEST_REPO_ROOT, which
+// Compiler/test.jet's packages suite sets to the checkout. The claims may run
+// inside an assembled scratch project, so the working directory is never
+// that tree.
 envmodel_test_repo_root: fn() -[Env]> String {
-    sys.get("JET_TOOLCHAIN_ROOT") ?? panic("JET_TOOLCHAIN_ROOT must name the Jet repository whose committed fixtures the claims read")
+    sys.get("JETPACK_TEST_REPO_ROOT") ?? panic("JETPACK_TEST_REPO_ROOT must name the Jet repository whose committed fixtures the claims read")
 }
 
 // A fresh, empty directory under the system temp dir, unique per call.

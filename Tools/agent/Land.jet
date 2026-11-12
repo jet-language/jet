@@ -118,8 +118,8 @@
 // one verification, by the train speed rules
 // (.agents/skills/orchestration/references/intake.md, "Train speed"):
 // every patch that applies (a patch already on dev is skipped; a lane's later
-// patches are left once one does not apply), the regenerated views and
-// runtime generator outputs; the gate, the seed's keep-going check of every
+// patches are left once one does not apply) and the runtime generator
+// outputs; the gate, the seed's keep-going check of every
 // touched package from an empty directory; one build, the seed `precommit`
 // of every path; then the affected test rows (each job's `tests` lines, its
 // own first, plus the whole ui and golden profiles once for a compiler
@@ -173,9 +173,6 @@ JOB_FILES: [String]{".patch", ".msg"}
 RECEIPT_SCHEMA: "jet.preflight-receipt.v1"
 RECEIPT_PASSES: [String]{"check", "build", "runtime-pack", "selfcheck", "selfcheck-core"}
 IDENTITY_TREES: [String]{"Compiler", "Core", "Jetpack"}
-// The generated CoreSourceRows views: a patch whose only conflict is in them
-// is admitted around them (the batch regenerates them from its sources).
-GENERATED_VIEWS: [String]{"Compiler/JetCli/Source/Cli/CoreStructureRows.jet", "Compiler/JetFoundation/Source/Registry/CoreCallRows.jet", "Compiler/JetFoundation/Source/Registry/CoreEnumRows.jet", "Compiler/JetFoundation/Source/Registry/CoreSourceOwned.jet"}
 // Test inputs the gate leaves to the tests: cases, ui and run fixtures.
 TEST_INPUT_PREFIXES: [String]{"tests/cases/", "tests/ui/", "tests/run/"}
 TEST_INPUT_MARKS: [String]{".fixture/", "/fixtures/"}
@@ -1724,8 +1721,8 @@ prescreen: fn(worktree: String, tree: String, patch: String, earlier: [String]) 
         return 2
     }
     // An earlier job that no longer applies is the lander's to report.
-    loop path in earlier -> apply_around_views(tree, path)
-    if !apply_around_views(tree, patch) {
+    loop path in earlier -> git(tree, [String]{"apply", path})
+    if git(tree, [String]{"apply", patch}).code != 0 {
         print("prescreen: does not apply to HEAD {git(worktree, [String]{"rev-parse", "--short", "HEAD"}).output.trim()}")
         return 3
     }
@@ -1754,13 +1751,6 @@ prescreen: fn(worktree: String, tree: String, patch: String, earlier: [String]) 
     print("prescreen: check rc={code} errors={rows.len()}")
     show(counted(rows), 20)
     1
-}
-
-// Apply `patch` in `tree`; when it does not apply whole, apply it around the
-// generated views.
-apply_around_views: fn(tree: String, patch: String) -[Exec, Time.Wait]> Bool Never! {
-    if git(tree, [String]{"apply", patch}).code == 0 -> return true
-    git(tree, around_views([String]{}, patch)).code == 0
 }
 
 // Each `Error...` line of a check's output with the location on the line after it.
@@ -2317,16 +2307,6 @@ batch: fn(tools: String, dir: String, jobs: [Job]) -[Exec, Env, FS, IO, Time, Ti
     finish(log, stages, 0)
 }
 
-// `git apply` arguments that apply `patch` around the generated views, after
-// `options` (`--check`, or none).
-around_views: fn(options: [String], patch: String) -> [String] Never! {
-    argv := [String]{"apply"}
-    argv.extend(options.copy())
-    loop view in GENERATED_VIEWS -> argv.push("--exclude={view}")
-    argv.push(patch.copy())
-    argv
-}
-
 // --- the train rules (`batch`) ----------------------------------------------
 //
 // .agents/skills/orchestration/references/intake.md, "Train speed". A job's
@@ -2431,13 +2411,12 @@ minutes: fn(seconds: Int) -> String Never! {
 }
 
 // Apply `jobs` but the `aside` ones on the worktree `dir` (a lane's later
-// patches are left once one does not apply), then regenerate the views and the
-// runtime generators' outputs.
+// patches are left once one does not apply), then regenerate the runtime
+// generators' outputs.
 compose: fn(dir: String, jobs: [Job], aside: [String], log: String) -[Exec, Env, FS, IO, Time.Wait]> Composed Never! {
     applied := [Applied]{}
     all := [String]{}
     broken := [String:String]{}
-    regenerate := false
     loop job in jobs {
         if aside.contains(job_key(job)) -> next
         name: files.basename(job.patch)
@@ -2449,18 +2428,7 @@ compose: fn(dir: String, jobs: [Job], aside: [String], log: String) -[Exec, Env,
             say(log, "SKIP (already on dev) {job.lane} {name}")
             next
         }
-        whole: git(dir, [String]{"apply", "--check", job.patch}).code == 0 && git(dir, [String]{"apply", job.patch}).code == 0
-        // A patch whose only conflict is in the generated CoreSourceRows views
-        // applies around them; the views are regenerated from the batch's sources.
-        around := false
-        if !whole {
-            around = git(dir, around_views([String]{"--check"}, job.patch)).code == 0 && git(dir, around_views([String]{}, job.patch)).code == 0
-            if around {
-                regenerate = true
-                say(log, "applied around the CoreSourceRows views: {name}")
-            }
-        }
-        if !whole && !around {
+        if git(dir, [String]{"apply", "--check", job.patch}).code != 0 || git(dir, [String]{"apply", job.patch}).code != 0 {
             say(log, "DOES NOT APPLY {job.lane} {name} - left for its lane")
             broken[job.lane] = name
             next
@@ -2473,15 +2441,6 @@ compose: fn(dir: String, jobs: [Job], aside: [String], log: String) -[Exec, Env,
         applied.push(Applied{job: job.copy(), paths: paths})
     }
     if applied.len() == 0 -> return Composed{ok: true, applied: applied, all: all, regenerated: [String]{}}
-    if regenerate {
-        rows: seed_run(dir, [String]{"Tools/agent/CoreSourceRows.jet"}, 900)
-        say(log, "CoreSourceRows regeneration rc={rows.code} {both(rows).trim_end().last_lines(1).join(" ")}")
-        if rows.code != 0 {
-            say(log, "CoreSourceRows regeneration FAILED; reverting")
-            revert_batch(dir, applied, all, log)
-            return Composed{ok: false, applied: [Applied]{}, all: [String]{}, regenerated: [String]{}}
-        }
-    }
     // The runtime generators' outputs (stop exports, lifecycle) for the batch's runtime sources.
     generated: seed_run(dir, [String]{"Tools/agent/RuntimeGenerators.jet"}, 900)
     say(log, "RuntimeGenerators rc={generated.code} {both(generated).trim_end().last_lines(2).join(" ")}")

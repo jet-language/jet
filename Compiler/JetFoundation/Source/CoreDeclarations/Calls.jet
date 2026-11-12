@@ -1,0 +1,797 @@
+// A `dispatcher_row`'s expression in Compiler/Prelude/Core.jet is a Rust
+// `CoreCallRecord` builder chain; these evaluate it into the CoreCallRecord
+// CORE_CALLS holds, while the compiler builds. A string argument is a Rust
+// string literal or the name of a Syntax string constant
+// (Compiler/JetFoundation/Data/Syntax).
+
+#Error
+CoreDeclarationError: struct {
+    message: String
+}
+
+core_decl_fail: fn(message: String) -> CoreDeclarationError Never! {
+    CoreDeclarationError{message: message}
+}
+
+// One call `name(args)` in an expression: its path, its top-level arguments
+// and the byte offset after its `)`.
+CoreDeclRustCall: struct {
+    name: String
+    args: [String]
+    end: Int
+}
+
+// One evaluated row: the Rust constructor its chain starts with and the
+// record the chain builds.
+CoreDeclarationCall: struct {
+    constructor: String
+    record: CoreCallRecord
+}
+
+// The byte offset of the `)` that closes the `(` at byte `open`.
+core_decl_call_end: fn(source: String, open: Int, context: String) -> Int CoreDeclarationError! {
+    bytes: source.bytes()
+    depth := 0
+    quoted := false
+    escaped := false
+    loop index in open..<bytes.len() {
+        code: Int.from_u8(bytes[index])
+        if quoted {
+            if {
+                escaped -> escaped = false
+                code == 92 -> escaped = true
+                code == 34 -> quoted = false
+            }
+            next
+        }
+        if code == {
+            34 -> quoted = true
+            40 -> depth += 1
+            41 -> {
+                depth -= 1
+                if depth == 0 -> return Ok(index)
+            }
+            else -> {}
+        }
+    }
+    Err(core_decl_fail("unterminated Rust call in {context}"))
+}
+
+// The top-level comma-separated parts of `source`, trimmed, empty ones
+// dropped; strings and comments are skipped.
+core_decl_split_top_level: fn(source: String, context: String) -> [String] CoreDeclarationError! {
+    bytes: source.bytes()
+    parts := [String]{}
+    start := 0
+    paren := 0
+    bracket := 0
+    brace := 0
+    quoted := false
+    escaped := false
+    line_comment := false
+    block_depth := 0
+    skip := false
+    loop index in 0..<bytes.len() {
+        if skip {
+            skip = false
+            next
+        }
+        code: Int.from_u8(bytes[index])
+        following: if index + 1 < bytes.len() -> Int.from_u8(bytes[index + 1]) else -> -1
+        if line_comment {
+            if code == 10 -> line_comment = false
+            next
+        }
+        if block_depth > 0 {
+            if {
+                code == 47 && following == 42 -> {
+                    block_depth += 1
+                    skip = true
+                }
+                code == 42 && following == 47 -> {
+                    block_depth -= 1
+                    skip = true
+                }
+            }
+            next
+        }
+        if quoted {
+            if {
+                escaped -> escaped = false
+                code == 92 -> escaped = true
+                code == 34 -> quoted = false
+            }
+            next
+        }
+        if code == 47 && (following == 47 || following == 42) {
+            if following == 47 -> line_comment = true else -> block_depth = 1
+            skip = true
+            next
+        }
+        if code == {
+            34 -> quoted = true
+            40 -> paren += 1
+            41 -> paren -= 1
+            91 -> bracket += 1
+            93 -> bracket -= 1
+            123 -> brace += 1
+            125 -> brace -= 1
+            44 -> if paren == 0 && bracket == 0 && brace == 0 {
+                part: core_decl_slice(source, start, index).trim()
+                if part != "" -> parts.push(part)
+                start = index + 1
+            }
+            else -> {}
+        }
+        if paren < 0 || bracket < 0 || brace < 0 -> return Err(core_decl_fail("unbalanced Rust row expression in {context}"))
+    }
+    if quoted || block_depth > 0 || paren != 0 || bracket != 0 || brace != 0 -> return Err(core_decl_fail("unterminated Rust row expression in {context}"))
+    last: core_decl_tail(source, start).trim()
+    if last != "" -> parts.push(last)
+    Ok(parts)
+}
+
+// The call at byte `start` of `source`: a `::`-separated path of names, then
+// optional whitespace and its parenthesized arguments.
+core_decl_read_call: fn(source: String, start: Int, context: String) -> CoreDeclRustCall CoreDeclarationError! {
+    bytes: source.bytes()
+    end := core_decl_name_end(bytes, start)
+    if end == start -> return Err(core_decl_fail("unsupported Rust call in {context}: {source.trim()}"))
+    loop end + 2 < bytes.len() && Int.from_u8(bytes[end]) == 58 && Int.from_u8(bytes[end + 1]) == 58 {
+        segment_end: core_decl_name_end(bytes, end + 2)
+        if segment_end == end + 2 -> break
+        end = segment_end
+    }
+    open: core_decl_skip_space(bytes, end)
+    if open >= bytes.len() || Int.from_u8(bytes[open]) != 40 -> return Err(core_decl_fail("unsupported Rust call in {context}: {source.trim()}"))
+    close: core_decl_call_end(source, open, context) ?? return Err(err)
+    args: core_decl_split_top_level(core_decl_slice(source, open + 1, close), context) ?? return Err(err)
+    Ok(CoreDeclRustCall{name: core_decl_slice(source, start, end), args: args, end: close + 1})
+}
+
+// A call that is the whole of `expression`.
+core_decl_whole_call: fn(expression: String, context: String, what: String) -> CoreDeclRustCall CoreDeclarationError! {
+    value: expression.trim()
+    call: core_decl_read_call(value, 0, context) ?? return Err(err)
+    if call.end != core_decl_len(value) -> return Err(core_decl_fail("unsupported {what} in {context}: {value}"))
+    Ok(call)
+}
+
+core_decl_expect_args: fn(call: CoreDeclRustCall, count: Int, context: String) -> Int CoreDeclarationError! {
+    if call.args.len() != count -> return Err(core_decl_fail("{call.name} expected {count} arguments in {context}"))
+    Ok(count)
+}
+
+core_decl_hex_value: fn(code: Int) -> Int Never! {
+    if {
+        core_decl_digit(code) -> return code - 48
+        code >= 97 && code <= 102 -> return code - 87
+        code >= 65 && code <= 70 -> return code - 55
+    }
+    -1
+}
+
+// The value of hex digits `text`, or -1 when one is not a hex digit.
+core_decl_hex_number: fn(text: String) -> Int Never! {
+    if text == "" -> return -1
+    value := 0
+    loop byte in text.bytes() {
+        digit: core_decl_hex_value(Int.from_u8(byte))
+        if digit < 0 || value > 1114111 -> return -1
+        value = value * 16 + digit
+    }
+    value
+}
+
+// The UTF-8 bytes of scalar `value`.
+core_decl_utf8: fn(value: Int) -> [U8] Never! {
+    if value < 128 -> return [U8]{U8{value}}
+    if value < 2048 -> return [U8]{U8{192 + (value >> 6)}, U8{128 + value.bit_and(63)}}
+    if value < 65536 -> return [U8]{U8{224 + (value >> 12)}, U8{128 + (value >> 6).bit_and(63)}, U8{128 + value.bit_and(63)}}
+    [U8]{U8{240 + (value >> 18)}, U8{128 + (value >> 12).bit_and(63)}, U8{128 + (value >> 6).bit_and(63)}, U8{128 + value.bit_and(63)}}
+}
+
+// The text of a Rust string literal's content.
+core_decl_rust_string_text: fn(content: String, context: String) -> String CoreDeclarationError! {
+    bytes: content.bytes()
+    out := [U8]{}
+    index := 0
+    loop index < bytes.len() {
+        code: Int.from_u8(bytes[index])
+        index += 1
+        if code != 92 {
+            out.push(bytes[index - 1])
+            next
+        }
+        if index >= bytes.len() -> return Err(core_decl_fail("unterminated Rust string escape in {context}"))
+        escape: Int.from_u8(bytes[index])
+        index += 1
+        simple: if escape == {
+            110 -> 10
+            114 -> 13
+            116 -> 9
+            48 -> 0
+            92 -> 92
+            34 -> 34
+            39 -> 39
+            else -> -1
+        }
+        if simple >= 0 {
+            out.push(U8{simple})
+            next
+        }
+        if escape == 120 {
+            digits: core_decl_slice(content, index, if index + 2 < bytes.len() -> index + 2 else -> bytes.len())
+            value: core_decl_hex_number(digits)
+            if core_decl_len(digits) != 2 || value < 0 || value > 127 -> return Err(core_decl_fail("invalid Rust byte escape in {context}"))
+            out.push(U8{value})
+            index += 2
+            next
+        }
+        if escape != 117 || index >= bytes.len() || Int.from_u8(bytes[index]) != 123 -> return Err(core_decl_fail("unsupported Rust string escape `\\{core_decl_slice(content, index - 1, index)}` in {context}"))
+        close: core_decl_tail(content, index + 1).find("}}")
+        if close < 0 -> return Err(core_decl_fail("unterminated Rust Unicode escape in {context}"))
+        value: core_decl_hex_number(core_decl_slice(content, index + 1, index + 1 + close).replace("_", ""))
+        if value < 0 -> return Err(core_decl_fail("invalid Rust Unicode escape in {context}"))
+        if value > 1114111 || (value >= 55296 && value <= 57343) -> return Err(core_decl_fail("invalid Rust Unicode scalar in {context}"))
+        loop byte in core_decl_utf8(value) -> out.push(byte)
+        index += close + 2
+    }
+    Ok(String.from_bytes(out) ?? return Err(core_decl_fail("Rust string in {context} is not UTF-8")))
+}
+
+// The content of `value` when the whole of it is one `"…"` literal.
+core_decl_quoted: fn(value: String) -> String? Never! {
+    bytes: value.bytes()
+    if bytes.len() < 2 || Int.from_u8(bytes[0]) != 34 -> return None
+    if core_decl_quote_end(bytes, 0) != bytes.len() - 1 -> return None
+    Val(core_decl_slice(value, 1, bytes.len() - 1))
+}
+
+// The Syntax constant a Rust path names (`NAME`, `Syntax::NAME`,
+// `crate::Syntax::NAME`, `super::NAME`), or None.
+core_decl_rust_constant: fn(value: String) -> String? Never! {
+    name: if {
+        value.starts_with("crate::Syntax::") -> value.removeprefix("crate::Syntax::")
+        value.starts_with("Syntax::") -> value.removeprefix("Syntax::")
+        value.starts_with("super::") -> value.removeprefix("super::")
+        else -> value.copy()
+    }
+    if !core_decl_is_constant(name) -> return None
+    Val(name)
+}
+
+// A Rust string literal or a Syntax string constant's name.
+core_decl_rust_string: fn(expression: String, context: String, constants: [String: String]) -> String CoreDeclarationError! {
+    value: expression.trim()
+    if core_decl_quoted(value) == .Val(literal) -> return core_decl_rust_string_text(literal, context)
+    name: core_decl_rust_constant(value) ?? return Err(core_decl_fail("unsupported Rust string value in {context}: {value}"))
+    if constants.get(name) == .Val(text) -> return Ok(text.copy())
+    Err(core_decl_fail("unknown Rust string constant `{value}` in {context}"))
+}
+
+// The items of a `&[…]` slice.
+core_decl_rust_slice: fn(expression: String, context: String) -> [String] CoreDeclarationError! {
+    value: expression.trim()
+    inner: if value.starts_with("&") -> value.removeprefix("&").trim_start() else -> ""
+    if !inner.starts_with("[") || !inner.ends_with("]") -> return Err(core_decl_fail("unsupported Rust slice in {context}: {value}"))
+    core_decl_split_top_level(core_decl_slice(inner, 1, core_decl_len(inner) - 1), context)
+}
+
+core_decl_rust_bool: fn(expression: String, context: String) -> Bool CoreDeclarationError! {
+    value: expression.trim()
+    if value != "true" && value != "false" -> return Err(core_decl_fail("unsupported Rust boolean in {context}: {value}"))
+    Ok(value == "true")
+}
+
+// `[0-9]+`, with an optional `usize` suffix and `_` separators.
+core_decl_rust_int: fn(expression: String, context: String) -> Int CoreDeclarationError! {
+    value: expression.trim().replace("_", "")
+    digits: value.removesuffix("usize")
+    if !core_decl_is_digits(digits) -> return Err(core_decl_fail("unsupported Rust integer in {context}: {value}"))
+    Ok(Int.parse(digits) ?? return Err(core_decl_fail("unsupported Rust integer in {context}: {value}")))
+}
+
+core_decl_rust_bools: fn(expression: String, context: String) -> [Bool] CoreDeclarationError! {
+    out := [Bool]{}
+    loop item in core_decl_rust_slice(expression, context) ?? return Err(err) -> out.push(core_decl_rust_bool(item, context) ?? return Err(err))
+    Ok(out)
+}
+
+core_decl_rust_strings: fn(expression: String, context: String, constants: [String: String]) -> [String] CoreDeclarationError! {
+    out := [String]{}
+    loop item in core_decl_rust_slice(expression, context) ?? return Err(err) -> out.push(core_decl_rust_string(item, context, constants) ?? return Err(err))
+    Ok(out)
+}
+
+// `Some(<string>)`'s string.
+core_decl_rust_some_string: fn(expression: String, context: String, constants: [String: String]) -> String CoreDeclarationError! {
+    call: core_decl_whole_call(expression, context, "optional Rust string") ?? return Err(err)
+    if call.name != "Some" || call.args.len() != 1 -> return Err(core_decl_fail("unsupported optional Rust string in {context}: {expression.trim()}"))
+    core_decl_rust_string(call.args[0], context, constants)
+}
+
+// The CoreCallPureRoute a `CoreCallPureRoute::<Rust variant>` names: Jet
+// spells acronyms in caps; the retired Rust enum kept its Rust variant names.
+core_decl_pure_route: fn(expression: String, context: String) -> CoreCallPureRoute CoreDeclarationError! {
+    value: expression.trim()
+    name: if value.starts_with("CoreCallPureRoute::") -> value.removeprefix("CoreCallPureRoute::") else -> ""
+    if name == {
+        "None" -> Ok(CoreCallPureRoute.NoPureRoute)
+        "Mime" -> Ok(CoreCallPureRoute.MIME)
+        "EncodingXml" -> Ok(CoreCallPureRoute.EncodingXML)
+        "SketchHll" -> Ok(CoreCallPureRoute.SketchHLL)
+        "SketchCms" -> Ok(CoreCallPureRoute.SketchCMS)
+        "Ui" -> Ok(CoreCallPureRoute.UI)
+        "Io" -> Ok(CoreCallPureRoute.IO)
+        "Time" -> Ok(CoreCallPureRoute.Time)
+        "Math" -> Ok(CoreCallPureRoute.Math)
+        "Date" -> Ok(CoreCallPureRoute.Date)
+        "DateTime" -> Ok(CoreCallPureRoute.DateTime)
+        "SketchTDigest" -> Ok(CoreCallPureRoute.SketchTDigest)
+        "SketchReservoir" -> Ok(CoreCallPureRoute.SketchReservoir)
+        "Net" -> Ok(CoreCallPureRoute.Net)
+        "Crypto" -> Ok(CoreCallPureRoute.Crypto)
+        else -> Err(core_decl_fail("unsupported CoreCallPureRoute in {context}: {value}"))
+    }
+}
+
+// The CORE_CALL_COVERAGE_* bit of a `CoreCallCoverage::<NAME>` constant, or
+// -1 when it has none.
+core_decl_coverage_bit: fn(name: String) -> Int Never! {
+    if name == {
+        "SEMA" -> CORE_CALL_COVERAGE_SEMA
+        "TIR_SUBSET" -> CORE_CALL_COVERAGE_TIR_SUBSET
+        "TIR_EVAL" -> CORE_CALL_COVERAGE_TIR_EVAL
+        "AOT" -> CORE_CALL_COVERAGE_AOT
+        "COMPTIME" -> CORE_CALL_COVERAGE_COMPTIME
+        "KNOWN" -> CORE_CALL_COVERAGE_KNOWN
+        else -> -1
+    }
+}
+
+// `CoreCallCoverage::from_bits(<constants and integers joined by |>)`.
+core_decl_coverage: fn(expression: String, context: String) -> CoreCallCoverage CoreDeclarationError! {
+    call: core_decl_whole_call(expression, context, "CoreCallCoverage") ?? return Err(err)
+    if call.name != "CoreCallCoverage::from_bits" || call.args.len() != 1 -> return Err(core_decl_fail("unsupported CoreCallCoverage in {context}: {expression.trim()}"))
+    bits := 0
+    loop raw in call.args[0].split("|") {
+        part: raw.trim()
+        if part.starts_with("CoreCallCoverage::") {
+            name: part.removeprefix("CoreCallCoverage::")
+            bit: core_decl_coverage_bit(name)
+            if bit < 0 -> return Err(core_decl_fail("CoreCallCoverage::{name} has no Jet coverage bit in {context}"))
+            bits = bits.bit_or(bit)
+            next
+        }
+        bits = bits.bit_or(core_decl_rust_int(part, context) ?? return Err(err))
+    }
+    Ok(CoreCallCoverage{bits: bits})
+}
+
+core_decl_resource_access: fn(expression: String, context: String) -> CoreCallResourceAccess CoreDeclarationError! {
+    call: core_decl_whole_call(expression, context, "CoreCallResourceAccess") ?? return Err(err)
+    if call.args.len() != 1 -> return Err(core_decl_fail("unsupported CoreCallResourceAccess in {context}"))
+    mode: if call.name == {
+        "CoreCallResourceAccess::read" -> CoreCallResourceAccessMode.Read
+        "CoreCallResourceAccess::write" -> CoreCallResourceAccessMode.Write
+        "CoreCallResourceAccess::move_" -> CoreCallResourceAccessMode.Move
+        else -> { return Err(core_decl_fail("unsupported CoreCallResourceAccess in {context}: {call.name}")) }
+    }
+    Ok(CoreCallResourceAccess{argument: core_decl_rust_int(call.args[0], context) ?? return Err(err), mode: mode})
+}
+
+core_decl_completion: fn(expression: String, context: String, constants: [String: String]) -> CoreCallCompletion CoreDeclarationError! {
+    call: core_decl_whole_call(expression, context, "CoreCallCompletion") ?? return Err(err)
+    kind: if call.name == {
+        "CoreCallCompletion::synchronous" -> if call.args.len() == 1 -> Val(CoreCallCompletionKind.Synchronous) else -> None
+        "CoreCallCompletion::pending" -> if call.args.len() == 2 -> Val(CoreCallCompletionKind.Pending) else -> None
+        "CoreCallCompletion::event" -> if call.args.len() == 2 -> Val(CoreCallCompletionKind.Event) else -> None
+        else -> None
+    }
+    done: kind ?? return Err(core_decl_fail("unsupported CoreCallCompletion in {context}: {call.name}"))
+    provider: core_decl_rust_string(call.args[call.args.len() - 1], context, constants) ?? return Err(err)
+    if call.args.len() == 1 -> return Ok(CoreCallCompletion{kind: done, token: None, provider: provider})
+    Ok(CoreCallCompletion{kind: done, token: Val(core_decl_rust_string(call.args[0], context, constants) ?? return Err(err)), provider: provider})
+}
+
+core_decl_pure_capability: fn() -> CoreCapabilityContract Never! {
+    CoreCapabilityContract{kind: CoreCapabilityKind.Pure, provider: None, fallback: None, failure: None}
+}
+
+core_decl_capability: fn(expression: String, context: String, constants: [String: String]) -> CoreCapabilityContract CoreDeclarationError! {
+    call: core_decl_whole_call(expression, context, "CoreCapabilityContract") ?? return Err(err)
+    strings := [String]{}
+    loop arg in call.args -> strings.push(core_decl_rust_string(arg, context, constants) ?? return Err(err))
+    count: strings.len()
+    if {
+        call.name == "CoreCapabilityContract::pure" && count == 0 -> return Ok(core_decl_pure_capability())
+        call.name == "CoreCapabilityContract::native_required" && count == 2 -> return Ok(CoreCapabilityContract{kind: CoreCapabilityKind.NativeRequired, provider: Val(strings[0].copy()), fallback: None, failure: Val(strings[1].copy())})
+        call.name == "CoreCapabilityContract::portable_fallback" && count == 3 -> return Ok(CoreCapabilityContract{kind: CoreCapabilityKind.PortableFallback, provider: Val(strings[0].copy()), fallback: Val(strings[1].copy()), failure: Val(strings[2].copy())})
+        call.name == "CoreCapabilityContract::explicit_simulation" && count == 2 -> return Ok(CoreCapabilityContract{kind: CoreCapabilityKind.ExplicitSimulation, provider: Val(strings[0].copy()), fallback: None, failure: Val(strings[1].copy())})
+    }
+    Err(core_decl_fail("unsupported CoreCapabilityContract in {context}: {call.name}"))
+}
+
+core_decl_marker: fn(expression: String, context: String, constants: [String: String]) -> CoreMarkerApplication CoreDeclarationError! {
+    call: core_decl_whole_call(expression, context, "CoreMarkerApplication") ?? return Err(err)
+    if call.name != "CoreMarkerApplication::deprecated" || call.args.len() != 4 -> return Err(core_decl_fail("unsupported CoreMarkerApplication in {context}"))
+    Ok(CoreMarkerApplication{
+        member: core_decl_rust_string(call.args[0], context, constants) ?? return Err(err),
+        since: core_decl_rust_string(call.args[1], context, constants) ?? return Err(err),
+        replacement: core_decl_rust_string(call.args[2], context, constants) ?? return Err(err),
+        removed_in: if call.args[3].trim() == "None" -> None else -> Val(core_decl_rust_some_string(call.args[3], context, constants) ?? return Err(err)),
+    })
+}
+
+// ---- Core call facts ----------------------------------------------------
+// The effect root, effect leaf and sink class of a plain Core call, keyed by
+// module and then member.
+
+// The effect root a plain Core call needs, or None when it is pure.
+core_decl_call_effect: fn(module_name: String, member: String) -> String? Never! {
+    if module_name == {
+        "core.files" -> if member == {
+            "__temp_path_sample" -> Val("Time")
+            "__temp_directory" -> Val("Env")
+            "__host_path_is_absolute" | "__host_path_join" | "__path_windows" | "__atomic_pid" | "__reader_path" -> None
+            else -> Val("FS")
+        }
+        "core.log" -> Val("Log")
+        // core.web's OpenAPI helpers and its live-binding registry: in-process
+        // state (Core/Web/Web.jet), not a browser API; a publish only writes to
+        // connections a server already upgraded under Net.
+        "core.web" -> if member == {
+            "__openapi_inputs" | "__openapi_render" | "__contract_stop" | "__live_load" | "__live_replace" | "__live_publish" | "live_stats" -> None
+            else -> Val("Browser")
+        }
+        "core.mod" -> if member == {
+            "__read_context" | "__stage_context" -> Val("FS")
+            "__supported" | "__os" | "__parse_context" | "__check_context" | "__context_name" | "__context_digest" | "__exports_count" | "__export_info" | "__finish_context" -> None
+            else -> Val("Exec")
+        }
+        "core.process" -> if member == {
+            "__keep_open_raw" -> Val("FS")
+            "status_ok" -> None
+            else -> Val("Exec")
+        }
+        "core.time" -> if member == {
+            "zone" | "parse_zoned" -> Val("FS")
+            "clock" | "time" | "local_time" | "parse_time" | "new" | "parse" | "from_timestamp"
+                | "period" | "period_days" | "period_months" | "period_years" | "parse_rfc3339"
+                | "from_unix_ms" | "from_unix_seconds" | "from_unix_microseconds" | "from_unix_nanoseconds"
+                | "parse_iso_week_date" | "from_iso_week" | "datetime" | "utc"
+                | "zoned" | "zoned_local" | "days_in_month" | "is_leap_year" -> None
+            else -> Val("Time")
+        }
+        "core.rt" -> if member == "callback" -> Val("Time") else -> None
+        "core.math" -> if member == "random" -> Val("Rand") else -> None
+        "core.math.random" -> if member == "rng" -> None else -> Val("Rand")
+        "core.crypto.random" -> Val("Rand")
+        "core.term" -> if member == {
+            "style_force" -> None
+            else -> Val("IO")
+        }
+        "core.net" -> if member == {
+            "gethostname" -> Val("Env")
+            "ip_addr" | "ip_to_string" | "ip_is_ipv4" | "ip" | "ipv4" | "ipv6" | "parse_ip" | "is_ipv4"
+                | "__ip_from_bytes" | "__ip_bytes" | "__ip_is_v4" | "__socket_from_parts"
+                | "__socket_ip" | "__socket_port" | "__socket_scope" | "__udp_packet_addr"
+                | "is_ipv6" | "socket_addr_parse" | "socket_host" | "socket_port" | "socket_to_string"
+                | "ready_readable" | "ready_writable" | "error_operation" | "error_address" | "error_name"
+                | "error_message" | "error_os_code" | "dns_srv_target" | "dns_srv_port" | "dns_srv_priority"
+                | "dns_srv_weight" | "udp_packet_data" | "udp_packet_addr" | "udp_packet_bytes"
+                | "udp_packet_original_len" | "udp_packet_truncated" -> None
+            else -> Val("Net")
+        }
+        "core.watcher" -> if member == {
+            "files" | "__files" -> Val("FS")
+            "process_pid" | "__process_pid" -> Val("Exec")
+            "port" | "__port" -> Val("Net")
+            else -> None
+        }
+        "core.web.browser" -> if member == {
+            "profile" | "timeout" | "__path_join" | "__html_path" | "__report_options" | "__report_json" | "__report_html" | "__report_text" | "__write_report_bytes" | "__server_stop" -> None
+            "locked" | "__read_text" | "__is_file" | "__file_size" | "__modified_ms" -> Val("FS")
+            "config_from_env" -> Val("Env")
+            else -> Val("Net")
+        }
+        // The encoding readers and writers.
+        "core.encoding.json" | "core.encoding.jsonl" | "core.encoding.xml" | "core.encoding.cbor" -> if member == "reader" || member == "writer" -> Val("FS") else -> None
+        "core.encoding.csv" -> if member == "reader" || member == "writer" || member == "query" -> Val("FS") else -> None
+        // The host's f32 SIMD dispatch is a fixed CPU fact read without a
+        // system call; comptime refuses it (BuildRoutes.jet
+        // ir_comptime_ambient_refusal).
+        "core.compute" -> if member == "__simd_lanes" || member == "device_cpu" -> None else -> Val("GPU")
+        "core.data" -> if member == "__host_path_is_file" -> Val("FS") else -> None
+        // A service file leaf names the one leaf it needs, as core.files
+        // does; the lock and workflow sleeps name Time. A service's record
+        // stamps read the wall clock, its authority tokens draw from the OS
+        // generator, and its store identity resolves against the working
+        // directory. The process id in a temporary name has no row yet, like
+        // an atomic write's; host-reads.md lists both as open.
+        "core.service" -> if member == {
+            "state_store" | "__host_path_kind" | "__host_stat" | "__host_read_bytes"
+                | "__host_append_bytes" | "__host_create_dirs" | "__host_reserve" | "__host_finish" | "__host_rename"
+                | "__host_sync_parent" | "__host_close" | "__host_remove" | "__host_fsync" | "__host_set_mode" -> Val("FS")
+            "__host_entropy" -> Val("Rand")
+            "__host_current_dir" -> Val("Env")
+            "__host_wall_sample" | "__host_sleep_ns" | "__host_sleep_wait_ns" -> Val("Time")
+            else -> None
+        }
+        // The terminal-capability variables (COLUMNS, TERM, NO_COLOR, …)
+        // change what a TUI draws, so reading them is Env.
+        "core.tui" -> if member == "__cap_env_bytes" -> Val("Env") else -> None
+        "core.net.tls" | "core.net.ws" | "core.http.client" | "core.http.server" | "core.http.middleware" -> Val("Net")
+        "core.http" -> if member == "serve" || member == "get" -> Val("Net") else -> None
+        // Key generation draws from the OS generator, like crypto.random.bytes.
+        "core.crypto" -> if member == "__x25519_generate" || member == "__signing_generate" -> Val("Rand") else -> None
+        "core.perf" -> if member == {
+            "__read_bits" | "__write_bits" | "fidelity" | "override_fidelity" | "reset_fidelity" -> Val("Env")
+            else -> None
+        }
+        // fork and setsid change the process tree, like every other child launch.
+        "core.sys" -> if member == {
+            "success" -> None
+            "__fork" | "__setsid" -> Val("Exec")
+            else -> Val("Env")
+        }
+        // Joining the scheduler's threads readies the process for a raw exec
+        // or fork, so it needs the same root as a child launch.
+        "core.tasks" -> if member == "__quiesce" -> Val("Exec") else -> None
+        "core.db" | "core.jobs" -> Val("DB")
+        "core.auth" -> if member == {
+            "register_user" | "password_login" | "session_validate" | "magic_link_issue" | "magic_link_consume"
+                | "oauth_begin" | "oauth_finish" | "__store_load" | "__store_replace" -> Val("DB")
+            else -> None
+        }
+        "core.plugin" -> Val("Exec")
+        "core.ui" | "core.web.storage.local" | "core.web.storage.session" -> Val("Browser")
+        "core.crypto.vault" -> if member == {
+            "get" | "current" | "versions" | "load" | "status" | "prepare_generate" | "prepare_store"
+                | "prepare_rotate" | "prepare_retire" | "prepare_revoke" | "authorize_write" | "commit_generate"
+                | "commit_store" | "commit_rotate" | "commit_retire" | "commit_revoke" | "export_to_recipients"
+                | "export_to_passphrase" | "prepare_import_wrapped" | "authorize_wrapped_import" | "commit_import_wrapped"
+                | "prepare_import_signing" | "prepare_import_x25519" | "commit_import_signing" | "commit_import_x25519" -> Val("Secret")
+            else -> None
+        }
+        else -> None
+    }
+}
+
+// The effect leaf a plain Core call needs, or None when its root suffices.
+// Spawning a process keeps the ungranted `Exec` root. A file operation names
+// the one leaf it needs, so `--allow=FS.Read` covers a read and never a
+// write; `copy` and `copy_dir` both read and write, so they keep the bare
+// `FS` root.
+core_decl_call_effect_leaf: fn(module_name: String, member: String) -> String? Never! {
+    if module_name == {
+        "core.net" -> if member == {
+            "gethostname" -> Val("FS.Read")
+            "__resolve_ordered" | "socket_addr" | "socket_addrs"
+                | "__tcp_accept" | "__tcp_connect" | "__tcp_connect_addr" | "__tcp_connect_timeout" | "__tcp_connect_happy"
+                | "__tcp_reply"
+                | "__udp_send_to" | "__udp_recv_from" | "__udp_send_bytes_to" | "__udp_receive"
+                | "__unix_accept" | "__unix_read" | "__unix_write_all_bytes" | "__unix_send_fds_raw" | "__unix_receive_fds_raw" | "__unix_wait_raw"
+                | "__unix_connect_host" | "__unix_connect_deadline_host"
+                | "tcp_accept" | "tcp_connect" | "tcp_connect_addr" | "tcp_connect_timeout" | "tcp_connect_happy" | "tcp_read"
+                | "tcp_write" | "tcp_read_bytes" | "tcp_read_text" | "tcp_write_bytes" | "tcp_write_all_bytes" | "tcp_write_text"
+                | "tcp_ready" | "sendfile" | "tcp_reply" | "udp_send_to" | "udp_recv_from" | "udp_send_bytes_to" | "udp_receive"
+                | "unix_accept" | "unix_connect" | "unix_read" | "unix_write" | "unix_read_bytes" | "unix_write_all_bytes"
+                | "unix_send" | "unix_receive" | "unix_wait"
+                | "dns_a" | "dns_aaaa" | "dns_a_at" | "dns_aaaa_at" | "dns_txt" | "dns_txt_at" | "dns_ptr" | "dns_srv"
+                | "dns_srv_at" | "getservbyname" | "getservbyport" | "tls_connect" | "tls_read" | "tls_write" | "tls_close"
+                | "__dns_a_lookup" | "__dns_aaaa_lookup" | "__dns_a_at_lookup" | "__dns_aaaa_at_lookup"
+                | "__dns_srv_lookup" | "__dns_srv_at_lookup" -> Val("Time.Wait")
+            else -> None
+        }
+        "core.sys" -> if member == {
+            "hostname" -> Val("FS.Read")
+            "wait" | "waitpid" -> Val("Time.Wait")
+            else -> None
+        }
+        "core.process" -> if member == {
+            "__keep_open_raw" -> Val("FS.Read")
+            "run" | "pipeline" -> Val("Time.Wait")
+            else -> None
+        }
+        "core.service" -> if member == {
+            "state_store" | "__host_path_kind" | "__host_stat" | "__host_read_bytes" -> Val("FS.Read")
+            "__host_append_bytes" | "__host_create_dirs" | "__host_reserve" | "__host_finish" | "__host_rename"
+                | "__host_sync_parent" | "__host_close" | "__host_remove" | "__host_fsync" | "__host_set_mode" -> Val("FS.Write")
+            "__host_sleep_ns" | "__host_sleep_wait_ns"
+                | "send" | "send_durable" | "receive" | "endpoint_send" | "endpoint_receive" | "workflow_sleep" | "workflow_activity_wait" | "workflow_all" -> Val("Time.Wait")
+            else -> None
+        }
+        "core.time" -> if member == {
+            "zone" | "parse_zoned" -> Val("FS.Read")
+            "sleep" | "sleep_until" -> Val("Time.Wait")
+            else -> None
+        }
+        "core.tasks" -> if member == "yield_now" || member == "__yield_now" -> Val("Time.Wait") else -> None
+        "core.files" -> if member == {
+            "scope" | "read" | "read_bytes" | "read_at" | "read_link" | "map" | "open" | "exists" | "is_dir" | "is_fifo" | "is_socket" | "space"
+                | "can_read" | "can_write" | "can_execute"
+                | "stat" | "lstat" | "list_dir" | "walk" | "walk_files" | "glob" | "canonicalize" | "absolute"
+                | "__read_bytes_os" | "__read_at_os" | "__read_link_os" | "__reader_line_bytes"
+                // #3593 provider leaves behind Core/Files/files.jet.
+                | "__open_reader" | "__open_reader_raw" | "__open_directory" | "__close_directory" | "__list_directory" | "__stat_at" | "__path_kind" | "__read_link_at"
+                | "__space" | "__access_raw" | "__reader_advise" | "__map_advise"
+                | "__xattr_names" | "__xattr_get" | "__reader_stat" | "__writer_stat" | "__metadata_directory" | "__directory_fd" | "__reader_fd" | "__writer_fd" | "__lock_fd"
+                | "__map_raw" | "__list_dir_raw" | "__stat_mode_raw" | "__canonicalize_raw" | "__walk_parallel_raw"
+                // The compiler-private non-blocking open only reads (RawHostKeys.jet).
+                | "jet_std_files_open_reader_nonblocking" -> Val("FS.Read")
+            "write" | "write_bytes" | "write_at" | "write_atomic" | "append_all" | "create" | "append" | "fsync" | "remove"
+                | "remove_dir" | "remove_all" | "create_dir_all" | "rename" | "symlink" | "hard_link" | "chown"
+                | "__write_bytes_os" | "__append_bytes_os" | "__create_dirs_os" | "__write_at_os" | "__writer_refusal"
+                | "__atomic_reserve" | "__atomic_finish" | "__atomic_remove" | "__atomic_rename" | "__atomic_sync_parent" | "__atomic_close"
+                | "jet_files_link_reader_at_raw"
+                | "set_mode" | "mkdtemp" | "mktemp" | "temp_dir" | "temp_file" | "lock" | "__open_writer" | "__create_directory"
+                | "__fsync_directory" | "__rename_at" | "__remove_at" | "__xattr_set" | "__writer_set_mode" | "__writer_allocate" | "__flock"
+                | "__open_writer_raw" | "__remove_at_raw"
+                | "__remove_raw" | "__remove_dir_raw" | "__remove_all_raw" | "__hard_link_raw" | "__fsync_raw" | "__syncfs_raw" | "__chown_raw"
+                | "__set_mode_raw" | "__symlink_directory_raw" | "__symlink_raw" | "__mkdtemp_raw" | "__temp_dir_raw" | "__temp_file_raw"
+                | "try_lock" | "__lock_open" | "__lock_try" | "__lock_wait" | "__lock_close" | "__lock_fd_identity" | "__lock_path_identity" | "__lock_owner" -> Val("FS.Write")
+            else -> None
+        }
+        "core.term" -> if member == {
+            "confirm" | "choose" | "input_secret" | "read_all_input" | "readline" | "read_until" | "take" | "binread"
+                | "binwrite" | "progress" | "read_key" -> Val("Time.Wait")
+            else -> None
+        }
+        "core.net.tls" -> if member == {
+            "client" | "read" | "read_text" | "write" | "write_all" | "write_text" | "close" -> Val("Time.Wait")
+            else -> None
+        }
+        // A WebSocket connect and upgrade both wait on the handshake.
+        "core.net.ws" -> Val("Time.Wait")
+        "core.http.client" -> if member == {
+            "get" | "post" | "request" | "__get" | "__post" | "__request" | "jet_http_build_resolve" | "jet_http_build_get" -> Val("Time.Wait")
+            else -> None
+        }
+        "core.http" -> if member == "get" -> Val("Time.Wait") else -> None
+        "core.http.server" -> if member == {
+            "serve" | "serve_once" | "serve_once_listener" -> Val("Time.Wait")
+            else -> None
+        }
+        "core.encoding.json" | "core.encoding.jsonl" | "core.encoding.xml" | "core.encoding.cbor" -> if member == "reader" || member == "writer" -> Val("Time.Wait") else -> None
+        "core.encoding.csv" -> if member == "reader" || member == "writer" || member == "query" -> Val("Time.Wait") else -> None
+        "core.db" -> if member == {
+            "transaction" | "__transaction" | "migrate" | "__migrate" -> Val("Time.Wait")
+            else -> None
+        }
+        "core.jobs" -> if member == "wait" || member == "poll" -> Val("Time.Wait") else -> None
+        else -> None
+    }
+}
+
+// The sink class a plain Core call's arguments reach, or None: the encoding
+// serializers, the terminal prints and every log call.
+core_decl_call_sink: fn(module_name: String, member: String) -> SinkClass? Never! {
+    if module_name == {
+        "core.log" -> Val(SinkClass.Credential)
+        "core.term" -> if member == "print" || member == "eprint" -> Val(SinkClass.Credential) else -> None
+        "core.encoding.json" | "core.encoding.csv" | "core.encoding.toml" | "core.encoding.yaml" | "core.encoding.cbor" | "core.encoding.xml" -> if member == {
+            "to_string" | "to_string_pretty" | "to_bytes" | "to_bytes_canonical" -> Val(SinkClass.Credential)
+            else -> None
+        }
+        "core.encoding.jsonl" -> if member == "to_string" -> Val(SinkClass.Credential) else -> None
+        else -> None
+    }
+}
+
+// `CoreCallRecord::new`'s record: the call's facts, Prelude symbol `symbol`.
+core_decl_plain_record: fn(module_name: String, member: String, symbol: String, mask: [Bool]) -> CoreCallRecord Never! {
+    root: core_decl_call_effect(module_name, member)
+    capability: if root == None -> core_decl_pure_capability() else -> CoreCapabilityContract{kind: CoreCapabilityKind.NativeRequired, provider: Val(module_name.copy()), fallback: None, failure: Val("core.capability.unavailable")}
+    leaf: core_decl_call_effect_leaf(module_name, member)
+    sink: core_decl_call_sink(module_name, member)
+    arity: mask.len()
+    CoreCallRecord{module_name: module_name, member: member, receiver_types: [String]{}, signature: CoreCallSignature{arity: arity, max_arity: arity, borrow_mask: mask}, frame_accesses: [CoreCallResourceAccess]{}, frame_completion: None, fallibility: CoreCallFallibility.Sema, effect_kind: root, capability: capability, effect_leaf: leaf, sink_class: sink, pure_route: CoreCallPureRoute.NoPureRoute, symbol: CoreCallSymbol.Prelude{name: symbol}, source_target: None, coverage: CoreCallCoverage{bits: CORE_CALL_COVERAGE_KNOWN}, aot_direct: true, native_int_result: false, ui_capabilities: [String]{}, marker: None, authority: None}
+}
+
+// A record the Jet source of its module defines: no Prelude symbol, Sema
+// coverage only, no direct AOT call.
+core_decl_source_owned: fn(record: CoreCallRecord) -> CoreCallRecord Never! {
+    owned := record
+    owned.symbol = CoreCallSymbol.SourceOwned
+    owned.coverage = CoreCallCoverage{bits: CORE_CALL_COVERAGE_SEMA}
+    owned.aot_direct = false
+    owned
+}
+
+// Every executable Core row routes to its Jet runtime symbol
+// (CoreCallSymbol.Prelude); the Rust-route form (`false`) was retired with the
+// Rust runtime.
+core_decl_require_jet_route: fn(argument: String, context: String) -> Bool CoreDeclarationError! {
+    if !(core_decl_rust_bool(argument, context) ?? return Err(err)) -> return Err(core_decl_fail("CoreCallRecord in {context} names a retired Rust route; route it to its Jet runtime symbol (`true`)"))
+    Ok(true)
+}
+
+// `CoreCallRecord::new(module, member, symbol, true, mask)`, with a sixth
+// CoreCallCoverage argument for `new_with_coverage`.
+core_decl_new_record: fn(call: CoreDeclRustCall, count: Int, context: String, constants: [String: String]) -> CoreCallRecord CoreDeclarationError! {
+    core_decl_expect_args(call, count, context) ?? return Err(err)
+    core_decl_require_jet_route(call.args[3], context) ?? return Err(err)
+    module_name: core_decl_rust_string(call.args[0], context, constants) ?? return Err(err)
+    member: core_decl_rust_string(call.args[1], context, constants) ?? return Err(err)
+    symbol: core_decl_rust_string(call.args[2], context, constants) ?? return Err(err)
+    record := core_decl_plain_record(module_name, member, symbol, core_decl_rust_bools(call.args[4], context) ?? return Err(err))
+    if count == 6 -> record.coverage = core_decl_coverage(call.args[5], context) ?? return Err(err)
+    Ok(record)
+}
+
+core_decl_constructor_record: fn(call: CoreDeclRustCall, context: String, constants: [String: String]) -> CoreCallRecord CoreDeclarationError! {
+    if call.name == {
+        "CoreCallRecord::source_owned" -> {
+            core_decl_expect_args(call, 3, context) ?? return Err(err)
+            member: core_decl_rust_string(call.args[1], context, constants) ?? return Err(err)
+            record: core_decl_plain_record(core_decl_rust_string(call.args[0], context, constants) ?? return Err(err), member.copy(), member.copy(), core_decl_rust_bools(call.args[2], context) ?? return Err(err))
+            Ok(core_decl_source_owned(record))
+        }
+        "sema_web_call" -> {
+            core_decl_expect_args(call, 4, context) ?? return Err(err)
+            Ok(core_decl_plain_record(core_decl_rust_string(call.args[0], context, constants) ?? return Err(err), core_decl_rust_string(call.args[1], context, constants) ?? return Err(err), core_decl_rust_string(call.args[2], context, constants) ?? return Err(err), core_decl_rust_bools(call.args[3], context) ?? return Err(err)))
+        }
+        "CoreCallRecord::new" -> core_decl_new_record(call, 5, context, constants)
+        "CoreCallRecord::new_with_coverage" -> core_decl_new_record(call, 6, context, constants)
+        "CoreCallRecord::receiver_with_symbol" -> {
+            core_decl_expect_args(call, 5, context) ?? return Err(err)
+            core_decl_require_jet_route(call.args[3], context) ?? return Err(err)
+            mask: core_decl_rust_bools(call.args[4], context) ?? return Err(err)
+            arity: mask.len()
+            Ok(CoreCallRecord{module_name: "", member: core_decl_rust_string(call.args[1], context, constants) ?? return Err(err), receiver_types: core_decl_rust_strings(call.args[0], context, constants) ?? return Err(err), signature: CoreCallSignature{arity: arity, max_arity: arity, borrow_mask: mask}, frame_accesses: [CoreCallResourceAccess]{}, frame_completion: None, fallibility: CoreCallFallibility.Sema, effect_kind: None, capability: core_decl_pure_capability(), effect_leaf: None, sink_class: None, pure_route: CoreCallPureRoute.NoPureRoute, symbol: CoreCallSymbol.Prelude{name: core_decl_rust_string(call.args[2], context, constants) ?? return Err(err)}, source_target: None, coverage: CoreCallCoverage{bits: CORE_CALL_COVERAGE_KNOWN}, aot_direct: false, native_int_result: false, ui_capabilities: [String]{}, marker: None, authority: None})
+        }
+        else -> Err(core_decl_fail("unsupported CoreCallRecord constructor in {context}: {call.name}"))
+    }
+}
+
+// `record` with the builder `.name(args)` applied.
+core_decl_apply_builder: fn(record: CoreCallRecord, call: CoreDeclRustCall, context: String, constants: [String: String]) -> CoreCallRecord CoreDeclarationError! {
+    built := record
+    if call.name == "without_direct_aot" || call.name == "with_native_int_result" || call.name == "with_source_owned" {
+        core_decl_expect_args(call, 0, context) ?? return Err(err)
+        if call.name == {
+            "without_direct_aot" -> built.aot_direct = false
+            "with_native_int_result" -> built.native_int_result = true
+            else -> built = core_decl_source_owned(built)
+        }
+        return Ok(built)
+    }
+    core_decl_expect_args(call, 1, context) ?? return Err(err)
+    argument: call.args[0]
+    if call.name == {
+        "with_max_arity" -> built.signature.max_arity = core_decl_rust_int(argument, context) ?? return Err(err)
+        "with_pure_route" -> built.pure_route = core_decl_pure_route(argument, context) ?? return Err(err)
+        "with_frame_accesses" -> {
+            accesses := [CoreCallResourceAccess]{}
+            loop item in core_decl_rust_slice(argument, context) ?? return Err(err) -> accesses.push(core_decl_resource_access(item, context) ?? return Err(err))
+            built.frame_accesses = accesses
+        }
+        "with_frame_completion" -> built.frame_completion = Val(core_decl_completion(argument, context, constants) ?? return Err(err))
+        "with_capability" -> built.capability = core_decl_capability(argument, context, constants) ?? return Err(err)
+        "with_ui_capabilities" -> built.ui_capabilities = core_decl_rust_strings(argument, context, constants) ?? return Err(err)
+        "with_source_target" -> built.source_target = Val(core_decl_rust_string(argument, context, constants) ?? return Err(err))
+        "with_marker" -> built.marker = Val(core_decl_marker(argument, context, constants) ?? return Err(err))
+        else -> return Err(core_decl_fail("unsupported CoreCallRecord builder in {context}: {call.name}"))
+    }
+    Ok(built)
+}
+
+// One Rust CoreCallRecord builder chain evaluated into its record.
+core_decl_call_record: fn(expression: String, context: String, constants: [String: String]) -> CoreDeclarationCall CoreDeclarationError! {
+    value: expression.trim()
+    root: core_decl_read_call(value, 0, context) ?? return Err(err)
+    record := core_decl_constructor_record(root, context, constants) ?? return Err(err)
+    bytes: value.bytes()
+    position := root.end
+    loop position < bytes.len() {
+        position = core_decl_skip_space(bytes, position)
+        if position >= bytes.len() -> break
+        if Int.from_u8(bytes[position]) != 46 -> return Err(core_decl_fail("unsupported CoreCallRecord expression in {context}: {value}"))
+        builder: core_decl_read_call(value, position + 1, context) ?? return Err(err)
+        record = core_decl_apply_builder(record, builder, context, constants) ?? return Err(err)
+        position = builder.end
+    }
+    Ok(CoreDeclarationCall{constructor: root.name, record: record})
+}

@@ -6,7 +6,8 @@
 // names that do the same job.
 //
 // A row's `jet` names are checked, never trusted: `core.<module>.<member>` (or
-// a bare module) must be exported by Compiler/Prelude/Core.jet,
+// a bare module) must be exported by Compiler/Prelude/Core.jet, as the
+// compiler declares it (`$JET inspect structure core --json`),
 // `core.<module>.<Type>.<method>` must name a type that module exports and a
 // method its source declares, and `<Type>.<method>` must be a built-in method,
 // static or collection operation row. Every unresolved name is reported. With
@@ -17,6 +18,7 @@
 // Usage (from the repository root): jet Tools/agent/LibcCensus.jet [--check]
 use {
     files: core.files
+    json: core.encoding.json
     process: core.process
 }
 
@@ -408,40 +410,55 @@ family_names: fn(family: Family) -> [String] Never! {
 
 is_pattern: fn(name: String) -> Bool Never! { name.contains("*") }
 
+// The compiler's Core structure: `jet inspect structure core --json`, run by
+// $JET, else `jet` on PATH.
+core_structure: fn() -[Env, Exec, Time.Wait]> Dyn CensusError! {
+    jet: process.env_get_or("JET", "jet")
+    asked: process.cmd([String]{jet, "inspect", "structure", "core", "--json"}).env("NO_COLOR", "1").output_limit(16777216).run() ?? return Err(census_fail("`{jet} inspect structure core --json` could not start: {err}"))
+    if asked.code != 0 || asked.signal != None -> return Err(census_fail("`{jet} inspect structure core --json` failed: {asked.errors.trim()}"))
+    answer: json.parse(asked.output) ?? return Err(census_fail("`{jet} inspect structure core --json` printed no JSON: {err}"))
+    core: answer.get("core") ?? return Err(census_fail("`{jet} inspect structure core --json` printed no `core` object"))
+    Ok(core)
+}
+
+// The items of array field `key` of a JSON object; none when it is absent.
+json_items: fn(value: Dyn, key: String) -> [Dyn] Never! {
+    found: value.get(key) ?? return [Dyn]{}
+    if found == .Array(entries) -> return entries.copy()
+    [Dyn]{}
+}
+
+// Text field `key` of a JSON object, or "" when it is absent or not text.
+json_text: fn(value: Dyn, key: String) -> String Never! {
+    found: value.get(key) ?? return ""
+    if found == .Text(content) -> return content.copy()
+    ""
+}
+
 // Core.jet's exported members, keyed by module.
-core_exports: fn() -[FS]> [String: [String]] CensusError! {
-    text: files.read(CORE_PRELUDE_PATH) ?? return Err(census_fail("cannot read {CORE_PRELUDE_PATH}: {err}"))
+core_exports: fn(core: Dyn) -> [String: [String]] CensusError! {
     out := [String: [String]]{}
-    loop line in text.split("\n") {
-        if !line.starts_with("module ") -> next
-        open: line.find(" exports {{ ")
-        if open < 0 -> next
-        name: line.slice(7, open)
-        rest: line.slice(open + 11, line.len())
-        close: rest.find(" }}")
-        if close < 0 -> next
+    loop entry in json_items(core, "modules") {
         members := [String]{}
-        loop member in rest.slice(0, close).split(", ") -> members.push(member.copy())
-        out[name] = members
+        loop member in json_items(entry, "members") {
+            if member == .Text(name) -> members.push(name.copy())
+        }
+        out[json_text(entry, "module")] = members
     }
     if out.len() == 0 -> return Err(census_fail("{CORE_PRELUDE_PATH} exports no modules"))
     Ok(out)
 }
 
-// Core.jet's source file of each source module, keyed by module.
-core_sources: fn() -[FS]> [String: String] CensusError! {
-    text: files.read(CORE_PRELUDE_PATH) ?? return Err(census_fail("cannot read {CORE_PRELUDE_PATH}: {err}"))
+// The first source file of each Core module, keyed by module; runtime units
+// are no module's source.
+core_sources: fn(core: Dyn) -> [String: String] Never! {
     out := [String: String]{}
-    loop line in text.split("\n") {
-        if !line.starts_with("source_module ") -> next
-        at: line.find(" path ")
-        if at < 0 -> next
-        rest: line.slice(at + 6, line.len())
-        end: rest.find(" ")
-        if end < 0 -> next
-        out[line.slice(14, at)] = rest.slice(0, end)
+    loop source in json_items(core, "sources") {
+        module_name: json_text(source, "module")
+        if (source.get("runtime") ?? Dyn.Null) == .Bool(true) || out.get(module_name) != None -> next
+        out[module_name] = json_text(source, "path")
     }
-    Ok(out)
+    out
 }
 
 // Whether `source` declares method `method` of `type_name`: a `method: fn`
@@ -654,20 +671,21 @@ report: fn() -> String Never! {
     lines.join("\n")
 }
 
-census_main: fn(args: [String]) -[FS]> String CensusError! {
+census_main: fn(args: [String]) -[Env, Exec, FS, Time.Wait]> String CensusError! {
     check_only: args.len() == 1 && args[0] == "--check"
     if args.len() > 1 || (args.len() == 1 && !check_only) -> return Err(census_fail(USAGE))
-    exports: core_exports()
-    sources: core_sources()
-    problems: unresolved(exports, sources)
+    core: core_structure() ?? return Err(err)
+    exports: core_exports(core) ?? return Err(err)
+    problems: unresolved(exports, core_sources(core)) ?? return Err(err)
     if problems.len() > 0 -> return Err(census_fail("libc census: {problems.len()} row problem(s)\n{problems.join("\n")}"))
     if check_only -> return Ok("libc census: every Jet API of {FAMILIES.len()} families resolves")
     Ok(report())
 }
 
 #Test("every Jet API the census names exists") {
-    exports: core_exports() ?? panic(err.message)
-    problems: unresolved(exports, core_sources() ?? panic(err.message)) ?? panic(err.message)
+    core: core_structure() ?? panic(err.message)
+    exports: core_exports(core) ?? panic(err.message)
+    problems: unresolved(exports, core_sources(core)) ?? panic(err.message)
     assert_eq(problems.join("\n"), "")
 }
 

@@ -5980,7 +5980,7 @@ targets; arbitrary function values or string-selected jobs are not admitted.
 ## `core` — built Core modules
 
 The canonical module registry is [`Core.jet`](../../../Compiler/Prelude/Core.jet),
-and the loader's exported list is the generated [`CoreCallRows.jet`](../../../Compiler/JetFoundation/Source/Registry/CoreCallRows.jet).
+and the loader's exported list is [`CoreCallRows.jet`](../../../Compiler/JetFoundation/Source/Registry/CoreCallRows.jet), which the compiler build computes from it.
 The list below is the source-facing module inventory. A module may be a
 namespace-only provider boundary; its presence in the registry does not imply
 that every provider operation is available on every target.

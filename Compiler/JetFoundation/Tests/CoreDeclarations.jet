@@ -1,0 +1,249 @@
+// Core.jet's declarations as the compiler build reads them
+// (Compiler/JetFoundation/Source/CoreDeclarations): CORE_CALLS is the
+// dispatcher rows then CORE_CALL_EXTENSIONS, a dispatcher row's Rust
+// constructor chain evaluates to its CoreCallRecord facts, and a broken
+// declaration is refused with what is wrong. Assemble with the canonical
+// Compiler unit, replacing its host entry.
+use {
+    core_declarations_files: core.files
+    jet_foundation.[
+        CORE_CALL_EXTENSIONS, CORE_CALLS, CORE_DECLARATIONS, CORE_DECLARATIONS_CORE_PATH,
+        CORE_DECLARATIONS_ENCODING_PATH, CORE_DECLARATIONS_PARTS_PATH, CORE_DECLARATIONS_RUNTIME_FILES,
+        CORE_DECLARATIONS_SYNTAX_FILES, CoreCapabilityKind, CoreDeclPublic, CoreDeclarationDispatcher,
+        CoreDeclarationError, CoreDeclarationFile, CoreDeclarationType, CoreDeclarations, EFFECT_VOCABULARY_ROOTS,
+        EFFECT_VOCABULARY_ROWS, EffectVocabularyRow, core_call_key, core_declarations_module,
+        core_declarations_read, core_declarations_source_problems, core_decl_call_record,
+        core_decl_constructor_offsets, core_decl_directory, core_decl_dispatcher,
+        core_decl_effect_roots_problem, core_decl_embedded_names, core_decl_lang_type_problem,
+        core_decl_list_body, core_decl_mem_problem, core_decl_problem, core_decl_public_problem,
+        core_decl_register_public, core_decl_resolve_items, core_decl_rust_string_text,
+        core_decl_snake_segment, core_decl_source_lines, core_decl_source_locals,
+        core_decl_syntax_constants, core_decl_wrapper_unit,
+    ]
+}
+
+// Compiler/Prelude/Core.jet as the checkout has it.
+core_declarations_core: fn() -[FS]> String Never! {
+    core_declarations_files.read(CORE_DECLARATIONS_CORE_PATH) ?? panic("{CORE_DECLARATIONS_CORE_PATH} did not read")
+}
+
+// Core.jet `source`'s declarations, read with the build's other inputs.
+core_declarations_fixture: fn(source: String) -[FS]> CoreDeclarations CoreDeclarationError! {
+    parts: core_declarations_files.read(CORE_DECLARATIONS_PARTS_PATH) ?? panic("{CORE_DECLARATIONS_PARTS_PATH} did not read")
+    core_declarations_read(source, parts, CORE_DECLARATIONS_SYNTAX_FILES, CORE_DECLARATIONS_RUNTIME_FILES, EFFECT_VOCABULARY_ROWS)
+}
+
+// The error text reading Core.jet `source` reports, or "".
+core_declarations_error: fn(source: String) -[FS]> String Never! {
+    if core_declarations_fixture(source) == {
+        .Ok(_) -> ""
+        .Err(error) -> error.message
+    }
+}
+
+// The text of every source `declared` names, as the checkout has it.
+core_declarations_sources: fn(declared: CoreDeclarations) -[FS]> [CoreDeclarationFile] Never! {
+    paths := [String]{}
+    loop row in declared.source_rows {
+        if !paths.contains(row.path) -> paths.push(row.path.copy())
+    }
+    if !paths.contains(CORE_DECLARATIONS_ENCODING_PATH) -> paths.push(CORE_DECLARATIONS_ENCODING_PATH)
+    loop path in paths -> CoreDeclarationFile{path: path.copy(), text: core_declarations_files.read(path) ?? panic("{path} did not read")}
+}
+
+core_declarations_type_in: fn(declared: CoreDeclarations, module_name: String, name: String) -> CoreDeclarationType Never! {
+    owner: core_declarations_module(declared.modules, module_name) ?? panic("Core.jet declares no {module_name}")
+    loop leaf in owner.types {
+        if leaf.name == name -> return leaf.copy()
+    }
+    panic("{module_name} exports no type {name}")
+}
+
+// The error text evaluating one constructor chain reports, or "".
+core_declarations_call_error: fn(expression: String) -> String Never! {
+    if core_decl_call_record(expression, "fixture", [String: String]{}) == {
+        .Ok(_) -> ""
+        .Err(error) -> error.message
+    }
+}
+
+// The error text one `dispatcher_row <kind> <module> <member>` reports, or "".
+core_declarations_row_error: fn(kind: String, written_module: String, member: String, expression: String, constants: [String: String]) -> String Never! {
+    if core_decl_dispatcher([String]{kind, written_module, member}, expression, 7, constants) == {
+        .Ok(_) -> ""
+        .Err(error) -> error.message
+    }
+}
+
+// The runtime unit the `core.text` wrapper `member` of `text` calls, or "".
+core_declarations_wrapper: fn(text: String, member: String) -> String Never! {
+    lines: core_decl_source_lines(text)
+    core_decl_wrapper_unit(lines, core_decl_source_locals(lines, [String]{"core.text.runtime.copy"}), "core.text", member)
+}
+
+// One dispatcher of a fixture `declared`, built from `expression`.
+core_declarations_stray: fn(kind: String, module_name: String, member: String, expression: String, line: Int) -> CoreDeclarationDispatcher Never! {
+    evaluated: core_decl_call_record(expression, "fixture", [String: String]{}) ?? panic("the fixture row was refused: {err.message}")
+    CoreDeclarationDispatcher{kind: kind, module_name: module_name, member: member, line: line, constructor: evaluated.constructor, record: evaluated.record}
+}
+
+#Test("core_call_rows") {
+    dispatchers: CORE_DECLARATIONS.dispatchers
+    assert_eq(CORE_CALLS.len(), dispatchers.len() + CORE_CALL_EXTENSIONS.len())
+    core_keys := [String]{}
+    loop (index, row) in dispatchers {
+        key: core_call_key(row.record)
+        assert_eq(core_call_key(CORE_CALLS[index]), key)
+        core_keys.push(key)
+    }
+    loop (index, row) in CORE_CALL_EXTENSIONS {
+        key: core_call_key(row)
+        assert_eq(core_call_key(CORE_CALLS[dispatchers.len() + index]), key)
+        assert(!core_keys.contains(key), "the extension row {key} repeats a Core.jet row")
+    }
+}
+
+#Test("the declarations the build reads pass every check against the checkout") {
+    declared: core_declarations_fixture(core_declarations_core()) ?? panic("Core.jet was refused: {err.message}")
+    assert_eq(declared.dispatchers.len(), CORE_DECLARATIONS.dispatchers.len())
+    assert_eq(core_declarations_source_problems(declared, core_declarations_sources(declared)).join("\n"), "")
+    constants: core_decl_syntax_constants(CORE_DECLARATIONS_SYNTAX_FILES) ?? panic("the Syntax constants did not read: {err.message}")
+    assert_eq(core_decl_mem_problem(CORE_DECLARATIONS, CORE_DECLARATIONS_SYNTAX_FILES, constants) ?? panic("the core.mem tiers did not read: {err.message}"), "")
+    assert_eq(core_decl_lang_type_problem(CORE_DECLARATIONS, "Effect", EFFECT_VOCABULARY_ROOTS, "the effect vocabulary's roots"), "")
+    assert(core_decl_lang_type_problem(CORE_DECLARATIONS, "Effect", [String]{"Net", "Rand"}, "the effect vocabulary's roots").ends_with("; write `Effect:plain(Net|Rand)`"))
+    assert(core_decl_lang_type_problem(CORE_DECLARATIONS, "SideEffect", [String]{"C"}, "the cases").contains("has no `SideEffect:plain(…)` type"))
+}
+
+#Test("Core type references resolve to their defining type and refuse a missing or cyclic target") {
+    source: core_declarations_core()
+    plot_types: [String]{"Aggregate", "Backend", "Channel", "FacetKind", "FilterOp", "Interaction", "LegendPosition", "Mark", "ScaleKind", "Support"}
+    loop name in plot_types {
+        owner: core_declarations_type_in(CORE_DECLARATIONS, "core.data.plot", "JetDataPlot{name}")
+        reexport: core_declarations_type_in(CORE_DECLARATIONS, "core.data", "JetDataPlot{name}")
+        assert_eq(reexport.variants, owner.variants)
+        assert(reexport.generic_arity == owner.generic_arity && reexport.kind == owner.kind)
+    }
+    defining: "JetDataPlotAggregate:plain(Sum|Mean|Count|Min|Max)"
+    changed: source.replace(defining, "JetDataPlotAggregate:plain(None|Count|Sum|Mean|Min|Max)")
+    assert(changed != source)
+    reordered: core_declarations_fixture(changed) ?? panic("the reordered variants were refused: {err.message}")
+    assert_eq(core_declarations_type_in(reordered, "core.data", "JetDataPlotAggregate").variants, [String]{"None", "Count", "Sum", "Mean", "Min", "Max"})
+    assert(core_declarations_error(source.replace("JetDataPlotAggregate:from(core.data.plot)", "JetDataPlotAggregate:from(core.missing)")).contains("unknown Core type reference `core.missing.JetDataPlotAggregate`"))
+    assert(core_declarations_error(source.replace(defining, "JetDataPlotAggregate:from(core.data)")).contains("cyclic Core type reference"))
+    // A private nominal is owned by its source module without joining the
+    // module's public types, and still needs its exact source declaration.
+    loop row in CORE_DECLARATIONS.source_rows {
+        if row.module_name == "core.time" -> assert(row.owned_types.contains("ExpiringValue"))
+    }
+    assert(!(core_declarations_module(CORE_DECLARATIONS.modules, "core.time") ?? panic("no core.time")).types.any(leaf -> leaf.name == "ExpiringValue"))
+    hidden_source: source.replace("TimeError, ExpiringValue }}", "TimeError, MissingPrivateType }}")
+    assert(hidden_source != source)
+    hidden: core_declarations_fixture(hidden_source) ?? panic("the hidden type was refused early: {err.message}")
+    assert(core_declarations_source_problems(hidden, core_declarations_sources(hidden)).any(problem -> problem.contains("does not declare owned type `core.time.MissingPrivateType`")))
+    dropped: core_declarations_fixture(source.replace("format_row ETF core.encoding.eetf ETF\n", "")) ?? panic("the dropped format row was refused early: {err.message}")
+    assert(core_declarations_source_problems(dropped, core_declarations_sources(dropped)).any(problem -> problem.contains("differ from the format_row lines")))
+}
+
+#Test("dispatcher row expressions evaluate to their CoreCallRecord facts") {
+    none: [String: String]{}
+    shortcut: (core_decl_call_record("CoreCallRecord::source_owned(\"core.ui.host\", \"shortcut\", &[false, false]).with_ui_capabilities(&[\"UI.Shortcuts\"])", "source-owned constructor fixture", none) ?? panic("the source-owned constructor was refused: {err.message}")).record
+    assert(shortcut.module_name == "core.ui.host" && shortcut.member == "shortcut" && shortcut.receiver_types.len() == 0)
+    assert(shortcut.signature.arity == 2 && shortcut.signature.max_arity == 2 && shortcut.signature.borrow_mask == [Bool]{false, false})
+    assert(shortcut.capability.kind == CoreCapabilityKind.Pure && shortcut.effect_kind == None && shortcut.source_target == None)
+    assert(shortcut.coverage.bits == 1 && !shortcut.aot_direct && !shortcut.native_int_result)
+    assert_eq(shortcut.ui_capabilities, [String]{"UI.Shortcuts"})
+    assert(if shortcut.symbol == {
+        .SourceOwned -> true
+        .Prelude(_) -> false
+    })
+    connect: (core_decl_call_record("CoreCallRecord::new(\"core.net\", \"unix_connect\", \"jet_net_unix_connect\", true, &[true]).with_max_arity(2).with_source_owned().with_source_target(\"__unix_connect_entry\")", "source-owned builder fixture", none) ?? panic("the source-owned builder was refused: {err.message}")).record
+    assert(if connect.symbol == {
+        .SourceOwned -> true
+        .Prelude(_) -> false
+    })
+    assert_eq(connect.source_target ?? "", "__unix_connect_entry")
+    assert(connect.signature.arity == 1 && connect.signature.max_arity == 2 && connect.coverage.bits == 1 && !connect.aot_direct)
+    assert((connect.effect_kind ?? "") == "Net" && (connect.effect_leaf ?? "") == "Time.Wait")
+    assert(connect.capability.kind == CoreCapabilityKind.NativeRequired && (connect.capability.provider ?? "") == "core.net")
+    assert(core_declarations_call_error("CoreCallRecord::new(\"core.mem\", \"volatile_read\", \"std::ptr::read_volatile\", false, &[false])").contains("names a retired Rust route"))
+    assert(core_declarations_call_error("CoreCallRecord::new(\"core.net\", \"ip\", \"jet_net_ip\", true)").contains("expected 5 arguments"))
+    assert(core_declarations_call_error("CoreCallRecord::new(\"core.net\", \"ip\", \"jet_net_ip\", true, &[true]).with_pure_route(CoreCallPureRoute::Gone)").contains("unsupported CoreCallPureRoute"))
+    assert_eq(core_declarations_row_error("plain", "core.net", "ipv6", "CoreCallRecord::new(\"core.net\", \"ipv6\", \"jet_net_ipv6\", true, &[true])", none), "")
+    assert_eq(core_declarations_row_error("plain", "core.net", "ipv4", "CoreCallRecord::new(\"core.net\", \"ipv6\", \"jet_net_ipv6\", true, &[true])", none), "dispatcher row identity disagrees with emitted adapter: DSL core.net.ipv4 vs CoreCallRecord::new core.net.ipv6")
+    assert_eq(core_decl_rust_string_text("a\\u{{e9}}\\x41\\n", "fixture") ?? panic("the Rust escapes were refused: {err.message}"), "aéA\n")
+    assert_eq(core_decl_constructor_offsets("CoreCallRecord::new_with_coverage (a), MyCoreCallRecord::new(b), CoreCallRecord::newer(c)"), [Int]{0})
+}
+
+#Test("dispatcher rows refuse an unowned source-owned row or a mismatched adapter and accept every constructor form") {
+    constants: core_decl_syntax_constants(CORE_DECLARATIONS_SYNTAX_FILES) ?? panic("the Syntax constants did not read: {err.message}")
+    unowned: core_decl_dispatcher([String]{"plain", "core.fake", "call"}, "CoreCallRecord::source_owned(\"core.fake\", \"call\", &[])", 9001, constants) ?? panic("the source-owned row was refused: {err.message}")
+    declared := CORE_DECLARATIONS.copy()
+    declared.dispatchers.push(unowned)
+    assert_eq(core_decl_problem(declared), "{CORE_DECLARATIONS_CORE_PATH}:9001: source-owned dispatcher row has no owning source_module: core.fake.call")
+    assert(core_declarations_row_error("adapter", "core.web", "form", "sema_web_call(\"core.db\", \"form\", \"jet_web_forms_typed\", &[])", constants).contains("dispatcher row identity disagrees with emitted adapter"))
+    assert(core_declarations_row_error("plain", "core.jobs", "queue", "CoreCallRecord::new(\"core.db\", \"queue\", \"jet_job_queue_default\", true, &[])", constants).contains("dispatcher row identity disagrees with emitted adapter"))
+    accepted: [(kind: String, module_name: String, member: String, expression: String)]{
+        (kind: "plain", module_name: "core.jobs", member: "queue", expression: "CoreCallRecord::new(\"core.jobs\", \"queue\", \"jet_job_queue_default\", true, &[])"),
+        (kind: "plain", module_name: "core.jobs", member: "covered", expression: "CoreCallRecord::new_with_coverage(\"core.jobs\", \"covered\", \"jet_job_queue_default\", true, &[], CoreCallCoverage::from_bits(CoreCallCoverage::SEMA))"),
+        (kind: "adapter", module_name: "core.web", member: "form", expression: "sema_web_call(\"core.web\", \"form\", \"jet_web_forms_typed\", &[])"),
+        (kind: "receiver", module_name: "-", member: "METHOD_RECEIPT_ATTACH", expression: "CoreCallRecord::receiver_with_symbol(&[INTERNAL_RECEIPT_HANDLE], METHOD_RECEIPT_ATTACH, \"jet_receipt_attach\", true, &[])"),
+        (kind: "receiver", module_name: "-", member: "collect", expression: "CoreCallRecord::receiver_with_symbol(&[\"Query\"], \"collect\", \"\", true, &[true]).with_source_owned().with_source_target(\"core.data.__query_collect\")"),
+    }
+    loop row in accepted -> assert_eq(core_declarations_row_error(row.kind, row.module_name, row.member, row.expression, constants), "")
+    targeted: (core_decl_call_record("CoreCallRecord::source_owned(\"core.fake\", \"call\", &[false]).with_source_target(\"__checked_call\")", "target fixture", constants) ?? panic("the targeted row was refused: {err.message}")).record
+    assert(targeted.module_name == "core.fake" && targeted.member == "call" && (targeted.source_target ?? "") == "__checked_call")
+    ordinary: (core_decl_call_record("CoreCallRecord::source_owned(\"core.fake\", \"call\", &[false])", "ordinary fixture", constants) ?? panic("the ordinary row was refused: {err.message}")).record
+    assert(ordinary.member == "call" && ordinary.source_target == None)
+}
+
+#Test("public dispatcher rows must name a ledger module once") {
+    none: [String: String]{}
+    expression: "CoreCallRecord::new(\"core.nowhere\", \"probe\", \"jet_nowhere_probe\", true, &[true])"
+    declared := CORE_DECLARATIONS.copy()
+    declared.dispatchers = [CoreDeclarationDispatcher]{core_declarations_stray("plain", "core.nowhere", "probe", expression, 9001)}
+    assert_eq(core_decl_public_problem(declared, [String]{expression}, none) ?? panic("the stray row was refused: {err.message}"), "{CORE_DECLARATIONS_CORE_PATH}: public dispatcher row names a non-ledger module: core.nowhere.probe")
+    declared.dispatchers.push(core_declarations_stray("plain", "core.nowhere", "probe", expression, 9002))
+    assert_eq(core_decl_public_problem(declared, [String]{expression, expression}, none) ?? panic("the duplicate row was refused: {err.message}"), "{CORE_DECLARATIONS_CORE_PATH}:9002: duplicate public dispatcher row `core.nowhere.probe` (also at line 9001)")
+    assert_eq(core_decl_register_public([CoreDeclPublic]{}, "core.net", "bad name", 3), "{CORE_DECLARATIONS_CORE_PATH}:3: malformed CoreCall dispatcher row: invalid module/member")
+}
+
+#Test("the effect roots are the build roots, the deny-only roots and four irreversible ones") {
+    roots := [EffectVocabularyRow]{}
+    names: [String]{"Mem", "Panic", "Net", "FS", "IO", "DB", "Time", "Rand", "Env", "Exec", "Log", "GPU", "FFI"}
+    loop name in names {
+        roots.push(EffectVocabularyRow{name: name, irreversible: name == "Net" || name == "FS" || name == "Exec" || name == "FFI", kernel: [String]{}})
+    }
+    assert_eq(core_decl_effect_roots_problem(roots), "")
+    assert_eq(core_decl_effect_roots_problem(EFFECT_VOCABULARY_ROWS), "")
+    roots.push(EffectVocabularyRow{name: "Secret", irreversible: true, kernel: [String]{}})
+    assert(core_decl_effect_roots_problem(roots).contains("must be Net, FS, Exec, and FFI"))
+    without_mem: loop row in roots if row.name != "Mem" -> row.copy()
+    assert(core_decl_effect_roots_problem(without_mem).contains("deny-only root Mem is not declared"))
+}
+
+#Test("list bodies, owned wrappers and source names read as the build reads them") {
+    constants: [String: String]{"TYPE_PTR": "Ptr", "MEM_COPY": "copy"}
+    body: core_decl_list_body("X: 1\nTIERS: [Row]{{\n    (name: TYPE_PTR, note: \"a {{ brace\"),\n    (name: Syntax::MEM_COPY),\n    (name: \"zero\"),\n}}\n", "TIERS: ", "fixture") ?? panic("the list body was refused: {err.message}")
+    assert_eq(core_decl_resolve_items(body, constants), [String]{"Ptr", "a {{ brace", "copy", "zero"})
+    assert(core_decl_list_body("TIERS: [Row]{{\n", "TIERS: ", "fixture") == .Err(_))
+    import_unit: "use kernel: core.text.runtime.copy\n"
+    assert_eq(core_declarations_wrapper("{import_unit}copy: fn() -> Int {{ kernel.copy() }}\n", "copy"), "core.text.runtime.copy")
+    // A declaration attribute does not hide the wrapper.
+    assert_eq(core_declarations_wrapper("{import_unit}#Unsafe(\"validated carrier\") copy: fn() -> Int {{ kernel.copy() }}\n", "copy"), "core.text.runtime.copy")
+    // A unit member alias names the same unit, in a `use` line or block.
+    assert_eq(core_declarations_wrapper("use raw_copy: core.text.runtime.copy.copy\ncopy: fn() -> Int {{ raw_copy() }}\n", "copy"), "core.text.runtime.copy")
+    assert_eq(core_declarations_wrapper("use {{\n    raw_copy: core.text.runtime.copy.copy\n    unicode: core.text\n}}\ncopy: fn() -> Int {{ raw_copy() }}\n", "copy"), "core.text.runtime.copy")
+    // A compiler-owned provider call is not a runtime cutover.
+    assert_eq(core_declarations_wrapper("{import_unit}copy: fn() -> Int {{ core.text.copy() }}\n", "copy"), "")
+    // The next declaration is outside the wrapper body.
+    assert_eq(core_declarations_wrapper("{import_unit}copy: fn() -> Int {{ 0 }}\ninternal: module {{\n    helper: fn() -> Int {{ kernel.copy() }}\n}}\n", "copy"), "")
+    // The retired `pub` spelling does not declare the wrapper.
+    assert_eq(core_declarations_wrapper("{import_unit}pub copy: fn() -> Int {{ kernel.copy() }}\n", "copy"), "")
+    // A longer name ending in the local is not a call through it.
+    assert_eq(core_declarations_wrapper("{import_unit}copy: fn() -> Int {{ my_kernel.copy() }}\n", "copy"), "")
+    assert_eq(core_decl_snake_segment("UnicodeCcc"), "unicode_ccc")
+    assert_eq(core_decl_snake_segment("HTTPServer"), "http_server")
+    assert_eq(core_decl_snake_segment("Utf8Bytes"), "utf8_bytes")
+    assert_eq(core_decl_embedded_names("// embed_bytes(\"note.bin\")\nA: comptime {{ embed_bytes(\"A/a.bin\") }}\nB: comptime {{ embed_file(\"b.txt\") }} // embed_bytes(\"A/a.bin\")\n"), [String]{"A/a.bin", "b.txt"})
+    assert_eq(core_decl_directory("Core/Ui/Xkb.jet"), "Core/Ui")
+}

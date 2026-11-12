@@ -1,9 +1,67 @@
+// The Core sources and assets this jet is built with, for a compile with no
+// toolchain tree (jet_cli_core_sources): the text of every
+// CORE_SOURCE_OWNED_ROWS row and the bytes of every file a Core source embeds
+// beside it, read from the toolchain tree when jet is built. The build checks
+// the sources against Core.jet's declarations (core_declarations_checked_sources)
+// and stops, naming each problem, when they disagree.
+use {
+    jet_foundation.[CORE_DECLARATIONS, CORE_SOURCE_OWNED_ROWS, CoreDeclarationFile, EFFECT_CANONICAL_SOURCE, core_declarations_assets, core_declarations_checked_sources]
+}
+
 // The canonical effect source: Compiler/Prelude/Effects.jet, then
 // Core/Effects/Effects.jet, then Core/Compiler/Meta.jet, read from the
 // toolchain tree while the compiler builds (JetFoundation
 // EFFECT_CANONICAL_SOURCE).
-use {
-    jet_foundation.[EFFECT_CANONICAL_SOURCE]
+JET_CLI_EFFECT_SOURCE: comptime { EFFECT_CANONICAL_SOURCE }
+
+// One embedded Core asset, by repository path.
+JetCLICoreAsset: struct {
+    path: String
+    bytes: [U8]
 }
 
-JET_CLI_EFFECT_SOURCE: comptime { EFFECT_CANONICAL_SOURCE }
+JET_CLI_CORE_SOURCES: comptime { core_declarations_checked_sources(CORE_DECLARATIONS, loop row in CORE_SOURCE_OWNED_ROWS -> CoreDeclarationFile{path: row.path.copy(), text: embed_file("toolchain:{row.path}")}) }
+
+// The files the Core sources embed (core_declarations_assets), read from the
+// toolchain tree; a #Test below holds the list to the sources.
+JET_CLI_CORE_ASSETS: comptime { [JetCLICoreAsset]{
+    JetCLICoreAsset{path: "Core/Ui/XkbTables/keysym_names.txt", bytes: embed_bytes("toolchain:Core/Ui/XkbTables/keysym_names.txt")},
+    JetCLICoreAsset{path: "Core/Ui/XkbTables/keysym_values.bin", bytes: embed_bytes("toolchain:Core/Ui/XkbTables/keysym_values.bin")},
+    JetCLICoreAsset{path: "Core/Ui/XkbTables/keysym_scalars.bin", bytes: embed_bytes("toolchain:Core/Ui/XkbTables/keysym_scalars.bin")},
+    JetCLICoreAsset{path: "Core/Ui/XkbTables/compose_nodes.bin", bytes: embed_bytes("toolchain:Core/Ui/XkbTables/compose_nodes.bin")},
+    JetCLICoreAsset{path: "Core/Ui/XkbTables/compose_text.bin", bytes: embed_bytes("toolchain:Core/Ui/XkbTables/compose_text.bin")},
+    JetCLICoreAsset{path: "Core/Ui/FontData/AtkinsonHyperlegibleNext-Regular.ttf", bytes: embed_bytes("toolchain:Core/Ui/FontData/AtkinsonHyperlegibleNext-Regular.ttf")},
+    JetCLICoreAsset{path: "Core/Ui/FontData/AtkinsonHyperlegibleNext-Bold.ttf", bytes: embed_bytes("toolchain:Core/Ui/FontData/AtkinsonHyperlegibleNext-Bold.ttf")},
+    JetCLICoreAsset{path: "Core/Ui/FontData/OFL.txt", bytes: embed_bytes("toolchain:Core/Ui/FontData/OFL.txt")},
+} }
+
+// The built-in text of the Core source row at repository path `path`
+// (`Core/App/App.jet`), or None when no row has that path.
+jet_cli_core_source_text: fn(path: String) -> String? Never! {
+    loop file in JET_CLI_CORE_SOURCES {
+        if file.path == path -> return Val(file.text.copy())
+    }
+    None
+}
+
+// The built-in bytes of the Core asset at repository path `path`
+// (`Core/Ui/XkbTables/keysym_values.bin`), or None when no Core source embeds
+// that path.
+jet_cli_core_asset_bytes: fn(path: String) -> [U8]? Never! {
+    loop asset in JET_CLI_CORE_ASSETS {
+        if asset.path == path -> return Val(asset.bytes.copy())
+    }
+    None
+}
+
+#Test("the built-in Core sources hold every Core source row and the assets they embed") {
+    loop row in CORE_SOURCE_OWNED_ROWS -> assert(jet_cli_core_source_text(row.path) != None, "{row.path} is built in")
+    assert(jet_cli_core_source_text("Core/NoSuch/NoSuch.jet") == None)
+    assert((jet_cli_core_asset_bytes("Core/Ui/XkbTables/keysym_values.bin") ?? [U8]{}).len() > 0)
+    assert(jet_cli_core_asset_bytes("Core/App/App.jet") == None)
+}
+
+#Test("the built-in assets are the files the Core sources embed, in order") {
+    built_in: loop asset in JET_CLI_CORE_ASSETS -> asset.path
+    assert_eq(built_in, core_declarations_assets(JET_CLI_CORE_SOURCES))
+}

@@ -7,8 +7,9 @@ defines where Core owns semantics, where a host may provide a typed leaf, how
 capabilities and effects are exposed, and what evidence makes an export
 complete. The declaration registry is
 [`Core.jet`](../../Compiler/Prelude/Core.jet); Jet source bodies
-are under [`Core/`](../../Core/). Generated call and module views are derived
-from those inputs by the [Core table generator](../../Tools/agent/CoreSourceRows.jet).
+are under [`Core/`](../../Core/). The compiler build computes its call and
+module tables from those inputs with the
+[Core declaration parser](../../Compiler/JetFoundation/Source/CoreDeclarations/).
 The [surface ledger](../../Tools/agent/CoreSurfaceLedger.jet) checks selected
 identity rows; runnable provider examples live under
 [`Examples/`](../../Examples/).
@@ -154,21 +155,19 @@ including Web, store, and virtual-record shapes. Source `VJPRun` remains
 nongeneric with `value` and `gradient: Tensor`; native generic `grads` or `pull`
 semantics do not follow from these parsed facts.
 
-The generator must verify that:
+The compiler build's declaration checks
+([`CoreDeclarations/`](../../Compiler/JetFoundation/Source/CoreDeclarations/))
+verify that:
 
 - every declared export has one canonical Jet source or an explicit registered
   provider/leaf role;
-- generated module and call views agree with the declaration source;
+- the computed module and call tables agree with the declaration source;
 - duplicate mechanisms, unapproved aliases, shims, and obsolete projections do
   not create a second public identity;
 - effect, authority, capability, fallback, signature, and tier metadata remain
   consistent.
 
-The generated Rust-bootstrap `CORE_CALLS` item alone permits long-running
-constant evaluation: the complete declaration registry exceeds rustc's
-const-evaluator step guard. This does not change row order, lookup facts,
-runtime initialization, or the Jet-native contract; the generator owns the
-item-level attribute alongside the table.
+A failed check stops the build, naming every problem.
 
 Shared bootstrap kernels embedded by comptime bind representation helpers
 locally, without copying their policy. Borrowed list indexing lives with the
@@ -176,10 +175,10 @@ shared collection kernel so both embeddings use the same bounds check and
 E3010 stop. Recursive mkdir dispatch names the single no-fault-probe raw leaf;
 the source caller, not a second evaluator arm, owns the FS.Write preflight.
 
-The generated registry tables are projections, not a second API catalog. Never
-hand-edit them. The main generated view is
+The registry tables are projections, not a second API catalog. The main one,
 [`CoreCallRows.jet`](../../Compiler/JetFoundation/Source/Registry/CoreCallRows.jet),
-with the corresponding generated projections in the Prelude. Native runtime
+is computed from Core.jet when the compiler builds; the generated projections
+in the Prelude are never hand-edited. Native runtime
 files under [`Compiler/JetRuntime`](../../Compiler/JetRuntime/) provide
 registered leaves and adapters; they do not become an independent public API
 registry.

@@ -9,9 +9,6 @@ use {
     cli_files: core.files
     cli_sys: core.sys
     cli_tasks: core.tasks
-    // The Core sources and assets this jet was built with, for a compile with
-    // no toolchain tree (jet_cli_core_sources).
-    core.devtools.[toolchain_core_asset, toolchain_core_source]
     jet_foundation.[
         AppAuthorizedDirectory,
         BuildOptions,
@@ -1037,7 +1034,7 @@ jet_cli_threads_left: fn(physical: Int, logical: Int, online: Int, stat: String)
 
 // The Core library rows of the toolchain tree (jet_cli_toolchain_root of
 // `input`, the entry), else the Core sources built into jet
-// (core.devtools.toolchain_core_source), or the refusal that stops the
+// (jet_cli_core_source_text), or the refusal that stops the
 // request. Each body is read when the compile first schedules its row
 // (jet_driver_core_text_file), so a compile reads only the Core files its
 // imports reach; every tree file is checked to be present here, so a missing
@@ -1094,11 +1091,11 @@ JetCLICoreSourceReader: struct {
 JetCLIBuiltinCoreSourceReader: struct {
     impl JetDriverCoreSourceReader {
         read: fn(self, file: String) -[FS.Read]> String? {
-            toolchain_core_source(file)
+            jet_cli_core_source_text(file)
         }
         read_bytes: fn(self, file: String) -[FS.Read]> [U8] JetDriverBuildInputError! {
-            if toolchain_core_asset(file) == .Val(bytes) -> return Ok(bytes)
-            text: toolchain_core_source(file) ?? return Err(JetDriverBuildInputError{message: "`{file}` is not a Core source or asset built into this jet"})
+            if jet_cli_core_asset_bytes(file) == .Val(bytes) -> return Ok(bytes)
+            text: jet_cli_core_source_text(file) ?? return Err(JetDriverBuildInputError{message: "`{file}` is not a Core source or asset built into this jet"})
             Ok(text.bytes())
         }
     }

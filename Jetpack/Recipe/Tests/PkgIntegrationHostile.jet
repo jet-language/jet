@@ -4,8 +4,8 @@ use hostile_net: core.net
 
 recipe_hostile_rows: fn() -> [[String]] {
     // Claims run inside an assembled scratch project, so the repository is
-    // named by JET_TOOLCHAIN_ROOT, never the working directory.
-    root: sys.get("JET_TOOLCHAIN_ROOT") ?? panic("JET_TOOLCHAIN_ROOT must name the Jet repository whose committed fixtures the claims read")
+    // named by JETPACK_TEST_REPO_ROOT, never the working directory.
+    root: sys.get("JETPACK_TEST_REPO_ROOT") ?? panic("JETPACK_TEST_REPO_ROOT must name the Jet repository whose committed fixtures the claims read")
     corpus: files.read(files.join(root, "tests/fixtures/build_sandbox/hostile-corpus.tsv")) ?? panic("hostile corpus")
     rows := [[String]]{}
     ids := [String]{}

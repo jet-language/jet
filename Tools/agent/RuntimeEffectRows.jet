@@ -5,7 +5,10 @@
 // Compiler/JetFoundation/Source/Registry/RuntimeInterface.jet) replaces the
 // Core leaf core.M.__X, or the leaf `leaf_aliases` names for it: its
 // `dispatcher_row` in Compiler/Prelude/Core.jet and its CoreCallRecord in
-// Compiler/JetFoundation/Source/Registry/CoreCallRows.jet.
+// Foundation's CORE_CALLS, which the compiler computes from Core.jet while it
+// builds (Compiler/JetFoundation/Source/CoreDeclarations); this tool reads the
+// built records through `jet inspect structure core --json` (its `calls`),
+// run by $JET, else `jet` on PATH, so the jet must be built from this tree.
 // While both tables carry that leaf, the member's declared row must be the
 // effect sema gives a call of the record: its `effect_kind` unless its
 // `effect_leaf` refines that kind, and its `effect_leaf`, sorted; else no
@@ -19,22 +22,18 @@
 // row. An unlisted split, and a listed symbol whose members agree, are
 // differences.
 //
-// With `--before REV` the Core leaves are read at the git revision REV, so a
-// cutover that deleted them still compares each member with the leaf it
-// replaced.
-//
 // Usage (from the repository root):
-//   jet Tools/agent/RuntimeEffectRows.jet --check [--before REV]
+//   jet Tools/agent/RuntimeEffectRows.jet --check
 use {
     files: core.files
+    json: core.encoding.json
     process: core.process
     term: core.term
 }
 
 INTERFACE: "Compiler/JetFoundation/Source/Registry/RuntimeInterface.jet"
-CORE_CALL_ROWS: "Compiler/JetFoundation/Source/Registry/CoreCallRows.jet"
 DISPATCHER: "Compiler/Prelude/Core.jet"
-USAGE: "usage: jet Tools/agent/RuntimeEffectRows.jet --check [--before REV]"
+USAGE: "usage: jet Tools/agent/RuntimeEffectRows.jet --check"
 OUTPUT_LIMIT: 268435456
 
 #Error
@@ -124,11 +123,12 @@ quoted_field: fn(line: String, key: String) -> String? Never! {
     Val(after.tail.partition("\"").head.copy())
 }
 
-// `key: Val("…")` as the quoted text, `key: None` as None.
-optional_field: fn(line: String, key: String) -> String? Never! {
-    after: line.partition("{key}: Val(\"")
-    if after.sep == "" -> return None
-    Val(after.tail.partition("\"").head.copy())
+// The text of `value`, or None for JSON null (or any other non-text).
+optional_text: fn(value: Dyn?) -> String? Never! {
+    if value == .Val(found) {
+        if found == .Text(content) -> return Val(content.copy())
+    }
+    None
 }
 
 // The entries of the effect row a declaration writes (`-[A, B.c]>`), sorted;
@@ -159,19 +159,23 @@ interface_members: fn(text: String) -> [InterfaceMember] Never! {
     members
 }
 
-core_leaves: fn(text: String) -> [CoreLeaf] Never! {
+// The `calls` of `jet inspect structure core --json`'s `core` object: each
+// CORE_CALLS record's module, member, effect fields and Prelude symbol.
+core_leaves: fn(core: Dyn) -> [CoreLeaf] Never! {
     leaves := [CoreLeaf]{}
-    loop line in text.split("\n") {
-        if !line.contains("CoreCallRecord{{module_name:") -> next
-        module_name: quoted_field(line, "module_name") ?? next
-        member: quoted_field(line, "member") ?? next
-        leaves.push(CoreLeaf{
-            module_name: module_name,
-            member: member,
-            effect_kind: optional_field(line, "effect_kind"),
-            effect_leaf: optional_field(line, "effect_leaf"),
-            symbol: quoted_field(line.partition("symbol: ").tail, "name") ?? "",
-        })
+    calls: core.get("calls") ?? Dyn.Null
+    if calls == .Array(records) {
+        loop record in records {
+            module_name: optional_text(record.get("module")) ?? next
+            member: optional_text(record.get("member")) ?? next
+            leaves.push(CoreLeaf{
+                module_name: module_name,
+                member: member,
+                effect_kind: optional_text(record.get("effect_kind")),
+                effect_leaf: optional_text(record.get("effect_leaf")),
+                symbol: optional_text(record.get("symbol")) ?? "",
+            })
+        }
     }
     leaves
 }
@@ -285,28 +289,29 @@ read_text: fn(path: String) -[FS]> String RowsError! {
     Ok(text)
 }
 
-// The text of `path`: the working tree's, else its text at the git revision
-// `before` (`git show`).
-source_text: fn(path: String, before: String) -[Exec, FS, Time, Time.Wait]> String RowsError! {
-    if before == "" -> return read_text(path)
-    argv: [String]{"git", "show", "{before}:{path}"}
+// The compiler's Core structure (`jet inspect structure core --json`, run by
+// $JET, else `jet` on PATH): its `core` object, as the build computed it.
+core_structure: fn() -[Env, Exec, FS, IO, Time, Time.Wait]> Dyn RowsError! {
+    jet: process.env_get_or("JET", process.which("jet") ?? "jet")
+    argv: [String]{jet, "inspect", "structure", "core", "--json"}
     spec: process.cmd(argv).stdin(.Inherit).stdout(.Capture).stderr(.Inherit).output_limit(OUTPUT_LIMIT)
     ran: process.run_all([ProcessSpec]{spec}, 1) ?? return Err(RowsError{message: "{argv.join(" ")} could not start: {err}"})
     receipt: ran[0] ?? return Err(RowsError{message: "{argv.join(" ")} could not start: {err}"})
     if receipt.code != 0 || receipt.signal != None || receipt.timed_out -> return Err(RowsError{message: "command failed: {argv.join(" ")}"})
-    Ok(receipt.output)
+    answer: json.parse(receipt.output) ?? return Err(RowsError{message: "{argv.join(" ")} printed no JSON: {err}"})
+    core: answer.get("core") ?? return Err(RowsError{message: "{argv.join(" ")} printed no `core` object"})
+    Ok(core)
 }
 
-runtime_effect_rows_main: fn(args: [String]) -[Exec, FS, IO, Time, Time.Wait]> Int RowsError! {
-    before := ""
-    if args.len() == 3 && args[1] == "--before" -> before = args[2].copy()
-    if args.len() == 0 || args[0] != "--check" || (args.len() != 1 && before == "") {
+runtime_effect_rows_main: fn(args: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> Int RowsError! {
+    if args.len() != 1 || args[0] != "--check" {
         term.eprint(USAGE)
         return Ok(2)
     }
     members: interface_members(read_text(INTERFACE) ?? return Err(err))
-    leaves: core_leaves(source_text(CORE_CALL_ROWS, before) ?? return Err(err))
-    dispatched: dispatcher_keys(source_text(DISPATCHER, before) ?? return Err(err))
+    leaves: core_leaves(core_structure() ?? return Err(err))
+    if leaves.len() == 0 -> return Err(RowsError{message: "`jet inspect structure core --json` printed no Core call records"})
+    dispatched: dispatcher_keys(read_text(DISPATCHER) ?? return Err(err))
     if members.len() == 0 -> return Err(RowsError{message: "{INTERFACE} has no interface member"})
     report: differences(members, leaves, dispatched, leaf_aliases())
     splits: row_splits()
@@ -387,15 +392,16 @@ run: fn() {
     assert_eq(split_differences(members, splits).join("|"), "jet_std_os_pid: its members declare different rows (jet.runtime.sys.pid -[Env]>, jet.runtime.files.process_id_raw -[FS]>) and row_splits lists no rule for it|jet_sys_cpu_count: row_splits lists it, but its members declare one row (jet.runtime.sys.cpu_count no effect)|jet_gone: row_splits lists it (unbound), but no interface member binds it")
 }
 
-#Test("the table rows parse from their generated lines") {
+#Test("the interface rows parse from their generated lines, the call records from the inspect JSON") {
     interface: "    RuntimeInterfaceRow{{module_name: \"jet.runtime.time\", member: \"sleep_ns\", declaration: \"sleep_ns: fn(nanos: Int) -[Time.Wait]>\", symbol: \"jet_std_time_sleep_duration_ns\"}},"
     parsed: interface_members(interface)
     assert_eq(parsed.len(), 1)
     assert_eq(parsed[0].effects.join("|"), "Time.Wait")
-    record: "    CoreCallRecord{{module_name: \"core.time\", member: \"__sleep_ns\", effect_kind: Val(\"Time\"), effect_leaf: Val(\"Time.Wait\"), symbol: CoreCallSymbol.Prelude{{name: \"jet_std_time_sleep_duration_ns\"}}, coverage: 1}},"
+    record: json.parse("{{\"calls\":[{{\"module\":\"core.time\",\"member\":\"__sleep_ns\",\"effect_kind\":\"Time\",\"effect_leaf\":\"Time.Wait\",\"symbol\":\"jet_std_time_sleep_duration_ns\"}},{{\"module\":\"core.time\",\"member\":\"__half\",\"effect_kind\":null,\"effect_leaf\":null,\"symbol\":null}}]}}") ?? panic("the call records did not parse: {err}")
     leaf: core_leaves(record)
-    assert_eq(leaf.len(), 1)
+    assert_eq(leaf.len(), 2)
     assert_eq(leaf[0].symbol, "jet_std_time_sleep_duration_ns")
     assert_eq(leaf[0].effect_leaf ?? "", "Time.Wait")
+    assert(leaf[1].effect_kind == None && leaf[1].symbol == "")
     assert_eq(dispatcher_keys("dispatcher_row adapter core.time __sleep_ns | CoreCallRecord::new(…)").join("|"), "core.time __sleep_ns")
 }

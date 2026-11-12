@@ -4003,23 +4003,7 @@ sema_registration_core_private: fn(module_row: SemaRegistrationModule, name: Str
         leaf = parts.after.copy()
     }
     if core_module_export(owner) == None -> return false
-    if sema_registration_core_toolchain_read(owner, leaf, requester_module) -> return false
     !core_module_has_member(owner, leaf) && !core_module_has_type(owner, leaf) && core_module_export("{owner}.{leaf}") == None
-}
-
-// The two unexported Core items code outside Core may name: the compiler's
-// CLI (the jet_cli package) reads the Core sources and assets jet was built
-// with through `core.devtools.toolchain_core_source` and
-// `core.devtools.toolchain_core_asset`. To any other package they are
-// private, like every unexported Core item. A module identity is
-// `module:<length>:<package identity>:<path>`, and a package identity is
-// `package:<length>:<name>:<version>`.
-sema_registration_core_toolchain_read: fn(owner: String, leaf: String, requester_module: String) -> Bool Never! {
-    if owner != "core.devtools" || (leaf != "toolchain_core_source" && leaf != "toolchain_core_asset") -> return false
-    kind: requester_module.split_once(":") ?? return false
-    if kind.before != "module" -> return false
-    package: kind.after.split_once(":") ?? return false
-    package.after.starts_with("package:7:jet_cli:")
 }
 
 sema_registration_core_private_error: fn(name: String, module_name: String, span: Span) -> Diagnostic {

@@ -27,11 +27,13 @@ CoreEnumPayloadRow: struct {
     labels: [String]
 }
 
+// One Core.jet `module` line; `line` is its Core.jet line.
 CoreModuleDeclaration: struct {
     module_name: String
     members: [String]
     type_exports: [CoreModuleTypeExport]
     dependencies: [String]
+    line: Int
 }
 
 core_module_export: fn(module_name: String) -> CoreModuleExportNames? {
@@ -347,10 +349,6 @@ core_module_for_alias: fn(name: String) -> String? {
     None
 }
 
-// Rust `CoreModuleExports::CORE_ROOT_TYPES`: the Core value types a bare
-// spelling names wherever Core is loaded, so a parameterless Core alias of one
-// of them stays a candidate owner of that bare name.
-CORE_ROOT_TYPES: [String]{"Date", "LocalDate", "LocalTime", "Decimal", "Fraction", "Duration", "Instant", "Authority", "__Decoding", "__DecodeTree", "__DecodeSource"}
 core_root_type: fn(name: String) -> Bool Never! {
     CORE_ROOT_TYPES.contains(name)
 }

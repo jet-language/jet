@@ -1,0 +1,160 @@
+// The byte readers of the Core declaration parser (CoreDeclarations/): the
+// line grammar of Compiler/Prelude/Core.jet, the Rust builder chains of its
+// dispatcher rows, the Syntax constants and the Core sources the
+// declarations name are all read with these while the compiler builds.
+
+// The text of bytes `start..<end` of `text` (indexes from text.bytes()).
+core_decl_slice: fn(text: String, start: Int, end: Int) -> String Never! {
+    String.from_bytes_lossy(text.bytes()[start..<end])
+}
+
+core_decl_len: fn(text: String) -> Int Never! { text.bytes().len() }
+
+core_decl_tail: fn(text: String, start: Int) -> String Never! { core_decl_slice(text, start, core_decl_len(text)) }
+
+core_decl_space: fn(code: Int) -> Bool Never! {
+    code == 32 || code == 9 || code == 10 || code == 11 || code == 12 || code == 13
+}
+
+core_decl_lower: fn(code: Int) -> Bool Never! { code >= 97 && code <= 122 }
+
+core_decl_upper: fn(code: Int) -> Bool Never! { code >= 65 && code <= 90 }
+
+core_decl_digit: fn(code: Int) -> Bool Never! { code >= 48 && code <= 57 }
+
+// `[A-Za-z0-9_]`.
+core_decl_word: fn(code: Int) -> Bool Never! {
+    core_decl_lower(code) || core_decl_upper(code) || core_decl_digit(code) || code == 95
+}
+
+// The comma-separated names of a list body, trimmed, empty ones dropped.
+core_decl_names: fn(list: String) -> [String] Never! {
+    out := [String]{}
+    loop name in list.split(",") {
+        trimmed: name.trim()
+        if trimmed != "" -> out.push(trimmed)
+    }
+    out
+}
+
+// `[A-Za-z_]` then any of `[A-Za-z0-9_]` and the bytes of `extra`.
+core_decl_is_name: fn(text: String, extra: String) -> Bool Never! {
+    bytes: text.bytes()
+    if bytes.len() == 0 -> return false
+    allowed: loop byte in extra.bytes() -> Int.from_u8(byte)
+    loop index in 0..<bytes.len() {
+        code: Int.from_u8(bytes[index])
+        if core_decl_lower(code) || core_decl_upper(code) || code == 95 -> next
+        if index == 0 || !(core_decl_digit(code) || allowed.contains(code)) -> return false
+    }
+    true
+}
+
+// `[A-Z][A-Z0-9_]*`: a Syntax constant's spelling.
+core_decl_is_constant: fn(name: String) -> Bool Never! {
+    bytes: name.bytes()
+    if bytes.len() == 0 || !core_decl_upper(Int.from_u8(bytes[0])) -> return false
+    loop byte in bytes {
+        code: Int.from_u8(byte)
+        if !core_decl_upper(code) && !core_decl_digit(code) && code != 95 -> return false
+    }
+    true
+}
+
+// `[0-9]+`.
+core_decl_is_digits: fn(text: String) -> Bool Never! {
+    bytes: text.bytes()
+    if bytes.len() == 0 -> return false
+    loop byte in bytes {
+        if !core_decl_digit(Int.from_u8(byte)) -> return false
+    }
+    true
+}
+
+// The end of the name of `[A-Za-z_]` then `[A-Za-z0-9_]` at byte `start` of
+// `bytes`, or `start` when no name starts there.
+core_decl_name_end: fn(bytes: [U8], start: Int) -> Int Never! {
+    if start >= bytes.len() -> return start
+    first: Int.from_u8(bytes[start])
+    if !(core_decl_lower(first) || core_decl_upper(first) || first == 95) -> return start
+    end := start + 1
+    loop end < bytes.len() && core_decl_word(Int.from_u8(bytes[end])) -> end += 1
+    end
+}
+
+// The first byte at or after `start` of `bytes` that is not whitespace.
+core_decl_skip_space: fn(bytes: [U8], start: Int) -> Int Never! {
+    at := start
+    loop at < bytes.len() && core_decl_space(Int.from_u8(bytes[at])) -> at += 1
+    at
+}
+
+// The byte offset of the `"` that closes the string opened at byte `open`,
+// `\` escaping the byte after it, or -1 when it is not closed.
+core_decl_quote_end: fn(bytes: [U8], open: Int) -> Int Never! {
+    at := open + 1
+    loop at < bytes.len() {
+        code: Int.from_u8(bytes[at])
+        if code == 92 {
+            at += 2
+            next
+        }
+        if code == 34 -> return at
+        at += 1
+    }
+    -1
+}
+
+// A Core.jet line without its `//` comment (outside a quoted string), trimmed.
+core_decl_line: fn(raw: String) -> String Never! {
+    bytes: raw.bytes()
+    quoted := false
+    escaped := false
+    loop index in 0..<bytes.len() - 1 {
+        code: Int.from_u8(bytes[index])
+        if quoted {
+            if {
+                escaped -> escaped = false
+                code == 92 -> escaped = true
+                code == 34 -> quoted = false
+            }
+            next
+        }
+        if code == 34 {
+            quoted = true
+            next
+        }
+        if code == 47 && Int.from_u8(bytes[index + 1]) == 47 -> return core_decl_slice(raw, 0, index).trim()
+    }
+    raw.trim()
+}
+
+// The lines of `text`, a `\r\n` ending read as `\n`.
+core_decl_source_lines: fn(text: String) -> [String] Never! {
+    loop line in text.split("\n") -> if line.ends_with("\r") -> core_decl_slice(line, 0, core_decl_len(line) - 1) else -> line.copy()
+}
+
+// Whether path `a` sorts before path `b` the way a sorted directory walk
+// visits them: segment by segment, a directory's files before a sibling
+// file whose name extends the directory's (`Assets/x.jet` before
+// `Assets.jet`).
+core_decl_walk_before: fn(a: String, b: String) -> Bool Never! {
+    left: a.split("/").to_list()
+    right: b.split("/").to_list()
+    loop index in 0..<left.len() {
+        if index >= right.len() -> return false
+        if left[index] == right[index] -> next
+        return core_decl_bytes_before(left[index].bytes(), right[index].bytes())
+    }
+    left.len() < right.len()
+}
+
+core_decl_bytes_before: fn(left: [U8], right: [U8]) -> Bool Never! {
+    loop index in 0..<left.len() {
+        if index >= right.len() -> return false
+        l: Int.from_u8(left[index])
+        r: Int.from_u8(right[index])
+        if l != r -> return l < r
+    }
+    left.len() < right.len()
+}

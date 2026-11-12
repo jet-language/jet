@@ -2118,8 +2118,9 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
   runtime rather than being dispatched into a crypto-only FFI bridge.
 
   The comptime Core registry uses the following namespace classification. The
-  table covers the namespaces of the generated
-  [`CoreCallRows.jet`](../../Compiler/JetFoundation/Source/Registry/CoreCallRows.jet).
+  table covers the namespaces of
+  [`CoreCallRows.jet`](../../Compiler/JetFoundation/Source/Registry/CoreCallRows.jet),
+  which the compiler build computes from Core.jet.
   `Kernel` means that comptime marshals `CtValue` into the exact Prelude part.
   `Intrinsic` means that the evaluator implements a language value operation,
   not a second Core policy. `Host` means that the call crosses an effect or

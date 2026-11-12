@@ -1,0 +1,485 @@
+// The checks of the Core sources CORE_DECLARATIONS names, run where jet_cli
+// embeds those sources (JET_CLI_CORE_SOURCES): every owned member's target is
+// a function its source defines and every owned type a column-0 declaration
+// there; the format rows repeat the EncodingFormat enum of
+// Core/Encoding/Encoding.jet; an owned wrapper that calls a runtime unit
+// instead of its provider leaves its dispatcher row dead; and a Core source
+// that defines a Core.jet enum leaf declares the variants Core.jet lists. A
+// source that breaks one stops the build with every problem. They run in
+// jet_cli, not in jet_foundation, so a Core source edit rebuilds only the
+// package that embeds the sources.
+
+CORE_DECLARATIONS_ENCODING_PATH: "Core/Encoding/Encoding.jet"
+
+// One name an owned wrapper may call a runtime unit through: `alias.` for a
+// unit import, `name(` for an imported unit member.
+CoreDeclRuntimeLocal: struct {
+    local: String
+    unit: String
+}
+
+// One `use` target: its alias ("" for none), its module path and the item
+// list of a `module.[…]` import.
+CoreDeclUse: struct {
+    alias: String
+    target: String
+    items: String?
+}
+
+// `[A-Za-z0-9_.]` from byte `start`: the end of the run.
+core_decl_path_end: fn(bytes: [U8], start: Int) -> Int Never! {
+    end := start
+    loop end < bytes.len() && (core_decl_word(Int.from_u8(bytes[end])) || Int.from_u8(bytes[end]) == 46) -> end += 1
+    end
+}
+
+// Whether byte `at` of `bytes` starts `word` followed by whitespace.
+core_decl_word_then_space: fn(text: String, at: Int, word: String) -> Bool Never! {
+    bytes: text.bytes()
+    end: at + core_decl_len(word)
+    end < bytes.len() && core_decl_slice(text, at, end) == word && core_decl_space(Int.from_u8(bytes[end]))
+}
+
+// The byte of `line` after any `#Attr` or `#Attr("…")` attributes, or -1
+// when an attribute is malformed.
+core_decl_attributes_end: fn(line: String) -> Int Never! {
+    bytes: line.bytes()
+    at := core_decl_skip_space(bytes, 0)
+    loop at < bytes.len() && Int.from_u8(bytes[at]) == 35 {
+        end := core_decl_name_end(bytes, at + 1)
+        if end == at + 1 -> return -1
+        if end + 1 < bytes.len() && Int.from_u8(bytes[end]) == 40 && Int.from_u8(bytes[end + 1]) == 34 {
+            close: core_decl_quote_end(bytes, end + 1)
+            if close < 0 || close + 1 >= bytes.len() || Int.from_u8(bytes[close + 1]) != 41 -> return -1
+            end = close + 2
+        }
+        after: core_decl_after_space(bytes, end)
+        if after < 0 -> return -1
+        at = after
+    }
+    at
+}
+
+// The name of the `name: fn` declaration at byte `at` of `line`, or "".
+core_decl_fn_name_at: fn(line: String, at: Int) -> String Never! {
+    if at < 0 -> return ""
+    bytes: line.bytes()
+    name_end: core_decl_name_end(bytes, at)
+    if name_end == at || !core_decl_tail(line, name_end).starts_with(": fn") -> return ""
+    following: name_end + 4
+    if following < bytes.len() && core_decl_word(Int.from_u8(bytes[following])) -> return ""
+    core_decl_slice(line, at, name_end)
+}
+
+// The name a `name: fn` declaration line declares after any attributes; ""
+// when the line declares none.
+core_decl_fn_name: fn(line: String) -> String Never! {
+    core_decl_fn_name_at(line, core_decl_attributes_end(line))
+}
+
+// core_decl_fn_name, also reading a `pub name: fn` line.
+core_decl_pub_fn_name: fn(line: String) -> String Never! {
+    at: core_decl_attributes_end(line)
+    if at >= 0 && core_decl_word_then_space(line, at, "pub") -> return core_decl_fn_name_at(line, core_decl_skip_space(line.bytes(), at + 3))
+    core_decl_fn_name_at(line, at)
+}
+
+// The end of `<…>` at byte `at`, `at` when no `<` is there, or -1 when it
+// is not closed.
+core_decl_generics_end: fn(bytes: [U8], at: Int) -> Int Never! {
+    if at >= bytes.len() || Int.from_u8(bytes[at]) != 60 -> return at
+    end := at + 1
+    loop end < bytes.len() && Int.from_u8(bytes[end]) != 62 -> end += 1
+    if end >= bytes.len() -> return -1
+    end + 1
+}
+
+// Whether byte `at` is a `:` that no `=` follows.
+core_decl_declares_at: fn(bytes: [U8], at: Int) -> Bool Never! {
+    if at < 0 || at >= bytes.len() || Int.from_u8(bytes[at]) != 58 -> return false
+    at + 1 >= bytes.len() || Int.from_u8(bytes[at + 1]) != 61
+}
+
+// The name of a column-0 declaration (`Name: struct …`, an alias `Name: Type`
+// or `Name<T>: Type<T>`, after an optional `pub`), or "". Any other column-0
+// declaration counts too, which only widens the owned-type existence check.
+core_decl_type_name: fn(line: String) -> String Never! {
+    bytes: line.bytes()
+    at: if core_decl_word_then_space(line, 0, "pub") -> core_decl_skip_space(bytes, 3) else -> 0
+    name_end: core_decl_name_end(bytes, at)
+    if name_end == at || !core_decl_declares_at(bytes, core_decl_generics_end(bytes, name_end)) -> return ""
+    core_decl_slice(line, at, name_end)
+}
+
+// Whether `line` starts a top-level item: a column-0 declaration (dotted
+// names allowed, after an optional `pub` or `priv`), an `impl` or an
+// attribute.
+core_decl_top_declaration: fn(line: String) -> Bool Never! {
+    bytes: line.bytes()
+    if bytes.len() == 0 -> return false
+    if Int.from_u8(bytes[0]) == 35 -> return true
+    if line.starts_with("impl") && (bytes.len() == 4 || !core_decl_word(Int.from_u8(bytes[4]))) -> return true
+    at := 0
+    if core_decl_word_then_space(line, 0, "pub") || core_decl_word_then_space(line, 0, "priv") {
+        at = core_decl_skip_space(bytes, if line.starts_with("pub") -> 3 else -> 4)
+    }
+    if core_decl_name_end(bytes, at) == at -> return false
+    core_decl_declares_at(bytes, core_decl_generics_end(bytes, core_decl_path_end(bytes, at)))
+}
+
+// The target of a `use NAME…` line; `text` is a comment-free, trimmed line.
+core_decl_use_line: fn(text: String) -> CoreDeclUse? Never! {
+    if !core_decl_word_then_space(text, 0, "use") -> return None
+    core_decl_use_at(text, core_decl_skip_space(text.bytes(), 3))
+}
+
+// The target of one entry of a `use {` block, a comment-free, trimmed line.
+core_decl_use_entry: fn(text: String) -> CoreDeclUse? Never! {
+    core_decl_use_at(text, 0)
+}
+
+// The `use` target starting at byte `start` of `text`.
+core_decl_use_at: fn(text: String, start: Int) -> CoreDeclUse? Never! {
+    bytes: text.bytes()
+    at := start
+    alias := ""
+    alias_end: core_decl_name_end(bytes, at)
+    if alias_end > at && alias_end < bytes.len() && Int.from_u8(bytes[alias_end]) == 58 {
+        alias = core_decl_slice(text, at, alias_end)
+        at = core_decl_skip_space(bytes, alias_end + 1)
+    }
+    if core_decl_name_end(bytes, at) == at -> return None
+    path_end: core_decl_path_end(bytes, at)
+    if core_decl_skip_space(bytes, path_end) >= bytes.len() -> return Val(CoreDeclUse{alias: alias, target: core_decl_slice(text, at, path_end), items: None})
+    if Int.from_u8(bytes[path_end]) != 91 || path_end - at < 2 || Int.from_u8(bytes[path_end - 1]) != 46 -> return None
+    close: core_decl_tail(text, path_end + 1).find("]")
+    if close < 0 || core_decl_skip_space(bytes, path_end + 2 + close) < bytes.len() -> return None
+    Val(CoreDeclUse{alias: alias, target: core_decl_slice(text, at, path_end - 1), items: Val(core_decl_slice(text, path_end + 1, path_end + 1 + close))})
+}
+
+// `local` occurs in `body` after a byte that does not continue a name.
+core_decl_calls_local: fn(body: String, local: String) -> Bool Never! {
+    bytes: body.bytes()
+    start := 0
+    loop {
+        found: core_decl_tail(body, start).find(local)
+        if found < 0 -> return false
+        at: start + found
+        if at == 0 -> return true
+        before: Int.from_u8(bytes[at - 1])
+        if !core_decl_word(before) && before != 46 -> return true
+        start = at + 1
+    }
+}
+
+// The locals one `use` target binds when it names a runtime unit.
+core_decl_runtime_locals: fn(entry: CoreDeclUse, units: [String]) -> [CoreDeclRuntimeLocal] Never! {
+    out := [CoreDeclRuntimeLocal]{}
+    if entry.items == .Val(list) {
+        if !units.contains(entry.target) -> return out
+        loop item in core_decl_names(list) {
+            parts: loop part in item.split(" as ") -> part.trim()
+            name: if parts.len() > 1 -> parts[1] else -> parts[0]
+            out.push(CoreDeclRuntimeLocal{local: "{name}(", unit: entry.target.copy()})
+        }
+        return out
+    }
+    segments: entry.target.split(".").to_list()
+    if units.contains(entry.target) {
+        name: if entry.alias != "" -> entry.alias.copy() else -> segments[segments.len() - 1]
+        out.push(CoreDeclRuntimeLocal{local: "{name}.", unit: entry.target.copy()})
+        return out
+    }
+    if segments.len() < 2 -> return out
+    unit: segments[0..<segments.len() - 1].join(".")
+    if !units.contains(unit) -> return out
+    name: if entry.alias != "" -> entry.alias.copy() else -> segments[segments.len() - 1]
+    out.push(CoreDeclRuntimeLocal{local: "{name}(", unit: unit})
+    out
+}
+
+// Every local a source's `use` lines bind to a runtime unit.
+core_decl_source_locals: fn(lines: [String], units: [String]) -> [CoreDeclRuntimeLocal] Never! {
+    locals := [CoreDeclRuntimeLocal]{}
+    in_block := false
+    loop line in lines {
+        if in_block {
+            if line.trim() == "}}" {
+                in_block = false
+                next
+            }
+            if core_decl_use_entry(core_decl_line(line)) == .Val(entry) {
+                loop local in core_decl_runtime_locals(entry, units) -> locals.push(local)
+            }
+            next
+        }
+        if line.trim() == "use {{" {
+            in_block = true
+            next
+        }
+        if core_decl_use_line(core_decl_line(line)) == .Val(entry) {
+            loop local in core_decl_runtime_locals(entry, units) -> locals.push(local)
+        }
+    }
+    locals
+}
+
+// The runtime unit the owned wrapper `member: fn` of a source calls instead
+// of its `module_name.member` provider, or "" when it calls none.
+core_decl_wrapper_unit: fn(lines: [String], locals: [CoreDeclRuntimeLocal], module_name: String, member: String) -> String Never! {
+    start := -1
+    loop (index, line) in lines {
+        if core_decl_fn_name(line) == member {
+            start = index
+            break
+        }
+    }
+    if start < 0 -> return ""
+    end := start + 1
+    loop end < lines.len() && !core_decl_top_declaration(lines[end]) -> end += 1
+    body: lines[start..<end].join("\n")
+    if body.contains("{module_name}.{member}(") -> return ""
+    loop entry in locals {
+        if core_decl_calls_local(body, entry.local) -> return entry.unit.copy()
+    }
+    ""
+}
+
+// What is wrong with the EncodingFormat enum of `encoding`, or "".
+core_decl_encoding_problem: fn(encoding: String, formats: [CoreDeclarationFormat]) -> String Never! {
+    head: "EncodingFormat: enum {{\n"
+    open: if encoding.starts_with(head) -> 0 else -> encoding.find("\n{head}")
+    if open < 0 -> return "{CORE_DECLARATIONS_ENCODING_PATH} declares no EncodingFormat enum"
+    body_start: if open == 0 -> core_decl_len(head) else -> open + 1 + core_decl_len(head)
+    close: core_decl_tail(encoding, body_start).find("\n}}")
+    if close < 0 -> return "{CORE_DECLARATIONS_ENCODING_PATH} declares no EncodingFormat enum"
+    // The cases are the body's first lines; a blank line ends them, and the
+    // enum's own methods and impls follow it.
+    cases := [String]{}
+    loop line in core_decl_slice(encoding, body_start, body_start + close).split("\n") {
+        trimmed: line.trim()
+        if trimmed == "" && cases.len() > 0 -> break
+        if trimmed != "" -> cases.push(trimmed)
+    }
+    variants: loop format in formats -> format.variant
+    if cases.join(" ") != variants.join(" ") -> return "{CORE_DECLARATIONS_ENCODING_PATH}: EncodingFormat cases ({cases.join(" ")}) differ from the format_row lines in {CORE_DECLARATIONS_CORE_PATH} ({variants.join(" ")}); edit the rows, then make the enum repeat them in order"
+    loop format in formats {
+        if !encoding.contains(".{format.variant} -> \"{format.label}\"") -> return "{CORE_DECLARATIONS_ENCODING_PATH}: EncodingFormat.as_str does not label .{format.variant} as \"{format.label}\" like its format_row at {CORE_DECLARATIONS_CORE_PATH}:{format.line}"
+    }
+    ""
+}
+
+// The byte offset just inside `<name>: enum {` in one Core source text (at a
+// line start after spaces or tabs and an optional `pub`), or -1 when the text
+// does not declare it (a compiler-owned family).
+core_decl_enum_body_start: fn(text: String, name: String) -> Int Never! {
+    bytes: text.bytes()
+    needle: "{name}:"
+    start := 0
+    loop {
+        found: core_decl_tail(text, start).find(needle)
+        if found < 0 -> return -1
+        at: start + found
+        start = at + 1
+        back := at
+        loop back > 0 && (Int.from_u8(bytes[back - 1]) == 32 || Int.from_u8(bytes[back - 1]) == 9) -> back -= 1
+        line_start := back == 0 || Int.from_u8(bytes[back - 1]) == 10
+        if !line_start {
+            word := at
+            loop word > 0 && core_decl_space(Int.from_u8(bytes[word - 1])) -> word -= 1
+            if word < at && word >= 3 && core_decl_slice(text, word - 3, word) == "pub" {
+                pub_start := word - 3
+                loop pub_start > 0 && (Int.from_u8(bytes[pub_start - 1]) == 32 || Int.from_u8(bytes[pub_start - 1]) == 9) -> pub_start -= 1
+                line_start = pub_start == 0 || Int.from_u8(bytes[pub_start - 1]) == 10
+            }
+        }
+        if !line_start -> next
+        keyword: core_decl_skip_space(bytes, at + core_decl_len(needle))
+        if core_decl_slice(text, keyword, if keyword + 4 <= bytes.len() -> keyword + 4 else -> bytes.len()) != "enum" -> next
+        brace: core_decl_skip_space(bytes, keyword + 4)
+        if brace < bytes.len() && Int.from_u8(bytes[brace]) == 123 -> return brace + 1
+    }
+}
+
+// The variant names of the enum body at byte `open`: the upper-case names at
+// its top level; payloads, discriminants and methods are skipped.
+core_decl_enum_variants: fn(text: String, open: Int) -> [String] Never! {
+    bytes: text.bytes()
+    end := open
+    depth := 1
+    loop depth > 0 && end < bytes.len() {
+        if Int.from_u8(bytes[end]) == {
+            123 -> depth += 1
+            125 -> depth -= 1
+            else -> {}
+        }
+        end += 1
+    }
+    kept: loop line in core_decl_slice(text, open, end - 1).split("\n") -> if line.find("//") < 0 -> line.copy() else -> core_decl_slice(line, 0, line.find("//"))
+    body: kept.join("\n")
+    code_bytes: body.bytes()
+    variants := [String]{}
+    nesting := 0
+    index := 0
+    loop index < code_bytes.len() {
+        code: Int.from_u8(code_bytes[index])
+        if code == 40 || code == 91 || code == 123 {
+            nesting += 1
+            index += 1
+            next
+        }
+        if code == 41 || code == 93 || code == 125 {
+            nesting -= 1
+            index += 1
+            next
+        }
+        if nesting != 0 || !(core_decl_lower(code) || core_decl_upper(code) || code == 95) {
+            index += 1
+            next
+        }
+        word_end := index + 1
+        loop word_end < code_bytes.len() && core_decl_word(Int.from_u8(code_bytes[word_end])) -> word_end += 1
+        word: core_decl_slice(body, index, word_end)
+        if word == "fn" || word == "impl" -> break
+        if core_decl_upper(code) -> variants.push(word)
+        index = word_end
+    }
+    variants
+}
+
+// The text of the source at `path` among `sources`, if any.
+core_decl_source_text: fn(sources: [CoreDeclarationFile], path: String) -> String? Never! {
+    loop file in sources {
+        if file.path == path -> return Val(file.text.copy())
+    }
+    None
+}
+
+// Every problem with the sources `declared` names, in check order.
+core_declarations_source_problems: fn(declared: CoreDeclarations, sources: [CoreDeclarationFile]) -> [String] Never! {
+    problems := [String]{}
+    loop file in sources {
+        if !file.path.starts_with("Core/") -> problems.push("Core source row {file.path} is outside Core/")
+    }
+    targets := [String: String]{}
+    loop row in declared.dispatchers {
+        if row.kind == "receiver" || row.constructor != "CoreCallRecord::source_owned" -> next
+        targets["{row.module_name}.{row.record.member}"] = row.record.source_target ?? row.record.member
+    }
+    units: loop row in declared.runtime -> row.module_name
+    loop row in declared.source_rows {
+        found: core_decl_source_text(sources, row.path)
+        if found == None {
+            problems.push("{CORE_DECLARATIONS_CORE_PATH}:{row.line}: Core source module path {row.path} is not a Core source row")
+            next
+        }
+        text: found
+        lines: core_decl_source_lines(text)
+        functions: loop line in lines if core_decl_pub_fn_name(line) != "" -> core_decl_pub_fn_name(line)
+        loop member in row.members {
+            target: targets.get("{row.module_name}.{member}") ?? member
+            if !functions.contains(target) -> problems.push("{CORE_DECLARATIONS_CORE_PATH}:{row.line}: Core source module does not define owned member `{row.module_name}.{member}` target `{target}` in {row.path}")
+        }
+        types: loop line in lines if core_decl_type_name(line) != "" -> core_decl_type_name(line)
+        loop leaf in row.owned_types {
+            if !types.contains(leaf) -> problems.push("{CORE_DECLARATIONS_CORE_PATH}:{row.line}: Core source module does not declare owned type `{row.module_name}.{leaf}` in {row.path}")
+        }
+        // Cutover end state: once an owned wrapper calls a runtime unit
+        // instead of its `core.<module>.<member>` provider, the dispatcher
+        // row (and the symbol it names) is dead and must go in the same change.
+        locals: core_decl_source_locals(lines, units)
+        loop dispatcher in declared.dispatchers {
+            if dispatcher.kind == "receiver" || dispatcher.module_name != row.module_name || !row.members.contains(dispatcher.member) -> next
+            if core_decl_first_owner(declared.source_rows, dispatcher.module_name, dispatcher.member) != row.line -> next
+            unit: core_decl_wrapper_unit(lines, locals, row.module_name, dispatcher.member)
+            if unit != "" -> problems.push("{CORE_DECLARATIONS_CORE_PATH}:{dispatcher.line}: dispatcher row `{dispatcher.module_name}.{dispatcher.member}` is dead: its owned wrapper `{dispatcher.member}: fn` in {row.path} (owns at line {row.line}) calls runtime unit `{unit}` instead of the provider; delete the row and the symbol it names")
+        }
+        // A Core.jet enum leaf of this module that the source defines lists
+        // the variants the source declares.
+        owner: core_declarations_module(declared.modules, row.module_name) ?? next
+        loop leaf in owner.types {
+            if leaf.generic_arity > 0 || leaf.variants.len() == 0 -> next
+            open: core_decl_enum_body_start(text, leaf.name)
+            if open < 0 -> next
+            listed: core_decl_enum_variants(text, open).join("|")
+            variants: leaf.variants.join("|")
+            if listed != variants -> problems.push("{CORE_DECLARATIONS_CORE_PATH}:{owner.line}: Core enum leaf {leaf.name} of {owner.name} lists {variants} but {row.path} declares {listed}")
+        }
+    }
+    if declared.formats.len() > 0 {
+        if core_decl_source_text(sources, CORE_DECLARATIONS_ENCODING_PATH) == {
+            .Val(encoding) -> {
+                problem: core_decl_encoding_problem(encoding, declared.formats)
+                if problem != "" -> problems.push(problem)
+            }
+            None -> problems.push("{CORE_DECLARATIONS_ENCODING_PATH} is not a Core source row")
+        }
+    }
+    problems
+}
+
+// The Core.jet line of the first `source_module` row of `module_name` that
+// owns `member`, or 0.
+core_decl_first_owner: fn(rows: [CoreDeclarationSource], module_name: String, member: String) -> Int Never! {
+    loop row in rows {
+        if row.module_name == module_name && row.members.contains(member) -> return row.line
+    }
+    0
+}
+
+// `sources`, the text of every CORE_SOURCE_OWNED_ROWS row, once the checks
+// of the sources `declared` names pass; the build stops with every problem
+// otherwise.
+core_declarations_checked_sources: fn(declared: CoreDeclarations, sources: [CoreDeclarationFile]) -> [CoreDeclarationFile] {
+    problems: core_declarations_source_problems(declared, sources)
+    if problems.len() > 0 -> panic(problems.join("\n"))
+    sources.copy()
+}
+
+// The files `text` names with an `embed_bytes` or `embed_file` call outside
+// comments, each once in source order, as written (relative to the file's
+// own directory).
+core_decl_embedded_names: fn(text: String) -> [String] Never! {
+    names := [String]{}
+    loop line in text.split("\n") {
+        if line.trim_start().starts_with("//") -> next
+        loop call in ([String]{"embed_bytes(\"", "embed_file(\""}) {
+            rest := line.copy()
+            loop rest.contains(call) {
+                after: rest.partition(call).tail
+                name: after.partition("\"").head
+                if name != "" && !names.contains(name) -> names.push(name.copy())
+                rest = after.copy()
+            }
+        }
+    }
+    names
+}
+
+// The repository directory of the Core file at `path` (`Core/Ui` for
+// `Core/Ui/Xkb.jet`).
+core_decl_directory: fn(path: String) -> String Never! {
+    parts: path.split("/").to_list()
+    kept := [String]{}
+    loop (index, part) in parts {
+        if index + 1 < parts.len() -> kept.push(part.copy())
+    }
+    kept.join("/")
+}
+
+// Every Core asset: each file a source embeds, as a repository path beside
+// that source, once, in row order. A row file another source embeds is
+// already built in as text, so it is not an asset.
+core_declarations_assets: fn(sources: [CoreDeclarationFile]) -> [String] Never! {
+    row_paths: loop file in sources -> file.path
+    assets := [String]{}
+    loop file in sources {
+        directory: core_decl_directory(file.path)
+        loop name in core_decl_embedded_names(file.text) {
+            asset: "{directory}/{name}"
+            if row_paths.contains(asset) || assets.contains(asset) -> next
+            assets.push(asset)
+        }
+    }
+    assets
+}

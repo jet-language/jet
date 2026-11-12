@@ -18,10 +18,6 @@ package: {
 
 use {
     core: core
-    // The Core sources and assets jet was built with (Core/EmbeddedSources.jet),
-    // read only once reached code names toolchain_core_source or
-    // toolchain_core_asset.
-    embedded: __core_embedded_sources
 }
 
 // The first three strings are the existing checked publication ABI facts,
@@ -74,24 +70,6 @@ publish: fn<T>(package: String, module_name: String, panel: String, field: Strin
     // copy: `field` and `value` are read parameters (the caller keeps them); the payload owns its own
     // texts and value. An exact `.move()` of a read parameter is E0201.
     core.devtools.__publish_payload(source, entity, fields, field.copy(), value.copy())
-}
-
-// The text of the Core source row at repository path `path`
-// (`Core/App/App.jet`) as this jet was built with it, or None when no row has
-// that path. core.devtools does not export it: only the compiler's CLI (the
-// jet_cli package) may name it, to read Core from itself when no checkout or
-// JET_TOOLCHAIN_ROOT supplies the Core tree.
-toolchain_core_source: fn(path: String) -> String? Never! {
-    embedded.source_text(path)
-}
-
-// The bytes of the Core asset at repository path `path`
-// (`Core/Ui/XkbTables/keysym_values.bin`), a file a Core source embeds, as this
-// jet was built with it, or None when no Core source embeds that path. Like
-// toolchain_core_source, only the jet_cli package may name it: it answers a
-// Core file's `embed_bytes`/`embed_file` when Core is read from jet itself.
-toolchain_core_asset: fn(path: String) -> [U8]? Never! {
-    embedded.asset_bytes(path)
 }
 
 #Test("devtools identity field envelope has canonical order and exact escapes") {

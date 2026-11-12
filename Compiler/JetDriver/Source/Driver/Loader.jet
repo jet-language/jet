@@ -4007,7 +4007,6 @@ jet_driver_parse_core_source: fn(text: String, module_name: String, owned_member
 // - a trait with an OWNED_TRAITS row is that row (OwnedTraitRows.jet --check);
 // - a struct with an `impl Diagnostic` block is a DIAGNOSTICS row
 //   (DiagnosticRows.jet --check);
-// - `CORE_CALL_EXTENSIONS` is CORE_CALLS rows (CoreSourceRows.jet --check);
 // - the default `Err` struct is the marked declaration of the compiler's
 //   original error module (Items.jet sema_registration_original_error_module,
 //   whose copy `jet build Compiler` regenerates: Toolchain/PreludeSources.jet);
@@ -4048,9 +4047,6 @@ jet_driver_prelude_checked_items: fn(items: [Item], prefix: String, text: String
             .Trait(definition) -> {
                 if owned_trait("{prefix}{definition.name}") != None -> next
             }
-            .Const(definition) -> {
-                if definition.name == "CORE_CALL_EXTENSIONS" -> next
-            }
             .CodeModule(code_module) -> {
                 if code_module.body == .Val(body) {
                     nested: jet_driver_prelude_checked_items(body, "{prefix}{code_module.name}.", text, diagnostics)
@@ -4061,7 +4057,7 @@ jet_driver_prelude_checked_items: fn(items: [Item], prefix: String, text: String
                     next
                 }
             }
-            .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Tag(_) | .Impl(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .FactDecl(_) -> {}
+            .Const(_) | .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Tag(_) | .Impl(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .FactDecl(_) -> {}
         }
         kept.push(item.copy())
     }

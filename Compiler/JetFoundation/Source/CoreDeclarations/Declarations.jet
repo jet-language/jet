@@ -1,0 +1,1031 @@
+// What Compiler/Prelude/Core.jet declares, read while the compiler builds
+// (CORE_DECLARATIONS): its closed line grammar of `bootstrap`, `root_types`,
+// `namespace_only`, `format_row`, `dispatcher_row`, `source_module` and
+// `module` lines, the private parts of Compiler/Prelude/CoreSourceParts.tsv and
+// the runtime units (`Core/<area>/Runtime/**/<Unit>.jet`). The Core tables
+// (CORE_SOURCE_OWNED_ROWS, CORE_CALLS, CORE_MODULE_EXPORTS, CORE_ENUM_ROWS,
+// CORE_MODULE_DECLARATIONS) are computed from it; nothing else reads Core.jet.
+// A declaration that breaks the grammar or the checks below stops the build,
+// naming the file and line. The checks that read the Core sources the
+// declarations name run where jet_cli embeds those sources
+// (core_declarations_checked_sources).
+
+CORE_DECLARATIONS_CORE_PATH: "Compiler/Prelude/Core.jet"
+CORE_DECLARATIONS_PARTS_PATH: "Compiler/Prelude/CoreSourceParts.tsv"
+CORE_DECLARATIONS_SURFACE_PATH: "Compiler/JetFoundation/Data/Syntax/CoreSurface.jet"
+
+// One toolchain file a comptime read embedded: its root-relative path and text.
+CoreDeclarationFile: struct {
+    path: String
+    text: String
+}
+
+// One exported Core type: its kind (`plain` or `crypto_nominal`), its enum
+// variants, its generic arity (0 when it takes none) and, until it is
+// resolved, the module a `from(core.x)` re-export names.
+CoreDeclarationType: struct {
+    name: String
+    kind: String
+    variants: [String]
+    generic_arity: Int
+    from_module: String
+}
+
+// One `module` line; `line` is its Core.jet line.
+CoreDeclarationModule: struct {
+    name: String
+    members: [String]
+    types: [CoreDeclarationType]
+    dependencies: [String]
+    line: Int
+}
+
+CoreBootstrapStep: struct {
+    name: String
+    dependencies: [String]
+}
+
+// One CORE_SOURCE_OWNED_ROWS row before its type exports are looked up: a
+// Core.jet `source_module` line (`line` is its Core.jet line), a private part
+// or a runtime unit (`line` 0). `owned_types` are a Core.jet row's
+// source-owned nominals.
+CoreDeclarationSource: struct {
+    module_name: String
+    alias: String
+    path: String
+    owner: String
+    members: [String]
+    owned_types: [String]
+    impl_types: [String]
+    runtime: Bool
+    line: Int
+}
+
+// One `dispatcher_row`: its kind, its module ("" for `-`) and member, its
+// Core.jet line, the Rust constructor its expression starts with and the
+// record the expression builds.
+CoreDeclarationDispatcher: struct {
+    kind: String
+    module_name: String
+    member: String
+    line: Int
+    constructor: String
+    record: CoreCallRecord
+}
+
+// One `format_row <Variant> <module> <Label>` line.
+CoreDeclarationFormat: struct {
+    variant: String
+    module_name: String
+    label: String
+    line: Int
+}
+
+// Everything Core.jet declares, in declaration order, every `from()` type
+// resolved to its canonical definition, with the parts and runtime units.
+CoreDeclarations: struct {
+    source_rows: [CoreDeclarationSource]
+    parts: [CoreDeclarationSource]
+    runtime: [CoreDeclarationSource]
+    modules: [CoreDeclarationModule]
+    bootstraps: [CoreBootstrapStep]
+    root_types: [String]
+    namespace_only: [String]
+    dispatchers: [CoreDeclarationDispatcher]
+    formats: [CoreDeclarationFormat]
+}
+
+// One word or bracketed body of a Core.jet line and the byte after it.
+CoreDeclTake: struct {
+    text: String
+    end: Int
+}
+
+// Every Syntax file, whose string constants dispatcher rows may name.
+CORE_DECLARATIONS_SYNTAX_FILES: comptime { loop path in find("toolchain:Compiler/JetFoundation/Data/Syntax/*.jet") -> CoreDeclarationFile{path: path.copy(), text: embed_file("toolchain:{path}")} }
+
+// Every runtime unit file (`Core/<area>/Runtime/**/<Unit>.jet`).
+CORE_DECLARATIONS_RUNTIME_FILES: comptime { loop path in find("toolchain:Core/*/Runtime/**/*.jet") -> CoreDeclarationFile{path: path.copy(), text: embed_file("toolchain:{path}")} }
+
+CORE_DECLARATIONS: comptime {
+    core_declarations_built(
+        embed_file("toolchain:{CORE_DECLARATIONS_CORE_PATH}"),
+        embed_file("toolchain:{CORE_DECLARATIONS_PARTS_PATH}"),
+        CORE_DECLARATIONS_SYNTAX_FILES,
+        CORE_DECLARATIONS_RUNTIME_FILES,
+        EFFECT_VOCABULARY_ROWS
+    )
+}
+
+// Core.jet's bootstrap steps, in order (`jet inspect structure core`).
+CORE_BOOTSTRAP_STEPS: comptime { CORE_DECLARATIONS.bootstraps }
+
+// Core.jet's `root_types`: the Core value types a bare spelling names wherever
+// Core is loaded, so a parameterless Core alias of one of them stays a
+// candidate owner of that bare name.
+CORE_ROOT_TYPES: comptime { CORE_DECLARATIONS.root_types }
+
+// Core.jet's `module` lines, in order, every type resolved.
+CORE_MODULE_DECLARATIONS: comptime { core_declarations_modules(CORE_DECLARATIONS) }
+
+// The declarations, or the build stops with what is wrong.
+core_declarations_built: fn(core: String, parts: String, syntax: [CoreDeclarationFile], runtime: [CoreDeclarationFile], effects: [EffectVocabularyRow]) -> CoreDeclarations {
+    if core_declarations_read(core, parts, syntax, runtime, effects) == {
+        .Ok(declared) -> declared
+        .Err(error) -> panic(error.message)
+    }
+}
+
+core_declarations_modules: fn(declared: CoreDeclarations) -> [CoreModuleDeclaration] Never! {
+    out := [CoreModuleDeclaration]{}
+    loop entry in declared.modules {
+        exports: loop leaf in entry.types -> CoreModuleTypeExport{name: leaf.name.copy(), kind: core_declarations_leaf_kind(leaf)}
+        out.push(CoreModuleDeclaration{module_name: entry.name.copy(), members: entry.members.copy(), type_exports: exports, dependencies: entry.dependencies.copy(), line: entry.line})
+    }
+    out
+}
+
+// A type's leaf kind: a generic arity first, then enum variants.
+core_declarations_leaf_kind: fn(leaf: CoreDeclarationType) -> CoreLeafKind Never! {
+    if {
+        leaf.generic_arity > 0 -> CoreLeafKind.Generic{arity: leaf.generic_arity}
+        leaf.variants.len() > 0 -> CoreLeafKind.Enum{variants: leaf.variants.copy()}
+        leaf.kind == "crypto_nominal" -> CoreLeafKind.CryptoNominal
+        else -> CoreLeafKind.Plain
+    }
+}
+
+// The `module` line named `name`, if any.
+core_declarations_module: fn(modules: [CoreDeclarationModule], name: String) -> CoreDeclarationModule? Never! {
+    loop entry in modules {
+        if entry.name == name -> return Val(entry.copy())
+    }
+    None
+}
+
+core_decl_fail_at: fn(line: Int, message: String) -> CoreDeclarationError Never! {
+    core_decl_fail("{CORE_DECLARATIONS_CORE_PATH}:{line}: {message}")
+}
+
+core_decl_at: fn(line: Int, error: CoreDeclarationError) -> CoreDeclarationError Never! {
+    core_decl_fail_at(line, error.message)
+}
+
+// ---- Syntax constants ---------------------------------------------------
+
+// The text of a Jet string literal's content: braces doubled, escapes
+// `\n \r \t \\ \"`, the escapes the Jet lexer knows.
+core_decl_jet_string_text: fn(content: String, context: String) -> String CoreDeclarationError! {
+    bytes: content.bytes()
+    out := [U8]{}
+    index := 0
+    loop index < bytes.len() {
+        code: Int.from_u8(bytes[index])
+        index += 1
+        if code == 123 || code == 125 {
+            if index >= bytes.len() || Int.from_u8(bytes[index]) != code -> return Err(core_decl_fail("interpolating Jet string in {context}"))
+            out.push(bytes[index])
+            index += 1
+            next
+        }
+        if code != 92 {
+            out.push(bytes[index - 1])
+            next
+        }
+        escape: if index < bytes.len() -> Int.from_u8(bytes[index]) else -> -1
+        index += 1
+        simple: if escape == {
+            110 -> 10
+            114 -> 13
+            116 -> 9
+            92 -> 92
+            34 -> 34
+            else -> -1
+        }
+        if simple < 0 -> return Err(core_decl_fail("unsupported Jet string escape in {context}"))
+        out.push(U8{simple})
+    }
+    Ok(String.from_bytes(out) ?? return Err(core_decl_fail("Jet string in {context} is not UTF-8")))
+}
+
+// The string constants of the Syntax registry, the names a dispatcher row
+// may spell instead of a literal: the `NAME: "text"` and
+// `NAME: String.from_bytes([U8]{…})` lines of every Syntax file.
+core_decl_syntax_constants: fn(syntax: [CoreDeclarationFile]) -> [String: String] CoreDeclarationError! {
+    constants := [String: String]{}
+    loop file in syntax {
+        loop line in file.text.split("\n") {
+            bytes: line.bytes()
+            colon: line.find(": ")
+            if colon <= 0 || !core_decl_is_constant(core_decl_slice(line, 0, colon)) -> next
+            name: core_decl_slice(line, 0, colon)
+            open: colon + 2
+            if open < bytes.len() && Int.from_u8(bytes[open]) == 34 {
+                close: core_decl_quote_end(bytes, open)
+                if close < 0 -> next
+                constants[name] = core_decl_jet_string_text(core_decl_slice(line, open + 1, close), "{file.path} {name}") ?? return Err(err)
+                next
+            }
+            rest: core_decl_tail(line, open)
+            if !rest.starts_with("String.from_bytes([U8]{{") || !rest.ends_with("}})") -> next
+            items: core_decl_slice(rest, core_decl_len("String.from_bytes([U8]{{"), core_decl_len(rest) - 2)
+            text_bytes := [U8]{}
+            listed := true
+            loop item in items.split(",") {
+                value: item.trim()
+                if !core_decl_is_digits(value) {
+                    listed = false
+                    break
+                }
+                text_bytes.push(U8{Int.parse(value) ?? 0})
+            }
+            if !listed -> next
+            constants[name] = String.from_bytes(text_bytes) ?? return Err(core_decl_fail("{file.path}: a String.from_bytes constant is not UTF-8"))
+        }
+    }
+    Ok(constants)
+}
+
+// ---- Core.jet line grammar ----------------------------------------------
+
+// The first byte after the whitespace at byte `at`, or -1 when none is there.
+core_decl_after_space: fn(bytes: [U8], at: Int) -> Int Never! {
+    if at >= bytes.len() || !core_decl_space(Int.from_u8(bytes[at])) -> return -1
+    core_decl_skip_space(bytes, at)
+}
+
+// The run of non-space bytes after the whitespace at byte `at`.
+core_decl_take_word: fn(line: String, at: Int) -> CoreDeclTake? Never! {
+    bytes: line.bytes()
+    start: core_decl_after_space(bytes, at)
+    if start < 0 || start >= bytes.len() -> return None
+    end := start
+    loop end < bytes.len() && !core_decl_space(Int.from_u8(bytes[end])) -> end += 1
+    Val(CoreDeclTake{text: core_decl_slice(line, start, end), end: end})
+}
+
+// The body between byte `open` and the first byte `close` after the
+// whitespace at byte `at`.
+core_decl_take_block: fn(line: String, at: Int, open: Int, close: Int) -> CoreDeclTake? Never! {
+    bytes: line.bytes()
+    start: core_decl_after_space(bytes, at)
+    if start < 0 || start >= bytes.len() || Int.from_u8(bytes[start]) != open -> return None
+    end := start + 1
+    loop end < bytes.len() && Int.from_u8(bytes[end]) != close -> end += 1
+    if end >= bytes.len() -> return None
+    Val(CoreDeclTake{text: core_decl_slice(line, start + 1, end), end: end + 1})
+}
+
+// `<keyword> <open>…<close>` after byte `at`: its body, an empty body ending
+// at `at` when the keyword is absent, or None when the keyword has no body.
+core_decl_optional_block: fn(line: String, at: Int, keyword: String, open: Int, close: Int) -> CoreDeclTake? Never! {
+    word: core_decl_take_word(line, at) ?? return Val(CoreDeclTake{text: "", end: at})
+    if word.text != keyword -> return Val(CoreDeclTake{text: "", end: at})
+    core_decl_take_block(line, word.end, open, close)
+}
+
+// The word after byte `at` when it is exactly `keyword`.
+core_decl_take_keyword: fn(line: String, at: Int, keyword: String) -> Int? Never! {
+    word: core_decl_take_word(line, at) ?? return None
+    if word.text != keyword -> return None
+    Val(word.end)
+}
+
+// `bootstrap NAME depends_on [DEPENDENCIES]`: the name and the list body.
+core_decl_bootstrap_line: fn(line: String, at: Int) -> [String]? Never! {
+    name: core_decl_take_word(line, at) ?? return None
+    if !core_decl_is_name(name.text, ".-") -> return None
+    after: core_decl_take_keyword(line, name.end, "depends_on") ?? return None
+    list: core_decl_take_block(line, after, 91, 93) ?? return None
+    if list.end != core_decl_len(line) -> return None
+    Val([String]{name.text, list.text})
+}
+
+// `root_types { … }` or `namespace_only { … }`: the body.
+core_decl_braced_line: fn(line: String, at: Int) -> String? Never! {
+    body: core_decl_take_block(line, at, 123, 125) ?? return None
+    if body.end != core_decl_len(line) -> return None
+    Val(body.text)
+}
+
+// `format_row VARIANT module LABEL`.
+core_decl_format_line: fn(line: String, at: Int) -> [String]? Never! {
+    variant: core_decl_take_word(line, at) ?? return None
+    module_name: core_decl_take_word(line, variant.end) ?? return None
+    label: core_decl_take_word(line, module_name.end) ?? return None
+    if label.end != core_decl_len(line) || !core_decl_is_constant(variant.text) || !core_decl_is_name(module_name.text, ".") || !core_decl_is_constant(label.text) -> return None
+    Val([String]{variant.text, module_name.text, label.text})
+}
+
+// `dispatcher_row <plain|adapter|receiver> <module> <member> | <expression>`.
+core_decl_dispatcher_line: fn(line: String, at: Int) -> [String]? Never! {
+    kind: core_decl_take_word(line, at) ?? return None
+    if kind.text != "plain" && kind.text != "adapter" && kind.text != "receiver" -> return None
+    module_name: core_decl_take_word(line, kind.end) ?? return None
+    member: core_decl_take_word(line, module_name.end) ?? return None
+    bar: core_decl_take_keyword(line, member.end, "|") ?? return None
+    start: core_decl_after_space(line.bytes(), bar)
+    if start < 0 || start >= core_decl_len(line) -> return None
+    Val([String]{kind.text, module_name.text, member.text, core_decl_tail(line, start)})
+}
+
+// `source_module NAME path PATH alias ALIAS owns { … } [types { … }] [impls { … }]`.
+core_decl_source_line: fn(line: String, at: Int) -> [String]? Never! {
+    name: core_decl_take_word(line, at) ?? return None
+    after_path: core_decl_take_keyword(line, name.end, "path") ?? return None
+    path: core_decl_take_word(line, after_path) ?? return None
+    after_alias: core_decl_take_keyword(line, path.end, "alias") ?? return None
+    alias: core_decl_take_word(line, after_alias) ?? return None
+    after_owns: core_decl_take_keyword(line, alias.end, "owns") ?? return None
+    owns: core_decl_take_block(line, after_owns, 123, 125) ?? return None
+    types: core_decl_optional_block(line, owns.end, "types", 123, 125) ?? return None
+    impls: core_decl_optional_block(line, types.end, "impls", 123, 125) ?? return None
+    if impls.end != core_decl_len(line) || !core_decl_is_name(name.text, ".") || !core_decl_is_name(alias.text, "") -> return None
+    Val([String]{name.text, path.text, alias.text, owns.text, types.text, impls.text})
+}
+
+// `module NAME exports { … } [types { … }] [depends_on [ … ]]`.
+core_decl_module_line: fn(line: String, at: Int) -> [String]? Never! {
+    name: core_decl_take_word(line, at) ?? return None
+    after_exports: core_decl_take_keyword(line, name.end, "exports") ?? return None
+    exports: core_decl_take_block(line, after_exports, 123, 125) ?? return None
+    types: core_decl_optional_block(line, exports.end, "types", 123, 125) ?? return None
+    dependencies: core_decl_optional_block(line, types.end, "depends_on", 91, 93) ?? return None
+    if dependencies.end != core_decl_len(line) || !core_decl_is_name(name.text, ".") -> return None
+    Val([String]{name.text, exports.text, types.text, dependencies.text})
+}
+
+// A Core.jet list body as declaration names (`[A-Za-z_][A-Za-z0-9_!?]*`).
+core_decl_core_names: fn(list: String, context: String) -> [String] CoreDeclarationError! {
+    values: core_decl_names(list)
+    loop value in values {
+        if !core_decl_is_name(value, "!?") -> return Err(core_decl_fail("invalid Core declaration name `{value}` in {context}"))
+    }
+    Ok(values)
+}
+
+// A Core.jet list body as module paths (`[A-Za-z_][A-Za-z0-9_.]*`).
+core_decl_core_paths: fn(list: String, context: String) -> [String] CoreDeclarationError! {
+    values: core_decl_names(list)
+    loop value in values {
+        if !core_decl_is_name(value, ".") -> return Err(core_decl_fail("invalid Core declaration name `{value}` in {context}"))
+    }
+    Ok(values)
+}
+
+// The argument of `<head>(<argument>)` when `descriptor` is exactly that.
+core_decl_descriptor_argument: fn(descriptor: String, head: String) -> String? Never! {
+    if !descriptor.starts_with("{head}(") || !descriptor.ends_with(")") -> return None
+    Val(core_decl_slice(descriptor, core_decl_len(head) + 1, core_decl_len(descriptor) - 1))
+}
+
+// `Name`, `Name: plain`, `Name: crypto_nominal`, `Name: plain(A|B)`,
+// `Name: generic(N)` or `Name: from(core.x)`.
+core_decl_type: fn(raw: String, context: String) -> CoreDeclarationType CoreDeclarationError! {
+    parts: loop part in raw.split(":") -> part.trim()
+    name: parts[0]
+    if parts.len() > 2 || !core_decl_is_name(name, "") -> return Err(core_decl_fail("invalid Core type export `{raw}` in {context}"))
+    descriptor: if parts.len() == 2 && parts[1] != "" -> parts[1].copy() else -> "plain"
+    kind := descriptor.copy()
+    arity := 0
+    variants := [String]{}
+    from_module := ""
+    if core_decl_descriptor_argument(descriptor, "generic") == .Val(count) && core_decl_is_digits(count) && !count.starts_with("0") {
+        arity = Int.parse(count) ?? 0
+        kind = "plain"
+    }
+    if core_decl_descriptor_argument(descriptor, "plain") == .Val(listed) && !listed.contains("(") && !listed.contains(")") {
+        variants = core_decl_core_names(listed.replace("|", ","), "Core enum `{name}` at {context}") ?? return Err(err)
+        if variants.len() == 0 -> return Err(core_decl_fail("Core enum export has no variants `{raw}` in {context}"))
+        kind = "plain"
+    }
+    if core_decl_descriptor_argument(descriptor, "from") == .Val(reference) && reference.starts_with("core.") && core_decl_is_name(reference.removeprefix("core."), ".") {
+        from_module = reference.copy()
+        kind = "plain"
+    }
+    if kind != "plain" && kind != "crypto_nominal" -> return Err(core_decl_fail("invalid Core type kind `{kind}` in {context}"))
+    seen := [String]{}
+    loop variant in variants {
+        if !core_decl_is_name(variant, "") -> return Err(core_decl_fail("invalid Core enum variant `{variant}` in {context}"))
+        if seen.contains(variant) -> return Err(core_decl_fail("duplicate Core enum variant `{name}` in {context}"))
+        seen.push(variant)
+    }
+    Ok(CoreDeclarationType{name: name.copy(), kind: kind, variants: variants, generic_arity: arity, from_module: from_module})
+}
+
+core_decl_module: fn(groups: [String], number: Int, context: String) -> CoreDeclarationModule CoreDeclarationError! {
+    name: groups[0]
+    members: core_decl_core_names(groups[1], context) ?? return Err(err)
+    seen := [String]{}
+    loop member in members {
+        if seen.contains(member) -> return Err(core_decl_fail("duplicate Core member `{name}.{member}`"))
+        seen.push(member)
+    }
+    types := [CoreDeclarationType]{}
+    seen_types := [String]{}
+    loop raw in core_decl_names(groups[2]) {
+        leaf: core_decl_type(raw, context) ?? return Err(err)
+        if seen_types.contains(leaf.name) -> return Err(core_decl_fail("duplicate Core type export `{name}.{leaf.name}`"))
+        seen_types.push(leaf.name.copy())
+        types.push(leaf)
+    }
+    Ok(CoreDeclarationModule{name: name.copy(), members: members, types: types, dependencies: core_decl_core_paths(groups[3], context) ?? return Err(err), line: number})
+}
+
+// `leaf` of module `module_name` with a `from(core.x)` reference replaced by
+// the kind, variants and arity of the type it names. Re-exports share one
+// definition instead of copying variant lists.
+core_decl_resolve_type: fn(modules: [CoreDeclarationModule], module_name: String, leaf: CoreDeclarationType, visiting: [String]) -> CoreDeclarationType CoreDeclarationError! {
+    if leaf.from_module == "" -> return Ok(leaf.copy())
+    key: "{module_name}.{leaf.name}"
+    if visiting.contains(key) -> return Err(core_decl_fail("cyclic Core type reference `{key}`"))
+    loop owner in modules {
+        if owner.name != leaf.from_module -> next
+        if !owner.members.contains(leaf.name) -> break
+        loop target in owner.types {
+            if target.name != leaf.name -> next
+            nested := visiting.copy()
+            nested.push(key)
+            canonical: core_decl_resolve_type(modules, owner.name, target, nested) ?? return Err(err)
+            return Ok(CoreDeclarationType{name: leaf.name.copy(), kind: canonical.kind.copy(), variants: canonical.variants.copy(), generic_arity: canonical.generic_arity, from_module: ""})
+        }
+        break
+    }
+    Err(core_decl_fail("unknown Core type reference `{leaf.from_module}.{leaf.name}`"))
+}
+
+// A `dispatcher_row`'s module or member may name a Syntax constant.
+core_decl_dispatcher_member: fn(member: String, constants: [String: String]) -> String Never! {
+    if !core_decl_is_constant(member) -> return member.copy()
+    if constants.get(member) == .Val(value) && value != "" -> return value.copy()
+    member.copy()
+}
+
+// `dispatcher_row <kind> <module|-> <member> | <expression>`, evaluated. The
+// record must carry the identity the row's labels name; a receiver row's
+// label is its method or one of its receiver types.
+core_decl_dispatcher: fn(groups: [String], expression: String, number: Int, constants: [String: String]) -> CoreDeclarationDispatcher CoreDeclarationError! {
+    kind: groups[0]
+    written_module: groups[1]
+    member: groups[2]
+    module_name: if written_module == "-" -> "" else -> written_module.copy()
+    if kind == "receiver" && written_module != "-" -> return Err(core_decl_fail("receiver dispatcher row must use `-` for its module"))
+    if kind != "receiver" && !core_decl_is_name(module_name, ".") -> return Err(core_decl_fail("invalid dispatcher module `{module_name}`"))
+    if !core_decl_is_name(member, "!?") -> return Err(core_decl_fail("invalid dispatcher member `{member}`"))
+    evaluated: core_decl_call_record(expression, "Core.jet line {number}", constants) ?? return Err(err)
+    record: evaluated.record.copy()
+    expected: core_decl_dispatcher_member(member, constants)
+    matches: if module_name != "" -> record.module_name == module_name && record.member == expected else -> record.module_name == "" && (record.member == expected || record.receiver_types.contains(member) || record.receiver_types.contains(expected))
+    if !matches {
+        shown: if module_name == "" -> "-" else -> module_name.copy()
+        emitted: if record.module_name == "" -> "-" else -> record.module_name.copy()
+        return Err(core_decl_fail("dispatcher row identity disagrees with emitted adapter: DSL {shown}.{member} vs {evaluated.constructor} {emitted}.{record.member}"))
+    }
+    Ok(CoreDeclarationDispatcher{kind: kind.copy(), module_name: module_name, member: member.copy(), line: number, constructor: evaluated.constructor.copy(), record: record.copy()})
+}
+
+core_decl_position: fn(values: [String], value: String) -> Int Never! {
+    loop (index, item) in values {
+        if item == value -> return index
+    }
+    -1
+}
+
+// What is wrong with the declarations as a whole, or "".
+core_decl_problem: fn(declared: CoreDeclarations) -> String Never! {
+    if declared.bootstraps.len() == 0 -> return "{CORE_DECLARATIONS_CORE_PATH} has no bootstrap declarations"
+    steps: loop step in declared.bootstraps -> step.name
+    loop (position, step) in declared.bootstraps {
+        loop dependency in step.dependencies {
+            at: core_decl_position(steps, dependency)
+            if at < 0 -> return "{CORE_DECLARATIONS_CORE_PATH}: Core bootstrap step `{step.name}` depends on missing step `{dependency}`"
+            if at >= position -> return "{CORE_DECLARATIONS_CORE_PATH}: Core bootstrap order is not deterministic: `{step.name}` precedes dependency `{dependency}`"
+        }
+    }
+    if steps.join(" ") != "Syntax Effects Core Derives" -> return "{CORE_DECLARATIONS_CORE_PATH}: Core bootstrap order must be Syntax -> Effects -> Core -> Derives"
+    module_names: loop entry in declared.modules -> entry.name
+    loop row in declared.source_rows {
+        owner: core_declarations_module(declared.modules, row.module_name) ?? return "{CORE_DECLARATIONS_CORE_PATH}:{row.line}: Core source module names missing Core module `{row.module_name}`"
+        loop member in row.members {
+            if !owner.members.contains(member) -> return "{CORE_DECLARATIONS_CORE_PATH}:{row.line}: Core source module owns undeclared member `{row.module_name}.{member}`"
+        }
+    }
+    loop entry in declared.modules {
+        loop dependency in entry.dependencies {
+            if !module_names.contains(dependency) -> return "{CORE_DECLARATIONS_CORE_PATH}:{entry.line}: Core module `{entry.name}` depends on missing module `{dependency}`"
+        }
+    }
+    loop format in declared.formats {
+        if !module_names.contains(format.module_name) -> return "{CORE_DECLARATIONS_CORE_PATH}:{format.line}: encoding format row names missing Core module `{format.module_name}`"
+    }
+    loop row in declared.dispatchers {
+        if row.kind == "receiver" -> next
+        if row.constructor == "CoreCallRecord::source_owned" {
+            owned := false
+            loop source in declared.source_rows {
+                if source.module_name == row.module_name && source.members.contains(row.record.member) -> owned = true
+            }
+            if !owned -> return "{CORE_DECLARATIONS_CORE_PATH}:{row.line}: source-owned dispatcher row has no owning source_module: {row.module_name}.{row.member}"
+        }
+        if row.kind == "adapter" -> next
+        owner: core_declarations_module(declared.modules, row.module_name) ?? return "{CORE_DECLARATIONS_CORE_PATH}:{row.line}: dispatcher row names missing Core module `{row.module_name}`"
+        if row.kind == "plain" && !owner.members.contains(row.member) -> return "{CORE_DECLARATIONS_CORE_PATH}:{row.line}: dispatcher row is not declared by Core.jet exports: {row.module_name}.{row.member}"
+    }
+    seen := [String]{}
+    loop namespace in declared.namespace_only {
+        if seen.contains(namespace) -> return "{CORE_DECLARATIONS_CORE_PATH}: Core namespace_only declarations contain a duplicate"
+        seen.push(namespace.copy())
+        if !module_names.contains(namespace) -> return "{CORE_DECLARATIONS_CORE_PATH}: Core namespace_only module is not declared: {namespace}"
+    }
+    ""
+}
+
+// ---- Public dispatcher rows -----------------------------------------------
+// Every CoreCallRecord constructor and web-call adapter of a dispatcher row
+// is accountable to the module inventory that feeds the surface ledger;
+// otherwise a stale adapter spelling can become user-visible without a
+// source declaration.
+
+CoreDeclPublic: struct {
+    module_name: String
+    member: String
+    line: Int
+}
+
+// The byte offsets of `CoreCallRecord::new(` and
+// `CoreCallRecord::new_with_coverage(` in `expression`.
+core_decl_constructor_offsets: fn(expression: String) -> [Int] Never! {
+    head: "CoreCallRecord::new"
+    bytes: expression.bytes()
+    out := [Int]{}
+    start := 0
+    loop {
+        found: core_decl_tail(expression, start).find(head)
+        if found < 0 -> return out
+        at: start + found
+        start = at + 1
+        if at > 0 && core_decl_word(Int.from_u8(bytes[at - 1])) -> next
+        rest := core_decl_tail(expression, at + core_decl_len(head))
+        if rest.starts_with("_with_coverage") -> rest = core_decl_tail(rest, core_decl_len("_with_coverage"))
+        if rest.trim().starts_with("(") -> out.push(at)
+    }
+}
+
+// The quoted text at byte `at` of `bytes` with no `\` in it, and the byte
+// after its closing quote; None when none is there.
+core_decl_plain_quoted: fn(text: String, at: Int) -> CoreDeclTake? Never! {
+    bytes: text.bytes()
+    if at >= bytes.len() || Int.from_u8(bytes[at]) != 34 -> return None
+    end := at + 1
+    loop end < bytes.len() {
+        code: Int.from_u8(bytes[end])
+        if code == 92 -> return None
+        if code == 34 -> return Val(CoreDeclTake{text: core_decl_slice(text, at + 1, end), end: end + 1})
+        end += 1
+    }
+    None
+}
+
+// The module and member of every `sema_web_call("<module>", "<member>"`
+// in `expression`.
+core_decl_web_calls: fn(expression: String) -> [[String]] Never! {
+    head: "sema_web_call"
+    bytes: expression.bytes()
+    out := [[String]]{}
+    start := 0
+    loop {
+        found: core_decl_tail(expression, start).find(head)
+        if found < 0 -> return out
+        at: start + found
+        start = at + 1
+        if at > 0 && core_decl_word(Int.from_u8(bytes[at - 1])) -> next
+        open: core_decl_skip_space(bytes, at + core_decl_len(head))
+        if open >= bytes.len() || Int.from_u8(bytes[open]) != 40 -> next
+        module_name: core_decl_plain_quoted(expression, core_decl_skip_space(bytes, open + 1)) ?? next
+        comma: core_decl_skip_space(bytes, module_name.end)
+        if comma >= bytes.len() || Int.from_u8(bytes[comma]) != 44 -> next
+        member: core_decl_plain_quoted(expression, core_decl_skip_space(bytes, comma + 1)) ?? next
+        out.push([String]{module_name.text, member.text})
+        start = member.end
+    }
+}
+
+// A public member: a Core name, or a `\0`-prefixed compiler-private path.
+core_decl_public_member: fn(member: String) -> Bool Never! {
+    if core_decl_is_name(member, "!?") -> return true
+    bytes: member.bytes()
+    if bytes.len() > 0 && Int.from_u8(bytes[0]) == 0 -> return core_decl_is_name(core_decl_tail(member, 1), ".")
+    member.starts_with("\\0") && core_decl_is_name(core_decl_tail(member, 2), ".")
+}
+
+core_decl_register_public: fn(rows: [CoreDeclPublic], module_name: String, member: String, line: Int) -> String Never! {
+    if !core_decl_is_name(module_name, ".") || !core_decl_public_member(member) -> return "{CORE_DECLARATIONS_CORE_PATH}:{line}: malformed CoreCall dispatcher row: invalid module/member"
+    loop seen in rows {
+        if seen.module_name == module_name && seen.member == member -> return "{CORE_DECLARATIONS_CORE_PATH}:{line}: duplicate public dispatcher row `{module_name}.{member}` (also at line {seen.line})"
+    }
+    ""
+}
+
+// What is wrong with the public dispatcher rows, or "". `expressions` are
+// the dispatcher rows' expressions, in row order.
+core_decl_public_problem: fn(declared: CoreDeclarations, expressions: [String], constants: [String: String]) -> String CoreDeclarationError! {
+    rows := [CoreDeclPublic]{}
+    loop (index, row) in declared.dispatchers {
+        expression: expressions[index]
+        context: "Core.jet line {row.line}"
+        loop offset in core_decl_constructor_offsets(expression) {
+            call: core_decl_read_call(expression, offset, context) ?? return Err(core_decl_at(row.line, err))
+            if call.args.len() < 2 -> return Ok("{CORE_DECLARATIONS_CORE_PATH}:{row.line}: malformed CoreCall dispatcher row: invalid module/member")
+            module_name: core_decl_rust_string(call.args[0], context, constants) ?? return Err(core_decl_at(row.line, err))
+            member: core_decl_rust_string(call.args[1], context, constants) ?? return Err(core_decl_at(row.line, err))
+            problem: core_decl_register_public(rows, module_name, member, row.line)
+            if problem != "" -> return Ok(problem)
+            rows.push(CoreDeclPublic{module_name: module_name, member: member, line: row.line})
+        }
+    }
+    loop (index, row) in declared.dispatchers {
+        loop found in core_decl_web_calls(expressions[index]) {
+            problem: core_decl_register_public(rows, found[0], found[1], row.line)
+            if problem != "" -> return Ok(problem)
+            rows.push(CoreDeclPublic{module_name: found[0].copy(), member: found[1].copy(), line: row.line})
+        }
+    }
+    if rows.len() == 0 -> return Ok("{CORE_DECLARATIONS_CORE_PATH}: CoreCall dispatcher table has no public rows")
+    adapter_keys := [String]{}
+    loop row in declared.dispatchers {
+        if row.kind == "adapter" -> adapter_keys.push("{row.module_name}.{core_decl_dispatcher_member(row.member, constants)}")
+    }
+    unknown_modules := [String]{}
+    undeclared := [String]{}
+    loop row in rows {
+        key: "{row.module_name}.{row.member}"
+        if adapter_keys.contains(key) -> next
+        if core_declarations_module(declared.modules, row.module_name) == {
+            .Val(owner) -> if !owner.members.contains(row.member) -> undeclared.push(key)
+            None -> unknown_modules.push(key)
+        }
+    }
+    if unknown_modules.len() > 0 -> return Ok("{CORE_DECLARATIONS_CORE_PATH}: public dispatcher row names a non-ledger module: {unknown_modules.join(", ")}")
+    if undeclared.len() > 0 -> return Ok("{CORE_DECLARATIONS_CORE_PATH}: public dispatcher row is not declared by Core.jet: {undeclared.join(", ")}")
+    Ok("")
+}
+
+// ---- Effect, task, core.mem and core.compiler.lang checks ---------------
+
+// What is wrong with the effect roots the build and policy tables name, or
+// "". Build authority is the ten-effect projection (Net FS IO DB Time Rand
+// Env Exec Log GPU; FFI, Browser and Secret are runtime authority roots, not
+// build grants); Mem and Panic are the deny-only roots, declared with the
+// rest of the vocabulary and refused by a policy but never granted; the
+// irreversible roots are exactly Net, FS, Exec and FFI.
+core_decl_effect_roots_problem: fn(rows: [EffectVocabularyRow]) -> String Never! {
+    roots := [String]{}
+    irreversible := [String]{}
+    loop row in rows {
+        if row.name.contains(".") -> next
+        roots.push(row.name)
+        if row.irreversible -> irreversible.push(row.name)
+    }
+    loop root in ([String]{"Mem", "Panic"}) {
+        if !roots.contains(root) -> return "{EFFECT_VOCABULARY_MACHINE_PATH}: deny-only root {root} is not declared"
+    }
+    loop root in ([String]{"Net", "FS", "IO", "DB", "Time", "Rand", "Env", "Exec", "Log", "GPU"}) {
+        if !roots.contains(root) -> return "{EFFECT_VOCABULARY_MACHINE_PATH}: build effect {root} has no declared root"
+    }
+    expected: [String]{"Net", "FS", "Exec", "FFI"}
+    if irreversible.len() != expected.len() -> return "{EFFECT_VOCABULARY_MACHINE_PATH}: the irreversible effect types must be Net, FS, Exec, and FFI"
+    loop root in irreversible {
+        if !expected.contains(root) -> return "{EFFECT_VOCABULARY_MACHINE_PATH}: the irreversible effect types must be Net, FS, Exec, and FFI"
+    }
+    ""
+}
+
+// What is wrong with the Core module names other tables rely on, or "".
+core_decl_names_problem: fn(declared: CoreDeclarations) -> String Never! {
+    if core_declarations_module(declared.modules, "core.tasks") == None -> return "{CORE_DECLARATIONS_CORE_PATH}: missing canonical core.tasks module"
+    if core_declarations_module(declared.modules, "core.task") != None -> return "{CORE_DECLARATIONS_CORE_PATH}: retired core.task alias is still declared"
+    ""
+}
+
+// What is wrong with the `core.compiler.lang` type `type_name:plain(…)`, or
+// "": it lists `cases`, the effect vocabulary's names, in order.
+core_decl_lang_type_problem: fn(declared: CoreDeclarations, type_name: String, cases: [String], what: String) -> String Never! {
+    owner: core_declarations_module(declared.modules, "core.compiler.lang") ?? return "{CORE_DECLARATIONS_CORE_PATH} declares no `core.compiler.lang` module"
+    loop leaf in owner.types {
+        if leaf.name != type_name -> next
+        if leaf.variants.join("|") == cases.join("|") -> return ""
+        return "{CORE_DECLARATIONS_CORE_PATH}:{owner.line}: the `core.compiler.lang` type `{type_name}:plain({leaf.variants.join("|")})` differs from {what}; write `{type_name}:plain({cases.join("|")})`"
+    }
+    "{CORE_DECLARATIONS_CORE_PATH}:{owner.line}: the `core.compiler.lang` declaration has no `{type_name}:plain(…)` type; write `{type_name}:plain({cases.join("|")})`"
+}
+
+// The `{ … }` body of the Jet list literal declared at `anchor`.
+core_decl_list_body: fn(source: String, anchor: String, path: String) -> String CoreDeclarationError! {
+    start: source.find(anchor)
+    if start < 0 -> return Err(core_decl_fail("{path} has no `{anchor}`"))
+    found: core_decl_tail(source, start).find("{{")
+    if found < 0 -> return Err(core_decl_fail("{path}: `{anchor}` has no list body"))
+    open: start + found
+    bytes: source.bytes()
+    depth := 0
+    quoted := false
+    escaped := false
+    loop index in open..<bytes.len() {
+        code: Int.from_u8(bytes[index])
+        if quoted {
+            if {
+                escaped -> escaped = false
+                code == 92 -> escaped = true
+                code == 34 -> quoted = false
+                else -> {}
+            }
+            next
+        }
+        if code == {
+            34 -> quoted = true
+            123 -> depth += 1
+            125 -> {
+                depth -= 1
+                if depth == 0 -> return Ok(core_decl_slice(source, open + 1, index))
+            }
+            else -> {}
+        }
+    }
+    Err(core_decl_fail("{path}: unterminated `{anchor}` list"))
+}
+
+// A list body's quoted strings and the values of the Syntax constants it
+// names, each once, sorted.
+core_decl_resolve_items: fn(body: String, constants: [String: String]) -> [String] Never! {
+    out := [String]{}
+    bytes: body.bytes()
+    at := 0
+    loop at < bytes.len() {
+        if Int.from_u8(bytes[at]) != 34 {
+            at += 1
+            next
+        }
+        close: core_decl_quote_end(bytes, at)
+        if close < 0 -> break
+        value: core_decl_slice(body, at + 1, close).replace("\\\"", "\"")
+        if !out.contains(value) -> out.push(value)
+        at = close + 1
+    }
+    start := -1
+    loop index in 0..<bytes.len() + 1 {
+        word: index < bytes.len() && core_decl_word(Int.from_u8(bytes[index]))
+        if word {
+            if start < 0 -> start = index
+            next
+        }
+        if start < 0 -> next
+        name: core_decl_slice(body, start, index)
+        start = -1
+        if !core_decl_is_constant(name) -> next
+        if constants.get(name) == .Val(value) && !out.contains(value) -> out.push(value.copy())
+    }
+    out.sort()
+    out
+}
+
+// What is wrong with core.mem's exports, or "": they are exactly the named
+// items of the syntax registry's core.mem gate-tier map.
+core_decl_mem_problem: fn(declared: CoreDeclarations, syntax: [CoreDeclarationFile], constants: [String: String]) -> String CoreDeclarationError! {
+    surface := ""
+    found := false
+    loop file in syntax {
+        if file.path == CORE_DECLARATIONS_SURFACE_PATH {
+            surface = file.text.copy()
+            found = true
+        }
+    }
+    if !found -> return Err(core_decl_fail("{CORE_DECLARATIONS_SURFACE_PATH} is not among the Syntax files"))
+    tiers: core_decl_resolve_items(core_decl_list_body(surface, "CORE_MEM_GATE_TIERS: ", CORE_DECLARATIONS_SURFACE_PATH) ?? return Err(err), constants)
+    owner: core_declarations_module(declared.modules, "core.mem") ?? return Ok("{CORE_DECLARATIONS_CORE_PATH} declares no core.mem module")
+    members := owner.members.copy()
+    members.sort()
+    if members.join("\n") == tiers.join("\n") -> return Ok("")
+    missing: loop name in tiers if !members.contains(name) -> name
+    extra: loop name in members if !tiers.contains(name) -> name
+    Ok("{CORE_DECLARATIONS_CORE_PATH}:{owner.line}: core.mem exports drift from CORE_MEM_GATE_TIERS: missing={missing.join(",")} extra={extra.join(",")}")
+}
+
+// ---- Parts and runtime units ----------------------------------------------
+
+// The compiler-private parts, in CoreSourceParts.tsv order.
+core_decl_parts: fn(source: String) -> [CoreDeclarationSource] CoreDeclarationError! {
+    rows := [CoreDeclarationSource]{}
+    lines: source.split("\n").to_list()
+    loop index in 0..<lines.len() {
+        line: lines[index]
+        if line == "" || line.starts_with("#") -> next
+        fields: line.split("\t").to_list()
+        if fields.len() != 6 || fields[0] == "" || fields[1] == "" || fields[2] == "" || fields[3] == "" -> return Err(core_decl_fail("{CORE_DECLARATIONS_PARTS_PATH}:{index + 1}: expected module, owner, path, alias, owns, impls"))
+        loop seen in rows {
+            if seen.module_name == fields[0] -> return Err(core_decl_fail("{CORE_DECLARATIONS_PARTS_PATH}:{index + 1}: duplicate source part {fields[0]}"))
+        }
+        rows.push(CoreDeclarationSource{module_name: fields[0], alias: fields[3], path: fields[2], owner: fields[1], members: core_decl_names(fields[4]), owned_types: [String]{}, impl_types: core_decl_names(fields[5]), runtime: false, line: 0})
+    }
+    if rows.len() == 0 -> return Err(core_decl_fail("{CORE_DECLARATIONS_PARTS_PATH} declares no source parts"))
+    Ok(rows)
+}
+
+// The snake_case module segment of a PascalCase Core path segment
+// (`UnicodeCcc` is `unicode_ccc`, `HTTPServer` is `http_server`).
+core_decl_snake_segment: fn(segment: String) -> String Never! {
+    bytes: segment.bytes()
+    parts := [String]{}
+    start := 0
+    loop index in 1..<bytes.len() {
+        code: Int.from_u8(bytes[index])
+        if !core_decl_upper(code) -> next
+        previous: Int.from_u8(bytes[index - 1])
+        acronym_end: core_decl_upper(previous) && index + 1 < bytes.len() && core_decl_lower(Int.from_u8(bytes[index + 1]))
+        if acronym_end || core_decl_lower(previous) || core_decl_digit(previous) {
+            parts.push(core_decl_slice(segment, start, index))
+            start = index
+        }
+    }
+    parts.push(core_decl_tail(segment, start))
+    parts.join("_").lower()
+}
+
+core_decl_unit_segment: fn(segment: String) -> Bool Never! {
+    bytes: segment.bytes()
+    if bytes.len() == 0 || !core_decl_lower(Int.from_u8(bytes[0])) -> return false
+    loop byte in bytes {
+        code: Int.from_u8(byte)
+        if !(core_decl_lower(code) || core_decl_digit(code) || code == 95) -> return false
+    }
+    true
+}
+
+// A `// PORT-PENDING` packet: its body is still the code it replaces.
+core_decl_port_pending: fn(source: String) -> Bool Never! {
+    marker: "// PORT-PENDING"
+    loop line in source.split("\n") {
+        if !line.starts_with(marker) -> next
+        if core_decl_len(line) == core_decl_len(marker) -> return true
+        if !core_decl_word(Int.from_u8(line.bytes()[core_decl_len(marker)])) -> return true
+    }
+    false
+}
+
+// The runtime units: every `Core/<area>/Runtime/**/<Unit>.jet` except a
+// `// PORT-PENDING` packet, in directory-walk order. A nested directory is
+// one more module segment (`Core/Text/Runtime/Assets/x.jet` is
+// `core.text.runtime.assets.x`).
+core_decl_runtime_units: fn(found: [CoreDeclarationFile]) -> [CoreDeclarationSource] CoreDeclarationError! {
+    ordered := [CoreDeclarationFile]{}
+    loop file in found {
+        ordered.push(file.copy())
+        at := ordered.len() - 1
+        loop at > 0 && core_decl_walk_before(ordered[at].path, ordered[at - 1].path) {
+            held: ordered[at - 1].copy()
+            ordered[at - 1] = ordered[at].copy()
+            ordered[at] = held
+            at -= 1
+        }
+    }
+    rows := [CoreDeclarationSource]{}
+    loop file in ordered {
+        if core_decl_port_pending(file.text) -> next
+        segments: file.path.split("/").to_list()
+        unit := [String]{}
+        loop index in 1..<segments.len() {
+            segment: segments[index]
+            unit.push(if index + 1 == segments.len() -> segment.removesuffix(".jet") else -> segment.copy())
+        }
+        module_segments: loop segment in unit -> core_decl_snake_segment(segment)
+        loop segment in module_segments {
+            if !core_decl_unit_segment(segment) -> return Err(core_decl_fail("{file.path}: runtime unit path segment `{segment}` is not a lowercase identifier"))
+        }
+        row: CoreDeclarationSource{module_name: "core.{module_segments.join(".")}", alias: "__core_{module_segments.join("_")}", path: file.path.copy(), owner: "", members: [String]{}, owned_types: [String]{}, impl_types: [String]{}, runtime: true, line: 0}
+        loop seen in rows {
+            if seen.alias == row.alias -> return Err(core_decl_fail("{row.path}: runtime unit alias `{row.alias}` is claimed twice; rename the file"))
+        }
+        rows.push(row)
+    }
+    Ok(rows)
+}
+
+// ---- The declarations -----------------------------------------------------
+
+// Everything Core.jet declares, checked. `syntax` is every Syntax file and
+// `runtime` every runtime unit file; `effects` the effect vocabulary.
+core_declarations_read: fn(core: String, parts: String, syntax: [CoreDeclarationFile], runtime: [CoreDeclarationFile], effects: [EffectVocabularyRow]) -> CoreDeclarations CoreDeclarationError! {
+    constants: core_decl_syntax_constants(syntax) ?? return Err(err)
+    rows := [CoreDeclarationSource]{}
+    modules := [CoreDeclarationModule]{}
+    bootstraps := [CoreBootstrapStep]{}
+    root_types := [String]{}
+    namespace_only := [String]{}
+    dispatchers := [CoreDeclarationDispatcher]{}
+    expressions := [String]{}
+    dispatcher_keys := [String]{}
+    formats := [CoreDeclarationFormat]{}
+    lines: core.split("\n").to_list()
+    loop index in 0..<lines.len() {
+        line: core_decl_line(lines[index])
+        if line == "" -> next
+        number: index + 1
+        context: "Core.jet line {number}"
+        bytes: line.bytes()
+        head_end := 0
+        loop head_end < bytes.len() && !core_decl_space(Int.from_u8(bytes[head_end])) -> head_end += 1
+        head: core_decl_slice(line, 0, head_end)
+        if head == {
+            "bootstrap" -> {
+                groups: core_decl_bootstrap_line(line, head_end) ?? return Err(core_decl_unrecognized(number, line))
+                loop step in bootstraps {
+                    if step.name == groups[0] -> return Err(core_decl_fail_at(number, "duplicate Core bootstrap step `{groups[0]}`"))
+                }
+                bootstraps.push(CoreBootstrapStep{name: groups[0].copy(), dependencies: core_decl_core_paths(groups[1], context) ?? return Err(core_decl_at(number, err))})
+            }
+            "root_types" -> {
+                body: core_decl_braced_line(line, head_end) ?? return Err(core_decl_unrecognized(number, line))
+                root_types = core_decl_core_names(body, context) ?? return Err(core_decl_at(number, err))
+            }
+            "namespace_only" -> {
+                body: core_decl_braced_line(line, head_end) ?? return Err(core_decl_unrecognized(number, line))
+                namespace_only = core_decl_core_paths(body, context) ?? return Err(core_decl_at(number, err))
+            }
+            "format_row" -> {
+                groups: core_decl_format_line(line, head_end) ?? return Err(core_decl_unrecognized(number, line))
+                format: CoreDeclarationFormat{variant: groups[0].copy(), module_name: groups[1].copy(), label: groups[2].copy(), line: number}
+                loop seen in formats {
+                    if seen.variant == format.variant -> return Err(core_decl_fail_at(number, "duplicate Core encoding format variant `{format.variant}`"))
+                    if seen.label == format.label -> return Err(core_decl_fail_at(number, "duplicate Core encoding format label `{format.label}`"))
+                    if seen.module_name == format.module_name -> return Err(core_decl_fail_at(number, "duplicate Core encoding format module `{format.module_name}`"))
+                }
+                formats.push(format)
+            }
+            "dispatcher_row" -> {
+                groups: core_decl_dispatcher_line(line, head_end) ?? return Err(core_decl_unrecognized(number, line))
+                expression := groups[3].trim()
+                if expression.ends_with(",") -> expression = core_decl_slice(expression, 0, core_decl_len(expression) - 1)
+                row: core_decl_dispatcher(groups, expression, number, constants) ?? return Err(core_decl_at(number, err))
+                key: if row.kind == "receiver" -> "receiver@{number}" else -> "{row.module_name}.{row.member}"
+                if dispatcher_keys.contains(key) -> return Err(core_decl_fail_at(number, "duplicate Core dispatcher row `{key}`"))
+                dispatcher_keys.push(key)
+                dispatchers.push(row)
+                expressions.push(expression)
+            }
+            "source_module" -> {
+                groups: core_decl_source_line(line, head_end) ?? return Err(core_decl_unrecognized(number, line))
+                row: CoreDeclarationSource{
+                    module_name: groups[0].copy(),
+                    alias: groups[2].copy(),
+                    path: groups[1].copy(),
+                    owner: "",
+                    members: core_decl_core_names(groups[3], context) ?? return Err(core_decl_at(number, err)),
+                    // `types { … }` names the module's source-owned nominals:
+                    // every tier uses the Jet declaration.
+                    owned_types: core_decl_core_names(groups[4], context) ?? return Err(core_decl_at(number, err)),
+                    // Owner-only impl admission never exports a type.
+                    impl_types: core_decl_core_names(groups[5], context) ?? return Err(core_decl_at(number, err)),
+                    runtime: false,
+                    line: number,
+                }
+                loop seen in rows {
+                    if seen.module_name == row.module_name -> return Err(core_decl_fail_at(number, "duplicate Core source module `{row.module_name}`"))
+                    if seen.alias == row.alias -> return Err(core_decl_fail_at(number, "duplicate Core source alias `{row.alias}`"))
+                }
+                rows.push(row)
+            }
+            "module" -> {
+                groups: core_decl_module_line(line, head_end) ?? return Err(core_decl_unrecognized(number, line))
+                declared: core_decl_module(groups, number, context) ?? return Err(core_decl_at(number, err))
+                if core_declarations_module(modules, declared.name) != None -> return Err(core_decl_fail_at(number, "duplicate Core module `{declared.name}`"))
+                modules.push(declared)
+            }
+            else -> return Err(core_decl_unrecognized(number, line))
+        }
+    }
+    if rows.len() == 0 -> return Err(core_decl_fail("{CORE_DECLARATIONS_CORE_PATH} declares no source modules"))
+    resolved := [CoreDeclarationModule]{}
+    loop entry in modules {
+        types := [CoreDeclarationType]{}
+        loop leaf in entry.types -> types.push(core_decl_resolve_type(modules, entry.name, leaf, [String]{}) ?? return Err(core_decl_at(entry.line, err)))
+        resolved.push(CoreDeclarationModule{name: entry.name.copy(), members: entry.members.copy(), types: types, dependencies: entry.dependencies.copy(), line: entry.line})
+    }
+    declared: CoreDeclarations{source_rows: rows, parts: core_decl_parts(parts) ?? return Err(err), runtime: core_decl_runtime_units(runtime) ?? return Err(err), modules: resolved, bootstraps: bootstraps, root_types: root_types, namespace_only: namespace_only, dispatchers: dispatchers, formats: formats}
+    roots: effect_vocabulary_names(effects, false)
+    languages: loop leaf in effect_vocabulary_names(effects, true) if leaf.starts_with("FFI.") -> leaf.removeprefix("FFI.")
+    problems: [String]{
+        core_decl_problem(declared),
+        core_decl_public_problem(declared, expressions, constants) ?? return Err(err),
+        core_decl_effect_roots_problem(effects),
+        core_decl_names_problem(declared),
+        core_decl_mem_problem(declared, syntax, constants) ?? return Err(err),
+        core_decl_lang_type_problem(declared, "Effect", roots, "the effect vocabulary's roots"),
+        core_decl_lang_type_problem(declared, "FFILanguage", languages, "the `FFI` effect family's cases"),
+    }
+    found: loop problem in problems if problem != "" -> problem
+    if found.len() > 0 -> return Err(core_decl_fail(found.join("\n")))
+    Ok(declared)
+}
+
+core_decl_unrecognized: fn(number: Int, line: String) -> CoreDeclarationError Never! {
+    core_decl_fail_at(number, "unrecognized Core declaration: {line}")
+}

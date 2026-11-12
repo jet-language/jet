@@ -45,7 +45,9 @@
 //                             names the binary it points to. The assembler's own
 //                             tool runs get it as JET_BIN.
 //   JET_COMPILER_IDENTITY     default: the first line of IDENTITY beside that binary
-//   JET_TOOLCHAIN_ROOT        default: this checkout (it must hold Core/)
+//   JET_TOOLCHAIN_ROOT        unset in every child: the unit's jet reads the toolchain
+//                             tree Assemble.jet stages from the source root beside
+//                             the unit's project
 //   JETPACK_BOOTSTRAP_SOURCE_ROOT  the tree to assemble (default: this checkout)
 //   JETPACK_WORKER            the scratch directory's writer name (default lead)
 //   JETPACK_CHECK_MEM, JETPACK_CHECK_SECS    `jet check` cap (6G, 1200)
@@ -200,9 +202,7 @@ prove: fn(repo: String, state: String, jet: String, options: Options) -> Int {
     areas: sorted_areas(selection)
     identity_set: process.env_get("JET_COMPILER_IDENTITY") ?? ""
     identity: if identity_set != "" -> identity_set else -> identity_beside(jet)
-    toolchain_set: process.env_get("JET_TOOLCHAIN_ROOT") ?? ""
-    if toolchain_set == "" && !files.is_dir("{repo}/Core") -> fail(69, "JET_TOOLCHAIN_ROOT is unset and {repo} has no Core/ tree")
-    toolchain: resolve_path(files.cwd() ?? ".", if toolchain_set != "" -> toolchain_set else -> repo)
+
     if options.deps_from_head && options.own == "" -> fail(64, "--deps-from-head needs --area")
     scratch: "{state}/{worker_name}-{root_tag(absolute_root, areas, options.own, if options.deps_from_head -> "1" else -> "0")}"
     child := Child{names: [String]{}, values: [String]{}, unset: [String]{}}
@@ -213,7 +213,9 @@ prove: fn(repo: String, state: String, jet: String, options: Options) -> Int {
     set_or_unset(child, "JETPACK_BOOTSTRAP_OWN_AREA", options.own)
     set_or_unset(child, "JETPACK_BOOTSTRAP_DEPS_FROM_HEAD", if options.deps_from_head -> "1" else -> "")
     set(child, "JET_COMPILER_IDENTITY", identity)
-    set(child, "JET_TOOLCHAIN_ROOT", toolchain)
+    // The unit's jet finds the toolchain tree Assemble.jet stages beside its
+    // project; the assembler finds this checkout's.
+    child.unset.push("JET_TOOLCHAIN_ROOT")
     set(child, "JET_BIN", jet)
     files.create_dir_all(scratch) ?? fail(1, "cannot create {scratch}: {err}")
     files.create_dir_all("{state}/slots") ?? fail(1, "cannot create {state}/slots: {err}")

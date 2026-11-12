@@ -50,4 +50,5 @@ INSPECT_STRUCTURE_TEST_KINDS: [StructureFactKind]{StructureFactKind.Liveness, St
     if core.exit_code != 0 || core.stderr != "" || !core.stdout.starts_with("core\nbootstrap:\n  1. Syntax  depends_on [none]\n") -> panic("canonical Core text")
     core_json: jet_cli_structure_core(true)
     if core_json.exit_code != 0 || !core_json.stdout.contains("\"root_types\":") || !core_json.stdout.contains("\"type_exports\":") -> panic("canonical Core projection")
+    if !core_json.stdout.contains("\"calls\":[{{\"module\":\"") || !core_json.stdout.contains("\"effect_leaf\":") -> panic("the Core call records' effect fields")
 }

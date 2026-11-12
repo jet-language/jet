@@ -16,9 +16,10 @@
 // the list also names (Compiler/JetBackend/Source/OS/*.jet) is checked in its
 // own package and in the assembled unit.
 // A Compiler/Prelude source is checked as the compiler embeds it (#6670 c1).
-// First the generator check that holds the compiler's copies of it equal to
-// it: CoreSourceRows.jet for Core.jet, CoreSourceParts.tsv, Effects.jet and
-// CoreCallExtensions.jet, the Core surface ledger for CoreSurfaceInventory.jet,
+// First the check that holds the compiler's copies of it equal to it: `jet
+// check` of Compiler/JetFoundation/Source/Registry/CoreCallRows.jet, whose
+// comptime tables read Core.jet and CoreSourceParts.tsv, for those two;
+// CoreSourceRows.jet for Effects.jet, the Core surface ledger for CoreSurfaceInventory.jet,
 // DiagnosticRows.jet for Diagnostics.jet, OwnedTraitRows.jet for Traits.jet
 // and core/prelude.jet, and Compiler/Toolchain/PreludeSources.jet (the
 // `prelude-sources` step of `jet build Compiler`, run from Compiler/) for
@@ -28,7 +29,8 @@
 // core/prelude.jet); a jet without that mode prints PRELUDE UNCHECKED and
 // never CHECK OK.
 // A Core source is checked as Core, the library that may define `__` names:
-// a public module or a private part (its CoreSourceOwned.jet row) as the
+// a public module or a private part (its row in `jet inspect structure core
+// --json`, the compiler's CORE_SOURCE_OWNED_ROWS) as the
 // one-import probe of its module that Tools/agent/CoreModuleCheck.jet uses,
 // then as `jet check Core` (every Core body, called or not), with this
 // checkout as the toolchain root; a runtime unit as itself, which the
@@ -87,6 +89,7 @@
 // run.
 use {
     files: core.files
+    json: core.encoding.json
     process: core.process
     sys: core.sys
     term: core.term
@@ -250,6 +253,9 @@ PRELUDE_TREE: "Compiler/Prelude"
 // check is their whole check.
 PRELUDE_GENERATOR_INPUTS: [String]{"Core.jet", "CoreSourceParts.tsv", "CoreSurfaceInventory.jet", "core/prelude.jet"}
 PRELUDE_UNCHECKED: "PRELUDE UNCHECKED: needs a seed with the prelude check mode"
+// The compiler source whose comptime tables read Core.jet and
+// CoreSourceParts.tsv (Compiler/JetFoundation/Source/CoreDeclarations).
+CORE_DECLARATION_TABLES: "Compiler/JetFoundation/Source/Registry/CoreCallRows.jet"
 
 // Whether `relative` is a Prelude source LaneCheck checks as embedded: a
 // `.jet` or `.tsv` file under Compiler/Prelude other than its package.jet.
@@ -265,7 +271,8 @@ prelude_source: fn(relative: String) -> Bool Never! {
 // the checkout.
 prelude_generator: fn(name: String, jet: String) -> [String] Never! {
     if name == {
-        "Core.jet" | "CoreSourceParts.tsv" | "Effects.jet" | "CoreCallExtensions.jet" -> [String]{jet, "Tools/agent/CoreSourceRows.jet", "--check"}
+        "Core.jet" | "CoreSourceParts.tsv" -> [String]{jet, "check", CORE_DECLARATION_TABLES}
+        "Effects.jet" -> [String]{jet, "Tools/agent/CoreSourceRows.jet", "--check"}
         "CoreSurfaceInventory.jet" -> [String]{jet, "Tools/agent/CoreSurfaceLedger.jet", "--check"}
         "Diagnostics.jet" -> [String]{jet, "Tools/agent/DiagnosticRows.jet", "--check"}
         "Traits.jet" | "core/prelude.jet" -> [String]{jet, "Tools/agent/OwnedTraitRows.jet", "--check"}
@@ -557,8 +564,6 @@ file_of: fn(location: String) -> String Never! {
 
 // --- Core sources ------------------------------------------------------------
 
-CORE_ROWS: "Compiler/JetFoundation/Source/Registry/CoreSourceOwned.jet"
-
 // What a Core source checks as: the module whose probe loads it (a private
 // part's owner, else its own module), or itself when it is a runtime unit.
 CoreRow: struct {
@@ -566,17 +571,25 @@ CoreRow: struct {
     runtime: Bool
 }
 
-// The quoted value after `name: ` in a generated row line.
-quoted_field: fn(line: String, name: String) -> String Never! {
-    line.partition("{name}: \"").tail.partition("\"").head.copy()
+// Text field `key` of a JSON object, or "" when it is absent or not text.
+json_text: fn(value: Dyn, key: String) -> String Never! {
+    found: value.get(key) ?? return ""
+    if found == .Text(content) -> return content.copy()
+    ""
 }
 
-// The CoreSourceOwned.jet row of the Core source at `relative`, or None.
-core_row: fn(registry: String, relative: String) -> CoreRow? Never! {
-    loop line in registry.split("\n") {
-        if !line.contains("CoreSourceOwnedRow{{module_name: ") || !line.contains(", path: \"{relative}\", ") -> next
-        owner: quoted_field(line, "owner")
-        return Val(CoreRow{probe_module: if owner != "" -> owner else -> quoted_field(line, "module_name"), runtime: line.contains("runtime: true}}")})
+// The row of the Core source at `relative` in `structure` (the output of
+// `jet inspect structure core --json`), or None.
+core_row: fn(structure: String, relative: String) -> CoreRow? Never! {
+    answer: json.parse(structure) ?? return None
+    core: answer.get("core") ?? return None
+    listed: core.get("sources") ?? return None
+    sources: if listed == .Array(rows) -> rows.copy() else -> return None
+    loop source in sources {
+        if json_text(source, "path") != relative -> next
+        owner: json_text(source, "owner")
+        runtime: (source.get("runtime") ?? Dyn.Null) == .Bool(true)
+        return Val(CoreRow{probe_module: if owner != "" -> owner else -> json_text(source, "module"), runtime: runtime})
     }
     None
 }
@@ -592,8 +605,9 @@ core_probe_source: fn(name: String) -> String Never! {
 // checks the bodies a program importing it alone reaches, then as `jet check
 // Core`, which checks every Core body, called or not.
 core_check: fn(repo: String, jet: String, relative: String, target: String, scratch: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Ran Never! {
-    registry: files.read("{repo}/{CORE_ROWS}") ?? return Ran{code: 1, text: "lane-check: cannot read {CORE_ROWS}: {err}\n"}
-    row: core_row(registry, relative) ?? return Ran{code: 1, text: "lane-check: {relative} has no Core source row in {CORE_ROWS}; run jet Tools/agent/CoreSourceRows.jet\n"}
+    asked: process.cmd([String]{jet, "inspect", "structure", "core", "--json"}).cwd(repo).env("NO_COLOR", "1").output_limit(268435456).run() ?? return Ran{code: 1, text: "lane-check: `{jet} inspect structure core --json` could not start: {err}\n"}
+    if asked.code != 0 || asked.signal != None -> return Ran{code: 1, text: "{process.combined_output(asked)}\nlane-check: `{jet} inspect structure core --json` failed\n"}
+    row: core_row(asked.output, relative) ?? return Ran{code: 1, text: "lane-check: {relative} is no Core source of `{jet} inspect structure core --json`; declare it in Compiler/Prelude/Core.jet or CoreSourceParts.tsv and rebuild the compiler\n"}
     if row.runtime -> return run_check(repo, jet, [String]{"check", target}, scratch)
     dir: "{scratch}/core-probe.{sys.pid()}"
     files.create_dir_all(dir) ?? return Ran{code: 1, text: "lane-check: cannot create {dir}: {err}\n"}
@@ -1081,6 +1095,8 @@ first_hit: fn(dir: String, file: String, args: [String], flags: [String]) -[Exec
     assert(prelude_source("Compiler/Prelude/Traits.jet") && prelude_source("Compiler/Prelude/CoreSourceParts.tsv") && prelude_source("Compiler/Prelude/core/prelude.jet"))
     assert(!prelude_source("Compiler/Prelude/package.jet") && !prelude_source("Compiler/Prelude/Assets/host.js") && !prelude_source("Compiler/Prelude") && !prelude_source("Compiler/JetCli/Source/Cli/Front.jet"))
     assert_eq(prelude_generator("Effects.jet", "/j"), [String]{"/j", "Tools/agent/CoreSourceRows.jet", "--check"})
+    assert_eq(prelude_generator("Core.jet", "/j"), [String]{"/j", "check", CORE_DECLARATION_TABLES})
+    assert_eq(prelude_generator("CoreCallExtensions.jet", "/j"), [String]{})
     assert_eq(prelude_generator("CoreSurfaceInventory.jet", "/j"), [String]{"/j", "Tools/agent/CoreSurfaceLedger.jet", "--check"})
     assert_eq(prelude_generator("Diagnostics.jet", "/j")[1], "Tools/agent/DiagnosticRows.jet")
     assert_eq(prelude_generator("core/prelude.jet", "/j")[1], "Tools/agent/OwnedTraitRows.jet")
@@ -1090,7 +1106,7 @@ first_hit: fn(dir: String, file: String, args: [String], flags: [String]) -[Exec
 }
 
 #Test("a Core source checks as its module, its part's owner, or its runtime unit") {
-    registry: "    CoreSourceOwnedRow{{module_name: \"core.encoding\", alias: \"core_encoding\", path: \"Core/Encoding/Encoding.jet\", owner: \"\", owned_members: [String]{{}}, runtime: false}},\n    CoreSourceOwnedRow{{module_name: \"core.encoding.stream\", alias: \"__s\", path: \"Core/Encoding/Stream.jet\", owner: \"core.encoding\", owned_members: [String]{{}}, runtime: false}},\n    CoreSourceOwnedRow{{module_name: \"core.files.runtime.k\", alias: \"__k\", path: \"Core/Files/Runtime/K.jet\", owner: \"\", owned_members: [String]{{}}, runtime: true}},\n"
+    registry: "{{\"schema\":\"jet.status/v1\",\"core\":{{\"sources\":[{{\"path\":\"Core/Encoding/Encoding.jet\",\"module\":\"core.encoding\",\"owner\":\"\",\"runtime\":false}},{{\"path\":\"Core/Encoding/Stream.jet\",\"module\":\"__s\",\"owner\":\"core.encoding\",\"runtime\":false}},{{\"path\":\"Core/Files/Runtime/K.jet\",\"module\":\"core.files.runtime.k\",\"owner\":\"\",\"runtime\":true}}]}}}}"
     own: core_row(registry, "Core/Encoding/Encoding.jet") ?? panic("no module row")
     assert_eq(own.probe_module, "core.encoding")
     assert(!own.runtime)

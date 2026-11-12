@@ -1,9 +1,9 @@
 // Checked NameLedger and structure slice of GateLedger. The structure rows are
 // the `Structure.*` rows of the registration fact table, and the Core view is
-// generated from Core.jet.
+// Core.jet's declarations as the compiler reads them (CORE_DECLARATIONS).
 use {
     jet_driver.[JetDriverAuthorizedSourceSnapshot, JetDriverCompileResult, JetDriverVerbOutput, JetDriverCompileMode, jet_driver_present_diagnostics, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR]
-    jet_foundation.[CoreModuleTypeExport, StructureFact, StructureFactKind, NameFacts, GateLedger, GateKind, Span, Diagnostic, RegistrationFactRow, REGISTRATION_FACT_ROWS, diagnostic_render_all, name_ledger_from_facts]
+    jet_foundation.[CORE_BOOTSTRAP_STEPS, CORE_CALLS, CORE_MODULE_DECLARATIONS, CORE_ROOT_TYPES, CORE_SOURCE_OWNED_ROWS, CoreModuleTypeExport, StructureFact, StructureFactKind, NameFacts, GateLedger, GateKind, Span, Diagnostic, RegistrationFactRow, REGISTRATION_FACT_ROWS, diagnostic_render_all, name_ledger_from_facts]
     jet_sema.[sema_gate_append_structure]
 }
 
@@ -28,12 +28,6 @@ jet_cli_structure_registry: fn(kind: StructureFactKind) -> String Never! {
 // The `Structure.*` rows of the registration fact table, in table order.
 jet_cli_structure_rows: fn() -> [RegistrationFactRow] Never! {
     loop row in REGISTRATION_FACT_ROWS if row.name.starts_with("Structure.") -> row
-}
-
-// One Core bootstrap step of the generated Core view.
-JetCLICoreBootstrap: struct {
-    name: String
-    dependencies: [String]
 }
 
 jet_cli_structure_span: fn(span: Span) -> JetCLIStatusValue Never! {
@@ -83,21 +77,32 @@ jet_cli_structure_core_type: fn(entry: CoreModuleTypeExport) -> JetCLIStatusValu
         .Enum(_) -> "enum"
     }
     fields := [JetCLIStatusField]{jet_cli_status_field("name", jet_cli_status_text(entry.name)), jet_cli_status_field("kind", jet_cli_status_text(kind))}
-    if entry.kind == .Enum(variants) -> fields.push(jet_cli_status_field("variants", jet_cli_status_texts(variants)))
+    if entry.kind == {
+        .Enum(variants) -> fields.push(jet_cli_status_field("variants", jet_cli_status_texts(variants)))
+        .Generic(arity) -> fields.push(jet_cli_status_field("arity", jet_cli_status_int(arity)))
+        .Plain | .CryptoNominal -> {}
+    }
     jet_cli_status_object(fields)
 }
 
+// `jet inspect structure core`: Core.jet's bootstrap steps, root types and
+// modules (each with its Core.jet line), and the Core sources the compiler
+// loads; `--json` is the machine view Tools/agent/CoreSurfaceLedger.jet reads,
+// and its `calls` (each CORE_CALLS record's effect fields and Prelude symbol)
+// the one Tools/agent/RuntimeEffectRows.jet reads.
 jet_cli_structure_core: fn(json: Bool) -> JetDriverVerbOutput Never! {
     if json {
-        bootstrap: loop step in JET_CLI_CORE_BOOTSTRAP -> jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("name", jet_cli_status_text(step.name)), jet_cli_status_field("dependencies", jet_cli_status_texts(step.dependencies))})
-        modules: loop core_module in JET_CLI_CORE_DECLARATIONS -> jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("module", jet_cli_status_text(core_module.module_name)), jet_cli_status_field("members", jet_cli_status_texts(core_module.members)), jet_cli_status_field("type_exports", jet_cli_status_array(loop entry in core_module.type_exports -> jet_cli_structure_core_type(entry))), jet_cli_status_field("dependencies", jet_cli_status_texts(core_module.dependencies))})
-        core: jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("bootstrap", jet_cli_status_array(bootstrap)), jet_cli_status_field("root_types", jet_cli_status_texts(JET_CLI_CORE_ROOT_TYPES)), jet_cli_status_field("modules", jet_cli_status_array(modules))})
+        bootstrap: loop step in CORE_BOOTSTRAP_STEPS -> jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("name", jet_cli_status_text(step.name)), jet_cli_status_field("dependencies", jet_cli_status_texts(step.dependencies))})
+        modules: loop core_module in CORE_MODULE_DECLARATIONS -> jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("module", jet_cli_status_text(core_module.module_name)), jet_cli_status_field("source_line", jet_cli_status_int(core_module.line)), jet_cli_status_field("members", jet_cli_status_texts(core_module.members)), jet_cli_status_field("type_exports", jet_cli_status_array(loop entry in core_module.type_exports -> jet_cli_structure_core_type(entry))), jet_cli_status_field("dependencies", jet_cli_status_texts(core_module.dependencies))})
+        sources: loop row in CORE_SOURCE_OWNED_ROWS -> jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("path", jet_cli_status_text(row.path)), jet_cli_status_field("module", jet_cli_status_text(row.module_name)), jet_cli_status_field("owner", jet_cli_status_text(row.owner)), jet_cli_status_field("runtime", jet_cli_status_bool(row.runtime))})
+        calls: loop record in CORE_CALLS if record.module_name != "" -> jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("module", jet_cli_status_text(record.module_name)), jet_cli_status_field("member", jet_cli_status_text(record.member)), jet_cli_status_field("effect_kind", jet_cli_status_optional_text(record.effect_kind)), jet_cli_status_field("effect_leaf", jet_cli_status_optional_text(record.effect_leaf)), jet_cli_status_field("symbol", jet_cli_status_optional_text(if record.symbol == .Prelude(name) -> Val(name) else -> None))})
+        core: jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("bootstrap", jet_cli_status_array(bootstrap)), jet_cli_status_field("root_types", jet_cli_status_texts(CORE_ROOT_TYPES)), jet_cli_status_field("modules", jet_cli_status_array(modules)), jet_cli_status_field("sources", jet_cli_status_array(sources)), jet_cli_status_field("calls", jet_cli_status_array(calls))})
         return JetDriverVerbOutput{stdout: "{jet_cli_status_render("inspect.structure", true, [JetCLIStatusField]{jet_cli_status_field("core", core)})}\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     }
     output := "core\nbootstrap:\n"
-    loop (index, step) in JET_CLI_CORE_BOOTSTRAP -> output = "{output}  {index + 1}. {step.name}  depends_on [{if step.dependencies.len() == 0 -> "none" else -> step.dependencies.join(", ")}]\n"
-    output = "{output}root types: {JET_CLI_CORE_ROOT_TYPES.join(", ")}\nmodules: {JET_CLI_CORE_DECLARATIONS.len()}\n"
-    loop core_module in JET_CLI_CORE_DECLARATIONS {
+    loop (index, step) in CORE_BOOTSTRAP_STEPS -> output = "{output}  {index + 1}. {step.name}  depends_on [{if step.dependencies.len() == 0 -> "none" else -> step.dependencies.join(", ")}]\n"
+    output = "{output}root types: {CORE_ROOT_TYPES.join(", ")}\nmodules: {CORE_MODULE_DECLARATIONS.len()}\n"
+    loop core_module in CORE_MODULE_DECLARATIONS {
         output = "{output}  module {core_module.module_name}  depends_on [{if core_module.dependencies.len() == 0 -> "none" else -> core_module.dependencies.join(", ")}]\n    members: {core_module.members.join(", ")}\n"
         if core_module.type_exports.len() == 0 {
             output = "{output}    types: (none)\n"
