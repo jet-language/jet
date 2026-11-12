@@ -1,0 +1,669 @@
+#!/usr/bin/env jet
+// The Jet twin of Tools/perf/enumset_bench.py (gauntlet tool entry
+// enumset-bench, #5072 c7): dense enum-set representations on matched
+// workloads. For each case count it writes the two Rust peers and the four
+// Jet arms, builds them (Rust through Tools/agent/JetEnv.jet rustc, Jet with
+// `jet build --release`), runs each binary samples + 1 times and keeps the
+// medians past the warm-up, checks every arm's stdout against rust_native,
+// and writes the JSON report.
+//
+//   jet Tools/perf/enumset_bench/run.jet --json FILE [--samples N]
+//        [--rounds N] [--sizes 8,32,64] [--jet PATH]
+//
+// Peak RSS is the run's peak_memory_bytes in KiB, the child's ru_maxrss that
+// the original reads from wait4.
+
+use {
+    files: core.files
+    json: core.encoding.json
+    math: core.math
+    process: core.process
+    stats: core.math.stats
+    sys: core.sys
+    time: core.time
+}
+
+PHASES: [String]{"construction", "update", "membership", "setops", "iteration", "conversion"}
+ARMS: [String]{"rust_native", "rust_btreeset", "jet_set_enum", "jet_bits", "jet_int_mask", "jet_packed_fields"}
+PACKAGE: "name: \"enumset_bench\"\nversion: \"0.1.0\"\nauthority: {{\n    \n        allow: [IO, Mem.Alloc, Time]\n\n}}\n"
+PROGRAM: "enumset_bench.py"
+CR: String.from_bytes_lossy([U8]{13})
+
+#[CLI, Doc("Dense enum-set representations on matched workloads: Rust u64 and BTreeSet peers against four Jet representations, per phase.")]
+Args: struct {
+    #Doc("timed runs of each arm after one warm-up run") samples: Int{5}
+    #Doc("workload rounds of each phase") rounds: Int{200000}
+    #Doc("comma-separated case counts, each in 1..64") sizes: String{"8,32,64"}
+    #[Doc("where the JSON report goes"), Arg(flag_only: true)] json: String
+    #Doc("the jet that builds the Jet arms; $JET_STATE_ROOT/safe-jet.sh by default") jet: String?
+}
+
+// What every arm's build and run needs.
+Bench: struct {
+    root: String
+    work: String
+    jet: String
+    rounds: Int
+    samples: Int
+    counter: String?
+}
+
+// One finished command: its exit code (minus the signal that ended it), its
+// output, how long it ran and its peak RSS in KiB.
+Ran: struct {
+    code: Int
+    out: String
+    err: String
+    wall_ns: Int
+    peak_kib: Int
+}
+
+// One arm's report keys in the original's order, with its stdout and phase
+// medians when it was measured.
+Arm: struct {
+    fields: [(key: String, value: Dyn)]
+    stdout: String?
+    phase_ns: [Int]
+}
+
+// A file or command that fails ends the bench, as the original's raise does:
+// Jet propagates each failure implicitly.
+run: fn(args: Args) Err! {
+    sizes := [Int]{}
+    loop part in args.sizes.split(",") -> sizes.push(Int.parse(part.trim()) ?? process.fail(1, "{PROGRAM}: ValueError: invalid literal for int() with base 10: '{part}'"))
+    if args.samples < 1 || args.rounds < 8 || sizes.any(size -> size != max(1, min(64, size))) -> process.fail(2, "{PROGRAM}: error: --samples >= 1, --rounds >= 8, sizes in 1..64")
+    root: files.dirname(files.dirname(files.dirname(files.dirname(files.canonicalize(sys.executable())))))
+    found: sys.env_text("""
+        STATE=${{JET_STATE_ROOT:-${{XDG_CACHE_HOME:-$HOME/.cache}}/jet-dev}}
+        """, sys.environment())
+    state: files.normalize(found["STATE"])
+    work: files.join(state, "enumset-bench")
+    files.create_dir_all(work)
+    lib: files.join(work, "liballoccount.so")
+    counter: sh(process.cmd([String]{files.join(root, "Tools/agent/JetEnv.jet"), "cc", "-O2", "-shared", "-fPIC", "-o", lib, files.join(root, "Tools/perf/alloccount.c")}).cwd(root), 1800s)
+    bench: Bench{
+        root: root,
+        work: work,
+        jet: args.jet ?? files.join(state, "safe-jet.sh"),
+        rounds: args.rounds,
+        samples: args.samples,
+        counter: if counter.code == 0 && files.is_file(lib) -> Val(lib) else -> None,
+    }
+    version: sh(process.cmd([String]{bench.jet, "--version"}).cwd(root), 1800s)
+    version_text: (if version.out != "" -> version.out else -> version.err).trim()
+    report := [(key: String, value: Dyn)]{
+        (key: "card", value: Dyn.Int(3133)),
+        (key: "finding", value: Dyn.Text("ENUM-F05")),
+        (key: "commit", value: Dyn.Text(sh(process.cmd([String]{"git", "rev-parse", "HEAD"}).cwd(root), 1800s).out.trim())),
+        (key: "dirty_tree", value: Dyn.Bool(sh(process.cmd([String]{"git", "status", "--porcelain"}).cwd(root), 1800s).out.trim() != "")),
+        (key: "jet", value: Dyn.Text(bench.jet)),
+        (key: "jet_version", value: Dyn.Text(version_text.slice(0, min(200, version_text.len())))),
+        (key: "rustc", value: Dyn.Text(sh(process.cmd([String]{files.join(root, "Tools/agent/JetEnv.jet"), "rustc", "--version"}).cwd(root), 1800s).out.trim())),
+        (key: "machine", value: Dyn.Object([(key: String, value: Dyn)]{
+            (key: "platform", value: Dyn.Text(sys.platform())),
+            (key: "cpu", value: Dyn.Text(sys.machine())),
+            (key: "cpus", value: Dyn.Int(sys.cpu_count())),
+        })),
+        (key: "samples", value: Dyn.Int(args.samples)),
+        (key: "rounds", value: Dyn.Int(args.rounds)),
+        (key: "phases", value: Dyn.Array(PHASES.map(phase -> Dyn.Text(phase.copy())))),  // copy: the report keeps its own
+        (key: "win_rule", value: Dyn.Text("Jet/rust_native < 1.00 on every phase")),
+    }
+    cells := [Dyn]{}
+    loop k in sizes {
+        row := [Arm]{}
+        loop arm in ARMS {
+            cell: arm_cell(bench, arm, k)
+            print("k={k} {arm}: {if cell.stdout == None -> "unavailable" else -> "measured"}")
+            row.push(cell)
+        }
+        cells.extend(compare(row))
+    }
+    report.push((key: "cells", value: Dyn.Array(cells)))
+    target: files.normalize(args.json)
+    files.create_dir_all(files.normalize("{target}/.."))
+    files.write(target, json.stringify(Dyn.Object(report), 2))
+    print(target)
+}
+
+// Runs one command to its end. One that cannot start or overruns ends the
+// bench, as the original's subprocess call raises.
+sh: fn(spec: ProcessSpec, limit: Duration) -> Ran Err! {
+    started: time.instant()
+    receipt: spec.timeout(limit).run()
+    if receipt.timed_out -> process.fail(1, "{PROGRAM}: TimeoutExpired: timed out after {limit}")
+    Ok(Ran{
+        code: if receipt.signal == .Val(number) -> -number else -> receipt.code,
+        out: receipt.output.copy(),  // copy: the receipt keeps its output
+        err: receipt.errors.copy(),  // copy: the receipt keeps its output
+        wall_ns: started.elapsed().ns,
+        peak_kib: (receipt.peak_memory_bytes ?? 0) /% 1024,
+    })
+}
+
+full_mask: fn(k: Int) -> String {
+    if k == 64 -> "(0 - 1)" else -> "{((1 << (k - 1)) - 1) * 2 + 1}"
+}
+
+// Writes and builds one arm, then measures it when the build made its binary.
+arm_cell: fn(bench: Bench, arm: String, k: Int) -> Arm Err! {
+    dir: files.join(bench.work, "k{k}")
+    files.create_dir_all(dir)
+    stem: "{arm}_k{k}"
+    made: if {
+        arm.starts_with("rust_") -> {
+            files.write(files.join(dir, "{stem}.rs"), rust_source(arm, k, bench.rounds))
+            binary: files.join(dir, stem)
+            (binary: binary, built: sh(process.cmd([String]{files.join(bench.root, "Tools/agent/JetEnv.jet"), "rustc", "-C", "opt-level=3", "-C", "codegen-units=1", files.join(dir, "{stem}.rs"), "-o", binary}).cwd(bench.root), 1800s))
+        }
+        else -> {
+            files.write(files.join(dir, "package.jet"), PACKAGE)
+            files.write(files.join(dir, "{stem}.jet"), jet_source(arm, k, bench.rounds))
+            binary: files.join(dir, ".jet/build/{stem}")
+            files.remove(binary) ?? ()
+            (binary: binary, built: sh(process.cmd([String]{bench.jet, "build", "--release", "{stem}.jet"}).cwd(dir), 1800s))
+        }
+    }
+    binary: made.binary
+    built: made.built
+    fields: [(key: String, value: Dyn)]{(key: "k", value: Dyn.Int(k)), (key: "arm", value: Dyn.Text(arm.copy())), (key: "build_ns", value: Dyn.Int(built.wall_ns))}  // copy: the caller prints the arm too
+    if built.code != 0 || !files.is_file(binary) {
+        tail: "{built.err}{built.out}".replace("{CR}\n", "\n").replace(CR, "\n")
+        return Ok(Arm{
+            fields: fields.concat([(key: String, value: Dyn)]{
+                (key: "status", value: Dyn.Text("unavailable")),
+                (key: "reason", value: Dyn.Text("build failed")),
+                (key: "error_tail", value: Dyn.Text(tail.slice(max(0, tail.len() - 1500), tail.len()))),
+            }),
+            stdout: None,
+            phase_ns: [Int]{},
+        })
+    }
+    measure(bench, binary, fields)
+}
+
+// The arm `fields` begin, measured: the binary runs samples + 1 times, the
+// first a warm-up, then once for its peak RSS and once under the allocation
+// counter.
+measure: fn(bench: Bench, binary: String, fields: [(key: String, value: Dyn)]) -> Arm Err! {
+    runs := [Ran]{}
+    timings := [[Int]]{}
+    loop _ in 0..<(bench.samples + 1) {
+        ran: sh(process.cmd([String]{binary}), 900s)
+        phases: (if ran.code == 0 -> phase_line(ran.err) else -> None) ?? return Ok(Arm{
+            fields: fields.concat([(key: String, value: Dyn)]{
+                (key: "status", value: Dyn.Text("unavailable")),
+                (key: "reason", value: Dyn.Text(if ran.code != 0 -> "exit {ran.code}" else -> "phase timings missing from stderr")),
+                (key: "stderr_tail", value: Dyn.Text(ran.err.slice(max(0, ran.err.len() - 800), ran.err.len()))),
+            }),
+            stdout: None,
+            phase_ns: [Int]{},
+        })
+        runs.push(ran)
+        timings.push(phases)
+    }
+    kept: runs.slice(1, runs.len())
+    first: kept[0].out.copy()  // copy: the stability check compares every run with it
+    phase_ns := [Int]{}
+    medians := [(key: String, value: Dyn)]{}
+    loop i in 0..<PHASES.len() {
+        phase_ns.push(Int.from_float(stats.median(timings.slice(1, timings.len()).map(row -> Float.from_int(row[i]))) ?? 0.0) ?? 0)
+        medians.push((key: PHASES[i], value: Dyn.Int(phase_ns[i])))
+    }
+    rss: sh(process.cmd([String]{binary}), 900s)
+    Ok(Arm{
+        fields: fields.concat([(key: String, value: Dyn)]{
+            (key: "status", value: Dyn.Text("measured")),
+            (key: "stdout", value: Dyn.Text(kept[0].out.copy())),  // copy: the stability check reads it too
+            (key: "stable_stdout", value: Dyn.Bool(kept.filter(ran -> ran.out != first).len() == 0)),
+            (key: "wall_median_ns", value: Dyn.Int(Int.from_float(stats.median(kept.map(ran -> Float.from_int(ran.wall_ns))) ?? 0.0) ?? 0)),
+            (key: "phase_median_ns", value: Dyn.Object(medians)),
+            (key: "peak_rss_kib", value: if rss.code == 0 && rss.peak_kib > 0 -> Dyn.Int(rss.peak_kib) else -> Dyn.Text("unavailable")),
+            (key: "binary_bytes", value: Dyn.Int(files.getsize(binary))),
+            (key: "allocations", value: allocations(bench, binary)),
+        }),
+        stdout: Val(kept[0].out.copy()),  // copy: the report keeps it too
+        phase_ns: phase_ns,
+    })
+}
+
+// The six phase timings from the last stderr line that names all of them.
+phase_line: fn(stderr: String) -> [Int]? {
+    lines := stderr.lines()
+    lines.reverse()
+    loop line in lines {
+        fields := [String: String]{}
+        loop word in line.words().filter(word -> word.contains("=")) -> fields[word.partition("=").head] = word.partition("=").tail
+        keys: fields.keys().to_list()
+        if !PHASES.all(phase -> keys.contains(phase)) -> next
+        timings := [Int]{}
+        loop phase in PHASES -> timings.push(Int.parse(fields[phase]) ?? process.fail(1, "{PROGRAM}: ValueError: invalid literal for int() with base 10: '{fields[phase]}'"))
+        return Val(timings)
+    }
+    None
+}
+
+// The counted run under the LD_PRELOAD allocation counter.
+allocations: fn(bench: Bench, binary: String) -> Dyn Err! {
+    status: Dyn.Text("unavailable")
+    lib: bench.counter ?? return Ok(Dyn.Object([(key: String, value: Dyn)]{(key: "status", value: status), (key: "reason", value: Dyn.Text("allocation counter did not build"))}))
+    count: files.join(bench.work, "alloc.count")
+    files.remove(count) ?? ()
+    ran: sh(process.cmd([String]{binary}).env("LD_PRELOAD", lib).env("ALLOCCOUNT_OUT", count), 900s)
+    if ran.code != 0 || !files.is_file(count) -> return Ok(Dyn.Object([(key: String, value: Dyn)]{(key: "status", value: status), (key: "reason", value: Dyn.Text("counted run exit {ran.code}"))}))
+    counted := [(key: String, value: Dyn)]{(key: "status", value: Dyn.Text("measured"))}
+    allocated := 0
+    loop pair in files.read(count).words() {
+        number: Int.parse(pair.partition("=").tail) ?? process.fail(1, "{PROGRAM}: ValueError: invalid literal for int() with base 10: '{pair}'")
+        if pair.partition("=").head == "allocations" -> allocated = number
+        counted.push((key: pair.partition("=").head, value: Dyn.Int(number)))
+    }
+    if allocated == 0 -> return Ok(Dyn.Object([(key: String, value: Dyn)]{(key: "status", value: status), (key: "reason", value: Dyn.Text("binary bypasses the preloadable libc allocator"))}))
+    Ok(Dyn.Object(counted))
+}
+
+// One case count's cells against rust_native: the arms measured beside a
+// measured reference first, with parity and per-phase ratios, then the rest
+// with parity unknown.
+compare: fn(row: [Arm]) -> [Dyn] {
+    compared := [Dyn]{}
+    unknown := [Dyn]{}
+    reference: row[0]
+    loop cell in row {
+        fields := cell.fields.copy()  // copy: the parity keys extend the cell
+        if cell.stdout == None || reference.stdout == None {
+            fields.push((key: "parity", value: Dyn.Text("unknown")))
+            unknown.push(Dyn.Object(fields))
+            next
+        }
+        fields.push((key: "parity", value: Dyn.Text(if cell.stdout == reference.stdout -> "match" else -> "MISMATCH")))
+        ratios := [(key: String, value: Dyn)]{}
+        losing := [Dyn]{}
+        loop i in 0..<PHASES.len() {
+            ratio: Float.from_int(cell.phase_ns[i]) / Float.from_int(max(1, reference.phase_ns[i]))
+            ratios.push((key: PHASES[i], value: Dyn.Float(math.round_even(ratio * 1000.0) / 1000.0)))
+            if ratio >= 1.0 -> losing.push(Dyn.Text(PHASES[i]))
+        }
+        fields.push((key: "ratio_to_rust_native", value: Dyn.Object(ratios)))
+        fields.push((key: "losing_phases", value: Dyn.Array(losing)))
+        compared.push(Dyn.Object(fields))
+    }
+    compared.extend(unknown)
+    compared
+}
+
+jet_source: fn(arm: String, k: Int, rounds: Int) -> String {
+    names := [String]{}
+    members := [String]{}
+    loop i in 0..<k {
+        names.push("    C{i}")
+        members.push("Case.C{i}")
+    }
+    cases: names.join("\n")
+    all: members.join(", ")
+    kbits: min(k, 63)
+    shape: if arm == {
+        "jet_set_enum" -> (rep: jet_set_enum_rep(k), ty: "Set<Case>")
+        "jet_bits" -> (rep: jet_bits_rep(k), ty: "Bits")
+        "jet_int_mask" -> (rep: jet_int_mask_rep(), ty: "Int")
+        else -> (rep: jet_packed_fields_rep(), ty: "Word")
+    }
+    "{jet_common(cases, all, full_mask(k), kbits)}{shape.rep}{jet_driver(shape.ty, k, kbits, rounds)}"
+}
+
+rust_source: fn(arm: String, k: Int, rounds: Int) -> String {
+    rust_template(k, if k == 64 -> "u64::MAX" else -> full_mask(k), min(k, 63), rounds, if arm == "rust_native" -> "u64" else -> "BTreeSet<Case>")
+}
+
+// The Jet header and the enum every Jet arm shares.
+jet_common: fn(cases: String, all: String, full: String, kbits: Int) -> String {
+    """
+    use time: core.time
+
+    Case: enum {{
+    {cases}
+    }}
+
+    ALL: [{all}]
+
+    dense: fn(r: Int) -> Int {{
+        x: (r * 40503 + 12345) % 1000003
+        return (x | (x << 20) | (x << 40)) & {full}
+    }}
+
+    sparse: fn(r: Int) -> Int {{
+        return (1 << (r % {kbits})) | (1 << ((r * 7) % {kbits}))
+    }}
+
+    mask_of: fn(r: Int) -> Int {{
+        if r % 2 == 0 -> return dense(r)
+        return sparse(r)
+    }}
+
+    """
+}
+
+// The Set<Case> representation's operations.
+#Allow(jet.RawMultilineHtml, "generated Jet source; its angle brackets are type arguments")
+jet_set_enum_rep: fn(k: Int) -> String {
+    """
+
+    mk: fn(mask: Int) -> Set<Case> {{
+        out := Set.from([Case]{{}})
+        i := 0
+        loop i < {k} {{
+            if (mask >> i) & 1 == 1 -> &out.add(ALL[i])
+            i += 1
+        }}
+        return out
+    }}
+
+    has: fn(s: Set<Case>, i: Int) -> Bool {{ s.has(ALL[i]) }}
+
+    set_bit: fn(s: &Set<Case>, i: Int) {{ &s.add(ALL[i]) }}
+
+    clear_bit: fn(s: &Set<Case>, i: Int) {{ &s.remove(ALL[i]) }}
+
+    uni: fn(a: Set<Case>, b: Set<Case>) -> Set<Case> {{ a.union(b) }}
+
+    inter: fn(a: Set<Case>, b: Set<Case>) -> Set<Case> {{ a.intersection(b) }}
+
+    diff: fn(a: Set<Case>, b: Set<Case>) -> Set<Case> {{ a.difference(b) }}
+
+    """
+}
+
+// The Bits representation's operations.
+jet_bits_rep: fn(k: Int) -> String {
+    """
+
+    mk: fn(mask: Int) -> Bits {{
+        out := Bits.new()
+        i := 0
+        loop i < {k} {{
+            if (mask >> i) & 1 == 1 -> &out.add(i)
+            i += 1
+        }}
+        return out
+    }}
+
+    has: fn(s: Bits, i: Int) -> Bool {{ s.has(i) }}
+
+    set_bit: fn(s: &Bits, i: Int) {{ &s.add(i) }}
+
+    clear_bit: fn(s: &Bits, i: Int) {{ &s.remove(i) }}
+
+    combine: fn(a: Bits, b: Bits, op: Int) -> Bits {{
+        out := Bits.new()
+        i := 0
+        loop i < {k} {{
+            x: a.has(i)
+            y: b.has(i)
+            keep := x && !y
+            if op == 0 -> keep = x || y
+            if op == 1 -> keep = x && y
+            if keep -> &out.add(i)
+            i += 1
+        }}
+        return out
+    }}
+
+    uni: fn(a: Bits, b: Bits) -> Bits {{ combine(a, b, 0) }}
+
+    inter: fn(a: Bits, b: Bits) -> Bits {{ combine(a, b, 1) }}
+
+    diff: fn(a: Bits, b: Bits) -> Bits {{ combine(a, b, 2) }}
+
+    """
+}
+
+// The Int representation's operations.
+jet_int_mask_rep: fn() -> String {
+    """
+
+    mk: fn(mask: Int) -> Int {{ mask }}
+
+    has: fn(s: Int, i: Int) -> Bool {{ (s >> i) & 1 == 1 }}
+
+    set_bit: fn(s: &Int, i: Int) {{ s = s | (1 << i) }}
+
+    clear_bit: fn(s: &Int, i: Int) {{ s = s - (s & (1 << i)) }}
+
+    uni: fn(a: Int, b: Int) -> Int {{ a | b }}
+
+    inter: fn(a: Int, b: Int) -> Int {{ a & b }}
+
+    diff: fn(a: Int, b: Int) -> Int {{ a - (a & b) }}
+
+    """
+}
+
+// The Word representation's operations.
+jet_packed_fields_rep: fn() -> String {
+    """
+
+    Word: struct {{
+        bits: Int
+    }}
+
+    mk: fn(mask: Int) -> Word {{ Word{{bits: mask}} }}
+
+    has: fn(s: Word, i: Int) -> Bool {{ (s.bits >> i) & 1 == 1 }}
+
+    set_bit: fn(s: &Word, i: Int) {{ s.bits = s.bits | (1 << i) }}
+
+    clear_bit: fn(s: &Word, i: Int) {{ s.bits = s.bits - (s.bits & (1 << i)) }}
+
+    uni: fn(a: Word, b: Word) -> Word {{ Word{{bits: a.bits | b.bits}} }}
+
+    inter: fn(a: Word, b: Word) -> Word {{ Word{{bits: a.bits & b.bits}} }}
+
+    diff: fn(a: Word, b: Word) -> Word {{ Word{{bits: a.bits - (a.bits & b.bits)}} }}
+
+    """
+}
+
+// The timed phases every Jet arm runs over its representation.
+jet_driver: fn(ty: String, k: Int, kbits: Int, rounds: Int) -> String {
+    """
+
+    to_mask: fn(s: {ty}) -> Int {{
+        m := 0
+        i := 0
+        loop i < {k} {{
+            if has(s, i) -> m = m | (1 << i)
+            i += 1
+        }}
+        return m % 1000003
+    }}
+
+    items: fn(s: {ty}) -> [Int] {{
+        out := [Int]{{}}
+        i := 0
+        loop i < {k} {{
+            if has(s, i) -> &out.push(i)
+            i += 1
+        }}
+        return out
+    }}
+
+    from_items: fn(xs: [Int]) -> {ty} {{
+        m := 0
+        loop x in xs -> m = m | (1 << x)
+        return mk(m)
+    }}
+
+    run: fn() {{
+        rounds: {rounds}
+        check := 0
+
+        w: time.instant()
+        r := 0
+        loop r < rounds {{
+            check = (check * 31 + to_mask(mk(mask_of(r)))) % 1000000007
+            r += 1
+        }}
+        t_construction: w.elapsed().in(.Nanoseconds)
+
+        w2: time.instant()
+        s := mk(0)
+        r = 0
+        loop r < rounds {{
+            set_bit(&s, r % {kbits})
+            if r % 3 == 0 -> clear_bit(&s, (r * 5) % {kbits})
+            r += 1
+        }}
+        check = (check * 31 + to_mask(s)) % 1000000007
+        t_update: w2.elapsed().in(.Nanoseconds)
+
+        w3: time.instant()
+        probe: mk(dense(7))
+        hits := 0
+        r = 0
+        loop r < rounds {{
+            if has(probe, r % {k}) -> hits += 1
+            r += 1
+        }}
+        check = (check * 31 + hits) % 1000000007
+        t_membership: w3.elapsed().in(.Nanoseconds)
+
+        w4: time.instant()
+        r = 0
+        loop r < rounds {{
+            a: mk(mask_of(r))
+            b: mk(mask_of(r + 1))
+            check = (check * 31 + to_mask(uni(a, b)) + to_mask(inter(a, b)) * 3 + to_mask(diff(a, b)) * 5) % 1000000007
+            r += 1
+        }}
+        t_setops: w4.elapsed().in(.Nanoseconds)
+
+        w5: time.instant()
+        total := 0
+        r = 0
+        loop r < rounds /% 8 {{
+            loop x in items(probe) -> total += x
+            r += 1
+        }}
+        check = (check * 31 + total) % 1000000007
+        t_iteration: w5.elapsed().in(.Nanoseconds)
+
+        w6: time.instant()
+        r = 0
+        loop r < rounds /% 8 {{
+            check = (check * 31 + to_mask(from_items(items(mk(mask_of(r)))))) % 1000000007
+            r += 1
+        }}
+        t_conversion: w6.elapsed().in(.Nanoseconds)
+
+        print("k={k} order={{items(mk(dense(3)))}}")
+        print("check={{check}}")
+        eprint("construction={{t_construction}} update={{t_update}} membership={{t_membership}} setops={{t_setops}} iteration={{t_iteration}} conversion={{t_conversion}}")
+    }}
+
+    """
+}
+
+// The Rust peer, generic over the u64 mask and BTreeSet<Case>.
+#Allow(jet.RawMultilineHtml, "generated Rust source; its angle brackets are type arguments")
+rust_template: fn(k: Int, full: String, kbits: Int, rounds: Int, rep: String) -> String {
+    """
+    use std::collections::BTreeSet;
+    use std::hint::black_box;
+    use std::time::Instant;
+
+    const K: u32 = {k};
+    const FULL: u64 = {full};
+
+    #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+    struct Case(u8);
+
+    fn dense(r: i64) -> u64 {{
+        let x = ((r * 40503 + 12345) % 1000003) as u64;
+        (x | (x << 20) | (x << 40)) & FULL
+    }}
+    fn sparse(r: i64) -> u64 {{ (1u64 << (r % {kbits})) | (1u64 << ((r * 7) % {kbits})) }}
+    fn mask_of(r: i64) -> u64 {{ if r % 2 == 0 {{ dense(r) }} else {{ sparse(r) }} }}
+
+    trait Rep: Sized {{
+        fn mk(mask: u64) -> Self;
+        fn has(&self, i: u32) -> bool;
+        fn set_bit(&mut self, i: u32);
+        fn clear_bit(&mut self, i: u32);
+        fn uni(&self, b: &Self) -> Self;
+        fn inter(&self, b: &Self) -> Self;
+        fn diff(&self, b: &Self) -> Self;
+    }}
+
+    impl Rep for u64 {{
+        fn mk(mask: u64) -> Self {{ mask }}
+        fn has(&self, i: u32) -> bool {{ (*self >> i) & 1 == 1 }}
+        fn set_bit(&mut self, i: u32) {{ *self |= 1 << i }}
+        fn clear_bit(&mut self, i: u32) {{ *self &= !(1 << i) }}
+        fn uni(&self, b: &Self) -> Self {{ self | b }}
+        fn inter(&self, b: &Self) -> Self {{ self & b }}
+        fn diff(&self, b: &Self) -> Self {{ self & !b }}
+    }}
+
+    impl Rep for BTreeSet<Case> {{
+        fn mk(mask: u64) -> Self {{ (0..K).filter(|i| (mask >> i) & 1 == 1).map(|i| Case(i as u8)).collect() }}
+        fn has(&self, i: u32) -> bool {{ self.contains(&Case(i as u8)) }}
+        fn set_bit(&mut self, i: u32) {{ self.insert(Case(i as u8)); }}
+        fn clear_bit(&mut self, i: u32) {{ self.remove(&Case(i as u8)); }}
+        fn uni(&self, b: &Self) -> Self {{ self.union(b).copied().collect() }}
+        fn inter(&self, b: &Self) -> Self {{ self.intersection(b).copied().collect() }}
+        fn diff(&self, b: &Self) -> Self {{ self.difference(b).copied().collect() }}
+    }}
+
+    fn to_mask<R: Rep>(s: &R) -> i64 {{
+        let mut m: u64 = 0;
+        for i in 0..K {{ if s.has(i) {{ m |= 1 << i; }} }}
+        (m % 1000003) as i64
+    }}
+    fn items<R: Rep>(s: &R) -> Vec<i64> {{ (0..K).filter(|&i| s.has(i)).map(|i| i as i64).collect() }}
+    fn from_items<R: Rep>(xs: &[i64]) -> R {{ R::mk(xs.iter().fold(0u64, |m, &x| m | (1 << x))) }}
+
+    fn run<R: Rep>() {{
+        let rounds: i64 = {rounds};
+        let mut check: i64 = 0;
+        let w = Instant::now();
+        for r in 0..rounds {{ check = (check * 31 + to_mask(&R::mk(mask_of(black_box(r))))) % 1000000007; }}
+        let t_construction = w.elapsed().as_nanos();
+        let w = Instant::now();
+        let mut s = R::mk(0);
+        for r in 0..rounds {{
+            s.set_bit((r % {kbits}) as u32);
+            if r % 3 == 0 {{ s.clear_bit(((r * 5) % {kbits}) as u32); }}
+        }}
+        check = (check * 31 + to_mask(&s)) % 1000000007;
+        let t_update = w.elapsed().as_nanos();
+        let w = Instant::now();
+        let probe = R::mk(dense(7));
+        let mut hits = 0i64;
+        for r in 0..rounds {{ if probe.has((black_box(r) % K as i64) as u32) {{ hits += 1; }} }}
+        check = (check * 31 + hits) % 1000000007;
+        let t_membership = w.elapsed().as_nanos();
+        let w = Instant::now();
+        for r in 0..rounds {{
+            let a = R::mk(mask_of(r));
+            let b = R::mk(mask_of(r + 1));
+            check = (check * 31 + to_mask(&a.uni(&b)) + to_mask(&a.inter(&b)) * 3 + to_mask(&a.diff(&b)) * 5) % 1000000007;
+        }}
+        let t_setops = w.elapsed().as_nanos();
+        let w = Instant::now();
+        let mut total = 0i64;
+        for _ in 0..rounds / 8 {{ for x in items(black_box(&probe)) {{ total += x; }} }}
+        check = (check * 31 + total) % 1000000007;
+        let t_iteration = w.elapsed().as_nanos();
+        let w = Instant::now();
+        for r in 0..rounds / 8 {{ check = (check * 31 + to_mask(&from_items::<R>(&items(&R::mk(mask_of(r)))))) % 1000000007; }}
+        let t_conversion = w.elapsed().as_nanos();
+        let order: Vec<String> = items(&R::mk(dense(3))).iter().map(|i| i.to_string()).collect();
+        println!("k={{K}} order=[{{}}]", order.join(", "));
+        println!("check={{check}}");
+        eprintln!("construction={{t_construction}} update={{t_update}} membership={{t_membership}} setops={{t_setops}} iteration={{t_iteration}} conversion={{t_conversion}}");
+    }}
+
+    fn main() {{ run::<{rep}>(); }}
+
+    """
+}

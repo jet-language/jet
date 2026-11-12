@@ -1,0 +1,24 @@
+# A stand-in for `jet build --release FILE`, run as `sh build --release FILE`
+# when a case passes `--jet sh`: it writes .jet/build/STEM, a shell program
+# whose run depends on the arm, or fails the build of the packed-fields arm.
+stem=$(basename "$2" .jet)
+mkdir -p .jet/build
+out=.jet/build/$stem
+case "$stem" in
+  jet_set_enum_*)
+    body='echo "k=8 members=[C0, C3, C7]"; echo "check=42"; echo "construction=5 update=6 membership=7 setops=8 iteration=9 conversion=10" >&2'
+    ;;
+  jet_bits_*)
+    body='echo partial; awk '"'"'BEGIN { for (i = 0; i < 900; i++) printf "é"; printf "\r\nboom: \"arm\" \\ failed\t✓ 😀\n" }'"'"' >&2; exit 3'
+    ;;
+  jet_int_mask_*)
+    body='echo "k=8"; echo "no timings here" >&2'
+    ;;
+  *)
+    awk 'BEGIN { for (i = 0; i < 1600; i++) printf "ü"; printf "\r\nerror: \"%s\" does not build\r\n", ARGV[1] }' "$stem" >&2
+    echo "see the log"
+    exit 1
+    ;;
+esac
+printf '#!/bin/sh\n%s\n' "$body" > "$out"
+chmod +x "$out"

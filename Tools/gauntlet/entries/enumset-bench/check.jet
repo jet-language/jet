@@ -1,0 +1,81 @@
+// An enumset-bench case: the printed lines, then the JSON report they name
+// with what changes between runs and machines replaced (the commit, the
+// tree state, the tool versions, the machine, every number but the counts
+// the case sets, and which phases lose), rendered with two-space indents,
+// then the sources the bench generated under $JET_STATE_ROOT/enumset-bench
+// with their sizes and digests.
+use {
+    crypto: core.crypto
+    files: core.files
+    json: core.encoding.json
+    process: core.process
+    sys: core.sys
+    term: core.term
+}
+
+// The numbers that stay put from one run to the next.
+STABLE: ["card", "samples", "rounds", "k"]
+
+// The values that name the machine, its tools and the tree, or that move
+// with the timings.
+VARYING: ["commit", "jet_version", "rustc", "platform", "cpu", "losing_phases"]
+
+#CLI
+Check: struct {
+    #Doc("The file holding the program's output") stdout: String
+}
+
+run: fn(check: Check) {
+    printed: files.read(check.stdout) ?? process.fail(1, "{err}")
+    stdout := term.stdout()
+    stdout.write(printed) ?? process.fail(1, "{err}")
+    lines: printed.trim().split("\n").to_list()
+    target: lines[lines.len() - 1]
+    report: json.parse(files.read(target) ?? process.fail(1, "{target}: {err}")) ?? process.fail(1, "{target}: {err}")
+    print("report:")
+    print(json.stringify(masked("", report), 2))
+    print("")
+    state: sys.getenv("JET_STATE_ROOT") ?? process.fail(1, "JET_STATE_ROOT is not set")
+    scratch: files.join(state, "enumset-bench")
+    print("sources:")
+    sizes := [String]{}
+    loop item in files.list_dir(scratch) ?? process.fail(1, "{scratch}: {err}") {
+        if item.is_dir && item.name.starts_with("k") -> sizes.push(item.name.copy())  // copy: the listing goes away
+    }
+    sizes.sort()
+    loop size in sizes {
+        dir: files.join(scratch, size)
+        names := [String]{}
+        loop item in files.list_dir(dir) ?? process.fail(1, "{dir}: {err}") {
+            if !item.is_dir && (item.name.ends_with(".jet") || item.name.ends_with(".rs")) -> names.push(item.name.copy())  // copy: the listing goes away
+        }
+        names.sort()
+        loop name in names {
+            bytes: files.read_bytes(files.join(dir, name)) ?? process.fail(1, "{name}: {err}")
+            print("  {size}/{name} {bytes.len()} bytes sha256 {crypto.sha256(bytes).hex()}")
+        }
+    }
+}
+
+// The value under `key` with what varies replaced by "<varies>".
+masked: fn(key: String, value: Dyn) -> Dyn {
+    if VARYING.contains(key) -> return Dyn.Text("<varies>")
+    if value == {
+        .Bool(_) | .Float(_) | .Number(_) -> Dyn.Text("<varies>")
+        .Int(_) -> if STABLE.contains(key) -> value.copy() else -> Dyn.Text("<varies>")  // copy: the report keeps its own
+        .Text(text) -> if key == "error_tail" -> Dyn.Text(without_runner_note(text)) else -> value.copy()  // copy: the report keeps its own
+        .Array(items) -> Dyn.Array(items.map(item -> masked("", item)))
+        .Object(entries) -> {
+            out := [String: Dyn]{}
+            loop entry in entries -> out[entry.key.copy()] = masked(entry.key, entry.value)  // copy: the masked report keeps its own
+            Dyn.Object(out)
+        }
+        .Null | .Bytes(_) | .DateTime(_) -> value.copy()  // copy: the report keeps its own
+    }
+}
+
+// A build's error tail without the note the Jet runner prints before the
+// JetEnv script, which names the tree it runs from.
+without_runner_note: fn(text: String) -> String {
+    text.split("\n").to_list().filter(line -> !(line.starts_with("note: ") && line.contains("JetEnv.jet"))).join("\n")
+}
