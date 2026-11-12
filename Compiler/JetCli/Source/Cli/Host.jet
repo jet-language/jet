@@ -2853,9 +2853,9 @@ jet_cli_fmt_explicit_copies: fn(source: String, origin: String, color: Bool) -> 
     jet_cli_fmt_formatted("{marked}{source.slice(cursor..<source.len())}")
 }
 
-// `format_source_for_fmt`: `package.jet` through the Package model; otherwise
-// optional copy marks, the retired package-target rewrite, the Package model
-// for a `Config` record, then the ordinary formatter.
+// `format_source_for_fmt`: `package.jet` through the Package model, whose
+// manifest syntax is not Jet; every other source (a `Config` record too)
+// through the one Jet formatter, after optional copy marks.
 jet_cli_fmt_format_source: fn(source: String, origin: String, explicit_copies: Bool, simplify: Bool, color: Bool) -> JetCLIFmtSource {
     if jet_cli_fmt_is_package_manifest_file(origin) -> return jet_cli_fmt_package_manifest(source, origin)
     marked := source
@@ -2865,14 +2865,7 @@ jet_cli_fmt_format_source: fn(source: String, origin: String, explicit_copies: B
         marked = copies.text
     }
     copy_marks_inserted: marked != source
-    materialized: marked
-    // A Config binding also parses as ordinary Jet, but its record fields
-    // belong to the Package model; prefer that formatter so the file keeps
-    // the shape the typed loader accepts.
-    if jet_cli_fmt_is_typed_package_source(materialized, origin) {
-        if pkg_format_source(materialized, origin) == .Ok(formatted) -> return jet_cli_fmt_formatted(formatted)
-    }
-    result: jet_cli_fmt_ordinary(materialized, simplify, jet_cli_fmt_is_library_source(origin))
+    result: jet_cli_fmt_ordinary(marked, simplify, jet_cli_fmt_is_library_source(origin))
     if result.structure_change == .Val(change) -> return JetCLIFmtSource{text: "", diagnostics: [Diagnostic]{}, report: Val(jet_cli_fmt_structure_report(origin, change))}
     if result.ok -> return jet_cli_fmt_formatted(result.text)
     // The source checked clean, so marks that do not parse are a defect in
