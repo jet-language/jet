@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6766,
-    "rev": 99916,
+    "nextNum": 6767,
+    "rev": 99919,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -99335,6 +99335,56 @@
       "updatedBy": "Main",
       "criteriaLastN": 1,
       "completedAt": "2026-11-12T09:15:50.594Z"
+    },
+    {
+      "id": "c0828za3",
+      "num": 6766,
+      "title": "Diagnostic coverage credits orphan snapshot text that no producer still prints",
+      "body": "Found by G5DevX-1 on 2026-11-12 during the #3720 c79 id sweep. tests/fixtures/jetpack-diagnostics is read only as snapshot text: tests/guards/diagnostics_coverage.jet:147 (dc_snapshot_texts) and Compiler/JetTestKit Ui.jet:682 (kit_ui_coverage) both credit it as rendered coverage, but neither checks that a producer still prints it. Live producers have moved on. JetOS/Source/LoadValidate.jet:18 E0979 now renders 'a bare host selects system.<host> in ./package.jet…', while the snapshot still holds the old decision-id text and ./config.jet. EnvModel ModuleEval/EnvPlanBuilder.jet:372 E1327 renders 'an environment image projects…', while module-eval-diagnostics/E1327.stderr holds a decision-id line and an old Fix. The jetpack_jetos cases are opt-in (-- --ignored), so nothing re-renders them. This breaks I4: a snapshot that no producer run checks is not evidence. Fix at the root, sweeping every snapshot directory first: tests/guards/diagnostics_snapshots.jet (which owns the snapshot-directory list, line 14) requires every listed snapshot to be compared against a live producer run in some suite that runs by default; orphan fixtures are re-rendered from their producer or deleted; dc_snapshot_texts and kit_ui_coverage count only producer-checked snapshots. Every stale text is re-blessed from its live producer, with no ids, in the same batch.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e14",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Every snapshot in the directories tests/guards/diagnostics_snapshots.jet lists is compared against a live producer run in a suite that runs by default. The guard fails when a snapshot has no producer, and orphans are re-rendered from their producer or deleted (sweep list in the evidence). Proof: the guard passes on dev, and a planted orphan snapshot makes it fail.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-12T09:30:14.739Z"
+        },
+        {
+          "n": 2,
+          "text": "dc_snapshot_texts (tests/guards/diagnostics_coverage.jet) and kit_ui_coverage (JetTestKit Ui.jet) credit only producer-checked snapshots. The E0979 (jetpack_jetos) and E1327 (module-eval-diagnostics) snapshots match their live producers' text, with no decision ids. Proof: jet test tests/guards/diagnostics_coverage.jet, plus the producer tests for E0979 and E1327, all passing.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-12T09:30:15.633Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G5"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-12T09:30:03.553Z",
+      "updated": "2026-11-12T09:30:15.633Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 2
     }
   ],
   "decisions": [
@@ -199948,6 +199998,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-12T09:30:15.633Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0828za3",
+      "note": "#2 dc_snapshot_texts (tests/guards/diagnostics_coverage.jet) an"
+    },
+    {
+      "at": "2026-11-12T09:30:14.739Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0828za3",
+      "note": "#1 Every snapshot in the directories tests/guards/diagnostics_s"
+    },
+    {
+      "at": "2026-11-12T09:30:03.553Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0828za3",
+      "note": "Diagnostic coverage credits orphan snapshot text that no producer still prints"
+    },
     {
       "at": "2026-11-12T09:26:50.053Z",
       "by": "Main",
