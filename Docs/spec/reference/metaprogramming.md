@@ -15,13 +15,13 @@ Jet uses one language at every stage. A compile-time expression is still typed
 Jet code, and a generated item must pass the ordinary checker before it can
 become part of a program. The boundary is visible in source:
 
-- `comptime { ... }` is the explicit shared-preparation block (D-PREP-SURFACE2=A).
+- `#run { ... }` is the explicit shared-preparation block (D-PREP-SURFACE2=A).
   Its body runs while building and emits no runtime code. In the binding form
-  `name: comptime { ... }`, the final expression supplies the prepared value.
+  `name: #run { ... }`, the final expression supplies the prepared value.
   That value retains its checked initializer type: numeric widths, empty-list
   element types, optional elements, and function return types are not inferred
   again from the evaluator's erased value representation. The retired
-  `@ { ... }` spelling teaches `comptime { ... }` (E0388).
+  `@ { ... }` spelling teaches `#run { ... }` (E0388).
 - `@name: expression` binds a value evaluated during compilation.
 - Compiler facts carry `$`: members of their subject such as `T.reflect().fields`, or
   the roots `#build`, `#package`, `#phase` and `#program`. They do not replace
@@ -43,7 +43,7 @@ ordinary runtime expression:
 area: fn(width: Int, height: Int) -> Int { width * height }
 
 run: fn() {
-    comptime {
+    #run {
         @cells: area(@WIDTH, @HEIGHT)
         if @cells > 100 -> panic("the grid is too large")
     }
@@ -66,7 +66,7 @@ emitted; the other arm is name-resolved so misspelled names are still found.
 Nested `@if` forms use the same rule. See
 [`comptime_if.jet`](../../../Examples/Metaprogramming/Comptime/ComptimeIf.jet).
 
-`comptime loop` is the one typed compile-time repetition mechanism used by derive
+`#loop` is the one typed compile-time repetition mechanism used by derive
 and marker bodies. [`derive_loop.jet`](../../../Examples/Metaprogramming/Comptime/PrepLoop.jet)
 uses it to create methods from `T.reflect().fields`, to emit an `impl` for each type,
 and to create measured test declarations from `CASES`.
@@ -90,7 +90,7 @@ user's function of the same name keeps its meaning. A name the template
 wrote resolves where the template was written, so a template in another
 module calls that module's helpers (private ones too), and a pasted name
 resolves at the marker's site. A template's own local (a binding or a
-`comptime loop` name in `expand`) may not hide a `use` name of its file or a
+`#loop` name in `expand`) may not hide a `use` name of its file or a
 Prelude name such as `print`: that is E0118, like a hidden inner local
 ([`template_local_hides_use_or_prelude_name.jet`](../../../tests/ui/template_local_hides_use_or_prelude_name.jet),
 [`TemplateHygiene.jet`](../../../tests/run/Comptime/TemplateHygiene.jet),
@@ -127,7 +127,7 @@ program reaches can't make one, directly or through a helper: a call that
 ([`comptime_input_reached_at_run_time.jet`](../../../tests/ui/comptime_input_reached_at_run_time.jet)).
 A helper that only comptime code and `build: fn` call is prep code, and the
 program reads its result through a prepared constant
-(`GREETING: comptime { greeting() }`).
+(`GREETING: #run greeting()`).
 
 `core.net.fetch(url, sha256:)` is the only Tier 1 network operation. It runs
 only while compiling; code the running program reaches can't call it (E0956).
@@ -156,7 +156,7 @@ gate and the command-line grant:
 use fs: core.files
 
 run: fn() {
-    comptime {
+    #run {
         #Impure("read an explicitly approved ambient input") {
             @CONFIG: fs.read("config.txt")
         }
@@ -260,8 +260,8 @@ build: fn(b: Build) {
 
 A spliced local is a `String`, `Int` or `Bool`, or a list of them; any other
 type is E3502. The value goes where an expression goes; a generated
-declaration's name comes only from a compile-time binding, such as a
-`comptime` loop name. A `#{name}` that names no build local stays a
+declaration's name comes only from a compile-time binding, such as the name
+a `#loop` binds. A `#{name}` that names no build local stays a
 compile-time name of the items.
 
 ## Typed reflection
@@ -273,7 +273,7 @@ Jet has two related reflection paths:
    `#package.name`. These reads produce typed fact records that can be
    used in a compile-time binding or a derive body.
 2. `T.reflect()` returns the aggregate `TypeInfo` record computed while
-   compiling. It reads the same in a marker body, a `comptime` value,
+   compiling. It reads the same in a marker body, a `#run` value,
    `build: fn` and ordinary code; in the running program it is a constant.
    `reflect.of(value)` returns the runtime reflection floor for a value.
 
@@ -381,7 +381,7 @@ snake_case name (`route` for `Route`), and the carrying item's `ItemInfo`
 (`name`, `path`, `module`, and `kind`: `struct`, `enum`, `distinct`,
 `function`, `field`, `variant`, `method` or `module`). The list is in module
 order, then source order. It folds to a constant after checking, so a program
-reads it in a compile-time binding such as `ENTITY_COUNT: comptime {
+reads it in a compile-time binding such as `ENTITY_COUNT: #run {
 Entity.reflect().uses.len() }`. Only the package that declares `M` reads its
 uses; any other package's read is E1136. A use whose marker argument has no
 compile-time value is E0302. See
@@ -407,11 +407,11 @@ spelling until a ballot names their `$` root.
 
 `#phase` is a `Phase` value (`core.prelude`) that Jet fills in for each
 compiled copy, one of exactly `Preparation`, `Build`, and `Runtime`. A
-`comptime` block or binding reads `.Preparation`. A function body is compiled
+`#run` block or binding reads `.Preparation`. A function body is compiled
 once for each phase that runs it: its compile-time copy reads `.Preparation`,
 its copy in the build entry (`build: fn` and what it calls) reads `.Build`,
 and its copy in the program reads `.Runtime`. Each copy folds its own
-`if #phase == ...`, so one helper called from a `comptime` binding and from
+`if #phase == ...`, so one helper called from a `#run` binding and from
 `run` returns `.Preparation` to the first and `.Runtime` to the second, and
 `print(#phase)` in `run` prints `Runtime` on every tier.
 [`Phase.jet`](../../../Examples/Metaprogramming/Comptime/Phase.jet) shows both

@@ -1,4 +1,4 @@
-// A `comptime` value may call a function declared in another
+// A `#run` value may call a function declared in another
 // file, through a member import or a qualified name. The callee's body runs
 // while building with its own file's names in scope, so it can call a third
 // file and build that file's structs and enums. At runtime the constants
@@ -11,14 +11,14 @@ use {
 }
 
 // A member-imported function.
-SQUARES: comptime { build_squares(5) }
+SQUARES: #run build_squares(5)
 
 // A qualified call; the callee calls a third file.
-CUBES: comptime { tables.build_cubes(4) }
+CUBES: #run tables.build_cubes(4)
 
 // A struct and an enum declared in another file.
-GRID: comptime { shapes.square_grid(3) }
-CORNER: comptime { shapes.corner_at(7) }
+GRID: #run shapes.square_grid(3)
+CORNER: #run shapes.corner_at(7)
 
 area: fn(grid: Grid) -> Int { grid.width * grid.height }
 

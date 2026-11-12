@@ -8,7 +8,7 @@ use {
     jet_parser.[JetParserState, jet_format_source, jfmt_apply_source_edits, parse_source, parser_current, parser_current_kind, parser_line_starts, parser_prepare_tokens, parser_take_type_close]
 }
 
-PC_FMT_RUNTIME_SOURCE: comptime { ```#Import(c) no_result: fn() = "jet_rt_trap"
+PC_FMT_RUNTIME_SOURCE: #run { ```#Import(c) no_result: fn() = "jet_rt_trap"
 
 #Import(c) scalar: fn(value: I64) -> I64 = "jet_rt_iter_next"
 
@@ -126,7 +126,7 @@ pc_trait_effect_slots: fn() {
 }
 
 pc_enum_methods: fn() {
-    parsed: parse_source("Choice: enum {{\n First\n Second\n name: fn(self) -> String {{ \"first\" }}\n label: fn(self) -> String {{ \"public\" }}\n comptime from_int: fn(value: Int) -> Choice {{ Choice.First }}\n}}\n".bytes())
+    parsed: parse_source("Choice: enum {{\n First\n Second\n name: fn(self) -> String {{ \"first\" }}\n label: fn(self) -> String {{ \"public\" }}\n #run from_int: fn(value: Int) -> Choice {{ Choice.First }}\n}}\n".bytes())
     pc_require(parsed.diagnostics.len() == 0, "enum methods accept public-default and comptime heads")
     pc_require(if parsed.program.items[0] == .Enum(value) -> value.variants.len() == 2 && value.methods.len() == 3 && value.methods[0].is_pub && value.methods[1].is_pub && value.methods[2].is_pub && value.methods[2].is_comptime else -> false, "enum method heads preserve public-default visibility and comptime facts")
 }

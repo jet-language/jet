@@ -3,13 +3,13 @@
 // I/O, and no UTF-8 requirement, so it works for images, fonts, or any blob.
 // A `comptime require` audits the bytes while compiling: if it fails you get a
 // compile error, not a runtime surprise.
-LOGO: comptime { embed_bytes("logo.bin") }
+LOGO: #run embed_bytes("logo.bin")
 
-SIZE: comptime { byte_count(LOGO) }
+SIZE: #run byte_count(LOGO)
 
-FIFTH: comptime { LOGO[5] }
+FIFTH: #run LOGO[5]
 
-OK: comptime { nonempty(LOGO) }
+OK: #run nonempty(LOGO)
 
 byte_count: fn(bytes: [U8]) -> Int { bytes.len() }
 

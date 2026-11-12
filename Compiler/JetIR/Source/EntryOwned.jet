@@ -47,7 +47,7 @@ use jet_foundation.[name_rows_value]
 // HostProcess.jet runs the exit handlers, flushes and exits at once; under
 // the root the same steps run after the stop edges, which an owned main's do
 // nothing observable on).
-IR_ROOT_FREE_ROUTES: comptime { [String]{
+IR_ROOT_FREE_ROUTES: #run { [String]{
     "jet_char_len",
     "jet_fault_should_fail",
     "jet_int_add",
@@ -127,7 +127,7 @@ IR_ROOT_FREE_ROUTES: comptime { [String]{
 // The runtime routes a stop edge or a drop routine may call with nothing a
 // process exit could observe: they free memory, or enter and leave a
 // cleanup scope (an owned main drops those).
-IR_ENTRY_QUIET_ROUTES: comptime { [String]{
+IR_ENTRY_QUIET_ROUTES: #run { [String]{
     "jet_rt_block_release",
     "jet_rt_cleanup_enter",
     "jet_rt_cleanup_leave",
@@ -277,7 +277,7 @@ ir_entry_quiet_functions: fn(m: IRModule, seeds: [Int]) -> IREntryQuiet Never! {
 // session flags are untouched and the saved word is 0 (Scheduler.jet
 // jet_rt_cleanup_enter/leave), so an owned main drops their calls and links
 // none of the deadline delivery behind the shield's leave.
-IR_OWNED_ATTACH_ROUTES: comptime { [String]{
+IR_OWNED_ATTACH_ROUTES: #run { [String]{
     "jet_ctx_deadline_ms",
     "jet_ctx_deadline_present",
     "jet_ctx_thread",
@@ -291,7 +291,7 @@ IR_OWNED_ATTACH_ROUTES: comptime { [String]{
 // The root-free routes besides print that may write stdout (through its
 // buffer, HostStdio.jet host_stdout_write). A main that calls one keeps
 // print's buffered writer, so their lines stay in program order.
-IR_OWNED_STDOUT_ROUTES: comptime { [String]{
+IR_OWNED_STDOUT_ROUTES: #run { [String]{
     "jet_term_stdio_write_raw",
 } }
 

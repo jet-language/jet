@@ -3,9 +3,9 @@ use {
     zstd: core.archive.zstd
 }
 
-BYTES: comptime { [U8]{ 72, 101, 108, 108, 111 } }
-ENCODED: comptime { zstd.compress(BYTES) ?? [U8]{} }
-EXPECTED: comptime { zstd.decompress(ENCODED) ?? [U8]{} }
+BYTES: #run { [U8]{ 72, 101, 108, 108, 111 } }
+ENCODED: #run { zstd.compress(BYTES) ?? [U8]{} }
+EXPECTED: #run { zstd.decompress(ENCODED) ?? [U8]{} }
 
 run: fn() {
     restored: zstd.decompress(ENCODED) ?? [U8]{}

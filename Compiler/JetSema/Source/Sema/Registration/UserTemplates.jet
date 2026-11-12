@@ -1,4 +1,4 @@
-// Package-authored templates (declared marker bodies and root `comptime loop`
+// Package-authored templates (declared marker bodies and root `#loop`
 // declarations) expand through the same typed template engine as the Prelude
 // providers (Registration/Derives.jet). Generated items re-enter ordinary
 // registration as written items; nothing is serialized or re-lexed. Rust:
@@ -142,10 +142,10 @@ sema_user_template_function_info: fn(function: Func, registered_module: SemaRegi
 }
 
 // ---------------------------------------------------------------------------
-// Root `comptime loop` declarations (Rust `expand_item_template_loops`). They
+// Root `#loop` declarations (Rust `expand_item_template_loops`). They
 // expand before registration in the module's known-time constant scope.
 
-// Expands the root `comptime loop` items of `items` in place; a list without one
+// Expands the root `#loop` items of `items` in place; a list without one
 // is left untouched (not copied).
 sema_derive_expand_template_loops: fn(items: &[Item], diagnostics: &[Diagnostic]) {
     has_loop: loop item in items {
@@ -346,7 +346,7 @@ sema_user_rule_row_check: fn(items: [Item], diagnostics: &[Diagnostic]) {
 }
 
 // Template hygiene: a template's own local (a template binding or a
-// `comptime loop` name in `expand`) may not hide a `use` name of its file or
+// `#loop` name in `expand`) may not hide a `use` name of its file or
 // a Prelude name, so the names its code reads mean the same at every marker.
 // A `#NoPrelude` file has no Prelude names to hide.
 sema_user_rule_local_check: fn(imports: [ImportDecl], items: [Item], no_prelude: Bool, diagnostics: &[Diagnostic]) {

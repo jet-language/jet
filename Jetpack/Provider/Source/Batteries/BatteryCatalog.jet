@@ -26,23 +26,23 @@ env_battery_text: fn(path: String, text: String) -> BatteryFile Never! {
     BatteryFile{path, mode: BATTERIES_FILE_MODE, bytes: text.bytes()}
 }
 
-// workaround #5940(g): module-level constants, not inline `comptime {}` values.
-BATTERY_BACKEND_JET: comptime { embed_file("../../Batteries/backend/backend.jet") }
-BATTERY_BACKEND_PACKAGE: comptime { embed_file("../../Batteries/backend/package.jet") }
-BATTERY_CLI_JET: comptime { embed_file("../../Batteries/cli/cli.jet") }
-BATTERY_CLI_PACKAGE: comptime { embed_file("../../Batteries/cli/package.jet") }
-BATTERY_DATA_JET: comptime { embed_file("../../Batteries/data/data.jet") }
-BATTERY_DATA_PACKAGE: comptime { embed_file("../../Batteries/data/package.jet") }
-BATTERY_EMBEDDED_JET: comptime { embed_file("../../Batteries/embedded/embedded.jet") }
-BATTERY_EMBEDDED_PACKAGE: comptime { embed_file("../../Batteries/embedded/package.jet") }
-BATTERY_GAMES_REPLAY: comptime { embed_file("../../Batteries/games/assets/demo.jetreplay") }
-BATTERY_GAMES_ATLAS: comptime { embed_file("../../Batteries/games/assets/player.atlas") }
-BATTERY_GAMES_JET: comptime { embed_file("../../Batteries/games/games.jet") }
-BATTERY_GAMES_PACKAGE: comptime { embed_file("../../Batteries/games/package.jet") }
-BATTERY_GUI_JET: comptime { embed_file("../../Batteries/gui/gui.jet") }
-BATTERY_GUI_PACKAGE: comptime { embed_file("../../Batteries/gui/package.jet") }
-BATTERY_WEB_PACKAGE: comptime { embed_file("../../Batteries/web/package.jet") }
-BATTERY_WEB_JET: comptime { embed_file("../../Batteries/web/web.jet") }
+// workaround #5940(g): module-level constants, not inline `#run {}` values.
+BATTERY_BACKEND_JET: #run embed_file("../../Batteries/backend/backend.jet")
+BATTERY_BACKEND_PACKAGE: #run embed_file("../../Batteries/backend/package.jet")
+BATTERY_CLI_JET: #run embed_file("../../Batteries/cli/cli.jet")
+BATTERY_CLI_PACKAGE: #run embed_file("../../Batteries/cli/package.jet")
+BATTERY_DATA_JET: #run embed_file("../../Batteries/data/data.jet")
+BATTERY_DATA_PACKAGE: #run embed_file("../../Batteries/data/package.jet")
+BATTERY_EMBEDDED_JET: #run embed_file("../../Batteries/embedded/embedded.jet")
+BATTERY_EMBEDDED_PACKAGE: #run embed_file("../../Batteries/embedded/package.jet")
+BATTERY_GAMES_REPLAY: #run embed_file("../../Batteries/games/assets/demo.jetreplay")
+BATTERY_GAMES_ATLAS: #run embed_file("../../Batteries/games/assets/player.atlas")
+BATTERY_GAMES_JET: #run embed_file("../../Batteries/games/games.jet")
+BATTERY_GAMES_PACKAGE: #run embed_file("../../Batteries/games/package.jet")
+BATTERY_GUI_JET: #run embed_file("../../Batteries/gui/gui.jet")
+BATTERY_GUI_PACKAGE: #run embed_file("../../Batteries/gui/package.jet")
+BATTERY_WEB_PACKAGE: #run embed_file("../../Batteries/web/package.jet")
+BATTERY_WEB_JET: #run embed_file("../../Batteries/web/web.jet")
 
 // Every bundled battery package.
 env_battery_packages: fn() -> [BatteryPackage] Never! {

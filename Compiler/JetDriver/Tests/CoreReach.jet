@@ -347,7 +347,7 @@ reach_test_methods: fn(load: JetDriverLoadResult, module_name: String, type_name
 
 #Test("a routed Core constant that only user comptime names still loads") {
     text: "plain: fn() -> Int Never! {{ 1 }}\n\nSCALE: 3.0\n\nOTHER: 4.0\n"
-    load: reach_test_load_module("use m: core.math\nDOUBLE: comptime {{ m.SCALE * 2.0 }}\nrun: fn() {{ print(DOUBLE) }}\n", "core.math", [String]{}, text)
+    load: reach_test_load_module("use m: core.math\nDOUBLE: #run {{ m.SCALE * 2.0 }}\nrun: fn() {{ print(DOUBLE) }}\n", "core.math", [String]{}, text)
     assert_eq(reach_test_constants(load, "core.math"), [String]{"SCALE"})
     assert_eq(reach_test_functions(load, "core.math"), [String]{})
 }
@@ -365,7 +365,7 @@ reach_test_methods: fn(load: JetDriverLoadResult, module_name: String, type_name
     assert_eq(reach_test_types(listed, "core.math"), [String]{"Box"})
     assert_eq(reach_test_functions(listed, "core.math"), [String]{})
     // A method only user comptime calls loads with its type.
-    timed: reach_test_load_module("use m: core.math\nWIDTH: comptime {{ m.make().spare() }}\nrun: fn() {{ print(WIDTH) }}\n", "core.math", [String]{}, text)
+    timed: reach_test_load_module("use m: core.math\nWIDTH: #run m.make().spare()\nrun: fn() {{ print(WIDTH) }}\n", "core.math", [String]{}, text)
     assert_eq(reach_test_methods(timed, "core.math", "Box"), [String]{"spare", "Shape.area"})
     assert_eq(reach_test_functions(timed, "core.math"), [String]{"make"})
 }

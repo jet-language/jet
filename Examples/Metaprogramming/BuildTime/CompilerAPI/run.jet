@@ -4,13 +4,13 @@
 use jc: core.compiler
 
 build: fn(b: Build) {
-    source: comptime { "generated_compiler_api: fn() -> String {{ return \"compiler API\" }}" }
-    lexed: comptime { jc.lex(source) ?? panic("compiler API lex failed") }
+    source: #run "generated_compiler_api: fn() -> String {{ return \"compiler API\" }}"
+    lexed: #run { jc.lex(source) ?? panic("compiler API lex failed") }
     if lexed.tokens().len() == 0 -> panic("compiler API lost tokens")
-    parsed: comptime { jc.parse(source) ?? panic("compiler API parse failed") }
-    checked: comptime { jc.check(parsed) ?? panic("compiler API check failed") }
+    parsed: #run { jc.parse(source) ?? panic("compiler API parse failed") }
+    checked: #run { jc.check(parsed) ?? panic("compiler API check failed") }
     if checked.functions().len() != 1 -> panic("compiler API lost a function")
-    map: comptime { jc.source_map("// jet:source-map source=generated.jet\n// jet:line 1") ?? panic("compiler API source map failed") }
+    map: #run { jc.source_map("// jet:source-map source=generated.jet\n// jet:line 1") ?? panic("compiler API source map failed") }
     if map.generated_lines().len() != 1 -> panic("compiler API lost source mapping")
     b.generate("compiler_api_generated") {
         generated_compiler_api: fn() -> String { "compiler API" }

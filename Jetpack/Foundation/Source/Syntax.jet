@@ -123,7 +123,7 @@ ENV_FILE: "env.jet"
 // ── PackageModel Foreign binders (jet_foundation::Syntax, Syntax/package_files.rs) ──
 
 // Canonical list of real Jet keywords; generated binder names may not use them.
-JET_KEYWORD_LIST: comptime { [String]{
+JET_KEYWORD_LIST: #run { [String]{
     "fn", "pub", "priv", "use", "as", "extern", "module", "if", "else", "loop", "in", "break",
     "return", "defer", "struct", "enum", "impl", "policy", "wrap", "trait", "tag",
     "effect", "derive", "distinct", "migration", "rename", "add", "remove", "change", "via",
@@ -219,7 +219,7 @@ TOOL_SUBCOMMAND: "tool"
 TOOL_VERB_INSTALL: "install"
 TOOL_VERB_LIST: "list"
 TOOL_VERB_UNINSTALL: "uninstall"
-TOOL_VERBS: comptime { [String]{TOOL_VERB_INSTALL, TOOL_VERB_LIST, TOOL_VERB_UNINSTALL} }
+TOOL_VERBS: #run { [String]{TOOL_VERB_INSTALL, TOOL_VERB_LIST, TOOL_VERB_UNINSTALL} }
 // Install under a different on-PATH bin name (avoids JPK-TOOL-COLLIDE / E1297).
 TOOL_FLAG_AS: "--as"
 // Default profile name for `jetpack tool install` PATH projections.
@@ -242,7 +242,7 @@ PROFILE_VERB_BUILD: "build"
 PROFILE_VERB_SWITCH: "switch"
 PROFILE_VERB_ROLLBACK: "rollback"
 PROFILE_VERB_GENERATIONS: "generations"
-PROFILE_VERBS: comptime { [String]{PROFILE_VERB_PLAN, PROFILE_VERB_BUILD, PROFILE_VERB_SWITCH, PROFILE_VERB_ROLLBACK, PROFILE_VERB_GENERATIONS} }
+PROFILE_VERBS: #run { [String]{PROFILE_VERB_PLAN, PROFILE_VERB_BUILD, PROFILE_VERB_SWITCH, PROFILE_VERB_ROLLBACK, PROFILE_VERB_GENERATIONS} }
 
 // U12: `jet os services <verb>`.
 SERVICES_VERB_UP: "up"
@@ -252,7 +252,7 @@ SERVICES_VERB_LOGS: "logs"
 SERVICES_VERB_RESTART: "restart"
 SERVICES_VERB_WAIT: "wait"
 SERVICES_VERB_WATCH: "watch"
-SERVICES_VERBS: comptime { [String]{SERVICES_VERB_UP, SERVICES_VERB_DOWN, SERVICES_VERB_HEALTH, SERVICES_VERB_LOGS, SERVICES_VERB_RESTART, SERVICES_VERB_WAIT, SERVICES_VERB_WATCH} }
+SERVICES_VERBS: #run { [String]{SERVICES_VERB_UP, SERVICES_VERB_DOWN, SERVICES_VERB_HEALTH, SERVICES_VERB_LOGS, SERVICES_VERB_RESTART, SERVICES_VERB_WAIT, SERVICES_VERB_WATCH} }
 
 // U13 `jetpack secrets <verb>`.
 SECRETS_SUBCOMMAND: "secrets"
@@ -263,10 +263,10 @@ SECRETS_VERB_UNSET: "unset"
 SECRETS_VERB_LIST: "list"
 SECRETS_VERB_IMPORT: "import"
 SECRETS_VERB_RECIPIENTS: "recipients"
-SECRETS_VERBS: comptime { [String]{SECRETS_VERB_KEYGEN, SECRETS_VERB_SET, SECRETS_VERB_GET, SECRETS_VERB_UNSET, SECRETS_VERB_LIST, SECRETS_VERB_IMPORT, SECRETS_VERB_RECIPIENTS} }
+SECRETS_VERBS: #run { [String]{SECRETS_VERB_KEYGEN, SECRETS_VERB_SET, SECRETS_VERB_GET, SECRETS_VERB_UNSET, SECRETS_VERB_LIST, SECRETS_VERB_IMPORT, SECRETS_VERB_RECIPIENTS} }
 SECRETS_RECIPIENTS_VERB_ADD: "add"
 SECRETS_RECIPIENTS_VERB_LIST: "list"
-SECRETS_RECIPIENTS_VERBS: comptime { [String]{SECRETS_RECIPIENTS_VERB_ADD, SECRETS_RECIPIENTS_VERB_LIST} }
+SECRETS_RECIPIENTS_VERBS: #run { [String]{SECRETS_RECIPIENTS_VERB_ADD, SECRETS_RECIPIENTS_VERB_LIST} }
 // U13: `jetpack secrets keygen --force` overwrites an existing identity.
 SECRETS_FLAG_FORCE: "--force"
 // SecretSpec 0.18 parity: `jetpack secrets import` default source.
@@ -279,11 +279,11 @@ CONFIG_VERB_SANDBOX: "sandbox"
 CONFIG_TRUST_VERB_ADD: "add"
 CONFIG_TRUST_VERB_LIST: "list"
 CONFIG_TRUST_VERB_REMOVE: "remove"
-CONFIG_TRUST_VERBS: comptime { [String]{CONFIG_TRUST_VERB_ADD, CONFIG_TRUST_VERB_LIST, CONFIG_TRUST_VERB_REMOVE} }
+CONFIG_TRUST_VERBS: #run { [String]{CONFIG_TRUST_VERB_ADD, CONFIG_TRUST_VERB_LIST, CONFIG_TRUST_VERB_REMOVE} }
 CONFIG_SANDBOX_VERB_REQUIRE: "require"
 CONFIG_SANDBOX_VERB_ALLOW: "allow"
 CONFIG_SANDBOX_VERB_STATUS: "status"
-CONFIG_SANDBOX_VERBS: comptime { [String]{CONFIG_SANDBOX_VERB_REQUIRE, CONFIG_SANDBOX_VERB_ALLOW, CONFIG_SANDBOX_VERB_STATUS} }
+CONFIG_SANDBOX_VERBS: #run { [String]{CONFIG_SANDBOX_VERB_REQUIRE, CONFIG_SANDBOX_VERB_ALLOW, CONFIG_SANDBOX_VERB_STATUS} }
 
 // The reserved default source token (`jetpack` falls back to it).
 DEFAULT_SOURCE: "default"
@@ -534,7 +534,7 @@ COMMAND_FILE_RUN: "run.jet"
 COMMAND_FILE_BUILD: "build.jet"
 COMMAND_FILE_DEV: "dev.jet"
 COMMAND_FILE_TEST: "test.jet"
-COMMAND_ROLE_FILES: comptime { [String]{COMMAND_FILE_RUN, COMMAND_FILE_BUILD, COMMAND_FILE_DEV, COMMAND_FILE_TEST} }
+COMMAND_ROLE_FILES: #run { [String]{COMMAND_FILE_RUN, COMMAND_FILE_BUILD, COMMAND_FILE_DEV, COMMAND_FILE_TEST} }
 // The package build entry and its compiler-owned parameter type.
 BUILD_ENTRY_FN: "build"
 TYPE_BUILD_CONTEXT: "Build"
@@ -626,15 +626,15 @@ OS_VERB_STUDIO: "studio"
 OS_VERB_PUSH: "push"
 // Every `jet os` verb: the jetos dispatcher's own verbs, then the actions the
 // CLI registry routes under `os`.
-OS_VERBS: comptime { [String]{OS_VERB_CHECK, OS_VERB_INIT, OS_VERB_PLAN, OS_VERB_PROOF, OS_VERB_BUILD, OS_VERB_SWITCH, OS_VERB_ROLLBACK, OS_VERB_GENERATIONS, OS_VERB_LIFT, OS_VERB_IMPORT, OS_VERB_MIGRATE, OS_VERB_IMAGE, OS_VERB_VM, OS_VERB_STUDIO, USER_SUBCOMMAND, OS_VERB_PUSH, BRIDGE_SUBCOMMAND, SERVICES_SUBCOMMAND, CONFIG_SUBCOMMAND} }
+OS_VERBS: #run { [String]{OS_VERB_CHECK, OS_VERB_INIT, OS_VERB_PLAN, OS_VERB_PROOF, OS_VERB_BUILD, OS_VERB_SWITCH, OS_VERB_ROLLBACK, OS_VERB_GENERATIONS, OS_VERB_LIFT, OS_VERB_IMPORT, OS_VERB_MIGRATE, OS_VERB_IMAGE, OS_VERB_VM, OS_VERB_STUDIO, USER_SUBCOMMAND, OS_VERB_PUSH, BRIDGE_SUBCOMMAND, SERVICES_SUBCOMMAND, CONFIG_SUBCOMMAND} }
 // The jetos verbs this engine builds.
-OS_BUILT_VERBS: comptime { [String]{OS_VERB_CHECK, OS_VERB_PLAN} }
+OS_BUILT_VERBS: #run { [String]{OS_VERB_CHECK, OS_VERB_PLAN} }
 // A bare host selects `system.<host>` in the current Package; `host@root`
 // selects an exact external Package root.
 OS_HOST_SELECTOR: "@"
 // Every Jetpack verb, in dispatch order. JetOS's `os` verb (OS_SUBCOMMAND)
 // routes through its own dispatcher and is not listed.
-JETPACK_VERBS: comptime { [String]{
+JETPACK_VERBS: #run { [String]{
     "doctor",
     "env",
     "use",
@@ -705,7 +705,7 @@ TRUST_VERB_GRANT: "grant"
 TRUST_VERB_LIST: "list"
 TRUST_VERB_EXPLAIN: "explain"
 TRUST_VERB_REVOKE: "revoke"
-TRUST_VERBS: comptime { [String]{TRUST_VERB_GRANT, TRUST_VERB_LIST, TRUST_VERB_EXPLAIN, TRUST_VERB_REVOKE} }
+TRUST_VERBS: #run { [String]{TRUST_VERB_GRANT, TRUST_VERB_LIST, TRUST_VERB_EXPLAIN, TRUST_VERB_REVOKE} }
 // `jet image <name> --push <ref>`.
 IMAGE_FLAG_PUSH: "--push"
 // The generic `--name <name>` flag (`hangar ingest`).
@@ -717,7 +717,7 @@ BROWSER_VERB_LOCK: "lock"
 BROWSER_VERB_PROVISION: "provision"
 BROWSER_VERB_RESOLVE: "resolve"
 BROWSER_VERB_LIST: "list"
-BROWSER_VERBS: comptime { [String]{BROWSER_VERB_LOCK, BROWSER_VERB_PROVISION, BROWSER_VERB_RESOLVE, BROWSER_VERB_LIST} }
+BROWSER_VERBS: #run { [String]{BROWSER_VERB_LOCK, BROWSER_VERB_PROVISION, BROWSER_VERB_RESOLVE, BROWSER_VERB_LIST} }
 BROWSER_FLAG_BINARY: "--binary"
 BROWSER_FLAG_VERSION: "--version"
 BROWSER_FLAG_PROTOCOL: "--protocol"

@@ -91,7 +91,7 @@ SemaScopeBinding: struct {
     integer_bounds: TIntegerBounds?
     string_view: Bool
     compiler_builtin: Bool
-    // A `name: comptime { … }` local reads as this value.
+    // A `name: #run { … }` local reads as this value.
     prepared: TComptimeValue?{None}
     // The `#Track` origin row for this binding; `None`
     // is the untracked row.
@@ -180,10 +180,10 @@ SemaCallSiteFact: struct {
     // process it runs in: its row grants authority, it doesn't prove the
     // call pure, so a local never computes it while compiling.
     runtime_export: Bool{false}
-    // The call runs while compiling (a comptime item, a `comptime { }` site or
+    // The call runs while compiling (a comptime item, a `#run { }` site or
     // a module value), not in the running program. A function only such calls
     // name is prep code, not a runtime entry (sema_effect_runtime_input_paths).
-    comptime: Bool{false}
+    compile_time: Bool{false}
 }
 
 // A raw `extern rust` callee's name and the capability sigil (`&` or `&&`)
@@ -389,7 +389,7 @@ SemaComptimeRequest: struct {
     checked_text: SemaCheckedTextEvaluation?
 }
 
-// A prepared local (`name: comptime { value }`) visible at a body comptime
+// A prepared local (`name: #run value`) visible at a body comptime
 // site. The staged check declares it again, so the site's code reads its
 // finished value as it does in the owner body.
 SemaComptimePreparedLocal: struct {

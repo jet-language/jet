@@ -1,5 +1,5 @@
 # A primitive's `reflect().layout` read at run time is E0302, and the fix it suggests,
-# `FACT: comptime { I32.reflect().layout }`, compiles and reads the layout on O0, O1
+# `FACT: #run I32.reflect().layout`, compiles and reads the layout on O0, O1
 # and O2. Inside comptime the primitive's name resolves (no E0107).
 fixture: primitive_layout_fact_fix_compiles_on_every_tier.fixture
 env: NO_COLOR=1
@@ -9,7 +9,7 @@ env: JETPACK_ENV=1
 step runtime: jet check runtime/main.jet
 exit: 1 # the fact read is compile-time only
 stderr: ~ "Error [jet.UnknownField]: Fact read `reflect().layout` is compile-time only" # E0302 at the run-time read
-stderr: ~ "Fix: Write `FACT: comptime { I32.reflect().layout }`, then use `FACT` in this expression" # the fix the o0 to o2 steps compile
+stderr: ~ "Fix: Write `FACT: #run I32.reflect().layout`, then use `FACT` in this expression" # the fix the o0 to o2 steps compile
 step o0: jet run --optimize=none main.jet
 exit: 0
 stdout: = primitive_layout_fact_fix_compiles_on_every_tier.stdout.expected

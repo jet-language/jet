@@ -1,4 +1,4 @@
-// `comptime loop` repeats
+// `#loop` repeats
 // declarations while building. One typed loop reaches derive bodies, marker
 // bodies, root impl items, and test declarations over closed lists.
 FieldNames: struct {
@@ -6,7 +6,7 @@ FieldNames: struct {
         sites: [.Type]
 
         expand: fn(self, target: Target) {
-            comptime loop field in target.reflect().fields {
+            #loop field in target.reflect().fields {
                 method: "field_{field.reflect().name}"
                 #{method}: fn(self) -> String { field.reflect().name }
             }
@@ -20,7 +20,7 @@ AddMarkerFields: struct {
 
         expand: fn(self, target: Target) {
             type_name: target.reflect().name
-            comptime loop field in target.reflect().fields {
+            #loop field in target.reflect().fields {
                 method: "marked_{field.reflect().name}"
                 impl #{type_name} {
                     #{method}: fn(self) -> String { field.reflect().name }
@@ -44,10 +44,10 @@ Case: struct {
     n: Int
 }
 
-CASES: comptime { [Case]{Case{n: 1}, Case{n: 2}} }
+CASES: #run { [Case]{Case{n: 1}, Case{n: 2}} }
 
 // One loop over a closed type list generates a method on each type.
-comptime loop T in [Point, Size] {
+#loop T in [Point, Size] {
     impl T {
         kind: fn(self) -> String { "generated" }
     }
@@ -55,7 +55,7 @@ comptime loop T in [Point, Size] {
 
 // Generated tests may hold a `.measure` body, so each closed case is a
 // named measurement too.
-comptime loop case in CASES {
+#loop case in CASES {
     #Test("case {case.n}") {
         .measure {
             assert(case.n > 0)

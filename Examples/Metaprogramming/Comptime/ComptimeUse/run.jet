@@ -1,22 +1,22 @@
-// `comptime use` imports a module for compile-time code only: its names work
-// in a `comptime { … }` block, a `comptime fn` body, a comptime argument and
+// `#run use` imports a module for compile-time code only: its names work
+// in a `#run { … }` block, a `#run fn` body, a comptime argument and
 // a value computed while building. Runtime code can't name them (E0944), so
 // the shipped program holds the finished values and leaves both modules out.
-comptime use {
+#run use {
     "tables"
     tables.build_squares
     "limits"
 }
 
 // Computed while building, through a member import.
-SQUARES: comptime { build_squares(5) }
+SQUARES: #run build_squares(5)
 
 // Computed while building from both imports, by qualified name.
-CUBES_FIT: comptime { tables.build_cubes(4).len() <= limits.max_rows() }
+CUBES_FIT: #run { tables.build_cubes(4).len() <= limits.max_rows() }
 
 run: fn() {
     // A local value computed while building.
-    cubes: comptime { tables.build_cubes(4) }
+    cubes: #run tables.build_cubes(4)
     print(SQUARES)
     print(cubes)
     print(CUBES_FIT)

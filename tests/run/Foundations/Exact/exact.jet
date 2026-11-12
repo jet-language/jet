@@ -7,7 +7,7 @@ Rational: struct {
 
     impl Literal.Int {
         // Context can construct an exact Rational directly.
-        comptime from_literal: fn(value: Int) -> Rational { Rational{numerator: value, denominator: 1} }
+        #run from_literal: fn(value: Int) -> Rational { Rational{numerator: value, denominator: 1} }
     }
 
     impl Add {
@@ -146,7 +146,7 @@ ScaledDecimal: struct {
     impl Literal.Float {
         // The compiler passes the source digits as text, preserving trailing zeroes
         // and avoiding an approximate Float round trip.
-        comptime from_literal: fn(digits: String) -> ScaledDecimal {
+        #run from_literal: fn(digits: String) -> ScaledDecimal {
             scientific: if digits.contains("e") -> digits.split("e").to_list() else -> digits.split("E").to_list()
             mantissa: scientific[0]
             exponent: if scientific.len() > 1 -> Int.parse(scientific[1]) ?? 0 else -> 0
@@ -325,7 +325,7 @@ Money: struct {
     cents: Int
 
     impl Literal.Int {
-        comptime from_literal: fn(value: Int) -> Money { Money{cents: value} }
+        #run from_literal: fn(value: Int) -> Money { Money{cents: value} }
     }
 
     impl Add {

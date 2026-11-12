@@ -1,7 +1,7 @@
 Error [jet.ImpureGateNotAllowed]: `core.files.read()` inside `#Impure` is a Tier-2 comptime effect, but `--gate impure=allow` was not passed
   --> tests/ui/impure_no_flag.jet:5:28
     |
-  5 |         cfg: comptime { fs.read("config.txt") }
+  5 |         cfg: #run fs.read("config.txt")
     |                            ^^^^
  Why: The `#Impure` block opts in to ambient I/O, but the invocation gate is also required so CI can audit builds that touch the host.
  Fix: Add `--gate impure=allow` to your `jet build` / `jet run` invocation.

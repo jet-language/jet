@@ -43,10 +43,10 @@ failure: fn() -> Err {
     Err("no error")
 }
 
-FRESH: comptime { fresh_errors() }
-KEPT: comptime { kept_errors() }
-VALUE: comptime { Err{message: "outer", code: Val("E1"), cause: Val(Err("inner"))} }
-FAILED: comptime { failure() }
+FRESH: #run fresh_errors()
+KEPT: #run kept_errors()
+VALUE: #run { Err{message: "outer", code: Val("E1"), cause: Val(Err("inner"))} }
+FAILED: #run failure()
 
 run: fn() {
     print(FRESH)

@@ -174,7 +174,7 @@ closed_list_after: fn(text: String, needle: String) -> Int {
 // The kind a top-level line opens: "enum", "list" or "".
 closed_list_opener: fn(rest: String) -> String {
     if rest.starts_with("enum {{") || rest.starts_with("enum{{") -> return "enum"
-    if rest.starts_with("[String]{{") || rest.starts_with("comptime {{ [String]{{") || rest.starts_with("comptime {{[String]{{") -> return "list"
+    if rest.starts_with("[String]{{") || rest.starts_with("#run {{ [String]{{") || rest.starts_with("#run {{[String]{{") -> return "list"
     ""
 }
 
@@ -317,7 +317,7 @@ closed_list_mirror_problems: fn(findings: [ClosedListFinding], rows: [[String]],
 }
 
 // A subset ledger row names a checked subset view of one vocabulary: view
-// file, view name, the comptime constant in that file whose check stops the
+// file, view name, the `#run` constant in that file whose check stops the
 // build when a member names nothing in the vocabulary, and the vocabulary
 // constant that check reads. The view is derived, not a second home: its
 // duplicate pairs are the vocabulary's, and it leaves the baseline. `texts`
@@ -336,8 +336,8 @@ closed_list_subset_problems: fn(findings: [ClosedListFinding], rows: [[String]],
             next
         }
         text: texts.get(row[0]) ?? ""
-        if !text.contains("\n{row[2]}: comptime {{") || !text.contains(row[3]) {
-            problems.push("{row[0]} {row[1]} is in the subset ledger, but {row[0]} has no `{row[2]}: comptime {{ … }}` check reading {row[3]}; the check is what makes the view derived")
+        if !text.contains("\n{row[2]}: #run ") || !text.contains(row[3]) {
+            problems.push("{row[0]} {row[1]} is in the subset ledger, but {row[0]} has no `{row[2]}: #run …` check reading {row[3]}; the check is what makes the view derived")
             next
         }
         views.push(closed_list_key(row[0], row[1]))
@@ -552,17 +552,21 @@ closed_list_duplicate_problems: fn(findings: [ClosedListFinding], copies: [Strin
     assert_eq(problems.join("\n"), "")
 }
 
-#Test("a subset view counts as derived only while its file holds the comptime check") {
+#Test("a subset view counts as derived only while its file holds the #run check") {
     guards_enter_root()
     view: ClosedListFinding{path: "v.jet", name: "View", members: [String]{"net", "fs", "db"}}
     rows: [[String]]{[String]{"v.jet", "View", "VIEW_COUNT", "ROOTS"}}
-    checked: [String: String]{"v.jet": "use {{ x.[ROOTS] }}\nVIEW_COUNT: comptime {{ view_count(embed_file(\"v.jet\"), ROOTS) }}\n"}
+    checked: [String: String]{"v.jet": "use {{ x.[ROOTS] }}\nVIEW_COUNT: #run {{ view_count(embed_file(\"v.jet\"), ROOTS) }}\n"}
     clean := [String]{}
     assert_eq(closed_list_subset_problems([ClosedListFinding]{view.copy()}, rows, checked, clean).join(","), "v.jet\tView")
     assert_eq(clean.len(), 0)
+    // The operand form `NAME: #run call(...)` is the same check.
+    operand: [String: String]{"v.jet": "use {{ x.[ROOTS] }}\nVIEW_COUNT: #run view_count(embed_file(\"v.jet\"), ROOTS)\n"}
+    assert_eq(closed_list_subset_problems([ClosedListFinding]{view.copy()}, rows, operand, clean).join(","), "v.jet\tView")
+    assert_eq(clean.len(), 0)
     unchecked := [String]{}
     assert_eq(closed_list_subset_problems([ClosedListFinding]{view.copy()}, rows, [String: String]{"v.jet": "View: enum {{ Net FS DB }}\n"}, unchecked).len(), 0)
-    assert(unchecked[0].contains("has no `VIEW_COUNT: comptime {{ … }}` check reading ROOTS"))
+    assert(unchecked[0].contains("has no `VIEW_COUNT: #run …` check reading ROOTS"))
     gone := [String]{}
     closed_list_subset_problems([ClosedListFinding]{}, rows, checked, gone)
     assert(gone[0].contains("names a list that is gone"))
@@ -640,7 +644,7 @@ closed_list_core_levels_problem: fn(levels_text: String, options_text: String) -
 #Test("the closed list scanner reads enums, string lists and generated headers") {
     guards_enter_root()
     found := [ClosedListFinding]{}
-    closed_list_findings_in("a.jet", "Color: enum {{\n    Red Green\n    Blue(Int)\n    Custom{{ name: String }}\n\n    name: fn(self) -> String {{ \"x\" }}\n}}\nNAMES: comptime {{ [String]{{\n    \"go\", \"Java\", // \"cobol\"\n    \"r\",\n}} }}\nSHORT: [String]{{\"a\", \"b\"}}\nInline: enum {{ A B C }}\nlocal: fn() {{ x: [String]{{\"p\", \"q\", \"r\"}} }}\n", found)
+    closed_list_findings_in("a.jet", "Color: enum {{\n    Red Green\n    Blue(Int)\n    Custom{{ name: String }}\n\n    name: fn(self) -> String {{ \"x\" }}\n}}\nNAMES: #run {{ [String]{{\n    \"go\", \"Java\", // \"cobol\"\n    \"r\",\n}} }}\nSHORT: [String]{{\"a\", \"b\"}}\nInline: enum {{ A B C }}\nlocal: fn() {{ x: [String]{{\"p\", \"q\", \"r\"}} }}\n", found)
     assert_eq(found.len(), 3)
     assert_eq(found[0].name, "Color")
     assert_eq(found[0].members.join(","), "red,green,blue,custom")

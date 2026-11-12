@@ -1,6 +1,8 @@
 // Every compiler request spelled with `#`: a build-time import, unbraced and
 // braced values, a branch, a loop of declarations, a number parameter, a
-// literal hook and a statement region.
+// literal hook and a statement region. The file is in `jet fmt` form: a value
+// that is one call, name or literal drops its braces, and a larger one keeps
+// them.
 #run use {
     "tables"
     tables.build_squares
@@ -10,7 +12,9 @@ SQUARES: #run build_squares(5)
 
 DEBUG: #run false
 
-CUBES: #run { tables.build_cubes(3) }
+CUBES: #run tables.build_cubes(3)
+
+LIMIT: #run { 50 * 2 }
 
 show_mode: fn() {
     #if DEBUG {
@@ -20,8 +24,13 @@ show_mode: fn() {
     }
 }
 
-Point: struct { x: Int }
-Size: struct { w: Int }
+Point: struct {
+    x: Int
+}
+
+Size: struct {
+    w: Int
+}
 
 #loop T in [Point, Size] {
     impl T {
@@ -49,7 +58,7 @@ numerator_of: fn(r: Rational) -> Int { r.numerator }
 run: fn() {
     count: #run build_squares(4).len()
     #run {
-        if SQUARES.len() > 100 -> panic("the table is too large")
+        if SQUARES.len() > LIMIT -> panic("the table is too large")
     }
     print(SQUARES)
     print(CUBES)

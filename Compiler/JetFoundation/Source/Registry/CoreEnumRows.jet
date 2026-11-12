@@ -2,10 +2,10 @@
 // declaration order: the first row naming a type is its canonical variant
 // list, and every module that exports the leaf must declare the same variants
 // (the build stops otherwise). A generic leaf is not an enum row.
-CORE_ENUM_ROWS: comptime { core_enum_rows(CORE_DECLARATIONS) }
+CORE_ENUM_ROWS: #run core_enum_rows(CORE_DECLARATIONS)
 
 // Source-owned Core nominals (`source_module … types { … }`) in Core.jet order.
-CORE_SOURCE_OWNED_TYPES: comptime { core_source_owned_types(CORE_DECLARATIONS) }
+CORE_SOURCE_OWNED_TYPES: #run core_source_owned_types(CORE_DECLARATIONS)
 
 // One Core module a builtin record's layout needs loaded. A builtin record
 // (a CORE_RECORD_FIELD_ROWS owner) whose field names a Core struct is laid
@@ -24,7 +24,7 @@ CoreRecordSourceDemand: struct {
 // The Core modules builtin record layouts need, one row per owner module and
 // struct (`TypeInfo.location: SourceLocation?` makes {"", SourceLocation,
 // core.prelude}).
-CORE_RECORD_SOURCE_DEMANDS: comptime { core_record_source_demands(CORE_DECLARATIONS, CORE_RECORD_FIELD_ROWS) }
+CORE_RECORD_SOURCE_DEMANDS: #run core_record_source_demands(CORE_DECLARATIONS, CORE_RECORD_FIELD_ROWS)
 
 core_enum_rows: fn(declared: CoreDeclarations) -> [CoreModuleTypeExport] {
     rows := [CoreModuleTypeExport]{}

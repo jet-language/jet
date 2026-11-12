@@ -14,7 +14,7 @@ use {
 MODULE_VALUE_SOURCE: `
 base_port: fn() -> Int { 8000 }
 
-PORT: comptime { base_port() + 1 }
+PORT: #run { base_port() + 1 }
 
 dev: module {
     env.dev: Env{
@@ -60,7 +60,7 @@ dev: module {
     }
 }
 
-PORT: comptime { base_port() + 1 }
+PORT: #run { base_port() + 1 }
 
 base_port: fn() -> Int { 8000 }
 `
@@ -130,7 +130,7 @@ base_port: fn() -> Int { 8000 }
 }
 
 #Test("module_value_self_cycle_is_reported_before_any_consumer") {
-    source: "PORT: comptime {{ PORT + 1 }}\nimage.server: module {{ from: packages.app, expose: [PORT] }}\n"
+    source: "PORT: #run {{ PORT + 1 }}\nimage.server: module {{ from: packages.app, expose: [PORT] }}\n"
     dir: envmodel_test_oci_base_dir("module-value-self-cycle")
     error: envmodel_test_env_error(envmodel_evaluate_env(source, dir))
     assert_eq(error.code, "E0338")
@@ -139,14 +139,14 @@ base_port: fn() -> Int { 8000 }
 }
 
 #Test("module_value_multi_node_cycle_is_reported_before_any_consumer") {
-    source: "FIRST: comptime {{ SECOND + 1 }}\nSECOND: comptime {{ FIRST + 1 }}\nsystem.web: module {{ target: linux.x64, options: [tuning.port: FIRST] }}\n"
+    source: "FIRST: #run {{ SECOND + 1 }}\nSECOND: #run {{ FIRST + 1 }}\nsystem.web: module {{ target: linux.x64, options: [tuning.port: FIRST] }}\n"
     error: envmodel_test_env_error(envmodel_evaluate_env(source, envmodel_test_base_dir()))
     assert_eq(error.code, "E0338")
     assert(error.what.contains("FIRST -> SECOND -> FIRST"), error.what)
 }
 
 #Test("module_value_ambient_io_is_rejected_before_any_consumer") {
-    source: "HOST: comptime {{ read_file(\"/etc/hostname\") }}\nsystem.web: module {{ target: linux.x64, options: [network.hostName: HOST] }}\n"
+    source: "HOST: #run {{ read_file(\"/etc/hostname\") }}\nsystem.web: module {{ target: linux.x64, options: [network.hostName: HOST] }}\n"
     error: envmodel_test_env_error(envmodel_evaluate_env(source, envmodel_test_base_dir()))
     assert_eq(error.code, "E3402")
 }

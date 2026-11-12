@@ -122,8 +122,8 @@ vocabulary](vocabulary.md).
   The template holds the members it generates: on a type or impl site a
   `name: fn(…)` written directly in `expand` is a member of the marked
   type, with no nested `impl`, and on a function or block site it is a
-  module item. A body-level `comptime if` expands only its chosen branch,
-  and `comptime loop` writes its items once per value (D-META-BODY1=A).
+  module item. A body-level `#if` expands only its chosen branch,
+  and `#loop` writes its items once per value (D-META-BODY1=A).
   A package marker reads its target, adds checked items and rejects code;
   only Jet's Prelude markers set the checking settings `scopes`,
   `inherits`, `resolution`, `owns_menu` and `companion`, which in a
@@ -317,14 +317,14 @@ is a build error (E0643), the same on every tier, and so are initializers that
 read each other in a cycle, one that reads itself included (E0338). A `name: Shared{value}`
 global holds one process-wide cell: the build computes `value`, which must be
 literal data, and every read shares the one cell. Only an explicit
-`comptime { … }` reads build
+`#run { … }` reads build
 inputs. Both globals are visible to functions in the file; only the mutable
 form may be assigned after initialization.
 Typed scalar literals such as `I64{0}`, `I64{-1}`, and `F32{1.25}` retain their
 checked scalar type in module storage (D-BIND-BARE1); the inner value must still
 be literal data, not a call or arithmetic expression.
-Inside a function, the same spellings are local bindings. A `comptime { … }` inside a function runs
-while building, before any call, so it reads the function's prepared `comptime` locals but not its
+Inside a function, the same spellings are local bindings. A `#run { … }` inside a function runs
+while building, before any call, so it reads the function's prepared `#run` locals but not its
 run-time locals or parameters (E0640).
 In an entry file whose top level holds
 statements and no `run: fn`, every top-level line is the program's entry, in order: its statements
@@ -335,8 +335,8 @@ The `const` keyword is retired and is recognized only to teach its replacement
 (E0146). A compile-time constant is an ordinary ALL_CAPS name, `NAME: value`,
 described below.
 The retired `#Known` constant, branch, and block forms teach E0377 and recover
-their compile-time form. Their replacements use `NAME: comptime { value }`,
-`comptime if condition { … }`, and `comptime { … }` (D-META-STAGE1=B,
+their compile-time form. Their replacements use `NAME: #run value`,
+`#if condition { … }`, and `#run { … }` (D-META-STAGE1=B,
 D-PREP-SURFACE2=A). Constant and local-name repairs use the same canonical
 identifier-casing algorithm as semantic diagnostics.
 
@@ -516,7 +516,7 @@ its `return`s. `else` sees only `T`'s bounds and is required (E0003), because
 types are an open set. Matching is exact identity (a bare `2.5` is a
 `Decimal`, not a `Float`): a repeated type is an unreachable arm (E0365) and
 an unknown or non-type head is E0119. `if T == Int { … }` is the one-arm test,
-and `comptime` on either form changes nothing. Each instance keeps only its
+and `#run` on either form changes nothing. Each instance keeps only its
 own arm, so no run-time test remains. Over a union value, an arm may name a
 member without binding it, as in `.Int -> …` (the same test as `.Int(_)`); a
 union table stays exhaustive and needs no `else` (D-TYPESWITCH1=A).
@@ -576,7 +576,7 @@ the literal: `if a > (I32{0}) ->`.
 ## Compile-time names and staged syntax
 
 An immutable `:` binding asks for build-time evaluation as an optimization,
-and `comptime` forces it (#6125). A module-level `name: value`, such as
+and `#run` forces it (#6125). A module-level `name: value`, such as
 `MAX_RETRIES: 3` or `LIMIT: 6 * 7 + 1`, is always evaluated while building
 and read as `MAX_RETRIES` like a literal (D-MODULE-BUILD1). A value that reads
 the outside world, or stops while building, is a build error (E0643). In a
@@ -588,11 +588,11 @@ computation calls something the runtime answers from the running program
 (a clock, the task, the process, its environment or its live and auth
 stores): a build would bake its own process's answer. A folded value is laid
 out once as read-only data, as a module constant is, rather than built part by
-part at each use. `NAME: comptime { value }` at file
-scope, and `lanes: comptime { calculate() }` in a block, where names stay
+part at each use. `NAME: #run value` at file
+scope, and `lanes: #run calculate()` in a block, where names stay
 snake_case (D-SHAPE-CASE1), force evaluation of the single final expression
 while building: a failure stops the build with E3010 (D-PREP-SURFACE2=A).
-Names bound inside a `comptime { … }` statement block stay readable after it.
+Names bound inside a `#run { … }` statement block stay readable after it.
 At file scope, `name := value` bindings remain runtime module globals; they do
 not require `#Persist`. `#Static NAME: value` requests a
 stable-address Rust static when the contract needs one, and `#Inline NAME:
@@ -663,7 +663,7 @@ D-SHAPE3a, D-SHAPE-OPAQUE-INFER1).
 
 Struct and enum bodies may declare methods with `fn` or `pub fn`; `pub`
 exports the method, while an unqualified method remains private. A build-time
-method places `comptime` directly before `fn`, including `pub comptime fn`.
+method places `#run` directly before `fn`, including `pub #run fn`.
 Methods declared inside a generic struct share that struct's type-parameter
 scope; Core's generic record methods use this form rather than generic `impl`
 heads.
@@ -1001,7 +1001,7 @@ uses the host OS by default. Ungated code can select the surviving implementatio
 with the compiler-known switch
 
 ```jet
-comptime if #build.target.os == {
+#if #build.target.os == {
     .Linux -> …
     .MacOS -> …
     .Windows -> …
@@ -1174,23 +1174,25 @@ Finally, `[T#N]` widens to `[T]`; the length fact is erased at that coercion.
 ### Number parameters
 
 A type or function may take a compile-time `Int` as a generic parameter,
-declared `<comptime N: Int>`; only the declaration writes `comptime`. Each
-number is its own instance: `Packet<4>` and `Packet<2>` are two types, laid
-out and named apart. An argument is an integer literal or a constant
-(`Packet<SIZE>`), or a number parameter in scope (`Packet<N>`). Inside the
-declaration, `[T#N]` takes the instance's length and `N` reads as an `Int`.
-A call infers `N` from its arguments' types (D-CONSTGEN1, D-CONSTGEN2).
+declared `<N: Int>`: a parameter bounded by exactly the core `Int` is a
+number, not a type. Each number is its own instance: `Packet<4>` and
+`Packet<2>` are two types, laid out and named apart. An argument is an
+integer literal or a constant (`Packet<SIZE>`), or a number parameter in
+scope (`Packet<N>`). Inside the declaration, `[T#N]` takes the instance's
+length and `N` reads as an `Int`.
+A call infers `N` from its arguments' types (D-CONSTGEN1, D-CONSTGEN2,
+D-META-SPELL1).
 
 ```jet
-Packet: struct<comptime N: Int> {
+Packet: struct<N: Int> {
     data: [U8#N]
 }
 
-size_of: fn<comptime N: Int>(packet: Packet<N>) -> Int { N }
+size_of: fn<N: Int>(packet: Packet<N>) -> Int { N }
 ```
 
-A number parameter of any other value type (`<comptime N: String>`) is
-**E0390**.
+Only `Int` makes a number parameter; any other bound declares a type
+parameter.
 
 ## Closures and function values
 

@@ -37,7 +37,7 @@ pack_sprites: fn(paths: [String]) -> Atlas {
     Atlas{sprites: sprites, rows: rows, palette: embed_bytes("sprites/palette.bin")}
 }
 
-ATLAS: comptime { pack_sprites(find("sprites/*.txt")) }
+ATLAS: #run pack_sprites(find("sprites/*.txt"))
 
 run: fn() {
     loop row in ATLAS.rows -> print(row)

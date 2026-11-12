@@ -4,7 +4,7 @@
 // (Compiler/Toolchain/PreludeSources.jet): edit the Prelude file, not this
 // copy.
 SEMA_PRELUDE_DERIVE_SOURCE_PATH: "jet:canonical-prelude/Prelude/Derives.jet"
-SEMA_PRELUDE_DERIVE_SOURCE: comptime { ```// Built-in derive providers are ordinary Prelude markers: each `expand`
+SEMA_PRELUDE_DERIVE_SOURCE: #run { ```// Built-in derive providers are ordinary Prelude markers: each `expand`
 // template writes the capability's members directly, read with the same
 // template expansion as package source, including reflected enum variant
 // payloads. `#{name}` is the derived type; a generic type keeps its
@@ -24,14 +24,14 @@ Equatable: struct {
 
         expand: fn(self, target: Target) {
             equal: fn(self, rhs: #{name}) -> Bool {
-                comptime if target.kind == "enum" {
-                    comptime loop left in target.reflect().fields {
+                #if target.kind == "enum" {
+                    #loop left in target.reflect().fields {
                         if self == {
                             .#{left} -> {
                                 if rhs == {
                                     .#{left} -> {
-                                        comptime loop field in left.reflect().fields {
-                                            comptime if field.type == target.reflect().name {
+                                        #loop field in left.reflect().fields {
+                                            #if field.type == target.reflect().name {
                                                 if self.#{field}.equal(rhs.#{field}) == false -> return false
                                             } else {
                                                 if self.#{field} != rhs.#{field} -> return false
@@ -48,13 +48,13 @@ Equatable: struct {
                     }
                     return false
                 } else {
-                    comptime if target.kind == "struct" {
-                        comptime loop field in target.reflect().fields {
+                    #if target.kind == "struct" {
+                        #loop field in target.reflect().fields {
                             if self.#{field} != rhs.#{field} -> return false
                         }
                         return true
                     } else {
-                        comptime if target.base == "Float" || target.base == "Float32" {
+                        #if target.base == "Float" || target.base == "Float32" {
                             return self.raw() <= rhs.raw() && self.raw() >= rhs.raw()
                         } else {
                             return self.raw() == rhs.raw()
@@ -72,25 +72,25 @@ Comparable: struct {
 
         expand: fn(self, target: Target) {
             compare: fn(self, rhs: #{name}) -> Ordering {
-                comptime if target.kind == "enum" {
+                #if target.kind == "enum" {
                     rhs_variant_index := 0
-                    comptime loop right in target.reflect().fields {
+                    #loop right in target.reflect().fields {
                         if rhs == {
                             .#{right} -> { rhs_variant_index = right.index }
                             else -> {}
                         }
                     }
-                    comptime loop left in target.reflect().fields {
+                    #loop left in target.reflect().fields {
                         if self == {
                             .#{left} -> {
                                 if rhs_variant_index > left.index -> return .Less
                                 if rhs_variant_index < left.index -> return .Greater
                                 if rhs == {
                                     .#{left} -> {
-                                        comptime loop field in left.reflect().fields {
+                                        #loop field in left.reflect().fields {
                                             // A Float payload orders by IEEE totalOrder, as `.compare` does;
                                             // its plain `<` stays the IEEE comparison.
-                                            comptime if field.type == target.reflect().name || field.type == "Float" || field.type == "F32" {
+                                            #if field.type == target.reflect().name || field.type == "Float" || field.type == "F32" {
                                                 if self.#{field}.compare(rhs.#{field}) == {
                                                     .Less -> return .Less
                                                     .Greater -> return .Greater
@@ -112,9 +112,9 @@ Comparable: struct {
                     }
                     return .Equal
                 } else {
-                    comptime if target.kind == "struct" {
-                        comptime loop field in target.reflect().fields {
-                            comptime if field.type == "Float" || field.type == "F32" {
+                    #if target.kind == "struct" {
+                        #loop field in target.reflect().fields {
+                            #if field.type == "Float" || field.type == "F32" {
                                 if self.#{field}.compare(rhs.#{field}) == {
                                     .Less -> return .Less
                                     .Greater -> return .Greater
@@ -127,7 +127,7 @@ Comparable: struct {
                         }
                         return .Equal
                     } else {
-                        comptime if target.base == "Float" || target.base == "F32" {
+                        #if target.base == "Float" || target.base == "F32" {
                             return self.raw().compare(rhs.raw())
                         } else {
                             if self.raw() < rhs.raw() -> return .Less
@@ -148,7 +148,7 @@ Comparable: struct {
 // (Compiler/Toolchain/PreludeSources.jet): edit the Prelude file, not this
 // copy.
 SEMA_PRELUDE_ERROR_SOURCE_PATH: "jet:canonical-prelude/Prelude/Errors.jet"
-SEMA_PRELUDE_ERROR_SOURCE: comptime { ```// (ratified 2026-08-17, card #2018): the standard library declares
+SEMA_PRELUDE_ERROR_SOURCE: #run { ```// (ratified 2026-08-17, card #2018): the standard library declares
 // the conversion for its own error family. A program can write `run: fn()` and
 // pass a Core failure up automatically without declaring anything, because
 // these declarations already sit on the existing rail. One source;

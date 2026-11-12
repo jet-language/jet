@@ -1,4 +1,4 @@
-// `:` asks for build-time evaluation as an optimization; `comptime` forces
+// `:` asks for build-time evaluation as an optimization; `#run` forces
 // it. `CELLS`, `lanes` and `wide` fold while building on every tier, so the
 // program stores their values instead of computing them. `width` is forced:
 // had `grid_width` failed, the build would have stopped. Inside a function, a
@@ -11,7 +11,7 @@ grid_width: fn() -> Int { 12 }
 run: fn() {
     lanes: 8 * 4 + 2
     wide: lanes * 2 - 1
-    width: comptime { grid_width() * 2 }
+    width: #run { grid_width() * 2 }
     print("cells {CELLS}")
     print("lanes {lanes}, wide {wide}")
     print("width {width}")

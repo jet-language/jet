@@ -369,11 +369,11 @@ provide a runtime path-loading fallback. A runtime call is E0956.
 
 The source declarations supply the public typed vocabulary; calls retain the
 compiler-owned compile-time provider route even when that source package is loaded.
-In a `comptime` binding or `build: fn`, the evaluator hands each `lex`, `parse`,
+In a `#run` binding or `build: fn`, the evaluator hands each `lex`, `parse`,
 or `check` call to the compiler, which answers with its own lexer, parser, and
 check query over the call's argument (the same check `jet inspect compiler
 check` runs). A comptime constant that holds one of these values is read back
-as the compiler's value for that constant, so `PARSED: comptime { … }` can
+as the compiler's value for that constant, so `PARSED: #run { … }` can
 feed `compiler.check(PARSED)`.
 
 The package-view field matrix is versioned by
@@ -2811,7 +2811,7 @@ tested tree has it; with both, their bytes differ.
 predicates, checked and saturating arithmetic, and elementary functions. The
 floating-point constants `math.PI`, `math.E`, `math.TAU`, `math.INFINITY` and
 `math.NAN` are comptime values read as fields, not calls, so they also work in
-`comptime` contexts.
+`#run` contexts.
 The numeric `/%` operator rounds division toward negative infinity for both
 exact `Int` and floating-point operands (`-7 /% 2` is `-4`). Its in-place
 form is `/%=`, and whole-number floor division pairs with floored `%`.
@@ -2915,7 +2915,7 @@ a double rounding of the Float one (C23's `f` forms such as `rsqrtf` and
 | `math.total_order(a, b)` / `math.total_order_mag(a, b)` | `Bool` | IEEE 754 `totalOrder`: whether `a` sorts at or before `b` when `-0` precedes `+0` and NaNs sort beyond the infinities by sign and payload; `total_order_mag` compares magnitudes. |
 | `math.is_signaling(x)` / `math.canonicalize(x)` | `Bool` / `Float` | Test for a signaling NaN, or quiet one while keeping its sign and payload; any other value is itself. |
 | `math.get_payload(x)` / `math.set_payload(p)` / `math.set_payload_signaling(p)` | `?Float` | Read a NaN's payload as an integral `Float`, or build the positive quiet or signaling NaN with payload `p`; `None` for a value that is not a NaN, or a payload that is negative, fractional, at least 2^51, or (signaling) zero. |
-| `math.PI` / `math.E` / `math.TAU` | `Float` | Mathematical constants, declared as comptime values (`PI: Float{…}`); usable in `comptime` contexts. |
+| `math.PI` / `math.E` / `math.TAU` | `Float` | Mathematical constants, declared as comptime values (`PI: Float{…}`); usable in `#run` contexts. |
 | `math.INFINITY` / `math.NAN` | `Float` | The IEEE-754 special values `1.0 / 0.0` and `0.0 / 0.0`, as comptime constants. `NAN` compares unequal to every value, itself included; test it with `math.is_nan`. |
 | `math.round(x)` | `Int` | Round to the nearest integer, with ties away from zero. |
 | `math.to_bits(x)` / `math.from_bits(bits)` | integer bits / `Float` | Convert between a floating value and its bit representation. |
@@ -4318,7 +4318,7 @@ items, so a short list of costly items still reaches every worker.
 each 64-item chunk from a fresh seed and then merges the chunk results up a
 fixed tree, so every tier and every worker count gives the same result.
 Compile-time code also runs natively at O0, but there the kernel uses one
-worker: a `para_*` call in a `comptime` block, a `comptime fn` or a value
+worker: a `para_*` call in a `#run` block, a `#run fn` or a value
 computed while building runs its chunks in order and returns the same value.
 
 ### `core.prelude` — small compiler-owned helpers

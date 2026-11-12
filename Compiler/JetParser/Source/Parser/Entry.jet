@@ -1304,7 +1304,7 @@ parser_is_item_keyword: fn(kind: Int) -> Bool Never! {
 
 // + owner ruling (2026-09-30): an immutable module binding
 // is named in ALL_CAPS, `MAX_ROWS: 100`. This is the casing predicate only;
-// compile time is always the explicit `NAME: comptime { value }`.
+// compile time is always the explicit `NAME: #run value`.
 parser_constant_name: fn(name: String) -> Bool Never! {
     if name == "" || name.starts_with("@") || name.starts_with("$") -> return false
     has_upper := false
@@ -1359,7 +1359,7 @@ parser_hash_leads_to_item: fn(state: &JetParserState) -> Bool Never! {
     parser_item_declaration_ahead_at(state, offset) || parser_marked_const_ahead(state, offset) || parser_type_alias_ahead_at(state, offset) || parser_is_item_keyword(kind) || (kind == TOKEN_KW_PUB || kind == TOKEN_KW_PRIV)
 }
 
-// The marker run ahead heads a function (`fn`, `pub fn`, `comptime fn`) or a
+// The marker run ahead heads a function (`fn`, `pub fn`, `#run fn`) or a
 // `module`.
 parser_hash_leads_to_function_or_module: fn(state: &JetParserState) -> Bool Never! {
     offset := parser_hash_item_offset(state)

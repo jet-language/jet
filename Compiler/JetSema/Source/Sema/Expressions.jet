@@ -2678,7 +2678,7 @@ sema_expr_comptime_target: fn(environment: SemaScopeEnvironment, program: SemaPr
 }
 
 // Whether sema_expr_comptime_target's target for `symbol` is declared
-// `comptime`, read in place from the graph rows.
+// `#run`, read in place from the graph rows.
 sema_expr_comptime_target_declared: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, symbol: SymbolID) -> Bool {
     if program.registration_graph == .Val(graph) {
         row: sema_registration_callable_row(graph, symbol.key) ?? return false
@@ -2782,7 +2782,7 @@ sema_expr_record_call_fact: fn(environment: SemaScopeEnvironment, program: SemaP
         unsafe_foreign_name: sema_expr_call_unsafe_foreign_name(program, callee, foreign_effect_root),
         foreign_capability: sema_expr_call_foreign_capability(program, callee),
         replacement_hidden: sema_expr_call_replacement_hidden(program, scopes, callee, span),
-        comptime: scopes.comptime_execution_depth > 0,
+        compile_time: scopes.comptime_execution_depth > 0,
     })
     // Demand: a codec call requires the generated codec it reaches, and a
     // call of a demand-checked derived method requires its body.
@@ -2790,7 +2790,7 @@ sema_expr_record_call_fact: fn(environment: SemaScopeEnvironment, program: SemaP
     sema_derive_demand_call(program, callee)
     symbol: callee ?? return true
     // Every early return here is the same `true`, and the target lookup is
-    // pure, so the cheap tests go first and only a `comptime` target builds
+    // pure, so the cheap tests go first and only a `#run` target builds
     // its row (whose declaration copy is the callee's whole body).
     if scopes.comptime_execution_depth > 0 -> return true
     if !sema_expr_comptime_target_declared(environment, program, scopes, symbol) -> return true
@@ -3257,7 +3257,7 @@ sema_expr_check_declared_direct_call: fn(call: Call, expected: Type?, environmen
 }
 
 // The built-in number types `Name(value)` is refused for (Jet: `Name{value}`).
-SEMA_NUMBER_TYPE_NAMES: comptime { [String]{"Int", "Float", "I8", "I16", "I32", "I64", "U8", "U16", "U32", "U64", "F32", "F64"} }
+SEMA_NUMBER_TYPE_NAMES: #run { [String]{"Int", "Float", "I8", "I16", "I32", "I64", "U8", "U16", "U32", "U64", "F32", "F64"} }
 
 // The argument as the Fix spells it: a name or literal as written, any other
 // expression elided.
@@ -4564,7 +4564,7 @@ sema_expr_ascii_letter: fn(byte: U8) -> Bool Never! {
 
 sema_expr_check_ident: fn(name: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     index: sema_scope_resolve_index(scopes, name) ?? {
-        // `N` of a `<comptime N: Int>` number parameter in scope reads as the
+        // `N` of a `<N: Int>` number parameter in scope reads as the
         // instance's number.
         loop parameter in context.generic_params {
             if parameter.number && parameter.name == name {
@@ -4578,7 +4578,7 @@ sema_expr_check_ident: fn(name: String, span: Span, expected: Type?, environment
     ty: sema_scope_binding_type(environment, scopes, index) ?? return None
     kind: scopes.bindings[index].symbol.kind
     // A constant read in a body is known while compiling; runtime code may
-    // read it unless it holds a compiler value or a value of a `comptime use`
+    // read it unless it holds a compiler value or a value of a `#run use`
     // module's types.
     if kind == SymbolKind.Constant && environment.function_name != "" {
         if sema_compiler_host_value_held(ty) == .Val(held) -> sema_compiler_host_value_runtime_read(name, held, span, scopes, environment.function_name, diagnostics)
@@ -5061,7 +5061,7 @@ sema_expr_is_string_literal: fn(expr: Expr, expected: String) -> Bool Never! {
 
 // An integer a lint can read without running code: a literal, a sum,
 // difference, product or negation of such integers, or a
-// `name: comptime { … }` local already folded.
+// `name: #run { … }` local already folded.
 sema_expr_lint_int_constant: fn(expr: Expr, scopes: SemaScopeTable) -> Int? {
     if expr == {
         .Int(value, _, _, raw, _) -> { return Val(sema_expr_exact_integer_literal(value, raw)) }

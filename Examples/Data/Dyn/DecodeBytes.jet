@@ -21,9 +21,9 @@ reasons: fn(tree: Dyn) -> String {
 }
 
 // A CBOR byte string of two bytes: major type 2, length 2, then "hi".
-WIRE: comptime { [U8]{66, 104, 105} }
-AT_BUILD: comptime { reasons(Dyn.Bytes([U8]{104, 105})) }
-AT_BUILD_WIRE: comptime { reasons(cbor.parse(WIRE) ?? panic("a CBOR byte string: {err}")) }
+WIRE: #run { [U8]{66, 104, 105} }
+AT_BUILD: #run reasons(Dyn.Bytes([U8]{104, 105}))
+AT_BUILD_WIRE: #run reasons(cbor.parse(WIRE) ?? panic("a CBOR byte string: {err}"))
 
 run: fn() {
     built: reasons(Dyn.Bytes([U8]{104, 105}))

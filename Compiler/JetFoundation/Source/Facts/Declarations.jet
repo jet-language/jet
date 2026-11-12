@@ -47,7 +47,7 @@ TForeignProvenance: struct {
 TGenericParam: struct {
     name: String
     bounds: [SymbolID]
-    // A `<comptime N: Int>` number parameter: an instance binds it to a
+    // A `<N: Int>` number parameter: an instance binds it to a
     // Type.Measure length, and a body reads `N` as that Int.
     number: Bool{false}
 }
@@ -272,7 +272,7 @@ TTargetOS: enum {
     Freestanding
 }
 
-TARGET_OS_ALL: comptime { [TTargetOS]{TTargetOS.Linux, TTargetOS.MacOS, TTargetOS.Windows, TTargetOS.Web, TTargetOS.Wasm, TTargetOS.Freestanding} }
+TARGET_OS_ALL: #run { [TTargetOS]{TTargetOS.Linux, TTargetOS.MacOS, TTargetOS.Windows, TTargetOS.Web, TTargetOS.Wasm, TTargetOS.Freestanding} }
 
 // `OS.MacOS` is `MacOS`.
 target_os_name: fn(os: TTargetOS) -> String Never! {

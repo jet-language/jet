@@ -44,7 +44,7 @@ JetCLIFlagTypedReason: struct {
     reason: String
 }
 
-JET_CLI_FLAG_TYPED_REASONS: comptime { [JetCLIFlagTypedReason]{
+JET_CLI_FLAG_TYPED_REASONS: #run { [JetCLIFlagTypedReason]{
     // It deletes, overwrites or skips a safeguard (`--force`, `--yes`).
     {name: "destructive", reason: "it deletes, overwrites or skips a safeguard"},
     // It names what this one run works on (`-e CODE`, `--query SQL`, `-o PATH`).
@@ -96,7 +96,7 @@ JetCLICommandSpec: struct {
     actions: [JetCLIActionSpec]
 }
 
-JET_CLI_HANDLERS: comptime { [JetCLIHandlerSpec]{
+JET_CLI_HANDLERS: #run { [JetCLIHandlerSpec]{
     {key: "Publish", dispatch_word: "publish", keeps_group: false},
     {key: "Yank", dispatch_word: "yank", keeps_group: false},
     {key: "Keygen", dispatch_word: "keygen", keeps_group: false},
@@ -142,7 +142,7 @@ JET_CLI_HANDLERS: comptime { [JetCLIHandlerSpec]{
     {key: "Db", dispatch_word: "db", keeps_group: true},
 } }
 
-JET_CLI_COMMANDS: comptime { [JetCLICommandSpec]{
+JET_CLI_COMMANDS: #run { [JetCLICommandSpec]{
     {
         name: "registry",
         summary: "Publish and manage packages",
@@ -744,7 +744,7 @@ JetCLIFormSpec: struct {
 // E2104 "not built yet" report names the row's card, and `jet help --all`
 // lists the rows. A row names only a form with no implementation: `jet perf`
 // lists its family, so the rows are its actions.
-JET_CLI_FORMS: comptime { [JetCLIFormSpec]{
+JET_CLI_FORMS: #run { [JetCLIFormSpec]{
     // Whole commands.
     {form: "db", ported: false, card: 6418, argv: [String]{"db"}},
     {form: "generate", ported: false, card: 6418, argv: [String]{"generate"}},
@@ -911,7 +911,7 @@ JET_CLI_FORMS: comptime { [JetCLIFormSpec]{
 // control (CLIControls.jet) after `--threads`. A setting whose flag is a
 // fixed row shared with other commands keeps that row; one whose flag is a
 // build option's (`--optimize`) shares that option's row, which says both.
-JET_CLI_FLAGS: comptime { jet_cli_flag_rows() }
+JET_CLI_FLAGS: #run jet_cli_flag_rows()
 
 jet_cli_flag_rows: fn() -> [JetCLIFlagSpec] Never! {
     rows := [JetCLIFlagSpec]{}
@@ -993,7 +993,7 @@ jet_cli_test_setting_text: fn(setting: TestSettingRow) -> String Never! {
     "{setting.help}; {test_setting_spellings(setting)}"
 }
 
-JET_CLI_FIXED_FLAGS: comptime { [JetCLIFlagSpec]{
+JET_CLI_FIXED_FLAGS: #run { [JetCLIFlagSpec]{
     {long: "--live", help: "With inspect: Process id for a live plane scope", value: JetCLIFlagValue.Value, typed: "operand"},
     {long: "--observe", help: "With run: Expose bounded live runtime facts for attachment"},
     {long: "--log", help: "With run/dev: Set the log level filter, such as warn,shop.db=debug; above JET_LOG", value: JetCLIFlagValue.Value},

@@ -3,7 +3,7 @@ use {
     json: core.encoding.json
     cbor: core.encoding.cbor
 }
-COMPTIME_VALUE: comptime { json.to_string(cbor.parse(cbor.to_bytes(json.parse("{{\"a\":1,\"b\":[1,2,3]}}") ?? panic("bad")) ?? panic("bad")) ?? panic("bad")) ?? panic("JSON encode") }
+COMPTIME_VALUE: #run { json.to_string(cbor.parse(cbor.to_bytes(json.parse("{{\"a\":1,\"b\":[1,2,3]}}") ?? panic("bad")) ?? panic("bad")) ?? panic("bad")) ?? panic("JSON encode") }
 
 run: fn() {
     r: json.to_string(cbor.parse(cbor.to_bytes(json.parse("{{\"a\":1,\"b\":[1,2,3]}}") ?? panic("bad")) ?? panic("bad")) ?? panic("bad")) ?? panic("JSON encode")

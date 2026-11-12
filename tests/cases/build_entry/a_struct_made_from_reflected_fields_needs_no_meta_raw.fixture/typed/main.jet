@@ -22,12 +22,12 @@ build: fn(b: Build) {
     b.default(app)
 }
 
-SHAPE_ID: comptime { Shape.reflect().identity }
-SHAPE_SIZE: comptime { Shape.reflect().layout.size ?? -1 }
-SHAPE_ALIGNMENT: comptime { Shape.reflect().layout.alignment ?? -1 }
-AT_FLAG: comptime { Shape.reflect().layout.fields[0].offset ?? -1 }
-AT_ID: comptime { Shape.reflect().layout.fields[1].offset ?? -1 }
-AT_TOTAL: comptime { Shape.reflect().layout.fields[2].offset ?? -1 }
+SHAPE_ID: #run Shape.reflect().identity
+SHAPE_SIZE: #run { Shape.reflect().layout.size ?? -1 }
+SHAPE_ALIGNMENT: #run { Shape.reflect().layout.alignment ?? -1 }
+AT_FLAG: #run { Shape.reflect().layout.fields[0].offset ?? -1 }
+AT_ID: #run { Shape.reflect().layout.fields[1].offset ?? -1 }
+AT_TOTAL: #run { Shape.reflect().layout.fields[2].offset ?? -1 }
 
 run: fn() {
     shape: Shape{flag: U8{1}, id: I64{40}, total: I32{2}}

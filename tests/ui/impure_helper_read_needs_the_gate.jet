@@ -1,6 +1,6 @@
 use files: core.files
 
-// #4276 c66: the helper the running program calls reads a file. A `comptime`
+// #4276 c66: the helper the running program calls reads a file. A `#run`
 // value inside `#Impure` that calls it reads the file natively only under
 // `--gate impure=allow`; without the gate the read is refused where the
 // value calls the helper.
@@ -12,7 +12,7 @@ greeting: fn(path: String) -[FS.Read]> String {
 run: fn() {
     #Impure("read the greeting while building") {
         // The reported call keeps a line of its own.
-        text: comptime {
+        text: #run {
             greeting("greeting.txt")
         }
         print(text)

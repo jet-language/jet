@@ -3,19 +3,19 @@ use {
     compiler: core.compiler
 }
 
-SOURCE: comptime { "old_name: fn(value: Int) -> Int {{ 41 }}\nrun: fn() -> Int {{ 2 }}\n" }
+SOURCE: #run "old_name: fn(value: Int) -> Int {{ 41 }}\nrun: fn() -> Int {{ 2 }}\n"
 
-LEXED: comptime { compiler.lex(SOURCE) ?? panic("compiler lex failed") }
+LEXED: #run { compiler.lex(SOURCE) ?? panic("compiler lex failed") }
 
-PARSED: comptime { compiler.parse(SOURCE) ?? panic("compiler parse failed") }
+PARSED: #run { compiler.parse(SOURCE) ?? panic("compiler parse failed") }
 
-CHECKED: comptime { compiler.check(PARSED) ?? panic("compiler check failed") }
+CHECKED: #run { compiler.check(PARSED) ?? panic("compiler check failed") }
 
-TOKENS: comptime { LEXED.tokens().len() }
+TOKENS: #run LEXED.tokens().len()
 
-ITEMS: comptime { PARSED.items().len() }
+ITEMS: #run PARSED.items().len()
 
-FUNCTIONS: comptime { CHECKED.functions().len() }
+FUNCTIONS: #run CHECKED.functions().len()
 
 build: fn(b: Build) {
     b.generate("facts") {

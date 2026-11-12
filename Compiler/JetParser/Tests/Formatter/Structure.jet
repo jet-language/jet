@@ -214,10 +214,10 @@ STRUCTURE_LAID_OUT: "pick: fn(n: Int) -> String {{\n    if {{\n        n == 1 ->
 }
 
 #Test("a module binding keeps its markers") {
-    formatted: jet_format_source("ring: module<T>(capacity: Int, label: String) {{\n#Meta(category: label)\nSIZE: comptime {{ capacity }}\n}}\nrun: fn() {{}}\n", false)
+    formatted: jet_format_source("ring: module<T>(capacity: Int, label: String) {{\n#Meta(category: label)\nSIZE: #run capacity\n}}\nrun: fn() {{}}\n", false)
     assert(formatted.ok)
     assert_eq(formatted.structure_change ?? "none", "none")
-    assert(formatted.text.contains("    #Meta(category: label) SIZE: comptime {{ capacity }}\n"))
+    assert(formatted.text.contains("    #Meta(category: label) SIZE: #run capacity\n"))
 }
 
 // The format of `source` keeps its program and contains `kept`.
@@ -259,7 +259,7 @@ structure_kept: fn(source: String, kept: String) {
 }
 
 #Test("a persisted binding keeps its comptime value") {
-    structure_kept("#Persist SEEDED: comptime {{ 20 + 1 }}\n", "#Persist SEEDED: comptime {{ 20 + 1 }}\n")
+    structure_kept("#Persist SEEDED: #run {{ 20 + 1 }}\n", "#Persist SEEDED: #run {{ 20 + 1 }}\n")
 }
 
 #Test("a property test keeps its Pre lines") {

@@ -31,15 +31,15 @@ packet_value: fn(packet: Packet) -> Int Never! {
     }
 }
 
-EXPECTED_ONE: comptime { label(1) }
-EXPECTED_OTHER: comptime { label(2) }
-EXPECTED_EARLY: comptime { early(true) }
-EXPECTED_LATE: comptime { early(false) }
-EXPECTED_RANGE: comptime { packet_value(Packet.Data(12)) }
-EXPECTED_OR: comptime { packet_value(Packet.Retry(2)) }
-EXPECTED_NESTED_RETURN: comptime { packet_value(Packet.Data(0)) }
-EXPECTED_EMPTY: comptime { packet_value(Packet.Empty) }
-EXPECTED_WILDCARD: comptime { packet_value(Packet.Ignore(17)) }
+EXPECTED_ONE: #run label(1)
+EXPECTED_OTHER: #run label(2)
+EXPECTED_EARLY: #run early(true)
+EXPECTED_LATE: #run early(false)
+EXPECTED_RANGE: #run packet_value(Packet.Data(12))
+EXPECTED_OR: #run packet_value(Packet.Retry(2))
+EXPECTED_NESTED_RETURN: #run packet_value(Packet.Data(0))
+EXPECTED_EMPTY: #run packet_value(Packet.Empty)
+EXPECTED_WILDCARD: #run packet_value(Packet.Ignore(17))
 
 run: fn() {
     print(EXPECTED_ONE)

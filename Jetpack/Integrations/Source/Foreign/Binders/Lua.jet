@@ -29,7 +29,7 @@ LuaBindResult: struct {
 
 // The fixed C entry points every Lua binding imports; they drive both the
 // generated import block and the reserved-name check.
-PKG_LUA_FIXED_FUNCTIONS: comptime { [(name: String, signature: String)]{
+PKG_LUA_FIXED_FUNCTIONS: #run { [(name: String, signature: String)]{
     (name: "open", signature: "() Int"),
     (name: "take_error", signature: "() Int"),
     (name: "cancel", signature: "(handle: Int)"),
@@ -264,7 +264,7 @@ pkg_lua_reserved: fn(value: String) -> Bool Never! {
     PKG_LUA_RESERVED.contains(value) || JET_KEYWORD_LIST.contains(value) || JET_TYPE_NAMES.contains(value)
 }
 
-PKG_LUA_JET_SESSION: comptime { ```impl Session.Close {
+PKG_LUA_JET_SESSION: #run { ```impl Session.Close {
     close: fn(&&self) { abi.close(self.value) }
 }
 
@@ -295,7 +295,7 @@ view_set_int: fn(view: TableView, key: String, value: Int) -> Bool LuaError! {
 ``` }
 
 // The three generated entry points per function. Hole: `name`.
-PKG_LUA_JET_FUNCTION: comptime { ```@@name@@: fn(session: Session, input: Dyn, deadline_ms: Int) -> Dyn LuaError! {
+PKG_LUA_JET_FUNCTION: #run { ```@@name@@: fn(session: Session, input: Dyn, deadline_ms: Int) -> Dyn LuaError! {
     payload: json.to_string(input) ?? return Err(LuaError.Protocol)
     raw: abi.@@name@@(session.value, payload, deadline_ms)
     code: abi.take_error()
@@ -321,7 +321,7 @@ PKG_LUA_JET_FUNCTION: comptime { ```@@name@@: fn(session: Session, input: Dyn, d
 
 // The embedded-VM bridge. Holes: `abi`, the c-escaped `codec` and `program`,
 // and the per-function `wrappers`.
-PKG_LUA_BRIDGE_C: comptime { ```#include <lua.h>
+PKG_LUA_BRIDGE_C: #run { ```#include <lua.h>
 #include <lauxlib.h>
 #include <lualib.h>
 #include <stdint.h>
@@ -356,7 +356,7 @@ void @@abi@@_close(int64_t h){failed=0;int index=(int)(h&63)-1;uint32_t generati
 @@wrappers@@``` }
 
 // The JSON codec loaded into every Lua state before the user module.
-PKG_LUA_JSON_CODEC: comptime { ```
+PKG_LUA_JSON_CODEC: #run { ```
 jet = jet or {}; jet.null = jet.null or setmetatable({}, {__tostring=function() return "null" end})
 local kinds=setmetatable({}, {__mode="k"})
 local function decode(text)

@@ -508,7 +508,7 @@ sema_expression_list: fn(expr: Expr, elements: [Expr], span: Span, expected: Typ
                     }
                 }
                 if sema_expression_runtime_measure_name(len, scopes) == .Val(local) {
-                    diagnostics.push(sema_error("E0963", span, "`[T#{measure_expression(len)}]` reads `{local}`, a run-time value of the function around it", "a fixed-size list `[T#N]` takes a length computed while compiling: a literal, an integer constant, a number parameter or a `comptime` value", "make the length a constant, or bind it with `{local}: comptime {{ … }}`"))
+                    diagnostics.push(sema_error("E0963", span, "`[T#{measure_expression(len)}]` reads `{local}`, a run-time value of the function around it", "a fixed-size list `[T#N]` takes a length computed while compiling: a literal, an integer constant, a number parameter or a `#run` value", "make the length a constant, or bind it with `{local}: #run {{ … }}`"))
                     return None
                 }
                 if has_spread {
@@ -577,7 +577,7 @@ sema_expression_list: fn(expr: Expr, elements: [Expr], span: Span, expected: Typ
 }
 
 // The first name in fixed length `measure` that is a run-time local or
-// parameter of the function being checked. A `name: comptime { … }` local
+// parameter of the function being checked. A `name: #run { … }` local
 // holds a value computed while compiling, and a name with no binding is a
 // constant, number parameter or module value the length checks resolve.
 sema_expression_runtime_measure_name: fn(measure: Measure, scopes: SemaScopeTable) -> String? Never! {

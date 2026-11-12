@@ -307,22 +307,22 @@ print("value_$K {value_$K}")`,
         Production{
             family: "comptime",
             name: "comptime-call",
-            markers: [String]{`SCALE_$K: comptime { scale_$K($B) }`},
+            markers: [String]{`SCALE_$K: #run { scale_$K($B) }`},
             decls: `scale_$K: fn(n: Int) -> Int Never! {
     n * $A
 }
 
-SCALE_$K: comptime { scale_$K($B) }`,
+SCALE_$K: #run { scale_$K($B) }`,
             body: `value_$K: SCALE_$K + $C
 print("value_$K {value_$K}")`,
         },
         Production{
             family: "comptime",
             name: "comptime-if",
-            markers: [String]{`FLAG_$K: comptime { $F }`, "comptime if FLAG_$K"},
-            decls: `FLAG_$K: comptime { $F }`,
+            markers: [String]{`FLAG_$K: #run { $F }`, "#if FLAG_$K"},
+            decls: `FLAG_$K: #run { $F }`,
             body: `value_$K := 0
-comptime if FLAG_$K {
+#if FLAG_$K {
     value_$K = $A
 } else {
     value_$K = $B

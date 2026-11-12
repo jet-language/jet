@@ -254,8 +254,8 @@ parser_fact_decl_params: fn(state: &JetParserState) -> [MarkerDeclParam] {
     params
 }
 
-// Rust `derive_body_items`: the body is a template, so nested `comptime loop`
-// statements are template loops and a body-level `comptime if` selects the
+// Rust `derive_body_items`: the body is a template, so nested `#loop`
+// statements are template loops and a body-level `#if` selects the
 // items of one branch.
 parser_marker_body: fn(state: &JetParserState) -> [DeriveBodyItem] {
     parser_expect(state, TOKEN_LBRACE, "`{{` before a marker body")
@@ -310,14 +310,14 @@ parser_marker_body_item: fn(state: &JetParserState, modifiers: ParsedItemModifie
     }
 }
 
-// A declaration loop is `comptime loop`, in marker bodies and at the root.
+// A declaration loop is `#loop`, in marker bodies and at the root.
 parser_template_loop_ahead: fn(state: &JetParserState) -> Bool Never! {
     parser_prep_verb_ahead(state, 0, TOKEN_KW_LOOP)
 }
 
 parser_parse_template_loop: fn(state: &JetParserState) -> ItemTemplateLoop {
     start: parser_bump(state)
-    parser_expect(state, TOKEN_KW_LOOP, "after `comptime` in a declaration loop")
+    parser_expect(state, TOKEN_KW_LOOP, "after `#` in a declaration loop")
     variable: parser_expect_name(state, "for a declaration loop binding")
     parser_expect(state, TOKEN_KW_IN, "between a declaration loop binding and source")
     // Rust `derive_body_loop`: `expr_no_struct_lit`, so `T.reflect().fields {` opens
@@ -333,12 +333,12 @@ parser_marker_template_loop: fn(state: &JetParserState) -> DeriveBodyItem {
     DeriveBodyItem.Loop{var: parsed.var, var_span: parsed.var_span, source: parsed.source, body: parsed.body, span: parsed.span}
 }
 
-// `comptime if cond { … } else comptime if … else { … }` in a template body.
-// Each branch is a template body of its own; an `else comptime if` is an
+// `#if cond { … } else #if … else { … }` in a template body.
+// Each branch is a template body of its own; an `else #if` is an
 // `else` holding one more template `if`.
 parser_marker_template_if: fn(state: &JetParserState) -> DeriveBodyItem {
     start: parser_bump(state)
-    parser_expect(state, TOKEN_KW_IF, "`if` after `comptime`")
+    parser_expect(state, TOKEN_KW_IF, "`if` after `#`")
     condition: parser_parse_expression_no_struct_lit(state, 1)
     then_body: parser_marker_body(state)
     else_body := [DeriveBodyItem]?{None}

@@ -168,7 +168,7 @@ ImportDecl: struct {
     is_pub: Bool
     is_package_pub: Bool
     inline_version: InlineVersion?
-    // A `comptime use` row: from `comptime` up to `use`. Its names are for
+    // A `#run use` row: from `#run` up to `use`. Its names are for
     // compile-time code only.
     comptime_span: Span?{None}
 }
@@ -613,14 +613,13 @@ TypeParam: struct {
     name_span: Span
     bounds: [String]
     // Set when the declaration is a compile-time number
-    // parameter, `<comptime N: Int>`; `bounds` is then empty.
+    // parameter, `<N: Int>`; `bounds` is then empty.
     prep: PrepParam?
 }
 
-// The declaration head of a compile-time number parameter.
-// Only the declaration carries `comptime`; uses write the plain name. An
-// `Int` one is a generic parameter whose arguments are numbers (#3505);
-// sema rejects any other value type with E0390.
+// The declaration head of a compile-time number parameter, `<N: Int>`: a
+// parameter bounded by exactly `Int`. Uses write the plain name. It is a
+// generic parameter whose arguments are numbers (#3505).
 PrepParam: struct {
     prep_span: Span
     value_type: String
@@ -716,7 +715,7 @@ DeriveBodyItem: enum {
     Item(value: Item)
     Stmt(value: Stmt)
     Loop(var: String, var_span: Span, source: Expr, body: [DeriveBodyItem], span: Span)
-    // `comptime if cond { … } else { … }`: the template expands only the
+    // `#if cond { … } else { … }`: the template expands only the
     // chosen branch's items.
     If(cond: Expr, cond_span: Span, then_body: [DeriveBodyItem], else_body: [DeriveBodyItem]?, span: Span)
 }

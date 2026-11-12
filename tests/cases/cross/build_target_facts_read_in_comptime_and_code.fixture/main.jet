@@ -1,5 +1,5 @@
 // `#build.target.*` reads the facts of the machine the build targets, in a
-// `comptime if` and in code; `core.target` declares the same facts for each
+// `#if` and in code; `core.target` declares the same facts for each
 // machine, with the effects it denies derived from the services it lacks.
 use core.target.[GPU, LinuxX64, MacOSArm64, Machine, Web, WindowsX64]
 
@@ -9,7 +9,7 @@ show: fn<M: Machine>(label: String) {
 }
 
 run: fn() {
-    comptime if #build.target.layout.pointer_bits == 64 {
+    #if #build.target.layout.pointer_bits == 64 {
         print("64-bit pointers")
     } else {
         print("32-bit pointers")

@@ -2,7 +2,7 @@ use {
     comptime_diff_hex: core.encoding.hex
     yaml: core.encoding.yaml
 }
-COMPTIME_VALUE: comptime { yaml.to_string(yaml.parse("a: &x 1\nb: *x\nc:\n  - 1\n  - 2\nd: |\n  hello\n  world\n") ?? panic("bad")).replace("\n", "|") }
+COMPTIME_VALUE: #run yaml.to_string(yaml.parse("a: &x 1\nb: *x\nc:\n  - 1\n  - 2\nd: |\n  hello\n  world\n") ?? panic("bad")).replace("\n", "|")
 
 run: fn() {
     r: yaml.to_string(yaml.parse("a: &x 1\nb: *x\nc:\n  - 1\n  - 2\nd: |\n  hello\n  world\n") ?? panic("bad")).replace("\n", "|")

@@ -384,7 +384,7 @@ SemaRegistrationGenericParam: struct {
     identity_key: String
     // The declaring module, where the bounds' trait names resolve.
     module_identity: String
-    // A `<comptime N: Int>` number parameter (TGenericParam.number).
+    // A `<N: Int>` number parameter (TGenericParam.number).
     number: Bool{false}
 }
 
@@ -847,8 +847,8 @@ SemaRegistrationGraph: struct {
     // checked for their diagnostics only; nothing is lowered or registered,
     // so no "not built yet" E2104 applies (sema_refuses_unbuilt).
     check_tests: Bool{false}
-    // `comptime use` (ComptimeUse.jet): "{module}\n{target}" -> the
-    // `comptime ` prefix of the import that brings `target` into `module`
+    // `#run use` (ComptimeUse.jet): "{module}\n{target}" -> the
+    // `#run ` prefix of the import that brings `target` into `module`
     // for compile-time code only, so a runtime read of a value of its types
     // is reported with the edit that drops the prefix.
     comptime_use_targets: [String:Span]{[String:Span]{}}
@@ -1100,7 +1100,7 @@ sema_registration_generic_identity: fn(owner_key: String, params: [SemaRegistrat
 sema_registration_generic_params: fn(type_params: [TypeParam], owner_key: String, module_identity: String, diagnostics: &[Diagnostic]) -> [SemaRegistrationGenericParam] {
     params := [SemaRegistrationGenericParam]{}
     loop (index, parameter) in type_params {
-        // A `<comptime N: Int>` number parameter is a generic parameter whose
+        // A `<N: Int>` number parameter is a generic parameter whose
         // arguments are numbers; one of another value type is E0390 in the
         // casing walk and is never registered.
         if parameter.prep == .Val(prep) && prep.value_type != "Int" -> next
@@ -2885,7 +2885,7 @@ sema_registration_prepare_module_row: fn(input: &&SemaRegistrationModuleInput, t
     // Every `#allow` names its reason (L3103) and never `allow_reason`
     // (E0355), as check_program does for one file.
     sema_marker_rules_validate_allow(module_row.program, diagnostics)
-    // Root `comptime loop` declarations expand first, so every
+    // Root `#loop` declarations expand first, so every
     // generated impl, conversion, and test registers as a written item.
     sema_derive_expand_template_loops(module_row.program.items, diagnostics)
     // Each `protocol` becomes its generated `.Client`/`.Server` handle types

@@ -698,7 +698,7 @@ type_carrier_identity: fn(ty: Type) -> String Never! {
             names.join(" | ")
         }
         .Quantity(base, _) -> type_carrier_identity(base)
-        // A `<comptime N: Int>` argument names its instance by its number
+        // A `<N: Int>` argument names its instance by its number
         // (`Packet<4>` and `Packet<2>` are two instances).
         .Measure(measure) -> {
             if measure == .Literal(kind, value) && kind == "length" -> return "{value}"
@@ -1169,7 +1169,7 @@ compute_dimension_type: fn(value: Int) -> Type Never! {
     Type.Measure{measure: Measure.Literal{kind: "shape", value: value}}
 }
 
-// The number a `<comptime N: Int>` argument holds: a literal length
+// The number a `<N: Int>` argument holds: a literal length
 // measure (`Packet<4>`, or a constant sema folded to one).
 number_argument_value: fn(ty: Type) -> Int? Never! {
     if ty == .Measure(value) -> return measure_literal_value(value)

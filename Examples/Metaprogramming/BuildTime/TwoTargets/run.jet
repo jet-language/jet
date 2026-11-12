@@ -14,7 +14,7 @@ build: fn(b: Build) {
 // Only the native artifact prepares a process; the page's copy keeps just
 // the `.Web` arm, so the call never reaches the web machine's check.
 launcher: fn() -> String {
-    comptime if #build.target.os == {
+    #if #build.target.os == {
         .Web -> return "this build starts no processes"
         else -> {
             _: process.cmd(["echo", "hello"])

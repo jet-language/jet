@@ -6,7 +6,7 @@ pivot_view: fn() -> String {
     groups: data.pivot_sum(rows, (row) -> "{prefix}{row.team}", (row) -> row.bucket, (row) -> row.score) ?? panic("pivot")
     return "{groups[0].row_key}|{groups[0].column_key}:{groups[0].count}:{groups[0].sum}:{groups[0].mean}|{groups[1].row_key}|{groups[1].column_key}:{groups[1].count}:{groups[1].sum}:{groups[1].mean}"
 }
-EXPECTED: comptime { pivot_view() }
+EXPECTED: #run pivot_view()
 
 run: fn() {
     actual: pivot_view()

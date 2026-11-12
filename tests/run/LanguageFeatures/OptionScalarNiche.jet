@@ -51,10 +51,10 @@ Sample: struct {
     light: Light?
 }
 
-K_BYTE: comptime { byte(255) }
-K_NONE: comptime { byte(256) }
-K_FLAG: comptime { flag(2) }
-K_LIGHT: comptime { light(2) }
+K_BYTE: #run byte(255)
+K_NONE: #run byte(256)
+K_FLAG: #run flag(2)
+K_LIGHT: #run light(2)
 
 // Write windows into an inline Option: a write parameter, a field, a variable.
 bump: fn(o: &U8?, by: U8) {
@@ -125,6 +125,6 @@ run: fn() {
     print("{a}")
     print("{b}")
     print("{a.code == b.code} {a.mark} {show_light(a.light)} {show_light(b.light)}")
-    print("comptime {K_BYTE} {K_NONE} {K_FLAG} {show_light(K_LIGHT)}")
+    print("#run {K_BYTE} {K_NONE} {K_FLAG} {show_light(K_LIGHT)}")
     windows()
 }

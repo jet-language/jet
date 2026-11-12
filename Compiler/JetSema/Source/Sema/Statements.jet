@@ -5453,7 +5453,7 @@ sema_stmt_check_binding: fn(binding: Binding, lambda_escapes: Bool?, environment
     if binding.uninit -> return sema_stmt_check_uninit_binding(binding, environment, program, scopes, state, context, diagnostics)
     if binding.arena_view -> return None
     // A lambda is already its value, and a function is no compile-time data:
-    // `name :: comptime { () -> … }` binds the lambda as a runtime binding does.
+    // `name :: #run { () -> … }` binds the lambda as a runtime binding does.
     if binding.is_comptime && !(binding.init == .Lambda(_, _)) -> return sema_stmt_check_prepared_binding(binding, environment, program, scopes, state, tail_store, context, diagnostics)
     if binding.pattern == .Val(pattern) {
         statement := sema_stmt_check_destructure(binding, pattern, environment, program, scopes, state, tail_store, context, diagnostics)
@@ -5848,7 +5848,7 @@ sema_stmt_is_path_op: fn(operation: THandleOp, normalize: Bool) -> Bool Never! {
     }
 }
 
-// `name: comptime { value }` in a body is compile-time code
+// `name: #run value` in a body is compile-time code
 // (Rust `check_binding` under `in_comptime`). A value already known here, such
 // as a fact read on a local, binds at once; any other value is staged through
 // the body comptime evaluator and binds when the owner body is checked again.
@@ -6809,7 +6809,7 @@ sema_stmt_check_defer_close: fn(close: Expr, span: Span, environment: SemaScopeE
 sema_stmt_check_reactive: fn(body: [Stmt], span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TLambda? {
     forbidden := scopes.comptime_execution_depth > 0
     if forbidden {
-        diagnostics.push(sema_error("E2914", span, "`#Reactive` can't run at comptime", "reactive effects subscribe to runtime signals and re-run when they change", "move `#Reactive {{ … }}` out of the `comptime` block"))
+        diagnostics.push(sema_error("E2914", span, "`#Reactive` can't run at comptime", "reactive effects subscribe to runtime signals and re-run when they change", "move `#Reactive {{ … }}` out of the `#run` block"))
     }
     closure_body := body
     closure_body.push(Stmt.Return{value: None, span: Span{start: span.end, end: span.end}})
@@ -8970,7 +8970,7 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, environment: S
             .ComptimeBlock(body, is_template_loop, span) -> {
                 if is_template_loop {
                     complete = false
-                    sema_check_unsupported(context, "the statement-level `comptime` block at offset {span.start} is not executed by the self-hosted checker yet")
+                    sema_check_unsupported(context, "the statement-level `#run` block at offset {span.start} is not executed by the self-hosted checker yet")
                 } else if !sema_stmt_check_comptime_block(body, span, environment, program, scopes, state, tail_store, context, diagnostics) {
                     complete = false
                 }
@@ -9284,8 +9284,8 @@ sema_stmt_context_allocator_type: fn(ty: Type) -> Bool Never! {
 }
 
 // Rust CheckerCore `check_comptime_if`
-// `comptime if` selects a branch while building. Its condition is compile-time
-// code, like `name: comptime { value }` (sema_stmt_check_prepared_binding): a
+// `#if` selects a branch while building. Its condition is compile-time
+// code, like `name: #run value` (sema_stmt_check_prepared_binding): a
 // value already known here selects at once; any other value is staged through
 // the body comptime evaluator, and the branch is selected when the owner body
 // is checked again. The selected arm is an ordinary nested block emitted
@@ -9293,7 +9293,7 @@ sema_stmt_context_allocator_type: fn(ty: Type) -> Bool Never! {
 // reports and everything it did to the scope, the context and the ownership
 // state are rolled back). False while the arm is unselected or incomplete.
 sema_stmt_check_prep_if: fn(cond: Expr, cond_span: Span, then_body: [Stmt], else_body: [Stmt]?, span: Span, return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic], loop_depth: Int, output: &[TStmt]) -> Bool {
-    // `comptime if T == Int { … }` is the one-arm type test,
+    // `#if T == Int { … }` is the one-arm type test,
     // which already keeps its arm only in the `Int` instance.
     if sema_expression_type_table_param(cond, environment, scopes) != None {
         arm: SwitchArm{cond: cond, body: then_body, span: cond_span}
@@ -9310,7 +9310,7 @@ sema_stmt_check_prep_if: fn(cond: Expr, cond_span: Span, then_body: [Stmt], else
     runtime_local := false
     sema_stmt_reads_runtime_local(condition, context.arena.tree, runtime_local)
     if runtime_local {
-        diagnostics.push(sema_error("E0989", cond_span, "this `comptime if` condition can't be known at compile time", "a `comptime if` condition must be a known-time expression — a prepared value, a literal, or a pure function call with known arguments", "prepare the value first: `flag: comptime {{ … }}`, then write `comptime if flag {{ … }}`"))
+        diagnostics.push(sema_error("E0989", cond_span, "this `#if` condition can't be known at compile time", "a `#if` condition must be a known-time expression — a prepared value, a literal, or a pure function call with known arguments", "prepare the value first: `flag: #run {{ … }}`, then write `#if flag {{ … }}`"))
         return false
     }
     if sema_expr_unwrap_tag(condition.ty) != Type.Bool {
@@ -9324,7 +9324,7 @@ sema_stmt_check_prep_if: fn(cond: Expr, cond_span: Span, then_body: [Stmt], else
         if staged == .Val(body_value) {
             value = Val(body_value.value)
         } else {
-            _ := sema_comptime_body_capture(context, environment, program, scopes, "comptime if", cond, condition.ty, cond_span, span)
+            _ := sema_comptime_body_capture(context, environment, program, scopes, "#if", cond, condition.ty, cond_span, span)
             return false
         }
     }
@@ -9351,9 +9351,9 @@ sema_stmt_check_prep_if: fn(cond: Expr, cond_span: Span, then_body: [Stmt], else
 }
 
 // Rust CheckerCore `check_comptime_block`
-// `comptime { … }` is compile-time code and emits no runtime code. Its
+// `#run { … }` is compile-time code and emits no runtime code. Its
 // statements are staged through the body comptime evaluator like a
-// `comptime if` condition (sema_stmt_check_prep_if), reading the prepared
+// `#if` condition (sema_stmt_check_prep_if), reading the prepared
 // locals before it; once the run lands, the owner body is checked again and
 // the block leaves nothing behind. A failed check or a panic stops the build.
 // False while the block is staged.
@@ -9400,7 +9400,7 @@ sema_stmt_row_reads_runtime_local: fn(tree: BodyTree, index: Int, found: &Bool) 
 }
 
 sema_stmt_prep_if_not_bool: fn(cond_span: Span) -> Diagnostic {
-    sema_error("E0989", cond_span, "a `comptime if` condition must be Bool, not another type", "the condition selects a branch at compile time — it must be true or false", "write a Bool known-time expression, like `comptime if flag {{ … }}`")
+    sema_error("E0989", cond_span, "a `#if` condition must be Bool, not another type", "the condition selects a branch at compile time — it must be true or false", "write a Bool known-time expression, like `#if flag {{ … }}`")
 }
 
 // The dropped arm is not a path through this code.
@@ -9421,7 +9421,7 @@ sema_stmt_check_dropped_prep_arm: fn(body: [Stmt], return_type: Type?, environme
     }
 }
 
-// `comptime` on a type table or type test changes nothing: it is checked
+// `#run` on a type table or type test changes nothing: it is checked
 // as the plain form (sema_stmt_check_switch).
 sema_stmt_check_prep_type_table: fn(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?, span: Span, return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic], loop_depth: Int, output: &[TStmt]) -> Bool {
     table := sema_stmt_check_switch(subject, arms, else_body, span, return_type, environment, program, scopes, state, tail_store, context, diagnostics, loop_depth)
@@ -9429,15 +9429,15 @@ sema_stmt_check_prep_type_table: fn(subject: Expr, arms: [SwitchArm], else_body:
     table.complete
 }
 
-// Rust OSTarget `fold_switch` `comptime if
-// #build.target.os == { .Linux -> … }` folds to the chain of `comptime if` arms whose
+// Rust OSTarget `fold_switch` `#if
+// #build.target.os == { .Linux -> … }` folds to the chain of `#if` arms whose
 // conditions are this build's `#build.target.os == .OS` as Bool literals, so the
-// `comptime if` check selects the arm. Every arm head is a distinct bare OS
+// `#if` check selects the arm. Every arm head is a distinct bare OS
 // variant, and the arms cover every OS or carry an `else`, whatever the
 // target. A `#build.settings.<key>` dispatch folds against the declared
 // setting's value (sema_stmt_check_setting_switch).
 sema_stmt_check_prep_switch: fn(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?, span: Span, return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic], loop_depth: Int, output: &[TStmt]) -> Bool {
-    // `comptime if T == { … }` over a type parameter is the
+    // `#if T == { … }` over a type parameter is the
     // type table, which already keeps one arm per instance.
     if sema_stmt_type_switch_param(subject, environment, scopes) != None -> return sema_stmt_check_prep_type_table(subject, arms, else_body, span, return_type, environment, program, scopes, state, tail_store, context, diagnostics, loop_depth, output)
     subject_span: expr_span(subject)
@@ -9449,14 +9449,14 @@ sema_stmt_check_prep_switch: fn(subject: Expr, arms: [SwitchArm], else_body: [St
                 return sema_stmt_check_setting_switch(key, setting.value, arms, else_body, span, return_type, environment, program, scopes, state, tail_store, context, diagnostics, loop_depth, output)
             }
         }
-        diagnostics.push(sema_error("E-OSTARGET-BUILD-CONTEXT", subject_span, "a `comptime if … == {{ … }}` dispatch branches on `#build.target.os`", "`#build.target.os` is the one compiler-known value this dispatch folds on — it selects the arm matching the build's target OS at compile time", "write `comptime if #build.target.os == {{ .Linux -> … else -> … }}`, or use a plain runtime `if` for a value that isn't known at compile time"))
+        diagnostics.push(sema_error("E-OSTARGET-BUILD-CONTEXT", subject_span, "a `#if … == {{ … }}` dispatch branches on `#build.target.os`", "`#build.target.os` is the one compiler-known value this dispatch folds on — it selects the arm matching the build's target OS at compile time", "write `#if #build.target.os == {{ .Linux -> … else -> … }}`, or use a plain runtime `if` for a value that isn't known at compile time"))
         return false
     }
     active := ""
     if program.registration_graph == .Val(graph) {
         active = graph.build_facts.os
     } else {
-        sema_check_unsupported(context, "the `comptime if #build.target.os` dispatch at offset {span.start} has no build facts to fold on")
+        sema_check_unsupported(context, "the `#if #build.target.os` dispatch at offset {span.start} has no build facts to fold on")
         return false
     }
     oses: loop os in TARGET_OS_ALL -> target_os_name(os)
@@ -9553,9 +9553,9 @@ sema_stmt_setting_arm_matches: fn(cond: Expr, value: TComptimeValue) -> Bool? Ne
     }
 }
 
-// `comptime if #build.settings.<key> == { … }`: each arm head is compared
+// `#if #build.settings.<key> == { … }`: each arm head is compared
 // with the setting's value for this build, and the folded Bool conditions
-// select the arm through the `comptime if` chain, as the `#build.target.os`
+// select the arm through the `#if` chain, as the `#build.target.os`
 // dispatch does.
 sema_stmt_check_setting_switch: fn(key: String, value: TComptimeValue, arms: [SwitchArm], else_body: [Stmt]?, span: Span, return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic], loop_depth: Int, output: &[TStmt]) -> Bool {
     matched := [Bool]{}

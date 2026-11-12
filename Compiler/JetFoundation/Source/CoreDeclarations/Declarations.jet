@@ -102,12 +102,12 @@ CoreDeclTake: struct {
 }
 
 // Every Syntax file, whose string constants dispatcher rows may name.
-CORE_DECLARATIONS_SYNTAX_FILES: comptime { loop path in find("toolchain:Compiler/JetFoundation/Data/Syntax/*.jet") -> CoreDeclarationFile{path: path.copy(), text: embed_file("toolchain:{path}")} }
+CORE_DECLARATIONS_SYNTAX_FILES: #run { loop path in find("toolchain:Compiler/JetFoundation/Data/Syntax/*.jet") -> CoreDeclarationFile{path: path.copy(), text: embed_file("toolchain:{path}")} }
 
 // Every runtime unit file (`Core/<area>/Runtime/**/<Unit>.jet`).
-CORE_DECLARATIONS_RUNTIME_FILES: comptime { loop path in find("toolchain:Core/*/Runtime/**/*.jet") -> CoreDeclarationFile{path: path.copy(), text: embed_file("toolchain:{path}")} }
+CORE_DECLARATIONS_RUNTIME_FILES: #run { loop path in find("toolchain:Core/*/Runtime/**/*.jet") -> CoreDeclarationFile{path: path.copy(), text: embed_file("toolchain:{path}")} }
 
-CORE_DECLARATIONS: comptime {
+CORE_DECLARATIONS: #run {
     core_declarations_built(
         embed_file("toolchain:{CORE_DECLARATIONS_CORE_PATH}"),
         embed_file("toolchain:{CORE_DECLARATIONS_PARTS_PATH}"),
@@ -118,15 +118,15 @@ CORE_DECLARATIONS: comptime {
 }
 
 // Core.jet's bootstrap steps, in order (`jet inspect structure core`).
-CORE_BOOTSTRAP_STEPS: comptime { CORE_DECLARATIONS.bootstraps }
+CORE_BOOTSTRAP_STEPS: #run CORE_DECLARATIONS.bootstraps
 
 // Core.jet's `root_types`: the Core value types a bare spelling names wherever
 // Core is loaded, so a parameterless Core alias of one of them stays a
 // candidate owner of that bare name.
-CORE_ROOT_TYPES: comptime { CORE_DECLARATIONS.root_types }
+CORE_ROOT_TYPES: #run CORE_DECLARATIONS.root_types
 
 // Core.jet's `module` lines, in order, every type resolved.
-CORE_MODULE_DECLARATIONS: comptime { core_declarations_modules(CORE_DECLARATIONS) }
+CORE_MODULE_DECLARATIONS: #run core_declarations_modules(CORE_DECLARATIONS)
 
 // The declarations, or the build stops with what is wrong.
 core_declarations_built: fn(core: String, parts: String, syntax: [CoreDeclarationFile], runtime: [CoreDeclarationFile], effects: [EffectVocabularyRow]) -> CoreDeclarations {

@@ -42,7 +42,7 @@ BuildOptionRow: struct {
     help: String
 }
 
-JET_BUILD_OPTIONS: comptime { [BuildOptionRow]{
+JET_BUILD_OPTIONS: #run { [BuildOptionRow]{
     // The native backend's level (AGENTS.md I9): none is O0, basic O1, full O2.
     // `jet build` is full; `jet run`, `jet dev` and `jet test` are none.
     {name: "optimize", kind: BuildOptionKind.Choice, values: [String]{"none", "basic", "full"}, stock_build: "full", stock_run: "none", removes_check: [String]{}, help: "How hard to optimize: none, basic or full"},
@@ -120,7 +120,7 @@ JET_BUILD_OPTIONS: comptime { [BuildOptionRow]{
 // hook, which turns checked mode on. A runtime build every program shares
 // (the prelinked native image, the web runtime partition) leaves both out,
 // so only a program built with `checked_alloc` runs checked.
-CHECKED_ALLOC_RUNTIME_EXPORTS: comptime { [String]{"jet_rt_alloc_check_link", "jet_rt_alloc_check_init"} }
+CHECKED_ALLOC_RUNTIME_EXPORTS: #run { [String]{"jet_rt_alloc_check_link", "jet_rt_alloc_check_init"} }
 
 // The Jai build options Jet refuses, each with the law that leaves nothing for
 // it to switch. A profile field, flag or `build: fn` call of one of these names
@@ -130,7 +130,7 @@ BuildOptionRefusal: struct {
     law: String
 }
 
-JET_BUILD_OPTION_REFUSALS: comptime { [BuildOptionRefusal]{
+JET_BUILD_OPTION_REFUSALS: #run { [BuildOptionRefusal]{
     {name: "null", law: "Jet has no null check to switch: a reference is never null, and a raw pointer's validity is the obligation of the `#Unsafe` code that uses it"},
     {name: "casts", law: "Jet has no unchecked conversion to switch: a conversion is total or returns an Optional"},
 } }

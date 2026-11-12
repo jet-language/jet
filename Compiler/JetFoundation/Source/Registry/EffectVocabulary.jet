@@ -24,21 +24,21 @@ EffectVocabularyRow: struct {
 }
 
 // Every declared root and leaf, in source order.
-EFFECT_VOCABULARY_ROWS: comptime { effect_vocabulary_rows(embed_file("toolchain:Compiler/Prelude/Effects.jet"), embed_file("toolchain:Core/Effects/Effects.jet"), embed_file("toolchain:Core/Compiler/Meta.jet")) }
+EFFECT_VOCABULARY_ROWS: #run effect_vocabulary_rows(embed_file("toolchain:Compiler/Prelude/Effects.jet"), embed_file("toolchain:Core/Effects/Effects.jet"), embed_file("toolchain:Core/Compiler/Meta.jet"))
 
 // The declared roots, in source order.
-EFFECT_VOCABULARY_ROOTS: comptime { effect_vocabulary_names(EFFECT_VOCABULARY_ROWS, false) }
+EFFECT_VOCABULARY_ROOTS: #run effect_vocabulary_names(EFFECT_VOCABULARY_ROWS, false)
 
 // The declared leaves (`Root.Member`), in source order.
-EFFECT_VOCABULARY_LEAVES: comptime { effect_vocabulary_names(EFFECT_VOCABULARY_ROWS, true) }
+EFFECT_VOCABULARY_LEAVES: #run effect_vocabulary_names(EFFECT_VOCABULARY_ROWS, true)
 
 // The roots Compiler/Prelude/Effects.jet declares (the machine roots), in
 // source order.
-EFFECT_VOCABULARY_MACHINE_ROOTS: comptime { effect_vocabulary_names(effect_vocabulary_source_rows(embed_file("toolchain:Compiler/Prelude/Effects.jet"), EFFECT_VOCABULARY_MACHINE_PATH, None), false) }
+EFFECT_VOCABULARY_MACHINE_ROOTS: #run effect_vocabulary_names(effect_vocabulary_source_rows(embed_file("toolchain:Compiler/Prelude/Effects.jet"), EFFECT_VOCABULARY_MACHINE_PATH, None), false)
 
 // The canonical effect source: the three files in order, each without its
 // trailing blank lines, one blank line between them.
-EFFECT_CANONICAL_SOURCE: comptime { effect_vocabulary_canonical(embed_file("toolchain:Compiler/Prelude/Effects.jet"), embed_file("toolchain:Core/Effects/Effects.jet"), embed_file("toolchain:Core/Compiler/Meta.jet")) }
+EFFECT_CANONICAL_SOURCE: #run effect_vocabulary_canonical(embed_file("toolchain:Compiler/Prelude/Effects.jet"), embed_file("toolchain:Core/Effects/Effects.jet"), embed_file("toolchain:Core/Compiler/Meta.jet"))
 
 EFFECT_VOCABULARY_MACHINE_PATH: "Compiler/Prelude/Effects.jet"
 

@@ -1004,7 +1004,7 @@ open: fn(*, width: Int, height: Int, title: String) -[Env, Net, Time]> Window UI
     if width < 1 || height < 1 || width > SIDE_MAX || height > SIDE_MAX {
         return Err(UIError.Size("a window is 1 to {SIDE_MAX} pixels on each side, not {width}x{height}"))
     }
-    comptime if #build.target.os == {
+    #if #build.target.os == {
         .Linux -> {
             if !wayland.available() -> return Err(UIError.NoDisplay)
             link: wayland.connect(width, height, title)

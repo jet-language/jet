@@ -34,7 +34,7 @@
 <h2>Why</h2>
 <p class="diag-copy why" data-registry-field="why">A decode/CLI/construction default fills a missing field, so it is baked into the program and its value has to be known at compile time. An expression that can only be computed at runtime has no fixed value to bake, and every tier must agree on it. During `jet check`, Jet reports this diagnostic.</p>
 <h2>Fix</h2>
-<p class="diag-copy fix" data-registry-field="fix">Use a literal or a `comptime`-evaluable expression, e.g. `port: Int{8080}`, `env: String{&quot;prod&quot;}`, or `ports: [Int]{[80, 443]}`.</p>
+<p class="diag-copy fix" data-registry-field="fix">Use a literal or a `#run`-evaluable expression, e.g. `port: Int{8080}`, `env: String{&quot;prod&quot;}`, or `ports: [Int]{[80, 443]}`.</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E2414</code>: <code>tests/ui/serde_default_not_const.stderr</code>.</p>
 <pre class="diag">Error [jet.DefaultNotConstant]: `n`&#39;s `{…}` default must be a compile-time constant
@@ -43,7 +43,7 @@
  11 |     n: Int{live()}
     |            ^^^^
  Why: A decode default is baked into the program, so its value has to be known at compile time; this expression can only be computed at runtime
- Fix: Use a literal or a `comptime`-evaluable expression — e.g. `port: Int{8080}` or `ports: [Int]{[80, 443]}`
+ Fix: Use a literal or a `#run`-evaluable expression — e.g. `port: Int{8080}` or `ports: [Int]{[80, 443]}`
 More: jet-lang.dev/e/E2414
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

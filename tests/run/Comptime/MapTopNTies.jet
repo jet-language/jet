@@ -9,10 +9,10 @@ scores: fn() -> [String:Int] {
     table
 }
 
-FIRST: comptime { scores().top_n(2)[0].key }
-SECOND: comptime { scores().top_n(2)[1].key }
+FIRST: #run scores().top_n(2)[0].key
+SECOND: #run scores().top_n(2)[1].key
 
 run: fn() {
-    print("comptime {FIRST} {SECOND}")
+    print("#run {FIRST} {SECOND}")
     loop item in scores().top_n(2) -> print("run {item.key}:{item.value}")
 }

@@ -55,7 +55,7 @@ use {
 
 #Test("computed image fields consume top level known values") {
     dir: envmodel_test_oci_base_dir("computed-fields")
-    src: "\nPORT: comptime {{ 8080 }}\nimage.server: module {{\n    from: packages.app,\n    expose: [PORT],\n}}\n"
+    src: "\nPORT: #run 8080\nimage.server: module {{\n    from: packages.app,\n    expose: [PORT],\n}}\n"
     plan: envmodel_evaluate_env(src, dir) ?? panic("the image plans")
     assert_eq(plan.images[0].expose, [Int]{8080})
     files.remove_all(dir) ?? return

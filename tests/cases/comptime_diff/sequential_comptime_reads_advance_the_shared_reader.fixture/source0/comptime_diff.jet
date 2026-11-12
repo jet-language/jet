@@ -1,10 +1,10 @@
 use comptime_diff_hex: core.encoding.hex
 
 run: fn() {
-    ct: comptime { Reader.over([U8]{7, 9, 11}) }
-    ct_a: comptime { ct.read_u8() ?? panic("ct a") }
-    ct_b: comptime { ct.read_u8() ?? panic("ct b") }
-    comptime_value: comptime { "{ct_a}|{ct_b}|{ct.remaining()}" }
+    ct: #run Reader.over([U8]{7, 9, 11})
+    ct_a: #run { ct.read_u8() ?? panic("ct a") }
+    ct_b: #run { ct.read_u8() ?? panic("ct b") }
+    comptime_value: #run "{ct_a}|{ct_b}|{ct.remaining()}"
 
     rt: Reader.over([U8]{7, 9, 11})
     rt_a: rt.read_u8() ?? panic("rt a")

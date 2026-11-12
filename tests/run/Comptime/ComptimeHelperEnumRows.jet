@@ -1,5 +1,5 @@
 // A compile-time table built by an ordinary helper: each row is a struct
-// with an enum field, made by calling `row` inside `comptime { … }`, so
+// with an enum field, made by calling `row` inside `#run { … }`, so
 // the table is not spelled out field by field.
 Kind: enum {
     Retired
@@ -13,7 +13,7 @@ Row: struct {
 
 row: fn(name: String, kind: Kind) -> Row { Row{name: name, kind: kind} }
 
-ROWS: comptime { [row("alpha", .Retired), row("beta", .Active)] }
+ROWS: #run { [row("alpha", .Retired), row("beta", .Active)] }
 
 run: fn() {
     loop r in ROWS {

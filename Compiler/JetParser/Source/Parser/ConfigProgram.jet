@@ -49,7 +49,7 @@ jet_config_program: fn(expr: Expr, source: String, funcs: [String: Func], global
     }
     text.push(String.from_bytes(bytes.slice(cursor, span.end)) ?? "")
     body: text.join("")
-    lines.push("{JET_CONFIG_VALUE_NAME}: comptime {{ {body} }}")
+    lines.push("{JET_CONFIG_VALUE_NAME}: #run {{ {body} }}")
     lines.push("")
     Ok(lines.join("\n"))
 }

@@ -577,12 +577,12 @@ explicit_region: fn() {
 
 
 // ============================================================================
-// COMPTIME
+// COMPILER REQUESTS
 // ============================================================================
-// Value-only compile-time execution; comptime never creates/selects types (S26).
-// `comptime` is itself the (always-immutable) binding keyword (S57).
+// `#run`, `#if` and `#loop` ask the compiler to do work while building; an
+// unbraced `#run` takes one call or name, and anything larger keeps braces.
 
-comptime table = build_table()                 // baked into the binary as constants
+TABLE: #run build_table()                      // baked into the binary as constants
 
 embedding: fn() {
     data: embed_file("logo.bin")             // the one I/O exception (S26)

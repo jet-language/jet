@@ -4664,7 +4664,7 @@ ir_route_symbol: fn(symbol: String) -> String Never! {
 // The routes ir_route_inline builds in place instead of calling the runtime
 // besides the leaf routes (ir_leaf_route); ir_route_labeled reaches it only
 // for these.
-IR_ROUTES_INLINE: comptime { [String]{
+IR_ROUTES_INLINE: #run { [String]{
     "std::collections::BinaryHeap::new", "std::collections::HashSet::new", "std::collections::HashSet::bits", "std::collections::HashSet::from_bits", "std::collections::BTreeSet::new", "std::collections::VecDeque::new", "std::collections::HashMap::new", "jet_deque_from", "JetCache::new",
     "jet_eq", "jet_map_from_keys_kernel", "jet_map_from_keys_int", "jet_map_from_keys_composite",
     "jet_ordering_then", "jet_ordering_reverse", "jet_std::JetShared::new", "jet_std::JetCell::new", "jet_std::JetPool::new", "jet_std_os_atexit", "jet_std_os_interrupt", "jet_rt_callback", "jet_devtools_publish_payload",
@@ -4678,7 +4678,7 @@ IR_ROUTES_INLINE: comptime { [String]{
 // The routes whose exact Int Word argument is a native index the route
 // converts unlocated: ir_route_labeled checks it at the call site first
 // (jet_int_native_i64_at), so one past the i64 range stops at the user's line.
-IR_ROUTES_NATIVE_INDEX: comptime { [String]{"jet_bit_set_has", "jet_bitset_add", "jet_bitset_remove"} }
+IR_ROUTES_NATIVE_INDEX: #run { [String]{"jet_bit_set_has", "jet_bitset_add", "jet_bitset_remove"} }
 
 // Whether the builder lowers a Core call of route `name` itself, with no
 // runtime or environment route: an inline or leaf route, a special of

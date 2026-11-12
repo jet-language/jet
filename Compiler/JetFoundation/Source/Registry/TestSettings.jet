@@ -71,7 +71,7 @@ TEST_SETTINGS_PLAN_ENV: "JET_TEST_PLAN"
 // line each: the child takes them as decided and runs no plan step of its own.
 TEST_SETTINGS_ENV: "JET_TEST_SETTINGS"
 
-JET_TEST_SETTINGS: comptime { [TestSettingRow]{
+JET_TEST_SETTINGS: #run { [TestSettingRow]{
     {name: "docs", kind: TestSettingKind.Switch, ported: true, help: "Run checked documentation examples only (default off)"},
     {name: "filter", kind: TestSettingKind.Text, ported: true, help: "Only run tests and corpus rows whose name contains the text", typed: "operand"},
     {name: "capture", kind: TestSettingKind.Capture, ported: true, help: "Show test output for failed, all, or none of the tests (default failed)"},
@@ -271,7 +271,7 @@ TestSettingSizeUnit: struct {
 }
 
 // Longest suffix first, so `gib` is not read as `b`.
-TEST_SETTING_SIZE_UNITS: comptime { [TestSettingSizeUnit]{
+TEST_SETTING_SIZE_UNITS: #run { [TestSettingSizeUnit]{
     {suffix: "GiB", bytes: 1073741824}, {suffix: "gib", bytes: 1073741824}, {suffix: "GB", bytes: 1073741824}, {suffix: "gb", bytes: 1073741824},
     {suffix: "MiB", bytes: 1048576}, {suffix: "mib", bytes: 1048576}, {suffix: "MB", bytes: 1048576}, {suffix: "mb", bytes: 1048576},
     {suffix: "KiB", bytes: 1024}, {suffix: "kib", bytes: 1024}, {suffix: "KB", bytes: 1024}, {suffix: "kb", bytes: 1024},

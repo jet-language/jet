@@ -139,13 +139,13 @@ PolicyRule: struct {
     combine: PolicyCombine
 }
 
-POLICY_PACKAGE_SCOPES: comptime { [PolicyScope]{PolicyScope.Package, PolicyScope.Module, PolicyScope.Function, PolicyScope.Block} }
-POLICY_ALL_SCOPES: comptime { [PolicyScope]{PolicyScope.Organization, PolicyScope.Package, PolicyScope.Module, PolicyScope.Function, PolicyScope.Block} }
+POLICY_PACKAGE_SCOPES: #run { [PolicyScope]{PolicyScope.Package, PolicyScope.Module, PolicyScope.Function, PolicyScope.Block} }
+POLICY_ALL_SCOPES: #run { [PolicyScope]{PolicyScope.Organization, PolicyScope.Package, PolicyScope.Module, PolicyScope.Function, PolicyScope.Block} }
 // Arithmetic is a function, method or block policy.
-POLICY_BODY_SCOPES: comptime { [PolicyScope]{PolicyScope.Function, PolicyScope.Block} }
+POLICY_BODY_SCOPES: #run { [PolicyScope]{PolicyScope.Function, PolicyScope.Block} }
 
 // Rust `POLICY_RULES`.
-POLICY_RULES: comptime { [PolicyRule]{
+POLICY_RULES: #run { [PolicyRule]{
     {key: PolicyKey.Unsafe, scopes: POLICY_ALL_SCOPES, combine: PolicyCombine.Tighten},
     {key: PolicyKey.Impure, scopes: POLICY_ALL_SCOPES, combine: PolicyCombine.Tighten},
     {key: PolicyKey.Nondeterministic, scopes: POLICY_ALL_SCOPES, combine: PolicyCombine.Tighten},

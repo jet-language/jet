@@ -62,7 +62,6 @@ use {
         TOKEN_HASH,
         TOKEN_IDENT,
         TOKEN_INT,
-        TOKEN_KW_COMPTIME,
         TOKEN_KW_ELSE,
         TOKEN_KW_FN,
         TOKEN_KW_IF,
@@ -82,6 +81,7 @@ use {
         TOKEN_PERCENT_EQ,
         TOKEN_PERCENT_PERCENT_EQ,
         TOKEN_PLUS_EQ,
+        TOKEN_PREP,
         TOKEN_RAW_STRING,
         TOKEN_RBRACE,
         TOKEN_RBRACKET,
@@ -109,7 +109,7 @@ parser_statement_is_keyword: fn(state: &JetParserState) -> Bool Never! {
     if token.kind == TOKEN_RETURN || token.kind == TOKEN_BREAK || token.kind == TOKEN_KW_YIELD -> return true
     if token.kind == TOKEN_HASH && parser_kind_at(state, 1) == TOKEN_IDENT && parser_site_value_ahead(state) -> return false
     if token.kind == TOKEN_KW_LOOP || token.kind == TOKEN_HASH || token.kind == TOKEN_AT -> return true
-    if token.kind == TOKEN_KW_COMPTIME && (parser_prep_verb_ahead(state, 0, TOKEN_KW_IF) || parser_prep_verb_ahead(state, 0, TOKEN_KW_LOOP) || parser_prep_verb_ahead(state, 0, TOKEN_LBRACE)) -> return true
+    if token.kind == TOKEN_PREP && (parser_prep_verb_ahead(state, 0, TOKEN_KW_IF) || parser_prep_verb_ahead(state, 0, TOKEN_KW_LOOP) || parser_prep_verb_ahead(state, 0, TOKEN_LBRACE)) -> return true
     if parser_scope_member_ahead(state) -> return true
     if token.kind == TOKEN_IDENT {
         word: parser_value(state, token)
@@ -409,8 +409,8 @@ parser_expression_is_collecting_loop: fn(expr: Expr) -> Bool Never! {
     false
 }
 
-// `prepared_value` marks the block of `name: comptime { value }`. A binding
-// `other: comptime { … }` directly inside it means that block was never closed
+// `prepared_value` marks the block of `name: #run value`. A binding
+// `other: #run { … }` directly inside it means that block was never closed
 // (a prepared value holds one expression, never a binding): report the
 // unclosed `{` and stop before the binding, so it parses on as the next
 // statement or declaration instead of nesting every later prepared binding
@@ -519,7 +519,7 @@ parser_parse_statement: fn(state: &JetParserState) -> Stmt {
         // `#Todo`, the one marker allowed only as an expression, starts an
         // ordinary expression statement, not a statement marker.
         TOKEN_HASH -> if parser_kind_at(state, 1) == TOKEN_IDENT && (parser_value_at(state, 1) == "Todo" || parser_site_value_ahead(state)) -> parser_parse_assignment_or_expression(state) else -> parser_parse_marked_statement(state)
-        TOKEN_KW_COMPTIME -> {
+        TOKEN_PREP -> {
             if parser_prep_verb_ahead(state, 0, TOKEN_KW_IF) -> return parser_parse_prep_if(state)
             if parser_prep_verb_ahead(state, 0, TOKEN_KW_LOOP) -> return parser_parse_prep_loop(state)
             if parser_prep_verb_ahead(state, 0, TOKEN_LBRACE) -> return parser_parse_prep_block(state)
@@ -1334,15 +1334,15 @@ parser_parse_break_statement: fn(state: &JetParserState) -> Stmt {
     Stmt.Break{span: start.span}
 }
 
-// The prep token (`comptime`, or `#run`, `#if` and `#loop`, which the lexer
-// gives the same token) leads a build-time verb when the verb follows it.
+// The prep token (`#run`, or the `#` of `#if` and `#loop`) leads a
+// build-time verb when the verb follows it.
 parser_prep_verb_ahead: fn(state: &JetParserState, offset: Int, verb: Int) -> Bool Never! {
-    parser_kind_at(state, offset) == TOKEN_KW_COMPTIME && parser_kind_at(state, offset + 1) == verb
+    parser_kind_at(state, offset) == TOKEN_PREP && parser_kind_at(state, offset + 1) == verb
 }
 
 // `NAME: #run operand` is a prepared value without braces.
 parser_prep_operand_ahead: fn(state: &JetParserState, offset: Int) -> Bool Never! {
-    parser_kind_at(state, offset) == TOKEN_KW_COMPTIME && parser_kind_at(state, offset + 1) != TOKEN_LBRACE && parser_text(state, parser_lookahead(state, offset)) == "#run"
+    parser_kind_at(state, offset) == TOKEN_PREP && parser_kind_at(state, offset + 1) != TOKEN_LBRACE && parser_text(state, parser_lookahead(state, offset)) == "#run"
 }
 
 // An unbraced `#run` takes one postfix operand: a call, a name or a
@@ -1354,7 +1354,7 @@ parser_parse_prep_operand: fn(state: &JetParserState) -> ParsedExpr {
     ParsedExpr{expr: operand.expr, span: parser_cover(head.span, operand.span)}
 }
 
-// `comptime { … }` is the explicit shared-preparation block. It
+// `#run { … }` is the explicit shared-preparation block. It
 // runs while building and emits no runtime code.
 parser_parse_prep_block: fn(state: &JetParserState) -> Stmt {
     start: parser_bump(state)
@@ -1362,7 +1362,7 @@ parser_parse_prep_block: fn(state: &JetParserState) -> Stmt {
     Stmt.ComptimeBlock{body: block.statements, is_template_loop: false, span: parser_cover(start.span, block.span)}
 }
 
-// A build-time method writes `comptime fn` directly before `fn`.
+// A build-time method writes `#run fn` directly before `fn`.
 parser_prep_fn_ahead: fn(state: &JetParserState) -> Bool Never! {
     parser_prep_verb_ahead(state, 0, TOKEN_KW_FN)
 }
@@ -1373,13 +1373,13 @@ parser_take_prep_fn: fn(state: &JetParserState) -> Bool {
     true
 }
 
-// `comptime if <cond> { … } else comptime if … else { … }` and the
-// This rule dispatch `comptime if <subject> == { .Arm -> … else -> … }`, which
+// `#if <cond> { … } else #if … else { … }` and the
+// This rule dispatch `#if <subject> == { .Arm -> … else -> … }`, which
 // shares the `if` arm grammar. Sema selects the arm; unselected arms are
 // name-checked only.
 parser_parse_prep_if: fn(state: &JetParserState) -> Stmt {
     start: parser_bump(state)
-    parser_expect(state, TOKEN_KW_IF, "`if` after `comptime`")
+    parser_expect(state, TOKEN_KW_IF, "`if` after `#`")
     saved_position: state.position
     saved_diagnostics: state.diagnostics.len()
     saved_blocks: state.block_spans.len()
@@ -1387,7 +1387,7 @@ parser_parse_prep_if: fn(state: &JetParserState) -> Stmt {
     subject: parser_parse_expression_no_struct_lit_no_cmp(state, 1)
     if parser_current_kind(state) == TOKEN_EQ_EQ && parser_kind_at(state, 1) == TOKEN_LBRACE {
         parser_bump(state)
-        parser_expect(state, TOKEN_LBRACE, "`{{` to open the `comptime if` dispatch body")
+        parser_expect(state, TOKEN_LBRACE, "`{{` to open the `#if` dispatch body")
         dispatch: parser_parse_if_arms(state, subject.expr, start.span, BinOp.Eq)
         span: Span{start: start.span.start, end: parser_previous_end(state)}
         if dispatch == .Switch(dispatch_subject, arms, else_body, _) -> return Stmt.ComptimeSwitch{subject: dispatch_subject, arms: arms, else_body: else_body, span: span}
@@ -1413,11 +1413,11 @@ parser_parse_prep_if: fn(state: &JetParserState) -> Stmt {
     Stmt.ComptimeIf{cond: condition.expr, cond_span: condition.span, then_body: then_block.statements, else_body: else_body.move(), span: parser_cover(start.span, end), selected_then: None}
 }
 
-// `comptime loop …` is the ordinary loop run while building. It
+// `#loop …` is the ordinary loop run while building. It
 // is one compile-time block holding that loop, so it emits no runtime code.
 parser_parse_prep_loop: fn(state: &JetParserState) -> Stmt {
     start: parser_bump(state)
-    keyword: parser_expect(state, TOKEN_KW_LOOP, "`loop` after `comptime`")
+    keyword: parser_expect(state, TOKEN_KW_LOOP, "`loop` after `#`")
     body: parser_parse_loop_after_keyword(state, keyword.span, None)
     end: parser_lookahead(state, -1).span
     Stmt.ComptimeBlock{body: [Stmt]{body}, is_template_loop: state.derive_template_depth > 0, span: parser_cover(start.span, end)}
@@ -1563,7 +1563,7 @@ parser_parse_binding_statement: fn(state: &JetParserState) -> Stmt {
             false
         }
     }
-    // `name: comptime { value }` is the prepared-value
+    // `name: #run value` is the prepared-value
     // binding. A block holding only its final expression lowers to the one
     // compile-time binding path; any other block keeps E0391.
     if !mutable && parser_prep_verb_ahead(state, 0, TOKEN_LBRACE) {
@@ -1576,7 +1576,7 @@ parser_parse_binding_statement: fn(state: &JetParserState) -> Stmt {
             parser_finish_statement(state)
             return Stmt.Val{binding: prepared}
         }
-        parser_add_error_code(state, "E0391", span, "`comptime {{ … }}` is used as a value, which this compiler does not support yet", "Jet makes the block's final expression its value; only a block holding a single final expression is folded today", "write `name: comptime {{ value }}` with one final expression, or a `comptime {{ … }}` statement")
+        parser_add_error_code(state, "E0391", span, "`#run {{ … }}` is used as a value, which this compiler does not support yet", "Jet makes the block's final expression its value; only a block holding a single final expression is folded today", "write `name: #run value` with one final expression, or a `#run {{ … }}` statement")
         parser_finish_statement(state)
         return Stmt.Val{binding: ast_binding(parser_value(state, name), name.span, false, Expr.Unit{span: span, id: parser_node_id(state)}, Val(sigil.span))}
     }
@@ -1842,7 +1842,7 @@ parser_unknown_top_word_ahead: fn(state: &JetParserState) -> Bool Never! {
     if token.kind == TOKEN_IDENT -> return parser_word_follows(state)
     if !parser_is_keyword_token(state, token) || parser_starts_expression(token.kind) -> return false
     kind: token.kind
-    !(kind == TOKEN_KW_IF || kind == TOKEN_KW_LOOP || kind == TOKEN_RETURN || kind == TOKEN_BREAK || kind == TOKEN_KW_YIELD || kind == TOKEN_KW_COMPTIME)
+    !(kind == TOKEN_KW_IF || kind == TOKEN_KW_LOOP || kind == TOKEN_RETURN || kind == TOKEN_BREAK || kind == TOKEN_KW_YIELD || kind == TOKEN_PREP)
 }
 
 // The one error for a word Jet does not spell at a declaration or statement

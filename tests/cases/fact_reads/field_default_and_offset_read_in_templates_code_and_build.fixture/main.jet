@@ -1,5 +1,5 @@
 // A field's `type`, `default` and `offset` read the same way in a marker's
-// `expand`, in a `comptime` value and through `T.reflect()` in the program.
+// `expand`, in a `#run` value and through `T.reflect()` in the program.
 // `default` says where a field's written default stands, without running
 // it; a field with none reads `None`.
 FieldFacts: struct {
@@ -27,7 +27,7 @@ Rock: struct {
     name: String
 }
 
-PREPARED: comptime { Rock.reflect() }
+PREPARED: #run { Rock.reflect() }
 
 default_start: fn(info: TypeInfo, index: Int) -> Int {
     if info.fields[index].default == .Val(found) -> return found.source.start

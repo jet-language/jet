@@ -27,23 +27,23 @@ Run a lesson from the repository root, for example `jet run Examples/Metaprogram
 
 - [BuildFactPrecedence](Comptime/BuildFactPrecedence.jet) — Every build fact follows one source-scope and layer law.
 - [BuildStamp](Comptime/BuildStamp.jet) — Provenance is a locked build input, not a wall-clock read.
-- [ComptimeIf](Comptime/ComptimeIf.jet) — `comptime if` selects a branch at compile time.
+- [ComptimeIf](Comptime/ComptimeIf.jet) — `#if` selects a branch at compile time.
 - [ComptimeParse](Comptime/ComptimeParse.jet) — Comptime Result/Option evaluation.
 - [ComptimeTable](Comptime/ComptimeTable.jet)
 - [ComptimeTiers](Comptime/ComptimeTiers.jet) — Comptime effect tiers.
-- [ComptimeUse](Comptime/ComptimeUse/) — `comptime use` imports a module for compile-time code only: its names work in a `comptime { … }` block, a `comptime fn` body, a comptime argument and a…
+- [ComptimeUse](Comptime/ComptimeUse/) — `#run use` imports a module for compile-time code only: its names work in a `#run { … }` block, a `#run fn` body, a comptime argument and a…
 - [ComputedConstants](Comptime/ComputedConstants.jet) — Declaration constants use the ordinary comptime evaluator.
 - [ConstantUseSites](Comptime/ConstantUseSites/) — An immutable module constant with a known value is copied into each place that reads it: a number, text, or a small record becomes a literal at the use…
 - [Embed](Comptime/Embed.jet) — `embed_file` bakes a file's contents into the binary at compile time — the file is never opened at runtime.
 - [Find](Comptime/Find.jet) — `find(glob)` expands a build-time glob, sorts the relative file paths, and records each matched file hash for reproducible builds.
-- [FoldConstants](Comptime/FoldConstants.jet) — `:` asks for build-time evaluation as an optimization; `comptime` forces it.
+- [FoldConstants](Comptime/FoldConstants.jet) — `:` asks for build-time evaluation as an optimization; `#run` forces it.
 - [FrozenMap](Comptime/FrozenMap.jet) — A Map constant is frozen at build time like a List constant: its entries sit in static data in key order, and every read borrows them instead of building…
 - [ModuleValues](Comptime/ModuleValues.jet) — A module-level `NAME: expr` is computed while building and stored in the program like a literal, the same value on every tier.
-- [Phase](Comptime/Phase.jet) — `#phase` reads the `Phase` of the compiled copy: `Preparation` inside `comptime` code and `Runtime` in the program, on every tier.
+- [Phase](Comptime/Phase.jet) — `#phase` reads the `Phase` of the compiled copy: `Preparation` inside `#run` code and `Runtime` in the program, on every tier.
 - [PhaseContract](Comptime/PhaseContract/) — `#phase` tells preparation, the build entry and the running program apart, one helper reads a different phase in each compiled copy, and a prepared record keeps the phase it was made in.
-- [PrepBlock](Comptime/PrepBlock.jet) — `comptime { … }` is the explicit shared-preparation block.
-- [PrepFn](Comptime/PrepFn.jet) — `comptime fn` marks a literal hook, a method that runs while building to turn a written number into a value.
-- [PrepLoop](Comptime/PrepLoop.jet) — `comptime loop` repeats declarations while building.
+- [PrepBlock](Comptime/PrepBlock.jet) — `#run { … }` is the explicit shared-preparation block.
+- [PrepFn](Comptime/PrepFn.jet) — `#run fn` marks a literal hook, a method that runs while building to turn a written number into a value.
+- [PrepLoop](Comptime/PrepLoop.jet) — `#loop` repeats declarations while building.
 - [RungSpellings](Comptime/RungSpellings.jet)
 - [SiteValues](Comptime/SiteValues.jet) — `#here` is the `SourceLocation` where it is written, so `#here.line` and `#here.file` are its line and file; `#build` and `#phase` are compiler values, so a local named `build` or `phase` is an ordinary binding beside them.
 - [StaticConstant](Comptime/StaticConstant.jet) — `#Static` gives a compile-time constant a stable address.

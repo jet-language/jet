@@ -2,10 +2,10 @@
 // CORE_CALL_EXTENSIONS in its order. Lookups take the first row per
 // core_call_key and IR canonicalization refuses a duplicate, so an extension
 // row may not repeat an earlier key; the build stops when one does.
-CORE_CALLS: comptime { core_call_rows(CORE_DECLARATIONS, CORE_CALL_EXTENSIONS) }
+CORE_CALLS: #run core_call_rows(CORE_DECLARATIONS, CORE_CALL_EXTENSIONS)
 
 // Module/member/type names follow Core.jet module declaration order.
-CORE_MODULE_EXPORTS: comptime { core_module_export_rows(CORE_DECLARATIONS) }
+CORE_MODULE_EXPORTS: #run core_module_export_rows(CORE_DECLARATIONS)
 
 core_module_export_rows: fn(declared: CoreDeclarations) -> [CoreModuleExportNames] Never! {
     rows := [CoreModuleExportNames]{}

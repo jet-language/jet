@@ -1,7 +1,7 @@
-// A number parameter, `<comptime N: Int>`, makes one instance per number: a
+// A number parameter, `<N: Int>`, makes one instance per number: a
 // `Packet<4>` and a `Packet<2>` are two types with their own lengths, and a
 // body reads `N` as that instance's Int.
-Packet: struct<comptime N: Int> {
+Packet: struct<N: Int> {
     data: [Int#N]
 }
 
@@ -9,16 +9,16 @@ Packet: struct<comptime N: Int> {
 WIDE: 8
 
 // Nested use: a `Frame<N>` holds a `Packet<N>` of the same number.
-Frame: struct<comptime N: Int> {
+Frame: struct<N: Int> {
     head: Packet<N>
     tag: Int
 }
 
-size_of: fn<comptime N: Int>(packet: Packet<N>) -> Int { N }
+size_of: fn<N: Int>(packet: Packet<N>) -> Int { N }
 
-frame_size: fn<comptime N: Int>(frame: Frame<N>) -> Int { size_of(frame.head) + N }
+frame_size: fn<N: Int>(frame: Frame<N>) -> Int { size_of(frame.head) + N }
 
-total: fn<comptime N: Int>(packet: Packet<N>) -> Int {
+total: fn<N: Int>(packet: Packet<N>) -> Int {
     sum := 0
     loop value in packet.data -> sum += value
     sum

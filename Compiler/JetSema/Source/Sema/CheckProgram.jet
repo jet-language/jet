@@ -2659,7 +2659,7 @@ sema_check_comptime_function: fn(graph: SemaRegistrationGraph, environment: &Sem
     }
     // Any function a compile-time body reaches runs while building; the
     // native run's effect gate (E3401) rejects an effectful call. No
-    // `comptime fn` or `pure` marker is required.
+    // `#run fn` or `pure` marker is required.
     // Retarget module-local scope facts while reading the retained graph
     // from its single owner in `program`.
     // copy: a handle copy (Shared facts plus length and frontier ints): this check reads a frozen
@@ -7403,7 +7403,7 @@ sema_comptime_find_function_source_by_key: fn(graph: SemaRegistrationGraph, func
 // Every registered function a compile-time body calls runs while building,
 // wherever it is declared: the callee's own file resolves its names, and the
 // evaluator's effect gate (E3401) rejects an effectful call. A function need
-// not be marked `comptime fn` or `pure` to be reached.
+// not be marked `#run fn` or `pure` to be reached.
 sema_comptime_reachable_function_keys: fn(graph: SemaRegistrationGraph, call_facts: [SemaCallSiteFact]) -> [String] Never! {
     keys := [String]{}
     seen := [String:Bool]{}
@@ -8342,7 +8342,7 @@ sema_comptime_check_discriminant: fn(source: SemaComptimeItemSource, environment
     attempt := [Diagnostic]{}
     checked: sema_check_expression(source.expression, None, environment, program, scopes, state, tail_store, context, attempt)
     if sema_has_error_since(attempt, 0) {
-        diagnostics.push(sema_error("E0035", source.span, "an enum discriminant must be computable at compile time", "the enum number is part of the type layout and must be known before code generation", "use an integer literal, a `NAME: comptime {{ value }}` constant, or another compile-time expression"))
+        diagnostics.push(sema_error("E0035", source.span, "an enum discriminant must be computable at compile time", "the enum number is part of the type layout and must be known before code generation", "use an integer literal, a `NAME: #run value` constant, or another compile-time expression"))
         return None
     }
     expression: checked ?? {

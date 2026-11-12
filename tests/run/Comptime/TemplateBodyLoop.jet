@@ -1,4 +1,4 @@
-// A `comptime loop` inside a generated method body unrolls once per field:
+// A `#loop` inside a generated method body unrolls once per field:
 // `self.#{f}` pastes the field in expression and assignment positions, and
 // each unrolled iteration's locals (`value`, `twice`) are its own, so the
 // repeated names are not E0118.
@@ -11,7 +11,7 @@ Totals: struct {
             impl #{tname} {
                 total: fn(self) -> Int {
                     sum := 0
-                    comptime loop f in target.reflect().fields {
+                    #loop f in target.reflect().fields {
                         value: self.#{f}
                         sum += value
                     }
@@ -19,7 +19,7 @@ Totals: struct {
                 }
 
                 double: fn(&self) {
-                    comptime loop f in target.reflect().fields {
+                    #loop f in target.reflect().fields {
                         twice: self.#{f} * 2
                         self.#{f} = twice
                     }

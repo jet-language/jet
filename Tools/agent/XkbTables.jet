@@ -246,7 +246,7 @@ push_be: fn(&out: [U8], value: Int, width: Int) {
 
 // The XkbTables.jet line that embeds the data file `name` of DATA_DIRECTORY.
 embed_line: fn(constant: String, builtin: String, name: String) -> String {
-    "{constant}: comptime {{ {builtin}(\"XkbTables/{name}\") }}"
+    "{constant}: #run {{ {builtin}(\"XkbTables/{name}\") }}"
 }
 
 render: fn(keysyms: [Keysym], nodes: [Node], keysyms_sha: String, compose_sha: String) -> [TableFile] TableError! {

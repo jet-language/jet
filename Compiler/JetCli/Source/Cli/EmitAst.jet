@@ -243,7 +243,7 @@ jet_cli_emit_ast_item: fn(item: Item) -> JetCLIEmitNode Never! {
             children: loop message in value.messages -> jet_cli_emit_leaf("message", "message {message.name}")
             jet_cli_emit_node("protocol", "protocol {value.name}", children)
         }
-        .TemplateLoop(value) -> jet_cli_emit_node("template-loop", "comptime loop {value.var}", [JetCLIEmitNode]{jet_cli_emit_ast_expr(value.source)})
+        .TemplateLoop(value) -> jet_cli_emit_node("template-loop", "#loop {value.var}", [JetCLIEmitNode]{jet_cli_emit_ast_expr(value.source)})
         .GenericModule(value) -> jet_cli_emit_ast_items("generic-module", "generic module {value.name}", value.body)
         .ModuleAlias(value) -> jet_cli_emit_leaf("module-alias", "{value.name}: module = {value.target}")
         .MarkerDecl(value) -> jet_cli_emit_leaf("marker", "marker {value.name}")
@@ -383,14 +383,14 @@ jet_cli_emit_ast_stmt: fn(statement: Stmt) -> JetCLIEmitNode Never! {
         .ComptimeIf(cond, _, then_body, else_body, _, _) -> {
             children := [JetCLIEmitNode]{jet_cli_emit_ast_expr(cond), jet_cli_emit_ast_body("body", "then", then_body)}
             if else_body == .Val(body) -> children.push(jet_cli_emit_ast_body("else", "else", body))
-            jet_cli_emit_node("comptime-if", "comptime if", children)
+            jet_cli_emit_node("comptime-if", "#if", children)
         }
         .ComptimeSwitch(subject, arms, else_body, _) -> {
             children := [JetCLIEmitNode]{jet_cli_emit_ast_expr(subject)}
             jet_cli_emit_ast_arms(arms, else_body, children)
-            jet_cli_emit_node("comptime-switch", "comptime switch", children)
+            jet_cli_emit_node("comptime-switch", "#if match", children)
         }
-        .ComptimeBlock(body, _, _) -> jet_cli_emit_ast_body("comptime-block", "comptime", body)
+        .ComptimeBlock(body, _, _) -> jet_cli_emit_ast_body("comptime-block", "#run", body)
         .ContextBlock(fields, body, _) -> {
             children := [JetCLIEmitNode]{}
             loop field in fields -> children.push(jet_cli_emit_node("context-field", "{field.name}:", [JetCLIEmitNode]{jet_cli_emit_ast_expr(field.value)}))

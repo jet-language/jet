@@ -1,26 +1,26 @@
-// `comptime if` selects a branch at
+// `#if` selects a branch at
 // compile time. Only the selected arm is type-checked and emitted; the
 // dropped arm gets name-resolution only (typos still caught).
-DEBUG: comptime { false }
+DEBUG: #run false
 
-PLATFORM: comptime { "unix" }
+PLATFORM: #run "unix"
 
 run: fn() {
-    comptime if DEBUG {
+    #if DEBUG {
         print("debug mode")
     } else {
         print("release mode")
     }
-    comptime if PLATFORM == "windows" {
+    #if PLATFORM == "windows" {
         print("windows path")
     } else {
         print("unix path")
     }
-    // Nested comptime if (comptime else-if chain)
-    comptime if DEBUG {
+    // Nested #if (comptime else-if chain)
+    #if DEBUG {
         print("debug")
     } else {
-        comptime if PLATFORM == "unix" {
+        #if PLATFORM == "unix" {
             print("unix, non-debug")
         } else {
             print("other")
@@ -29,21 +29,21 @@ run: fn() {
     prep_branch_lesson()
 }
 
-// `comptime if` chooses a branch while building. Only the
+// `#if` chooses a branch while building. Only the
 // chosen arm is fully checked and emitted; the other arms get name checks
 // only. `prep` is no longer a keyword: a value named `prep` is an
 // ordinary name.
-MODE: comptime { "fast" }
+MODE: #run "fast"
 
-LEVEL: comptime { 2 }
+LEVEL: #run 2
 
 add: fn(a: Int, b: Int) -> Int { a + b }
 
 describe: fn() -> String {
     label := "unknown mode"
-    comptime if MODE == "safe" {
+    #if MODE == "safe" {
         label = "safe mode"
-    } else comptime if MODE == "fast" {
+    } else #if MODE == "fast" {
         label = "fast mode"
     } else {
         label = "other mode"
@@ -53,22 +53,22 @@ describe: fn() -> String {
 
 prep_branch_lesson: fn() {
     print(describe())
-    comptime if LEVEL > 1 {
+    #if LEVEL > 1 {
         print("level above one")
     }
-    comptime if LEVEL > 5 {
+    #if LEVEL > 5 {
         print("level above five")
     }
     // The unchosen arm is not type-checked: this call would not type-check.
-    comptime if false {
+    #if false {
         broken: add("text", 0)
         print("{broken}")
     } else {
         print("dropped arm skipped")
     }
     // Nested branches.
-    comptime if LEVEL == 2 {
-        comptime if MODE == "fast" {
+    #if LEVEL == 2 {
+        #if MODE == "fast" {
             print("level two, fast")
         } else {
             print("level two, other")

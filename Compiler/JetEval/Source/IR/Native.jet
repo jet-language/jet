@@ -6,7 +6,7 @@
 // (JetBackend Image/SessionHost.jet, JetRuntime ComptimeServe.jet):
 // - the compiler CALLs an item's wrapper, which stores the result in a
 //   cell the compiler then READs back as compiler data (Values.jet);
-// - host routes (compiler values, comptime inputs: JetIR ir_host_route)
+// - host routes (compiler values, inputs: JetIR ir_host_route)
 //   come back as HOST requests, which the compiler answers by writing
 //   runtime values into the child (Host.jet) before it RETURNs;
 // - runtime stops come back as STOPs carrying their texts, and a seccomp
@@ -754,7 +754,7 @@ jet_eval_native_stop: fn(s: &JetEvalIRState, kind: Int, a: Int, b: Int, c: Int, 
             jet_eval_ir_source_fail(s, message)
             return
         }
-        if s.failure == None -> s.failure = Val(JetEvalError{kind: JetEvalErrorKind.Source, diagnostic: diagnostic_from_registry("E3010", Val(s.span), "`{message}`", "compile-time code stopped the build: a `panic`, a failed check or an unhandled failure in a `comptime` value is a compile error", "handle the failure inside the `comptime` block (`??` or an `.Ok`/`.Err` match), or fix the value the check rejects")})
+        if s.failure == None -> s.failure = Val(JetEvalError{kind: JetEvalErrorKind.Source, diagnostic: diagnostic_from_registry("E3010", Val(s.span), "`{message}`", "compile-time code stopped the build: a `panic`, a failed check or an unhandled failure in a `#run` value is a compile error", "handle the failure inside the `#run` block (`??` or an `.Ok`/`.Err` match), or fix the value the check rejects")})
         return
     }
     // A reached `#Todo` (Trap.jet jet_todo_stop): the E3011 stop at its file
@@ -764,8 +764,8 @@ jet_eval_native_stop: fn(s: &JetEvalIRState, kind: Int, a: Int, b: Int, c: Int, 
         file: jet_eval_ir_text(s, a) ?? return
         expected: jet_eval_ir_text(s, c) ?? return
         what: "`#Todo at {file}:{b} — expected {expected}`"
-        why: if s.runtime_execution -> "this code is deliberately incomplete and reached a running program." else -> "compile-time code reached a `#Todo`, so the `comptime` value has no result: the code it stands for is deliberately incomplete."
-        fix: if s.runtime_execution -> "implement the missing code before running the program." else -> "implement the missing code, or keep the `#Todo` out of the code a `comptime` value runs."
+        why: if s.runtime_execution -> "this code is deliberately incomplete and reached a running program." else -> "compile-time code reached a `#Todo`, so the `#run` value has no result: the code it stands for is deliberately incomplete."
+        fix: if s.runtime_execution -> "implement the missing code before running the program." else -> "implement the missing code, or keep the `#Todo` out of the code a `#run` value runs."
         if s.failure == None -> s.failure = Val(JetEvalError{kind: JetEvalErrorKind.Source, diagnostic: diagnostic_from_registry("E3011", Val(s.span), what, why, fix)})
         return
     }
@@ -939,7 +939,7 @@ jet_eval_ir_comptime_input_route: fn(s: &JetEvalIRState, args: [Int], dst_row: I
 // net under a program that skipped it), E3401 in a compile that has no host.
 jet_eval_ir_comptime_input_without_host: fn(runtime_execution: Bool, span: Span, builtin: String, path: String) -> JetEvalError {
     shown: if builtin == "fetch" -> "net.fetch" else -> builtin
-    if runtime_execution -> return jet_eval_diagnostic(JetEvalErrorKind.Source, span, "a running program can't call `{shown}`", "`{shown}` reads a compile-time input, which only comptime code and `build: fn` read", "call `{shown}` in a `comptime` item and use its value in the program")
+    if runtime_execution -> return jet_eval_diagnostic(JetEvalErrorKind.Source, span, "a running program can't call `{shown}`", "`{shown}` reads a compile-time input, which only comptime code and `build: fn` read", "call `{shown}` in a `#run` item and use its value in the program")
     jet_eval_diagnostic(JetEvalErrorKind.Effect, span, "`{shown}` can't read files here", "this compile has no comptime input host, so it can't read `{path}`", "build the program with `jet build` or `jet run`, which read comptime inputs")
 }
 

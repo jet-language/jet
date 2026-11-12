@@ -2,7 +2,7 @@ use {
     comptime_diff_hex: core.encoding.hex
     json: core.encoding.json
 }
-COMPTIME_VALUE: comptime { json.canonical(json.parse("{{\"b\":1,\"a\":2}}") ?? panic("bad")) ?? panic("value is not canonical JSON") }
+COMPTIME_VALUE: #run { json.canonical(json.parse("{{\"b\":1,\"a\":2}}") ?? panic("bad")) ?? panic("value is not canonical JSON") }
 
 run: fn() {
     r: json.canonical(json.parse("{{\"b\":1,\"a\":2}}") ?? panic("bad")) ?? panic("value is not canonical JSON")

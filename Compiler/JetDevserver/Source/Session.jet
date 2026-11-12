@@ -20,13 +20,13 @@ use {
     core.encoding.[Dyn]
 }
 
-DEVTOOLS_TEXT_LIMIT: comptime { USize{JET_DEVTOOLS_MAX_TEXT_BYTES} }
+DEVTOOLS_TEXT_LIMIT: #run { USize{JET_DEVTOOLS_MAX_TEXT_BYTES} }
 MAX_CLIENT_ID: USize{128}
 MAX_CLIENTS: USize{256}
 CLIENT_TTL_MS: U64{160}
-CLIENT_TTL: comptime { Duration.from_millis(CLIENT_TTL_MS) }
+CLIENT_TTL: #run Duration.from_millis(CLIENT_TTL_MS)
 MAX_RECEIPTS: USize{128}
-MAX_RETAINED_VIEW_BYTES: comptime { USize{2 * 1024 * 1024} }
+MAX_RETAINED_VIEW_BYTES: #run { USize{2 * 1024 * 1024} }
 // GATE #4494: canonical atomic storage and relaxed fetch-add.
 NEXT_SESSION_ID: AtomicU64.new(1)
 LiveLineage: struct { protocol: String; session_id: String; source_id: String; build_id: String; revision: String; world_id: String }

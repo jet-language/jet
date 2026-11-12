@@ -21,7 +21,7 @@
 // Both compilers build these packages: one package, one flat namespace across
 // its files (E0624 forbids the same top-level name in two files), no path
 // dependencies (the bootstrap runner authorizes one source root), no bounded
-// trait method calls through a type parameter and no mutation inside `comptime`
+// trait method calls through a type parameter and no mutation inside `#run`
 // (both unsupported by the generated compiler today).
 
 use {
@@ -346,7 +346,7 @@ comptime_items: fn(n: Int, r: &Seeded) -> [String:String] {
     loop i in 0..<n {
         a: r.int(3, 40)
         b: r.int(5, 90)
-        limit: if i % 3 == 2 -> "LIMIT_{i}: comptime {{ LIMIT_{i - 1} * 2 + {b} }}" else -> "LIMIT_{i}: comptime {{ {a} * 7 + {b} }}"
+        limit: if i % 3 == 2 -> "LIMIT_{i}: #run {{ LIMIT_{i - 1} * 2 + {b} }}" else -> "LIMIT_{i}: #run {{ {a} * 7 + {b} }}"
         user: if i % 2 == {
             0 -> """
                 Gauge{i}: struct {{

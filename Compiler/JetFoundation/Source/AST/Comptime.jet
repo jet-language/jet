@@ -10,7 +10,7 @@ CompilerStage: enum {
     Emitted
 }
 
-COMPILER_STAGE_ALL: comptime { [CompilerStage]{
+COMPILER_STAGE_ALL: #run { [CompilerStage]{
     CompilerStage.Parsed, CompilerStage.Resolved, CompilerStage.Typed,
     CompilerStage.Prepared, CompilerStage.Emitted
 } }
@@ -261,7 +261,7 @@ ComptimeNameSite: struct {
 
 // Rust jet-comptime `walk_calls`: every direct `Call` name in an expression
 // tree, in visit order (shallow over lambda and `#Impure` bodies, crossing
-// `comptime` blocks; `WalkOpts::PLAIN`).
+// `#run` blocks; `WalkOpts::PLAIN`).
 comptime_walk_calls: fn(expr: Expr) -> [ComptimeNameSite] Never! {
     sites := [ComptimeNameSite]{}
     ast_comptime_walk_expr(expr, true, sites)
@@ -446,7 +446,7 @@ ast_comptime_walk_stmts: fn(body: [Stmt], calls: Bool, sites: &[ComptimeNameSite
 }
 
 // Rust `walk_stmt_expr_nodes` under `WalkOpts::PLAIN`: `#Impure` and
-// `#AssumeDet` bodies and switched-off statements are skipped; `comptime`
+// `#AssumeDet` bodies and switched-off statements are skipped; `#run`
 // blocks are crossed.
 ast_comptime_walk_stmt: fn(statement: Stmt, calls: Bool, sites: &[ComptimeNameSite]) Never! {
     if statement == {

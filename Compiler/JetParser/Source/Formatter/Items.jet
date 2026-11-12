@@ -840,7 +840,7 @@ jfmt_fmt_user_policy_decl: fn(f: &JetFmt, declaration: UserPolicyDecl) {
 }
 
 jfmt_fmt_item_template_loop: fn(f: &JetFmt, loop_item: ItemTemplateLoop) {
-    jfmt_write(f, "comptime loop ")
+    jfmt_write(f, "#loop ")
     jfmt_write(f, loop_item.var)
     jfmt_write(f, " in ")
     jfmt_fmt_expr(f, loop_item.source, JFMT_PREC_OR_FALLBACK)
@@ -865,7 +865,7 @@ jfmt_fmt_derive_body_items: fn(f: &JetFmt, body: [DeriveBodyItem]) {
             .Item(item) -> jfmt_fmt_item(f, item)
             .Stmt(stmt) -> jfmt_fmt_stmt(f, stmt)
             .Loop(var, _, source, inner, _) -> {
-                jfmt_write(f, "comptime loop ")
+                jfmt_write(f, "#loop ")
                 jfmt_write(f, var)
                 jfmt_write(f, " in ")
                 jfmt_fmt_expr(f, source, JFMT_PREC_OR_FALLBACK)
@@ -884,10 +884,10 @@ jfmt_fmt_derive_body_items: fn(f: &JetFmt, body: [DeriveBodyItem]) {
     }
 }
 
-// `comptime if cond { … } else { … }` in a template body; an `else` holding
-// one more template `if` prints as `else comptime if`.
+// `#if cond { … } else { … }` in a template body; an `else` holding one more
+// template `if` prints as `else #if`.
 jfmt_fmt_derive_body_if: fn(f: &JetFmt, cond: Expr, then_body: [DeriveBodyItem], else_body: [DeriveBodyItem]?) {
-    jfmt_write(f, "comptime if ")
+    jfmt_write(f, "#if ")
     jfmt_fmt_expr(f, cond, JFMT_PREC_OR_FALLBACK)
     jfmt_write(f, " {{")
     jfmt_newline(f)
@@ -1443,8 +1443,8 @@ jfmt_fmt_type_params: fn(f: &JetFmt, params: [TypeParam], source: JetFmtSourceLi
         param: params[index]
         jfmt_comma_before(f, index, multiline, param.name_span.start)
         if param.prep == .Val(prep) {
-            // A number parameter prints `comptime N: Int`.
-            jfmt_write(f, "comptime {param.name}: {prep.value_type}")
+            // A number parameter prints `N: Int`.
+            jfmt_write(f, "{param.name}: {prep.value_type}")
         } else {
             jfmt_write(f, param.name)
             if param.bounds.len() == 1 {
@@ -1725,12 +1725,12 @@ jfmt_fmt_func: fn(f: &JetFmt, func: Func) {
     // the build-time callable mark on capability constructors. It sits after
     // any markers, directly before `fn`, exactly where `method_in_type` reads it.
     // A name path (`Shape.area`) prints before `fn`; the build-time
-    // `comptime` mark stays first after the markers.
+    // `#run` mark stays first after the markers.
     // A member `priv` or `priv(package)` (parsed onto the method) survives; a
     // narrowed module body's methods carry no written keyword.
     privacy: if func.is_pub -> "" else -> jfmt_source_privacy_before(f, func.name_span.start)
     if privacy.len() > 0 -> jfmt_write(f, privacy)
-    if func.is_comptime -> jfmt_write(f, "comptime ")
+    if func.is_comptime -> jfmt_write(f, "#run ")
     if func.external_type == .Val(owner) {
         jfmt_write(f, owner.name)
         jfmt_write(f, ".")
@@ -2518,8 +2518,8 @@ jfmt_fmt_const: fn(f: &JetFmt, c: ConstDef) {
             jfmt_write(f, " ")
         }
     }
-    // `#Persist` on a binding, its value `comptime { … }` when the author
-    // wrote it so. Preserve `:` vs `:=`.
+    // `#Persist` on a binding, its value `#run …` when the author wrote it
+    // so. Preserve `:` vs `:=`.
     if c.is_persist {
         jfmt_write(f, "#Persist ")
         jfmt_write(f, c.name)
@@ -2537,7 +2537,7 @@ jfmt_fmt_const: fn(f: &JetFmt, c: ConstDef) {
     }
     if c.is_comptime {
         // Compile time is always the explicit
-        // `NAME: comptime { value }`.
+        // `NAME: #run value`.
         jfmt_write(f, c.name)
         jfmt_write(f, ": ")
         jfmt_fmt_prepared_value(f, c.value)
@@ -2560,7 +2560,7 @@ jfmt_fmt_const: fn(f: &JetFmt, c: ConstDef) {
 }
 
 // The imports of one scope (#6542): two or more print as one `use { … }`
-// block with a row per line, the build-only rows as one `comptime use { … }`
+// block with a row per line, the build-only rows as one `#run use { … }`
 // block, the re-exports as one `pub use { … }` block, and a lone import
 // keeps its one line. Comments before the first import print above the
 // group; the rest stay beside their rows.
@@ -2650,11 +2650,11 @@ jfmt_fmt_import: fn(f: &JetFmt, imp: ImportDecl) {
     jfmt_fmt_import_row(f, imp)
 }
 
-// `pub use` is the only re-export spelling (ballot pending); `comptime use`
+// `pub use` is the only re-export spelling (ballot pending); `#run use`
 // marks a build-only import.
 jfmt_fmt_import_head: fn(f: &JetFmt, imp: ImportDecl) {
     if imp.is_pub -> jfmt_write(f, "pub ")
-    if imp.comptime_span != None -> jfmt_write(f, "comptime ")
+    if imp.comptime_span != None -> jfmt_write(f, "#run ")
     jfmt_write(f, "use ")
 }
 

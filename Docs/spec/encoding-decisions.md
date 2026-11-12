@@ -1265,7 +1265,7 @@ errors. Options relax only their named forms and never change error precedence
 or offsets.
 
 Use one std-only parser and table-driven RFC 4648 vectors across AOT,
-`comptime`, `jet eval`, REPL, and `jet dev`; parity tests compare every option
+`#run`, `jet eval`, REPL, and `jet dev`; parity tests compare every option
 combination and malformed corpus case byte-for-byte. Edition `2026` uses one
 compatibility parser across those tiers and accepts the historical union with
 the same bytes everywhere, never backend drift. A stricter omitted-argument

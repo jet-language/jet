@@ -1,6 +1,6 @@
 // D-META-HASH2=A, D-META-PHASE1=A: `#build` and `#phase` are compiler values,
 // so locals named `build` and `phase` are ordinary bindings beside them.
-PREPARED: comptime { #phase }
+PREPARED: #run #phase
 
 run: fn() {
     build: "a local named build"
@@ -9,7 +9,7 @@ run: fn() {
     print(#build.profile)
     print(#package.name)
     print(#phase == PREPARED)
-    comptime if #build.target.os == {
+    #if #build.target.os == {
         .Linux -> { print("linux") }
         else -> { print("other") }
     }

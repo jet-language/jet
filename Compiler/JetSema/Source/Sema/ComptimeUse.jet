@@ -1,6 +1,6 @@
-// `comptime use` binds names that only compile-time code may use: a
-// `comptime {}` block, a `comptime if` or `comptime switch` head, a
-// `comptime fn` or `fn build` body, a number argument, and a binding or
+// `#run use` binds names that only compile-time code may use: a
+// `#run {}` block, a `#if` or `#if … == {}` head, a
+// `#run fn` or `fn build` body, a number argument, and a binding or
 // constant computed while building. This pass reads each user module's own
 // syntax once, before any body is checked. It reports a reference to such a
 // name from code that runs in the shipped program, and it records which
@@ -35,11 +35,11 @@ use jet_foundation.[
 SemaComptimeUseScan: struct {
     // Every name the module's imports bind.
     import_locals: [String:Bool]
-    // The names a `comptime use` binds -> its `comptime ` prefix, the span
+    // The names a `#run use` binds -> its `#run ` prefix, the span
     // the fix deletes to make the import plain.
     comptime_locals: [String:Span]
     // The callables whose arguments are compile-time: the module's own
-    // `comptime fn`s and the imported ones, as a call spells them.
+    // `#run fn`s and the imported ones, as a call spells them.
     comptime_callees: [String:Bool]
     // The module's source when spans index it directly, else empty.
     source: [U8]
@@ -47,7 +47,7 @@ SemaComptimeUseScan: struct {
     // not an import reference.
     bound: [String:Bool]
     // The current binding initializer or constant value a reference sits
-    // in, which can move into a `comptime {}` block as a whole.
+    // in, which can move into a `#run {}` block as a whole.
     wrap: Span?
     pending: [SemaComptimeUseReference]
     runtime_names: [String:Bool]
@@ -61,7 +61,7 @@ SemaComptimeUseReference: struct {
 }
 
 // Checks every user module, then records the build-only modules and, per
-// module, the modules it imports only with `comptime use`.
+// module, the modules it imports only with `#run use`.
 sema_comptime_use_check: fn(graph: &SemaRegistrationGraph) {
     count: graph.modules.len()
     own_callees := [[String:Bool]]{}
@@ -125,7 +125,7 @@ sema_comptime_use_bind_import: fn(local: String, prefix: Span?, scan: &SemaCompt
     if prefix == .Val(span) -> scan.comptime_locals[local] = span
 }
 
-// A module's `comptime fn`s as its own code calls them: `name` at the top
+// A module's `#run fn`s as its own code calls them: `name` at the top
 // level, `Type.name` for a method.
 sema_comptime_use_own_callees: fn(items: [Item]) -> [String:Bool] Never! {
     callees := [String:Bool]{}
@@ -156,7 +156,7 @@ sema_comptime_use_items: fn(items: [Item], scan: &SemaComptimeUseScan) {
     loop item in items {
         if item == {
             .Func(function) -> {
-                // `fn build` runs while building, like a `comptime fn`.
+                // `fn build` runs while building, like a `#run fn`.
                 if function.name != "build" -> sema_comptime_use_func(function, scan)
             }
             .Struct(definition) -> {
@@ -250,7 +250,7 @@ sema_comptime_use_params: fn(params: [Param], scan: &SemaComptimeUseScan) {
     }
 }
 
-// Reports each pending runtime reference to a `comptime use` name and
+// Reports each pending runtime reference to a `#run use` name and
 // records every runtime import use, then starts the next declaration.
 sema_comptime_use_flush: fn(scan: &SemaComptimeUseScan) {
     pending: compiler_take_rows<SemaComptimeUseReference>(scan.pending)
@@ -258,7 +258,7 @@ sema_comptime_use_flush: fn(scan: &SemaComptimeUseScan) {
         if scan.bound.has_key(reference.name) -> next
         scan.runtime_names[reference.name] = true
         prefix: scan.comptime_locals.get(reference.name) ?? next
-        diagnostic := diagnostic_with_edit(sema_error("E0944", reference.span, "`{reference.name}` comes from a `comptime use` import, but this code runs in the shipped program", "A `comptime use` import exists only while building, so the shipped program does not contain its module", "Import it with plain `use`, or move this use into compile-time code: a `comptime {{ … }}` block, a `comptime fn`, or a value computed while building"), TextEdit{span: prefix, new_text: ""})
+        diagnostic := diagnostic_with_edit(sema_error("E0944", reference.span, "`{reference.name}` comes from a `#run use` import, but this code runs in the shipped program", "A `#run use` import exists only while building, so the shipped program does not contain its module", "Import it with plain `use`, or move this use into compile-time code: a `#run {{ … }}` block, a `#run fn`, or a value computed while building"), TextEdit{span: prefix, new_text: ""})
         if reference.wrap == .Val(value_span) {
             if sema_comptime_use_wrap_edit(scan.source, value_span) == .Val(alternative) -> diagnostic = diagnostic_with_alternative_edit(diagnostic, alternative)
         }
@@ -271,7 +271,7 @@ sema_comptime_use_flush: fn(scan: &SemaComptimeUseScan) {
 sema_comptime_use_wrap_edit: fn(source: [U8], wrap: Span) -> TextEdit? Never! {
     if wrap.start < 0 || wrap.start >= wrap.end || wrap.end > source.len() -> return None
     text: String.from_bytes(source[wrap.start..<wrap.end]) ?? return None
-    Val(TextEdit{span: wrap, new_text: "comptime {{ {text} }}"})
+    Val(TextEdit{span: wrap, new_text: "#run {{ {text} }}"})
 }
 
 // Notes a runtime reference to `name`, or to the first segment of a dotted
@@ -317,7 +317,7 @@ sema_comptime_use_binding: fn(binding: Binding, scan: &SemaComptimeUseScan) {
             }
         }
     }
-    // `x: comptime { … }` is computed while building.
+    // `x: #run { … }` is computed while building.
     if binding.is_comptime -> return
     if binding.ty == .Val(ty) -> sema_comptime_use_type(ty, binding.ty_span ?? binding.name_span, scan)
     outer: scan.wrap
@@ -489,7 +489,7 @@ sema_comptime_use_expr: fn(expression: Expr, scan: &SemaComptimeUseScan) {
         .Call(call, _) -> {
             sema_comptime_use_reference(call.name, call.name_span, scan)
             sema_comptime_use_type_args(call.type_args, call.name_span, scan)
-            // A `comptime fn` takes its arguments while building.
+            // A `#run fn` takes its arguments while building.
             if !scan.comptime_callees.has_key(call.name) -> sema_comptime_use_args(call.args, scan)
         }
         .MethodCall(receiver, _, method_span, owner_type_args, type_args, args, _) -> {
@@ -610,7 +610,7 @@ sema_comptime_use_type: fn(ty: Type, span: Span, scan: &SemaComptimeUseScan) Nev
     }
 }
 
-// Per module, the modules it imports only with `comptime use` -> the
+// Per module, the modules it imports only with `#run use` -> the
 // prefix of one such import, which the fix deletes.
 sema_comptime_use_record_targets: fn(graph: &SemaRegistrationGraph) Never! {
     targets := [String:Span]{}
@@ -707,16 +707,16 @@ sema_comptime_use_build_only_shape: fn(graph: SemaRegistrationGraph, module_inde
     true
 }
 
-// A read of a value computed while building (a constant or a `comptime`
+// A read of a value computed while building (a constant or a `#run`
 // local) in code that runs in the shipped program, when the value's type
-// comes from a module this module imports only with `comptime use`: the
+// comes from a module this module imports only with `#run use`: the
 // shipped program has no such module to hold it.
 sema_comptime_use_value_read: fn(name: String, ty: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) {
     if scopes.comptime_execution_depth > 0 || (scopes.location_function ?? environment.function_name) == "build" -> return
     if program.registration_graph == .Val(graph) {
         if graph.comptime_use_targets.len() == 0 -> return
         prefix: sema_comptime_use_value_prefix(graph, ty, environment.module_identity) ?? return
-        diagnostics.push(diagnostic_with_edit(sema_error("E0944", span, "`{name}` is a value computed while building, and its type comes from a `comptime use` module", "A `comptime use` module exists only while building, so the shipped program cannot hold a value of its types", "Import that module with plain `use`, or read `{name}` only in compile-time code"), TextEdit{span: prefix, new_text: ""}))
+        diagnostics.push(diagnostic_with_edit(sema_error("E0944", span, "`{name}` is a value computed while building, and its type comes from a `#run use` module", "A `#run use` module exists only while building, so the shipped program cannot hold a value of its types", "Import that module with plain `use`, or read `{name}` only in compile-time code"), TextEdit{span: prefix, new_text: ""}))
     }
 }
 

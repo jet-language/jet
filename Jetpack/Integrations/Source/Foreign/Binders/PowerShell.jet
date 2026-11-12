@@ -19,7 +19,7 @@ use {
 
 // Parses the script with the PowerShell parser and prints each top-level
 // function name; a parse error prints `ParserError` and exits 2.
-PKG_PWSH_VALIDATOR: comptime { ```$tokens = $null
+PKG_PWSH_VALIDATOR: #run { ```$tokens = $null
 $errors = $null
 $ast = [System.Management.Automation.Language.Parser]::ParseFile($args[0], [ref]$tokens, [ref]$errors)
 if ($errors.Count -ne 0) { [Console]::Error.WriteLine('ParserError'); exit 2 }
@@ -27,7 +27,7 @@ $ast.EndBlock.Statements | Where-Object { $_ -is [System.Management.Automation.L
 ``` }
 
 // The persistent worker. Hole: `allowed`, the quoted command allow-list.
-PKG_PWSH_WORKER: comptime { ```$ErrorActionPreference = 'Stop'
+PKG_PWSH_WORKER: #run { ```$ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 $inputStream = [Console]::OpenStandardInput()
 $outputStream = [Console]::OpenStandardOutput()
@@ -78,7 +78,7 @@ while ($true) {
 ``` }
 
 // The generated module's types after the import block. Hole: `abi`.
-PKG_PWSH_JET_TYPES: comptime { ```}
+PKG_PWSH_JET_TYPES: #run { ```}
 use {
     abi: c.@@abi@@
     json: core.encoding.json
@@ -100,7 +100,7 @@ PowerShellError: enum {
 
 ``` }
 
-PKG_PWSH_JET_SESSION: comptime { ```impl Session.Close {
+PKG_PWSH_JET_SESSION: #run { ```impl Session.Close {
     close: fn(&&self) { abi.close(self.value) }
 }
 

@@ -26,7 +26,7 @@ make_index: fn() -> [String:Int] {
     index
 }
 
-INDEX: comptime { make_index() }
+INDEX: #run make_index()
 
 // Compile-time code reads the same frozen Map, and a write there copies too.
 bumped_fig: fn() -> Int {
@@ -35,7 +35,7 @@ bumped_fig: fn() -> Int {
     prices["fig"] + PRICES["fig"]
 }
 
-BUMPED: comptime { bumped_fig() }
+BUMPED: #run bumped_fig()
 
 raise: fn(prices: &[String:Int]) {
     prices["apple"] = 100

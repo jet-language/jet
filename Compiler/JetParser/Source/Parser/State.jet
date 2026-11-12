@@ -32,7 +32,6 @@ use {
         TOKEN_FLOAT,
         TOKEN_GT,
         TOKEN_INT,
-        TOKEN_KW_COMPTIME,
         TOKEN_KW_CONST,
         TOKEN_KW_ENUM,
         TOKEN_KW_FN,
@@ -48,6 +47,7 @@ use {
         TOKEN_LINE_COMMENT,
         TOKEN_LPAREN,
         TOKEN_NULL,
+        TOKEN_PREP,
         TOKEN_RAW_STRING,
         TOKEN_RBRACE,
         TOKEN_RBRACKET,
@@ -125,7 +125,7 @@ JetParserState: struct {
     // result, so an audited region at its tail keeps the value grammar.
     callable_tail_value: Bool{false}
     // Rust `derive_template_depth`: derive, marker and declaration-loop
-    // template bodies entered so far. A `comptime loop` inside one is a
+    // template bodies entered so far. A `#loop` inside one is a
     // template loop the derive expansion unrolls.
     derive_template_depth: Int{0}
     // Code and generic module bodies entered so far; 0 is a file's top
@@ -971,13 +971,13 @@ parser_recover_statement: fn(state: &JetParserState) Never! {
 }
 
 // After a failed top-level item: skip to the next plausible item start. A
-// `comptime` starts an item only at the start of a line; after `NAME:` it
-// is that binding's value, which goes with the skipped line.
+// `#run`, `#if` or `#loop` starts an item only at the start of a line; after
+// `NAME:` it is that binding's value, which goes with the skipped line.
 parser_sync_top: fn(state: &JetParserState) Never! {
     loop {
         kind: parser_current_kind(state)
         if kind == TOKEN_EOF || kind == TOKEN_KW_FN || kind == TOKEN_KW_PUB || kind == TOKEN_KW_STRUCT || kind == TOKEN_KW_ENUM || kind == TOKEN_KW_IMPL || kind == TOKEN_KW_CONST -> break
-        if kind == TOKEN_KW_COMPTIME && (state.position == 0 || state.tokens[state.position - 1].kind == TOKEN_SEMI) -> break
+        if kind == TOKEN_PREP && (state.position == 0 || state.tokens[state.position - 1].kind == TOKEN_SEMI) -> break
         parser_bump(state)
     }
 }

@@ -50,7 +50,6 @@ use {
         TOKEN_GT,
         TOKEN_HASH,
         TOKEN_IDENT,
-        TOKEN_KW_COMPTIME,
         TOKEN_KW_CONST,
         TOKEN_KW_COPY,
         TOKEN_KW_DERIVE,
@@ -79,6 +78,7 @@ use {
         TOKEN_LPAREN,
         TOKEN_LT,
         TOKEN_MINUS,
+        TOKEN_PREP,
         TOKEN_RBRACE,
         TOKEN_RBRACKET,
         TOKEN_RPAREN,
@@ -123,11 +123,11 @@ parser_colon_head_keyword: fn(kind: Int) -> Bool Never! {
     kind == TOKEN_KW_FN || kind == TOKEN_KW_STRUCT || kind == TOKEN_KW_ENUM || kind == TOKEN_KW_TRAIT || kind == TOKEN_KW_MODULE || kind == TOKEN_KW_TAG || kind == TOKEN_KW_EFFECT
 }
 
-// The head kind of a `comptime loop` or `comptime if` statement.
+// The head kind of a `#loop` or `#if` statement.
 PARSER_COLON_HEAD_COMPTIME_BLOCK: -2
 
 // The frame a declaration's body brace opens, by the declaration's keyword.
-// A `comptime loop` or `comptime if` among declarations generates
+// A `#loop` or `#if` among declarations generates
 // declarations, so its bodies keep the enclosing frame.
 parser_colon_body_frame: fn(head: Int, frame: Int) -> Int Never! {
     if head == TOKEN_KW_STRUCT || head == TOKEN_KW_ENUM -> return PARSER_COLON_FRAME_SHAPE
@@ -189,7 +189,7 @@ parser_colon_skip_group: fn(tokens: [Token], open: Int) -> Int Never! {
 }
 
 // The head of the statement starting at `start`: past `pub`, `pub(…)`,
-// `priv`, `priv(…)`, `comptime` and `#Marker(…)` / `#[…]` markers written on
+// `priv`, `priv(…)`, `#run` and `#Marker(…)` / `#[…]` markers written on
 // the declaration's line. A `pub:` / `priv:` section label (E0415) is passed
 // over too, so the declaration after it keeps its head.
 parser_colon_head_at: fn(tokens: [Token], start: Int) -> Int Never! {
@@ -202,7 +202,7 @@ parser_colon_head_at: fn(tokens: [Token], start: Int) -> Int Never! {
             if index < tokens.len() && tokens[index].kind == TOKEN_COLON -> index = parser_colon_code_at(tokens, index + 1)
             next
         }
-        if kind == TOKEN_KW_COMPTIME {
+        if kind == TOKEN_PREP {
             index = parser_colon_code_at(tokens, index + 1)
             next
         }
@@ -513,7 +513,7 @@ parser_colon_declarations: fn(input: &&[Token], tables: TokenTables) -> [Token] 
             head_kind = if head < tokens.len() -> tokens[head].kind else -> -1
             if head_kind == TOKEN_KW_LOOP || head_kind == TOKEN_KW_IF {
                 loop at in index..<head {
-                    if tokens[at].kind == TOKEN_KW_COMPTIME -> head_kind = PARSER_COLON_HEAD_COMPTIME_BLOCK
+                    if tokens[at].kind == TOKEN_PREP -> head_kind = PARSER_COLON_HEAD_COMPTIME_BLOCK
                 }
             }
             head_marker = parser_colon_marker_head(tokens, tables, head)
@@ -554,7 +554,7 @@ parser_colon_declarations: fn(input: &&[Token], tables: TokenTables) -> [Token] 
             closed = opens.pop() ?? -1
             // A member's body brace ends the member, so a one-line body's
             // next member (`{ get: fn(self) -> Int { 1 } put: fn… }`) starts
-            // here; an `else` goes on with a `comptime if`.
+            // here; an `else` goes on with a `#if`.
             if current == TOKEN_RBRACE && parser_colon_member_frame(frame) {
                 after: parser_colon_code_at(tokens, index + 1)
                 if after >= tokens.len() || tokens[after].kind != TOKEN_KW_ELSE -> at_start = true

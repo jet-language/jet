@@ -1,7 +1,7 @@
 Error [jet.ArgumentCountMismatch]: `package` expects 0 arguments, got 1
   --> tests/ui/compiler_api/compiler_package_query_extra_arguments_are_rejected_at_checking_2.jet:2:28
     |
-  2 | VALUE: comptime { compiler.package("extra") }
+  2 | VALUE: #run compiler.package("extra")
     |                            ^^^^^^^
  Why: Every argument must match a parameter
  Fix: Check the definition of `package` in the imported file
@@ -10,7 +10,7 @@ More: jet-lang.dev/e/E0104
 Error [jet.MissingErrorConversion]: This implicit fallible call can't convert `CompilerPackageError` into `Err` — no declared conversion exists
   --> tests/ui/compiler_api/compiler_package_query_extra_arguments_are_rejected_at_checking_2.jet:2:28
     |
-  2 | VALUE: comptime { compiler.package("extra") }
+  2 | VALUE: #run compiler.package("extra")
     |                            ^^^^^^^
  Why: Ordinary fallible calls propagate automatically; `CompilerPackageError` can reach `Err` only through `impl CompilerPackageError -> Err`
  Fix: Handle this call locally with `??`, add `impl CompilerPackageError -> Err { … }`, or change the return type

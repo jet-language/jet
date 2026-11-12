@@ -3,18 +3,18 @@
 // resulting constants; it never receives a filesystem capability.
 use compiler: core.compiler
 
-MANIFEST: comptime { compiler.manifest() ?? panic("manifest view failed") }
-PACKAGE: comptime { compiler.package() ?? panic("package view failed") }
-LOCK: comptime { compiler.lock() ?? panic("lock view failed") }
-PROFILES: comptime { compiler.profiles() ?? panic("profile view failed") }
+MANIFEST: #run { compiler.manifest() ?? panic("manifest view failed") }
+PACKAGE: #run { compiler.package() ?? panic("package view failed") }
+LOCK: #run { compiler.lock() ?? panic("lock view failed") }
+PROFILES: #run { compiler.profiles() ?? panic("profile view failed") }
 
-MANIFEST_OUTPUTS: comptime { MANIFEST.outputs().len() }
-PACKAGE_OUTPUTS: comptime { PACKAGE.outputs().len() }
-LOCK_VERSION: comptime { LOCK.version() }
-LOCK_PACKAGES: comptime { LOCK.packages().len() }
-PROFILE_COUNT: comptime { PROFILES.profiles().len() }
-PACKAGE_NAME: comptime { #package.name }
-PACKAGE_VERSION: comptime { #package.version }
+MANIFEST_OUTPUTS: #run MANIFEST.outputs().len()
+PACKAGE_OUTPUTS: #run PACKAGE.outputs().len()
+LOCK_VERSION: #run LOCK.version()
+LOCK_PACKAGES: #run LOCK.packages().len()
+PROFILE_COUNT: #run PROFILES.profiles().len()
+PACKAGE_NAME: #run #package.name
+PACKAGE_VERSION: #run #package.version
 
 build: fn(b: Build) {
     if MANIFEST_OUTPUTS != 0 -> panic("manifest view must stay uncomposed")

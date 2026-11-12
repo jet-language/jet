@@ -91,7 +91,7 @@ mrc_program_at: fn(marker: String, rule: TAppliedRule, site: String) -> String? 
         "Block" -> return Val("run: fn() {{\n    {marker} {{\n        print(\"ok\")\n    }}\n}}\n")
         "Statement" -> return Val("run: fn() {{\n    {marker} print(\"ok\")\n}}\n")
         "Declaration" -> if marker.starts_with("#Persist") -> return Val("{marker} value := 1\n\nrun: fn() {{\n}}\n") else -> return Val("run: fn() {{\n    {marker} value: 1\n}}\n")
-        "Constant" -> return Val("{marker} VALUE: comptime {{ 1 }}\n\nrun: fn() {{\n}}\n")
+        "Constant" -> return Val("{marker} VALUE: #run 1\n\nrun: fn() {{\n}}\n")
         "Parameter" -> return Val("helper: fn({marker} a: Int) {{\n}}\n\nrun: fn() {{\n}}\n")
         "Expression" -> return Val("run: fn() {{\n    value: {marker}\n}}\n")
         "Test" -> return Val("{marker} {{\n    print(\"ok\")\n}}\n\nrun: fn() {{\n}}\n")

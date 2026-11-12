@@ -61,7 +61,7 @@ render_copy: fn(row: PreludeCopy, source: String) -> String PreludeSourcesError!
     lines := [String]{}
     loop line in row.comment.split("\n") -> lines.push("// {line}")
     if row.path != "" -> lines.push("{row.constant}_PATH: \"{row.path}\"")
-    Ok("{lines.join("\n")}\n{row.constant}: comptime {{ {FENCE}{source}{FENCE} }}\n")
+    Ok("{lines.join("\n")}\n{row.constant}: #run {{ {FENCE}{source}{FENCE} }}\n")
 }
 
 // Every target, generated whole from `copies`, whose sources `read` holds.
@@ -124,8 +124,8 @@ run: fn() { print(prelude_sources_main(process.args()) ?? process.fail(1, err.me
     out: render_targets(copies, read) ?? panic(err.message)
     assert_eq(out.len(), 2)
     assert_eq(out[0].path, "t.jet")
-    assert_eq(out[0].text, "// First.\n// Second.\nA: comptime {{ ```a: 1\n``` }}\n\n// Bee.\nB_PATH: \"jet:b.jet\"\nB: comptime {{ ```b: 2\n``` }}\n")
-    assert_eq(out[1].text, "// Sea.\nC: comptime {{ ```a: 1\n``` }}\n")
+    assert_eq(out[0].text, "// First.\n// Second.\nA: #run {{ ```a: 1\n``` }}\n\n// Bee.\nB_PATH: \"jet:b.jet\"\nB: #run {{ ```b: 2\n``` }}\n")
+    assert_eq(out[1].text, "// Sea.\nC: #run {{ ```a: 1\n``` }}\n")
     if render_targets(copies, [TextFile]{TextFile{path: "a.jet", text: "has ``` inside"}, TextFile{path: "b.jet", text: ""}}) == .Ok(_) -> panic("a fence in the source must fail")
     if render_targets(copies, [TextFile]{TextFile{path: "a.jet", text: ""}}) == .Ok(_) -> panic("a source with no text must fail")
 }

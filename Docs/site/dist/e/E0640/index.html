@@ -34,16 +34,16 @@
 <h2>Why</h2>
 <p class="diag-copy why" data-registry-field="why">Compile-time code runs once while building, before any call of the function, so `{name}` has no value yet.</p>
 <h2>Fix</h2>
-<p class="diag-copy fix" data-registry-field="fix">Compute the value at run time without `comptime`, or read a constant or a `comptime` value instead of `{name}`.</p>
+<p class="diag-copy fix" data-registry-field="fix">Compute the value at run time without `#run`, or read a constant or a `#run` value instead of `{name}`.</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E0640</code>: <code>tests/ui/prep_runtime_input.stderr</code>.</p>
 <pre class="diag">Error [jet.CompileTimeReadsRuntimeValue]: This compile-time code reads `n`, a run-time value of the function around it
   --&gt; tests/ui/prep_runtime_input.jet:4:25
     |
-  4 |     doubled: comptime { n * 2 }
+  4 |     doubled: #run { n * 2 }
     |                         ^
  Why: Compile-time code runs once while building, before any call of the function, so `n` has no value yet.
- Fix: Compute the value at run time without `comptime`, or read a constant or a `comptime` value instead of `n`.
+ Fix: Compute the value at run time without `#run`, or read a constant or a `#run` value instead of `n`.
 More: jet-lang.dev/e/E0640
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

@@ -1487,7 +1487,7 @@ jet_driver_module_value_refused: fn(
         diagnostics.push(jet_driver_attach_program_source_location(diagnostic, program, source.module_identity))
     }
     if jet_driver_has_errors(checked.diagnostics) -> return
-    diagnostics.push(jet_driver_diagnostic_at_program_site(program, source.module_identity, "E0643", source.span, "`{source.name}` can't be computed while building: {reason}", "a module-level `name: value` is computed while building and stored in the program, the same value on every tier; no code runs before `run: fn`, so a value that stops, reaches the outside world, or can't run while building is a build error", "compute it in `run` and pass it on; or make it a function, marked `#Memo` when it is pure so the first result is kept; or, for outside data, read a pinned build input such as `comptime {{ embed_file(\"config.txt\") }}`"))
+    diagnostics.push(jet_driver_diagnostic_at_program_site(program, source.module_identity, "E0643", source.span, "`{source.name}` can't be computed while building: {reason}", "a module-level `name: value` is computed while building and stored in the program, the same value on every tier; no code runs before `run: fn`, so a value that stops, reaches the outside world, or can't run while building is a build error", "compute it in `run` and pass it on; or make it a function, marked `#Memo` when it is pure so the first result is kept; or, for outside data, read a pinned build input such as `#run {{ embed_file(\"config.txt\") }}`"))
 }
 
 // Refuses each of `refusals` (jet_driver_module_value_refused), whose
@@ -1809,7 +1809,7 @@ jet_driver_comptime_flush: fn(
             if source.baked_default {
                 name_parts := source.name.split(".").to_list()
                 field_name: name_parts.pop() ?? source.name
-                diagnostics.push(jet_driver_diagnostic_at_registration_site(graph, source.module_identity, "E2414", source.span, "`{field_name}`'s `{{…}}` default must be a compile-time constant", "a decode default is baked into the program, so its value has to be known at compile time; this expression can only be computed at runtime", "use a literal or a `comptime`-evaluable expression — e.g. `port: Int{{8080}}` or `ports: [Int]{{[80, 443]}}`"))
+                diagnostics.push(jet_driver_diagnostic_at_registration_site(graph, source.module_identity, "E2414", source.span, "`{field_name}`'s `{{…}}` default must be a compile-time constant", "a decode default is baked into the program, so its value has to be known at compile time; this expression can only be computed at runtime", "use a literal or a `#run`-evaluable expression — e.g. `port: Int{{8080}}` or `ports: [Int]{{[80, 443]}}`"))
             }
             next
         }
@@ -2276,7 +2276,7 @@ jet_driver_comptime_run: fn(
                     return jet_driver_comptime_run_result(values, checked_functions, trace, false, false)
                 }
                 // A comptime input with a literal path that is the item's whole
-                // value (`TEXT: comptime { embed_file("x") }`) is read here, as
+                // value (`TEXT: #run embed_file("x")`) is read here, as
                 // Rust's `try_eval_build_time_io` did, with no evaluation; a
                 // computed path is evaluated.
                 if jet_driver_comptime_literal_input(comptime_request.expression) == .Val(literal_input) {

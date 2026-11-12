@@ -84,8 +84,8 @@ test_command: fn(argv: [String]) -> String { process.check_output(process.cmd(ar
 
 #Test("the Jet CLI embeds the same single native C policy file") {
     embedded: files.read("Compiler/JetCli/Source/Cli/NativeCPolicy.jet") ?? panic("cannot read NativeCPolicy.jet")
-    assert(embedded.contains("JET_CLI_NATIVE_C_FLAGS: comptime {{ jet_cli_native_c_policy_values(embed_file(\"native-c-policy.tsv\"), \"flag\") }}"))
-    assert(embedded.contains("JET_CLI_NATIVE_C_HARDENING_REMOVED: comptime {{ jet_cli_native_c_policy_values(embed_file(\"native-c-policy.tsv\"), \"hardening-remove\") }}"))
+    assert(embedded.contains("JET_CLI_NATIVE_C_FLAGS: #run {{ jet_cli_native_c_policy_values(embed_file(\"native-c-policy.tsv\"), \"flag\") }}"))
+    assert(embedded.contains("JET_CLI_NATIVE_C_HARDENING_REMOVED: #run {{ jet_cli_native_c_policy_values(embed_file(\"native-c-policy.tsv\"), \"hardening-remove\") }}"))
 }
 
 #Test("native fixture and packaging drivers have no independent C compiler policy") {

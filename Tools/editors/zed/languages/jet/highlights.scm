@@ -67,7 +67,7 @@
 ] @keyword
 
 ; keyword.ownership: uninit
-; keyword.other: #caller #here @SOURCE @TYPES comptime it self
+; keyword.other: #caller #here #if #loop #run @SOURCE @TYPES it self
 [
   "self"
 ] @keyword

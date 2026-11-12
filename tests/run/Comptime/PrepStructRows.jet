@@ -1,4 +1,4 @@
-// A module `comptime` constant may hold a struct or enum value that a helper
+// A module `#run` constant may hold a struct or enum value that a helper
 // function builds before the program runs: one row, a payload-free enum
 // variant, and a typed list of rows that passed through a function taking
 // its row by move. Each value keeps its declared type at run time.
@@ -18,9 +18,9 @@ mode: fn(name: String) -> Mode Never! { if name == "fast" -> Mode.Fast else -> M
 
 keep: fn(row: &&Row) -> Row Never! { row }
 
-ROW: comptime { make("a", 1) }
-MODE: comptime { mode("fast") }
-ROWS: comptime { [Row]{keep(make("b", 2)), keep(keep(make("c", 3)))} }
+ROW: #run make("a", 1)
+MODE: #run mode("fast")
+ROWS: #run { [Row]{keep(make("b", 2)), keep(keep(make("c", 3)))} }
 
 run: fn() {
     print("row {ROW.name} {ROW.bits}")

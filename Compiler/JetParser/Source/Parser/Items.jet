@@ -112,7 +112,6 @@ use {
         TOKEN_IDENT,
         TOKEN_INT,
         TOKEN_KW_COPY,
-        TOKEN_KW_COMPTIME,
         TOKEN_KW_EFFECT,
         TOKEN_KW_ENUM,
         TOKEN_KW_EXTERN,
@@ -535,7 +534,7 @@ parser_marker_first_expr: fn(marker: Marker) -> Expr? {
 // `use ROW` or a `use { … }` block with one ROW per line (#6542). A row is
 // a module path, a member list, or a "file" path, any of them after an
 // `alias:`: `alias: path` means what `use alias: path` means. `pub`
-// before `use` re-exports every row. `comptime_head` is the `comptime`
+// before `use` re-exports every row. `comptime_head` is the `#run`
 // before `use`, which makes every row a build-only import.
 parser_parse_import: fn(state: &JetParserState, is_pub: Bool, comptime_head: Span?) -> [ImportDecl] {
     keyword: parser_bump(state)
@@ -717,16 +716,6 @@ parser_parse_type_params: fn(state: &JetParserState) -> [TypeParam] {
         parser_type_close_here(state) -> parser_add_error_here(state, "a generic parameter list cannot be empty", "type parameters are declared by name", "write at least one type parameter or remove `< >`")
         else -> {
             loop {
-                // `comptime N: Int` declares a compile-time number parameter.
-                if parser_current_kind(state) == TOKEN_KW_COMPTIME && parser_kind_at(state, 1) == TOKEN_IDENT {
-                    prep_head: parser_bump(state)
-                    params.push(parser_parse_prep_param(state, prep_head.span))
-                    if parser_type_close_here(state) -> break
-                    if parser_current_kind(state) != TOKEN_COMMA -> break
-                    parser_bump(state)
-                    if parser_type_close_here(state) -> break
-                    next
-                }
                 name: parser_expect_name(state, "in a generic parameter list")
                 bounds := [String]{}
                 bound_head := parser_current(state)
@@ -751,16 +740,6 @@ parser_parse_type_params: fn(state: &JetParserState) -> [TypeParam] {
     }
     if parser_type_close_here(state) -> parser_take_type_close(state) else -> parser_expect(state, TOKEN_GT, "`>` after generic parameters")
     params
-}
-
-// Parse `N: Int` after `comptime` into the typed number-parameter slot.
-parser_parse_prep_param: fn(state: &JetParserState, prep_span: Span) -> TypeParam {
-    name: parser_expect_name(state, "for a number parameter name")
-    param_name: parser_value(state, name)
-    name_span: name.span
-    parser_expect(state, TOKEN_COLON, "`:` after a number parameter name")
-    value_type: parser_expect_name(state, "for the number parameter type")
-    TypeParam{name: param_name, name_span: name_span, bounds: [String]{}, prep: Val(PrepParam{prep_span: prep_span, value_type: parser_value(state, value_type), value_type_span: value_type.span})}
 }
 
 // `/` closes the positional-only zone and `*` opens the
@@ -2133,7 +2112,7 @@ parser_parse_enum: fn(state: &JetParserState, modifiers: ParsedItemModifiers) ->
     value
 }
 
-// A method inside a type body: `fn`, `pub fn`, `comptime fn`, or `pub comptime fn`.
+// A method inside a type body: `fn`, `pub fn`, `#run fn`, or `pub #run fn`.
 parser_method_starts_here: fn(state: &JetParserState) -> Bool Never! {
     parser_current_kind(state) == TOKEN_KW_FN || parser_prep_fn_ahead(state) || (parser_current_kind(state) == TOKEN_KW_PUB && (parser_kind_at(state, 1) == TOKEN_KW_FN || parser_prep_verb_ahead(state, 1, TOKEN_KW_FN)))
 }
@@ -2373,7 +2352,7 @@ parser_parse_const: fn(state: &JetParserState, modifiers: ParsedItemModifiers) -
             prepared = true
             parsed_value = ParsedExpr{expr: tail, span: span}
         } else {
-            parser_add_error_code(state, "E0391", span, "`comptime {{ … }}` is used as a value, which this compiler does not support yet", "Jet makes the block's final expression its value; only a block holding a single final expression is folded today", "write `NAME: comptime {{ value }}` with one final expression, or a `comptime {{ … }}` statement")
+            parser_add_error_code(state, "E0391", span, "`#run {{ … }}` is used as a value, which this compiler does not support yet", "Jet makes the block's final expression its value; only a block holding a single final expression is folded today", "write `NAME: #run value` with one final expression, or a `#run {{ … }}` statement")
         }
     } else if parser_prep_operand_ahead(state, 0) {
         prepared = true

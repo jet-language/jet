@@ -5,8 +5,8 @@ square: fn(n: Int) -> Int { n * n }
 // A file constant is computed while building and needs no word.
 SIDE: square(2)
 
-// `comptime` demands the value now.
-LIMIT: comptime { square(3) }
+// `#run` demands the value now.
+LIMIT: #run { square(3) }
 
 Grid: struct {
     cells: [Int#SIDE]
@@ -14,7 +14,7 @@ Grid: struct {
 
 run: fn() {
     // A static assertion: checked while building, absent from the program.
-    comptime {
+    #run {
         assert(LIMIT > SIDE, "LIMIT must exceed SIDE")
     }
     grid: Grid{cells: [Int#SIDE]{1, 2, 3, 4}}

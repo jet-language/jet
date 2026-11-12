@@ -1,6 +1,6 @@
 // A marker's template holds the members it generates. A member
 // written directly in `expand` joins the marked type, with no nested `impl`;
-// a body-level `comptime if` decides which members exist, and a template loop
+// a body-level `#if` decides which members exist, and a template loop
 // writes one member per field. The marker's parameter is a named field read
 // as `self.label`; its settings are `impl Marker` facts.
 Describe: struct {
@@ -15,14 +15,14 @@ Describe: struct {
             kind: self.label
             describe: fn(self) -> String { "{kind} {tname} has {count} fields" }
             field_count: fn() -> Int { #{count} }
-            comptime if count > 3 {
+            #if count > 3 {
                 size: fn(self) -> String { "large" }
-            } else comptime if count > 2 {
+            } else #if count > 2 {
                 size: fn(self) -> String { "medium" }
             } else {
                 size: fn(self) -> String { "small" }
             }
-            comptime loop field in target.fields {
+            #loop field in target.fields {
                 method: "has_{field.name}"
                 #{method}: fn(self) -> Bool { true }
             }

@@ -209,7 +209,7 @@ sema_call_core_crypto_expert_gate: fn(module_name: String, member: String, span:
 }
 
 // Rust `vault_comptime_denied` (raised:754 @ 6083377777): a `core.crypto.vault`
-// call in build-time code (a `comptime` block, a module field, a comptime
+// call in build-time code (a `#run` block, a module field, a comptime
 // function, the body of `build: fn`) is E1265. No gate unlocks it, `#Impure`
 // included: a build artifact must never hold a decrypted secret. True when
 // reported; the call then has no value, so no comptime evaluation is staged
@@ -1366,7 +1366,7 @@ sema_call_core_check_fixed_record: fn(record: CoreCallRecord, args: [CallArg], t
     }
     // #1465: POSIX process/session control requires `#Unsafe` (I1); checking continues.
     if canonical_record.module_name == "core.sys" && context.unsafe_depth == 0 && sema_call_core_posix_control(canonical_record.member) {
-        diagnostics.push(sema_error("E3101", span, "`core.sys.{canonical_record.member}` requires an audited `#Unsafe` region", "POSIX process and session control can change credentials, signals, and process topology", "wrap the call in `#Unsafe(\"posix {canonical_record.member}: …\") {{ … }}` and gate the host OS with `comptime if #build.target.os` / `#Target(OS.*)`"))
+        diagnostics.push(sema_error("E3101", span, "`core.sys.{canonical_record.member}` requires an audited `#Unsafe` region", "POSIX process and session control can change credentials, signals, and process topology", "wrap the call in `#Unsafe(\"posix {canonical_record.member}: …\") {{ … }}` and gate the host OS with `#if #build.target.os` / `#Target(OS.*)`"))
     }
     actual_accesses: loop argument in args -> argument.convention
     signature: sema_call_core_typed_signature(canonical_record, args.len(), actual_accesses, [Type]{}) ?? {

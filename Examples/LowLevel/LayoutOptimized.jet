@@ -19,16 +19,16 @@ Mixed: struct {
     e: U8
 }
 
-MIXED_SIZE: comptime { Mixed.reflect().layout.size ?? -1 }
-MIXED_ALIGNMENT: comptime { Mixed.reflect().layout.alignment ?? -1 }
-MIXED_GUARANTEE: comptime { Mixed.reflect().layout.guarantee }
-MIXED_A: comptime { Mixed.reflect().layout.fields[0].offset ?? -1 }
-MIXED_B: comptime { Mixed.reflect().layout.fields[1].offset ?? -1 }
-MIXED_C: comptime { Mixed.reflect().layout.fields[2].offset ?? -1 }
-MIXED_D: comptime { Mixed.reflect().layout.fields[3].offset ?? -1 }
-MIXED_E: comptime { Mixed.reflect().layout.fields[4].offset ?? -1 }
-C_SIZE: comptime { CMixed.reflect().layout.size ?? -1 }
-C_E: comptime { CMixed.reflect().layout.fields[4].offset ?? -1 }
+MIXED_SIZE: #run { Mixed.reflect().layout.size ?? -1 }
+MIXED_ALIGNMENT: #run { Mixed.reflect().layout.alignment ?? -1 }
+MIXED_GUARANTEE: #run Mixed.reflect().layout.guarantee
+MIXED_A: #run { Mixed.reflect().layout.fields[0].offset ?? -1 }
+MIXED_B: #run { Mixed.reflect().layout.fields[1].offset ?? -1 }
+MIXED_C: #run { Mixed.reflect().layout.fields[2].offset ?? -1 }
+MIXED_D: #run { Mixed.reflect().layout.fields[3].offset ?? -1 }
+MIXED_E: #run { Mixed.reflect().layout.fields[4].offset ?? -1 }
+C_SIZE: #run { CMixed.reflect().layout.size ?? -1 }
+C_E: #run { CMixed.reflect().layout.fields[4].offset ?? -1 }
 
 bump: fn(value: &Mixed) {
     value.a += U8{1}

@@ -1,11 +1,11 @@
 
 #Layout(c)
 TargetPointer: struct { pointer: *Int }
-POINTER_BYTES: comptime { pointer_bytes() }
+POINTER_BYTES: #run pointer_bytes()
 pointer_bytes: fn() -> Int Never! {
     layout: TargetPointer.reflect().layout
     layout.size ?? panic("target pointer layout is missing")
 }
 run: fn() {
-    print(POINTER_BYTES == comptime { TargetPointer.reflect().layout.size ?? 0 })
+    print(POINTER_BYTES == #run { TargetPointer.reflect().layout.size ?? 0 })
 }

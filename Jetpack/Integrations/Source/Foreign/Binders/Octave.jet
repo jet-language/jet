@@ -139,7 +139,7 @@ pkg_octave_reserved: fn(value: String) -> Bool Never! {
 }
 
 // Generated module head. Hole: `abi`.
-PKG_OCTAVE_JET_HEAD: comptime { ```use abi: c.@@abi@@
+PKG_OCTAVE_JET_HEAD: #run { ```use abi: c.@@abi@@
 use {
     compute: core.compute
     json: core.encoding.json
@@ -152,7 +152,7 @@ use {
     close: fn(handle: Int) = "@@abi@@_close"
 ``` }
 
-PKG_OCTAVE_JET_TYPES: comptime { ```}
+PKG_OCTAVE_JET_TYPES: #run { ```}
 
 Session: struct {
     value: Int
@@ -172,7 +172,7 @@ OctaveError: enum {
 
 ``` }
 
-PKG_OCTAVE_JET_SESSION: comptime { ```impl Session.Close {
+PKG_OCTAVE_JET_SESSION: #run { ```impl Session.Close {
     close: fn(&&self) { abi.close(self.value) }
 }
 
@@ -189,7 +189,7 @@ cancel: fn(session: Session) -[FFI.Octave]> { abi.cancel(session.value) }
 ``` }
 
 // One generated tensor call. Hole: `function`.
-PKG_OCTAVE_JET_FUNCTION: comptime { ```@@function@@: fn(session: Session, input: Tensor, deadline_ms: Int) -[FFI.Octave, GPU]> Tensor OctaveError! {
+PKG_OCTAVE_JET_FUNCTION: #run { ```@@function@@: fn(session: Session, input: Tensor, deadline_ms: Int) -[FFI.Octave, GPU]> Tensor OctaveError! {
     if compute.rank(input) != 2 -> return Err(OctaveError.Shape)
     shape_wire := [Dyn]{}
     loop dimension in compute.shape(input) {
@@ -232,7 +232,7 @@ PKG_OCTAVE_JET_FUNCTION: comptime { ```@@function@@: fn(session: Session, input:
 
 // The persistent worker. `__JET_SCRIPT__` and `__JET_ALLOWED__` are replaced
 // in that order, exactly as the Rust binder does.
-PKG_OCTAVE_WORKER: comptime { ```input = fopen('/dev/stdin', 'rb');
+PKG_OCTAVE_WORKER: #run { ```input = fopen('/dev/stdin', 'rb');
 output = fopen('/dev/stdout', 'wb');
 script_path = __JET_SCRIPT__;
 try

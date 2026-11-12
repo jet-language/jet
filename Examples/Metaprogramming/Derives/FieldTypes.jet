@@ -6,7 +6,7 @@ FieldTypes: struct {
         sites: [.Type]
 
         expand: fn(self, target: Target) {
-            comptime loop field in target.reflect().fields {
+            #loop field in target.reflect().fields {
                 method: "type_of_{field.reflect().name}"
                 #{method}: fn(self) -> String { field.type }
             }
@@ -24,6 +24,6 @@ run: fn() {
     rock: Rock{size: 1.0, name: "rock"}
     print("size: {rock.type_of_size()}")
     print("name: {rock.type_of_name()}")
-    info: comptime { Rock.reflect() }
+    info: #run Rock.reflect()
     loop field in info.fields -> print("{field.name}: {field.type}")
 }

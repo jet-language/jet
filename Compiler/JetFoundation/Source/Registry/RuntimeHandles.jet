@@ -75,7 +75,7 @@ ir_key_index_keys: fn(keys: [String], rows: [Int]) -> [String] Never! {
 // by `jet_rt_handle_eq_<runtime>` when `eq`.
 IRRuntimeHandle: struct { jet_name: String, runtime: String, clone: Bool, display: Bool, show: Bool, debug: Bool, eq: Bool }
 
-IR_RUNTIME_HANDLES: comptime { [IRRuntimeHandle]{
+IR_RUNTIME_HANDLES: #run { [IRRuntimeHandle]{
     IRRuntimeHandle{jet_name: "__EvidenceRead", runtime: "JetTestingEvidenceRead", clone: true, display: false, show: false, debug: false, eq: true},
     IRRuntimeHandle{jet_name: "__JetcRaw", runtime: "JetCryptoJetcRaw", clone: false, display: false, show: false, debug: false, eq: false},
     IRRuntimeHandle{jet_name: "__JetcStat", runtime: "JetCryptoJetcStat", clone: false, display: false, show: false, debug: false, eq: false},
@@ -550,8 +550,8 @@ ir_runtime_handle_keys: fn(handles: [IRRuntimeHandle]) -> [String] Never! {
     loop handle in handles -> handle.jet_name.copy() // copy: the global handle tables can't be moved from
 }
 
-IR_RUNTIME_HANDLE_KEY_ROWS: comptime { ir_key_index(ir_runtime_handle_keys(IR_RUNTIME_HANDLES)) }
-IR_RUNTIME_HANDLE_KEYS: comptime { ir_key_index_keys(ir_runtime_handle_keys(IR_RUNTIME_HANDLES), IR_RUNTIME_HANDLE_KEY_ROWS) }
+IR_RUNTIME_HANDLE_KEY_ROWS: #run ir_key_index(ir_runtime_handle_keys(IR_RUNTIME_HANDLES))
+IR_RUNTIME_HANDLE_KEYS: #run ir_key_index_keys(ir_runtime_handle_keys(IR_RUNTIME_HANDLES), IR_RUNTIME_HANDLE_KEY_ROWS)
 
 // The row of IR_RUNTIME_HANDLES that `name` keys, if any.
 ir_runtime_handle_row: fn(name: String) -> Int? Never! {

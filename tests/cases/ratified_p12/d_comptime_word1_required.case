@@ -1,5 +1,5 @@
-# `comptime` demands a value now (#4276 c49). A file constant needs no word
-# and is computed while building; `comptime` on a binding or block fails the
+# `#run` demands a value now (#4276 c49). A file constant needs no word
+# and is computed while building; `#run` on a binding or block fails the
 # build when its value can't be computed then: it reads a run-time value, it
 # runs out of the evaluator's steps (the same budget a plain file constant
 # has), or a static assertion in it fails. A value computed while building
@@ -32,7 +32,7 @@ step fmt: jet fmt --check main.jet runtime/main.jet fuel/main.jet plain/main.jet
 exit: 0 # every fixture file is in `jet fmt` form
 step runtime: jet check runtime/main.jet
 exit: 1
-stderr: ~ "jet-lang.dev/e/E0640" # `comptime` code can't read a parameter
+stderr: ~ "jet-lang.dev/e/E0640" # `#run` code can't read a parameter
 stderr: ~ "--> main.jet:2:23" # the parameter read inside the block
 stderr: ~ "1 problem found" # nothing else is reported
 step fuel: jet check fuel/main.jet
@@ -43,7 +43,7 @@ stderr: ~ "1 problem found" # nothing else is reported
 step plain: jet check plain/main.jet
 exit: 1
 stderr: ~ "jet-lang.dev/e/E0643" # a file constant must be computable early
-stderr: ~ "exhausted its fuel" # under the same step budget as `comptime`
+stderr: ~ "exhausted its fuel" # under the same step budget as `#run`
 stderr: ~ "--> main.jet:7:8" # at the constant's value
 stderr: ~ "1 problem found" # nothing else is reported
 step assert: jet check assert/main.jet

@@ -264,7 +264,7 @@ IRLintOp: struct {
     typing: IRLintTyping
 }
 
-IR_LINT_OPS: comptime { [IRLintOp]{
+IR_LINT_OPS: #run { [IRLintOp]{
     IRLintOp{op: IROp.Nop, dst: IRLintRole.Unused, a: IRLintRole.Unused, b: IRLintRole.Unused, c: IRLintRole.Unused, dst_kinds: IR_LINT_ANY, a_kinds: IR_LINT_ANY, typing: IRLintTyping.Empty},
     IRLintOp{op: IROp.Const, dst: IRLintRole.Slot, a: IRLintRole.Immediate, b: IRLintRole.Unused, c: IRLintRole.Unused, dst_kinds: IR_LINT_SCALAR, a_kinds: IR_LINT_ANY, typing: IRLintTyping.Const},
     IRLintOp{op: IROp.ConstText, dst: IRLintRole.Slot, a: IRLintRole.Data, b: IRLintRole.Unused, c: IRLintRole.Unused, dst_kinds: IR_LINT_TEXT, a_kinds: IR_LINT_ANY, typing: IRLintTyping.Text},
@@ -321,7 +321,7 @@ IR_LINT_OPS: comptime { [IRLintOp]{
 
 // The share keys a box, trait value or function value row names as its
 // clone: its Copy aliases and the builder retains it (IRType.clone).
-IR_LINT_SHARES: comptime { [String]{"#box.share", "#trait.share", "#closure.share"} }
+IR_LINT_SHARES: #run { [String]{"#box.share", "#trait.share", "#closure.share"} }
 
 // Findings kept per function and pass; the rest are counted in one row.
 IR_LINT_FUNCTION_LIMIT: 32
@@ -1497,7 +1497,7 @@ ir_lint_route_gaps: fn(exports: [String]) -> [IRLintFinding] Never! {
 
 // A runtime handle's helpers, in the order ir_lint_route_gaps reads its
 // row's claims: drop (always), clone, display, show, debug, eq.
-IR_LINT_HANDLE_VERBS: comptime { [String]{"drop", "clone", "display", "show", "debug", "eq"} }
+IR_LINT_HANDLE_VERBS: #run { [String]{"drop", "clone", "display", "show", "debug", "eq"} }
 
 // The findings' text, one line per row: "pass\tfunction\trule\tmessage".
 ir_lint_text: fn(findings: [IRLintFinding]) -> String Never! {

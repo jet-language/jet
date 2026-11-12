@@ -12,7 +12,7 @@ use {
 // Core/Effects/Effects.jet, then Core/Compiler/Meta.jet, read from the
 // toolchain tree while the compiler builds (JetFoundation
 // EFFECT_CANONICAL_SOURCE).
-JET_CLI_EFFECT_SOURCE: comptime { EFFECT_CANONICAL_SOURCE }
+JET_CLI_EFFECT_SOURCE: #run EFFECT_CANONICAL_SOURCE
 
 // One embedded Core asset, by repository path.
 JetCLICoreAsset: struct {
@@ -20,11 +20,11 @@ JetCLICoreAsset: struct {
     bytes: [U8]
 }
 
-JET_CLI_CORE_SOURCES: comptime { core_declarations_checked_sources(CORE_DECLARATIONS, loop row in CORE_SOURCE_OWNED_ROWS -> CoreDeclarationFile{path: row.path.copy(), text: embed_file("toolchain:{row.path}")}) }
+JET_CLI_CORE_SOURCES: #run core_declarations_checked_sources(CORE_DECLARATIONS, loop row in CORE_SOURCE_OWNED_ROWS -> CoreDeclarationFile{path: row.path.copy(), text: embed_file("toolchain:{row.path}")})
 
 // The files the Core sources embed (core_declarations_assets), read from the
 // toolchain tree; a #Test below holds the list to the sources.
-JET_CLI_CORE_ASSETS: comptime { [JetCLICoreAsset]{
+JET_CLI_CORE_ASSETS: #run { [JetCLICoreAsset]{
     JetCLICoreAsset{path: "Core/Ui/XkbTables/keysym_names.txt", bytes: embed_bytes("toolchain:Core/Ui/XkbTables/keysym_names.txt")},
     JetCLICoreAsset{path: "Core/Ui/XkbTables/keysym_values.bin", bytes: embed_bytes("toolchain:Core/Ui/XkbTables/keysym_values.bin")},
     JetCLICoreAsset{path: "Core/Ui/XkbTables/keysym_scalars.bin", bytes: embed_bytes("toolchain:Core/Ui/XkbTables/keysym_scalars.bin")},

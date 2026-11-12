@@ -18,12 +18,12 @@ names: fn(markers: [MarkerInfo]) -> String {
     written.join(",")
 }
 
-ORDER_WRITTEN: comptime { names(Order.reflect().markers) }
-ORDER_EXPANDED: comptime { names(Order.reflect().expanded_markers) }
-ORDER_HAS_CODABLE: comptime { Order.reflect().marker(Codable) != None }
-ORDER_HAS_ENCODE: comptime { Order.reflect().marker(Encode) != None }
-ID_WRITTEN: comptime { names(OrderID.reflect().markers) }
-ID_EXPANDED: comptime { names(OrderID.reflect().expanded_markers) }
+ORDER_WRITTEN: #run names(Order.reflect().markers)
+ORDER_EXPANDED: #run names(Order.reflect().expanded_markers)
+ORDER_HAS_CODABLE: #run { Order.reflect().marker(Codable) != None }
+ORDER_HAS_ENCODE: #run { Order.reflect().marker(Encode) != None }
+ID_WRITTEN: #run names(OrderID.reflect().markers)
+ID_EXPANDED: #run names(OrderID.reflect().expanded_markers)
 
 run: fn() {
     print("Order written: {ORDER_WRITTEN}")

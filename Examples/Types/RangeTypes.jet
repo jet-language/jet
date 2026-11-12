@@ -12,7 +12,7 @@ Brightness: struct {
 set_brightness: fn(level: Int(0..100)) -> Int(0..100) { level }
 
 // The same structural inline type can cross the comptime/runtime boundary.
-COMPTIME_BRIGHTNESS: comptime { set_brightness(42) }
+COMPTIME_BRIGHTNESS: #run set_brightness(42)
 
 checked_inline: fn(raw: Int) -> Int(0..100) { Int(0..100).from_int(raw) }
 

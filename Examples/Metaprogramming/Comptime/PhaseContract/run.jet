@@ -1,22 +1,22 @@
 // `#phase` is the phase of the compiled copy that runs it: `.Preparation` in
-// `comptime` code and in a function's compile-time copy, `.Build` in the copy
+// `#run` code and in a function's compile-time copy, `.Build` in the copy
 // the build entry runs, and `.Runtime` in the program, so one helper called
 // from all three reads all three. A value made while preparing keeps the
 // phase it was made in, so the program can tell a prepared record from one it
 // makes itself. Each copy folds its own phase, not the optimizer, so every
 // tier and the built program print the same lines.
-PREPARED: comptime { #phase }
+PREPARED: #run #phase
 
 Stamp: struct {
     phase: Phase
     value: Int
 }
 
-PREP_STAMP: comptime { Stamp{phase: #phase, value: 6 * 7} }
+PREP_STAMP: #run { Stamp{phase: #phase, value: 6 * 7} }
 
 current_phase: fn() -> Phase { #phase }
 
-HELPER_PHASE: comptime { current_phase() }
+HELPER_PHASE: #run current_phase()
 
 phase_label: fn(phase: Phase) -> String {
     if phase == {

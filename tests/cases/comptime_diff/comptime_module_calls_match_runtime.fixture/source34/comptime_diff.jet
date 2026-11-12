@@ -2,7 +2,7 @@ use {
     comptime_diff_hex: core.encoding.hex
     jsonl: core.encoding.jsonl
 }
-COMPTIME_VALUE: comptime { (jsonl.to_string(jsonl.parse("{{\"a\":1}}\n{{\"b\":2}}\n") ?? panic("bad")) ?? panic("JSONL encode")).replace("\n", "|") }
+COMPTIME_VALUE: #run (jsonl.to_string(jsonl.parse("{{\"a\":1}}\n{{\"b\":2}}\n") ?? panic("bad")) ?? panic("JSONL encode")).replace("\n", "|")
 
 run: fn() {
     r: (jsonl.to_string(jsonl.parse("{{\"a\":1}}\n{{\"b\":2}}\n") ?? panic("bad")) ?? panic("JSONL encode")).replace("\n", "|")

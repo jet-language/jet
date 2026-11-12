@@ -51,7 +51,7 @@ IRRouteResult: enum {
 
 IRRoute: struct { symbol: String, export: String, native_lists: Bool, params: [IRRouteCarrier], result: IRRouteResult }
 
-IR_RUNTIME_ROUTES: comptime { [IRRoute]{
+IR_RUNTIME_ROUTES: #run { [IRRoute]{
     IRRoute{symbol: "jet_app_auth", export: "jet_app_auth", native_lists: false, params: [IRRouteCarrier]{IRRouteCarrier.Text}, result: IRRouteResult.Plain{carrier: IRRouteCarrier.Handle{name: "JetAuthApp"}}},
     IRRoute{symbol: "jet_app_auth_oauth", export: "jet_app_auth_oauth", native_lists: false, params: [IRRouteCarrier]{IRRouteCarrier.Handle{name: "JetAuthApp"}, IRRouteCarrier.Text}, result: IRRouteResult.Plain{carrier: IRRouteCarrier.Handle{name: "JetAuthApp"}}},
     IRRoute{symbol: "jet_auth_store_load", export: "jet_auth_store_load", native_lists: true, params: [IRRouteCarrier]{}, result: IRRouteResult.Plain{carrier: IRRouteCarrier.List{elem: IRRouteCarrier.Word}}},
@@ -1250,8 +1250,8 @@ ir_runtime_route_keys: fn() -> [String] Never! {
     loop route in IR_RUNTIME_ROUTES -> route.symbol.copy() // copy: the global route table can't be moved from
 }
 
-IR_RUNTIME_ROUTE_KEY_ROWS: comptime { ir_key_index(ir_runtime_route_keys()) }
-IR_RUNTIME_ROUTE_KEYS: comptime { ir_key_index_keys(ir_runtime_route_keys(), IR_RUNTIME_ROUTE_KEY_ROWS) }
+IR_RUNTIME_ROUTE_KEY_ROWS: #run ir_key_index(ir_runtime_route_keys())
+IR_RUNTIME_ROUTE_KEYS: #run ir_key_index_keys(ir_runtime_route_keys(), IR_RUNTIME_ROUTE_KEY_ROWS)
 
 ir_runtime_route: fn(symbol: String) -> IRRoute? {
     position: ir_key_row(IR_RUNTIME_ROUTE_KEYS, IR_RUNTIME_ROUTE_KEY_ROWS, symbol) ?? return None
@@ -1264,7 +1264,7 @@ ir_runtime_route: fn(symbol: String) -> IRRoute? {
 // Opaque native providers: physical ownership ABI only, no Rust schema. A
 // Core-declared shape here crosses a route as a heap shell of its declared
 // bytes (ir_route_shell): `KeyRef<T>` from jet_vault_current_impl.
-IR_NATIVE_PROVIDER_HANDLES: comptime { [IRRuntimeHandle]{
+IR_NATIVE_PROVIDER_HANDLES: #run { [IRRuntimeHandle]{
     IRRuntimeHandle{jet_name: "<corelib>/core.crypto.vault::KeyRef", runtime: "JetVaultKeyRef", clone: false, display: false, show: false, debug: false, eq: false},
     IRRuntimeHandle{jet_name: "<corelib>/core.process::ProcessStdoutStream", runtime: "ProcessStdoutStream", clone: true, display: false, show: false, debug: false, eq: false},
     IRRuntimeHandle{jet_name: "ProcessStdoutStream", runtime: "ProcessStdoutStream", clone: true, display: false, show: false, debug: false, eq: false},
@@ -1274,13 +1274,13 @@ IR_NATIVE_PROVIDER_HANDLES: comptime { [IRRuntimeHandle]{
     IRRuntimeHandle{jet_name: "ProcessStderrStream", runtime: "ProcessStderrStream", clone: true, display: false, show: false, debug: false, eq: false},
 } }
 
-IR_NATIVE_PROVIDER_HANDLE_KEY_ROWS: comptime { ir_key_index(ir_runtime_handle_keys(IR_NATIVE_PROVIDER_HANDLES)) }
-IR_NATIVE_PROVIDER_HANDLE_KEYS: comptime { ir_key_index_keys(ir_runtime_handle_keys(IR_NATIVE_PROVIDER_HANDLES), IR_NATIVE_PROVIDER_HANDLE_KEY_ROWS) }
+IR_NATIVE_PROVIDER_HANDLE_KEY_ROWS: #run ir_key_index(ir_runtime_handle_keys(IR_NATIVE_PROVIDER_HANDLES))
+IR_NATIVE_PROVIDER_HANDLE_KEYS: #run ir_key_index_keys(ir_runtime_handle_keys(IR_NATIVE_PROVIDER_HANDLES), IR_NATIVE_PROVIDER_HANDLE_KEY_ROWS)
 
 // The runtime's C export table (RUNTIME_C_EXPORTS, generated from every
 // JetRuntime #Export(c)), indexed for halving search.
-IR_RUNTIME_EXPORT_KEY_ROWS: comptime { ir_key_index(RUNTIME_C_EXPORTS) }
-IR_RUNTIME_EXPORT_KEYS: comptime { ir_key_index_keys(RUNTIME_C_EXPORTS, IR_RUNTIME_EXPORT_KEY_ROWS) }
+IR_RUNTIME_EXPORT_KEY_ROWS: #run ir_key_index(RUNTIME_C_EXPORTS)
+IR_RUNTIME_EXPORT_KEYS: #run ir_key_index_keys(RUNTIME_C_EXPORTS, IR_RUNTIME_EXPORT_KEY_ROWS)
 
 // Whether the runtime exports C symbol `symbol`.
 ir_runtime_exports: fn(symbol: String) -> Bool Never! {
@@ -1329,7 +1329,7 @@ ir_runtime_handle: fn(name: String) -> IRRuntimeHandle? {
 // named members joined by `+`). Every row is read: its key is a runtime
 // handle row's runtime type or a route carrier's, or a member of another
 // row; a Core type whose declaration moved to Core source keeps no row here.
-IR_GENERATED_RECORDS: comptime { [IRRecordSchema]{
+IR_GENERATED_RECORDS: #run { [IRRecordSchema]{
     IRRecordSchema{jet_name: "__jet__x3ccorelib_x3e_score_dcrypto_dvault_c_cKeyStatus", variants: "Active,Retired,Revoked", fields: ""},
     IRRecordSchema{jet_name: "__jet__x3ccorelib_x3e_score_dcrypto_dvault_c_cVaultError", variants: "InvalidName,NotFound,WrongType,Revoked,Locked,AuthorityDenied,Conflict,UnsupportedProvider,InvalidEncoding,DurabilityUnknown,Crypto=Tag.CryptoError,IO=Text+Text,Internal=Text", fields: ""},
     IRRecordSchema{jet_name: "__jet__x3ccorelib_x3e_score_dcrypto_dvault_c_cWrappedVaultKey", variants: "", fields: "encoded=List.Byte,mode=Int,key_type=Int,origin_name=Text,origin_generation=Int,header_len=Int"},
@@ -1538,7 +1538,7 @@ IR_GENERATED_RECORDS: comptime { [IRRecordSchema]{
 } }
 // Declaration-proven scalar records; the IR builder still proves the actual native field.
 IRRuntimeWordRecord: struct { runtime: String, field: String }
-IR_WORD_RECORDS: comptime { [IRRuntimeWordRecord]{
+IR_WORD_RECORDS: #run { [IRRuntimeWordRecord]{
     IRRuntimeWordRecord{runtime: "__jet__x3ccorelib_x3e_score_dtime_c_cInstant", field: "start_ns"},
     IRRuntimeWordRecord{runtime: "__jet__x3ccorelib_x3e_score_dtime_c_cStopwatch", field: "start_ns"},
     IRRuntimeWordRecord{runtime: "Duration", field: "ns"},
@@ -1552,7 +1552,7 @@ IR_WORD_RECORDS: comptime { [IRRuntimeWordRecord]{
 // String the read owns.
 IRHandleField: struct { runtime: String, field: String, kind: String, header_bytes: Int }
 
-IR_HANDLE_FIELDS: comptime { [IRHandleField]{
+IR_HANDLE_FIELDS: #run { [IRHandleField]{
     IRHandleField{runtime: "__jet__x3ccorelib_x3e_score_ddb_dsql_c_cJetSQLQuery", field: "__jet_source", kind: "Text", header_bytes: 0},
     IRHandleField{runtime: "__jet__x3ccorelib_x3e_score_dencoding_dcsv_c_cCSVReader", field: "__jet_input", kind: "Handle.JetFileReader", header_bytes: 0},
     IRHandleField{runtime: "__jet__x3ccorelib_x3e_score_dencoding_dcsv_c_cCSVReader", field: "__jet_limits", kind: "Handle.__jet__x3ccorelib_x3e_score_dencoding_c_cEncodingLimits", header_bytes: 0},
@@ -1729,8 +1729,8 @@ ir_handle_field_keys: fn() -> [String] Never! {
     loop row in IR_HANDLE_FIELDS -> "{row.runtime} {row.field}"
 }
 
-IR_HANDLE_FIELD_KEY_ROWS: comptime { ir_key_index(ir_handle_field_keys()) }
-IR_HANDLE_FIELD_KEYS: comptime { ir_key_index_keys(ir_handle_field_keys(), IR_HANDLE_FIELD_KEY_ROWS) }
+IR_HANDLE_FIELD_KEY_ROWS: #run ir_key_index(ir_handle_field_keys())
+IR_HANDLE_FIELD_KEYS: #run ir_key_index_keys(ir_handle_field_keys(), IR_HANDLE_FIELD_KEY_ROWS)
 
 ir_runtime_handle_field: fn(runtime: String, field: String) -> IRHandleField? {
     position: ir_key_row(IR_HANDLE_FIELD_KEYS, IR_HANDLE_FIELD_KEY_ROWS, "{runtime} {field}") ?? return None
@@ -1740,7 +1740,7 @@ ir_runtime_handle_field: fn(runtime: String, field: String) -> IRHandleField? {
 }
 IREnvironmentOp: enum { Bytes Set Remove Columns Compare Seed Text }
 IREnvironmentRoute: struct { symbol: String, export: String, op: IREnvironmentOp, arity: Int }
-IR_ENVIRONMENT_ROUTES: comptime { [IREnvironmentRoute]{
+IR_ENVIRONMENT_ROUTES: #run { [IREnvironmentRoute]{
     IREnvironmentRoute{symbol: "jet_sys_env_value_raw", export: "jet_rt_logical_env_get_os", op: IREnvironmentOp.Bytes, arity: 1},
     IREnvironmentRoute{symbol: "jet_std_env_try_set", export: "jet_rt_logical_env_set", op: IREnvironmentOp.Set, arity: 2},
     IREnvironmentRoute{symbol: "jet_std_env_unset", export: "jet_rt_logical_env_unset", op: IREnvironmentOp.Remove, arity: 1},
@@ -1759,7 +1759,7 @@ ir_environment_route: fn(symbol: String) -> IREnvironmentRoute? {
 
 // Candidate source identities; the backend validates against the actual native layout.
 IRNativeType: struct { jet_name: String, declaration: String, arguments: String }
-IR_NATIVE_TYPES: comptime { [IRNativeType]{
+IR_NATIVE_TYPES: #run { [IRNativeType]{
     IRNativeType{jet_name: "<corelib>/core.crypto.vault::ExpiryCloseProbe", declaration: "<corelib>/core.crypto.vault::ExpiryCloseProbe", arguments: ""},
     IRNativeType{jet_name: "<corelib>/core.crypto.vault::KeyRef", declaration: "<corelib>/core.crypto.vault::KeyRef", arguments: "T"},
     IRNativeType{jet_name: "<corelib>/core.crypto.vault::KeyStatus", declaration: "<corelib>/core.crypto.vault::KeyStatus", arguments: ""},
@@ -1862,8 +1862,8 @@ ir_native_type_keys: fn() -> [String] Never! {
     loop row in IR_NATIVE_TYPES -> row.jet_name.copy() // copy: the global native type table can't be moved from
 }
 
-IR_NATIVE_TYPE_KEY_ROWS: comptime { ir_key_index(ir_native_type_keys()) }
-IR_NATIVE_TYPE_KEYS: comptime { ir_key_index_keys(ir_native_type_keys(), IR_NATIVE_TYPE_KEY_ROWS) }
+IR_NATIVE_TYPE_KEY_ROWS: #run ir_key_index(ir_native_type_keys())
+IR_NATIVE_TYPE_KEYS: #run ir_key_index_keys(ir_native_type_keys(), IR_NATIVE_TYPE_KEY_ROWS)
 
 ir_native_type: fn(name: String) -> IRNativeType? {
     position: ir_key_row(IR_NATIVE_TYPE_KEYS, IR_NATIVE_TYPE_KEY_ROWS, name) ?? return None

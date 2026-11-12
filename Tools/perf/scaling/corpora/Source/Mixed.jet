@@ -4,7 +4,7 @@
 // section 4.3): about 25 lines per function and 53 bytes per line, structs,
 // enums with payloads, a trait called through trait values, generic
 // functions, closures, value and variant matches, maps, strings and
-// interpolation, and about 4.7% compile-time (`comptime`) items. `run: fn`
+// interpolation, and about 4.7% compile-time (`#run`) items. `run: fn`
 // prints one checksum line.
 //
 // The package is one source file (main.jet) of numbered sections, like the
@@ -383,7 +383,7 @@ mixed_unit: fn(m: Int, u: Int, r: &Seeded, stats: &Stats) -> Generated {
     constant_value: constant_a * 7 + constant_b
     if constant != "" {
         lines.push("// Prepared once while building; folded into every use below.")
-        lines.extend(["{constant}: comptime {{ {constant_a} * 7 + {constant_b} }}", ""])
+        lines.extend(["{constant}: #run {{ {constant_a} * 7 + {constant_b} }}", ""])
         stats.comptime_items += 1
     }
     score_a: r.int(3, 19)
