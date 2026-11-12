@@ -1,6 +1,15 @@
 // What the gauntlet's axis adapters share: where an adapter runs, the
-// publication it reports, and the contract rules it checks the manifest's
-// axis against.
+// publication it reports, the contract rules it checks the manifest's axis
+// against, and the probe of each tool an axis runner declares (the twin of
+// probeAxisTools in Tools/gauntlet/harness/run.mjs).
+use {
+    crypto: core.crypto
+    files: core.files
+    process: core.process
+}
+
+// How much of a probe's stderr a probe keeps.
+AXIS_OUTPUT_LIMIT: 4000
 
 // Where an adapter runs: the gauntlet run's directory, the `jet` it
 // measures and runs the harness with, and the repository holding the harness.
@@ -28,7 +37,148 @@ contract_issues: fn(rules: [ContractRule]) -> [String] {
     rules.filter(rule -> !rule.holds).map(rule -> rule.issue.copy())
 }
 
+// What one probe command printed and its exit status.
+ToolRun: struct {
+    code: Int
+    stdout: String
+    stderr: String
+}
+
+// The probe of each of `tools`, the tools an axis runner declares, in
+// order; an error when it declares none. `jet` is the binary `jet_bin`
+// itself: its path and SHA-256. Any other tool is what `command -v` finds,
+// with the first line its version command prints. Each command runs in
+// `cwd` through Tools/agent/JetEnv.jet of the repository `repo_dir`, for
+// 10 seconds at most.
+probe_axis_tools: fn(repo_dir: String, cwd: String, tools: Dyn, jet_bin: String) -[Env, Exec, FS, Time.Wait]> [Dyn] Err! {
+    declared: items_at(tools, "")
+    if declared.len() == 0 -> return Err("axis runner declares no tools")
+    env_runner: files.join(repo_dir, "Tools/agent/JetEnv.jet")
+    probes := [Dyn]{}
+    loop tool in declared -> probes.push(probe_axis_tool(env_runner, cwd, tool, jet_bin))
+    Ok(probes)
+}
+
+probe_axis_tool: fn(env_runner: String, cwd: String, tool: Dyn, jet_bin: String) -> Dyn {
+    if tool == Dyn.Text("jet") -> return probe_jet_binary(jet_bin)
+    name: js_text(tool)
+    out := Dyn.object()
+    out["tool"] = tool
+    found: run_probe_command(env_runner, cwd, ["sh", "-c", "command -v {shell_quoted(name)}"])
+    output: found.stdout.trim()
+    if found.code == 0 && output != "" {
+        version_run: run_probe_command(env_runner, cwd, tool_version_command(name))
+        printed: version_run.stdout.trim()
+        version: limited(first_line(if printed != "" -> printed else -> version_run.stderr.trim()), 300)
+        if version_run.code != 0 {
+            out["status"] = Dyn.Text("probe_failed")
+            out["resolved"] = Dyn.Text(first_line(output))
+            out["reason"] = Dyn.Text("{name} version probe failed (exit {version_run.code})")
+            out["version"] = Dyn.Text(version)
+            out["exit_code"] = Dyn.Int(version_run.code)
+            out["stderr"] = Dyn.Text(limited(version_run.stderr.trim(), AXIS_OUTPUT_LIMIT))
+            return out
+        }
+        out["status"] = Dyn.Text("available")
+        out["resolved"] = Dyn.Text(first_line(output))
+        out["version"] = Dyn.Text(version)
+        out["version_exit_code"] = Dyn.Int(version_run.code)
+        return out
+    }
+    if found.code == 1 && output == "" && found.stderr.trim() == "" {
+        out["status"] = Dyn.Text("unavailable")
+        out["reason"] = Dyn.Text("{name} is absent from the declared tool environment")
+        return out
+    }
+    out["status"] = Dyn.Text("probe_failed")
+    out["reason"] = Dyn.Text("could not determine whether {name} is available (exit {found.code})")
+    out["exit_code"] = Dyn.Int(found.code)
+    out["stderr"] = Dyn.Text(limited(found.stderr.trim(), AXIS_OUTPUT_LIMIT))
+    out
+}
+
+// The probe of the Jet binary `jet_bin`, resolved against the working
+// directory with its links followed.
+probe_jet_binary: fn(jet_bin: String) -> Dyn {
+    resolved: files.resolve(jet_bin) ?? jet_bin.copy()
+    stat: files.stat(resolved, Val(.Follow)) ?? {
+        if err == .NotFound(_) -> return jet_probe("unavailable", "Jet binary is absent: {resolved}")
+        return jet_probe("probe_failed", "could not inspect Jet binary {resolved}: {err}")
+    }
+    if !stat.is_file -> return jet_probe("probe_failed", "Jet binary is not a file: {resolved}")
+    bytes: files.read_bytes(resolved) ?? return jet_probe("probe_failed", "could not inspect Jet binary {resolved}: {err}")
+    out := Dyn.object()
+    out["tool"] = Dyn.Text("jet")
+    out["status"] = Dyn.Text("available")
+    out["resolved"] = Dyn.Text(resolved)
+    out["sha256"] = Dyn.Text(crypto.sha256(bytes).hex())
+    out
+}
+
+jet_probe: fn(status: String, reason: String) -> Dyn {
+    out := Dyn.object()
+    out["tool"] = Dyn.Text("jet")
+    out["status"] = Dyn.Text(status.copy())
+    out["reason"] = Dyn.Text(reason.copy())
+    out
+}
+
+// `command` run in `cwd` through `env_runner` as run.mjs runs a probe: 124
+// with a timeout note once 10 seconds pass, 128 when a signal stopped it
+// and 127 when it could not start.
+run_probe_command: fn(env_runner: String, cwd: String, command: [String]) -> ToolRun {
+    receipt: process.cmd([env_runner].concat(command)).cwd(cwd).timeout(10s).run() ?? return ToolRun{code: 127, stdout: "", stderr: "{err}"}
+    if receipt.timed_out -> return ToolRun{code: 124, stdout: receipt.output, stderr: "timeout after 10s"}
+    ToolRun{code: if receipt.signal == None -> receipt.code else -> 128, stdout: receipt.output, stderr: receipt.errors}
+}
+
+// The command that prints `tool`'s version.
+tool_version_command: fn(tool: String) -> [String] {
+    if tool == {
+        "entr" -> ["entr", "-V"]
+        "go" | "zig" -> [tool, "version"]
+        "lua" | "luajit" -> [tool, "-v"]
+        else -> [tool, "--version"]
+    }
+}
+
+// `text` as one single-quoted shell word.
+shell_quoted: fn(text: String) -> String {
+    "'{text.replace("'", "'\\''")}'"
+}
+
+// The text before the first line break of `text`.
+first_line: fn(text: String) -> String {
+    line: text.split("\n").to_list()[0]
+    line.remove_suffix("\r")
+}
+
 #Test("a contract's issues are its broken rules, in order") {
     rules: [ContractRule]{{holds: false, issue: "a"}, {holds: true, issue: "b"}, {holds: false, issue: "c"}}
     assert_eq(contract_issues(rules), ["a", "c"])
+}
+
+#Test("a version command is the tool's own where it has one, else --version") {
+    assert_eq(tool_version_command("zig"), ["zig", "version"])
+    assert_eq(tool_version_command("luajit"), ["luajit", "-v"])
+    assert_eq(tool_version_command("entr"), ["entr", "-V"])
+    assert_eq(tool_version_command("gcc"), ["gcc", "--version"])
+    assert_eq(shell_quoted("it's"), "'it'\\''s'")
+    assert_eq(first_line("one\r\ntwo"), "one")
+}
+
+#Test("a runner that declares no tools is an error, and the Jet binary is probed as a file") {
+    dir: files.mkdtemp("axis-tools-") ?? panic("{err}")
+    assert(probe_axis_tools(dir, dir, Dyn.Array([]), "jet") == .Err(_))
+    assert(probe_axis_tools(dir, dir, Dyn.Text("jet"), "jet") == .Err(_))
+    jet: files.join(dir, "jet")
+    files.write(jet, "jet") ?? panic("{err}")
+    probes: probe_axis_tools(dir, dir, Dyn.Array([Dyn.Text("jet")]), jet) ?? panic(err.message)
+    assert_eq(text_at(probes[0], "status"), Val("available"))
+    assert_eq(text_at(probes[0], "sha256"), Val(crypto.sha256("jet".bytes()).hex()))
+    absent: probe_axis_tools(dir, dir, Dyn.Array([Dyn.Text("jet")]), files.join(dir, "absent")) ?? panic(err.message)
+    assert_eq(text_at(absent[0], "status"), Val("unavailable"))
+    folder: probe_axis_tools(dir, dir, Dyn.Array([Dyn.Text("jet")]), dir) ?? panic(err.message)
+    assert_eq(text_at(folder[0], "reason"), Val("Jet binary is not a file: {dir}"))
+    files.remove_all(dir)
 }

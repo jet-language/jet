@@ -1,0 +1,77 @@
+// The gauntlet driver of the kit's tool probe (#5072 c8), the twin of
+// Tools/gauntlet/harness/drivers/run-tools.mjs: the tool-probe export of
+// Tools/gauntlet/harness/run.mjs, probeAxisTools.
+//
+//   jet driver probe FILE
+//
+// `probe` runs each case of the JSON array in FILE, the `tools` an axis
+// runner declares and the `jet` binary it names, in this directory, and shows
+// the case's `name` and each tool's probe, or the error of a case that
+// declares no tools. A probe shows its fields in order. This directory in a
+// path or reason reads `<cwd>`. A path outside it, a version of one line of at
+// most 300 characters and a stderr of at most 4000 read `<path>`, `<version>`
+// and `<stderr>`, so the dev shell's store paths and tool versions change no
+// output. The probes run through Tools/agent/JetEnv.jet of the checkout that
+// holds this driver, as run.mjs runs them through that of its own.
+package: {
+    name: "run_tools_driver"
+    version: "0.0.1"
+    deps: {
+        jet_gauntlet_kit: ../../../kit,
+    }
+}
+
+use {
+    jet_gauntlet_kit.[dyn_at, items_at, members, probe_axis_tools, read_json, text_or_empty]
+    files: core.files
+    json: core.encoding.json
+    process: core.process
+    sys: core.sys
+}
+
+USAGE: "usage: driver probe FILE"
+
+// This driver's path below the checkout that holds it.
+DRIVER: "/Tools/gauntlet/entries/run-tools/driver/run.jet"
+
+print_probes: fn(file: String) {
+    cases: read_json(file) ?? process.fail(1, "{file} is not a JSON file")
+    repo: sys.executable().remove_suffix(DRIVER)
+    cwd: files.cwd()
+    loop item in items_at(cases, "") {
+        name: text_or_empty(item, "name")
+        probes: probe_axis_tools(repo, cwd, dyn_at(item, "tools"), text_or_empty(item, "jet")) ?? {
+            print("{name}\terror: {err.message}")
+            next
+        }
+        loop probe in probes -> print("{name}\t{json.stringify(shown(probe, cwd))}")
+    }
+}
+
+// A probe as the driver shows it.
+shown: fn(probe: Dyn, cwd: String) -> Dyn {
+    out := Dyn.object()
+    loop row in members(probe) {
+        out[row.key] = if row.value == .Text(value) -> Dyn.Text(field(row.key, value, cwd)) else -> row.value
+    }
+    out
+}
+
+// A probe's text field as the driver shows it.
+field: fn(key: String, value: String, cwd: String) -> String {
+    if key == {
+        "resolved" -> if {
+            value.starts_with("{cwd}/") -> value.replace(cwd, "<cwd>")
+            value.starts_with("/") -> "<path>"
+            else -> value
+        }
+        "version" -> if value != "" && !value.contains("\n") && value.len() <= 300 -> "<version>" else -> value
+        "stderr" -> if value != "" && value.len() <= 4000 -> "<stderr>" else -> value
+        else -> value.replace(cwd, "<cwd>")
+    }
+}
+
+run: fn() {
+    args: process.args()
+    if args.get(0) == Val("probe") && args.len() >= 2 -> print_probes(args[1]) else -> process.fail(64, USAGE)
+}
