@@ -64,14 +64,16 @@
 // Jetpack area a named file reaches (all of them when none is named or one
 // is under CHECKER_PREFIXES; the rest are carried over). The areas run in
 // lanes packed under area_budget by their last measured peaks
-// (r14/area-peaks.tsv, updated from each check's receipt). Every pass
-// reports whatever another found; checks keep going and list every row of
-// their report at its file:line. Each pass has its own memory cap
+// (r14/area-peaks.tsv, updated from each check's receipt); an area its cap
+// killed checks again alone after the lanes, under the whole budget. Every
+// pass reports whatever another found; checks keep going and list every row
+// of their report at its file:line. Each pass has its own memory cap
 // (CHECK_MEMORY, BUILD_MEMORY, GUARD_MEMORY, CORE_MEMORY). CENSUS_BUILD=0
 // skips the build and what needs it, CENSUS_SELFCHECK=0 phase B. Output:
 // $JET_SCRATCH_ROOT/discovery/r14/{snap,census}, with census/phases.tsv
-// (phase, seconds, rc, peak MiB, note; one row per area). A census whose
-// RECEIPT_PASSES are clean writes the snapshot's preflight receipt, which
+// (phase, seconds, rc, peak MiB, note; one row per area). Only a census whose
+// every row is clean, every RECEIPT_PASSES pass among them, writes the
+// snapshot's preflight receipt, which lists every row and which
 // `Tools/agent/Chain.jet TREE full` and Tools/release `admit` and `build`
 // require. Exit: 0 clean; 1 rows or a failed pass; 2 setup failure.
 //
@@ -98,9 +100,10 @@
 // the source identity>.json). `identity` prints TREE's compiler source
 // identity (Tools/agent/CompilerPackages.jet identity); `check` admits a
 // launch of TREE by the seed SEED_DIR, and
-// `commit` one of COMMIT of the checkout REPO (from an export of it). Each
-// prints `LAUNCHER: admitted by ...` (exit 0) or the refusal, which names the
-// census to run (exit 1); exit 2 is a setup failure.
+// `commit` one of COMMIT of the checkout REPO (from an export of it); a
+// receipt with a failing row, or no row for a RECEIPT_PASSES pass, admits
+// neither. Each prints `LAUNCHER: admitted by ...` (exit 0) or the refusal,
+// which names the census to run (exit 1); exit 2 is a setup failure.
 //
 // `serve` is the landing service, run from the tools checkout. Every minute
 // it takes the jobs `queue` wrote, admits each one (`prescreen`: all at once
@@ -168,10 +171,11 @@ SPEED_LANES: [String]{"O0Speed", "RustOut"}
 COMPILER_PREFIXES: [String]{"Compiler/", "Core/", "Jetpack/"}
 IDENTITY_KEYS: [String]{"user.name", "user.email"}
 JOB_FILES: [String]{".patch", ".msg"}
-// The preflight receipt: its schema, the census passes it vouches for, and
-// the trees an export needs for the source identity.
-RECEIPT_SCHEMA: "jet.preflight-receipt.v1"
-RECEIPT_PASSES: [String]{"check", "build", "runtime-pack", "selfcheck", "selfcheck-core"}
+// The preflight receipt: its schema, the census passes it must list clean
+// (every pass but the Core #Tests, which CENSUS_CORE_TESTS=0 skips), and the
+// trees an export needs for the source identity.
+RECEIPT_SCHEMA: "jet.preflight-receipt.v2"
+RECEIPT_PASSES: [String]{"check", "build", "guards", "runtime-pack", "codegen", "selfcheck", "selfcheck-core", "areas"}
 IDENTITY_TREES: [String]{"Compiler", "Core", "Jetpack"}
 // Test inputs the gate leaves to the tests: cases, ui and run fixtures.
 TEST_INPUT_PREFIXES: [String]{"tests/cases/", "tests/ui/", "tests/run/"}
@@ -199,7 +203,9 @@ GUARD_SHARDS: 4
 // launch less TRAIN_FLOOR_GIB, at most AREA_BUDGET_MAX): each is capped at
 // its last measured peak (r14/area-peaks.tsv; AREA_UNMEASURED when it has
 // none) plus a fifth and AREA_MARGIN, and the areas run in lanes packed under
-// the budget (pack_lanes).
+// the budget (pack_lanes). An area whose scope the cap killed checks again
+// alone after the lanes, under the whole budget then (area_again).
+// CENSUS_AREA_CAP (bytes) caps every area's check instead, again checks too.
 AREA_BUDGET_MAX: 34359738368
 GIB: 1073741824
 AREA_UNMEASURED: 4294967296
@@ -1057,14 +1063,47 @@ census: fn(named: [String], passes: Passes) -[Exec, Env, FS, IO, Time, Time.Wait
     // Core's #Tests after the self-checks, so their scopes never stack on them.
     runs.push(core_tests_pass(snap, out, seed_jet, self_jet, identity, source_identity, named))
     code: census_finish(runs, out)
-    // The receipt vouches for RECEIPT_PASSES only.
-    if !RECEIPT_PASSES.all(name -> pass_clean(runs, name)) -> return code
-    written: write_receipt(source_identity, read_identity(compiler_dir), head, named, receipt_dir()) ?? {
+    // A receipt only for a census whose every row, areas' among them, is
+    // clean (#6763); it lists them all, and gate refuses one that does not.
+    rows: receipt_rows(runs)
+    if code != 0 || !RECEIPT_PASSES.all(name -> pass_clean(runs, name)) -> return code
+    written: write_receipt(source_identity, read_identity(compiler_dir), head, named, rows, receipt_dir()) ?? {
         print("census: the preflight receipt cannot be written: {err.message}")
         return 2
     }
     print("preflight receipt {written}")
     code
+}
+
+// A receipt's rows: each pass that ran, and each area, with its exit.
+receipt_rows: fn(runs: [PassRun]) -> [Dyn] Never! {
+    out := [Dyn]{}
+    loop run in runs {
+        if run.name != "" -> out.push(Dyn.Object([String: Dyn]{"name": Dyn.Text(run.name.copy()), "rc": Dyn.Int(run.rc), "note": Dyn.Text(run.note.copy())}))
+    }
+    out
+}
+
+// What keeps a receipt's `rows` from vouching for a launch, "" when nothing
+// does: every failing row (an exit that is not 0), then every RECEIPT_PASSES
+// pass with no row.
+receipt_rows_problem: fn(rows: [Dyn]) -> String Never! {
+    failing := [String]{}
+    names := [String]{}
+    loop row in rows {
+        name: text_field(row, "name")
+        names.push(name.copy())
+        rc: int_field(row, "rc") ?? -1
+        if rc != 0 -> failing.push("{name} rc={rc}")
+    }
+    missing := [String]{}
+    loop pass in RECEIPT_PASSES {
+        if !names.contains(pass) -> missing.push(pass.copy())
+    }
+    parts := [String]{}
+    if failing.len() > 0 -> parts.push("lists failing rows: {failing.join(", ")}")
+    if missing.len() > 0 -> parts.push("has no row for {missing.join(", ")}")
+    parts.join("; ")
 }
 
 // A pass whose task ended without a result.
@@ -1228,8 +1267,9 @@ core_tests_pass: fn(snap: String, out: String, seed_jet: String, self_jet: Strin
 }
 
 // The Jetpack areas a census of `named` reaches, checked in lanes packed
-// under area_budget: an "areas" run, then one run per area checked.
-area_runs: fn(snap: String, out: String, r14: String, self_jet: String, identity: String, named: [String]) -[Exec, FS, Time, Time.Wait]> [PassRun] Never! {
+// under area_budget, then each one the cap killed alone (area_again): an
+// "areas" run, then one run per area checked.
+area_runs: fn(snap: String, out: String, r14: String, self_jet: String, identity: String, named: [String]) -[Env, Exec, FS, Time, Time.Wait]> [PassRun] Never! {
     watch: time.start()
     env: [Setting]{Setting{name: "JET_COMPILER_IDENTITY", value: identity.copy()}, Setting{name: "JET_TOOLCHAIN_ROOT", value: snap.copy()}}
     listed: run_in_env(snap, [String]{self_jet, "{snap}/Jetpack/Bootstrap/Assemble.jet", "areas", "populated"}, env)
@@ -1255,8 +1295,9 @@ area_runs: fn(snap: String, out: String, r14: String, self_jet: String, identity
     reached: areas_reached(all, sources, named)
     peaks_path: "{r14}/area-peaks.tsv"
     known: read_peaks(files.read(peaks_path) ?? "")
+    forced: Int.parse(process.env_nonempty("CENSUS_AREA_CAP") ?? "") ?? 0
     caps := [Int]{}
-    loop area in reached -> caps.push(area_cap(peak_of(known, area)))
+    loop area in reached -> caps.push(if forced > 0 -> forced else -> area_cap(peak_of(known, area)))
     lanes: pack_lanes(reached, caps, area_budget(available_gib() * GIB))
     state: "{out}/jetpack-areas-state"
     home: "{out}/jetpack-areas-home"
@@ -1267,10 +1308,20 @@ area_runs: fn(snap: String, out: String, r14: String, self_jet: String, identity
         handles: loop lane in lanes -> task area_lane(lane.areas.copy(), reached.copy(), caps.copy(), snap.copy(), state.copy(), home.copy(), self_jet.copy(), identity.copy())
         loop handle in handles -> checked.extend(handle.join() ?? [PassRun]{lost_pass("areas")})
     }
+    loop at in 0..<checked.len() {
+        area: checked[at].name.removeprefix("area:")
+        if checked[at].rc == 0 || !checked[at].name.starts_with("area:") || !area_killed(state, area) -> next
+        cap: cap_of(reached, caps, area)
+        again: area_again(cap, forced, area_budget(available_gib() * GIB))
+        if again == 0 -> next
+        rerun: area_lane([String]{area.copy()}, [String]{area.copy()}, [Int]{again}, snap.copy(), state.copy(), home.copy(), self_jet.copy(), identity.copy())
+        if rerun.len() == 1 -> checked[at] = PassRun{name: rerun[0].name.copy(), rc: rerun[0].rc, seconds: checked[at].seconds + rerun[0].seconds, peak: rerun[0].peak, note: "{rerun[0].note}, again alone after the {cap /% 1048576}M cap killed it", lines: rerun[0].lines.copy()}
+    }
     files.remove_all(home) ?? ()
     updated := known.copy()
     loop run in checked {
-        if run.peak > 0 -> updated = with_peak(updated, run.name.removeprefix("area:"), run.peak)
+        area: run.name.removeprefix("area:")
+        if run.peak > 0 -> updated = with_peak(updated, area, peak_after(peak_of(known, area), run.peak, run.rc))
     }
     files.write(peaks_path, peak_rows(updated)) ?? ()
     rc := 0
@@ -1343,6 +1394,36 @@ area_peak: fn(state: String, area: String) -[FS]> Int Never! {
         }
     }
     peak
+}
+
+// Whether this census's check of `area` was killed at its memory cap, as its
+// log (rewritten by each check) says.
+area_killed: fn(state: String, area: String) -[FS]> Bool Never! {
+    (files.read("{state}/jetpack-bootstrap/census-each-{area}.err") ?? "").contains("jetpack-bootstrap: check was killed at its ")
+}
+
+// The cap of `area` in `areas` (its `caps` entry), AREA_UNMEASURED when absent.
+cap_of: fn(areas: [String], caps: [Int], area: String) -> Int Never! {
+    loop at in 0..<areas.len() {
+        if areas[at] == area && at < caps.len() -> return caps[at]
+    }
+    AREA_UNMEASURED
+}
+
+// The cap an area the `cap` killed checks again at, alone once the lanes are
+// done: the whole area `budget` then (its last peak went stale as the area
+// grew, so it is measured, not failed), or the `forced` cap when one is set;
+// 0, no again check, when that is no larger than `cap`.
+area_again: fn(cap: Int, forced: Int, budget: Int) -> Int Never! {
+    again: if forced > 0 -> forced else -> budget
+    if again > cap -> again else -> 0
+}
+
+// An area's known peak after a check that exited `rc` at `peak`: that peak,
+// but a failed check's is only a floor (a killed one stopped at its cap), so
+// it never lowers the `known` one.
+peak_after: fn(known: Int, peak: Int, rc: Int) -> Int Never! {
+    if rc != 0 && known > peak -> known else -> peak
 }
 
 // Whether a file of `named` changes the checker or the area assembler, or
@@ -3721,8 +3802,9 @@ receipt_path: fn(source_identity: String, dir: String) -> String Never! {
 
 // The receipt of a clean census of every pass of the snapshot whose source
 // identity is `source_identity`: COMMIT plus the `named` worktree files, by
-// the seed of `seed_identity`. Written whole (a temporary file renamed).
-write_receipt: fn(source_identity: String, seed_identity: String, commit: String, named: [String], dir: String) -[Env, FS, Time]> String LandError! {
+// the seed of `seed_identity`, with every row it ran (receipt_rows). Written
+// whole (a temporary file renamed).
+write_receipt: fn(source_identity: String, seed_identity: String, commit: String, named: [String], rows: [Dyn], dir: String) -[Env, FS, Time]> String LandError! {
     files.create_dir_all(dir) ?? return Err(LandError{message: "`{dir}` cannot be created: {err}"})
     path: receipt_path(source_identity, dir)
     receipt: Dyn.Object([String: Dyn]{
@@ -3731,7 +3813,7 @@ write_receipt: fn(source_identity: String, seed_identity: String, commit: String
         "seedIdentity": Dyn.Text(seed_identity.copy()),
         "commit": Dyn.Text(commit.copy()),
         "files": Dyn.Array(named.map(name -> Dyn.Text(name.copy()))),
-        "passes": Dyn.Array(RECEIPT_PASSES.map(pass -> Dyn.Text(pass.copy()))),
+        "rows": Dyn.Array(rows.copy()),
         "finished": Dyn.Text("{time.isoformat(time.now_utc())}Z"),
     })
     text: json.to_string_pretty(receipt) ?? return Err(LandError{message: "the receipt cannot be encoded: {err}"})
@@ -3747,7 +3829,8 @@ Admission: struct {
 }
 
 // Is a launch of the compiler of `source_identity` by the seed of
-// `seed_identity` vouched for by a receipt in `dir`?
+// `seed_identity` vouched for by a receipt in `dir`: one whose rows are all
+// clean and hold every RECEIPT_PASSES pass?
 gate: fn(source_identity: String, seed_identity: String, dir: String) -[FS]> Admission Never! {
     path: receipt_path(source_identity, dir)
     if !files.exists(path) -> return Admission{admitted: false, reason: "no preflight receipt for source identity {source_identity}"}
@@ -3760,6 +3843,8 @@ gate: fn(source_identity: String, seed_identity: String, dir: String) -[FS]> Adm
     if census_seed != seed_identity {
         return Admission{admitted: false, reason: "the preflight receipt for source identity {source_identity} is from a census by seed {census_seed}, not {seed_identity}"}
     }
+    problem: receipt_rows_problem(array_field(tree, "rows"))
+    if problem != "" -> return Admission{admitted: false, reason: "the preflight receipt {path} {problem}"}
     count: array_field(tree, "files").len()
     named: if count > 0 -> " + {count} worktree file(s)" else -> ""
     Admission{admitted: true, reason: "preflight receipt {path}: census of {short_sha(text_field(tree, "commit"))}{named} by seed {seed_identity}, finished {text_field(tree, "finished")}"}
@@ -3857,6 +3942,14 @@ array_field: fn(tree: Dyn, name: String) -> [Dyn] Never! {
     [Dyn]{}
 }
 
+int_field: fn(tree: Dyn, name: String) -> Int? Never! {
+    if field(tree, name) == {
+        .Int(value) -> Val(value)
+        .Number(lexeme) -> Val(Int.parse(lexeme) ?? return None)
+        .Null | .Bool(_) | .Float(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> None
+    }
+}
+
 #Test("numstat -z rows give each path, and both sides of a rename") {
     nul: String.from_bytes([U8]{U8{0}}) ?? ""
     fields: nul_fields("1\t2\ta.jet{nul}0\t0\t{nul}old.md{nul}new.md{nul}")
@@ -3899,7 +3992,13 @@ array_field: fn(tree: Dyn, name: String) -> [Dyn] Never! {
     source: "jet@a0.0.43#aaaa"
     seed: "jet@a0.0.43#bbbb"
     assert_eq(gate(source, seed, dir).reason, "no preflight receipt for source identity jet@a0.0.43#aaaa")
-    written: write_receipt(source, seed, "0123456789abcdef", [String]{"Compiler/JetCli/Source/Main.jet"}, dir) ?? panic(err.message)
+    clean := [PassRun]{}
+    loop pass in RECEIPT_PASSES -> clean.push(PassRun{name: pass.copy(), rc: 0, seconds: 1, peak: 0, note: "", lines: [String]{}})
+    clean.push(PassRun{name: "area:CLI", rc: 0, seconds: 1, peak: 0, note: "cap 7000M", lines: [String]{}})
+    clean.push(PassRun{name: "", rc: 0, seconds: 0, peak: 0, note: "", lines: [String]{}})
+    rows: receipt_rows(clean)
+    assert_eq(rows.len(), RECEIPT_PASSES.len() + 1)
+    written: write_receipt(source, seed, "0123456789abcdef", [String]{"Compiler/JetCli/Source/Main.jet"}, rows, dir) ?? panic(err.message)
     assert_eq(written, receipt_path(source, dir))
     admitted: gate(source, seed, dir)
     assert(admitted.admitted)
@@ -3908,6 +4007,20 @@ array_field: fn(tree: Dyn, name: String) -> [Dyn] Never! {
     assert(!other.admitted)
     assert_eq(other.reason, "the preflight receipt for source identity jet@a0.0.43#aaaa is from a census by seed jet@a0.0.43#bbbb, not jet@a0.0.43#cccc")
     assert(!gate("jet@a0.0.43#dddd", seed, dir).admitted)
+    // #6763: a receipt with a failing row, or none for a RECEIPT_PASSES pass, admits nothing.
+    failing := clean.copy()
+    failing[failing.len() - 2] = PassRun{name: "area:CLI", rc: 1, seconds: 1, peak: 0, note: "cap 5857M", lines: [String]{}}
+    failing[failing.len() - 3] = PassRun{name: "areas", rc: 1, seconds: 1, peak: 0, note: "", lines: [String]{}}
+    write_receipt(source, seed, "0123456789abcdef", [String]{}, receipt_rows(failing), dir) ?? panic(err.message)
+    refused: gate(source, seed, dir)
+    assert(!refused.admitted)
+    assert_eq(refused.reason, "the preflight receipt {written} lists failing rows: areas rc=1, area:CLI rc=1")
+    write_receipt(source, seed, "0123456789abcdef", [String]{}, receipt_rows(failing.filter(run -> run.name != "check" && run.name != "build")), dir) ?? panic(err.message)
+    assert_eq(gate(source, seed, dir).reason, "the preflight receipt {written} lists failing rows: areas rc=1, area:CLI rc=1; has no row for check, build")
+    write_receipt(source, seed, "0123456789abcdef", [String]{}, [Dyn]{}, dir) ?? panic(err.message)
+    assert_eq(gate(source, seed, dir).reason, "the preflight receipt {written} has no row for {RECEIPT_PASSES.join(", ")}")
+    files.write(written, "{{\"schema\": \"{RECEIPT_SCHEMA}\", \"sourceIdentity\": \"{source}\", \"seedIdentity\": \"{seed}\", \"rows\": [{{\"name\": \"check\", \"rc\": \"0\"}}]}}") ?? panic("{written}: {err}")
+    assert(gate(source, seed, dir).reason.contains("lists failing rows: check rc=-1; has no row for build, "))
     files.write(written, "{{") ?? panic("{written}: {err}")
     assert(gate(source, seed, dir).reason.starts_with("receipt {written} is not JSON ("))
     files.remove_all(dir) ?? ()
@@ -4011,6 +4124,19 @@ array_field: fn(tree: Dyn, name: String) -> [Dyn] Never! {
 #Test("an area's cap is its peak and a fifth plus the margin; unmeasured counts AREA_UNMEASURED") {
     assert_eq(area_cap(1000), 1200 + AREA_MARGIN)
     assert_eq(area_cap(0), AREA_UNMEASURED + AREA_UNMEASURED /% 5 + AREA_MARGIN)
+}
+
+#Test("an area the cap killed checks again alone under the budget, or the forced cap, when that is larger (#6761)") {
+    assert_eq(area_again(6 * GIB, 0, 20 * GIB), 20 * GIB)
+    assert_eq(area_again(6 * GIB, 0, 6 * GIB), 0)
+    assert_eq(area_again(6 * GIB, 0, 0), 0)
+    assert_eq(area_again(GIB, GIB, 20 * GIB), 0)
+    assert_eq(area_again(GIB, 2 * GIB, 20 * GIB), 2 * GIB)
+    assert_eq(cap_of([String]{"CLI", "JetOS"}, [Int]{7, 6}, "JetOS"), 6)
+    assert_eq(cap_of([String]{"CLI"}, [Int]{7}, "Nix"), AREA_UNMEASURED)
+    assert_eq(peak_after(5 * GIB, GIB, 1), 5 * GIB)
+    assert_eq(peak_after(5 * GIB, 6 * GIB, 1), 6 * GIB)
+    assert_eq(peak_after(5 * GIB, GIB, 0), GIB)
 }
 
 #Test("areas pack largest first into lanes under the budget, the rest join the least loaded lane") {
