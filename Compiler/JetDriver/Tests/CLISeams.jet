@@ -100,8 +100,9 @@ seams_checked_projection: fn() {
     fallback_request: seams_request("use tools: core.devtools\nserve: fn() -> Int {{ 7 }}", JetDriverCompileMode.Program)
     seams_registration_inputs(fallback_request, 1)
     fallback: jet_driver_checked_projection(fallback_request)
-    // Program mode also checks the compiler-owned Prelude effect module, which is never a Review source.
-    seams_require(fallback.compile.complete && fallback.compile.doc_modules.len() == 3 && fallback.source_modules.len() == 1, "explicit ABI-only Core fallback stays checked but is not a Review source")
+    // Program mode also checks the compiler-owned Prelude effect module, which is never a Review source,
+    // and every program loads the same Core modules, so the fallback adds just core.devtools.
+    seams_require(fallback.compile.complete && fallback.compile.doc_modules.len() == retained.compile.doc_modules.len() + 1 && fallback.source_modules.len() == 1, "explicit ABI-only Core fallback stays checked but is not a Review source: {fallback.compile.doc_modules.map(row -> row.module_name)} over {retained.compile.doc_modules.map(row -> row.module_name)}")
     real_request := seams_request("use tools: core.devtools\nserve: fn() -> Int {{ 7 }}", JetDriverCompileMode.Program)
     real_request.core_sources = [JetDriverCoreSource]{
         {module_name: "core.devtools", alias: "core_devtools_fixture", path: "Core/devtools-fixture.jet", owner: "", owned_members: [String]{}, runtime: false, text: jet_driver_core_text("")},
@@ -109,7 +110,7 @@ seams_checked_projection: fn() {
     }
     seams_registration_inputs(real_request, 3)
     real: jet_driver_checked_projection(real_request)
-    seams_require(real.compile.complete && real.compile.doc_modules.len() == 4 && real.source_modules.len() == 3, "empty real Core source and its private source remain source owners")
+    seams_require(real.compile.complete && real.compile.doc_modules.len() == retained.compile.doc_modules.len() + 2 && real.source_modules.len() == 3, "empty real Core source and its private source remain source owners: {real.compile.doc_modules.map(row -> row.module_name)}")
     found_core := false
     found_private := false
     loop position in real.source_modules {
@@ -126,7 +127,7 @@ seams_checked_projection: fn() {
     failed: jet_driver_checked_projection(seams_request("serve: fn() {{ undefined_call() }}", JetDriverCompileMode.Program))
     seams_require(!failed.compile.complete && failed.source_modules.len() == 0 && failed.entry_module == None, "failed checking does not publish a complete projection")
     legacy: jet_driver_compile(seams_request(source, JetDriverCompileMode.Doc))
-    seams_require(legacy.complete && legacy.doc_modules.len() == 1, "legacy Doc keeps its existing user-only path")
+    seams_require(legacy.complete && legacy.doc_modules.filter(row -> !row.module_name.starts_with("core.")).len() == 1, "legacy Doc projects the one user module beside the Core modules every program loads: {legacy.doc_modules.map(row -> row.module_name)}")
 }
 #Test("cli_seams") {
     seams_checked_projection()
@@ -134,7 +135,7 @@ seams_checked_projection: fn() {
     // load-only query. A semantic check instead would report E0102.
     load_request: seams_request("serve: fn() {{ undefined_call() }}", JetDriverCompileMode.Doc)
     loaded: jet_driver_source_query(load_request)
-    seams_require(loaded.complete && loaded.diagnostics.len() == 0 && loaded.modules.len() == 1, "load-only, not a disguised check")
+    seams_require(loaded.complete && loaded.diagnostics.len() == 0 && loaded.modules.filter(row -> !row.module_name.starts_with("core.")).len() == 1, "load-only, not a disguised check: {loaded.modules.map(row -> row.module_name)}")
     seams_require(loaded.modules[0].physical_path == "/seams-fixture/main.jet" && loaded.modules[0].source == "serve: fn() {{ undefined_call() }}", "exact authorized source provenance")
     seams_require(loaded.entry_package_version == None, "loose source has no declared package version")
     loop version in ([String?]{Val("2.3.4"), None, Val("")}) {

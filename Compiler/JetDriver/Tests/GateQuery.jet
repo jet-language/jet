@@ -34,7 +34,9 @@ gate_query_request: fn(source: String, policy: String?) -> JetDriverCompileReque
     result: jet_driver_gate_query(request)
     gate_query_require(result.complete && result.diagnostics.len() == 0, "undefined bodies are never checked")
     names: result.source.names ?? panic("GateQuery: missing loader ledger")
-    gate_query_require(names.facts.modules.len() == 2 && names.facts.structure_facts.len() == 1, "canonical load module and import facts retained")
+    // Every program also loads core.prelude: the builtin records' fields hold
+    // its SourceLocation.
+    gate_query_require(names.facts.modules.len() == 3 && names.facts.structure_facts.len() == 1, "canonical load module and import facts retained: modules {names.facts.modules.map(row -> row.path)}, {names.facts.structure_facts.len()} import facts")
     gate_query_require(name_ledger_declaration(names, result.source.entry_module_index, "run") != None, "declarations share the existing sema name writer")
     unsafe_count := 0
     trust_count := 0
