@@ -71,6 +71,17 @@ and marker bodies. [`derive_loop.jet`](../../../Examples/Metaprogramming/Comptim
 uses it to create methods from `T.reflect().fields`, to emit an `impl` for each type,
 and to create measured test declarations from `CASES`.
 
+A `#Pre` condition written `#run { condition }` is decided for each call
+while building, by the same evaluator, after the call's arguments are
+substituted for the parameters. A call it holds for carries no run-time
+check; a false answer, or a condition that reads an argument known only at
+run time, is E0180 at the call. `#run` in any other marker argument is
+E0391 for now. [`RequiredPreDecidedWhileBuilding.jet`](../../../tests/run/Contracts/RequiredPreDecidedWhileBuilding.jet)
+prints 10 for `sum(4, [1, 2, 3, 4])` under
+`#Pre(#run { lanes == 4 || lanes == 8 }, "need 4 or 8")`, and
+[`contract_required_pre_false.jet`](../../../tests/ui/contract_required_pre_false.jet)
+is `sum(3, …)` refused while building.
+
 Inside a template a paste `#{name}` splices a template binding
 (D-META-HASH1=A). `#{method}: fn(self)` and `impl #{type_name}` name a
 declaration from the binding's text, `self.#{field}` reads the member a loop

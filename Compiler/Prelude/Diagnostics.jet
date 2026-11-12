@@ -1629,6 +1629,22 @@ ResultInPrecondition: struct {
     }
 }
 
+RequiredContractNotTrue: struct {
+    callee: String
+    clause: String
+    answer: String
+
+    impl Diagnostic {
+        code: "E0180"
+        meaning: "A `#run {{ … }}` contract condition is not true for a call while building"
+        detail: true
+        no_fix: .Behavior
+        what: fn(self) -> String { "`{self.callee}`'s `#{self.clause}` condition is {self.answer} for this call while building" }
+        why: fn(self) -> String { "A condition written `#run {{ … }}` must be decided while building for every call, from the call's arguments after contract substitution. A false answer, or no answer because it reads a value only known at run time, stops the build at the call." }
+        fix: fn(self) -> String { "Pass arguments the build can read that make the condition true, or drop `#run` so the condition is checked when the program runs." }
+    }
+}
+
 PersistNotModuleLevel: struct {
     impl Diagnostic {
         code: "E0145"

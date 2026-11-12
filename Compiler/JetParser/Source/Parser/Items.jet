@@ -503,15 +503,12 @@ parser_parse_marker: fn(state: &JetParserState) -> Marker {
     end := name.span
     if parser_current_kind(state) == TOKEN_LPAREN {
         open: parser_current(state).span
-        arrow: parser_value(state, name) == "State"
-        args = parser_parse_marker_args(state, arrow)
+        marker_name: parser_value(state, name)
+        args = parser_parse_marker_args(state, marker_name)
         if state.position > 0 -> end = parser_lookahead(state, -1).span
-        if args.args.len() == 0 {
-            marker_name: parser_value(state, name)
-            parser_check_empty_marker_parens(state, marker_name, Span{start: open.start, end: end.end})
-        }
+        if args.args.len() == 0 -> parser_check_empty_marker_parens(state, marker_name, Span{start: open.start, end: end.end})
     }
-    Marker{name: parser_value(state, name), negated: negated, name_span: name.span, args: args.args, arg_labels: args.labels, span: parser_cover(hash.span, end), ct: None}
+    Marker{name: parser_value(state, name), negated: negated, name_span: name.span, args: args.args, arg_labels: args.labels, span: parser_cover(hash.span, end), ct: None, required: args.required}
 }
 
 // A marker writes parentheses exactly when it passes arguments,
@@ -1899,7 +1896,13 @@ parser_project_contract_marker: fn(state: &JetParserState, func: &Func, marker: 
 parser_contract_clause: fn(state: &JetParserState, marker: Marker) -> ContractClause? {
     values: parser_marker_bindings(marker, [String]{"condition", "message"}) ?? [Expr?]{}
     if values.len() == 2 && values[0] == .Val(condition) && values[1] == .Val(message) {
-        return Val(ContractClause{cond: condition, message_expr: message, message_span: expr_span(message), span: marker.span})
+        required := false
+        loop index in marker.required {
+            if marker.args[index] == .Expr(value) {
+                if expr_span(value).start == expr_span(condition).start -> required = true
+            }
+        }
+        return Val(ContractClause{cond: condition, message_expr: message, message_span: expr_span(message), span: marker.span, required: required})
     }
     parser_marker_shape_error(state, marker)
     None

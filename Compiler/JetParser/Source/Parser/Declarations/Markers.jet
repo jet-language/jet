@@ -62,6 +62,7 @@ use {
 ParsedMarkerArgs: struct {
     args: [MarkerCallArg]
     labels: [CallLabel?]
+    required: [Int]{[Int]{}}
 }
 
 ParsedMarkerGroup: struct {
@@ -371,11 +372,11 @@ parser_parse_marker_group_entries: fn(state: &JetParserState, declaration: Bool)
         args := ParsedMarkerArgs{args: [MarkerCallArg]{}, labels: [CallLabel?]{}}
         end := name.span
         if parser_current_kind(state) == TOKEN_LPAREN {
-            arrow: parser_value(state, name) == MARKER_STATE
-            args = parser_parse_marker_args(state, arrow)
+            marker_name: parser_value(state, name)
+            args = parser_parse_marker_args(state, marker_name)
             if state.position > 0 -> end = parser_lookahead(state, -1).span
         }
-        markers.push(Marker{name: parser_value(state, name), negated: negated, name_span: name.span, args: args.args, arg_labels: args.labels, span: parser_cover(start, end), ct: None})
+        markers.push(Marker{name: parser_value(state, name), negated: negated, name_span: name.span, args: args.args, arg_labels: args.labels, span: parser_cover(start, end), ct: None, required: args.required})
         if parser_current_kind(state) == TOKEN_COMMA {
             parser_bump(state)
             next
@@ -406,13 +407,15 @@ parser_check_signed_marker: fn(state: &JetParserState, bang_start: Int, name: To
 
 // Rust `marker_call_arg`: a marker argument is an ordinary (optionally
 // labeled) call argument or an effect row `-[Effects]>`, which keeps its own
-// carrier until sema checks the rule's effect slot. With `arrow` (`#State`),
-// `A -> B` is two arguments: B carries STATE_ARROW_LABEL,
-// which no written label can spell.
-parser_parse_marker_args: fn(state: &JetParserState, arrow: Bool) -> ParsedMarkerArgs {
+// carrier until sema checks the rule's effect slot. `#State`'s `A -> B` is two
+// arguments: B carries STATE_ARROW_LABEL, which no written label can spell.
+// `#run { value }` is the argument `value` whose answer is required while
+// building; its position joins `required`.
+parser_parse_marker_args: fn(state: &JetParserState, marker_name: String) -> ParsedMarkerArgs {
     parser_expect(state, TOKEN_LPAREN, "`(` before marker arguments")
     args := [MarkerCallArg]{}
     labels := [CallLabel?]{}
+    required := [Int]{}
     if parser_current_kind(state) != TOKEN_RPAREN {
         loop {
             label := CallLabel?{None}
@@ -433,26 +436,12 @@ parser_parse_marker_args: fn(state: &JetParserState, arrow: Bool) -> ParsedMarke
                 close: parser_expect(state, TOKEN_GT, "`>` after the effect row")
                 args.push(MarkerCallArg.EffectRow{effects: effects, span: parser_cover(start.span, close.span)})
             } else {
-                // A marker value is read, never written or taken. A `#State`
-                // name is never a struct literal or a bare `name -> body` lambda.
-                argument: if arrow -> parser_parse_expression_no_struct_lit(state, 2) else -> parser_parse_expression(state, 1, 2)
-                args.push(MarkerCallArg.Expr{value: argument.expr})
-                // A chain `A -> B -> C` keeps every step; the `#State`
-                // applicator refuses any shape but one step (E0930).
-                if arrow && label == None {
-                    loop parser_current_kind(state) == TOKEN_UNIFIED_ARROW {
-                        arrow_token: parser_bump(state)
-                        labels.push(label)
-                        to: parser_parse_expression_no_struct_lit(state, 2)
-                        args.push(MarkerCallArg.Expr{value: to.expr})
-                        label = Val(CallLabel{name: STATE_ARROW_LABEL, span: arrow_token.span})
-                    }
-                }
+                label = parser_parse_marker_value_arg(state, marker_name, label, args, labels, required)
             }
             labels.push(label)
             if parser_current_kind(state) == TOKEN_RPAREN -> break
             if parser_current_kind(state) != TOKEN_COMMA {
-                if parser_unclosed_delimiter(state, "call") -> return ParsedMarkerArgs{args: args, labels: labels}
+                if parser_unclosed_delimiter(state, "call") -> return ParsedMarkerArgs{args: args, labels: labels, required: required}
                 token: parser_current(state)
                 parser_add_error(state, token.span, "expected `,` between marker arguments", "marker arguments are comma-separated", "add a comma or close the marker arguments")
                 break
@@ -462,7 +451,58 @@ parser_parse_marker_args: fn(state: &JetParserState, arrow: Bool) -> ParsedMarke
         }
     }
     parser_expect(state, TOKEN_RPAREN, "`)` after marker arguments")
-    ParsedMarkerArgs{args: args, labels: labels}
+    ParsedMarkerArgs{args: args, labels: labels, required: required}
+}
+
+// One marker value argument: `#run { value }`, or an expression, which for
+// `#State` may continue as a chain `A -> B -> C`. Returns the label of the
+// last argument it pushed.
+parser_parse_marker_value_arg: fn(state: &JetParserState, marker_name: String, label: CallLabel?, args: &[MarkerCallArg], labels: &[CallLabel?], required: &[Int]) -> CallLabel? {
+    if parser_prep_verb_ahead(state, 0, TOKEN_LBRACE) && parser_text(state, parser_current(state)) == "#run" {
+        if parser_parse_marker_required_arg(state, args, marker_name, label) -> required.push(args.len() - 1)
+        return label.copy()
+    }
+    // A marker value is read, never written or taken. A `#State` name is
+    // never a struct literal or a bare `name -> body` lambda.
+    arrow: marker_name == MARKER_STATE
+    argument: if arrow -> parser_parse_expression_no_struct_lit(state, 2) else -> parser_parse_expression(state, 1, 2)
+    args.push(MarkerCallArg.Expr{value: argument.expr})
+    // A chain `A -> B -> C` keeps every step; the `#State` applicator refuses
+    // any shape but one step (E0930).
+    if !arrow || label != None -> return label.copy()
+    last := label.copy()
+    loop parser_current_kind(state) == TOKEN_UNIFIED_ARROW {
+        arrow_token: parser_bump(state)
+        labels.push(last)
+        to: parser_parse_expression_no_struct_lit(state, 2)
+        args.push(MarkerCallArg.Expr{value: to.expr})
+        last = Val(CallLabel{name: STATE_ARROW_LABEL, span: arrow_token.span})
+    }
+    last
+}
+
+// `#run { value }` as an argument of the marker written `marker`, with
+// `label`, pushed onto `args`. True when it is a `#Pre` condition (the first
+// unlabeled argument, or the one labeled `condition`), the marker value decided
+// while building; any other place, or a block with more than its value, is
+// E0391. Like the contract projection (Items.jet), it keys `#Pre` by its
+// written name.
+parser_parse_marker_required_arg: fn(state: &JetParserState, args: &[MarkerCallArg], marker: String, label: CallLabel?) -> Bool {
+    slot: if label == .Val(written) -> written.name == "condition" else -> args.len() == 0
+    condition: marker == "Pre" && slot
+    head: parser_bump(state)
+    block: parser_parse_value_block(state, 0, true)
+    span: parser_cover(head.span, block.span)
+    if condition && block.statements.len() == 0 {
+        if block.tail == .Val(tail) {
+            args.push(MarkerCallArg.Expr{value: tail})
+            return true
+        }
+    }
+    if condition -> parser_add_error_code(state, "E0391", span, "`#run {{ … }}` in a marker holds more than one value", "a `#Pre` condition decided while building is the one value its block ends with", "write `#run {{ condition }}` with one final expression")
+    if !condition -> parser_add_error_code(state, "E0391", span, "`#run {{ … }}` is used as a marker value this compiler does not decide while building", "today only a `#Pre` condition is decided while building, for each call", "write `#Pre(#run {{ condition }}, \"message\")`, or drop `#run`")
+    args.push(MarkerCallArg.Expr{value: Expr.Unit{span: span, id: parser_node_id(state)}})
+    false
 }
 
 // The marker as written after its `#`, for E0999 repair edits; None when the

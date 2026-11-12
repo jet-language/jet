@@ -1533,7 +1533,11 @@ jfmt_fmt_marker_args: fn(f: &JetFmt, m: Marker) {
                     jfmt_write(f, ": ")
                 }
             }
+            // An argument whose answer is required while building keeps its `#run { … }`.
+            required: loop position in m.required if position == index -> position
+            if required.len() > 0 -> jfmt_write(f, "#run {{ ")
             jfmt_fmt_marker_call_arg(f, argument)
+            if required.len() > 0 -> jfmt_write(f, " }}")
             jfmt_comma_after(f, multiline, argument_span.end)
         }
         jfmt_comma_end(f, multiline, source)
