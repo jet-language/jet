@@ -1,0 +1,24 @@
+
+// A `.Report` finding is advice `jet lint` lists; it fails no build.
+PreferLogger: struct {
+    impl Diagnostic {
+        code: "mypkg.PreferLogger"
+        tier: .Report
+        what: fn(self) -> String { "this prints where a logger could" }
+        why: fn(self) -> String { "a logger can be filtered and redirected" }
+        fix: fn(self) -> String { "log the message instead" }
+    }
+}
+
+shout: fn(n: Int) { print(n) }
+
+build: fn(b: Build) {
+    app: b.add_executable("app", ["advice.jet"], [])
+    meta: b.compiler(app)
+    meta.events(watch: .Calls{to: print}, (event) -> {
+        if event == .Checked(.Call(c)) -> meta.report(PreferLogger{}, at: c)
+    })
+    b.default(app)
+}
+
+run: fn() { shout(2) }

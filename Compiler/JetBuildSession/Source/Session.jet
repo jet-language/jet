@@ -81,6 +81,22 @@ BuildSessionGeneratedModule: struct {
     identity: String{""}
 }
 
+// `meta.report(finding, at: c)`: a finding a package lint raised at the
+// checked call `c`: its Diagnostic `code`, `tier` (`Error`, `Tidy` or
+// `Report`) and texts, and the file (`module`, as the CompilerCall names
+// it) and byte span of the call. The build query reports it after the build
+// returns (JetDriver BuildQueries.jet jet_driver_build_findings).
+BuildSessionFinding: struct {
+    code: String
+    tier: String
+    what: String
+    why: String
+    fix: String
+    module: String
+    at_start: Int
+    at_end: Int
+}
+
 BuildSessionContribution: struct {
     key: String
     value: BuildSessionValue
@@ -255,6 +271,8 @@ BuildSessionState: struct {
     // run (build_session_refuse): that report is the build's own, not a
     // restated check report.
     refused: Bool{false}
+    // Each finding `meta.report` raised, in call order.
+    findings: [BuildSessionFinding]{[BuildSessionFinding]{}}
     start: Int
     end: Int
 }
@@ -578,6 +596,27 @@ build_session_call: fn(session: &BuildSession, method: String, args: [BuildSessi
             if !build_session_contains_string(state.targets[target].sources, path) -> state.targets[target].sources.push(path)
         }
         return added
+    }
+    // `meta.report(finding, at: c)`: the finding is kept with the build and
+    // reported once it returns.
+    if method == "compiler.report" {
+        if args.len() != 8 -> return build_session_fail(state, "`meta.report` takes a compiler value, a finding's code, tier and texts, and the call it names")
+        _: build_session_handle(state, args[0], "Compiler") ?? return build_session_fail(state, "the `Compiler` value does not belong to this build")
+        texts := [String]{}
+        loop index in 1..<7 {
+            text: build_session_text(args, index) ?? return build_session_fail(state, "`meta.report` lost a finding's text")
+            texts.push(text)
+        }
+        at_start := -1
+        at_end := -1
+        if args[7] == .Span(from, to) {
+            at_start = from
+            at_end = to
+        }
+        if at_start < 0 || at_end < at_start -> return build_session_fail(state, "`meta.report` lost the place of its call")
+        if texts[1] != "Error" && texts[1] != "Tidy" && texts[1] != "Report" -> return build_session_fail(state, "`meta.report` takes a finding of tier `Error`, `Tidy` or `Report`")
+        state.findings.push(BuildSessionFinding{code: texts[0], tier: texts[1], what: texts[2], why: texts[3], fix: texts[4], module: texts[5], at_start: at_start, at_end: at_end})
+        return BuildSessionReply.Value{value: BuildSessionValue.Unit}
     }
     if method == "args" {
         if args.len() != 0 -> return build_session_fail(state, "`b.args` takes no arguments")

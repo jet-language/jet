@@ -686,6 +686,15 @@ and the build publishes nothing. An unsafe operation stays in a function of
 the package's source, with its own `#Unsafe("reason")` block, and the code
 calls that function. A body pasted in through `#{f.body}` is the function's
 own source, and it keeps the blocks that source wrote.
+`meta.report(finding, at: c)` raises the value `finding` at the call `c` that
+a call watch heard. The finding's type has an `impl Diagnostic`: its `code`
+constant names the report (the type path, such as `mypkg.NoPrintInLib`, when
+it writes none), its `tier` says what the report fails, and `what`, `why`
+and `fix` word it. When the build returns, an `.Error` finding fails the
+build; a `.Tidy` one fails `jet build` but not `jet run`, `jet dev` or
+`jet test`; a `.Report` one is advice for lint alone and fails nothing. A
+value whose type has no `impl Diagnostic` is refused (E0905). Reporting
+needs no Meta effect, and the build refuses a value whose build has returned.
 A Meta effect is not a filesystem, process, FFI, network, or secret
 permission. Those authorities remain on their own effect and package-policy
 rails.

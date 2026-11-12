@@ -1,0 +1,10 @@
+# #6516 c3: a root build's call watch reports a package finding with
+# `meta.report(finding, at: c)`; the `.Tidy` finding fails `jet build` with
+# the package's code and texts at the `print` call it names.
+fixture: fixtures/meta_report_tiers
+step: jet build tidy.jet
+exit: nonzero
+stderr: ~ "mypkg.NoPrintInLib" # the code the impl declares
+stderr: ~ "Library code prints to the terminal" # the finding's what text
+stderr: ~ "tidy.jet:13" # reported at the print call in `shout`
+stderr: ~ "Log the message instead" # the finding's fix text

@@ -168,6 +168,13 @@ jet_cli_build_package_as: fn(file: String, color: Bool, options: BuildOptions, b
             query := response.query.move()
             if !query.complete || query.internal_problem != None {
                 refused = Val(jet_cli_build_query_failure(response.request, query, file, false, color, false))
+            } else if query.tidy.len() > 0 {
+                // A `.Tidy` finding a package lint raised (`meta.report`)
+                // fails `jet build`; a run, a dev session or a test keeps
+                // going.
+                // copy: `query` is passed whole to report the findings.
+                query.diagnostics = query.tidy.copy()
+                refused = Val(jet_cli_build_query_failure(response.request, query, file, false, color, false))
             } else if query.plan == .Val(plan) {
                 if jet_cli_settings_package(snapshot) == .Val(package) {
                     recorded: jet_cli_record_build_contributions(plan, package, color)

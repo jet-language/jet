@@ -1,0 +1,24 @@
+
+// A package lint: library code prints through a logger, not to the terminal.
+NoPrintInLib: struct {
+    impl Diagnostic {
+        code: "mypkg.NoPrintInLib"
+        tier: .Tidy
+        what: fn(self) -> String { "library code prints to the terminal" }
+        why: fn(self) -> String { "the program that calls the library owns the terminal" }
+        fix: fn(self) -> String { "log the message instead" }
+    }
+}
+
+shout: fn(n: Int) { print(n) }
+
+build: fn(b: Build) {
+    app: b.add_executable("app", ["tidy.jet"], [])
+    meta: b.compiler(app)
+    meta.events(watch: .Calls{to: print}, (event) -> {
+        if event == .Checked(.Call(c)) -> meta.report(NoPrintInLib{}, at: c)
+    })
+    b.default(app)
+}
+
+run: fn() { shout(2) }

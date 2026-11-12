@@ -1,0 +1,8 @@
+# #6516 c3: a `.Report` finding is advice for lint alone; `jet build`
+# succeeds and the built program runs.
+fixture: fixtures/meta_report_tiers
+step: jet build advice.jet
+exit: 0
+stderr: !~ "mypkg.PreferLogger" # the advice is not a build report
+step: {work}/.jet/build/app
+stdout: = "2\n"

@@ -325,6 +325,11 @@ build_plan_contributions: fn(plan: BuildSessionPlan) -> [BuildSessionContributio
     permit: plan.storage.guard_read()
     permit.value.contributions.copy()
 }
+// Each finding `meta.report` raised, in call order.
+build_plan_findings: fn(plan: BuildSessionPlan) -> [BuildSessionFinding] Never! {
+    permit: plan.storage.guard_read()
+    permit.value.findings.copy()
+}
 build_plan_selected_generated: fn(plan: BuildSessionPlan) -> [BuildSessionGeneratedModule] Never! {
     permit: plan.storage.guard_read()
     selected_targets := [Int]{}

@@ -1,0 +1,18 @@
+
+// A finding needs a type with an `impl Diagnostic`.
+Note: struct {
+    text: String
+}
+
+shout: fn(n: Int) { print(n) }
+
+build: fn(b: Build) {
+    app: b.add_executable("app", ["plain.jet"], [])
+    meta: b.compiler(app)
+    meta.events(watch: .Calls{to: print}, (event) -> {
+        if event == .Checked(.Call(c)) -> meta.report(Note{text: "printed"}, at: c)
+    })
+    b.default(app)
+}
+
+run: fn() { shout(2) }

@@ -1,0 +1,7 @@
+# #6516 c3: `meta.report` raises only a value whose type implements
+# `Diagnostic`; any other value is refused before the build runs.
+fixture: fixtures/meta_report_tiers
+step: jet build plain.jet
+exit: nonzero
+stderr: ~ "E0905" # the refusal of a value without a Diagnostic impl
+stderr: ~ "does not implement `Diagnostic`" # it names what the value lacks

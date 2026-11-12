@@ -266,6 +266,44 @@ build_graph_rules_made: fn(session: &BuildSession, tool: BuildSessionValue, name
     assert_eq(before.start, 5)
 }
 
+// `meta.report(finding, at: c)` (`compiler.report`): the finding is kept in
+// call order with its code, tier, texts, file and span; a value of another
+// build, an unknown tier or a lost span records nothing.
+#Test("meta_report_keeps_each_finding_in_call_order") {
+    a := build_graph_rules_session(193)
+    b := build_graph_rules_session(194)
+    empty: build_graph_rules_list([String]{})
+    app: build_graph_rules_value(build_session_call(a, "add_executable", [BuildSessionValue]{.Text(value: "app"), empty, empty}, None, false, 1, 2))
+    other: build_graph_rules_value(build_session_call(b, "add_executable", [BuildSessionValue]{.Text(value: "other"), empty, empty}, None, false, 3, 4))
+    meta: build_graph_rules_value(build_session_call(a, "compiler", [BuildSessionValue]{app}, None, false, 5, 6))
+    foreign: build_graph_rules_value(build_session_call(b, "compiler", [BuildSessionValue]{other}, None, false, 7, 8))
+    texts: [BuildSessionValue]{.Text(value: "mypkg.NoPrintInLib"), .Text(value: "Tidy"), .Text(value: "library code prints"), .Text(value: "the caller owns the terminal"), .Text(value: "log it"), .Text(value: "main.jet")}
+    found := [BuildSessionValue]{meta.copy()}
+    loop text in texts -> found.push(text.copy())
+    found.push(.Span(start: 40, end: 48))
+    assert(build_graph_rules_ok(build_session_call(a, "compiler.report", found, None, false, 9, 10)))
+    stray := [BuildSessionValue]{foreign}
+    loop text in texts -> stray.push(text.copy())
+    stray.push(.Span(start: 50, end: 58))
+    assert(build_graph_rules_failed(build_session_call(a, "compiler.report", stray, None, false, 11, 12)))
+    untiered := found.copy()
+    untiered[2] = .Text(value: "Warning")
+    assert(build_graph_rules_failed(build_session_call(a, "compiler.report", untiered, None, false, 13, 14)))
+    unplaced := found.copy()
+    unplaced[7] = .Int(value: 40)
+    assert(build_graph_rules_failed(build_session_call(a, "compiler.report", unplaced, None, false, 15, 16)))
+    later := found.copy()
+    later[1] = .Text(value: "mypkg.Second")
+    assert(build_graph_rules_ok(build_session_call(a, "compiler.report", later, None, false, 17, 18)))
+    permit: a.storage.guard_read()
+    assert_eq(permit.value.findings.len(), 2)
+    assert_eq(permit.value.findings[0].code, "mypkg.NoPrintInLib")
+    assert_eq(permit.value.findings[0].tier, "Tidy")
+    assert_eq(permit.value.findings[0].module, "main.jet")
+    assert_eq(permit.value.findings[0].at_start, 40)
+    assert_eq(permit.value.findings[0].at_end, 48)
+    assert_eq(permit.value.findings[1].code, "mypkg.Second")
+}
 #Test("invalid_toolchain_probe_and_signer_specs_do_not_reserve_names") {
     session := build_graph_rules_session(89)
     bad_toolchain: build_session_call(session, "toolchain", [BuildSessionValue]{.Text(value: "cross"), .Text(value: "")}, None, false, 1, 2)
