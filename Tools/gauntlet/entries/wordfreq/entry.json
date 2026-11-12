@@ -42,7 +42,7 @@
         "E0121: `counts` was given away earlier, so it can't be used here",
         "exit 127: `./jet/build/main` not found (actual output was `build/main`)"
       ],
-      "notes": "Reads the declared #CLI path with core.files.read_bytes, splits on ASCII whitespace (tab through carriage return plus space) and counts tokens in a Map. Map.top_n(20) ranks by descending count with ascending-word ties, the contract's order, without sorting every entry."
+      "notes": "Reads the declared #CLI path with core.files.read (strict UTF-8), splits it with String.words() and tallies the words with Sequence.counts(). Map.top_n(20) ranks by descending count with ascending-word ties, the contract's order, without sorting every entry; the total is the sum of the counts."
     },
     "rust": {
       "author": "luna-max",
@@ -96,9 +96,9 @@
     }
   },
   "rewrite_provenance": {
-    "worker": "PortsLead",
+    "worker": "ScriptAPI",
     "variant": "jet",
-    "changed": "Ranked through Map.top_n(20) instead of to_list plus a full sort_by and a counted print loop, and printed the distinct count from the Map; the ASCII byte scan, strict UTF-8 token conversion, count updates, ranking order, totals, and output remain unchanged.",
+    "changed": "Tallied with files.read(path).words().counts() instead of the hand-written byte scan and Map increments, and summed the counts for the total; the strict UTF-8 read, ranking order and output remain unchanged.",
     "matched": "Same generated 2,000,000-token, 10,000-word ASCII corpus as every peer: consume every byte, split only on space and bytes 9 through 13, count exact tokens, rank by descending count with ascending-word ties, and emit the same 21 output lines.",
     "expected_output_sha256": "ab3c7cbf1c9ad386613e251b2294deace1d759b87cf2de68f7aab8379274bd14"
   }

@@ -122,7 +122,9 @@ rt_text_hash_fold: fn(hash: I64, word: I64) -> I64 {
 }
 
 // jet_string_words: Rust str::split_whitespace, the fields between runs of
-// Unicode White_Space. No field is empty, so blank text has none.
+// Unicode White_Space. No field is empty, so blank text has none. An ASCII
+// byte is tested in place (space and bytes 9 through 13 are its White_Space);
+// only a multi-byte scalar is decoded and looked up.
 #Export(c) jet_string_words: fn(value: I64, output: I64) -> I64 {
     bytes: rt_text_data(value)
     length: rt_text_len(value)
@@ -130,10 +132,13 @@ rt_text_hash_fold: fn(hash: I64, word: I64) -> I64 {
     inside := false
     at := I64{0}
     loop at < length {
-        space: unicode_is_white_space(rt_text_decode(wrapping(bytes + at)))
+        lead: rt_text_byte(wrapping(bytes + at))
+        ascii: lead < I64{128}
+        space: if ascii -> lead == I64{32} || (lead >= I64{9} && lead <= I64{13}) else -> unicode_is_white_space(rt_text_decode(wrapping(bytes + at)))
         if (!space && !inside) { count += I64{1} }
         inside = !space
-        at += rt_text_width(wrapping(bytes + at))
+        width: if ascii -> I64{1} else -> rt_text_width(wrapping(bytes + at))
+        at += width
     }
     if (count > I64{1152921504606846975}) {
         rt_text_capacity_stop()
@@ -145,14 +150,17 @@ rt_text_hash_fold: fn(hash: I64, word: I64) -> I64 {
     index := I64{0}
     at = I64{0}
     loop at < length {
-        space: unicode_is_white_space(rt_text_decode(wrapping(bytes + at)))
+        lead: rt_text_byte(wrapping(bytes + at))
+        ascii: lead < I64{128}
+        space: if ascii -> lead == I64{32} || (lead >= I64{9} && lead <= I64{13}) else -> unicode_is_white_space(rt_text_decode(wrapping(bytes + at)))
         if (space && start >= I64{0}) {
             rt_text_store(wrapping(words + index * I64{8}), rt_text_slice(value, start, at))
             index += I64{1}
             start = I64{-1}
         }
         if (!space && start < I64{0}) { start = at }
-        at += rt_text_width(wrapping(bytes + at))
+        width: if ascii -> I64{1} else -> rt_text_width(wrapping(bytes + at))
+        at += width
     }
     if (start >= I64{0}) { rt_text_store(wrapping(words + index * I64{8}), rt_text_slice(value, start, length)) }
     count

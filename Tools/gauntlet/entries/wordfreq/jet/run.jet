@@ -1,6 +1,6 @@
 use files: core.files
 
-// Word counts over ASCII-whitespace tokens. top_n ranks by count
+// Word counts over whitespace-separated words. top_n ranks by count
 // (descending) and word, the order the contract asks for.
 #CLI
 Args: struct {
@@ -8,31 +8,7 @@ Args: struct {
 }
 
 run: fn(args: Args) IOError! {
-    bytes: files.read_bytes(args.path) ?? return
-    counts := [String:Int]{}
-    total := 0
-    token := [U8]{}
-    ascii_space: U8{32}
-    ascii_ws_start: U8{9}
-    ascii_ws_end: U8{13}
-    loop byte in bytes {
-        if {
-            byte == ascii_space || (byte >= ascii_ws_start && byte <= ascii_ws_end) -> {
-                if !token.is_empty() {
-                    word: String.from_bytes(token) ?? panic("invalid utf8")
-                    counts[word] = (counts.get(word) ?? 0) + 1
-                    total += 1
-                    token.clear()
-                }
-            }
-            else -> token.push(byte)
-        }
-    }
-    if !token.is_empty() {
-        word: String.from_bytes(token) ?? panic("invalid utf8")
-        counts[word] = (counts.get(word) ?? 0) + 1
-        total += 1
-    }
+    counts: files.read(args.path).words().counts()
     loop item in counts.top_n(20) -> print("{item.value} {item.key}")
-    print("distinct {counts.len()} total {total}")
+    print("distinct {counts.len()} total {counts.values().sum()}")
 }
