@@ -1,0 +1,238 @@
+# A #CLI struct with 1, 2, 3 or 6 command fns checks with no warning: the
+# generated dispatch is one `if __command == { … }` table, not adjacent guards
+# (three or more once warned L0514 SameSubjectDispatch on code the user never
+# wrote). A struct without commands gets a parser with one table per argv
+# form, so many options and flags check clean too. Each command and form runs
+# on every tier.
+fixture: fixtures/cli_commands
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check one.jet
+exit: 0
+stdout: = ""
+stderr: = "ok: `one.jet` has no problems\n"
+step: jet check two.jet
+exit: 0
+stdout: = ""
+stderr: = "ok: `two.jet` has no problems\n"
+step: jet check three.jet
+exit: 0
+stdout: = ""
+stderr: = "ok: `three.jet` has no problems\n"
+step: jet check six.jet
+exit: 0
+stdout: = ""
+stderr: = "ok: `six.jet` has no problems\n"
+step: jet check options.jet
+exit: 0
+stdout: = ""
+stderr: = "ok: `options.jet` has no problems\n"
+step: jet run --optimize=none one.jet -- hello ada
+exit: 0
+stdout: = "hello ada\n"
+stderr: empty
+step: jet run --optimize=basic one.jet -- hello ada
+exit: 0
+stdout: = "hello ada\n"
+stderr: empty
+step: jet run --optimize=full one.jet -- hello ada
+exit: 0
+stdout: = "hello ada\n"
+stderr: empty
+step: jet run --optimize=none two.jet -- add buy-milk --due fri
+exit: 0
+stdout: = "add buy-milk due fri\n"
+stderr: empty
+step: jet run --optimize=basic two.jet -- add buy-milk --due fri
+exit: 0
+stdout: = "add buy-milk due fri\n"
+stderr: empty
+step: jet run --optimize=full two.jet -- add buy-milk --due fri
+exit: 0
+stdout: = "add buy-milk due fri\n"
+stderr: empty
+step: jet run --optimize=none two.jet -- login tok
+exit: 0
+stdout: = "login tok\n"
+stderr: empty
+step: jet run --optimize=basic two.jet -- login tok
+exit: 0
+stdout: = "login tok\n"
+stderr: empty
+step: jet run --optimize=full two.jet -- login tok
+exit: 0
+stdout: = "login tok\n"
+stderr: empty
+step: jet run --optimize=none three.jet -- --greeting hey greet ada
+exit: 0
+stdout: = "hey ada\n"
+stderr: empty
+step: jet run --optimize=basic three.jet -- --greeting hey greet ada
+exit: 0
+stdout: = "hey ada\n"
+stderr: empty
+step: jet run --optimize=full three.jet -- --greeting hey greet ada
+exit: 0
+stdout: = "hey ada\n"
+stderr: empty
+step: jet run --optimize=none three.jet -- count --times 5
+exit: 0
+stdout: = "count 5\n"
+stderr: empty
+step: jet run --optimize=basic three.jet -- count --times 5
+exit: 0
+stdout: = "count 5\n"
+stderr: empty
+step: jet run --optimize=full three.jet -- count --times 5
+exit: 0
+stdout: = "count 5\n"
+stderr: empty
+step: jet run --optimize=none three.jet -- stop
+exit: 0
+stdout: = "stop hi\n"
+stderr: empty
+step: jet run --optimize=basic three.jet -- stop
+exit: 0
+stdout: = "stop hi\n"
+stderr: empty
+step: jet run --optimize=full three.jet -- stop
+exit: 0
+stdout: = "stop hi\n"
+stderr: empty
+step: jet run --optimize=none six.jet -- --config x show
+exit: 0
+stdout: = "show x\n"
+stderr: empty
+step: jet run --optimize=basic six.jet -- --config x show
+exit: 0
+stdout: = "show x\n"
+stderr: empty
+step: jet run --optimize=full six.jet -- --config x show
+exit: 0
+stdout: = "show x\n"
+stderr: empty
+step: jet run --optimize=none six.jet -- open a.txt
+exit: 0
+stdout: = "open a.txt\n"
+stderr: empty
+step: jet run --optimize=basic six.jet -- open a.txt
+exit: 0
+stdout: = "open a.txt\n"
+stderr: empty
+step: jet run --optimize=full six.jet -- open a.txt
+exit: 0
+stdout: = "open a.txt\n"
+stderr: empty
+step: jet run --optimize=none six.jet -- repeat hi
+exit: 0
+stdout: = "repeat hi 3\n"
+stderr: empty
+step: jet run --optimize=basic six.jet -- repeat hi
+exit: 0
+stdout: = "repeat hi 3\n"
+stderr: empty
+step: jet run --optimize=full six.jet -- repeat hi
+exit: 0
+stdout: = "repeat hi 3\n"
+stderr: empty
+step: jet run --optimize=none six.jet -- tag --label x
+exit: 0
+stdout: = "tag x\n"
+stderr: empty
+step: jet run --optimize=basic six.jet -- tag --label x
+exit: 0
+stdout: = "tag x\n"
+stderr: empty
+step: jet run --optimize=full six.jet -- tag --label x
+exit: 0
+stdout: = "tag x\n"
+stderr: empty
+step: jet run --optimize=none six.jet -- rename a b
+exit: 0
+stdout: = "rename a b\n"
+stderr: empty
+step: jet run --optimize=basic six.jet -- rename a b
+exit: 0
+stdout: = "rename a b\n"
+stderr: empty
+step: jet run --optimize=full six.jet -- rename a b
+exit: 0
+stdout: = "rename a b\n"
+stderr: empty
+step: jet run --optimize=none six.jet -- stop
+exit: 0
+stdout: = "stop\n"
+stderr: empty
+step: jet run --optimize=basic six.jet -- stop
+exit: 0
+stdout: = "stop\n"
+stderr: empty
+step: jet run --optimize=full six.jet -- stop
+exit: 0
+stdout: = "stop\n"
+stderr: empty
+step: jet run --optimize=none options.jet -- --name=ada -c 3 --scale 2.5 --label=x -l --quiet
+exit: 0
+stdout: = "ada 3 2.5 x true true false\n"
+stderr: empty
+step: jet run --optimize=basic options.jet -- --name=ada -c 3 --scale 2.5 --label=x -l --quiet
+exit: 0
+stdout: = "ada 3 2.5 x true true false\n"
+stderr: empty
+step: jet run --optimize=full options.jet -- --name=ada -c 3 --scale 2.5 --label=x -l --quiet
+exit: 0
+stdout: = "ada 3 2.5 x true true false\n"
+stderr: empty
+step: jet run --optimize=none options.jet -- -n bo --count=4 -s1.5 --dry
+exit: 0
+stdout: = "bo 4 1.5 none false false true\n"
+stderr: empty
+step: jet run --optimize=basic options.jet -- -n bo --count=4 -s1.5 --dry
+exit: 0
+stdout: = "bo 4 1.5 none false false true\n"
+stderr: empty
+step: jet run --optimize=full options.jet -- -n bo --count=4 -s1.5 --dry
+exit: 0
+stdout: = "bo 4 1.5 none false false true\n"
+stderr: empty
+step: jet run --optimize=none six.jet -- nope
+exit: 2
+stdout: empty
+stderr: ~ "unknown command `nope`" # an unknown command reaches the else of the table
+step: jet run --optimize=full six.jet -- nope
+exit: 2
+stdout: empty
+stderr: ~ "unknown command `nope`" # an unknown command reaches the else of the table
+step: jet run --optimize=none options.jet -- --nope
+exit: 2
+stdout: empty
+stderr: ~ "unknown option `--nope`" # an unknown `--name` reaches the else of the `--name` table
+step: jet run --optimize=full options.jet -- --nope
+exit: 2
+stdout: empty
+stderr: ~ "unknown option `--nope`" # an unknown `--name` reaches the else of the `--name` table
+step: jet run --optimize=none options.jet -- --loud=yes
+exit: 2
+stdout: empty
+stderr: ~ "--loud is a flag; it takes no value (got `=yes`)" # a flag given a value is the flag arm of the `--name=value` table
+step: jet run --optimize=full options.jet -- --loud=yes
+exit: 2
+stdout: empty
+stderr: ~ "--loud is a flag; it takes no value (got `=yes`)" # a flag given a value is the flag arm of the `--name=value` table
+step: jet run --optimize=none options.jet -- -z
+exit: 2
+stdout: empty
+stderr: ~ "unknown option `-z`" # an unknown short reaches the else of the `-x` table
+step: jet run --optimize=full options.jet -- -z
+exit: 2
+stdout: empty
+stderr: ~ "unknown option `-z`" # an unknown short reaches the else of the `-x` table
+step: jet run --optimize=none options.jet -- --count x
+exit: 2
+stdout: empty
+stderr: ~ "`--count` expects an Int, got `x`" # a bad Int still refuses inside its arm
+step: jet run --optimize=full options.jet -- --count x
+exit: 2
+stdout: empty
+stderr: ~ "`--count` expects an Int, got `x`" # a bad Int still refuses inside its arm

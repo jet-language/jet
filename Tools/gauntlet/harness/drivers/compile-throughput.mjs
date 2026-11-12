@@ -3,24 +3,33 @@
 // Tools/gauntlet/entries/compile-throughput/driver/run.jet is the twin on the
 // kit's CompileThroughput module.
 //
-//   node compile-throughput.mjs contract AXIS | adapt AXIS JET
+//   node compile-throughput.mjs consts | contract AXIS | adapt AXIS JET
 //
-// AXIS is a JSON file holding an axes.compile_throughput cell (`null` for a
-// missing one). `adapt` runs the adapter in the working directory: the run
-// directory is `run` and the repository the working directory itself.
+// `consts` prints the schema and harness path an axis must name. AXIS is a
+// JSON file holding an axes.compile_throughput cell (`null` for a missing
+// one). `adapt` runs the adapter in the working directory: the run directory
+// is `run` and the repository the working directory itself.
 import fs from 'node:fs';
-import { compileThroughputContractIssues, runCompileThroughputAxisAdapter } from '../compile-throughput.mjs';
+import {
+  COMPILE_THROUGHPUT_HARNESS,
+  COMPILE_THROUGHPUT_SCHEMA,
+  compileThroughputContractIssues,
+  runCompileThroughputAxisAdapter,
+} from '../compile-throughput.mjs';
 
 const [command, file, jet] = process.argv.slice(2);
-const axis = JSON.parse(fs.readFileSync(file, 'utf8'));
-if (command === 'contract') {
-  const issues = compileThroughputContractIssues(axis);
+const axis = () => JSON.parse(fs.readFileSync(file, 'utf8'));
+if (command === 'consts') {
+  console.log(`schema ${COMPILE_THROUGHPUT_SCHEMA}`);
+  console.log(`harness ${COMPILE_THROUGHPUT_HARNESS}`);
+} else if (command === 'contract') {
+  const issues = compileThroughputContractIssues(axis());
   for (const issue of issues) console.log(issue);
   console.log(`${issues.length} issues`);
 } else if (command === 'adapt') {
-  const report = await runCompileThroughputAxisAdapter(axis, { runDir: 'run', jetBin: jet, repoDir: process.cwd() });
+  const report = await runCompileThroughputAxisAdapter(axis(), { runDir: 'run', jetBin: jet, repoDir: process.cwd() });
   console.log(JSON.stringify(report, null, 2));
 } else {
-  console.error('usage: node compile-throughput.mjs contract AXIS | adapt AXIS JET');
+  console.error('usage: node compile-throughput.mjs consts | contract AXIS | adapt AXIS JET');
   process.exit(64);
 }

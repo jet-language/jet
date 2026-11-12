@@ -1,0 +1,32 @@
+// Six command fns with mixed inputs: no input, a positional String, an Int
+// option, an optional String, two positionals, and the shared field.
+#CLI
+Commands: struct {
+    #Doc("the shared config") config: String{"default"}
+
+    #Doc("show the config") show: fn(self) {
+        print("show {self.config}")
+    }
+
+    #Doc("open a file") open: fn(self, path: String) {
+        print("open {path}")
+    }
+
+    #Doc("repeat a word") repeat: fn(self, word: String, times: Int{3}) {
+        print("repeat {word} {times}")
+    }
+
+    #Doc("tag an item") tag: fn(self, label: String?) {
+        print("tag {label ?? "none"}")
+    }
+
+    #Doc("rename a file") rename: fn(self, from: String, to: String) {
+        print("rename {from} {to}")
+    }
+
+    #Doc("stop") stop: fn(self) {
+        print("stop")
+    }
+}
+
+run: fn(_args: Commands) {}

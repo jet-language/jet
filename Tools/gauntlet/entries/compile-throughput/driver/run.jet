@@ -2,11 +2,12 @@
 // twin of Tools/gauntlet/harness/drivers/compile-throughput.mjs: one command
 // per compile-throughput.mjs export.
 //
-//   jet driver contract AXIS | adapt AXIS JET
+//   jet driver consts | contract AXIS | adapt AXIS JET
 //
-// AXIS is a JSON file holding an axes.compile_throughput cell (`null` for a
-// missing one). `adapt` runs the adapter in the working directory: the run
-// directory is `run` and the repository the working directory itself.
+// `consts` prints the schema and harness path an axis must name. AXIS is a
+// JSON file holding an axes.compile_throughput cell (`null` for a missing
+// one). `adapt` runs the adapter in the working directory: the run directory
+// is `run` and the repository the working directory itself.
 package: {
     name: "compile_throughput_driver"
     version: "0.0.1"
@@ -17,7 +18,7 @@ package: {
 
 use {
     files: core.files
-    jet_gauntlet_kit.[AxisRun, compile_throughput_contract_issues, read_json, run_compile_throughput_adapter]
+    jet_gauntlet_kit.[AxisRun, COMPILE_THROUGHPUT_HARNESS, COMPILE_THROUGHPUT_SCHEMA, compile_throughput_contract_issues, read_json, run_compile_throughput_adapter]
     json: core.encoding.json
     process: core.process
 }
@@ -29,6 +30,10 @@ axis_in: fn(file: String) -> Dyn {
 
 #CLI
 Driver: struct {
+    #Doc("COMPILE_THROUGHPUT_SCHEMA and COMPILE_THROUGHPUT_HARNESS") consts: fn(self) {
+        print("schema {COMPILE_THROUGHPUT_SCHEMA}\nharness {COMPILE_THROUGHPUT_HARNESS}")
+    }
+
     #Doc("compileThroughputContractIssues of the cell in AXIS: each issue, then their count") contract: fn(self, file: String) {
         issues: compile_throughput_contract_issues(axis_in(file))
         print(issues.concat(["{issues.len()} issues"]).join("\n"))
