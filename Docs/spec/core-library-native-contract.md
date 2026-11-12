@@ -6,7 +6,7 @@ This specification is for Core maintainers, provider authors, and reviewers. It
 defines where Core owns semantics, where a host may provide a typed leaf, how
 capabilities and effects are exposed, and what evidence makes an export
 complete. The declaration registry is
-[`Core.jet`](../../Compiler/Prelude/Core.jet); Jet source bodies
+[`Core.rows`](../../Compiler/Prelude/Core.rows); Jet source bodies
 are under [`Core/`](../../Core/). The compiler build computes its call and
 module tables from those inputs with the
 [Core declaration parser](../../Compiler/JetFoundation/Source/CoreDeclarations/).
@@ -116,7 +116,7 @@ Core modules own public behavior. A Core API must be useful for real programs,
 safe by default, explicit about effects and authority, and complete enough to
 serve its intended domain. The contract applies to every module row, exported
 function, exported type, root type, format row, namespace-only row, and
-explicit dispatcher row declared in `Core.jet`.
+explicit dispatcher row declared in `Core.rows`.
 
 Each declaration has a meaningful role. A metadata-only declaration identifies a
 compiler or runtime fact and has a generated consistency check; it cannot hide
@@ -131,7 +131,7 @@ still needs a contract, an error meaning, and evidence appropriate to its role.
 
 ## Source authority and generated projections
 
-`Core.jet` is the authority for Core's bootstrap dependencies, module rows,
+`Core.rows` is the authority for Core's bootstrap dependencies, module rows,
 exports, root types, namespace-only declarations, format rows, and explicit
 native-dispatch metadata. A `source_module` row names the canonical Jet source
 path and the members that it owns. The corresponding `Core/**/*.jet` file owns
@@ -177,7 +177,7 @@ the source caller, not a second evaluator arm, owns the FS.Write preflight.
 
 The registry tables are projections, not a second API catalog. The main one,
 [`CoreCallRows.jet`](../../Compiler/JetFoundation/Source/Registry/CoreCallRows.jet),
-is computed from Core.jet when the compiler builds; the generated projections
+is computed from Core.rows when the compiler builds; the generated projections
 in the Prelude are never hand-edited. Native runtime
 files under [`Compiler/JetRuntime`](../../Compiler/JetRuntime/) provide
 registered leaves and adapters; they do not become an independent public API

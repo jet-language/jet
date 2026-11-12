@@ -656,7 +656,7 @@ Core sources built into it ([`CoreSources.jet`](../../../Compiler/JetCli/Source/
 see [Environment variables](environment.md)). A Core file's `embed_bytes` and
 `embed_file` read the named file beside it in the toolchain tree, or, with no
 tree, the copy of it built into `jet`: the build embeds every file a Core
-source embeds. The compiler build reads `Compiler/Prelude/Core.jet`, the Core
+source embeds. The compiler build reads `Compiler/Prelude/Core.rows`, the Core
 source rows, the Syntax files and the runtime units from the toolchain tree and
 computes the Core-declaration tables from them
 ([`CoreDeclarations`](../../../Compiler/JetFoundation/Source/CoreDeclarations)):

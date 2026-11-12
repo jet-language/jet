@@ -18,16 +18,16 @@
 // A Compiler/Prelude source is checked as the compiler embeds it (#6670 c1).
 // First the check that holds the compiler's copies of it equal to it: `jet
 // check` of Compiler/JetFoundation/Source/Registry/CoreCallRows.jet, whose
-// comptime tables read Core.jet and CoreSourceParts.tsv, for those two;
-// CoreSourceRows.jet for Effects.jet, the Core surface ledger for CoreSurfaceInventory.jet,
+// build-time tables read Core.rows and CoreSourceParts.tsv, for those two;
+// CoreSourceRows.jet for Effects.jet, the Core surface ledger for CoreSurfaceInventory.rows,
 // DiagnosticRows.jet for Diagnostics.jet, OwnedTraitRows.jet for Traits.jet
 // and core/prelude.jet, and Compiler/Toolchain/PreludeSources.jet (the
 // `prelude-sources` step of `jet build Compiler`, run from Compiler/) for
 // Markers.jet, Derives.jet, Errors.jet and Units.jet. Then every Prelude Jet
-// file the compiler embeds gets `jet check --prelude`: all but the inputs
-// only a generator reads (Core.jet, CoreSurfaceInventory.jet and the readers'
-// core/prelude.jet); a jet without that mode prints PRELUDE UNCHECKED and
-// never CHECK OK.
+// file the compiler embeds gets `jet check --prelude`: every `.jet` file but
+// the readers' core/prelude.jet, which the compiler does not embed; a jet
+// without that mode prints PRELUDE UNCHECKED and never CHECK OK. A `.rows`
+// or `.tsv` table is never Jet: its generator check is its whole check.
 // A Core source is checked as Core, the library that may define `__` names:
 // a public module or a private part (its row in `jet inspect structure core
 // --json`, the compiler's CORE_SOURCE_OWNED_ROWS) as the
@@ -249,19 +249,19 @@ runtime_generators: fn(repo: String) -[Env, Exec, FS, IO, Time.Wait]> Int Never!
 // --- Compiler/Prelude -------------------------------------------------------
 
 PRELUDE_TREE: "Compiler/Prelude"
-// The inputs only a generator reads (row DSLs and the readers' prelude): its
-// check is their whole check.
-PRELUDE_GENERATOR_INPUTS: [String]{"Core.jet", "CoreSourceParts.tsv", "CoreSurfaceInventory.jet", "core/prelude.jet"}
+// The readers' prelude: a Jet module only a generator reads, which the
+// compiler does not embed, so its generator check is its whole check.
+PRELUDE_READERS_MODULE: "core/prelude.jet"
 PRELUDE_UNCHECKED: "PRELUDE UNCHECKED: needs a seed with the prelude check mode"
-// The compiler source whose comptime tables read Core.jet and
+// The compiler source whose build-time tables read Core.rows and
 // CoreSourceParts.tsv (Compiler/JetFoundation/Source/CoreDeclarations).
 CORE_DECLARATION_TABLES: "Compiler/JetFoundation/Source/Registry/CoreCallRows.jet"
 
-// Whether `relative` is a Prelude source LaneCheck checks as embedded: a
-// `.jet` or `.tsv` file under Compiler/Prelude other than its package.jet.
+// Whether `relative` is a Prelude source LaneCheck checks: a `.jet`, `.rows`
+// or `.tsv` file under Compiler/Prelude other than its package.jet.
 prelude_source: fn(relative: String) -> Bool Never! {
     if !relative.starts_with("{PRELUDE_TREE}/") || relative.removeprefix("{PRELUDE_TREE}/") == "package.jet" -> return false
-    relative.ends_with(".jet") || relative.ends_with(".tsv")
+    relative.ends_with(".jet") || relative.ends_with(".rows") || relative.ends_with(".tsv")
 }
 
 // The command whose `--check` holds the compiler's copies of Prelude file
@@ -271,9 +271,9 @@ prelude_source: fn(relative: String) -> Bool Never! {
 // the checkout.
 prelude_generator: fn(name: String, jet: String) -> [String] Never! {
     if name == {
-        "Core.jet" | "CoreSourceParts.tsv" -> [String]{jet, "check", CORE_DECLARATION_TABLES}
+        "Core.rows" | "CoreSourceParts.tsv" -> [String]{jet, "check", CORE_DECLARATION_TABLES}
         "Effects.jet" -> [String]{jet, "Tools/agent/CoreSourceRows.jet", "--check"}
-        "CoreSurfaceInventory.jet" -> [String]{jet, "Tools/agent/CoreSurfaceLedger.jet", "--check"}
+        "CoreSurfaceInventory.rows" -> [String]{jet, "Tools/agent/CoreSurfaceLedger.jet", "--check"}
         "Diagnostics.jet" -> [String]{jet, "Tools/agent/DiagnosticRows.jet", "--check"}
         "Traits.jet" | "core/prelude.jet" -> [String]{jet, "Tools/agent/OwnedTraitRows.jet", "--check"}
         "Markers.jet" | "Derives.jet" | "Errors.jet" | "Units.jet" -> [String]{jet, "Toolchain/PreludeSources.jet", "--check"}
@@ -289,8 +289,8 @@ prelude_mode: fn(repo: String, jet: String) -[Exec, Time.Wait]> Bool Never! {
 }
 
 // A Prelude source (`relative`, at `target`): its generator check, then, for
-// a Prelude Jet file the compiler embeds (no generator-only input), `jet check
-// --prelude`. None when that file needs the mode and `jet` has none.
+// a Prelude Jet file the compiler embeds, `jet check --prelude`. None when
+// that file needs the mode and `jet` has none.
 prelude_check: fn(repo: String, jet: String, relative: String, target: String, scratch: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Ran? Never! {
     name: relative.removeprefix("{PRELUDE_TREE}/")
     generator: prelude_generator(name, jet)
@@ -301,7 +301,7 @@ prelude_check: fn(repo: String, jet: String, relative: String, target: String, s
         text = ran.text
         generated = ran.code
     }
-    if !name.ends_with(".jet") || PRELUDE_GENERATOR_INPUTS.contains(name) -> return Val(Ran{code: generated, text: text})
+    if !name.ends_with(".jet") || name == PRELUDE_READERS_MODULE -> return Val(Ran{code: generated, text: text})
     // A generator failure is reported beside the prelude check, not instead of it.
     if !prelude_mode(repo, jet) {
         if generated != 0 -> return Val(Ran{code: generated, text: text})
@@ -607,7 +607,7 @@ core_probe_source: fn(name: String) -> String Never! {
 core_check: fn(repo: String, jet: String, relative: String, target: String, scratch: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Ran Never! {
     asked: process.cmd([String]{jet, "inspect", "structure", "core", "--json"}).cwd(repo).env("NO_COLOR", "1").output_limit(268435456).run() ?? return Ran{code: 1, text: "lane-check: `{jet} inspect structure core --json` could not start: {err}\n"}
     if asked.code != 0 || asked.signal != None -> return Ran{code: 1, text: "{process.combined_output(asked)}\nlane-check: `{jet} inspect structure core --json` failed\n"}
-    row: core_row(asked.output, relative) ?? return Ran{code: 1, text: "lane-check: {relative} is no Core source of `{jet} inspect structure core --json`; declare it in Compiler/Prelude/Core.jet or CoreSourceParts.tsv and rebuild the compiler\n"}
+    row: core_row(asked.output, relative) ?? return Ran{code: 1, text: "lane-check: {relative} is no Core source of `{jet} inspect structure core --json`; declare it in Compiler/Prelude/Core.rows or CoreSourceParts.tsv and rebuild the compiler\n"}
     if row.runtime -> return run_check(repo, jet, [String]{"check", target}, scratch)
     dir: "{scratch}/core-probe.{sys.pid()}"
     files.create_dir_all(dir) ?? return Ran{code: 1, text: "lane-check: cannot create {dir}: {err}\n"}
@@ -1092,17 +1092,16 @@ first_hit: fn(dir: String, file: String, args: [String], flags: [String]) -[Exec
 }
 
 #Test("a Prelude source is routed to its generator check and the prelude mode") {
-    assert(prelude_source("Compiler/Prelude/Traits.jet") && prelude_source("Compiler/Prelude/CoreSourceParts.tsv") && prelude_source("Compiler/Prelude/core/prelude.jet"))
+    assert(prelude_source("Compiler/Prelude/Traits.jet") && prelude_source("Compiler/Prelude/CoreSourceParts.tsv") && prelude_source("Compiler/Prelude/Core.rows") && prelude_source("Compiler/Prelude/core/prelude.jet"))
     assert(!prelude_source("Compiler/Prelude/package.jet") && !prelude_source("Compiler/Prelude/Assets/host.js") && !prelude_source("Compiler/Prelude") && !prelude_source("Compiler/JetCli/Source/Cli/Front.jet"))
     assert_eq(prelude_generator("Effects.jet", "/j"), [String]{"/j", "Tools/agent/CoreSourceRows.jet", "--check"})
-    assert_eq(prelude_generator("Core.jet", "/j"), [String]{"/j", "check", CORE_DECLARATION_TABLES})
+    assert_eq(prelude_generator("Core.rows", "/j"), [String]{"/j", "check", CORE_DECLARATION_TABLES})
     assert_eq(prelude_generator("CoreCallExtensions.jet", "/j"), [String]{})
-    assert_eq(prelude_generator("CoreSurfaceInventory.jet", "/j"), [String]{"/j", "Tools/agent/CoreSurfaceLedger.jet", "--check"})
+    assert_eq(prelude_generator("CoreSurfaceInventory.rows", "/j"), [String]{"/j", "Tools/agent/CoreSurfaceLedger.jet", "--check"})
     assert_eq(prelude_generator("Diagnostics.jet", "/j")[1], "Tools/agent/DiagnosticRows.jet")
     assert_eq(prelude_generator("core/prelude.jet", "/j")[1], "Tools/agent/OwnedTraitRows.jet")
     assert_eq(prelude_generator("Units.jet", "/j")[1], "Toolchain/PreludeSources.jet")
     assert_eq(prelude_generator("Facts.jet", "/j").len(), 0)
-    assert(PRELUDE_GENERATOR_INPUTS.contains("core/prelude.jet") && PRELUDE_GENERATOR_INPUTS.contains("Core.jet") && !PRELUDE_GENERATOR_INPUTS.contains("Traits.jet"))
 }
 
 #Test("a Core source checks as its module, its part's owner, or its runtime unit") {

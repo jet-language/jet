@@ -3,7 +3,7 @@
 Use this record when implementing, reviewing, or documenting Jet's encoding
 contracts. It defines the shared `Dyn` and bounded reader/writer model,
 then the selected wire formats and decoder policies. Executable names and
-carriers are registered in [`Core.jet`](../../Compiler/Prelude/Core.jet)
+carriers are registered in [`Core.rows`](../../Compiler/Prelude/Core.rows)
 and sourced from [`Core/Encoding`](../../Core/Encoding/Encoding.jet); the
 native raw leaves are in
 [`RouteAEncoding.jet`](../../Compiler/JetRuntime/Source/RouteAEncoding.jet)

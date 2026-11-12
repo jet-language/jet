@@ -1,16 +1,16 @@
-// What Compiler/Prelude/Core.jet declares, read while the compiler builds
+// What Compiler/Prelude/Core.rows declares, read while the compiler builds
 // (CORE_DECLARATIONS): its closed line grammar of `bootstrap`, `root_types`,
 // `namespace_only`, `format_row`, `dispatcher_row`, `source_module` and
 // `module` lines, the private parts of Compiler/Prelude/CoreSourceParts.tsv and
 // the runtime units (`Core/<area>/Runtime/**/<Unit>.jet`). The Core tables
 // (CORE_SOURCE_OWNED_ROWS, CORE_CALLS, CORE_MODULE_EXPORTS, CORE_ENUM_ROWS,
-// CORE_MODULE_DECLARATIONS) are computed from it; nothing else reads Core.jet.
+// CORE_MODULE_DECLARATIONS) are computed from it; nothing else reads Core.rows.
 // A declaration that breaks the grammar or the checks below stops the build,
 // naming the file and line. The checks that read the Core sources the
 // declarations name run where jet_cli embeds those sources
 // (core_declarations_checked_sources).
 
-CORE_DECLARATIONS_CORE_PATH: "Compiler/Prelude/Core.jet"
+CORE_DECLARATIONS_CORE_PATH: "Compiler/Prelude/Core.rows"
 CORE_DECLARATIONS_PARTS_PATH: "Compiler/Prelude/CoreSourceParts.tsv"
 CORE_DECLARATIONS_SURFACE_PATH: "Compiler/JetFoundation/Data/Syntax/CoreSurface.jet"
 
@@ -31,7 +31,7 @@ CoreDeclarationType: struct {
     from_module: String
 }
 
-// One `module` line; `line` is its Core.jet line.
+// One `module` line; `line` is its Core.rows line.
 CoreDeclarationModule: struct {
     name: String
     members: [String]
@@ -46,8 +46,8 @@ CoreBootstrapStep: struct {
 }
 
 // One CORE_SOURCE_OWNED_ROWS row before its type exports are looked up: a
-// Core.jet `source_module` line (`line` is its Core.jet line), a private part
-// or a runtime unit (`line` 0). `owned_types` are a Core.jet row's
+// Core.rows `source_module` line (`line` is its Core.rows line), a private part
+// or a runtime unit (`line` 0). `owned_types` are a Core.rows row's
 // source-owned nominals.
 CoreDeclarationSource: struct {
     module_name: String
@@ -62,7 +62,7 @@ CoreDeclarationSource: struct {
 }
 
 // One `dispatcher_row`: its kind, its module ("" for `-`) and member, its
-// Core.jet line, the Rust constructor its expression starts with and the
+// Core.rows line, the Rust constructor its expression starts with and the
 // record the expression builds.
 CoreDeclarationDispatcher: struct {
     kind: String
@@ -81,7 +81,7 @@ CoreDeclarationFormat: struct {
     line: Int
 }
 
-// Everything Core.jet declares, in declaration order, every `from()` type
+// Everything Core.rows declares, in declaration order, every `from()` type
 // resolved to its canonical definition, with the parts and runtime units.
 CoreDeclarations: struct {
     source_rows: [CoreDeclarationSource]
@@ -95,7 +95,7 @@ CoreDeclarations: struct {
     formats: [CoreDeclarationFormat]
 }
 
-// One word or bracketed body of a Core.jet line and the byte after it.
+// One word or bracketed body of a Core.rows line and the byte after it.
 CoreDeclTake: struct {
     text: String
     end: Int
@@ -117,15 +117,15 @@ CORE_DECLARATIONS: #run {
     )
 }
 
-// Core.jet's bootstrap steps, in order (`jet inspect structure core`).
+// Core.rows's bootstrap steps, in order (`jet inspect structure core`).
 CORE_BOOTSTRAP_STEPS: #run CORE_DECLARATIONS.bootstraps
 
-// Core.jet's `root_types`: the Core value types a bare spelling names wherever
+// Core.rows's `root_types`: the Core value types a bare spelling names wherever
 // Core is loaded, so a parameterless Core alias of one of them stays a
 // candidate owner of that bare name.
 CORE_ROOT_TYPES: #run CORE_DECLARATIONS.root_types
 
-// Core.jet's `module` lines, in order, every type resolved.
+// Core.rows's `module` lines, in order, every type resolved.
 CORE_MODULE_DECLARATIONS: #run core_declarations_modules(CORE_DECLARATIONS)
 
 // The declarations, or the build stops with what is wrong.
@@ -246,7 +246,7 @@ core_decl_syntax_constants: fn(syntax: [CoreDeclarationFile]) -> [String: String
     Ok(constants)
 }
 
-// ---- Core.jet line grammar ----------------------------------------------
+// ---- Core.rows line grammar ----------------------------------------------
 
 // The first byte after the whitespace at byte `at`, or -1 when none is there.
 core_decl_after_space: fn(bytes: [U8], at: Int) -> Int Never! {
@@ -355,7 +355,7 @@ core_decl_module_line: fn(line: String, at: Int) -> [String]? Never! {
     Val([String]{name.text, exports.text, types.text, dependencies.text})
 }
 
-// A Core.jet list body as declaration names (`[A-Za-z_][A-Za-z0-9_!?]*`).
+// A Core.rows list body as declaration names (`[A-Za-z_][A-Za-z0-9_!?]*`).
 core_decl_core_names: fn(list: String, context: String) -> [String] CoreDeclarationError! {
     values: core_decl_names(list)
     loop value in values {
@@ -364,7 +364,7 @@ core_decl_core_names: fn(list: String, context: String) -> [String] CoreDeclarat
     Ok(values)
 }
 
-// A Core.jet list body as module paths (`[A-Za-z_][A-Za-z0-9_.]*`).
+// A Core.rows list body as module paths (`[A-Za-z_][A-Za-z0-9_.]*`).
 core_decl_core_paths: fn(list: String, context: String) -> [String] CoreDeclarationError! {
     values: core_decl_names(list)
     loop value in values {
@@ -472,7 +472,7 @@ core_decl_dispatcher: fn(groups: [String], expression: String, number: Int, cons
     if kind == "receiver" && written_module != "-" -> return Err(core_decl_fail("receiver dispatcher row must use `-` for its module"))
     if kind != "receiver" && !core_decl_is_name(module_name, ".") -> return Err(core_decl_fail("invalid dispatcher module `{module_name}`"))
     if !core_decl_is_name(member, "!?") -> return Err(core_decl_fail("invalid dispatcher member `{member}`"))
-    evaluated: core_decl_call_record(expression, "Core.jet line {number}", constants) ?? return Err(err)
+    evaluated: core_decl_call_record(expression, "Core.rows line {number}", constants) ?? return Err(err)
     record: evaluated.record.copy()
     expected: core_decl_dispatcher_member(member, constants)
     matches: if module_name != "" -> record.module_name == module_name && record.member == expected else -> record.module_name == "" && (record.member == expected || record.receiver_types.contains(member) || record.receiver_types.contains(expected))
@@ -529,7 +529,7 @@ core_decl_problem: fn(declared: CoreDeclarations) -> String Never! {
         }
         if row.kind == "adapter" -> next
         owner: core_declarations_module(declared.modules, row.module_name) ?? return "{CORE_DECLARATIONS_CORE_PATH}:{row.line}: dispatcher row names missing Core module `{row.module_name}`"
-        if row.kind == "plain" && !owner.members.contains(row.member) -> return "{CORE_DECLARATIONS_CORE_PATH}:{row.line}: dispatcher row is not declared by Core.jet exports: {row.module_name}.{row.member}"
+        if row.kind == "plain" && !owner.members.contains(row.member) -> return "{CORE_DECLARATIONS_CORE_PATH}:{row.line}: dispatcher row is not declared by Core.rows exports: {row.module_name}.{row.member}"
     }
     seen := [String]{}
     loop namespace in declared.namespace_only {
@@ -632,7 +632,7 @@ core_decl_public_problem: fn(declared: CoreDeclarations, expressions: [String], 
     rows := [CoreDeclPublic]{}
     loop (index, row) in declared.dispatchers {
         expression: expressions[index]
-        context: "Core.jet line {row.line}"
+        context: "Core.rows line {row.line}"
         loop offset in core_decl_constructor_offsets(expression) {
             call: core_decl_read_call(expression, offset, context) ?? return Err(core_decl_at(row.line, err))
             if call.args.len() < 2 -> return Ok("{CORE_DECLARATIONS_CORE_PATH}:{row.line}: malformed CoreCall dispatcher row: invalid module/member")
@@ -666,7 +666,7 @@ core_decl_public_problem: fn(declared: CoreDeclarations, expressions: [String], 
         }
     }
     if unknown_modules.len() > 0 -> return Ok("{CORE_DECLARATIONS_CORE_PATH}: public dispatcher row names a non-ledger module: {unknown_modules.join(", ")}")
-    if undeclared.len() > 0 -> return Ok("{CORE_DECLARATIONS_CORE_PATH}: public dispatcher row is not declared by Core.jet: {undeclared.join(", ")}")
+    if undeclared.len() > 0 -> return Ok("{CORE_DECLARATIONS_CORE_PATH}: public dispatcher row is not declared by Core.rows: {undeclared.join(", ")}")
     Ok("")
 }
 
@@ -911,7 +911,7 @@ core_decl_runtime_units: fn(found: [CoreDeclarationFile]) -> [CoreDeclarationSou
 
 // ---- The declarations -----------------------------------------------------
 
-// Everything Core.jet declares, checked. `syntax` is every Syntax file and
+// Everything Core.rows declares, checked. `syntax` is every Syntax file and
 // `runtime` every runtime unit file; `effects` the effect vocabulary.
 core_declarations_read: fn(core: String, parts: String, syntax: [CoreDeclarationFile], runtime: [CoreDeclarationFile], effects: [EffectVocabularyRow]) -> CoreDeclarations CoreDeclarationError! {
     constants: core_decl_syntax_constants(syntax) ?? return Err(err)
@@ -929,7 +929,7 @@ core_declarations_read: fn(core: String, parts: String, syntax: [CoreDeclaration
         line: core_decl_line(lines[index])
         if line == "" -> next
         number: index + 1
-        context: "Core.jet line {number}"
+        context: "Core.rows line {number}"
         bytes: line.bytes()
         head_end := 0
         loop head_end < bytes.len() && !core_decl_space(Int.from_u8(bytes[head_end])) -> head_end += 1

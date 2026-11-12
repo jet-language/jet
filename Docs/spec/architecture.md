@@ -310,7 +310,7 @@ The front end owns language checks and user-facing compiler diagnostics.
 Backends consume checked facts; a back end that rejects the checked program has hit an
 internal compiler error, not another language checker.
 Checked compile-time `reject(Value)` calls use the canonical
-`core.compiler.__reject` intrinsic row, declared in `Prelude/Core.jet` and
+`core.compiler.__reject` intrinsic row, declared in `Prelude/Core.rows` and
 projected into both Core inventories. Its one argument is a value whose type
 implements `Diagnostic`; the evaluator reads that impl's `code` and `severity`
 constants and its `what`, `why` and `fix` literals with the value's fields
@@ -2120,7 +2120,7 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
   The comptime Core registry uses the following namespace classification. The
   table covers the namespaces of
   [`CoreCallRows.jet`](../../Compiler/JetFoundation/Source/Registry/CoreCallRows.jet),
-  which the compiler build computes from Core.jet.
+  which the compiler build computes from Core.rows.
   `Kernel` means that comptime marshals `CtValue` into the exact Prelude part.
   `Intrinsic` means that the evaluator implements a language value operation,
   not a second Core policy. `Host` means that the call crosses an effect or

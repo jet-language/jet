@@ -1,4 +1,4 @@
-// One Core source the compiler loads: a Core.jet `source_module` row, a
+// One Core source the compiler loads: a Core.rows `source_module` row, a
 // private part (Compiler/Prelude/CoreSourceParts.tsv) or a runtime unit
 // (`Core/<area>/Runtime/**/<Unit>.jet`).
 CoreSourceOwnedRow: struct {
@@ -14,8 +14,8 @@ CoreSourceOwnedRow: struct {
 
 // A nominal is source-owned only when this registration row and a loaded
 // source declaration agree. Opaque impl ownership uses the module's row.
-// Core.jet's source rows in order, then the parts, then the runtime units;
-// a row's type exports are its module's Core.jet types.
+// Core.rows's source rows in order, then the parts, then the runtime units;
+// a row's type exports are its module's Core.rows types.
 CORE_SOURCE_OWNED_ROWS: #run core_source_owned_rows(CORE_DECLARATIONS)
 
 core_source_owned_rows: fn(declared: CoreDeclarations) -> [CoreSourceOwnedRow] Never! {

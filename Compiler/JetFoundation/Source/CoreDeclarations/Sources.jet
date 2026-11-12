@@ -4,7 +4,7 @@
 // there; the format rows repeat the EncodingFormat enum of
 // Core/Encoding/Encoding.jet; an owned wrapper that calls a runtime unit
 // instead of its provider leaves its dispatcher row dead; and a Core source
-// that defines a Core.jet enum leaf declares the variants Core.jet lists. A
+// that defines a Core.rows enum leaf declares the variants Core.rows lists. A
 // source that breaks one stops the build with every problem. They run in
 // jet_cli, not in jet_foundation, so a Core source edit rebuilds only the
 // package that embeds the sources.
@@ -394,7 +394,7 @@ core_declarations_source_problems: fn(declared: CoreDeclarations, sources: [Core
             unit: core_decl_wrapper_unit(lines, locals, row.module_name, dispatcher.member)
             if unit != "" -> problems.push("{CORE_DECLARATIONS_CORE_PATH}:{dispatcher.line}: dispatcher row `{dispatcher.module_name}.{dispatcher.member}` is dead: its owned wrapper `{dispatcher.member}: fn` in {row.path} (owns at line {row.line}) calls runtime unit `{unit}` instead of the provider; delete the row and the symbol it names")
         }
-        // A Core.jet enum leaf of this module that the source defines lists
+        // A Core.rows enum leaf of this module that the source defines lists
         // the variants the source declares.
         owner: core_declarations_module(declared.modules, row.module_name) ?? next
         loop leaf in owner.types {
@@ -418,7 +418,7 @@ core_declarations_source_problems: fn(declared: CoreDeclarations, sources: [Core
     problems
 }
 
-// The Core.jet line of the first `source_module` row of `module_name` that
+// The Core.rows line of the first `source_module` row of `module_name` that
 // owns `member`, or 0.
 core_decl_first_owner: fn(rows: [CoreDeclarationSource], module_name: String, member: String) -> Int Never! {
     loop row in rows {

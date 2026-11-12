@@ -3,7 +3,7 @@
 This specification is for Core API authors and reviewers. It defines the
 naming, failure, ownership, effects, allocation, diagnostics, and evidence
 rules for a public function, method, or type. The executable surface lives in
-[`Core.jet`](../../Compiler/Prelude/Core.jet) and the Jet source
+[`Core.rows`](../../Compiler/Prelude/Core.rows) and the Jet source
 under [`Core/`](../../Core/); accepted syntax and compiler-owned names live in
 the [syntax registry](../../Compiler/JetFoundation/Data/Syntax/). The
 [Core surface ledger cases](../../tests/cases/core_surface_ledger/) and their
@@ -605,7 +605,7 @@ Removed native routes → source replacements (reviewed pre-removal line anchors
   → source locale/name/email/host/address bodies, no closed Fake handle operations.
 - Comptime `Builtins.rs:1438`, `dispatch/eval_method.rs:2355`,
   `Methods/core_calls.rs:378`, `plain_calls.rs:1243` → ordinary source dispatch.
-- `Core.jet:414`, `CoreHostSignatures.jet:191`, `fixed_sigs.rs:1864`,
+- `Core.rows:414`, `CoreHostSignatures.jet:191`, `fixed_sigs.rs:1864`,
   `Codegen/mod.rs:3865`, native `FakeData.rs:1-69`,
   `CommonTypes.rs:2822,6819` → source constructor, fields, rendering and tables.
 - `Syntax/core_surface.rs:996` → source type identity, no builtin Fake marker.

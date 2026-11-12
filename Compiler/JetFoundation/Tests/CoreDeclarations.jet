@@ -1,4 +1,4 @@
-// Core.jet's declarations as the compiler build reads them
+// Core.rows's declarations as the compiler build reads them
 // (Compiler/JetFoundation/Source/CoreDeclarations): CORE_CALLS is the
 // dispatcher rows then CORE_CALL_EXTENSIONS, a dispatcher row's Rust
 // constructor chain evaluates to its CoreCallRecord facts, and a broken
@@ -22,18 +22,18 @@ use {
     ]
 }
 
-// Compiler/Prelude/Core.jet as the checkout has it.
+// Compiler/Prelude/Core.rows as the checkout has it.
 core_declarations_core: fn() -[FS]> String Never! {
     core_declarations_files.read(CORE_DECLARATIONS_CORE_PATH) ?? panic("{CORE_DECLARATIONS_CORE_PATH} did not read")
 }
 
-// Core.jet `source`'s declarations, read with the build's other inputs.
+// Core.rows `source`'s declarations, read with the build's other inputs.
 core_declarations_fixture: fn(source: String) -[FS]> CoreDeclarations CoreDeclarationError! {
     parts: core_declarations_files.read(CORE_DECLARATIONS_PARTS_PATH) ?? panic("{CORE_DECLARATIONS_PARTS_PATH} did not read")
     core_declarations_read(source, parts, CORE_DECLARATIONS_SYNTAX_FILES, CORE_DECLARATIONS_RUNTIME_FILES, EFFECT_VOCABULARY_ROWS)
 }
 
-// The error text reading Core.jet `source` reports, or "".
+// The error text reading Core.rows `source` reports, or "".
 core_declarations_error: fn(source: String) -[FS]> String Never! {
     if core_declarations_fixture(source) == {
         .Ok(_) -> ""
@@ -52,7 +52,7 @@ core_declarations_sources: fn(declared: CoreDeclarations) -[FS]> [CoreDeclaratio
 }
 
 core_declarations_type_in: fn(declared: CoreDeclarations, module_name: String, name: String) -> CoreDeclarationType Never! {
-    owner: core_declarations_module(declared.modules, module_name) ?? panic("Core.jet declares no {module_name}")
+    owner: core_declarations_module(declared.modules, module_name) ?? panic("Core.rows declares no {module_name}")
     loop leaf in owner.types {
         if leaf.name == name -> return leaf.copy()
     }
@@ -99,12 +99,12 @@ core_declarations_stray: fn(kind: String, module_name: String, member: String, e
     loop (index, row) in CORE_CALL_EXTENSIONS {
         key: core_call_key(row)
         assert_eq(core_call_key(CORE_CALLS[dispatchers.len() + index]), key)
-        assert(!core_keys.contains(key), "the extension row {key} repeats a Core.jet row")
+        assert(!core_keys.contains(key), "the extension row {key} repeats a Core.rows row")
     }
 }
 
 #Test("the declarations the build reads pass every check against the checkout") {
-    declared: core_declarations_fixture(core_declarations_core()) ?? panic("Core.jet was refused: {err.message}")
+    declared: core_declarations_fixture(core_declarations_core()) ?? panic("Core.rows was refused: {err.message}")
     assert_eq(declared.dispatchers.len(), CORE_DECLARATIONS.dispatchers.len())
     assert_eq(core_declarations_source_problems(declared, core_declarations_sources(declared)).join("\n"), "")
     constants: core_decl_syntax_constants(CORE_DECLARATIONS_SYNTAX_FILES) ?? panic("the Syntax constants did not read: {err.message}")

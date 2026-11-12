@@ -6,7 +6,7 @@ This reference is for Jet application authors who need the standard modules for
 files, data, networking, security, command-line programs, and system
 integration. The executable declarations live in [`Core/`](../../../Core/);
 the Prelude registry lists exports and module paths in
-[`Core.jet`](../../../Compiler/Prelude/Core.jet), and the
+[`Core.rows`](../../../Compiler/Prelude/Core.rows), and the
 [`Examples/`](../../../Examples/) and [`tests/`](../../../tests/) directories
 exercise the contracts. The Jet compiler in [`Compiler/`](../../../Compiler/)
 checks and builds them.
@@ -321,7 +321,7 @@ and stays Core's.
 
 A Core module's API is the list of names it exports: the items this reference
 documents for it, recorded as its `module core.X exports { … }` row in
-`Compiler/Prelude/Core.jet`. Every other declaration in its source belongs to
+`Compiler/Prelude/Core.rows`. Every other declaration in its source belongs to
 Core alone, including internal helpers and constants and handle types such as
 `core.db`'s `CachedStatement` or `core.crypto`'s `JetcFd`, whose fields are
 live engine or native handles. Code outside Core can't name them:
@@ -2542,7 +2542,7 @@ defined by [`Core/Process/Process.jet`](../../../Core/Process/Process.jet) and
 tests such as
 [`tests/cases/corelib/process_wait_observes_inherited_deadline.case`](../../../tests/cases/corelib/process_wait_observes_inherited_deadline.case).
 The export registry is
-[`Prelude/Core.jet`](../../../Compiler/Prelude/Core.jet); the
+[`Prelude/Core.rows`](../../../Compiler/Prelude/Core.rows); the
 data example used later is
 [`data_analysis.jet`](../../../Examples/Data/Analysis/DataAnalysis.jet).
 
@@ -6060,7 +6060,7 @@ targets; arbitrary function values or string-selected jobs are not admitted.
 
 ## `core` — built Core modules
 
-The canonical module registry is [`Core.jet`](../../../Compiler/Prelude/Core.jet),
+The canonical module registry is [`Core.rows`](../../../Compiler/Prelude/Core.rows),
 and the loader's exported list is [`CoreCallRows.jet`](../../../Compiler/JetFoundation/Source/Registry/CoreCallRows.jet), which the compiler build computes from it.
 The list below is the source-facing module inventory. A module may be a
 namespace-only provider boundary; its presence in the registry does not imply
@@ -6193,7 +6193,7 @@ storage, and mutating a sketch uses its `&self` receiver with an explicit `&` ca
 Jet source packages under [`Core/`](../../../Core/) are compiled by the Jet
 compiler's normal frontend, like any other package.
 
-`Core.jet` is the declaration registry, `Core/**/*.jet` is the source for the
+`Core.rows` is the declaration registry, `Core/**/*.jet` is the source for the
 Jet-owned package surface, and provider code supplies operations that require
 an external runtime or operating-system capability. A change to an exported
 signature must update the source module, the registry, the relevant conformance

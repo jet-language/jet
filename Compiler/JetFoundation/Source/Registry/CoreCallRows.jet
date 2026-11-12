@@ -1,10 +1,10 @@
-// The Core ABI rows: Core.jet's dispatcher rows in order, then
+// The Core ABI rows: Core.rows's dispatcher rows in order, then
 // CORE_CALL_EXTENSIONS in its order. Lookups take the first row per
 // core_call_key and IR canonicalization refuses a duplicate, so an extension
 // row may not repeat an earlier key; the build stops when one does.
 CORE_CALLS: #run core_call_rows(CORE_DECLARATIONS, CORE_CALL_EXTENSIONS)
 
-// Module/member/type names follow Core.jet module declaration order.
+// Module/member/type names follow Core.rows module declaration order.
 CORE_MODULE_EXPORTS: #run core_module_export_rows(CORE_DECLARATIONS)
 
 core_module_export_rows: fn(declared: CoreDeclarations) -> [CoreModuleExportNames] Never! {
@@ -20,7 +20,7 @@ core_call_rows: fn(declared: CoreDeclarations, extensions: [CoreCallRecord]) -> 
     rows := [CoreCallRecord]{}
     owners := [String: String]{}
     loop row in declared.dispatchers {
-        owners[core_call_key(row.record)] = "Core.jet"
+        owners[core_call_key(row.record)] = "Core.rows"
         rows.push(row.record.copy())
     }
     loop row in extensions {

@@ -1758,7 +1758,7 @@ area_fixture_at: fn(root: String) -> String {
     put(root, "Jetpack/CLI/Source/Fixture.jet", "cli_fixture: fn() {{}}\n")
     put(root, "Jetpack/Store/Tests/Fixture.jet", "#Test(\"store fixture\") {{\n    assert(true)\n}}\n")
     put(root, "Core/Effects/Effects.jet", "// effects\n")
-    put(root, "Compiler/Prelude/Core.jet", "// prelude\n")
+    put(root, "Compiler/Prelude/Core.rows", "// prelude\n")
     put(root, "Compiler/JetFoundation/Data/Syntax/Core.jet", "// syntax\n")
     root.copy() // copy: the caller keeps its path
 }
@@ -1925,7 +1925,7 @@ read_map: fn(root: String, mode: String) -> Dyn {
     root: normalize_join("/", files.mkdtemp("jetpack-toolchain") ?? panic("a temporary directory cannot be made: {err}"))
     put(root, "Core/Effects/Effects.jet", "// effects\n")
     put(root, "Core/.jet/cache.bin", "cache\n")
-    put(root, "Compiler/Prelude/Core.jet", "// prelude\n")
+    put(root, "Compiler/Prelude/Core.rows", "// prelude\n")
     put(root, "Compiler/JetFoundation/Data/Syntax/Core.jet", "// syntax\n")
     put(root, "Compiler/JetFoundation/Source/Other.jet", "// not staged\n")
     scratch: "{root}/scratch/aot"
@@ -1934,7 +1934,7 @@ read_map: fn(root: String, mode: String) -> Dyn {
     assert_eq(files.read("{scratch}/Core/Effects/Effects.jet") ?? panic("{err}"), "// effects\n")
     // jet reads a toolchain file only while it has one hard link.
     assert_eq((files.stat("{scratch}/Core/Effects/Effects.jet") ?? panic("{err}")).links, 1)
-    assert_eq(files.read("{scratch}/Compiler/Prelude/Core.jet") ?? panic("{err}"), "// prelude\n")
+    assert_eq(files.read("{scratch}/Compiler/Prelude/Core.rows") ?? panic("{err}"), "// prelude\n")
     assert_eq(files.read("{scratch}/Compiler/JetFoundation/Data/Syntax/Core.jet") ?? panic("{err}"), "// syntax\n")
     assert_eq(files.read("{scratch}/Compiler/package.jet") ?? panic("{err}"), TOOLCHAIN_WORKSPACE)
     assert(!files.exists("{scratch}/Core/Stale.jet"))

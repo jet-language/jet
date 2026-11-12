@@ -4,7 +4,7 @@
 //
 // The compiler tables are authoritative for what Jet ships. Each recorded
 // competitor surface is authoritative for what that language ships. This file
-// holds only the comparison policy and the reader of those tables; Core.jet's
+// holds only the comparison policy and the reader of those tables; Core.rows's
 // declarations are read and gated by the compiler build
 // (Compiler/JetFoundation/Source/CoreDeclarations), and this tool reads the
 // built tables through `jet inspect structure core --json`. The runtime JSON
@@ -38,10 +38,10 @@ PYTHON_SURFACE_PATH: "Docs/spec/reference/python-surface.json"
 TOWER_DATA_DIR: "Tools/tower/.tower"
 TOWER_BOARD_PATH: "Tools/tower/.tower/tower.json"
 TOWER_BOARD_TOOL: "Tools/tower/Board.jet"
-CORE_SOURCE_PATH: "Compiler/Prelude/Core.jet"
-// The Core rows with no Core.jet declaration: typed fixed-signature members,
+CORE_SOURCE_PATH: "Compiler/Prelude/Core.rows"
+// The Core rows with no Core.rows declaration: typed fixed-signature members,
 // built-in receiver methods, and the lowering-owned extension calls.
-CORE_SURFACE_INVENTORY_PATH: "Compiler/Prelude/CoreSurfaceInventory.jet"
+CORE_SURFACE_INVENTORY_PATH: "Compiler/Prelude/CoreSurfaceInventory.rows"
 CORE_CALL_EXTENSIONS_PATH: "Compiler/JetFoundation/Source/Registry/CoreCallExtensions.jet"
 // The Jet tables an inventory `receivers` row reads receiver methods from, and
 // the sema sources a `methods` row's names must be spelled in.
@@ -50,7 +50,7 @@ BUILTIN_STATICS_PATH: "Compiler/JetFoundation/Source/Registry/BuiltinStatics.jet
 COLLECTIONS_PATH: "Compiler/JetFoundation/Source/Collections.jet"
 CORE_SOURCE_PARTS_PATH: "Compiler/Prelude/CoreSourceParts.tsv"
 SEMA_SOURCE_DIR: "Compiler/JetSema/Source"
-// The owner-controlled syntax registry: every Syntax string constant a Core.jet
+// The owner-controlled syntax registry: every Syntax string constant a Core.rows
 // dispatcher row or the core.mem tier map names.
 SYNTAX_DIR: "Compiler/JetFoundation/Data/Syntax"
 CORE_API_LAWS_PATH: "Docs/spec/stdlib-api-laws.md"
@@ -1271,7 +1271,7 @@ core_type_methods: fn(root: String, paths: [String], type_name: String) -[FS]> [
     Ok(methods)
 }
 
-// The Core surface beyond Core.jet's module exports, from its one authored
+// The Core surface beyond Core.rows's module exports, from its one authored
 // home: `fixed_sig <module> { … }`, `receivers <Container> { … }` and
 // `methods <Container> { … }` lines. A receivers row names the Jet tables a
 // container's receiver methods come from; the method names are read from those
@@ -3260,7 +3260,7 @@ core_api_gate: fn(root: String, rows: [Row], entries_in: [SurfaceEntry], surface
 // ---- Ledger -------------------------------------------------------------------
 
 // The compiler's Core structure (`jet inspect structure core --json`, run by
-// $JET, else `jet` on PATH, from `root`): Core.jet's modules and the Core
+// $JET, else `jet` on PATH, from `root`): Core.rows's modules and the Core
 // sources the compiler loads, as the build computed them.
 core_structure: fn(root: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Dyn LedgerError! {
     jet: process.env_get_or("JET", process.which("jet") ?? "jet")
@@ -3275,8 +3275,8 @@ core_structure: fn(root: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Dyn Ledg
     Ok(core)
 }
 
-// The ledger's module inventory: each Core.jet module with its members, its
-// Core.jet line, its type exports and its dependencies.
+// The ledger's module inventory: each Core.rows module with its members, its
+// Core.rows line, its type exports and its dependencies.
 core_module_inventory: fn(core: Dyn) -> Dyn Never! {
     out := [Dyn]{}
     loop entry in items(field(core, "modules")) {
@@ -3292,7 +3292,7 @@ core_module_inventory: fn(core: Dyn) -> Dyn Never! {
         name: text_field(entry, "module")
         fact := Dyn.object()
         fact["module"] = jtext(name)
-        fact["rawModules"] = Dyn.Array([Dyn]{jtext("{name} (Prelude/Core.jet)")})
+        fact["rawModules"] = Dyn.Array([Dyn]{jtext("{name} (Prelude/Core.rows)")})
         fact["members"] = field(entry, "members")
         fact["sourceLine"] = field(entry, "source_line")
         fact["types"] = Dyn.Array(types)
@@ -3311,7 +3311,7 @@ module_facts: fn(facts: Dyn) -> [ModuleFact] Never! {
     out
 }
 
-// The Core source paths of each public module: its Core.jet source modules,
+// The Core source paths of each public module: its Core.rows source modules,
 // then the compiler-private parts it owns, in load order. Runtime units belong
 // to no module's receivers.
 core_module_paths: fn(core: Dyn) -> [String: [String]] Never! {
@@ -4511,7 +4511,7 @@ release_mode: fn(root: String) -[Env, Exec, FS, IO, Time, Time.Wait]> String Led
 // just as happily with every gate deleted. Each fixture below takes the real
 // ledger, breaks exactly one thing, and requires the matching gate to reject
 // it. A gate that stops firing fails here rather than going quiet in CI. The
-// Core.jet parser fixtures live with the parser, in
+// Core.rows parser fixtures live with the parser, in
 // Compiler/JetFoundation/Tests/CoreDeclarations.jet.
 
 // `value` with the item at `path` changed: "set" replaces it with `new_value`

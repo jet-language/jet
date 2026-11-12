@@ -6,7 +6,7 @@
 // names that do the same job.
 //
 // A row's `jet` names are checked, never trusted: `core.<module>.<member>` (or
-// a bare module) must be exported by Compiler/Prelude/Core.jet, as the
+// a bare module) must be exported by Compiler/Prelude/Core.rows, as the
 // compiler declares it (`$JET inspect structure core --json`),
 // `core.<module>.<Type>.<method>` must name a type that module exports and a
 // method its source declares, and `<Type>.<method>` must be a built-in method,
@@ -22,7 +22,7 @@ use {
     process: core.process
 }
 
-CORE_PRELUDE_PATH: "Compiler/Prelude/Core.jet"
+CORE_PRELUDE_PATH: "Compiler/Prelude/Core.rows"
 BUILTIN_METHODS_PATH: "Compiler/JetFoundation/Source/Registry/BuiltinMethods.jet"
 BUILTIN_STATICS_PATH: "Compiler/JetFoundation/Source/Registry/BuiltinStatics.jet"
 COLLECTIONS_PATH: "Compiler/JetFoundation/Source/Collections.jet"
@@ -435,7 +435,7 @@ json_text: fn(value: Dyn, key: String) -> String Never! {
     ""
 }
 
-// Core.jet's exported members, keyed by module.
+// Core.rows's exported members, keyed by module.
 core_exports: fn(core: Dyn) -> [String: [String]] CensusError! {
     out := [String: [String]]{}
     loop entry in json_items(core, "modules") {
