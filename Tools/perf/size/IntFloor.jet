@@ -1,0 +1,91 @@
+// The overflow-free Int floor: an Int loop whose range facts prove it cannot
+// overflow (`i := 0; loop i < 1000000 { i += 3 }`) links none of the
+// arbitrary-precision Int closure, and its image is within 2 KB of the empty
+// program's, in the release and the default build.
+//
+//   jet Tools/perf/size/IntFloor.jet [--jet PATH]
+//
+// It builds both programs in a scratch directory with `jet build` and `jet
+// build --release`, reads each image's symbols with nm (the `.debug` file
+// beside an image when there is one, since the release image is stripped),
+// and prints each image's size, its arbitrary-precision Int symbols (the
+// unit_int_* and jet_int_* routines) and the gap to the empty program. It
+// prints PASS, or FAIL with the broken facts and exits 1.
+package: {
+    name: "int-floor"
+    authority: { allow: [Env, Exec, Exec.Args, FS, IO, Mem.Alloc] }
+}
+
+use {
+    fs: core.files
+    process: core.process
+}
+
+// The largest gap, in bytes, from the empty program's image to the loop's.
+GAP_LIMIT: 2048
+
+EMPTY: "run: fn() {{\n}}\n"
+LOOP: "run: fn() {{\n    i := 0\n    loop i < 1000000 {{ i += 3 }}\n}}\n"
+
+fail: fn(message: String) -> Never {
+    print("int-floor: {message}")
+    process.exit(2)
+}
+
+// The arbitrary-precision Int routines among nm's lines.
+wide_symbols: fn(listing: String) -> [String] {
+    wide := [String]{}
+    loop line in listing.lines() {
+        fields: line.split(" ").to_list()
+        name: fields[fields.len() - 1]
+        if name.starts_with("unit_int_") || name.starts_with("jet_int_") -> wide.push(name.copy())
+    }
+    wide
+}
+
+// Builds `name`.jet in `dir` with `flags`: the image's size and its
+// arbitrary-precision Int symbols.
+image: fn(jet: String, dir: String, name: String, flags: [String]) -> (size: Int, wide: [String]) {
+    out: "{dir}/out"
+    argv := [jet.copy(), "build"]
+    argv.extend(flags.copy())
+    argv.push("--output-dir={out}")
+    argv.push("{dir}/{name}.jet")
+    built: process.cmd(argv).output_limit(16777216).run() ?? fail("{jet} could not start")
+    if !built.success -> fail("`{argv.join(" ")}` failed (exit {built.code}): {built.output}{built.errors}")
+    path: "{out}/{name}"
+    size: (fs.stat(path) ?? fail("no image at {path}")).size
+    named: if fs.exists("{path}.debug") -> "{path}.debug" else -> path.copy()
+    listing: process.cmd(["nm", named]).output_limit(268435456).run() ?? fail("nm could not start")
+    if !listing.success -> fail("nm {named} failed (exit {listing.code}): {listing.errors}")
+    (size: size, wide: wide_symbols(listing.output))
+}
+
+run: fn() {
+    argv: process.args()
+    if argv.len() != 0 && (argv.len() != 2 || argv[0] != "--jet") -> fail("usage: IntFloor.jet [--jet PATH]")
+    jet: if argv.len() == 2 -> argv[1].copy() else -> process.which("jet") ?? ""
+    if jet == "" -> fail("no jet on PATH; pass --jet PATH")
+    dir: fs.mkdtemp("int-floor") ?? fail("no scratch directory")
+    fs.write("{dir}/empty.jet", EMPTY) ?? fail("can't write {dir}/empty.jet")
+    fs.write("{dir}/intloop.jet", LOOP) ?? fail("can't write {dir}/intloop.jet")
+    broken := [String]{}
+    builds: ["release", "default"]
+    loop build in builds {
+        flags: if build == "release" -> ["--release"] else -> [String]{}
+        empty: image(jet, dir, "empty", flags)
+        looped: image(jet, dir, "intloop", flags)
+        gap: looped.size - empty.size
+        print("{build}: empty {empty.size} bytes; intloop {looped.size} bytes, {gap} over the empty program (limit {GAP_LIMIT})")
+        print("{build}: intloop links {looped.wide.len()} arbitrary-precision Int symbols{if looped.wide.len() > 0 -> ": {looped.wide.join(" ")}" else -> ""}")
+        if gap > GAP_LIMIT -> broken.push("the {build} intloop image is {gap} bytes over the empty program")
+        if looped.wide.len() > 0 -> broken.push("the {build} intloop image links the arbitrary-precision Int closure")
+        fs.remove_all("{dir}/out") ?? fail("can't clear {dir}/out")
+    }
+    fs.remove_all(dir).drop("the scratch directory is only cleanup")
+    if broken.len() > 0 {
+        print("FAIL: {broken.join("; ")}")
+        process.exit(1)
+    }
+    print("PASS")
+}
