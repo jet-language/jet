@@ -7,7 +7,7 @@ use {
     core.build.[BuildGraph, BuildGraphNode, BuildGraphInputDigest]
     jet_sema.[SemaGraphResult, SemaSourceOrigin]
     jet_build_session.[
-        BuildSessionFinding, BuildSessionGeneratedModule, BuildSessionPlan, BuildSessionPolicy, build_plan_findings, build_plan_graph, build_plan_selection,
+        BuildSessionDiagnostic, BuildSessionFinding, BuildSessionGeneratedModule, BuildSessionPlan, BuildSessionPolicy, build_plan_findings, build_plan_graph, build_plan_selection,
         build_plan_selected_generated, build_session_abort, build_session_append_unique, build_session_refused,
         build_session_compiler_node, build_session_finish, build_session_new, build_session_set_args, build_session_set_dependencies, build_session_set_identity,
     ]
@@ -154,6 +154,14 @@ JetDriverBuildQueryResponse: struct {
 jet_driver_build_query_empty: fn(request: &&JetDriverCompileRequest, diagnostics: &&[Diagnostic], complete: Bool, problem: &&String?) -> JetDriverBuildQueryResponse Never! {
     {request: request.move(), query: JetDriverBuildQueryResult{plan: None, graph: None, generated: [], diagnostics: diagnostics.move(), complete: complete, internal_problem: problem.move()}}
 }
+// A build session report as a diagnostic. A project rule's report at a
+// program span names the source file the span indexes and points there, as a
+// checker's finding about its own source should.
+jet_driver_build_rule_report: fn(error: BuildSessionDiagnostic) -> Diagnostic Never! {
+    report: jet_eval_build_session_diagnostic(error)
+    if error.file == "" -> return report
+    diagnostic_with_source_path(report, error.file, 0)
+}
 // A build that failed: the compile's `errors`, then the build's own reports
 // `ran`. After a failed staging check (`staged`) the build's reports come
 // first: what the build refused is why the staged check missed the modules
@@ -294,7 +302,7 @@ jet_driver_query_build_plan: fn(owned_request: &&JetDriverCompileRequest, scope:
         return jet_driver_build_query_failed(request, errors, ran, staged_failed)
     }
     finished: build_session_finish(session, value)
-    loop error in finished.diagnostics -> ran.push(jet_eval_build_session_diagnostic(error))
+    loop error in finished.diagnostics -> ran.push(jet_driver_build_rule_report(error))
     plan: finished.plan.move() ?? return jet_driver_build_query_failed(request, errors, ran, staged_failed)
     // The selected generated modules, owned by the build's package: the
     // final checked bundle below and every target compile of the plan

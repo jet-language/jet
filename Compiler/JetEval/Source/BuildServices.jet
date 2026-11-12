@@ -55,7 +55,8 @@ jet_eval_build_session_input: fn(data: TComptimeValue) -> BuildSessionValue? Nev
             if name == "SourceSpan" {
                 start: jet_eval_build_field(data, "start") ?? return None
                 end: jet_eval_build_field(data, "end") ?? return None
-                if start == .Int(first) && end == .Int(last) -> return Val(BuildSessionValue.Span{start: first, end: last})
+                file: jet_eval_build_field(data, "file") ?? return None
+                if start == .Int(first) && end == .Int(last) && file == .String(written) -> return Val(BuildSessionValue.Span{start: first, end: last, file: written.copy()})
                 return None
             }
             session: jet_eval_build_field(data, "session") ?? return None
@@ -80,9 +81,8 @@ jet_eval_build_session_output: fn(value: BuildSessionValue) -> TComptimeValue Ne
             {name: "session", value: TComptimeValue.Int{value: owner}},
             {name: "id", value: TComptimeValue.Int{value: index}},
         }}
-        // A session span keeps offsets only; it names no file.
-        .Span(start, end) -> TComptimeValue.Struct{type_name: "SourceSpan", fields: [TComptimeField]{
-            {name: "file", value: TComptimeValue.String{value: ""}},
+        .Span(start, end, file) -> TComptimeValue.Struct{type_name: "SourceSpan", fields: [TComptimeField]{
+            {name: "file", value: TComptimeValue.String{value: file}},
             {name: "start", value: TComptimeValue.Int{value: start}},
             {name: "end", value: TComptimeValue.Int{value: end}},
         }}

@@ -152,7 +152,7 @@ jet_driver_build_splice_literal: fn(value: BuildSessionValue) -> String? Never! 
             }
             Val("[{parts.join(", ")}]")
         }
-        .Unit | .Char(_) | .Enum(_) | .Handle(_, _, _) | .Span(_, _) -> None
+        .Unit | .Char(_) | .Enum(_) | .Handle(_, _, _) | .Span(_, _, _) -> None
     }
 }
 
@@ -276,7 +276,7 @@ jet_driver_compiler_call: fn(session: &BuildSession, member: String, args: [TCom
             }
         }
         values.push(BuildSessionValue.Text{value: module_name})
-        values.push(BuildSessionValue.Span{start: first, end: last})
+        values.push(BuildSessionValue.Span{start: first, end: last, file: ""})
         values.push(BuildSessionValue.Text{value: rewrite})
         reply: build_session_call(session, "compiler.report", values, None, false, span.start, span.end)
         return jet_driver_compiler_reply(session, reply, span)

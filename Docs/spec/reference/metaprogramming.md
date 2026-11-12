@@ -241,6 +241,11 @@ build: fn(b: Build) {
 }
 ```
 
+A finding that `b.error` reports at a reflected `SourceSpan` points to the
+span's `file` and line, beside the compiler's own diagnostics, which a finding
+can't suppress. A code of the compiler's own, `E` or `W` followed only by
+digits, is refused as E3530.
+
 Each action declares its capabilities. Execution proceeds only when package
 and workspace policy permits them and the invocation supplies matching grants;
 dependency build scripts do not inherit root authority. The execution runtime
@@ -389,8 +394,8 @@ and `start` and `end` are byte offsets into that module's text. Every span a
 declaration record, a `CommentInfo`, a `FunctionInfo`'s arithmetic or the
 semantic index carries names its file. A span of a text that is no module's
 file reads `file` as `""`: a token or node of a text given to `compiler.lex`
-or `compiler.parse` as a value, the call site of a failed compiler query, and a
-span a build session hands back.
+or `compiler.parse` as a value, and the call site of a failed compiler query.
+A span a build session hands back keeps the `file` it was given.
 
 Each declaration record also lists its `documentation`: the `///` lines
 written directly above the declaration, in order, read up past its markers,

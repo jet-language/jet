@@ -1,0 +1,33 @@
+// A program with one entity, one direct print, and one type error, which
+// the checkers below read but can't hide.
+
+Entity: struct { id: Int }
+
+shout: fn(n: Int) { print(n) }
+
+// Two project checkers over the typed snapshot of the checked program. One
+// reads its types and one hears each checked call of `print`. Each reports
+// its findings as structured diagnostics at the source it read. The last one
+// claims a code of the compiler's own, which a checker can't speak.
+build: fn(b: Build) {
+    app: b.add_executable("app", ["main.jet"], [])
+    meta: b.compiler(app)
+    loop info in b.program.types() {
+        if info.name == "Entity" -> b.error(info.span, "ORG01", "entity must define archive", "company policy requires archival", "add an archive method")
+    }
+    meta.events(
+        watch: .Calls{to: print},
+        (event) -> {
+            if event == .Checked(.Call(c)) {
+                b.error(c.span, "ORG02", "`{c.caller}` prints directly", "project policy routes output through the logger", "call the logger instead")
+                b.error(c.span, "E0101", "a checker speaking as the compiler", "none", "none")
+            }
+        },
+    )
+    b.default(app)
+}
+
+run: fn() {
+    total: Int{"not an Int"}
+    shout(total)
+}

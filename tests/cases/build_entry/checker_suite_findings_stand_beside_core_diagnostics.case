@@ -1,0 +1,23 @@
+# #3526 c18: project checkers are read/report handlers over typed snapshots
+# of the checked program. `build: fn` reads `b.program.types()`, and a
+# `meta.events` handler hears each checked call of `print`. Each reports
+# findings with `b.error(span, code, what, why, fix)`: structured rows mapped
+# to the file and line of the source they read, in the same report as the
+# compiler's own diagnostics. A checker can't suppress those. The program's
+# type error is still reported, and a finding that claims a compiler code is
+# refused as E3530.
+fixture: checker_suite_findings_stand_beside_core_diagnostics.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet build main.jet --json
+exit: nonzero
+json: machine doc $.reports[?code="ORG01"] #= 1 # one finding, for the program's one entity
+json: machine doc $.reports[?code="ORG01"][0].what = "entity must define archive" # the type checker's finding
+json: machine doc $.reports[?code="ORG01"][0].file != null # mapped to the file of the type it read
+json: machine doc $.reports[?code="ORG01"][0].line = 4 # at the type's declaration
+json: machine doc $.reports[?code="ORG02"][0].why = "project policy routes output through the logger" # the call handler's finding
+json: machine doc $.reports[?code="ORG02"][0].file != null # mapped to the file of the call it heard
+json: machine doc $.reports[?code="ORG02"][0].line = 6 # at the call
+json: machine doc $.reports[?code="E3530"] #>= 1 # a checker can't speak with the compiler's own code
+json: machine doc $.reports[?code="E0101"] #= 0 # so the claimed compiler code is never reported
+json: machine doc $.reports[?code="E0108"] #= 1 # the compiler's own type error still stands beside the findings

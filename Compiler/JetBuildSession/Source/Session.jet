@@ -22,7 +22,9 @@ BuildSessionValue: enum {
     Enum(variant: String)
     List(values: [BuildSessionValue])
     Handle(type_name: String, session: Int, id: Int)
-    Span(start: Int, end: Int)
+    // `file` is the source file the offsets index, as a reflected
+    // `SourceSpan` names it; "" is the build file's own source.
+    Span(start: Int, end: Int, file: String)
 }
 
 BuildSessionDiagnostic: struct {
@@ -32,6 +34,9 @@ BuildSessionDiagnostic: struct {
     fix: String
     start: Int
     end: Int
+    // The source file `start` and `end` index, from the `SourceSpan` a
+    // project rule reported at; "" is the build file.
+    file: String{""}
     error: BuildSessionError?{None}
 }
 
@@ -367,7 +372,7 @@ build_session_strings: fn(args: [BuildSessionValue], index: Int) -> [String]? {
         loop value in values {
             if value == {
                 .Text(text) -> out.push(text.copy())
-                .Unit | .Bool(_) | .Int(_) | .Char(_) | .Enum(_) | .List(_) | .Handle(_, _, _) | .Span(_, _) -> return None
+                .Unit | .Bool(_) | .Int(_) | .Char(_) | .Enum(_) | .List(_) | .Handle(_, _, _) | .Span(_, _, _) -> return None
             }
         }
         return Val(out)
@@ -613,7 +618,7 @@ build_session_call: fn(session: &BuildSession, method: String, args: [BuildSessi
         }
         at_start := -1
         at_end := -1
-        if args[7] == .Span(from, to) {
+        if args[7] == .Span(from, to, _) {
             at_start = from
             at_end = to
         }
@@ -639,7 +644,7 @@ build_session_call: fn(session: &BuildSession, method: String, args: [BuildSessi
         if name.trim() == "" || name.contains(".") -> return build_session_fail(state, "`b.contribute` needs one declared setting name, such as `cache_slots`")
         if args[1] == {
             .Bool(_) | .Int(_) | .Char(_) | .Text(_) | .Enum(_) -> {}
-            .Unit | .List(_) | .Handle(_, _, _) | .Span(_, _) -> return build_session_fail(state, "`b.contribute` accepts only Bool, Int, Char, String, or a fieldless enum value")
+            .Unit | .List(_) | .Handle(_, _, _) | .Span(_, _, _) -> return build_session_fail(state, "`b.contribute` accepts only Bool, Int, Char, String, or a fieldless enum value")
         }
         // The writer is spelled by the package's name, as `jet explain` and the lock show it.
         state.contributions.push(BuildSessionContribution{key: "Build.Settings.{name}", value: args[1], source: "{build_session_package_dir(state.package)}::build", start: start, end: end})
@@ -839,10 +844,12 @@ build_session_project_error: fn(state: &BuildSessionState, args: [BuildSessionVa
     if args.len() != 5 -> return build_session_fail(state, "`b.error` requires SourceSpan, code, what, why, and fix")
     start := state.start
     end := state.end
+    file := ""
     if args[0] == {
-        .Span(first, last) -> {
+        .Span(first, last, written) -> {
             start = first
             end = last
+            file = written.copy()
         }
         .Unit | .Text(_) | .Bool(_) | .Int(_) | .Char(_) | .Enum(_) | .List(_) | .Handle(_, _, _) -> return build_session_fail(state, "argument 1 must be SourceSpan")
     }
@@ -853,9 +860,9 @@ build_session_project_error: fn(state: &BuildSessionState, args: [BuildSessionVa
     reserved := code.len() > 1 && (code.starts_with("E") || code.starts_with("W"))
     bytes: code.bytes()
     loop index in 1..<bytes.len() { if bytes[index] < (U8{48}) || bytes[index] > (U8{57}) -> reserved = false }
-    diagnostic := BuildSessionDiagnostic{code: code, what: what, why: why, fix: fix, start: start, end: end}
+    diagnostic := BuildSessionDiagnostic{code: code, what: what, why: why, fix: fix, start: start, end: end, file: file.copy()}
     if reserved {
-        diagnostic = BuildSessionDiagnostic{code: "E3530", what: "build rule code `{code}` is reserved", why: "codes beginning with E or W followed only by digits belong to the compiler", fix: "use a project prefix such as `ORG01`", start: start, end: end}
+        diagnostic = BuildSessionDiagnostic{code: "E3530", what: "build rule code `{code}` is reserved", why: "codes beginning with E or W followed only by digits belong to the compiler", fix: "use a project prefix such as `ORG01`", start: start, end: end, file: file}
     } else if code.trim() == "" || what.trim() == "" || why.trim() == "" || fix.trim() == "" {
         diagnostic = build_session_diag(state, "build rule errors require non-empty code, what, why, and fix")
     }
