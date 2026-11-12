@@ -825,9 +825,9 @@ sema_call_method_checked_from_value: fn(state: &SemaOwnershipState, receiver: Ex
     call_receiver := pinned_receiver
     contract_bindings := [TStmt]{}
     contract_nodes := [TContract]{}
-    // The callee's declaration is copied only when it has `pre` clauses.
+    // The callee's declaration is copied only when a call checks its clauses.
     contract_callee := Func?{None}
-    if sema_contract_function_has_pre(environment, program, resolved_candidate.method.symbol) -> contract_callee = sema_contract_function_for_symbol(environment, program, resolved_candidate.method.symbol)
+    if sema_contract_function_checks_calls(environment, program, resolved_candidate.method.symbol) -> contract_callee = sema_contract_function_for_symbol(environment, program, resolved_candidate.method.symbol)
     if contract_callee == .Val(contract) {
         receiver_arg: TCallArg{value: call_receiver, template_items: [SymbolID]{}, borrow: resolved_candidate.receiver_convention == AccessConvention.Read && !sema_call_is_scalar(call_receiver.ty), mut_borrow: resolved_candidate.receiver_convention == AccessConvention.Write, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: sema_call_box_as_trait(receiver_type, call_receiver.ty, environment, program), label: None, spread: false}
         all_args := [TCallArg]{receiver_arg}
@@ -835,7 +835,7 @@ sema_call_method_checked_from_value: fn(state: &SemaOwnershipState, receiver: Ex
         receiver_slot: resolved_candidate.receiver_offset - 1
         slots := [Int]{receiver_slot}
         loop slot in 0..<params.len() -> slots.push(slot + resolved_candidate.receiver_offset)
-        checked_contract: sema_contract_check_call(contract, resolved_candidate.method.symbol, all_args, slots, span, environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
+        checked_contract: sema_contract_check_call(contract, resolved_candidate.method.symbol, None, all_args, slots, span, environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
         call_receiver = all_args[0].value
         lowered = [TCallArg]{}
         loop index in 1..<all_args.len() -> lowered.push(all_args[index])

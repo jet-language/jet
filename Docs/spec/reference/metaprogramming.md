@@ -75,12 +75,22 @@ A `#Pre` condition written `#run { condition }` is decided for each call
 while building, by the same evaluator, after the call's arguments are
 substituted for the parameters. A call it holds for carries no run-time
 check; a false answer, or a condition that reads an argument known only at
-run time, is E0180 at the call. `#run` in any other marker argument is
-E0391 for now. [`RequiredPreDecidedWhileBuilding.jet`](../../../tests/run/Contracts/RequiredPreDecidedWhileBuilding.jet)
+run time, is E0180 at the call. A `#Post` condition written the same way is
+decided the same way, with `result` holding the call's own value, which
+the evaluator computes while building from the same arguments; the body
+checks it for no call. Only a call by name is computed again, so a method
+or function-value call of such a function is E0180, and so is one whose
+result can fail. `#run` in any other marker argument is E0391 for now.
+[`RequiredPreDecidedWhileBuilding.jet`](../../../tests/run/Contracts/RequiredPreDecidedWhileBuilding.jet)
 prints 10 for `sum(4, [1, 2, 3, 4])` under
 `#Pre(#run { lanes == 4 || lanes == 8 }, "need 4 or 8")`, and
 [`contract_required_pre_false.jet`](../../../tests/ui/contract_required_pre_false.jet)
 is `sum(3, …)` refused while building.
+[`RequiredPostDecidedWhileBuilding.jet`](../../../tests/run/Contracts/RequiredPostDecidedWhileBuilding.jet)
+prints 12 for `padded(4, 10)` under
+`#Post(#run { result % lanes == 0 }, "a whole number of lanes")`, and
+[`contract_required_post_false.jet`](../../../tests/ui/contract_required_post_false.jet)
+is `width(1)` refused while building.
 
 Inside a template a paste `#{name}` splices a template binding
 (D-META-HASH1=A). `#{method}: fn(self)` and `impl #{type_name}` name a

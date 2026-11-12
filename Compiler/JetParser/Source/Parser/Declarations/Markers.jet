@@ -482,14 +482,14 @@ parser_parse_marker_value_arg: fn(state: &JetParserState, marker_name: String, l
 }
 
 // `#run { value }` as an argument of the marker written `marker`, with
-// `label`, pushed onto `args`. True when it is a `#Pre` condition (the first
-// unlabeled argument, or the one labeled `condition`), the marker value decided
-// while building; any other place, or a block with more than its value, is
-// E0391. Like the contract projection (Items.jet), it keys `#Pre` by its
-// written name.
+// `label`, pushed onto `args`. True when it is a `#Pre` or `#Post` condition
+// (the first unlabeled argument, or the one labeled `condition`), the marker
+// value decided while building; any other place, or a block with more than
+// its value, is E0391. Like the contract projection (Items.jet), it keys the
+// contract markers by their written names.
 parser_parse_marker_required_arg: fn(state: &JetParserState, args: &[MarkerCallArg], marker: String, label: CallLabel?) -> Bool {
     slot: if label == .Val(written) -> written.name == "condition" else -> args.len() == 0
-    condition: marker == "Pre" && slot
+    condition: (marker == "Pre" || marker == "Post") && slot
     head: parser_bump(state)
     block: parser_parse_value_block(state, 0, true)
     span: parser_cover(head.span, block.span)
@@ -499,8 +499,8 @@ parser_parse_marker_required_arg: fn(state: &JetParserState, args: &[MarkerCallA
             return true
         }
     }
-    if condition -> parser_add_error_code(state, "E0391", span, "`#run {{ … }}` in a marker holds more than one value", "a `#Pre` condition decided while building is the one value its block ends with", "write `#run {{ condition }}` with one final expression")
-    if !condition -> parser_add_error_code(state, "E0391", span, "`#run {{ … }}` is used as a marker value this compiler does not decide while building", "today only a `#Pre` condition is decided while building, for each call", "write `#Pre(#run {{ condition }}, \"message\")`, or drop `#run`")
+    if condition -> parser_add_error_code(state, "E0391", span, "`#run {{ … }}` in a marker holds more than one value", "a `#Pre` or `#Post` condition decided while building is the one value its block ends with", "write `#run {{ condition }}` with one final expression")
+    if !condition -> parser_add_error_code(state, "E0391", span, "`#run {{ … }}` is used as a marker value this compiler does not decide while building", "today only a `#Pre` or `#Post` condition is decided while building, for each call", "write `#Pre(#run {{ condition }}, \"message\")` or `#Post(#run {{ condition }}, \"message\")`, or drop `#run`")
     args.push(MarkerCallArg.Expr{value: Expr.Unit{span: span, id: parser_node_id(state)}})
     false
 }

@@ -1,0 +1,13 @@
+// A `#Post` condition written `#run { … }` is decided for each call while
+// building: the call's own value is computed while building from that
+// call's arguments, and the condition reads it as `result`. A call it holds
+// for needs no run-time check. tests/ui/contract_required_post_false.jet is
+// the call it refuses.
+#Post(#run { result % lanes == 0 }, "a whole number of lanes")
+padded: fn(lanes: Int, count: Int) -> Int {
+    (count + lanes - 1) / lanes * lanes
+}
+
+run: fn() {
+    print(padded(4, 10))
+}

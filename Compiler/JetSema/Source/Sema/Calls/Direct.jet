@@ -1743,12 +1743,14 @@ sema_call_direct_checked_from_target: fn(state: &SemaOwnershipState, target: Sem
     }
     contract_bindings := [TStmt]{}
     contract_nodes := [TContract]{}
-    // The callee's declaration is copied only when it has `pre` clauses.
+    // The callee's declaration is copied only when a call checks its clauses.
     contract_callee := Func?{None}
-    if callee_facts == .Val(facts) && facts.pre_count > 0 -> contract_callee = sema_contract_function_for_symbol(environment, program, candidate.symbol.id)
+    if callee_facts == .Val(facts) && facts.call_checks > 0 -> contract_callee = sema_contract_function_for_symbol(environment, program, candidate.symbol.id)
     if contract_callee == .Val(contract) {
         slots: loop slot in 0..<params.len() -> slot
-        checked_contract: sema_contract_check_call(contract, candidate.symbol.id, lowered, slots, call.name_span, environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
+        // copy: the contract check may stage this call again by name; the call keeps its written type arguments and its checked type.
+        recall: SemaContractRecall{call: Call{name: call.name, name_span: call.name_span, type_args: call.type_args.copy(), args: [CallArg]{}}, result_type: result_type.copy()}
+        checked_contract: sema_contract_check_call(contract, candidate.symbol.id, Val(recall), lowered, slots, call.name_span, environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
         contract_bindings = checked_contract.bindings
         contract_nodes = checked_contract.contracts
     }
