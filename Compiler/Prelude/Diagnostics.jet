@@ -733,11 +733,11 @@ RetiredEffectArrow: struct {
 ReservedDunderName: struct {
     impl Diagnostic {
         code: "E0067"
-        status: .Reserved
-        no_fix: None
+        stage: [.Lex, .Sema]
+        no_fix: .Ambiguous
         what: fn(self) -> String { "Source-written `__name` is reserved for Jet and generated tooling; visible machine names use `__jet_`" }
-        why: fn(self) -> String { "The registered lex rule applies here" }
-        fix: fn(self) -> String { "Follow the guidance for E0067" }
+        why: fn(self) -> String { "Double-underscore names belong to the compiler, generated binders, the debugger, the serializer, and tools." }
+        fix: fn(self) -> String { "Rename it without the second leading underscore." }
     }
 }
 
@@ -6688,10 +6688,10 @@ ReservedBindgenSegment: struct {
 
     impl Diagnostic {
         code: "E3206"
-        status: .Reserved
+        stage: [.Parse]
         meaning: "User declared reserved `__bindgen__` segment"
         detail: true
-        no_fix: None
+        no_fix: .Ambiguous
         what: fn(self) -> String { "Module path `{self.path}` uses the reserved segment `__bindgen__`." }
         why: fn(self) -> String { "Autogen lives in `c.{self.lib}.__bindgen__`; users declare overlays as `#Import c.{self.lib}: module` only." }
         fix: fn(self) -> String { "Drop `__bindgen__` from your module path, or use `#Import c.{self.lib}: module {{ … }}`." }
@@ -7344,10 +7344,10 @@ ReservedBuildRuleCode: struct {
 
     impl Diagnostic {
         code: "E3530"
-        status: .Reserved
+        stage: [.Build]
         meaning: "Custom build rule used a compiler-reserved E/W numeric code"
         detail: true
-        no_fix: None
+        no_fix: .Ambiguous
         what: fn(self) -> String { "Build rule code `{self.code}` is reserved." }
         why: fn(self) -> String { "Codes beginning with E or W followed only by digits belong to the compiler." }
         fix: fn(self) -> String { "Use a project prefix such as `ORG01`." }
@@ -8173,12 +8173,12 @@ MissingLayoutByteFact: struct {
 ReservedContributionNamespace: struct {
     impl Diagnostic {
         code: "E0960"
-        status: .Reserved
-        meaning: "module contribution names a non-reserved namespace (U3: `env`/`system`/`image`)"
-        no_fix: None
-        what: fn(self) -> String { "Module contribution names a non-reserved namespace (U3: `env`/`system`/`image`)" }
-        why: fn(self) -> String { "The registered parse rule applies here" }
-        fix: fn(self) -> String { "Follow the guidance for E0960" }
+        stage: [.Parse]
+        meaning: "a module contribution, image source, fleet host, or VM-test run names something other than its namespace"
+        no_fix: .Ambiguous
+        what: fn(self) -> String { "A module contribution names something other than a module namespace." }
+        why: fn(self) -> String { "A module contributes to one of the reserved namespaces `env`, `system`, `image`, `fleet`, `vmtest`, `profile`, or `perf`; an image source, a fleet host, and a VM-test run each name theirs the same way." }
+        fix: fn(self) -> String { "Begin the contribution with one of those namespaces, as in `env.name: module {{ … }}`." }
     }
 }
 
@@ -8549,11 +8549,11 @@ UnknownCoreModule: struct {
 ReservedRootShadowed: struct {
     impl Diagnostic {
         code: "E1002"
-        status: .Reserved
-        no_fix: None
-        what: fn(self) -> String { "Local module shadows reserved first-party or foreign root/name" }
-        why: fn(self) -> String { "The registered jet rule applies here" }
-        fix: fn(self) -> String { "Follow the guidance for E1002" }
+        stage: [.Load]
+        no_fix: .Ambiguous
+        what: fn(self) -> String { "A local module takes a reserved first-party or foreign root name." }
+        why: fn(self) -> String { "`core`, `jet`, the first-party ring names, and the foreign-language roots name packages Jet provides, so a local module can't use them." }
+        fix: fn(self) -> String { "Rename the module, or import it under another name, as in `other_name: …`." }
     }
 }
 
@@ -9071,10 +9071,10 @@ GrowableFieldInCLayout: struct {
 ReservedPackedLayout: struct {
     impl Diagnostic {
         code: "E1105"
-        status: .Reserved
-        meaning: "`#Layout(packed)` / first-argument `#Layout(align(N))` not yet supported (reserved)"
+        stage: [.Parse]
+        meaning: "a `#Layout` argument the declaration doesn't support: `packed`, a first-argument `align(N)`, an integer backing on a struct, or alignment on an enum"
         detail: true
-        what: fn(self) -> String { "`#Layout(packed)`, `#Layout(c, packed)` or `#Layout(align(N))` written on a struct." }
+        what: fn(self) -> String { "This `#Layout` argument isn't supported on this declaration." }
         why: fn(self) -> String { "The supported variants are `c`, `columnar`, and the second argument `align(N)` or `align(target, N)` on `#Layout(c)`; `packed` and first-argument `align` remain reserved." }
         fix: fn(self) -> String { "Use `#Layout(c)`, `#Layout(c, align(64))`, `#Layout(c, align(target, 2097152))`, or `#Layout(columnar)`." }
     }
@@ -9094,10 +9094,10 @@ DetachWithView: struct {
 ReservedColumnarPrefix: struct {
     impl Diagnostic {
         code: "E1107"
-        status: .Reserved
+        stage: [.Parse]
         meaning: "`columnar [T]` per-container layout prefix is reserved"
         detail: true
-        no_fix: None
+        no_fix: .Design
         what: fn(self) -> String { "The per-container layout prefix `columnar [T]` was written in a type." }
         why: fn(self) -> String { "A per-use columnar override isn't built yet — only the whole-struct form `#Layout(columnar) Name: struct …` ships in v1 (this spelling is reserved)." }
         fix: fn(self) -> String { "Put `#Layout(columnar)` on the `struct` declaration instead." }
@@ -9607,22 +9607,22 @@ ToolchainVersionMismatch: struct {
 ReservedSectionUsed: struct {
     impl Diagnostic {
         code: "E1209"
-        status: .Reserved
-        no_fix: None
-        what: fn(self) -> String { "Reserved section used non-empty (M12.1)" }
-        why: fn(self) -> String { "The registered jet rule applies here" }
-        fix: fn(self) -> String { "Follow the guidance for E1209" }
+        stage: [.Jetpack]
+        no_fix: .Ambiguous
+        what: fn(self) -> String { "`package.jet` uses a reserved section." }
+        why: fn(self) -> String { "This section name is reserved for a future Jet feature, so using it now is an error." }
+        fix: fn(self) -> String { "Remove the section from `package.jet`, or leave it empty." }
     }
 }
 
-ReservedPackagesTarget: struct {
+UnknownPackagesTarget: struct {
     impl Diagnostic {
         code: "E1210"
-        status: .Reserved
-        no_fix: None
-        what: fn(self) -> String { "Unknown or reserved target in `packages:` block" }
-        why: fn(self) -> String { "The registered jet rule applies here" }
-        fix: fn(self) -> String { "Follow the guidance for E1210" }
+        stage: [.Jetpack]
+        no_fix: .Ambiguous
+        what: fn(self) -> String { "`package.jet` lists an unknown target." }
+        why: fn(self) -> String { "Each `packages:` entry names its target kind, and Jet builds only the shipped kinds." }
+        fix: fn(self) -> String { "Use a shipped target: `library`, `executable`, `test`, `example`, or `sandbox`." }
     }
 }
 
@@ -9825,10 +9825,10 @@ RetiredManifestName: struct {
 
     impl Diagnostic {
         code: "E1226"
-        status: .Retired
+        stage: [.Jetpack]
         meaning: "A retired manifest filename (`pkg.jet`/`pack.jet`/`payload.jet`/`jet.toml`) found where `package.jet` belongs"
         detail: true
-        no_fix: None
+        no_fix: .Design
         what: fn(self) -> String { "`{self.name}` is not the package manifest name — Jet reads `package.jet`." }
         why: fn(self) -> String { "The manifest filename is frozen to one spelling so tooling, docs, and every worked example never have to guess which file to read. `pkg.jet`, `pack.jet`, `payload.jet`, and `jet.toml` are retired names from earlier manifest reshapes." }
         fix: fn(self) -> String { "Rename `{self.name}` to `package.jet`." }
@@ -10744,13 +10744,13 @@ MissingNixOutput: struct {
     }
 }
 
-ReservedRecipeBuildFailed: struct {
+RecipeBuildFailed: struct {
     impl Diagnostic {
         code: "E1273"
-        status: .Reserved
-        meaning: "A recipe-backed package build failed at a logged build step (U27)"
+        stage: [.Jetpack]
+        meaning: "A recipe-backed package build failed at a logged build step"
         detail: true
-        no_fix: None
+        no_fix: .Behavior
         what: fn(self) -> String { "Package build failed at a logged step." }
         why: fn(self) -> String { "Jetpack preserves the failed build scratch under the hangar and records each recipe step's command/output. The primary error names the failed step instead of dumping provider noise." }
         fix: fn(self) -> String { "Run `jet logs <pkg>` for the full per-step log, or rerun the build with `--shell-on-fail` to debug inside the preserved scratch." }

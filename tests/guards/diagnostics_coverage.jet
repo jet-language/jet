@@ -4,11 +4,11 @@
 // read the registry rows from their committed homes.
 use dc_files: core.files
 
-// The deleted gate's named exclusions (tests/diagnostics_coverage.rs:1230-1243):
-// rustc codes kept only to classify foreign compiler output, the internal
-// placeholder, and the retired code that still fires for legacy spelling.
+// rustc's codes, kept only to classify foreign compiler output
+// (tests/diagnostics_coverage.rs:1230-1243). The census never counts them as
+// emitted (Tools/agent/DiagnosticCensus.jet RUSTC_CODES); the i2 test below
+// keeps them out of raise sites and reports.
 DC_RUSTC_CODES: [String]{"E0061", "E0277", "E0425"}
-DC_EXCLUDED_CODES: [String]{"E0061", "E0277", "E0425", "E0000", "E0019"}
 
 // The active rows the compiler emits nothing for yet, each staged on its
 // owning card (tests/diagnostics_coverage.rs:2005-2055). Rows the registry
@@ -205,7 +205,7 @@ dc_report_codes: fn(text: String) -> [String] {
     registered: dc_registered_codes()
     missing := [String]{}
     loop code in dc_emitted_codes() {
-        if !dc_has(DC_EXCLUDED_CODES, code) && !dc_has(registered, code) -> missing.push(code)
+        if !dc_has(registered, code) -> missing.push(code)
     }
     missing.sort()
     assert_eq(missing.join(" "), "")
@@ -261,7 +261,7 @@ dc_baseline_failure: fn(listed: [String], unimplemented: [String], emitted: [Str
     emitted: dc_emitted_codes()
     unimplemented := [String]{}
     loop row in rows {
-        if row.status != "reserved" && row.status != "retired" && !dc_has(DC_EXCLUDED_CODES, row.code) && !dc_has(emitted, row.code) -> dc_add(unimplemented, row.code)
+        if row.status != "reserved" && row.status != "retired" && !dc_has(emitted, row.code) -> dc_add(unimplemented, row.code)
     }
     assert_eq(dc_baseline_failure(DC_SPEC_AHEAD_OF_IMPL.map(row -> row.code), unimplemented, emitted), "")
 }

@@ -17,7 +17,10 @@
 // (`"E2416: invalid .env line"`), or by writing a report header with the
 // row's type path (`[jet.MissingEngine]`). The scan covers every `.jet` file
 // under Compiler/, Jetpack/ and Core/ except test packages, fixtures, dot
-// directories and the registry's own files.
+// directories and the registry's own files. rustc's codes (RUSTC_CODES) are
+// never a Jet emission: a source names them only to classify or set aside
+// cargo output, and the i2 test of tests/guards/diagnostics_coverage.jet
+// keeps them out of every raise site and report.
 // A rendered output carries a code as a report opener or bracket (`[E0749]`,
 // `[jet.FetchHashMismatch]`), a quoted code, or its `jet-lang.dev/e/` link;
 // a case carries it that way on any line that is not a `#` comment.
@@ -50,6 +53,7 @@ SOURCE_PATH: "Compiler/Prelude/Diagnostics.jet"
 // The registry lists every code by construction; it is not an emission site.
 REGISTRY_FILES: [String]{"Compiler/JetFoundation/Source/Registry/DiagnosticRows.jet", "Compiler/Prelude/Diagnostics.jet"}
 EMIT_ROOTS: [String]{"Compiler", "Jetpack", "Core"}
+RUSTC_CODES: [String]{"E0061", "E0277", "E0425"}
 // The emitters that are not a compiler stage: the package manager, Core, the
 // runtime, and the compiler's tool and command packages.
 TOOL_ROOTS: [String]{"Jetpack/", "Core/", "Compiler/JetRuntime/", "Compiler/JetCli/", "Compiler/JetBuildSession/", "Compiler/JetCanvas/", "Compiler/JetDebug/", "Compiler/JetDevserver/", "Compiler/JetImpact/", "Compiler/JetLSP/", "Compiler/JetRepl/", "Compiler/JetSemIndex/", "Compiler/JetTestKit/", "Compiler/Toolchain/"}
@@ -251,6 +255,10 @@ census_tool_source: fn(path: String) -> Bool Never! {
     TOOL_ROOTS.any(root -> path.starts_with(root))
 }
 
+census_rustc_code: fn(code: String) -> Bool Never! {
+    RUSTC_CODES.contains(code)
+}
+
 // The codes and type paths the compiler, package manager and Core sources emit.
 census_emitted: fn() -[FS]> CensusEmitters DiagnosticCensusError! {
     paths := [String]{}
@@ -269,6 +277,8 @@ census_emitted: fn() -[FS]> CensusEmitters DiagnosticCensusError! {
             }
         }
     }
+    emitters.compiler.codes = emitters.compiler.codes.filter(code -> !census_rustc_code(code))
+    emitters.tool.codes = emitters.tool.codes.filter(code -> !census_rustc_code(code))
     Ok(emitters)
 }
 
@@ -564,6 +574,7 @@ census_test_entry: fn(code: String, gap: String) -> BaselineRow Never! {
     census_carried_text("t/a.case", "# \"E0001\" in a comment\nstderr: ~ \"E0749\" # the denial\n", case_tokens)
     assert_eq(case_tokens.codes, [String]{"E0749"})
     assert(census_is_code("E-WEB-RUN") && census_is_code("JT0001") && !census_is_code("E-WEB") && !census_is_code("E01"))
+    assert(census_rustc_code("E0277") && !census_rustc_code("E0308"))
 }
 
 #Test("the census classifies rows by emitter and first carriage, names their gaps, and round-trips its rendering") {

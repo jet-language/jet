@@ -523,7 +523,7 @@ kit_ui_source_code: fn(code: String) -> Bool {
     bytes: code.bytes()
     if bytes.len() == 5 {
         digits: bytes.slice(1, bytes.len()).all(byte -> byte >= (U8{48}) && byte <= (U8{57}))
-        if digits && (bytes[0] == (U8{69}) || bytes[0] == (U8{76}) || code == "W0410") -> return true
+        if digits && (bytes[0] == (U8{69}) || bytes[0] == (U8{76}) || bytes[0] == (U8{87})) -> return true
     }
     if bytes.len() == 6 && code.starts_with("JT") && bytes.slice(2, bytes.len()).all(byte -> byte >= (U8{48}) && byte <= (U8{57})) -> return true
     if !code.starts_with("E-") && !code.starts_with("L-") -> return false
@@ -603,7 +603,7 @@ kit_ui_extract_reports: fn(text: String, rows: [KitUIRegistryRow]) -> [String] {
 }
 
 kit_ui_excluded: fn(code: String) -> Bool {
-    kit_expect_named(["E0061", "E0277", "E0425", "E0000", "E0019", "E0420", "E0421", "E0422", "E0423", "E0424", "E0909"], code)
+    kit_expect_named(["E0061", "E0277", "E0425", "E0420", "E0421", "E0423", "E0424", "E0909"], code)
 }
 
 kit_ui_allowed: fn(rows: [KitUIAllowance], code: String, side: String) -> Bool {
