@@ -1,0 +1,51 @@
+// `core.sys.tree_cpu_time(pid)` reads the CPU time a process and all its
+// descendants have used: the live ones, and every child one of them has
+// already waited for. `cpu_time(pid)` counts only the process itself. Here
+// a shell runs a busy loop in a grandchild, waits for it and says so; the
+// grandchild's time then shows in the tree's count but not in the shell's
+// own. CPU time, unlike wall time, does not grow when the host is busy, so
+// a harness bounds a child's whole process tree by this count. A host with
+// no process table to read (anything but Linux) reports the tree's time as
+// Unsupported, so each line prints the same on every host.
+package: {
+    name: "os_tree_cpu_time"
+    authority: { allow: [Env, Exec, FS, IO, Time] }
+}
+
+use {
+    os: core.sys
+    process: core.process
+}
+
+kind: fn(error: IOError) -> String {
+    if error == {
+        .InvalidInput(_) -> "InvalidInput"
+        .NotFound(_) -> "NotFound"
+        .Unsupported(_) -> "Unsupported"
+        .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) -> "another error"
+    }
+}
+
+run: fn() {
+    script: "sh -c 'i=0; while [ $i -lt 300000 ]; do i=$((i+1)); done'; echo done; read line"
+    child := process.cmd(["sh", "-c", script]).stdin(.Stream).stdout(.Stream).spawn() ?? panic("sh did not start: {err}")
+    // The shell prints only once it has waited for the busy grandchild.
+    said: child.stdout.read(64) ?? panic("read: {err}")
+    tree: os.tree_cpu_time(child.id())
+    own: os.cpu_time(child.id())
+    counted: if tree == {
+        .Ok(spent) -> if own == {
+            // The grandchild's loop runs for far more than 50 ms of CPU.
+            .Ok(alone) -> spent.in(.Nanoseconds) - alone.in(.Nanoseconds) >= 50000000
+            .Err(error) -> spent.in(.Nanoseconds) >= 50000000
+        }
+        .Err(error) -> kind(error) == "Unsupported"
+    }
+    print("the shell said it was done: {said.len() > 0}")
+    print("the tree's CPU time counts the finished grandchild, or is unreadable here: {counted}")
+    print("tree_cpu_time(-1): {if os.tree_cpu_time(-1) == { .Ok(spent) -> "accepted", .Err(error) -> kind(error) }}")
+    // No Linux pid is above 4194304, so nothing is read.
+    print("tree_cpu_time(4194305): {if os.tree_cpu_time(4194305) == { .Ok(spent) -> "accepted", .Err(error) -> kind(error) }}")
+    child.stdin.close()
+    _ := child.wait()
+}

@@ -2462,13 +2462,15 @@ setters, and it is POSIX process control under `#Unsafe` like `setpriority`.
 | `set_scheduling(policy, pid: Int{0})` | `!IOError -[Env, Exec]>` | `sched_setscheduler`. A real-time priority outside 1 to 99 is `IOError.InvalidInput`; real time without `CAP_SYS_NICE` or an `RLIMIT_RTPRIO` allowance is `IOError.PermissionDenied`. |
 | `round_robin_interval(pid: Int{0})` | `Duration !IOError -[Env]>` | `sched_rr_get_interval`: the slice a `.RoundRobin` process runs before the next of its priority; zero under `.Fifo`. |
 
-`cpu_time` reads the CPU time of any process; `set_wall_clock` sets the
+`cpu_time` reads the CPU time of any process and `tree_cpu_time` that of a
+process with its descendants; `set_wall_clock` sets the
 machine's wall clock, so it is POSIX control under `#Unsafe`. Monotonic
 readings (`core.time.instant`, stopwatches) do not jump when it is set.
 
 | API | Result | Description |
 | --- | --- | --- |
 | `cpu_time(pid: Int{0})` | `Duration !IOError -[Env]>` | `clock_getcpuclockid` and `clock_gettime`: the user and system time of every thread of process `pid`, this program when 0. No such process, or a pid naming a thread that is not a process, is `IOError.NotFound`; a negative pid is `IOError.InvalidInput`. |
+| `tree_cpu_time(pid: Int{0})` | `Duration !IOError -[Env, FS.Read]>` | `/proc/<pid>/stat` of `pid` (this program when 0) and every live descendant (`/proc/<pid>/task/<tid>/children`): their user and system time plus that of each child one of them has waited for, in whole clock ticks. A descendant whose parent exited without waiting for it is not counted. A harness bounds a child's whole process tree with it: the testkit's step CPU limit reads it. Linux only, else `IOError.Unsupported`; no such process is `IOError.NotFound`; a negative pid is `IOError.InvalidInput`. |
 | `set_wall_clock(time: DateTime)` | `!IOError -[Env]>` | `clock_settime(CLOCK_REALTIME)`. It needs `CAP_SYS_TIME`, otherwise it is `IOError.PermissionDenied`; a time before 1970 is `IOError.InvalidInput`. |
 
 `usize_max()` is a pure `U64` constant derived at compile time from the

@@ -1,0 +1,10 @@
+// core-conformance: core.sys.tree_cpu_time
+use os: core.sys
+
+run: fn() {
+    own: os.tree_cpu_time() ?? panic("tree_cpu_time")
+    parent: os.tree_cpu_time(os.getppid()) ?? panic("tree_cpu_time(getppid())")
+    missing: os.tree_cpu_time(4194305) == .Err(.NotFound(_))
+    // The parent's tree holds this program's, read a moment earlier.
+    print(own.in(.Nanoseconds) >= 0 && parent.in(.Nanoseconds) >= own.in(.Nanoseconds) && missing)
+}

@@ -1158,6 +1158,78 @@ cpu_time: fn(pid: Int{0}) -[Env]> Duration IOError! {
     Ok(Duration.nanoseconds(row.value) ?? return Err(syscall_input(.Read, Val("cpu_time"), "the CPU time is outside Duration's range")))
 }
 
+/// The CPU time process `pid` (this program when 0) and its descendants have
+/// used: the user and system time of every live process in the tree, plus
+/// the time of each child one of them has already waited for. A descendant
+/// whose parent exited without waiting for it leaves the tree and is not
+/// counted. The kernel counts in clock ticks, so the result is a whole
+/// number of ticks (10 ms on most Linux hosts). Only Linux has the
+/// process table this reads; elsewhere it is `IOError.Unsupported`. No such
+/// process is `IOError.NotFound`; a negative pid is `IOError.InvalidInput`.
+tree_cpu_time: fn(pid: Int{0}) -[Env, FS.Read]> Duration IOError! {
+    if pid < 0 {
+        return Err(IOError.InvalidInput(IOContext{operation: .Read, resource: Val("tree_cpu_time"), os_code: None, cause: Val("pid {pid} is negative")}))
+    }
+    if pid > 4194304 -> return Err(process_error(.Read, "tree_cpu_time", 3))
+    if name() != "linux" -> return Err(unsupported("tree_cpu_time"))
+    root: if pid == 0 -> getpid() else -> pid
+    clock: core.sys.__times()
+    ticks: if !clock.available || clock.ticks < 1 -> 100 else -> clock.ticks
+    // Parents before children: a child a parent reaps between the two reads
+    // is missed once, never counted twice.
+    total := 0
+    queue := [Int]{root}
+    at := 0
+    loop at < queue.len() {
+        current: queue[at]
+        at += 1
+        stat: files.read("/proc/{current}/stat") ?? {
+            if current == root -> return Err(process_error(.Read, "tree_cpu_time", 3))
+            next
+        }
+        total += __tree_stat_ticks(stat)
+        threads: files.list_dir("/proc/{current}/task") ?? next
+        loop thread in threads {
+            children: files.read(files.join(thread.path, "children")) ?? next
+            loop word in text_parse.split_ws(children) {
+                child: Int.parse(word) ?? next
+                queue.push(child)
+            }
+        }
+    }
+    Ok(Duration.nanoseconds(total * (1000000000 /% ticks)) ?? return Err(syscall_input(.Read, Val("tree_cpu_time"), "the CPU time is outside Duration's range")))
+}
+
+// utime, stime, cutime and cstime of a /proc/<pid>/stat row, in clock ticks:
+// fields 14 to 17, counted after the command name's closing parenthesis,
+// since the name itself may hold spaces and parentheses.
+__tree_stat_ticks: fn(stat: String) -> Int Never! {
+    raw: stat.bytes()
+    close := -1
+    loop index in 0..<raw.len() {
+        if raw[index] == (U8{41}) -> close = index
+    }
+    if close < 0 -> return 0
+    after: close + 1
+    fields: text_parse.split_ws(String.from_bytes(raw[after..<raw.len()]) ?? "")
+    // fields[0] is field 3, the state.
+    if fields.len() < 15 -> return 0
+    sum := 0
+    loop index in 11..<15 -> sum += Int.parse(fields[index]) ?? 0
+    sum
+}
+
+#Test("tree_cpu_time counts a process tree's user, system and waited-for children's ticks") {
+    assert_eq(__tree_stat_ticks("42 (a b) c) S 1 42 42 0 -1 4194560 100 0 0 0 7 3 2 1 20 0 1 0 5 0 0"), 13)
+    assert_eq(__tree_stat_ticks("garbled"), 0)
+    if name() == "linux" {
+        own: tree_cpu_time() ?? panic("tree_cpu_time: {err}")
+        assert(own.ns >= 0)
+        assert(tree_cpu_time(4194305) == .Err(.NotFound(_)))
+        assert(tree_cpu_time(-1) == .Err(.InvalidInput(_)))
+    }
+}
+
 /// Set the machine's wall clock (CLOCK_REALTIME) to `time`. `core.time.now`
 /// jumps in every process; `core.time.instant` and stopwatches do not, since
 /// they read the monotonic clock. Setting needs CAP_SYS_TIME, otherwise it is
