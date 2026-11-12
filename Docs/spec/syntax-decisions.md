@@ -1118,6 +1118,15 @@ use `filter_map`/`try_collect` (D-FAILCOMP1). S25 comparison distribution is
 **S13 — Logic & comparison**: `&&` `||` `!`; `==` `!=` `<` `>` `<=` `>=`.
 Word forms are not operators.
 
+**D-FLOORDIV1 — Floor division `/%`** *(ratified 2026-08-05, card #1431)*:
+`a /% b` divides and rounds down, toward negative infinity, on exact `Int`,
+fixed-width integers and Float (`7 /% 2` is 3, `-7 /% 2` is -4, `7.5 /% 2.0`
+is 3.0). It is the whole-number companion of `/`, which always gives the true
+quotient, and it pairs with floored `%`, so `a == b * (a /% b) + a % b`. The
+in-place form is `/%=`. A zero divisor traps
+with the divided-by-zero message on every tier. The registry spellings are
+`OP_SLASH_PERCENT` and `OP_SLASH_PERCENT_EQ` in `Data/Syntax/MathLayout.jet`.
+
 **D-SIGIL-ALGEBRA1=B — Words for bit arithmetic and power** *(ratified
 2026-10-04, card #4141)*: every integer type has `bit_and(other)`,
 `bit_or(other)`, `bit_xor(other)` and `bit_not()`. Power is `value.pow(exponent)`
