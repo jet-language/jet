@@ -1,0 +1,40 @@
+// The organization policy's `authority: { deny: [...] }` narrows the root
+// package past its own `allow` row (E0749, naming the policy file), leaves a
+// build that uses no denied effect alone, and a gate-only policy file still
+// denies nothing.
+use {
+    jet_driver.[JetDriverCompileMode, jet_driver_present_diagnostics]
+    jet_cli.[jet_cli_compile_file]
+    jet_foundation.[DIAGNOSTIC_ERROR]
+    sys: core.sys
+}
+
+organization_denial_errors: fn(file: String) -> [String] {
+    errors := [String]{}
+    checked: jet_cli_compile_file(file, false, None, JetDriverCompileMode.Program)
+    if checked == {
+        .Refused(refusal) -> errors.push(refusal.stderr)
+        .Compiled(result, snapshot) -> {
+            if result.internal_problem != None -> panic("{file}: internal compiler failure")
+            loop diagnostic in jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files) {
+                if diagnostic.severity == DIAGNOSTIC_ERROR && diagnostic.code == "E0749" -> errors.push(diagnostic.what)
+            }
+        }
+    }
+    errors
+}
+
+#Test("organization_authority_deny") {
+    fixture: "tests/cases/build_entry/an_organization_denial_of_meta_holds_over_every_package.fixture"
+    app: "{fixture}/app/main.jet"
+    assert_eq(organization_denial_errors(app), [String]{})
+    sys.set("JET_ORG_UNSAFE_POLICY", "{fixture}/org-policy.jet")
+    denied: organization_denial_errors(app)
+    unaffected: organization_denial_errors("tests/cases/build_entry/only_the_roots_compiler_value_runs_the_hook.fixture/steps/main.jet")
+    sys.set("JET_ORG_UNSAFE_POLICY", "tests/cases/cli_parts_core/fixtures/gate_policy/org-policy.jet")
+    gate_only: organization_denial_errors(app)
+    _ := sys.unset("JET_ORG_UNSAFE_POLICY")
+    assert_eq(denied, [String]{"`build` reaches the `Meta.Generate` effect, which the organization policy `{fixture}/org-policy.jet` denies with `authority: {{ deny: [Meta] }}`"})
+    assert_eq(unaffected, [String]{})
+    assert_eq(gate_only, [String]{})
+}

@@ -31,35 +31,47 @@ pkg_gate_refusal: fn(key: PolicyKey, site: String, span: Span?, declarations: [P
     }, span))
 }
 
+// The organization's policy file (`JET_ORG_UNSAFE_POLICY`), the outermost
+// rung of every policy chain: its audited-gate floor and the effects its
+// `authority: { deny: [...] }` denies every package; no package row lifts
+// either.
+PackageOrganizationPolicy: struct {
+    declarations: [PolicyDeclaration]
+    deny: [String]
+    // The configured file ("" when none is configured).
+    source: String
+}
+
 // crates/jet-driver/src/Loader.rs:2988 `load_organization_policy`.
-pkg_load_organization_gate_policy: fn() -[FS, Env]> [PolicyDeclaration] PackageGateError! {
-    path: sys.get("JET_ORG_UNSAFE_POLICY") ?? return Ok([PolicyDeclaration]{})
+pkg_load_organization_gate_policy: fn() -[FS, Env]> PackageOrganizationPolicy PackageGateError! {
+    path: sys.get("JET_ORG_UNSAFE_POLICY") ?? return Ok(PackageOrganizationPolicy{declarations: [PolicyDeclaration]{}, deny: [String]{}, source: ""})
     source: files.read(path) ?? return Err(PackageGateError{diagnostics: [Diagnostic]{diagnostic_from_registry("E3109", None,
         "cannot read the configured organization gate policy",
         "JET_ORG_UNSAFE_POLICY names `{path}`, but it could not be read: {pkg_io_cause(err)}",
         "fix the policy path or remove the environment variable")}})
-    declarations := pkg_parse_policy_document(source) ?? return Err(PackageGateError{diagnostics: [Diagnostic]{diagnostic_from_registry("E3109", None,
+    document := pkg_parse_organization_document(source) ?? return Err(PackageGateError{diagnostics: [Diagnostic]{diagnostic_from_registry("E3109", None,
         "the configured organization gate policy is malformed",
-        "`{path}` must contain a manifest-shaped `policy: {{ unsafe: .Obligations, impure: .GateOnly, nondeterministic: .GateOnly }}` block: {err:Debug}",
+        "`{path}` must contain a manifest-shaped `policy: {{ unsafe: .Obligations, impure: .GateOnly, nondeterministic: .GateOnly }}` block, an `authority: {{ deny: [Meta] }}` block, or both: {err:Debug}",
         "fix the organization policy; configured policy never fails open")}})
-    wrong_shape := declarations.len() == 0
-    loop declaration in declarations {
+    wrong_shape := document.declarations.len() == 0 && document.deny.len() == 0
+    loop declaration in document.declarations {
         if !policy_key_is_audited_gate(declaration.key) -> wrong_shape = true
     }
     if wrong_shape -> return Err(PackageGateError{diagnostics: [Diagnostic]{diagnostic_from_registry("E3109", None,
         "the organization gate policy has the wrong shape",
-        "this admin input contains only the shared audited-gate fields",
-        "use `policy: {{ gate_kind: .Forbid }}` with any subset of the fifteen audited gate policy keys")}})
-    loop index in 0..<declarations.len() {
-        declarations[index].scope = PolicyScope.Organization
-        declarations[index].source = path
+        "this admin input contains only the shared audited-gate fields and the effects it denies",
+        "use `policy: {{ gate_kind: .Forbid }}` with any subset of the fifteen audited gate policy keys, `authority: {{ deny: [Effect] }}`, or both")}})
+    loop index in 0..<document.declarations.len() {
+        document.declarations[index].scope = PolicyScope.Organization
+        document.declarations[index].source = path
     }
-    Ok(declarations)
+    Ok(PackageOrganizationPolicy{declarations: document.declarations.move(), deny: document.deny.move(), source: path})
 }
 
 // crates/jet-driver/src/Loader.rs:403 `project_gate_declarations`.
 pkg_project_gate_declarations: fn(cache: &WorkspaceDeclarationCache, root: String) -[FS, Env]> [PolicyDeclaration] PackageGateError! {
-    declarations := pkg_load_organization_gate_policy()
+    organization := pkg_load_organization_gate_policy()
+    declarations := organization.declarations.move()
     loaded: if pkg_package_facts_for_root(cache, root) == {
         .Ok(found) -> found
         .Err(error) -> return Err(PackageGateError{diagnostics: [Diagnostic]{error.diagnostic}})

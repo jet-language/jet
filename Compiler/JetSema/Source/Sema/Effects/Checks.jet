@@ -1050,21 +1050,32 @@ sema_effect_prohibited_diagnostic: fn(node: SemaEffectNode, reached: [String], p
     diagnostic_with_rights(diagnostic, "invocation", [String]{node.name}, [String]{}, None)
 }
 
-// A package `authority.deny` row reached by one of the package's functions.
-// A denied Panic names the reachable function where the stop enters the call
-// graph and the chain to it (`panic_steps`) and the three exits, the same as
-// a `-[!Panic]>` row.
-sema_effect_package_denied_diagnostic: fn(node: SemaEffectNode, reached: [String], denied: String, panic_steps: [String]) -> Diagnostic {
+// One effect an `authority: { deny: [...] }` row denies the root package's
+// modules: the package's own row (`organization` is ""), or the organization
+// policy file's at `organization`, which no package row lifts.
+SemaEffectDenial: struct {
+    name: String
+    organization: String
+}
+
+// A package `authority.deny` row, or the organization policy's, reached by
+// one of the package's functions. A denied Panic names the reachable
+// function where the stop enters the call graph and the chain to it
+// (`panic_steps`) and the three exits, the same as a `-[!Panic]>` row.
+sema_effect_package_denied_diagnostic: fn(node: SemaEffectNode, reached: [String], denied: String, panic_steps: [String], organization: String) -> Diagnostic {
     reached_list: sema_effect_show(reached)
     reaches_panic: loop effect_name in reached {
         if sema_effect_root(effect_name) == "Panic" -> break true
     } ?? false
+    denier: if organization == "" -> "the package" else -> "the organization policy `{organization}`"
+    undo: if organization == "" -> "drop `{denied}` from `authority.deny`" else -> "ask the organization to drop `{denied}` from its policy's `authority.deny`; no package row lifts it"
     if reaches_panic {
         panic_site: sema_effect_panic_site_name(node, panic_steps)
-        diagnostic: sema_error("E0749", node.name_span, "`{node.name}` can stop, but the package denies Panic with `authority: {{ deny: [{denied}] }}`", "`{panic_site}` can stop; every function in the package and every callee it can reach must not stop when Panic is denied", "return a fallible result for expected failure, add facts or a `#Pre`/refinement proof for a programmer-error stop, or drop `{denied}` from `authority.deny`")
+        diagnostic: sema_error("E0749", node.name_span, "`{node.name}` can stop, but {denier} denies Panic with `authority: {{ deny: [{denied}] }}`", "`{panic_site}` can stop; every function in the package and every callee it can reach must not stop when Panic is denied", "return a fallible result for expected failure, add facts or a `#Pre`/refinement proof for a programmer-error stop, or {undo}")
         return diagnostic_with_rights(diagnostic, "invocation", sema_effect_panic_chain(node.name, panic_steps), [String]{}, None)
     }
-    diagnostic: sema_error("E0749", node.name_span, "`{node.name}` reaches the `{reached_list}` effect, which the package denies with `authority: {{ deny: [{denied}] }}`", "a package `deny` row means every function in the package and every callee it can reach must not use `{reached_list}`", "remove the call that introduces `{reached_list}`, or drop `{denied}` from `authority.deny`")
+    row: if organization == "" -> "a package `deny` row" else -> "an organization `deny` row"
+    diagnostic: sema_error("E0749", node.name_span, "`{node.name}` reaches the `{reached_list}` effect, which {denier} denies with `authority: {{ deny: [{denied}] }}`", "{row} means every function in the package and every callee it can reach must not use `{reached_list}`", "remove the call that introduces `{reached_list}`, or {undo}")
     diagnostic_with_rights(diagnostic, "invocation", [String]{node.name}, [String]{}, None)
 }
 
@@ -3915,8 +3926,10 @@ sema_effect_region_add_scoped: fn(inferred: &[String], scoped_calls: [SemaEffect
 // onto `modules` at the end. The effect sites of every module's functions are
 // collected at once on up to `threads` compiler threads
 // (sema_effect_collect_threads); the result is the same for any thread count.
-// `package_denials` is the root package's `authority.deny` row; `denial_modules`
-// marks, by graph module index, the modules that row binds. `file_caps` holds,
+// `package_denials` is the root package's `authority.deny` row and
+// `organization_denials` the organization policy's (read from
+// `organization_source`), which no package row lifts; `denial_modules`
+// marks, by graph module index, the modules both rows bind. `file_caps` holds,
 // by graph module index, the `#FX(…)` caps a file module takes from the
 // `name: module` declarations above it. `trait_caps` is each capped trait's
 // `#FX(…)` cap (sema_effect_trait_caps). `decls` is the run's declaration
@@ -3924,7 +3937,7 @@ sema_effect_region_add_scoped: fn(inferred: &[String], scoped_calls: [SemaEffect
 // functions the build checked to run while compiling (a comptime item's
 // callees, whose call sites no module records): prep code, never a runtime
 // entry (sema_effect_runtime_input_paths).
-sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaEffectModuleInput], prepared: &&SemaEffectPrepared, package_denials: [String], denial_modules: [Bool], file_caps: [[SemaEffectModuleCap]], trait_caps: [String:SemaEffectTypeCap], decls: DeclTable, prep_functions: [String:Bool], threads: CompilerThreads) -> SemaEffectGraphResult {
+sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaEffectModuleInput], prepared: &&SemaEffectPrepared, package_denials: [String], denial_modules: [Bool], file_caps: [[SemaEffectModuleCap]], trait_caps: [String:SemaEffectTypeCap], decls: DeclTable, prep_functions: [String:Bool], threads: CompilerThreads, organization_denials: [String]{[String]{}}, organization_source: String{""}) -> SemaEffectGraphResult {
     owned_prepared := prepared.move()
     diagnostics := owned_prepared.diagnostics.move()
     nodes := owned_prepared.nodes.move()
@@ -4077,9 +4090,16 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
     }
     // Rust bundle_memory_inputs: a manifest guarantee covers every qualified
     // function, including otherwise unreferenced bodies, not just entry.
-    loop name in package_denials {
+    // The organization's denials hold beside the package's own: a package
+    // row can't lift them, and each report names the row that denies.
+    denials := loop name in package_denials -> SemaEffectDenial{name: name, organization: ""}
+    loop name in organization_denials -> denials.push(SemaEffectDenial{name: name, organization: organization_source})
+    loop denial in denials {
+        name: denial.name
         fact: sema_effect_memory_fact(name) ?? next
-        declaration: SemaMemoryFactDeclaration{fact: fact, roots: loop node in nodes -> node.display_key, span: Span{start: 0, end: 0}, source: "package.jet", provenance: "manifest denial `authority: {{ deny: [{name}] }}`"}
+        source: if denial.organization == "" -> "package.jet" else -> denial.organization
+        provenance: if denial.organization == "" -> "manifest denial `authority: {{ deny: [{name}] }}`" else -> "organization denial `authority: {{ deny: [{name}] }}`"
+        declaration: SemaMemoryFactDeclaration{fact: fact, roots: loop node in nodes -> node.display_key, span: Span{start: 0, end: 0}, source: source, provenance: provenance}
         memory_facts.declarations.push(declaration)
         loop root in 0..<nodes.len() {
             memory_diagnostics := [Diagnostic]{}
@@ -4091,9 +4111,9 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
     // A package's every other denial is a compile-time prohibition on its
     // own functions, exactly as if each wrote `-[!E]>`;
     // memory denials are the facts above.
-    loop name in package_denials {
-        if sema_effect_memory_fact(name) != None -> next
-        denied: sema_effect_parse_name(name) ?? next
+    loop denial in denials {
+        if sema_effect_memory_fact(denial.name) != None -> next
+        denied: sema_effect_parse_name(denial.name) ?? next
         loop node_index in 0..<nodes.len() {
             graph_module: inputs[nodes[node_index].module_index].module_index
             if graph_module >= denial_modules.len() || !denial_modules[graph_module] -> next
@@ -4102,7 +4122,7 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
             panic_steps := [String]{}
             if sema_effect_root(denied) == "Panic" -> panic_steps = sema_effect_panic_steps(nodes, calls.node_by_key, node_index)
             denial_diagnostics := [Diagnostic]{}
-            denial_diagnostics.push(sema_effect_with_instance_notes(sema_effect_package_denied_diagnostic(nodes[node_index], reached, denied, panic_steps), sema_effect_instance_notes(nodes, calls.node_by_key, solved, nodes[node_index]), reached))
+            denial_diagnostics.push(sema_effect_with_instance_notes(sema_effect_package_denied_diagnostic(nodes[node_index], reached, denied, panic_steps, denial.organization), sema_effect_instance_notes(nodes, calls.node_by_key, solved, nodes[node_index]), reached))
             sema_effect_publish_diagnostics(diagnostics, inputs[nodes[node_index].module_index].source_segments, denial_diagnostics)
         }
     }

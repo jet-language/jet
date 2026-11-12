@@ -9,7 +9,7 @@ use {
         policy_parse_value, policy_resolve,
     ]
     jetpack_foundation.[
-        MANIFEST_BLOCK_POLICY, POLICY_EXCEPTION_FIELD_EXPIRES, POLICY_EXCEPTION_FIELD_ID,
+        MANIFEST_BLOCK_AUTHORITY, MANIFEST_BLOCK_POLICY, POLICY_EXCEPTION_FIELD_EXPIRES, POLICY_EXCEPTION_FIELD_ID,
         POLICY_EXCEPTION_FIELD_REASON, POLICY_EXCEPTION_FIELD_SCOPE, POLICY_EXCEPTION_TYPE,
         POLICY_FIELD_CLAIMS, POLICY_FIELD_CONTAIN, POLICY_FIELD_DEPS,
         POLICY_FIELD_EXCEPTIONS, POLICY_FIELD_EXPERT, POLICY_FIELD_HARDEN, POLICY_FIELD_LICENSES,
@@ -419,17 +419,35 @@ pkg_parse_guarantee_policy: fn(body: String) -> GuaranteePolicy PackageParseErro
     Ok(GuaranteePolicy{contain: pkg_manifest_sorted(contain), harden: harden})
 }
 
-// Parse a standalone organization policy file whose entire content is one
-// `policy: { … }` block (`JET_ORG_UNSAFE_POLICY`).
-pkg_parse_policy_document: fn(text: String) -> [PolicyDeclaration] PackageParseError! {
-    stripped: pkg_strip_comments(text).trim()
-    if !stripped.starts_with(MANIFEST_BLOCK_POLICY) -> return Err(pkg_bad_mem("expected only `policy: {{ … }}`"))
-    rest := stripped.removeprefix(MANIFEST_BLOCK_POLICY).trim_start()
-    if !rest.starts_with(":") -> return Err(pkg_bad_mem("expected `:` after `policy`"))
-    rest = rest.removeprefix(":").trim_start()
-    if !rest.starts_with("{{") -> return Err(pkg_bad_mem("expected `{{` after `policy:`"))
-    rest = rest.removeprefix("{{")
-    close: pkg_text_find_byte(rest, 125) ?? return Err(pkg_bad_mem("missing `}}` after organization policy"))
-    if pkg_binder_tail(rest, close + 1).trim() != "" -> return Err(pkg_bad_mem("organization policy file may contain only the `policy` block"))
-    pkg_parse_policy(pkg_binder_slice(rest, 0, close), false)
+// A standalone organization policy file (`JET_ORG_UNSAFE_POLICY`): its
+// `policy: { … }` audited-gate floor and the effects its
+// `authority: { deny: [...] }` denies every package of the build.
+PackageOrganizationDocument: struct {
+    declarations: [PolicyDeclaration]
+    deny: [String]
+}
+
+// Parse a standalone organization policy file: a `policy: { … }` block, an
+// `authority: { deny: [...] }` block, or both. The organization's authority
+// only narrows, so `deny` is its one field.
+pkg_parse_organization_document: fn(text: String) -> PackageOrganizationDocument PackageParseError! {
+    document := PackageOrganizationDocument{declarations: [PolicyDeclaration]{}, deny: [String]{}}
+    seen := [String]{}
+    loop entry in pkg_key_value_entries(pkg_strip_comments(text).trim()) {
+        if seen.contains(entry.key) -> return Err(pkg_bad_mem("organization policy `{entry.key}` is declared more than once"))
+        seen.push(entry.key)
+        if entry.key == MANIFEST_BLOCK_POLICY {
+            value: entry.value.trim()
+            if !value.starts_with("{{") || !value.ends_with("}}") -> return Err(pkg_bad_mem("organization `policy:` must be one record `{{ … }}`"))
+            document.declarations = pkg_parse_policy(pkg_binder_slice(value, 1, value.len() - 1), false)
+        } else if entry.key == MANIFEST_BLOCK_AUTHORITY {
+            authority: pkg_parse_authority_value(entry.value)
+            if authority.allow != None || authority.needs.len() > 0 || authority.grants.len() > 0 || authority.trust != None || authority.providers.len() > 0 -> return Err(pkg_bad_mem("organization `authority:` holds only `deny: [...]`; the organization narrows every package and grants nothing"))
+            document.deny = authority.deny ?? [String]{}
+        } else {
+            return Err(pkg_bad_mem("organization policy file may contain only the `policy` and `authority` blocks"))
+        }
+    }
+    if seen.len() == 0 -> return Err(pkg_bad_mem("expected `policy: {{ … }}` or `authority: {{ deny: [...] }}`"))
+    Ok(document)
 }

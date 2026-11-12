@@ -1,6 +1,6 @@
 // Exact originals tests/policy_scope.rs; no fixture spelling migrations.
 use {
-    jet_pkg_model.[PackageFacts, pkg_parse_policy_document]
+    jet_pkg_model.[PackageFacts, pkg_parse_organization_document]
     jet_foundation.[PolicyKey, PolicyValue]
 }
 
@@ -49,14 +49,15 @@ use {
 }
 
 #Test("organization policy document is exact and fails closed") {
-    valid: pkg_parse_policy_document("policy: {{ unsafe: .Obligations, impure: .GateOnly, nondeterministic: .GateOnly }}\n") ?? panic("organization policy parse")
-    assert_eq(valid.len(), 3)
-    assert_eq(valid[0].value, PolicyValue.Obligations)
-    assert_eq(valid[1].key, PolicyKey.Impure)
-    assert_eq(valid[2].key, PolicyKey.Nondeterministic)
-    invalid: [String]{"policy: {{ unsafe: .Obligations", "policy: {{ unsafe: .Obligations }}\npackage: {{}}"}
+    valid: pkg_parse_organization_document("policy: {{ unsafe: .Obligations, impure: .GateOnly, nondeterministic: .GateOnly }}\n") ?? panic("organization policy parse")
+    assert_eq(valid.declarations.len(), 3)
+    assert_eq(valid.declarations[0].value, PolicyValue.Obligations)
+    assert_eq(valid.declarations[1].key, PolicyKey.Impure)
+    assert_eq(valid.declarations[2].key, PolicyKey.Nondeterministic)
+    assert_eq(valid.deny.len(), 0)
+    invalid: [String]{"policy: {{ unsafe: .Obligations", "policy: {{ unsafe: .Obligations }}\npackage: {{}}", "authority: {{ allow: [Meta] }}", "authority: {{ deny: [Meta], needs: [Net] }}", "authority: {{ deny: [Meta] }}\nauthority: {{ deny: [Net] }}", ""}
     loop text in invalid {
-        rejected: if pkg_parse_policy_document(text) == {
+        rejected: if pkg_parse_organization_document(text) == {
             .Err(_) -> true
             .Ok(_) -> false
         }
@@ -64,19 +65,28 @@ use {
     }
 }
 
+#Test("organization policy document denies effects to every package") {
+    denied: pkg_parse_organization_document("authority: {{ deny: [Meta] }}\n") ?? panic("organization authority parse")
+    assert_eq(denied.deny, [String]{"Meta"})
+    assert_eq(denied.declarations.len(), 0)
+    both: pkg_parse_organization_document("policy: {{ unsafe: .Forbid }}\nauthority: {{ deny: [Meta.Generate, Exec] }}\n") ?? panic("organization policy and authority parse")
+    assert_eq(both.declarations.len(), 1)
+    assert_eq(both.deny, [String]{"Meta.Generate", "Exec"})
+}
+
 #Test("package policy document accepts explicit units") {
-    declarations: pkg_parse_policy_document("policy: {{ explicit_units: true }}\n") ?? panic("policy parse")
+    declarations: (pkg_parse_organization_document("policy: {{ explicit_units: true }}\n") ?? panic("policy parse")).declarations
     assert_eq(declarations.len(), 1)
     assert_eq(declarations[0].key, PolicyKey.ExplicitUnits)
     assert_eq(declarations[0].value, PolicyValue.Enabled)
 }
 
 #Test("copies policy is package and source explicit only") {
-    declarations: pkg_parse_policy_document("policy: {{ copies: .Explicit }}\n") ?? panic("policy parse")
+    declarations: (pkg_parse_organization_document("policy: {{ copies: .Explicit }}\n") ?? panic("policy parse")).declarations
     assert_eq(declarations.len(), 1)
     assert_eq(declarations[0].key, PolicyKey.Copies)
     assert_eq(declarations[0].value, PolicyValue.Explicit)
-    rejected: if pkg_parse_policy_document("policy: {{ copies: true }}\n") == {
+    rejected: if pkg_parse_organization_document("policy: {{ copies: true }}\n") == {
         .Err(_) -> true
         .Ok(_) -> false
     }

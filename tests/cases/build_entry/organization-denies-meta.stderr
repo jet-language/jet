@@ -1,0 +1,13 @@
+Error [jet.ProhibitedEffectReached]: `build` reaches the `Meta.Generate` effect, which the organization policy `{work}/org-policy.jet` denies with `authority: { deny: [Meta] }`
+  --> main.jet:1:1
+    |
+  1 | build: fn(b: Build) {
+    | ^^^^^
+ Why: An organization `deny` row means every function in the package and every callee it can reach must not use `Meta.Generate`
+ Fix: Remove the call that introduces `Meta.Generate`, or ask the organization to drop `Meta` from its policy's `authority.deny`; no package row lifts it
+ Denial: invocation
+ Call chain: build
+More: jet-lang.dev/e/E0749
+
+1 problem found
+run `jet explain E0749` to learn more

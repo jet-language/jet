@@ -1,0 +1,12 @@
+build: fn(b: Build) {
+    app: b.add_executable("app", ["main.jet"], [])
+    meta: b.compiler(app)
+    meta.add(#code {
+        greeting: fn() -> String { "added under Meta.Generate" }
+    }, scope: "greeting")
+    b.default(app)
+}
+
+run: fn() {
+    print(greeting())
+}

@@ -3961,6 +3961,9 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
     registration_module_count := registration_inputs.len()
     package_policies := [SemaRegistrationPackagePolicy]{}
     loop package in load.packages {
+        // The organization's denial rides on the root package's row, the
+        // row whose modules a package denial binds.
+        root: package.identity == load.package_identity
         package_policies.push(SemaRegistrationPackagePolicy{
             package_identity: package.identity,
             authority_allow: package.authority_allow,
@@ -3968,6 +3971,8 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
             authority_needs: package.authority_needs,
             runtime_ceiling: package.runtime_ceiling,
             edition: package.edition,
+            organization_deny: if root -> request.organization_deny.copy() else -> [String]{},
+            organization_source: if root -> request.organization_source.copy() else -> "",
         })
     }
     // #4319: the graph counts its lookups only while a trace is open.

@@ -311,6 +311,12 @@ JetDriverCompileRequest: struct {
     // The organization's audited-gate floor (`JET_ORG_UNSAFE_POLICY`, read by
     // the host): the outermost rung of every loaded file's policy chain.
     organization_policy: [PolicyDeclaration]{[PolicyDeclaration]{}}
+    // The effects the organization policy's `authority: { deny: [...] }`
+    // denies: the root package's modules are held to them as to its own
+    // `authority.deny`, and no package row lifts them.
+    organization_deny: [String]{[String]{}}
+    // The organization policy file the denial names ("" when none is set).
+    organization_source: String{""}
     // External lock/trust/forced-build writers use the canonical gate row.
     external_gate_entries: [GateEntry]{[GateEntry]{}}
     // Explicit callable shared by named jobs, generation and evaluation.

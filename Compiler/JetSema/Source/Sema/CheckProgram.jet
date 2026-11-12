@@ -421,6 +421,10 @@ SemaRegistrationPackagePolicy: struct {
     authority_needs: [String]
     runtime_ceiling: RuntimeLayer?
     edition: String
+    // The organization policy's `authority: { deny: [...] }`, carried on the
+    // root package's row, and the policy file it names.
+    organization_deny: [String]{[String]{}}
+    organization_source: String{""}
 }
 
 SemaComptimeDeclarationStage: struct {
@@ -9448,7 +9452,10 @@ sema_finalize_graph: fn(resolved: &&SemaRegistrationGraph, trail: &SemaGraphTrai
     if trace_sink == .Val(sink) -> sink.begin("sema.effects", "", -1, -1)
     root_policy: sema_comptime_policy_for_package(stage.package_policies, final_graph.package_identity)
     package_denials: if root_policy == .Val(policy) -> policy.authority_deny ?? [String]{} else -> [String]{}
-    // The root package's `authority.deny` row binds the root package's own modules.
+    organization_denials: if root_policy == .Val(policy) -> policy.organization_deny.copy() else -> [String]{}
+    organization_source: if root_policy == .Val(policy) -> policy.organization_source.copy() else -> ""
+    // The root package's `authority.deny` row, and the organization's, bind
+    // the root package's own modules.
     denial_modules := [Bool]{}
     loop graph_module in final_graph.modules -> denial_modules.push(graph_module.package_identity == final_graph.package_identity)
     // Each `#FX(…)` module cap names known effects, checked once where it is
@@ -9472,7 +9479,7 @@ sema_finalize_graph: fn(resolved: &&SemaRegistrationGraph, trail: &SemaGraphTrai
     loop result in comptime_functions -> prep_functions[result.function_key.copy()] = true
     // The effect graph reads every checked body in place and stamps each
     // solved row onto `modules`.
-    effects := sema_effects_check_modules(modules, effect_inputs, effect_prepared, package_denials, denial_modules, file_caps, trait_caps, final_graph.decls, prep_functions, threads)
+    effects := sema_effects_check_modules(modules, effect_inputs, effect_prepared, package_denials, denial_modules, file_caps, trait_caps, final_graph.decls, prep_functions, threads, organization_denials, organization_source)
     if trace_sink == .Val(sink) -> sink.end("sema.effects", effect_inputs.len())
     loop diagnostic in effects.diagnostics -> diagnostics.push(diagnostic)
     if !effects.complete -> complete = false

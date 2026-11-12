@@ -1,0 +1,21 @@
+# #3526 c2: the organization policy (`JET_ORG_UNSAFE_POLICY`) is the
+# outermost authority rung. Its `authority: { deny: [Meta] }` narrows the
+# build, and no package row lifts it.
+# - Without the organization policy, the app's `meta.add` adds its function.
+# - Under it, the same `meta.add` uses `Meta.Generate`, so the build is
+#   refused (E0749) and the report names the organization policy, even
+#   though the package's own row is `authority: { allow: [Meta] }`.
+fixture: an_organization_denial_of_meta_holds_over_every_package.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet build app/main.jet
+exit: 0
+step: {work}/app/.jet/build/app
+exit: 0
+stdout: = "added under Meta.Generate\n"
+step: jet build app/main.jet
+env: JET_ORG_UNSAFE_POLICY={work}/org-policy.jet
+exit: 1
+stderr: = organization-denies-meta.stderr
+stderr: ~ E0749 # the organization's denial holds over the package's allow row
+stderr: ~ "which the organization policy `{work}/org-policy.jet` denies with `authority: { deny: [Meta] }`" # the report names the organization policy
