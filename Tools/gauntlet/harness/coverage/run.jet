@@ -1,0 +1,99 @@
+#!/usr/bin/env jet
+// The peer-floor loss census over the coverage corpus (#6756), the Jet twin
+// of Tools/gauntlet/harness/coverage.mjs (#5072 c8).
+//
+//   jet Tools/gauntlet/harness/coverage/run.jet -- --gauntlet REPORT --scriptbench DIR [--out FILE] [--require-empty]
+//
+// REPORT is a gauntlet run (Tools/gauntlet/results/<date>.json from run.mjs)
+// and DIR a ScriptBench --out directory (its cells.tsv). The census itself is
+// the Coverage module of the jet_gauntlet_kit package. It prints one line per
+// loss and per uncovered reading, and the totals. The exit is 1 when the
+// corpus is short or malformed or any reading is uncovered, and with
+// --require-empty also on any loss.
+package: {
+    name: "gauntlet_coverage"
+    version: "0.0.1"
+    deps: {
+        jet_gauntlet_kit: ../../kit,
+    }
+}
+
+use {
+    files: core.files
+    jet_gauntlet_kit.[CensusFile, build_census, corpus_issues, load_corpus, parse_cells]
+    json: core.encoding.json
+    process: core.process
+    sys: core.sys
+    time: core.time
+}
+
+USAGE: "usage: coverage.mjs --gauntlet REPORT --scriptbench DIR [--out FILE] [--require-empty]"
+
+Options: struct {
+    gauntlet: String
+    scriptbench: String
+    out: String?
+    require_empty: Bool
+}
+
+fail: fn(message: String) -> Never {
+    process.fail(1, "coverage: {message}")
+}
+
+parse_options: fn(args: [String]) -> Options {
+    gauntlet := String?{None}
+    scriptbench := String?{None}
+    out := String?{None}
+    require_empty := false
+    at := 0
+    loop at < args.len() {
+        arg: args[at]
+        if arg == "--require-empty" {
+            require_empty = true
+            at += 1
+            next
+        }
+        if arg != "--gauntlet" && arg != "--scriptbench" && arg != "--out" -> fail("unknown argument {arg}")
+        value: args.get(at + 1) ?? ""
+        if value == "" -> fail("{arg} needs a value")
+        if arg == {
+            "--gauntlet" -> gauntlet = Val(value)
+            "--scriptbench" -> scriptbench = Val(value)
+            else -> out = Val(value)
+        }
+        at += 2
+    }
+    Options{gauntlet: gauntlet ?? fail(USAGE), scriptbench: scriptbench ?? fail(USAGE), out: out, require_empty: require_empty}
+}
+
+// This program is Tools/gauntlet/harness/coverage/run.jet.
+repo_root: fn() -> String {
+    files.absolute(files.join(files.dirname(sys.executable()), "../../../.."))
+}
+
+run: fn() {
+    options: parse_options(process.args())
+    programs: load_corpus(repo_root()) ?? fail("{err}")
+    issues: corpus_issues(programs)
+    report: json.parse(files.read(options.gauntlet) ?? fail("{err}")) ?? fail("{options.gauntlet}: {err}")
+    cells: parse_cells(files.read(files.join(options.scriptbench, "cells.tsv")) ?? fail("{err}"))
+    census: build_census(programs, report, cells)
+    loop issue in issues -> print("corpus\t{issue}")
+    loop root in census.roots {
+        loop loss in root.losses -> print("loss\t{root.owner}\t{loss.source}/{loss.program}\t{loss.peer}\t{loss.metric}\t{reading(loss.jet)}\t{reading(loss.peer_value)}\t{loss.ratio:Fixed(3)}")
+    }
+    loop row in census.uncovered -> print("uncovered\t{row.source}/{row.program}\t{row.peer}\t{row.metric}\t{row.reason}")
+    print("coverage: {census.programs} programs ({census.sources.gauntlet} gauntlet, {census.sources.scriptbench} scriptbench), {census.measured} readings, {census.losses.len()} losses in {census.roots.len()} roots, {census.uncovered.len()} uncovered")
+    failed: issues.len() > 0 || census.uncovered.len() > 0 || (options.require_empty && census.losses.len() > 0)
+    if options.out == .Val(out) {
+        record: CensusFile{contract: "gauntlet-coverage-census-v1", generated: time.now().format_rfc3339(), gauntlet_report: options.gauntlet, scriptbench: options.scriptbench, corpus_issues: issues, census: census}
+        files.write(out, "{json.stringify(record, 2)}\n") ?? fail("{err}")
+    }
+    if failed -> process.exit(1)
+}
+
+// A reading as the census prints it; "-" for none.
+reading: fn(value: Float?) -> String {
+    if value == .Val(number) -> return "{number}"
+    "-"
+}

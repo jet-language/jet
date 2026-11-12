@@ -1,0 +1,66 @@
+// The coverage entry's check: what the census found for the fixture's
+// programs, from the program's printed lines (the file named by its one
+// argument) and the census file it wrote.
+//
+// The corpus is the repository's own, so the check keeps the facts the
+// fixture decides: every corpus issue and loss, the uncovered readings of
+// the programs watched.txt names, and the readings and losses the totals
+// line counts. A loss's readings print as numbers, so both programs'
+// number formats compare. census.json prints in canonical form, the
+// generated time as present or not.
+use {
+    files: core.files
+    json: core.encoding.json
+    process: core.process
+}
+
+// A printed reading as a number; the text itself when it is none.
+number: fn(text: String) -> String {
+    value: Float.parse(text) ?? return text
+    "{value}"
+}
+
+// The member `key` of `tree`; null when it has none.
+at: fn(tree: Dyn, key: String) -> Dyn {
+    json.pointer(tree, "/{key}") ?? Dyn.Null
+}
+
+// Whether a corpus issue is the corpus's size or about a watched program.
+concerns_watched: fn(issue: String, watched: [String]) -> Bool {
+    if issue.starts_with("the corpus has ") -> return true
+    watched.any(id -> issue.starts_with("{id}:") || issue.starts_with("{id} "))
+}
+
+run: fn() {
+    printed: files.read(process.args()[0]) ?? panic("no program output: {err}")
+    watched: (files.read("watched.txt") ?? panic("no watched.txt: {err}")).lines().filter(line -> line != "")
+    loop line in printed.lines() {
+        fields: line.split("\t").to_list()
+        kind: fields[0]
+        if kind == "corpus" && concerns_watched(fields[1], watched) -> print(line)
+        if kind == "uncovered" && watched.contains(fields[1]) -> print(line)
+        if kind == "loss" -> print([fields[0], fields[1], fields[2], fields[3], fields[4], number(fields[5]), number(fields[6]), fields[7]].join("\t"))
+        if line.starts_with("coverage: ") {
+            totals: line.split(", ").to_list()
+            print("totals: {totals[2]}, {totals[3]}")
+        }
+    }
+    if !files.exists("census.json") {
+        print("census: none")
+        return
+    }
+    census: json.parse(files.read("census.json") ?? panic("census.json: {err}")) ?? panic("census.json: {err}")
+    loop key in ["contract", "gauntlet_report", "scriptbench", "measured", "losses", "roots"] -> print("census {key}: {json.canonical(at(census, key))}")
+    if at(census, "corpus_issues") == .Array(issues) {
+        loop issue in issues {
+            if issue == .Text(text) && concerns_watched(text, watched) -> print("census corpus issue: {text}")
+        }
+    }
+    generated: if at(census, "generated") == .Text(_) -> "present" else -> "none"
+    print("census generated: {generated}")
+    if at(census, "uncovered") == .Array(rows) {
+        loop row in rows {
+            if at(row, "source") == .Text(source) && at(row, "program") == .Text(program) && watched.contains("{source}/{program}") -> print("census uncovered: {json.canonical(row)}")
+        }
+    }
+}

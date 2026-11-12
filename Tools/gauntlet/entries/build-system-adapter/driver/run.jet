@@ -1,0 +1,44 @@
+// The gauntlet driver of the kit's BuildSystem module (#5072 c8), the twin of
+// Tools/gauntlet/harness/drivers/build-system-adapter.mjs: one command per
+// contract and adapter export of build-system.mjs.
+//
+//   jet driver contract AXIS | adapt AXIS JET
+//
+// AXIS is a JSON file holding an axes.build_system cell (`null` for a missing
+// one). `adapt` runs the adapter in the working directory: the run directory
+// is `run` and the repository the working directory itself.
+package: {
+    name: "build_system_adapter_driver"
+    version: "0.0.1"
+    deps: {
+        jet_gauntlet_kit: ../../../kit,
+    }
+}
+
+use {
+    files: core.files
+    jet_gauntlet_kit.[AxisRun, build_system_contract_issues, read_json, run_build_system_adapter]
+    json: core.encoding.json
+    process: core.process
+}
+
+// The cell in `file`, null when it holds `null`.
+axis_in: fn(file: String) -> Dyn {
+    read_json(file) ?? process.fail(1, "{file} is not a JSON file")
+}
+
+#CLI
+Driver: struct {
+    #Doc("buildSystemContractIssues of the cell in AXIS: each issue, then their count") contract: fn(self, file: String) {
+        issues: build_system_contract_issues(axis_in(file))
+        print(issues.concat(["{issues.len()} issues"]).join("\n"))
+    }
+
+    #Doc("runBuildSystemAxisAdapter of the cell in AXIS with JET, as JSON") adapt: fn(self, file: String, jet: String) {
+        repo: files.cwd() ?? process.fail(1, "no working directory: {err}")
+        report: run_build_system_adapter(axis_in(file), AxisRun{run_dir: "run", jet_bin: jet, repo_dir: repo}) ?? process.fail(1, "error: {err}")
+        print(json.stringify(report, 2))
+    }
+}
+
+run: fn(_args: Driver) {}

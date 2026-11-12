@@ -1,0 +1,56 @@
+// The job of a build-system harness case, as facts (the harness runs it in
+// the case directory with the file holding the program's output).
+//
+// The cases stop before anything is measured, so the check keeps what the
+// arguments and the fixture decide: the table's header and each cell's row,
+// how many failures it lists, and from the receipt (when written) its schema,
+// samples, warmups, the fake jet's version, each cell's id, target, status,
+// verdict and which summaries it has, and whether it passed. Failure texts
+// carry the host's own error messages, the machine its own facts, and the
+// times are the clock's, so each prints as present or not.
+use {
+    files: core.files
+    json: core.encoding.json
+    process: core.process
+}
+
+// The member `key` of `tree`; null when it has none.
+at: fn(tree: Dyn, key: String) -> Dyn {
+    json.pointer(tree, "/{key}") ?? Dyn.Null
+}
+
+shown: fn(tree: Dyn) -> String {
+    json.canonical(tree) ?? process.fail(1, "no canonical form: {err}")
+}
+
+present: fn(tree: Dyn) -> String {
+    if tree == .Null -> "none" else -> "present"
+}
+
+run: fn() {
+    printed: files.read(process.args()[0]) ?? process.fail(1, "no program output: {err}")
+    failures := 0
+    loop line in printed.lines() {
+        if line.starts_with("failure: ") {
+            failures += 1
+            next
+        }
+        print("table: {line}")
+    }
+    print("table failures: {failures}")
+    if !files.exists("receipt.json") {
+        print("receipt: none")
+        return
+    }
+    receipt: json.parse(files.read("receipt.json") ?? process.fail(1, "receipt.json: {err}")) ?? process.fail(1, "receipt.json: {err}")
+    loop key in ["schema", "samples", "warmups", "passed"] -> print("receipt {key}: {shown(at(receipt, key))}")
+    print("receipt jet version: {shown(at(at(receipt, "jet"), "version"))}")
+    print("receipt jet path: {if at(at(receipt, "jet"), "path") == .Text(path) && path.ends_with("/fake-jet") -> "the fake jet" else -> "other"}")
+    print("receipt times: {present(at(receipt, "started_at"))} {present(at(receipt, "finished_at"))}")
+    machine: at(receipt, "machine")
+    print("receipt machine: {present(at(machine, "cpu_model"))} {present(at(machine, "threads"))} {present(at(machine, "memory_bytes"))} {present(at(machine, "kernel"))} {present(at(machine, "nix"))}")
+    if at(receipt, "failures") == .Array(listed) -> print("receipt failures: {listed.len()}")
+    if at(receipt, "cells") == .Array(cells) {
+        loop cell in cells -> print("receipt cell: {shown(at(cell, "id"))} {shown(at(cell, "target"))} {shown(at(cell, "status"))} {shown(at(cell, "verdict"))} jet {present(at(cell, "jet"))} nix {present(at(cell, "nix"))} ratio {present(at(cell, "ratio"))}")
+    }
+}

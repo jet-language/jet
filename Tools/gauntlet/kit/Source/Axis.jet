@@ -1,0 +1,34 @@
+// What the gauntlet's axis adapters share: where an adapter runs, the
+// publication it reports, and the contract rules it checks the manifest's
+// axis against.
+
+// Where an adapter runs: the gauntlet run's directory, the `jet` it
+// measures and runs the harness with, and the repository holding the harness.
+AxisRun: struct {
+    run_dir: String
+    jet_bin: String
+    repo_dir: String
+}
+
+#Codable
+Publication: struct {
+    status: String
+    blockers: [String]
+}
+
+// One rule of an axis contract: whether the axis keeps it, and the issue
+// when it does not.
+ContractRule: struct {
+    holds: Bool
+    issue: String
+}
+
+// The issue of each rule of `rules` the axis breaks, in order.
+contract_issues: fn(rules: [ContractRule]) -> [String] {
+    rules.filter(rule -> !rule.holds).map(rule -> rule.issue.copy())
+}
+
+#Test("a contract's issues are its broken rules, in order") {
+    rules: [ContractRule]{{holds: false, issue: "a"}, {holds: true, issue: "b"}, {holds: false, issue: "c"}}
+    assert_eq(contract_issues(rules), ["a", "c"])
+}

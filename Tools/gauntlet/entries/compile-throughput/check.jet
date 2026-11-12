@@ -1,0 +1,29 @@
+// The job of a compile-throughput driver case, as facts (the harness runs it
+// in the case directory with the file holding the driver's output): the
+// output, a JSON report in canonical form with the case directory written as
+// `.`; then, when the adapter ran the stand-in harness (fixtures/fake-jet),
+// the command line and JET it ran with and the receipt it left.
+use {
+    files: core.files
+    json: core.encoding.json
+    process: core.process
+}
+
+#CLI
+Check: struct {
+    #Doc("The file holding the driver's output") stdout: String
+}
+
+run: fn(check: Check) {
+    here: files.cwd() ?? process.fail(1, "no working directory: {err}")
+    output: files.read(check.stdout) ?? process.fail(1, "no output file: {err}")
+    if json.parse(output) == {
+        .Ok(report) -> print((json.canonical(report) ?? process.fail(1, "the report has no canonical form: {err}")).replace(here, "."))
+        .Err(_) -> loop line in output.lines() -> print(line)
+    }
+    if files.exists("argv.txt") {
+        loop line in (files.read("argv.txt") ?? "").replace(here, ".").lines() -> print("harness: {line}")
+    }
+    receipt: "run/axes/compile_throughput/receipt.json"
+    print("receipt: {if files.exists(receipt) -> "written" else -> "none"}")
+}

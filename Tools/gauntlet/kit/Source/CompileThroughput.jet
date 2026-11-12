@@ -1,0 +1,124 @@
+// The gauntlet adapter for axes.compile_throughput (Tower #4529): runs the
+// cell's full lane through Tools/perf/compile-throughput/Throughput.jet with
+// the gauntlet's `jet` (as both the measured compiler and the script's
+// runner), and projects its receipt onto the axis report. Throughput.jet owns
+// measurement and every gate; a failed or incomplete receipt blocks
+// publication with its own failure lines.
+use {
+    files: core.files
+    json: core.encoding.json
+    process: core.process
+}
+
+COMPILE_THROUGHPUT_SCHEMA: "gauntlet-axis-compile-throughput-v1"
+COMPILE_THROUGHPUT_HARNESS: "Tools/perf/compile-throughput/Throughput.jet"
+
+// Why `axis` (the manifest's axes.compile_throughput, null when it is
+// missing) is not the cell this adapter runs.
+compile_throughput_contract_issues: fn(axis: Dyn) -> [String] {
+    if axis == Dyn.Null -> return ["compile_throughput axis is missing"]
+    contract_issues([ContractRule]{
+        {holds: text_at(axis, "status") == Val("required"), issue: "compile_throughput must be required"},
+        {holds: text_at(axis, "schema") == Val(COMPILE_THROUGHPUT_SCHEMA), issue: "compile_throughput schema must be {COMPILE_THROUGHPUT_SCHEMA}"},
+        {holds: text_at(axis, "metric") == Val("clean_build_wall_ns"), issue: "compile_throughput metric must be clean_build_wall_ns"},
+        {holds: text_at(axis, "harness") == Val(COMPILE_THROUGHPUT_HARNESS), issue: "compile_throughput harness must be {COMPILE_THROUGHPUT_HARNESS}"},
+        {holds: ids_at(axis, "programs") == ["bench300k", "selfhost"], issue: "compile_throughput programs must be bench300k and selfhost"},
+        {holds: ids_at(axis, "arms") == ["default", "single"], issue: "compile_throughput arms must be default and single"},
+        {holds: int_at(axis, "samples") == Val(5) && int_at(axis, "warmups") == Val(1), issue: "compile_throughput takes 5 samples after 1 warmup"},
+    })
+}
+
+// The axis report the gauntlet publishes.
+#Codable
+CompileThroughputReport: struct {
+    id: String
+    required: Bool
+    status: String
+    contract: Dyn
+    schema: Dyn?
+    metric: Dyn?
+    receipt: String
+    compiler: Dyn
+    metrics: Dyn
+    gates: Dyn
+    publication: Publication
+}
+
+// Runs the full lane into <run_dir>/axes/compile_throughput and reports its
+// receipt: complete when every program has a summary in every arm, ready to
+// publish when the receipt passed. A harness that left no receipt blocks
+// publication with its exit code. The gauntlet checks the contract first, so
+// the axis names its harness and whole sample counts.
+run_compile_throughput_adapter: fn(axis: Dyn, run: AxisRun) -[FS, Exec]> CompileThroughputReport IOError! {
+    axis_dir: files.join(run.run_dir, "axes/compile_throughput")
+    files.create_dir_all(axis_dir)
+    receipt_path: files.join(axis_dir, "receipt.json")
+    harness: files.join(run.repo_dir, text_or_empty(axis, "harness"))
+    argv: [run.jet_bin, harness, "--lane", "full", "--tree", run.repo_dir, "--samples", json.stringify(dyn_at(axis, "samples")), "--warmups", json.stringify(dyn_at(axis, "warmups")), "--work", axis_dir, "--receipt", receipt_path]
+    done: process.cmd(argv).cwd(run.repo_dir).env("JET", run.jet_bin).stdout(.Inherit).stderr(.Inherit).run()
+    // A missing receipt reads as null: it has no programs, gates or compiler.
+    receipt: read_json(receipt_path) ?? Dyn.Null
+    blockers: if receipt == Dyn.Null -> ["Throughput.jet exited {done.code} without a receipt"] else -> texts_at(receipt, "failures")
+    programs: items_at(receipt, "programs")
+    arm_count: items_at(axis, "arms").len()
+    complete: receipt != Dyn.Null && programs.len() == items_at(axis, "programs").len() && programs.all(program -> items_at(program, "arms").len() == arm_count && items_at(program, "arms").all(arm -> member(arm, "summary") != None))
+    metrics := Dyn.object()
+    loop program in programs {
+        loop arm in items_at(program, "arms") {
+            summary: member(arm, "summary") ?? next
+            // A reading the summary holds as null stays null; one it lacks is left out.
+            readings := Dyn.object()
+            put_present(readings, "clean_build_wall_ns", value_at(summary, "wall_ns"))
+            put_present(readings, "peak_rss_bytes", value_at(summary, "peak_rss_bytes"))
+            metrics["{text_or_empty(program, "id")}.{text_or_empty(arm, "id")}"] = readings
+        }
+    }
+    Ok(CompileThroughputReport{
+        id: "compile_throughput",
+        required: text_at(axis, "status") == Val("required"),
+        status: if complete -> "complete" else -> "incomplete",
+        contract: axis,
+        schema: member(axis, "schema"),
+        metric: member(axis, "metric"),
+        receipt: receipt_path,
+        compiler: dyn_at(receipt, "compiler"),
+        metrics: metrics,
+        gates: dyn_at(receipt, "gates"),
+        publication: Publication{status: if is_true(receipt, "passed") -> "ready" else -> "blocked", blockers: blockers}
+    })
+}
+
+test_axis: fn() -> Dyn {
+    json.parse("{{\"status\":\"required\",\"schema\":\"gauntlet-axis-compile-throughput-v1\",\"metric\":\"clean_build_wall_ns\",\"harness\":\"Tools/perf/compile-throughput/Throughput.jet\",\"programs\":[{{\"id\":\"bench300k\"}},{{\"id\":\"selfhost\"}}],\"arms\":[{{\"id\":\"default\"}},{{\"id\":\"single\"}}],\"samples\":5,\"warmups\":1}}") ?? panic("axis: {err}")
+}
+
+#Test("the manifest's cell has no contract issues, and a missing axis or each wrong field is one") {
+    assert_eq(compile_throughput_contract_issues(test_axis()).len(), 0)
+    assert_eq(compile_throughput_contract_issues(Dyn.Null), ["compile_throughput axis is missing"])
+    wrong: json.parse("{{\"status\":\"optional\",\"programs\":[{{\"id\":\"selfhost\"}}],\"arms\":[],\"samples\":5}}")
+    issues: compile_throughput_contract_issues(wrong)
+    assert_eq(issues.len(), 7)
+    assert_eq(issues[0], "compile_throughput must be required")
+    assert_eq(issues[6], "compile_throughput takes 5 samples after 1 warmup")
+}
+
+#Test("a receipt with every summary is complete; failures block publication; no receipt names the exit code") {
+    dir: files.mktemp("compile-throughput-")
+    receipt: files.join(dir, "run/axes/compile_throughput/receipt.json")
+    files.create_dir_all(files.dirname(receipt))
+    passing: "{{\"passed\":true,\"failures\":[],\"compiler\":{{\"sha256\":\"c\"}},\"gates\":{{\"memory\":\"pass\"}},\"programs\":[{{\"id\":\"bench300k\",\"arms\":[{{\"id\":\"default\",\"summary\":{{\"wall_ns\":7,\"peak_rss_bytes\":9}}}},{{\"id\":\"single\",\"summary\":{{\"wall_ns\":8}}}}]}},{{\"id\":\"selfhost\",\"arms\":[{{\"id\":\"default\",\"summary\":{{\"wall_ns\":1}}}},{{\"id\":\"single\",\"summary\":{{\"wall_ns\":2}}}}]}}]}}"
+    files.write(receipt, passing)
+    run: AxisRun{run_dir: files.join(dir, "run"), jet_bin: "true", repo_dir: dir}
+    ready: run_compile_throughput_adapter(test_axis(), run)
+    assert(ready.status == "complete" && ready.publication.status == "ready" && ready.publication.blockers.len() == 0)
+    assert_eq(json.stringify(ready.metrics), "{{\"bench300k.default\":{{\"clean_build_wall_ns\":7,\"peak_rss_bytes\":9}},\"bench300k.single\":{{\"clean_build_wall_ns\":8}},\"selfhost.default\":{{\"clean_build_wall_ns\":1}},\"selfhost.single\":{{\"clean_build_wall_ns\":2}}}}")
+    files.write(receipt, "{{\"passed\":false,\"failures\":[\"gate\"],\"programs\":[{{\"id\":\"bench300k\",\"arms\":[{{\"id\":\"default\"}}]}}]}}")
+    blocked: run_compile_throughput_adapter(test_axis(), run)
+    assert(blocked.status == "incomplete" && blocked.publication.status == "blocked" && blocked.publication.blockers == ["gate"])
+    files.remove(receipt)
+    failing: AxisRun{run_dir: files.join(dir, "run"), jet_bin: "false", repo_dir: dir}
+    missing: run_compile_throughput_adapter(test_axis(), failing)
+    assert_eq(missing.publication.blockers, ["Throughput.jet exited 1 without a receipt"])
+    assert(missing.compiler == Dyn.Null && missing.gates == Dyn.Null)
+    files.remove_all(dir)
+}

@@ -1,0 +1,370 @@
+// The peer-floor loss census over the coverage corpus (#6756), the library
+// of Tools/gauntlet/harness/coverage/run.jet.
+//
+// The coverage corpus is every gauntlet program (the measurement manifest's
+// corpus.entry_names, each with its peer twins under its entry directory)
+// and every ScriptBench workload (Tools/perf/scriptbench/manifest.json, each
+// with its peer.* twins), so a fix that only helps a measured cell is caught
+// by the programs that use the same feature differently. For every program,
+// matched peer and metric (the program's time metric and peak memory) the
+// census takes the release-binary reading: the gauntlet's aot tier,
+// ScriptBench's jet-bin tier. A ratio Jet/peer of 1.00 or more is a loss; a
+// program, peer or metric with no reading is uncovered. Losses are grouped by
+// the card that owns them (the manifest's loss_owners, the workload's cards).
+use {
+    files: core.files
+    json: core.encoding.json
+    math: core.math
+}
+
+COVERAGE_MINIMUM_PROGRAMS: 30
+MEMORY_METRIC: "runtime_peak_rss_kb"
+WALL_METRIC: "runtime_wall_seconds"
+GAUNTLET_TIER: "aot"
+SCRIPTBENCH_TIER: "jet-bin"
+
+// A peer's twin: the file or directory holding its program (None when the
+// ScriptBench manifest names no file for the peer).
+Twin: struct {
+    peer: String
+    path: String?
+}
+
+// A gauntlet program's loss owner for one metric category.
+OwnerCard: struct {
+    category: String
+    card: Int
+}
+
+// One program of the corpus with its matched peers (each with its twin) and
+// loss owners: a gauntlet program's cards by metric category, a workload's
+// cards.
+CoverageProgram: struct {
+    source: String
+    name: String
+    key: String
+    cells: [String]
+    peers: [Twin]
+    owner_cards: [OwnerCard]
+    cards: [String]
+}
+
+// One row of ScriptBench's cells.tsv; a column the header lacks is None.
+ScriptBenchCell: struct {
+    workload: String?
+    tier: String?
+    peer: String?
+    metric: String?
+    jet: String?
+    peer_value: String?
+    ratio: String?
+    verdict: String?
+}
+
+#Codable
+CoverageSources: struct {
+    gauntlet: Int
+    scriptbench: Int
+}
+
+#Codable
+CoverageLoss: struct {
+    source: String
+    program: String
+    cells: [String]
+    peer: String
+    metric: String
+    jet: Float?
+    peer_value: Float?
+    ratio: Float
+    owner: String
+}
+
+#Codable
+CoverageGap: struct {
+    source: String
+    program: String
+    cells: [String]
+    peer: String
+    metric: String
+    reason: String
+}
+
+#Codable
+LossRoot: struct {
+    owner: String
+    losses: [CoverageLoss]
+}
+
+#Codable
+CoverageCensus: struct {
+    programs: Int
+    sources: CoverageSources
+    measured: Int
+    losses: [CoverageLoss]
+    uncovered: [CoverageGap]
+    roots: [LossRoot]
+}
+
+// The census file `--out` writes (contract gauntlet-coverage-census-v1):
+// its inputs and corpus issues beside the census.
+#Codable
+CensusFile: struct {
+    contract: String
+    generated: String
+    gauntlet_report: String
+    scriptbench: String
+    corpus_issues: [String]
+    #Flatten census: CoverageCensus
+}
+
+// A lost reading's values: Jet's, the peer's and their ratio Jet/peer.
+Lost: struct {
+    jet: Float?
+    peer: Float?
+    ratio: Float
+}
+
+Reading: enum {
+    NotApplicable
+    Uncovered(String)
+    Won
+    Lost(Lost)
+}
+
+// Why the corpus cannot be read: the file and its read or parse error.
+#Error
+CoverageError: struct {
+    message: String
+    impl Display { display: fn(self) -> String { self.message.copy() } }
+}
+
+// The JSON file `path` under `repo`.
+read_manifest: fn(repo: String, path: String) -> Dyn CoverageError! {
+    text: files.read(files.join(repo, path)) ?? return Err(CoverageError{message: "{path}: {err}"})
+    tree: json.parse(text) ?? return Err(CoverageError{message: "{path}: {err}"})
+    Ok(tree)
+}
+
+// The corpus under `repo`: one program per gauntlet corpus entry, then one
+// per ScriptBench workload.
+load_corpus: fn(repo: String) -[FS]> [CoverageProgram] CoverageError! {
+    manifest: read_manifest(repo, "Tools/gauntlet/measurement-manifest.json")
+    bench: read_manifest(repo, "Tools/perf/scriptbench/manifest.json")
+    programs := [CoverageProgram]{}
+    loop name in texts_at(manifest, "corpus/entry_names") {
+        dir: "Tools/gauntlet/entries/{name}"
+        entry: read_manifest(repo, "{dir}/entry.json")
+        peers := [Twin]{}
+        loop language in texts_at(entry, "languages") {
+            if language == "jet" || language == "jet-expert" || truthy_at(entry, "non_applicable/{language}") -> next
+            peers.push(Twin{peer: language, path: Val(files.join(repo, "{dir}/{language}"))})
+        }
+        owners := [OwnerCard]{}
+        if member(manifest, "loss_owners/{name}") == .Val(.Object(rows)) {
+            loop row in rows {
+                if int_at(row.value, "") == .Val(card) -> owners.push(OwnerCard{category: row.key, card: card})
+            }
+        }
+        programs.push(CoverageProgram{source: "gauntlet", name: name, key: name, cells: texts_at(entry, "cells"), peers: peers, owner_cards: owners, cards: []})
+    }
+    peer_files: items_at(bench, "peers")
+    loop workload in items_at(bench, "workloads") {
+        dir: files.join(repo, "Tools/perf/scriptbench/{text_at(workload, "dir") ?? ""}")
+        peers := [Twin]{}
+        loop peer in texts_at(workload, "peers") {
+            wanted: peer.copy()
+            file: peer_files.find(known -> text_at(known, "name") == Val((wanted))).map(known -> text_at(known, "file"))
+            peers.push(Twin{peer: peer, path: if file == .Val(name) -> Val(files.join(dir, name)) else -> None})
+        }
+        programs.push(CoverageProgram{source: "scriptbench", name: text_at(workload, "dir") ?? "", key: text_at(workload, "id") ?? "", cells: [], peers: peers, owner_cards: [], cards: texts_at(workload, "cards")})
+    }
+    Ok(programs)
+}
+
+// Why `programs` is not a coverage corpus: too few programs, a repeated
+// one, or one without a peer twin on disk.
+corpus_issues: fn(programs: [CoverageProgram]) -[FS]> [String] {
+    issues := [String]{}
+    if programs.len() < COVERAGE_MINIMUM_PROGRAMS -> issues.push("the corpus has {programs.len()} programs, fewer than {COVERAGE_MINIMUM_PROGRAMS}")
+    seen := [String]{}
+    loop program in programs {
+        id: "{program.source}/{program.name}"
+        if seen.contains(id) -> issues.push("{id} is listed twice")
+        if program.peers.len() == 0 -> issues.push("{id} has no peer twin")
+        loop twin in program.peers {
+            on_disk: if twin.path == .Val(path) -> files.exists(path) else -> false
+            if !on_disk -> issues.push("{id}: the {twin.peer} twin is missing")
+        }
+        seen.push(id)
+    }
+    issues
+}
+
+// ScriptBench's cells.tsv, each row read by its header.
+parse_cells: fn(text: String) -> [ScriptBenchCell] {
+    lines: text.split("\n").filter(line -> line != "").to_list()
+    rows := [ScriptBenchCell]{}
+    if lines.len() == 0 -> return rows
+    columns: lines[0].split("\t").to_list()
+    loop at in 1..<lines.len() {
+        values: lines[at].split("\t").to_list()
+        rows.push(ScriptBenchCell{workload: column(columns, values, "workload"), tier: column(columns, values, "tier"), peer: column(columns, values, "peer"), metric: column(columns, values, "metric"), jet: column(columns, values, "jet"), peer_value: column(columns, values, "peer_value"), ratio: column(columns, values, "ratio"), verdict: column(columns, values, "verdict")})
+    }
+    rows
+}
+
+// The value of a row's column `name`; None when the header lacks it.
+column: fn(columns: [String], values: [String], name: String) -> String? {
+    at: columns.index_of(name) ?? return None
+    values.get(at)
+}
+
+// The owner of a loss on `metric`: a workload's cards, a gauntlet program's
+// card for the metric's category, or "unowned".
+owner_of: fn(program: CoverageProgram, metric: String) -> String {
+    if program.source == "scriptbench" -> return if program.cards.len() > 0 -> program.cards.join(",") else -> "unowned"
+    category: loss_owner_category(metric) ?? return "unowned"
+    loop owner in program.owner_cards {
+        if owner.category == category -> return "#{owner.card}"
+    }
+    "unowned"
+}
+
+// One reading of a gauntlet program: the aot comparison with `peer` on
+// `metric`, from the program's result in the gauntlet report.
+gauntlet_reading: fn(result: Dyn?, peer: String, metric: String) -> Reading {
+    found: result ?? return Reading.Uncovered("the program is not in the gauntlet report")
+    comparison: member(found, "comparisons/{peer}") ?? return Reading.Uncovered("no {peer} comparison")
+    if text_at(comparison, "status") == Val("not_applicable") && text_at(comparison, "basis") == Val("declared-non-applicability") -> return Reading.NotApplicable
+    row: member(comparison, "tiers/{GAUNTLET_TIER}/metrics/{metric}") ?? Dyn.Null
+    if text_at(row, "status") == Val("not_applicable") -> return Reading.NotApplicable
+    ratio: number_at(row, "ratio") ?? math.NAN
+    if !math.is_finite(ratio) || !(ratio > 0.0) -> return Reading.Uncovered(text_at(row, "reason") ?? "no {GAUNTLET_TIER} {metric} reading")
+    if ratio < 1.0 -> return Reading.Won
+    Reading.Lost(Lost{jet: number_at(row, "jet"), peer: number_at(row, "peer"), ratio: ratio})
+}
+
+// One reading of a ScriptBench workload: its jet-bin cell for `peer` on
+// `metric`. Bench judges the unrounded ratio, so its verdict decides; a peer
+// that overran the timeout is a win on wall with no ratio.
+scriptbench_reading: fn(cells: [ScriptBenchCell], program: CoverageProgram, peer: String, metric: String) -> Reading {
+    wanted: if metric == MEMORY_METRIC -> "rss" else -> "wall"
+    loop cell in cells {
+        // `Val((name))` compares with the name's value; `Val(name)` would bind a new one.
+        if cell.workload != Val((program.key)) || cell.tier != Val(SCRIPTBENCH_TIER) || cell.peer != Val((peer)) || cell.metric != Val((wanted)) -> next
+        if cell.verdict == Val("win") -> return Reading.Won
+        ratio: cell_number(cell.ratio)
+        if !(ratio > 0.0) -> return Reading.Uncovered("{SCRIPTBENCH_TIER} {wanted} cell has no ratio")
+        return Reading.Lost(Lost{jet: Val(cell_number(cell.jet)), peer: Val(cell_number(cell.peer_value)), ratio: ratio})
+    }
+    Reading.Uncovered("no {SCRIPTBENCH_TIER} {wanted} cell")
+}
+
+// A cell's number; NaN when it holds none (a peer's `>60s`).
+cell_number: fn(text: String?) -> Float {
+    Float.parse(text ?? "") ?? math.NAN
+}
+
+// The census: every loss and every uncovered reading of `programs`, from a
+// gauntlet report and ScriptBench cells, with the losses grouped by owner.
+build_census: fn(programs: [CoverageProgram], report: Dyn, cells: [ScriptBenchCell]) -> CoverageCensus {
+    results: items_at(report, "entries")
+    losses := [CoverageLoss]{}
+    uncovered := [CoverageGap]{}
+    measured := 0
+    gauntlet := 0
+    loop program in programs {
+        if program.source == "gauntlet" -> gauntlet += 1
+        name: program.name.copy()
+        result: results.find(result -> text_at(result, "entry/name") == Val((name)))
+        loop twin in program.peers {
+            peer: twin.peer
+            time: if program.source == "gauntlet" && result == .Val(found) -> text_at(found, "comparisons/{peer}/primary_metric") ?? WALL_METRIC else -> WALL_METRIC
+            loop metric in [time, MEMORY_METRIC] {
+                reading: if program.source == "gauntlet" -> gauntlet_reading(result, peer, metric) else -> scriptbench_reading(cells, program, peer, metric)
+                if reading == {
+                    .NotApplicable -> {}
+                    .Uncovered(reason) -> uncovered.push(CoverageGap{source: program.source, program: program.name, cells: program.cells, peer: peer, metric: metric, reason: reason})
+                    .Won -> measured += 1
+                    .Lost(values) -> {
+                        measured += 1
+                        losses.push(CoverageLoss{source: program.source, program: program.name, cells: program.cells, peer: peer, metric: metric, jet: values.jet, peer_value: values.peer, ratio: values.ratio, owner: owner_of(program, metric)})
+                    }
+                }
+            }
+        }
+    }
+    // The roots hold the losses again, so the census file lists each loss under its owner.
+    grouped: losses.copy().group_by(.owner)
+    owners := grouped.keys().to_list()
+    owners.sort()
+    CoverageCensus{
+        programs: programs.len(),
+        sources: CoverageSources{gauntlet: gauntlet, scriptbench: programs.len() - gauntlet},
+        measured: measured,
+        losses: losses,
+        uncovered: uncovered,
+        roots: owners.map(owner -> LossRoot{losses: grouped.get(owner) ?? [], owner: owner})
+    }
+}
+
+test_gauntlet_program: fn(name: String, twin: String) -> CoverageProgram {
+    CoverageProgram{source: "gauntlet", name: name, key: name, cells: ["cell.{name}"], peers: [Twin{peer: "c", path: Val(twin)}], owner_cards: [OwnerCard]{{category: "runtime", card: 1111}, {category: "rss", card: 1112}}, cards: []}
+}
+
+test_scriptbench_program: fn(name: String, twin: String) -> CoverageProgram {
+    CoverageProgram{source: "scriptbench", name: name, key: "w-{name}", cells: [], peers: [Twin{peer: "python", path: Val(twin)}], owner_cards: [], cards: ["#2222"]}
+}
+
+// A gauntlet report holding `name`'s aot comparison with peer `c`, one
+// reading per metric at `ratio` (Jet ratio * 10 against 10).
+test_report: fn(name: String, ratios: [(metric: String, ratio: Float)]) -> Dyn {
+    metrics: ratios.map(row -> "\"{row.metric}\": {{\"jet\": {row.ratio * 10.0}, \"peer\": 10, \"ratio\": {row.ratio}}}").join(", ")
+    json.parse("{{\"entries\": [{{\"entry\": {{\"name\": \"{name}\"}}, \"comparisons\": {{\"c\": {{\"primary_metric\": \"runtime_wall_seconds\", \"tiers\": {{\"aot\": {{\"metrics\": {{{metrics}}}}}}}}}}}}}]}}") ?? panic("report: {err}")
+}
+
+TEST_HEADER: "workload\ttier\tpeer\tmetric\tjet\tpeer_value\tratio\tverdict\tcards"
+
+#Test("a planted memory loss and time loss are listed with program, peer, metric, ratio and owner, grouped by owner") {
+    here: files.cwd()
+    programs: [test_gauntlet_program("kernel", here), test_scriptbench_program("words", here)]
+    report: test_report("kernel", [(metric: "runtime_wall_seconds", ratio: 0.5), (metric: "runtime_peak_rss_kb", ratio: 1.25)])
+    cells: parse_cells([TEST_HEADER, "w-words\tjet-bin\tpython\twall\t30\t20\t1.50\tLOSS\t#2222", "w-words\tjet-bin\tpython\trss\t1000\t9000\t0.11\twin\t#2222", "w-words\tjet-run-first\tpython\twall\t90\t20\t4.50\tloss (report-only)\t#2222"].join("\n"))
+    census: build_census(programs, report, cells)
+    assert_eq(census.measured, 4)
+    assert_eq(census.uncovered.len(), 0)
+    assert_eq(census.losses.map(loss -> "{loss.source}/{loss.program}/{loss.peer}/{loss.metric}/{loss.ratio}/{loss.owner}"), ["gauntlet/kernel/c/runtime_peak_rss_kb/1.25/#1112", "scriptbench/words/python/runtime_wall_seconds/1.5/#2222"])
+    assert_eq(census.roots.map(root -> "{root.owner}:{root.losses.map(loss -> loss.program).join(",")}"), ["#1112:kernel", "#2222:words"])
+}
+
+#Test("a ratio of exactly 1.00 is a loss, and a peer that overran the timeout is a win without a ratio") {
+    here: files.cwd()
+    programs: [test_gauntlet_program("tie", here), test_scriptbench_program("slow", here)]
+    report: test_report("tie", [(metric: "runtime_wall_seconds", ratio: 1.0), (metric: "runtime_peak_rss_kb", ratio: 0.9)])
+    cells: parse_cells([TEST_HEADER, "w-slow\tjet-bin\tpython\twall\t30\t>60s\t<1\twin\t#2222", "w-slow\tjet-bin\tpython\trss\t1000\t9000\t0.11\twin\t#2222"].join("\n"))
+    census: build_census(programs, report, cells)
+    assert_eq(census.losses.map(loss -> "{loss.program} {loss.metric} {loss.owner}"), ["tie runtime_wall_seconds #1111"])
+    assert_eq(census.uncovered.len(), 0)
+}
+
+#Test("a program, peer or metric without a reading is uncovered, not a win") {
+    here: files.cwd()
+    programs: [test_gauntlet_program("absent", here), test_gauntlet_program("partial", here), test_scriptbench_program("halfway", here)]
+    report: test_report("partial", [(metric: "runtime_wall_seconds", ratio: 0.5)])
+    cells: parse_cells([TEST_HEADER, "w-halfway\tjet-bin\tpython\twall\t30\t40\t0.75\twin\t#2222"].join("\n"))
+    census: build_census(programs, report, cells)
+    assert_eq(census.losses.len(), 0)
+    assert_eq(census.uncovered.map(row -> "{row.source}/{row.program}/{row.peer}/{row.metric}"), ["gauntlet/absent/c/runtime_wall_seconds", "gauntlet/absent/c/runtime_peak_rss_kb", "gauntlet/partial/c/runtime_peak_rss_kb", "scriptbench/halfway/python/runtime_peak_rss_kb"])
+}
+
+#Test("a corpus under 30 programs, a repeated program and a missing twin are corpus issues") {
+    here: files.cwd()
+    programs := [CoverageProgram]{}
+    loop index in 0..<(COVERAGE_MINIMUM_PROGRAMS - 1) {
+        programs.push(test_gauntlet_program("p{index}", here))
+    }
+    assert_eq(corpus_issues(programs), ["the corpus has 29 programs, fewer than 30"])
+    programs.push(test_gauntlet_program("p0", files.join(here, "no-such-twin")))
+    assert_eq(corpus_issues(programs), ["gauntlet/p0 is listed twice", "gauntlet/p0: the c twin is missing"])
+}

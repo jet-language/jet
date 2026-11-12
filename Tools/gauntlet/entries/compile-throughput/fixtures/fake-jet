@@ -1,0 +1,14 @@
+#!/bin/sh
+# The stand-in for `jet Throughput.jet`: records its command line and JET in
+# argv.txt, copies $FAKE_RECEIPT (when set) to its --receipt path and exits
+# $FAKE_EXIT (0 when unset).
+printf '%s\n' "$*" > argv.txt
+printf 'JET=%s\n' "$JET" >> argv.txt
+receipt=
+previous=
+for word in "$@"; do
+  if [ "$previous" = --receipt ]; then receipt=$word; fi
+  previous=$word
+done
+if [ -n "$FAKE_RECEIPT" ]; then cp "$FAKE_RECEIPT" "$receipt"; fi
+exit "${FAKE_EXIT:-0}"

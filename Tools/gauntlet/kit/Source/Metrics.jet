@@ -1,0 +1,23 @@
+// The loss-owner category of a gauntlet metric: the key of an entry's
+// measurement-manifest `loss_owners` row whose card owns a loss on it.
+loss_owner_category: fn(metric: String) -> String? {
+    if metric == {
+        "runtime_wall_seconds" | "runtime_first_stdout_seconds" | "service_startup_seconds" -> Val("runtime")
+        "service_latency_ms_p50" | "service_latency_ms_p99" -> Val("latency")
+        "runtime_peak_rss_kb" | "peak_rss_bytes" -> Val("rss")
+        "cold_build_seconds" | "warm_build_seconds" -> Val("build")
+        "binary_bytes" | "artifact_bytes" | "wasm_bytes" -> Val("binary")
+        "loc" | "source_bytes" | "tokens" | "source_tokens" -> Val("source")
+        else -> None
+    }
+}
+
+#Test("each metric names its loss-owner category, and an unknown metric none") {
+    assert_eq(loss_owner_category("runtime_first_stdout_seconds"), Val("runtime"))
+    assert_eq(loss_owner_category("service_latency_ms_p99"), Val("latency"))
+    assert_eq(loss_owner_category("peak_rss_bytes"), Val("rss"))
+    assert_eq(loss_owner_category("warm_build_seconds"), Val("build"))
+    assert_eq(loss_owner_category("wasm_bytes"), Val("binary"))
+    assert_eq(loss_owner_category("source_tokens"), Val("source"))
+    assert_eq(loss_owner_category("lines_per_second"), None)
+}

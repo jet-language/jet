@@ -1,0 +1,431 @@
+#!/usr/bin/env jet
+// Gauntlet axis build_system, the Jet twin of
+// Tools/gauntlet/harness/build-system.mjs (#5072 c8): Jet's build system
+// against Nix, the required peer, on one medium project
+// (jet_build_system_project). Every cell pairs one Jet command with one Nix
+// command over the same project state, measures wall time in fresh
+// processes, interleaves the two peers (the order alternates per sample) and
+// validates every built artifact against Tools/perf/build-time/midsize.out.
+// The cell commands come from measurement-manifest.json
+// axes.build_system.cells; the preparation of each cell (edit, cache drop,
+// output delete) is fixed here and never timed.
+//
+//   jet Tools/gauntlet/harness/build-system/run.jet -- --jet JET [--work-dir DIR] [--receipt FILE] [--samples N] [--warmups N]
+//
+// The caller's environment reaches `jet` unchanged (JET_TOOLCHAIN_ROOT and
+// friends); JET_STORE_DIR points the machine-wide store at a directory under
+// the work dir. The receipt is the original's; the exit is 1 on any failure.
+package: {
+    name: "gauntlet_build_system"
+    version: "0.0.1"
+    deps: {
+        jet_gauntlet_kit: ../../kit,
+        jet_build_system_project: ../../axes/build-system/project,
+        // The project's own dependency: a path dependency outside the root's package is declared by the root.
+        jet_midsize_units: ../../../perf/build-time/units,
+    }
+}
+
+use {
+    files: core.files
+    jet_build_system_project.[SYSTEM, write_project]
+    jet_gauntlet_kit.[BUILD_SYSTEM_RECEIPT_SCHEMA, build_system_contract_issues, dyn_at, int_at, items_at, number_at, text_or_empty, texts_at]
+    json: core.encoding.json
+    math: core.math
+    process: core.process
+    sys: core.sys
+    time: core.time
+}
+
+USAGE: "usage: jet Tools/gauntlet/harness/build-system/run.jet -- --jet JET [--work-dir DIR] [--receipt FILE] [--samples N] [--warmups N]"
+EXPECTED: "Tools/perf/build-time/midsize.out"
+
+Options: struct {
+    jet: String
+    work_dir: String?
+    receipt: String?
+    samples: Int?
+    warmups: Int?
+}
+
+#Codable
+Machine: struct {
+    cpu_model: String
+    threads: Int
+    memory_bytes: Int
+    kernel: String
+    nix: String
+}
+
+#Codable
+JetBinary: struct {
+    path: String
+    version: String
+}
+
+#Codable
+Summary: struct {
+    samples_ns: [Int]
+    median_ns: Int
+    min_ns: Int
+    max_ns: Int
+}
+
+// A cell as the receipt holds it; a peer without samples has no summary,
+// and an unmeasured cell no ratio.
+#Codable
+CellReceipt: struct {
+    id: String
+    target: Dyn
+    status: String
+    jet: Summary?
+    nix: Summary?
+    ratio: Float?
+    verdict: String
+}
+
+#Codable
+Receipt: struct {
+    schema: String
+    started_at: String
+    machine: Machine
+    jet: JetBinary
+    samples: Int
+    warmups: Int
+    cells: [CellReceipt]
+    failures: [String]
+    passed: Bool
+    finished_at: String
+}
+
+// One finished step: its exit code (None when it could not start, overran
+// the limit or died by a signal), its output and its wall time.
+Step: struct {
+    code: Int?
+    output: String
+    errors: String
+    wall_ns: Int
+}
+
+// A cell's samples per peer, the warmups left out.
+Row: struct {
+    id: String
+    target: Dyn
+    jet: [Int]
+    nix: [Int]
+}
+
+fail: fn(message: String) -> Never {
+    process.fail(1, "build-system: {message}")
+}
+
+parse_options: fn(args: [String]) -> Options {
+    jet := String?{None}
+    work_dir := String?{None}
+    receipt := String?{None}
+    samples := Int?{None}
+    warmups := Int?{None}
+    at := 0
+    loop at < args.len() {
+        flag: args[at]
+        value: args.get(at + 1)
+        if flag == {
+            "--jet" -> jet = value
+            "--work-dir" -> work_dir = value
+            "--receipt" -> receipt = value
+            "--samples" -> samples = Val(count(flag, value))
+            "--warmups" -> warmups = Val(count(flag, value))
+            else -> fail("unknown flag {flag}")
+        }
+        at += 2
+    }
+    Options{jet: jet ?? fail(USAGE), work_dir: work_dir, receipt: receipt, samples: samples, warmups: warmups}
+}
+
+count: fn(flag: String, value: String?) -> Int {
+    Int.parse(value ?? "") ?? fail("{flag} needs a whole number")
+}
+
+// `spec` run with a 30-minute limit, timed.
+run_step: fn(spec: ProcessSpec) -> Step {
+    started: time.instant()
+    done: spec.timeout(1800s).run() ?? return Step{code: None, output: "", errors: "{err}", wall_ns: started.elapsed().ns}
+    Step{code: if done.timed_out || done.signal != None -> None else -> Val(done.code), output: done.output, errors: done.errors, wall_ns: started.elapsed().ns}
+}
+
+// The step `spec` runs, which must exit 0; `what` and `argv` name it in the
+// failure, with the last three lines of its stderr.
+checked: fn(what: String, argv: [String], spec: ProcessSpec) -> Step Err! {
+    done: run_step(spec)
+    if done.code == Val(0) -> return Ok(done)
+    ended: if done.code == .Val(code) -> "exited {code}" else -> "did not exit"
+    lines: done.errors.trim().split("\n").to_list()
+    tail: lines.slice(if lines.len() > 3 -> lines.len() - 3 else -> 0, lines.len())
+    Err("{what}: `{argv.join(" ")}` {ended}: {tail.join(" | ")}")
+}
+
+must: fn(what: String, argv: [String]) -> Step Err! {
+    checked(what, argv, process.cmd(argv))
+}
+
+// The last line `step` printed, trimmed.
+last_line: fn(step: Step) -> String {
+    step.output.trim().split("\n").to_list().last() ?? ""
+}
+
+machine: fn() -> Machine {
+    model: (files.read("/proc/cpuinfo") ?? "").split("\n").to_list().find(line -> line.starts_with("model name"))
+    total: (files.read("/proc/meminfo") ?? "").split("\n").to_list().find(line -> line.starts_with("MemTotal:"))
+    kilobytes: Int.parse(total.map(line -> line.remove_prefix("MemTotal:").remove_suffix("kB").trim()) ?? "") ?? 0
+    Machine{cpu_model: model.map(line -> line.partition(":").tail.trim()) ?? "unknown", threads: sys.cpu_count(), memory_bytes: kilobytes * 1024, kernel: sys.release(), nix: run_step(process.cmd(["nix", "--version"])).output.trim()}
+}
+
+// The samples `values` summarized; the median of an even count is the mean
+// of its middle two, rounded.
+summary: fn(values: [Int]) -> Summary? {
+    if values.len() == 0 -> return None
+    sorted := values.copy()
+    sorted.sort()
+    mid: sorted.len() /% 2
+    median: if sorted.len() % 2 == 1 -> sorted[mid] else -> math.round(Float.from_int(sorted[mid - 1] + sorted[mid]) / 2.0)
+    Val(Summary{samples_ns: values, median_ns: median, min_ns: sorted[0], max_ns: sorted[sorted.len() - 1]})
+}
+
+// Removes `path` and everything under it, when it exists.
+remove_if_exists: fn(path: String) Err! {
+    if files.exists(path) -> files.remove_all(path)
+}
+
+verdict_of: fn(target: Dyn, ratio: Float) -> String {
+    win: if number_at(target, "ratio_max") == .Val(bound) -> ratio <= bound else -> ratio < (number_at(target, "ratio_lt") ?? 0.0)
+    if win -> "win" else -> "loss"
+}
+
+// The project, the private stores and caches, and the samples so far.
+Workspace: struct {
+    work_dir: String
+    project: String
+    jet_dir: String
+    nix_dir: String
+    jet_store: String
+    nix_store: String
+    nix_store_root: String
+    nix_cache: String
+    flake: String
+    jet: String
+    repo: String
+    expected: String
+    nix_out: String
+    edits: Int
+    rows: [Row]
+
+    // Each cell word with the workspace's {jet}, {flake}, {nix_store} and
+    // {nix_cache} in place.
+    expand: fn(self, argv: [String]) -> [String] {
+        words := [String]{}
+        loop word in argv -> words.push(word.replace("{{jet}}", self.jet).replace("{{flake}}", self.flake).replace("{{nix_store}}", self.nix_store).replace("{{nix_cache}}", self.nix_cache))
+        words
+    }
+
+    must_jet: fn(self, what: String, argv: [String]) -> Step Err! {
+        checked(what, argv, process.cmd(argv).cwd(self.jet_dir).env("JET_STORE_DIR", self.jet_store))
+    }
+
+    // A fresh project and caches, the private Nix store seeded with the
+    // pinned nixpkgs source (flake evaluation needs it; it is a toolchain
+    // input), then one validated build by each peer.
+    set_up: fn(&self) Err! {
+        remove_if_exists(self.work_dir)
+        files.create_dir_all(self.jet_store)
+        write_project(self.project, self.repo)
+        lock: json.parse(files.read(files.join(self.nix_dir, "flake.lock")))
+        locked: "nodes/nixpkgs/locked"
+        pinned: "github:{text_or_empty(lock, "{locked}/owner")}/{text_or_empty(lock, "{locked}/repo")}/{text_or_empty(lock, "{locked}/rev")}"
+        nixpkgs: must("resolve the pinned nixpkgs", ["nix", "eval", "--raw", "--expr", "(builtins.getFlake \"{pinned}\").outPath"]).output.trim()
+        must("seed the private Nix store", ["nix", "copy", "--to", self.nix_store, nixpkgs])
+        self.must_jet("first jet build", [self.jet, "build"])
+        self.validate_jet()
+        self.validate_nix(must("first nix build", self.expand(["nix", "build", "--no-link", "--print-out-paths", "--option", "substitute", "false", "{{flake}}"])), "")
+    }
+
+    validate_jet: fn(self) Err! {
+        output: must("run the jet artifact", [files.join(self.jet_dir, ".jet/build/medium")]).output
+        if output != self.expected -> return Err("the jet artifact printed {json.stringify(Dyn.Text(output))}")
+    }
+
+    // The output path `step` printed, its artifact run from under `prefix`
+    // (a private store's root; "" for the system store).
+    validate_nix: fn(&self, step: Step, prefix: String) Err! {
+        out: last_line(step)
+        if !out.starts_with("/nix/store/") -> return Err("nix build printed no output path: {json.stringify(Dyn.Text(step.output.copy()))}")
+        output: must("run the nix artifact", ["{prefix}{out}/bin/medium"]).output
+        if output != self.expected -> return Err("the nix artifact printed {json.stringify(Dyn.Text(output))}")
+        self.nix_out = out
+    }
+
+    // One new unused function in the edit file: a real source change that
+    // keeps the program's output.
+    edit: fn(&self, peer: String) Err! {
+        self.edits += 1
+        n: self.edits
+        if peer == "jet" -> files.append_all(files.join(self.project, "jet/units_4.jet"), "\nedit_probe_{n}: fn() -> Int {{\n    return {n}\n}}\n")
+        else -> files.append_all(files.join(self.project, "nix/src/units_4.c"), "\nint64_t edit_probe_{n}(void) {{ return {n}; }}\n")
+    }
+
+    // The untimed preparation of `peer`'s sample of `cell`.
+    prepare: fn(&self, cell: String, peer: String) Err! {
+        jet_cache: files.join(self.jet_dir, ".jet")
+        if "{cell} {peer}" == {
+            "incremental jet" -> self.edit(peer)
+            "incremental nix" -> self.edit(peer)
+            "cold_cache jet" -> remove_if_exists(jet_cache)
+            "scratch jet" -> {
+                remove_if_exists(jet_cache)
+                remove_if_exists(self.jet_store)
+                files.create_dir_all(self.jet_store)
+            }
+            "cold_cache nix" -> {
+                // The substituter holds the current build; the private store does not.
+                must("populate the binary cache", ["nix", "copy", "--to", self.nix_cache, self.nix_out])
+                // An output the private store never held has nothing to delete.
+                deleted: run_step(process.cmd(["nix", "store", "delete", "--store", self.nix_store, self.nix_out]))
+                if files.exists("{self.nix_store_root}{self.nix_out}") -> return Err("could not delete {self.nix_out} from the private store: {deleted.errors.trim()}")
+            }
+            else -> {}
+        }
+    }
+
+    // One timed sample of `peer` on `cell`, its result validated.
+    measure: fn(&self, cell: Dyn, id: String, peer: String) -> Int Err! {
+        argv: self.expand(texts_at(cell, peer))
+        what: "{id} ({peer})"
+        done: if peer == "jet" -> self.must_jet(what, argv) else -> checked(what, argv, process.cmd(argv).cwd(self.nix_dir))
+        // An eval cell builds nothing, so only Nix's printed derivation is checked.
+        if {
+            id == "eval" && peer == "nix" && !done.output.trim().ends_with(".drv") -> return Err("nix eval printed {json.stringify(Dyn.Text(done.output.copy()))}")
+            id == "eval" -> {}
+            peer == "jet" -> self.validate_jet()
+            else -> self.validate_nix(done, if id == "cold_cache" -> self.nix_store_root else -> "")
+        }
+        Ok(done.wall_ns)
+    }
+
+    // Every round over every cell, each peer in turn, the order alternating.
+    rounds: fn(&self, cells: [Dyn], samples: Int, warmups: Int) Err! {
+        self.set_up()
+        loop round in 0..<(warmups + samples) {
+            order: if round % 2 == 0 -> ["jet", "nix"] else -> ["nix", "jet"]
+            loop at in 0..<cells.len() {
+                id: self.rows[at].id.copy()
+                loop peer in order {
+                    self.prepare(id, peer)
+                    wall: self.measure(cells[at], id, peer)
+                    if round < warmups -> next
+                    if peer == "jet" -> self.rows[at].jet.push(wall) else -> self.rows[at].nix.push(wall)
+                }
+            }
+        }
+    }
+}
+
+open_workspace: fn(work_dir: String, jet: String, repo: String, cells: [Dyn]) -> Workspace Err! {
+    root: files.absolute(work_dir)
+    project: files.join(root, "project")
+    nix_dir: files.join(project, "nix")
+    Ok(Workspace{
+        jet_dir: files.join(project, "jet"),
+        flake: "path:{nix_dir}#packages.{SYSTEM}.default",
+        jet_store: files.join(root, "jet-store"),
+        nix_store: "local?root={root}/nix-root",
+        nix_store_root: files.join(root, "nix-root"),
+        nix_cache: "file://{root}/nix-cache",
+        jet: files.absolute(jet),
+        expected: files.read(files.join(repo, EXPECTED)),
+        work_dir: root,
+        project: project,
+        nix_dir: nix_dir,
+        repo: repo,
+        nix_out: "",
+        edits: 0,
+        rows: cells.map(cell -> Row{id: text_or_empty(cell, "id"), target: dyn_at(cell, "target"), jet: [], nix: []})
+    })
+}
+
+// `value` rounded to four decimal places.
+four_places: fn(value: Float) -> Float {
+    Float.parse("{value:Fixed(4)}") ?? panic("{value} has no four-place form")
+}
+
+measure_build_system: fn(axis: Dyn, options: Options, work_dir: String, repo: String) -> Receipt Err! {
+    samples: options.samples ?? (int_at(axis, "samples") ?? 0)
+    warmups: options.warmups ?? (int_at(axis, "warmups") ?? 0)
+    started_at: time.now().format_rfc3339()
+    found: machine()
+    version: run_step(process.cmd([options.jet, "--version"])).output.trim()
+    cells: items_at(axis, "cells")
+    space := open_workspace(work_dir, options.jet, repo, cells)
+    failures := [String]{}
+    if space.rounds(cells, samples, warmups) == .Err(error) -> failures.push(error.message)
+    measured := [CellReceipt]{}
+    loop row in space.rows {
+        complete: row.jet.len() == samples && row.nix.len() == samples
+        jet: summary(row.jet)
+        nix: summary(row.nix)
+        ratio: if complete && jet == .Val(left) && nix == .Val(right) -> Val(four_places(Float.from_int(left.median_ns) / Float.from_int(right.median_ns))) else -> Float?{None}
+        verdict: if ratio == .Val(value) -> verdict_of(row.target, value) else -> "unmeasured"
+        measured.push(CellReceipt{id: row.id, target: row.target, status: if complete -> "measured" else -> "unmeasured", jet: jet, nix: nix, ratio: ratio, verdict: verdict})
+    }
+    passed: failures.len() == 0 && measured.all(cell -> cell.verdict == "win")
+    Ok(Receipt{
+        schema: BUILD_SYSTEM_RECEIPT_SCHEMA,
+        started_at: started_at,
+        machine: found,
+        jet: JetBinary{path: space.jet, version: version},
+        samples: samples,
+        warmups: warmups,
+        cells: measured,
+        failures: failures,
+        passed: passed,
+        finished_at: time.now().format_rfc3339()
+    })
+}
+
+table: fn(receipt: Receipt) -> String {
+    lines := ["cell\tjet_ms\tnix_ms\tjet/nix\ttarget\tverdict"]
+    loop cell in receipt.cells {
+        bound: if number_at(cell.target, "ratio_max") == .Val(max) -> "<= {max:Fixed(2)}" else -> "< {(number_at(cell.target, "ratio_lt") ?? 0.0):Fixed(2)}"
+        ratio: if cell.ratio == .Val(value) -> "{value}" else -> "-"
+        lines.push("{cell.id}\t{milliseconds(cell.jet)}\t{milliseconds(cell.nix)}\t{ratio}\t{bound}\t{cell.verdict}")
+    }
+    loop failure in receipt.failures -> lines.push("failure: {failure}")
+    lines.join("\n")
+}
+
+milliseconds: fn(found: Summary?) -> String {
+    if found == .Val(summary) -> return "{(Float.from_int(summary.median_ns) / 1000000.0):Fixed(1)}"
+    "-"
+}
+
+// The receipt of the axis the measurement manifest declares, measured as
+// `options` ask, and written to the file `options.receipt` names, if any.
+measure_from_manifest: fn(options: Options) -> Receipt Err! {
+    // This program is Tools/gauntlet/harness/build-system/run.jet.
+    repo: files.absolute(files.join(files.dirname(sys.executable()), "../../../.."))
+    manifest: json.parse(files.read(files.join(repo, "Tools/gauntlet/measurement-manifest.json")))
+    axis: dyn_at(manifest, "axes/build_system")
+    issues: build_system_contract_issues(axis)
+    if issues.len() > 0 -> return Err(issues.join("; "))
+    receipt: measure_build_system(axis, options, options.work_dir ?? files.mkdtemp("jet-build-system-"), repo)
+    if options.receipt == .Val(path) {
+        target: files.absolute(path)
+        files.create_dir_all(files.dirname(target))
+        files.write(target, "{json.stringify(receipt, 2)}\n")
+    }
+    Ok(receipt)
+}
+
+run: fn() {
+    receipt: measure_from_manifest(parse_options(process.args())) ?? fail(err.message)
+    print(table(receipt))
+    if receipt.failures.len() > 0 -> process.exit(1)
+}

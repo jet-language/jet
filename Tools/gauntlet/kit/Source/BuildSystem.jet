@@ -1,0 +1,144 @@
+// The gauntlet axis build_system's contract and adapter: Jet's build system
+// against Nix, the required peer, on one medium project. The harness the
+// manifest names (axes.build_system.harness) measures every cell and writes a
+// receipt; the adapter runs it and projects the receipt onto the axis report.
+use {
+    files: core.files
+    json: core.encoding.json
+    process: core.process
+}
+
+BUILD_SYSTEM_SCHEMA: "gauntlet-axis-build-system-v1"
+BUILD_SYSTEM_RECEIPT_SCHEMA: "gauntlet-build-system-receipt-v1"
+BUILD_SYSTEM_CELLS: ["eval", "noop", "incremental", "cold_cache", "scratch"]
+BUILD_SYSTEM_HARNESS: "Tools/gauntlet/harness/build-system.mjs"
+
+// Why `axis` (the manifest's axes.build_system, null when it is missing) is
+// not the axis the harness measures.
+build_system_contract_issues: fn(axis: Dyn) -> [String] {
+    if axis == Dyn.Null -> return ["build_system axis is missing"]
+    rules := [ContractRule]{
+        {holds: text_at(axis, "status") == Val("required"), issue: "build_system must be required"},
+        {holds: text_at(axis, "schema") == Val(BUILD_SYSTEM_SCHEMA), issue: "build_system schema must be {BUILD_SYSTEM_SCHEMA}"},
+        {holds: text_at(axis, "metric") == Val("wall_ns"), issue: "build_system metric must be wall_ns"},
+        {holds: text_at(axis, "harness") == Val(BUILD_SYSTEM_HARNESS), issue: "build_system harness must be {BUILD_SYSTEM_HARNESS}"},
+        {holds: ids_at(axis, "peers") == ["jet", "nix"] && items_at(axis, "peers").all(peer -> is_true(peer, "required")), issue: "build_system peers must be jet and nix, both required"},
+        {holds: ids_at(axis, "cells") == BUILD_SYSTEM_CELLS, issue: "build_system cells must be {BUILD_SYSTEM_CELLS.join(", ")}"},
+    }
+    rules.extend(items_at(axis, "cells").flat_map(cell -> cell_rules(cell)))
+    rules.push(ContractRule{holds: (number_at(axis, "samples") ?? 0.0) >= 1.0 && (number_at(axis, "warmups") ?? -1.0) >= 0.0, issue: "build_system needs samples and warmups"})
+    contract_issues(rules)
+}
+
+// The contract rules of one axis cell: a command for each peer, and a target
+// bounding jet/nix at or below 1.
+cell_rules: fn(cell: Dyn) -> [ContractRule] {
+    id: text_at(cell, "id") ?? "a cell without an id"
+    ratio_lt: number_at(cell, "target/ratio_lt")
+    bounded: number_at(cell, "target/ratio_max") != None || ratio_lt != None
+    [ContractRule]{
+        {holds: items_at(cell, "jet").len() > 0 && items_at(cell, "nix").len() > 0, issue: "{id}: both peers need a command"},
+        {holds: bounded && (ratio_lt ?? 0.0) <= 1.0, issue: "{id}: target must bound jet/nix at or below 1.00"},
+    }
+}
+
+// The axis report the gauntlet publishes.
+#Codable
+BuildSystemReport: struct {
+    id: String
+    required: Bool
+    status: String
+    contract: Dyn
+    schema: Dyn?
+    metric: Dyn?
+    receipt: String
+    metrics: Dyn
+    comparisons: Dyn
+    verdicts: Dyn
+    publication: Publication
+}
+
+// Runs the harness into <run_dir>/axes/build_system with `node` and reports
+// its receipt: complete when every cell of the axis was measured, its
+// verdict a win only when every cell won, ready to publish when the receipt
+// passed. Each failure and each cell that did not win blocks publication; a
+// harness that left no receipt blocks it with its exit code. The gauntlet
+// checks the contract first, so the axis names its harness.
+run_build_system_adapter: fn(axis: Dyn, run: AxisRun) -[FS, Exec]> BuildSystemReport IOError! {
+    axis_dir: files.join(run.run_dir, "axes/build_system")
+    files.create_dir_all(axis_dir)
+    receipt_path: files.join(axis_dir, "receipt.json")
+    harness: files.join(run.repo_dir, text_or_empty(axis, "harness"))
+    done: process.cmd(["node", harness, "--jet", run.jet_bin, "--work-dir", files.join(axis_dir, "work"), "--receipt", receipt_path]).cwd(run.repo_dir).stdout(.Inherit).stderr(.Inherit).run()
+    // A missing receipt reads as null: it has no cells and no failures.
+    receipt: read_json(receipt_path) ?? Dyn.Null
+    blockers := if receipt == Dyn.Null -> ["the build-system harness exited {done.code} without a receipt"] else -> texts_at(receipt, "failures")
+    cells: items_at(receipt, "cells")
+    metrics := [(key: String, value: Dyn)]{}
+    readings := [(key: String, value: Dyn)]{}
+    loop cell in cells {
+        id: text_or_empty(cell, "id")
+        jet: dyn_at(cell, "jet/median_ns")
+        nix: dyn_at(cell, "nix/median_ns")
+        ratio: dyn_at(cell, "ratio")
+        metrics.push((key: id, value: Dyn.Object([(key: "jet_wall_ns", value: jet), (key: "nix_wall_ns", value: nix)])))
+        readings.push((key: id, value: Dyn.Object([(key: "status", value: dyn_at(cell, "status")), (key: "jet", value: jet), (key: "peer", value: nix), (key: "ratio", value: ratio), (key: "verdict", value: dyn_at(cell, "verdict"))])))
+        // The ratio as JSON writes it: 1, not 1.0.
+        if text_at(cell, "verdict") != Val("win") -> blockers.push("{id}: jet/nix {if ratio == Dyn.Null -> "unmeasured" else -> json.stringify(ratio)} misses {json.stringify(dyn_at(cell, "target"))}")
+    }
+    complete: receipt != Dyn.Null && cells.len() == items_at(axis, "cells").len() && cells.all(cell -> text_at(cell, "status") == Val("measured"))
+    verdict: if {
+        !complete -> "unmeasured"
+        cells.all(cell -> text_at(cell, "verdict") == Val("win")) -> "win"
+        else -> "loss"
+    }
+    Ok(BuildSystemReport{
+        id: "build_system",
+        required: text_at(axis, "status") == Val("required"),
+        status: if complete -> "complete" else -> "incomplete",
+        contract: axis,
+        schema: member(axis, "schema"),
+        metric: member(axis, "metric"),
+        receipt: receipt_path,
+        metrics: Dyn.Object(metrics),
+        comparisons: Dyn.Object([(key: "nix", value: Dyn.Object([(key: "verdict", value: Dyn.Text(verdict)), (key: "cells", value: Dyn.Object(readings))]))]),
+        verdicts: Dyn.Object([(key: "nix", value: Dyn.Text(verdict))]),
+        publication: Publication{status: if is_true(receipt, "passed") -> "ready" else -> "blocked", blockers: blockers}
+    })
+}
+
+test_build_axis: fn() -> Dyn {
+    cells: BUILD_SYSTEM_CELLS.map(id -> "{{\"id\":\"{id}\",\"jet\":[\"{{jet}}\",\"build\"],\"nix\":[\"nix\",\"build\"],\"target\":{{\"ratio_max\":0.25}}}}").join(",")
+    json.parse("{{\"status\":\"required\",\"schema\":\"gauntlet-axis-build-system-v1\",\"metric\":\"wall_ns\",\"harness\":\"Tools/gauntlet/harness/build-system.mjs\",\"peers\":[{{\"id\":\"jet\",\"required\":true}},{{\"id\":\"nix\",\"required\":true}}],\"cells\":[{cells}],\"samples\":5,\"warmups\":1}}") ?? panic("axis: {err}")
+}
+
+#Test("the manifest's axis has no contract issues, and a missing axis or each wrong field is one") {
+    assert_eq(build_system_contract_issues(test_build_axis()).len(), 0)
+    assert_eq(build_system_contract_issues(Dyn.Null), ["build_system axis is missing"])
+    wrong: json.parse("{{\"peers\":[{{\"id\":\"jet\",\"required\":true}}],\"cells\":[{{\"id\":\"eval\",\"jet\":[],\"nix\":[\"nix\"],\"target\":{{\"ratio_lt\":1.5}}}}],\"samples\":0}}")
+    assert_eq(build_system_contract_issues(wrong), ["build_system must be required", "build_system schema must be gauntlet-axis-build-system-v1", "build_system metric must be wall_ns", "build_system harness must be Tools/gauntlet/harness/build-system.mjs", "build_system peers must be jet and nix, both required", "build_system cells must be eval, noop, incremental, cold_cache, scratch", "eval: both peers need a command", "eval: target must bound jet/nix at or below 1.00", "build_system needs samples and warmups"])
+}
+
+#Test("a receipt of won cells is complete and ready; a lost cell blocks; no receipt names the exit code") {
+    dir: files.mktemp("build-system-")
+    receipt: files.join(dir, "run/axes/build_system/receipt.json")
+    files.create_dir_all(files.dirname(receipt))
+    harness: files.join(dir, BUILD_SYSTEM_HARNESS)
+    files.create_dir_all(files.dirname(harness))
+    files.write(harness, "")
+    won: BUILD_SYSTEM_CELLS.map(id -> "{{\"id\":\"{id}\",\"target\":{{\"ratio_max\":0.25}},\"status\":\"measured\",\"jet\":{{\"median_ns\":1}},\"nix\":{{\"median_ns\":10}},\"ratio\":0.1,\"verdict\":\"win\"}}").join(",")
+    files.write(receipt, "{{\"passed\":true,\"failures\":[],\"cells\":[{won}]}}")
+    run: AxisRun{run_dir: files.join(dir, "run"), jet_bin: "jet", repo_dir: dir}
+    ready: run_build_system_adapter(test_build_axis(), run)
+    assert(ready.status == "complete" && ready.publication.status == "ready" && ready.publication.blockers.len() == 0)
+    assert_eq(json.stringify(ready.verdicts), "{{\"nix\":\"win\"}}")
+    files.write(receipt, "{{\"passed\":false,\"failures\":[\"setup\"],\"cells\":[{{\"id\":\"eval\",\"target\":{{\"ratio_max\":0.25}},\"status\":\"unmeasured\",\"jet\":null,\"nix\":null,\"ratio\":null,\"verdict\":\"unmeasured\"}}]}}")
+    blocked: run_build_system_adapter(test_build_axis(), run)
+    assert_eq(blocked.publication.blockers, ["setup", "eval: jet/nix unmeasured misses {{\"ratio_max\":0.25}}"])
+    assert_eq(json.stringify(blocked.verdicts), "{{\"nix\":\"unmeasured\"}}")
+    files.remove(receipt)
+    files.write(harness, "process.exit(3)")
+    missing: run_build_system_adapter(test_build_axis(), run)
+    assert_eq(missing.publication.blockers, ["the build-system harness exited 3 without a receipt"])
+    files.remove_all(dir)
+}

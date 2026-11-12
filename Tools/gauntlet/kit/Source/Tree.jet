@@ -1,0 +1,117 @@
+// JSON values read by `/`-separated path (member names and array indices).
+// A missing step and a JSON null both read as absent, except to `value_at`
+// and `dyn_at`, which keep a null.
+use {
+    files: core.files
+    json: core.encoding.json
+}
+
+// The value at `path` ("" is the whole value), null included; None when a
+// step is missing.
+value_at: fn(tree: Dyn, path: String) -> Dyn? {
+    Val(json.at<Dyn>(tree, path) ?? return None)
+}
+
+// The value at `path`, null when a step is missing: what JavaScript's
+// `tree.a?.b ?? null` reads.
+dyn_at: fn(tree: Dyn, path: String) -> Dyn {
+    json.at<Dyn>(tree, path) ?? Dyn.Null
+}
+
+// The value at `path`; None when a step is missing or the value is null.
+member: fn(tree: Dyn, path: String) -> Dyn? {
+    found: dyn_at(tree, path)
+    if found == .Null -> return None
+    Val(found)
+}
+
+// The text at `path`; None when it is absent or not a string.
+text_at: fn(tree: Dyn, path: String) -> String? {
+    if dyn_at(tree, path) == .Text(text) -> return Val(text)
+    None
+}
+
+// The text at `path`; "" when it is absent or not a string.
+text_or_empty: fn(tree: Dyn, path: String) -> String {
+    text_at(tree, path) ?? ""
+}
+
+// Whether the value at `path` is `true`.
+is_true: fn(tree: Dyn, path: String) -> Bool {
+    dyn_at(tree, path) == Dyn.Bool(true)
+}
+
+// Whether the value at `path` is truthy as JavaScript sees it: present and
+// not null, false, 0 or "".
+truthy_at: fn(tree: Dyn, path: String) -> Bool {
+    found: dyn_at(tree, path)
+    ![Dyn.Null, Dyn.Bool(false), Dyn.Text("")].contains(found) && number_at(found, "") != Val(0.0)
+}
+
+// The number at `path`; None when it is absent or not a number.
+number_at: fn(tree: Dyn, path: String) -> Float? {
+    Val(dyn_at(tree, path).decode<Float>() ?? return None)
+}
+
+// The whole number at `path`; None when it is absent or not a whole number.
+int_at: fn(tree: Dyn, path: String) -> Int? {
+    Val(dyn_at(tree, path).decode<Int>() ?? return None)
+}
+
+// The elements of the array at `path` (none for another value).
+items_at: fn(tree: Dyn, path: String) -> [Dyn] {
+    if dyn_at(tree, path) == .Array(list) -> return list
+    []
+}
+
+// The `id` of each element of the array at `path` ("" for one without).
+ids_at: fn(tree: Dyn, path: String) -> [String] {
+    items_at(tree, path).map(item -> text_or_empty(item, "id"))
+}
+
+// The strings of the array at `path` (its other elements skipped).
+texts_at: fn(tree: Dyn, path: String) -> [String] {
+    items_at(tree, path).filter_map(item -> text_at(item, "")).collect()
+}
+
+// `value` as member `key` of `object` when it is set: what a JavaScript
+// object literal keeps of an undefined member.
+put_present: fn(object: &Dyn, key: String, value: Dyn?) {
+    if value == .Val(found) -> object[key] = found
+}
+
+// The JSON file at `path`; None when it cannot be read or is not JSON.
+read_json: fn(path: String) -[FS]> Dyn? {
+    text: files.read(path) ?? return None
+    Val(json.parse(text) ?? return None)
+}
+
+#Test("a path reads members and indices; a missing step, a null and another type are absent") {
+    tree: json.parse("{{\"a\": {{\"b\": [{{\"id\": \"x\"}}, {{\"id\": 7}}], \"n\": 2.5, \"i\": 5, \"f\": 5.0, \"t\": true, \"z\": null, \"s\": [\"p\", 1, \"q\"]}}}}")
+    assert_eq(text_at(tree, "a/b/0/id"), Val("x"))
+    assert_eq(text_at(tree, "a/b/1/id"), None)
+    assert_eq(text_or_empty(tree, "a/b/1/id"), "")
+    assert_eq(number_at(tree, "a/n"), Val(2.5))
+    assert_eq(number_at(tree, "a/b"), None)
+    assert(int_at(tree, "a/i") == Val(5) && int_at(tree, "a/f") == Val(5) && int_at(tree, "a/n") == None && int_at(tree, "a/b/0/id") == None)
+    assert(is_true(tree, "a/t") && !is_true(tree, "a/i"))
+    assert(member(tree, "a/z") == None && member(tree, "a/q/r") == None)
+    assert(value_at(tree, "a/z") != None && value_at(tree, "a/q") == None)
+    assert(dyn_at(tree, "a/z") == Dyn.Null && dyn_at(tree, "a/q/r") == Dyn.Null && dyn_at(tree, "a/s/0") == Dyn.Text("p"))
+    assert_eq(ids_at(tree, "a/b"), ["x", ""])
+    assert_eq(texts_at(tree, "a/s"), ["p", "q"])
+    assert_eq(items_at(tree, "a/n").len(), 0)
+}
+
+#Test("truthiness is JavaScript's: null, false, 0 and \"\" are falsy; any other value, an empty array included, is truthy") {
+    tree: json.parse("{{\"z\": null, \"f\": false, \"o\": 0, \"e\": \"\", \"t\": true, \"n\": 2, \"s\": \"x\", \"a\": []}}")
+    assert_eq(["z", "f", "o", "e", "m", "t", "n", "s", "a"].map(key -> truthy_at(tree, key)), [false, false, false, false, false, true, true, true, true])
+}
+
+#Test("a set value is put; an unset one is left out") {
+    out := Dyn.object()
+    put_present(out, "a", Val(Dyn.Int(1)))
+    put_present(out, "b", None)
+    put_present(out, "c", Val(Dyn.Null))
+    assert_eq(json.stringify(out), "{{\"a\":1,\"c\":null}}")
+}

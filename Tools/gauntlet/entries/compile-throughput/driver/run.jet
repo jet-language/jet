@@ -1,0 +1,44 @@
+// The gauntlet driver of the kit's CompileThroughput module (#5072 c8), the
+// twin of Tools/gauntlet/harness/drivers/compile-throughput.mjs: one command
+// per compile-throughput.mjs export.
+//
+//   jet driver contract AXIS | adapt AXIS JET
+//
+// AXIS is a JSON file holding an axes.compile_throughput cell (`null` for a
+// missing one). `adapt` runs the adapter in the working directory: the run
+// directory is `run` and the repository the working directory itself.
+package: {
+    name: "compile_throughput_driver"
+    version: "0.0.1"
+    deps: {
+        jet_gauntlet_kit: ../../../kit,
+    }
+}
+
+use {
+    files: core.files
+    jet_gauntlet_kit.[AxisRun, compile_throughput_contract_issues, read_json, run_compile_throughput_adapter]
+    json: core.encoding.json
+    process: core.process
+}
+
+// The cell in `file`, null when it holds `null`.
+axis_in: fn(file: String) -> Dyn {
+    read_json(file) ?? process.fail(1, "{file} is not a JSON file")
+}
+
+#CLI
+Driver: struct {
+    #Doc("compileThroughputContractIssues of the cell in AXIS: each issue, then their count") contract: fn(self, file: String) {
+        issues: compile_throughput_contract_issues(axis_in(file))
+        print(issues.concat(["{issues.len()} issues"]).join("\n"))
+    }
+
+    #Doc("runCompileThroughputAxisAdapter of the cell in AXIS with JET, as JSON") adapt: fn(self, file: String, jet: String) {
+        repo: files.cwd() ?? process.fail(1, "no working directory: {err}")
+        report: run_compile_throughput_adapter(axis_in(file), AxisRun{run_dir: "run", jet_bin: jet, repo_dir: repo}) ?? process.fail(1, "error: {err}")
+        print(json.stringify(report, 2))
+    }
+}
+
+run: fn(_args: Driver) {}
