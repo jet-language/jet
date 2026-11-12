@@ -20,7 +20,7 @@ use {
     jet_build_session.[BuildPlanExecutable, BuildPlanExecution, BuildPlanSelection, BuildSessionGeneratedModule, BuildSessionOption, BuildSessionPlan, BuildSessionValue, build_plan_contributions, build_plan_execution, build_plan_generated, build_plan_selection]
     jet_pkg_model.[
         ContributionLayer, FactContribution, FactValue, LockError, LockedBuildContribution, PackageFacts, SourceScope,
-        BuildStamp, ComptimeInput, pkg_lock_build_stamp, pkg_lock_e3513, pkg_lock_load, pkg_lock_locked_build_contribution_set, pkg_lock_record_build_contributions, pkg_lock_record_effect_rows, pkg_lock_record_generated_inputs, pkg_lock_sorted_contributions, pkg_lock_widened_note, pkg_manifest_parse, pkg_sha256_hex,
+        BuildStamp, ComptimeInput, pkg_lock_build_stamp, pkg_lock_e3512, pkg_lock_e3513, pkg_lock_load, pkg_lock_locked_build_contribution_set, pkg_lock_record_build_contributions, pkg_lock_record_effect_rows, pkg_lock_record_generated_inputs, pkg_lock_sorted_contributions, pkg_lock_widened_note, pkg_manifest_parse, pkg_sha256_hex,
     ]
 }
 
@@ -240,6 +240,9 @@ jet_cli_build_package_as: fn(file: String, color: Bool, options: BuildOptions, b
     if locked {
         if pkg_lock_record_generated_inputs(root, generated_inputs, true, BuildStamp.default()) == .Err(error) -> return jet_cli_lock_refusal(error, color)
     }
+    // Under `--locked`, what each action output held before the graph runs,
+    // so one that drifts from its lock row is put back.
+    before: if locked -> jet_cli_action_outputs_snapshot(root, produced) else -> [JetCLIActionOutput]{}
     shadowed: jet_cli_generated_shadow(root, generated, color)
     // copy: `shadowed` is a payload view of the check's result.
     if shadowed == .Val(refusal) -> return refusal.copy()
@@ -253,6 +256,18 @@ jet_cli_build_package_as: fn(file: String, color: Bool, options: BuildOptions, b
     }
     built: jet_cli_build_run_graph(graph, projected, selected, root, policy, invocation, member, selected_options, threads, target_generated, trace_sink, color)
     if built.exit_code != JET_DRIVER_EXIT_OK -> return built
+    // Each action output is locked beside what `build: fn` generated and
+    // read, as a generated input of the targets. A locked build whose outputs
+    // drift from their rows is refused, with the outputs restored.
+    outputs: jet_cli_action_output_lock_rows(root, produced)
+    drifted: if locked -> jet_cli_locked_action_drift(root, outputs) else -> None
+    if drifted == .Val(path) {
+        jet_cli_action_outputs_restore(root, before)
+        return jet_cli_lock_refusal(LockError.Reported(pkg_lock_e3512("locked generated input `{path}` drifted", "`--locked` requires generated input and output hashes to match the unified lock exactly", "rerun without `--locked` to review and record the new generated provenance")), color)
+    }
+    if !locked {
+        loop row in outputs -> generated_inputs.push(row)
+    }
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     // A `build: fn` that selects no executable keeps the stock build of the
     // program beside it, named after its file.
@@ -296,6 +311,71 @@ jet_cli_generated_lock_inputs: fn(generated: [BuildSessionGeneratedModule]) -> [
     inputs := [ComptimeInput]{}
     loop source_file in generated -> inputs.push(ComptimeInput{path: source_file.path.copy(), hash: "sha256:{pkg_sha256_hex(source_file.source.bytes())}"})
     inputs
+}
+
+// One build action output before the graph ran: its package-relative path,
+// and its bytes when it was a file (`present`).
+JetCLIActionOutput: struct {
+    path: String
+    present: Bool
+    bytes: [U8]
+}
+
+// The action outputs `produced` names outside the managed `.jet/` tree (the
+// generated modules lock there by their own rows), each once.
+jet_cli_action_output_paths: fn(produced: [String]) -> [String] Never! {
+    paths := [String]{}
+    loop path in produced {
+        if path.starts_with(".jet/") || paths.contains(path) -> next
+        paths.push(path.copy())
+    }
+    paths
+}
+
+// What each action output `produced` names holds under `root` now.
+jet_cli_action_outputs_snapshot: fn(root: String, produced: [String]) -[FS]> [JetCLIActionOutput] Never! {
+    outputs := [JetCLIActionOutput]{}
+    loop path in jet_cli_action_output_paths(produced) {
+        full: jet_cli_entry_join(root, path)
+        present: build_files.is_file(full)
+        bytes: if present -> build_files.read_bytes(full) ?? [U8]{} else -> [U8]{}
+        outputs.push(JetCLIActionOutput{path: path.copy(), present: present, bytes: bytes})
+    }
+    outputs
+}
+
+// Put each snapshotted action output back: its old bytes, or no file. One
+// that can't be put back is named in a notice beside the refusal.
+jet_cli_action_outputs_restore: fn(root: String, outputs: [JetCLIActionOutput]) -[FS, IO]> {
+    loop output in outputs {
+        full: jet_cli_entry_join(root, output.path)
+        if {
+            output.present -> build_files.write_bytes(full, output.bytes) ?? jet_cli_write_notice("couldn't restore the build action output `{full}`: {err}\n")
+            build_files.exists(full) -> build_files.remove(full) ?? jet_cli_write_notice("couldn't remove the build action output `{full}`: {err}\n")
+        }
+    }
+}
+
+// The `[[comptime_inputs]]` rows of the action outputs `produced` names: each
+// file's package-relative path and the SHA-256 of its bytes. An output the
+// graph didn't write has no row.
+jet_cli_action_output_lock_rows: fn(root: String, produced: [String]) -[FS]> [ComptimeInput] Never! {
+    rows := [ComptimeInput]{}
+    loop path in jet_cli_action_output_paths(produced) {
+        bytes: build_files.read_bytes(jet_cli_entry_join(root, path)) ?? next
+        rows.push(ComptimeInput{path: path.copy(), hash: "sha256:{pkg_sha256_hex(bytes)}"})
+    }
+    rows
+}
+
+// The first of `outputs` the unified lock under `root` doesn't hold with the
+// same hash.
+jet_cli_locked_action_drift: fn(root: String, outputs: [ComptimeInput]) -[FS]> String? Never! {
+    recorded: if pkg_lock_load(root) == .Val(lock) -> lock.comptime_inputs.copy() else -> [ComptimeInput]{}
+    loop output in outputs {
+        if !recorded.contains(output) -> return Val(output.path.copy())
+    }
+    None
 }
 
 // E3510 for the first generated module whose managed `.jet/generated/` path
