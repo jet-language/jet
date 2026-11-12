@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6775,
-    "rev": 99983,
+    "rev": 99995,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -2359,7 +2359,7 @@
       "title": "M06 · Adoption-ready reference and learning",
       "goal": "A new user can discover, learn, and trust the stable Jet surface: jetdoc generates stable semantic API docs with source links and doctests, the Core API comparison records honest evidence-backed wins, jet learn runs versioned offline exercises with live diagnostics in the dev loop, and the 1.0 policy explains cadence and feature-complete status from the adopter entry point. Someone can generate docs, complete the first kata arc, inspect comparison evidence, and understand what quiet releases mean.",
       "criteria": [],
-      "status": "open",
+      "status": "review-ready",
       "created": "2026-08-23T01:02:27.247Z"
     },
     {
@@ -28339,7 +28339,7 @@
       "track": "epoch",
       "epoch": "e10",
       "milestoneId": "e10-m06-adoption-reference-learning",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "**Goal**\nMake the selected loop, error and cleanup teaching examples conform to current Syntax and Tower law: legal forms run, intended rejections are shown, and no comment teaches punctuation that does not exist. The card owns teaching-source conformance only. Guard runtime repair belongs to READ-F05 and formatter preservation to READ-F07.\n\n**Current state**\n- The finite manifest (criterion 2) largely exists in `Examples/README.md:114-119`: loop_forms, `tests/ui/list_loop_mutate.jet` (E0507), errors, typed_error_families and scope_guard, each with its normative claim, golden and command. It was added by d94ccde46 (2026-09-21), which also rewrote loop_forms, errors, typed_error_families and scope_guard.\n- `Examples/features/basics/loop_forms.jet:1-16` now teaches `loop` / `loop cond` / `loop x in`, eager value loops and `next`. `Examples/features/concurrency/bounded_workers.jet` (golden `.out`) and `all_failfast.jet` (golden `all_failfast.err.out`) are not in the manifest.\n- The last AOT golden attempt on basics/loop_forms (card log 2026-09-22) failed in generated Rust with E0308 on `jet_list_len` i64. No open card owns that failure (Tower title search).\n\n**Changes**\n1. Add manifest rows for `concurrency/bounded_workers` and `concurrency/all_failfast` to `Examples/README.md:114-119`, naming the decisions each teaches.\n2. Audit comments in those two files and in errors/typed_error_families/scope_guard. Keep unmarked fallible calls, explicit failure return, `??` fallback and scope-guard cleanup visibly distinct. Delete any mention of a propagation token absent from the code, and use only current `E!`/`T?` spelling.\n3. Run the manifest. If loop_forms still hits the AOT E0308, file one codegen card, list it as this card's blocker, and do not work around it in the example.\n4. Leave historical captures and receipts untouched, with no aliases.\n\n**Proof**\nRun `jet test Compiler --profile golden <stem>` for each of `basics/loop_forms`, `errors/errors`, `errors/typed_error_families`, `io/scope_guard`, `concurrency/bounded_workers` and `concurrency/all_failfast`; all pass (all_failfast via `.err.out`, exit 70/1). Also pass `jet test Compiler --profile ui list_loop_mutate`.\n\n**Batch**\n`batch-docs`: teaching comments and a manifest, re-verified by the golden pass.\n\n**Dependencies**\nNone known. It is conditional on the loop_forms E0308 reproducing; see change 3. The work overlaps #3177 on the same files, so one implementer should take both.",
       "checkSteps": "1. Use the corrected complete loop_forms, bounded_workers and all_failfast source capture. Do not classify the original synthetic/condensed excerpts as stale repository files, and do not preserve retired spellings as compatibility aliases.\n2. Make a finite manifest of loop_forms, list-loop mutation, errors, typed_error_families and scope_guard examples and the normative decisions each teaches.\n3. Resolve current syntax from authoritative Syntax/Tower records, never from whichever spelling frozen e841 accepts.\n4. Exercise the current legal form and the intended rejection/repair on one recorded source/binary; update obsolete comments and current examples, not historical receipts.\n5. Separate unmarked fallible calls, explicit failure return, fallback recovery and cleanup behavior so comments do not teach nonexistent punctuation.\n6. Coordinate actual guard runtime repair with READ-F05 and formatter preservation with READ-F07; this card owns teaching-source conformance, not duplicate compiler mechanisms.",
@@ -28348,6 +28348,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-12",
+          "by": "Main",
+          "text": "All 32 criteria are met; c7 was re-proved on dev by meet g6f."
+        },
         {
           "at": "2026-11-12",
           "by": "Main",
@@ -28473,8 +28478,8 @@
           "status": "met",
           "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "full golden suite with this patch's s1 jet: basics/loop_forms, errors/errors, errors/typed_error_families, io/scope_guard, concurrency/bounded_workers and concurrency/all_failfast PASS at o0/o1/o2 (18/18 rows), and tests/ui/list_loop_mutate.jet PASS on all 4 rows (q/sg/golden-bd4.txt, q/sg/ui-bd4.txt); the same 18+4 rows also PASS on plain base 67fd (q/sg/golden-bb67.txt, q/sg/ui-bb67.txt)",
-          "at": "2026-10-30T16:49:03.407Z"
+          "evidence": "Meet batch g6f on dev 2368741c9b with seed-b13 (jet@a0.0.45#6c8af19f74a2): every line for this criterion PASS, 0 FAIL, each at 24G. Summary at $JET_SCRATCH_ROOT/lanes/Lander/loop/out/meet-g6f/summary.txt.",
+          "at": "2026-11-12T10:54:04.131Z"
         },
         {
           "n": 8,
@@ -28754,13 +28759,14 @@
       "parentId": "c0h4r83r",
       "needsAcceptance": false,
       "created": "2026-09-12T13:27:30.358Z",
-      "updated": "2026-11-12T09:26:50.053Z",
+      "updated": "2026-11-12T10:54:25.068Z",
       "updatedBy": "Main",
       "workOrder": 277,
       "goals": [
         "G12"
       ],
-      "criteriaLastN": 40
+      "criteriaLastN": 40,
+      "completedAt": "2026-11-12T10:54:25.068Z"
     },
     {
       "id": "c04lnbtj",
@@ -34440,11 +34446,11 @@
         {
           "n": 10,
           "text": "Every public metadata fact, operation, phase and failure named by D-PREP-SURFACE2, D-META-REFLECT2, D-META-PUBLISH2 and D-META-CONTROL2 appears as a row in the Jet executable registry (Compiler/JetFoundation/Source/Registry) with a delivery-owner card and a behavioral-witness name; `jet check Compiler` exits 0 and `jet test Compiler --profile ui meta_` passes after the re-bless (crit 9).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-09-30T16:33:36.440Z"
+          "evidence": "Meet batch g6f on dev 2368741c9b with seed-b13 (jet@a0.0.45#6c8af19f74a2): every line for this criterion PASS, 0 FAIL, each at 24G. Summary at $JET_SCRATCH_ROOT/lanes/Lander/loop/out/meet-g6f/summary.txt.",
+          "at": "2026-11-12T10:54:05.854Z"
         },
         {
           "n": 11,
@@ -34683,7 +34689,7 @@
       "parentId": "c0zima4a",
       "needsAcceptance": false,
       "created": "2026-09-21T20:56:37.792Z",
-      "updated": "2026-11-11T23:20:43.278Z",
+      "updated": "2026-11-12T10:54:05.854Z",
       "updatedBy": "Main",
       "goals": [
         "G6"
@@ -34875,11 +34881,11 @@
         {
           "n": 11,
           "text": "The hook fixture is built with: no Compiler value, import only, an authorized root value, a dependency's request, a forwarded `Build`, a root `Meta` denial, an organization policy, and an unknown root without a TTY. Only the authorized root value (and its recorded handoffs) runs the handler. Every self-enablement attempt (source, generated header, cache reuse, subprocess) fails with a registered diagnostic and no effect. The UI fixtures are renamed `tests/ui/meta_ladder_*`, and `jet test Compiler --profile ui --filter meta_ladder_` passes.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-11T02:43:57.078Z"
+          "evidence": "Meet batch g12g on dev e701db870c with seed-b12 (lines 27-29 PASS; line 30 was OOM-killed at 10G and proved nothing) and meet batch g6f on dev 2368741c9b with seed-b13 (line 14, CompilerHookLaunch, PASS at 24G): every line PASS, 0 FAIL. Summaries at $JET_SCRATCH_ROOT/lanes/Lander/loop/out/meet-g12g/ and meet-g6f/.",
+          "at": "2026-11-12T10:54:21.669Z"
         },
         {
           "n": 12,
@@ -35002,7 +35008,7 @@
       "parentId": "c0yfcz0w",
       "needsAcceptance": false,
       "created": "2026-09-21T20:56:51.106Z",
-      "updated": "2026-11-12T10:50:31.158Z",
+      "updated": "2026-11-12T10:54:21.669Z",
       "updatedBy": "Main",
       "goals": [
         "G6"
@@ -46016,20 +46022,20 @@
         {
           "n": 38,
           "text": "(was #1030 c1) Every behavior named by “Computed module fields: diagnostics and consumer parity”, its body, and ratified decisions works through the production path; no demo, label, stub, or sibling claim substitutes [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:36:54.812Z"
+          "evidence": "Meet batch g6f on dev 2368741c9b with seed-b13 (jet@a0.0.45#6c8af19f74a2): every line for this criterion PASS, 0 FAIL, each at 24G. Summary at $JET_SCRATCH_ROOT/lanes/Lander/loop/out/meet-g6f/summary.txt.",
+          "at": "2026-11-12T10:54:07.458Z"
         },
         {
           "n": 39,
           "text": "(was #1030 c2) All supported consumers evaluate the same dependency graph, values, order, provenance, and cache identity from the same source revision [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:36:55.466Z"
+          "evidence": "Meet batch g6f on dev 2368741c9b with seed-b13 (jet@a0.0.45#6c8af19f74a2): every line for this criterion PASS, 0 FAIL, each at 24G. Summary at $JET_SCRATCH_ROOT/lanes/Lander/loop/out/meet-g6f/summary.txt.",
+          "at": "2026-11-12T10:54:09.159Z"
         },
         {
           "n": 40,
@@ -46043,11 +46049,11 @@
         {
           "n": 41,
           "text": "(was #1030 c4) Focused evaluator and consumer tests cover top-level values, sibling chains, self and multi-node cycles, purity, and environment/system/image/fleet parity on the real paths [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:36:56.870Z"
+          "evidence": "Meet batch g6f on dev 2368741c9b with seed-b13 (jet@a0.0.45#6c8af19f74a2): every line for this criterion PASS, 0 FAIL, each at 24G. Summary at $JET_SCRATCH_ROOT/lanes/Lander/loop/out/meet-g6f/summary.txt.",
+          "at": "2026-11-12T10:54:10.966Z"
         },
         {
           "n": 42,
@@ -46322,11 +46328,11 @@
         {
           "n": 82,
           "text": "(was #3521) Proof with the admitted `jet` (stage-2 output of `jet build Compiler`): `jet test Compiler --profile golden comptime/phase_contract` passes on O0, O1 and O2. Two launches of the built artifact print no preparation line. UI fixtures match their snapshots. (was #4275 c92)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T19:35:17.777Z"
+          "evidence": "Meet batch g6f on dev 2368741c9b with seed-b13 (jet@a0.0.45#6c8af19f74a2): every line for this criterion PASS, 0 FAIL, each at 24G. Summary at $JET_SCRATCH_ROOT/lanes/Lander/loop/out/meet-g6f/summary.txt.",
+          "at": "2026-11-12T10:54:12.753Z"
         },
         {
           "n": 83,
@@ -46475,7 +46481,7 @@
       "parentId": "c0yfcz0w",
       "needsAcceptance": false,
       "created": "2026-10-02T18:25:10.781Z",
-      "updated": "2026-11-12T10:23:07.052Z",
+      "updated": "2026-11-12T10:54:12.753Z",
       "updatedBy": "Main",
       "goals": [
         "G6"
@@ -65610,11 +65616,11 @@
         {
           "n": 20,
           "text": "jet fmt writes only when asked to. --diff (with or without --check), --check and --dry-run never write: they report and exit 1 on a change, leaving the bytes unchanged. On seed-t21, `jet fmt --diff FILE` rewrote the file and exited 0 (G6Decl's repro, 2026-11-11). An unknown flag form such as --check=true is refused with the CLI's unknown-flag error instead of being ignored, and after `--` the word --check is a path, so a missing file is an error. CLI #Tests cover each form.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-11T10:35:08.546Z"
+          "evidence": "Meet batch g6f on dev 2368741c9b with seed-b13 (jet@a0.0.45#6c8af19f74a2): every line for this criterion PASS, 0 FAIL, each at 24G. Summary at $JET_SCRATCH_ROOT/lanes/Lander/loop/out/meet-g6f/summary.txt.",
+          "at": "2026-11-12T10:54:14.357Z"
         },
         {
           "n": 22,
@@ -65670,7 +65676,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T11:42:16.618Z",
-      "updated": "2026-11-12T08:18:29.701Z",
+      "updated": "2026-11-12T10:54:14.357Z",
       "updatedBy": "Main",
       "goals": [],
       "criteriaLastN": 26
@@ -75456,20 +75462,20 @@
         {
           "n": 181,
           "text": "D-FFI-EFFECTS1=A is built (owner ratified 2026-11-11): a foreign-library permission names one locked library, `authority: { allow: [IO, FFI.C(\"c\")] }`, through the existing foreign effect root and solver (Compiler/JetSema/Source/Sema/Effects/Checks.jet:1750-1760, Compiler/Prelude/Effects.jet:71-98). A grant naming one library doesn't cover another library in the same language, and the ballot program prints 7. Owner: G6Decl. Proof: an example golden on O0, O1 and O2 printing the ballot's intended output, a UI snapshot for every diagnostic the form adds, and every in-repo use migrated in the same batch (greenfield, no old spelling kept).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-11T12:41:32.970Z"
+          "evidence": "Meet batch g6f on dev 2368741c9b with seed-b13 (jet@a0.0.45#6c8af19f74a2): every line for this criterion PASS, 0 FAIL, each at 24G. Summary at $JET_SCRATCH_ROOT/lanes/Lander/loop/out/meet-g6f/summary.txt.",
+          "at": "2026-11-12T10:54:16.052Z"
         },
         {
           "n": 182,
           "text": "D-RESULT-BRANCH1=C is built (owner ratified 2026-11-11): the compact comma layout of an ordinary pattern table, `if lookup(k) == { .Val(n) -> n, .None -> 0, .Err(e) -> -1 }`, extends the canonical pattern route (Compiler/JetParser/Source/Parser/ExpressionForms/ResultHandlers.jet) with no second result evaluator. The ballot program prints -1, 0, 7. Owner: G8Scope (syntax cutovers). Proof: an example golden on O0, O1 and O2 printing the ballot's intended output, a UI snapshot for every diagnostic the form adds, and every in-repo use migrated in the same batch (greenfield, no old spelling kept).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-11T12:41:34.775Z"
+          "evidence": "Meet batch g6f on dev 2368741c9b with seed-b13 (jet@a0.0.45#6c8af19f74a2): every line for this criterion PASS, 0 FAIL, each at 24G. Summary at $JET_SCRATCH_ROOT/lanes/Lander/loop/out/meet-g6f/summary.txt.",
+          "at": "2026-11-12T10:54:17.777Z"
         },
         {
           "n": 183,
@@ -75492,11 +75498,11 @@
         {
           "n": 185,
           "text": "Loop destructuring of named tuple elements binds each name to its field: loop (package, name) in [(package: \"a\", name: \"b\")] binds name to \"b\", never to the whole tuple. A wrong-arity or unknown-name pattern is a registered diagnostic, never a silent binding. Cases run at O0/O1/O2 plus a UI snapshot, and the step.name workaround in ScriptAPI-44's census-snap2 port is reverted. Found by ScriptAPI-2 on seed-b3, 2026-11-11.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-11T19:57:06.888Z"
+          "evidence": "Meet batch g6f on dev 2368741c9b with seed-b13 (jet@a0.0.45#6c8af19f74a2): every line for this criterion PASS, 0 FAIL, each at 24G. Summary at $JET_SCRATCH_ROOT/lanes/Lander/loop/out/meet-g6f/summary.txt.",
+          "at": "2026-11-12T10:54:19.353Z"
         }
       ],
       "refs": [],
@@ -75507,7 +75513,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T00:04:45.539Z",
-      "updated": "2026-11-12T09:15:28.482Z",
+      "updated": "2026-11-12T10:54:19.353Z",
       "updatedBy": "Main",
       "criteriaLastN": 185
     },
@@ -200430,6 +200436,90 @@
   ],
   "events": [
     {
+      "at": "2026-11-12T10:54:25.068Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0ytw4eo",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-12T10:54:21.669Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c02m1p02",
+      "note": "#11"
+    },
+    {
+      "at": "2026-11-12T10:54:19.353Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0oev2ib",
+      "note": "#185"
+    },
+    {
+      "at": "2026-11-12T10:54:17.777Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0oev2ib",
+      "note": "#182"
+    },
+    {
+      "at": "2026-11-12T10:54:16.052Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0oev2ib",
+      "note": "#181"
+    },
+    {
+      "at": "2026-11-12T10:54:14.357Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0kob6cb",
+      "note": "#20"
+    },
+    {
+      "at": "2026-11-12T10:54:12.753Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0699zei",
+      "note": "#82"
+    },
+    {
+      "at": "2026-11-12T10:54:10.966Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0699zei",
+      "note": "#41"
+    },
+    {
+      "at": "2026-11-12T10:54:09.159Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0699zei",
+      "note": "#39"
+    },
+    {
+      "at": "2026-11-12T10:54:07.458Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0699zei",
+      "note": "#38"
+    },
+    {
+      "at": "2026-11-12T10:54:05.855Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0yfcz0w",
+      "note": "#10"
+    },
+    {
+      "at": "2026-11-12T10:54:04.132Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0ytw4eo",
+      "note": "#7"
+    },
+    {
       "at": "2026-11-12T10:50:31.158Z",
       "by": "Main",
       "action": "card.criteria-meet",
@@ -203858,713 +203948,6 @@
       "action": "card.criteria-add",
       "ref": "c0h114mv",
       "note": "#9 Release a0.0.44 blocker (admit l2-release044d on 9755703c76,"
-    },
-    {
-      "at": "2026-11-11T15:30:16.864Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0h114mv",
-      "note": "#8 Release a0.0.44 blocker (admit l2-release044d on 9755703c76,"
-    },
-    {
-      "at": "2026-11-11T15:30:13.559Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0h114mv",
-      "note": "#7 Release a0.0.44 blocker (admit l2-release044d on 9755703c76,"
-    },
-    {
-      "at": "2026-11-11T15:15:20.054Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0cshs43",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-11T14:57:54.612Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0h114mv",
-      "note": "#6 A release admit never re-runs suite rows that already passed"
-    },
-    {
-      "at": "2026-11-11T14:50:40.967Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0qe89cl",
-      "note": "#48"
-    },
-    {
-      "at": "2026-11-11T14:50:37.861Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0qe89cl",
-      "note": "#49"
-    },
-    {
-      "at": "2026-11-11T14:38:56.467Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0ym70o1",
-      "note": "#44: Premise corrected by G6Meta on seed-t23: jet run/dev -O0/-O1/-O2 are ported (the front door rewrites them to --optimize= in jet_cli_level_words) and exit 0. The red was the CommandModel.jet census counting them as refusals.; was: The command model has a row for every refused spelling: `jet run` and `jet dev` with -O0, -O1 and -O2 are refused through registered command-model rows that name their card, and the FrontDoor test 'co"
-    },
-    {
-      "at": "2026-11-11T14:25:58.380Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0ym70o1",
-      "note": "#44 The command model has a row for every refused spelling: `jet"
-    },
-    {
-      "at": "2026-11-11T14:25:54.964Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0ym70o1",
-      "note": "#43 A plain `jet test Compiler/JetCli/Tests/FrontDoor.jet` (no J"
-    },
-    {
-      "at": "2026-11-11T14:10:40.901Z",
-      "by": "Main",
-      "action": "goal.log",
-      "ref": "G8",
-      "note": "2026-11-11 09:15: every G8 criterion is met (0 open of 97+);"
-    },
-    {
-      "at": "2026-11-11T14:10:39.642Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0esm6za",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-11T14:10:37.051Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0ihjl6a",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-11T14:10:34.305Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0tbm7r0",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-11T14:10:31.886Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0scf8mn",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-11T14:10:29.093Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c09kjhit",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-11T14:10:08.543Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#200"
-    },
-    {
-      "at": "2026-11-11T14:10:07.238Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c09kjhit",
-      "note": "#60"
-    },
-    {
-      "at": "2026-11-11T14:10:05.965Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0oev2ib",
-      "note": "#174"
-    },
-    {
-      "at": "2026-11-11T14:10:04.650Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0oev2ib",
-      "note": "#173"
-    },
-    {
-      "at": "2026-11-11T14:10:03.291Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c06lr0kz",
-      "note": "#25"
-    },
-    {
-      "at": "2026-11-11T14:10:01.956Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c06lr0kz",
-      "note": "#24"
-    },
-    {
-      "at": "2026-11-11T14:10:00.727Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0oev2ib",
-      "note": "#130"
-    },
-    {
-      "at": "2026-11-11T14:09:59.324Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0pxauid",
-      "note": "#4"
-    },
-    {
-      "at": "2026-11-11T14:08:07.326Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0ytw4eo",
-      "note": "#17"
-    },
-    {
-      "at": "2026-11-11T14:00:14.952Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c02m1p02",
-      "note": "#12: Workspaces get no new API name (I8, one mechanism): a second compile is another session from the existing b.compiler(output) handle. Option (A), meta.workspace, would add a parallel constructor, and (B) would drop a real requirement. Decided by Main 2026-11-11 on G6Decl's analysis.; was: [#3527] A `Compiler` value is a typed session handle on the existing driver; events, workspaces and build control go through it. A stale value (kept past its build) fails closed. Backend options canno"
-    },
-    {
-      "at": "2026-11-11T13:45:20.008Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0ytw4eo",
-      "note": "#17: Per-file jet check can't pass by design: these files belong to the assembled Engine unit (Jetpack/Bootstrap/areas.list, sources.list) and have no package.jet, and Assemble.jet:685-719 rebase_embeds makes the .. embed legal only inside the unit (G8Scope, 2026-11-11). The proof becomes the unit's own check.; was: (was #6307, from #6198 Jetpack backend battery) `jet check` passes on every file under Jetpack/Provider/Source/Batteries. As of 2026-11-11 on seed-t22: BatteryCatalog.jet:30:33 fails with jet.InvalidE"
-    },
-    {
-      "at": "2026-11-11T13:43:01.290Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c03pi177",
-      "note": "#10: The combine clause has no reachable program. D-MARKER-LAW1=A (spec.md:132-135, sema E0936) forbids a package marker to set resolution, and the only Prelude .Tighten marker, Policy, keeps its built-in rule. So no marker can be required to write combine. The later ratified law supersedes the clause; decided by Main 2026-11-11 on G6Decl's analysis.; was: D-DECL-TYPES1 A: markers are structs implementing Core Marker (sites, repeatable, inherits, resolution, scopes, companion and group as trait constants; expand(self, target) template; wrap; combine for"
-    },
-    {
-      "at": "2026-11-11T13:33:58.716Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0ewbkcj",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-11T13:29:20.600Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0kob6cb",
-      "note": "#23 Every tracked .jet file under Compiler/, Core/, Jetpack/, Ex"
-    },
-    {
-      "at": "2026-11-11T13:29:18.419Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0kob6cb",
-      "note": "#22 jet fmt --diff prints a minimal unified diff (longest-common"
-    },
-    {
-      "at": "2026-11-11T13:28:15.437Z",
-      "by": "Main",
-      "action": "card.criteria-remove",
-      "ref": "c0fymc7l",
-      "note": "#1: Superseded by c3 (NEW-D-LINT-DECL1=A, owner ratified 2026-11-11): Diagnostic is the only finding carrier, there is no impl T.Lint, and the fix is syntax.rewrite(callee:, replacement:), built in G6Decl-30 to -34.; was [open]: `impl T.Diagnostic` and `impl T.Lint` register package codes, and `syntax.rewrite(pattern, template)` declares a structured fix that `jet fix` applies, proven by a test package."
-    },
-    {
-      "at": "2026-11-11T13:28:12.854Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c02m1p02",
-      "note": "#20"
-    },
-    {
-      "at": "2026-11-11T13:25:21.003Z",
-      "by": "Main",
-      "action": "card.criteria-remove",
-      "ref": "c0kob6cb",
-      "note": "#21: Wrong premise (G6Meta, rechecked 2026-11-11): --check and --check --diff agree. The 'no diff' came from jet fmt --diff without --check, which wrote the file (that bug is c20). Every file is flagged because the seed formatter's style differs from the repository text and it loses content on Core/Text/Fmt.jet, which c18 and c19 already cover.; was [open]: `jet fmt --check FILE` exits 0 and prints nothing for a file the formatter wouldn't change, and agrees with `jet fmt --check --diff FILE`. Defect on seed-t22, 2026-11-11: `jet fmt --check Core/Text/Fm"
-    },
-    {
-      "at": "2026-11-11T13:23:33.135Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0kob6cb",
-      "note": "#21 `jet fmt --check FILE` exits 0 and prints nothing for a file"
-    },
-    {
-      "at": "2026-11-11T13:22:53.991Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0ytw4eo",
-      "note": "#11"
-    },
-    {
-      "at": "2026-11-11T13:05:16.474Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0bnp1zw",
-      "note": "#21 The secret-timing analyzer (Compiler/.../Taint.jet:651 and :"
-    },
-    {
-      "at": "2026-11-11T13:05:15.286Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0bnp1zw",
-      "note": "#20 A struct field can be tagged #Secret: `Cond: struct { mask: "
-    },
-    {
-      "at": "2026-11-11T13:03:26.098Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0ytw4eo",
-      "note": "#17: The path moved to Jetpack/Provider/Source/Batteries; recorded the current failures; was: (was #6307) (from #6198 Jetpack backend battery (Provider/Batteries/backend/backend.) `jet check` passes on every file under Jetpack/Provider/Batteries"
-    },
-    {
-      "at": "2026-11-11T13:03:16.265Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0ytw4eo",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-11T13:03:13.295Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0ytw4eo",
-      "note": "#39"
-    },
-    {
-      "at": "2026-11-11T13:03:12.016Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0ytw4eo",
-      "note": "#30"
-    },
-    {
-      "at": "2026-11-11T13:03:10.688Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0ytw4eo",
-      "note": "#29"
-    },
-    {
-      "at": "2026-11-11T13:03:09.378Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0ytw4eo",
-      "note": "#28"
-    },
-    {
-      "at": "2026-11-11T13:03:08.127Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0ytw4eo",
-      "note": "#14"
-    },
-    {
-      "at": "2026-11-11T13:03:06.416Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0ytw4eo",
-      "note": "#13"
-    },
-    {
-      "at": "2026-11-11T13:03:05.098Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0ytw4eo",
-      "note": "#10"
-    },
-    {
-      "at": "2026-11-11T12:52:20.854Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0pjwkhn",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-11T12:45:49.322Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c03obxd3",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-11T12:45:47.610Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0f9brds",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-11T12:45:46.417Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0ky4017",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-11T12:45:45.250Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0nsxbj2",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-11T12:45:44.070Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c04g9zai",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-11T12:45:42.860Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0g6fxb9",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-11T12:45:41.718Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0tpf98i",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-11T12:45:40.518Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0wtvbj7",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-11T12:45:39.349Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0h8jjrp",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-11T12:45:37.863Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0agsbqj",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-11T12:45:36.254Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0nqr80d",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-11T12:45:34.483Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0ewbdj1",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-11T12:45:32.644Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0awiifz",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-11T12:45:30.630Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0cdnofm",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-11T12:45:28.530Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0f1eda4",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-11T12:45:26.238Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0wssehw",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-11T12:45:24.676Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c02qdoro",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-11T12:45:23.566Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0dv8dlk",
-      "note": "#8"
-    },
-    {
-      "at": "2026-11-11T12:45:20.270Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0u19cev",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-11T12:45:18.720Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0p2n50x",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-11T12:45:16.877Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0j6lwuh",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-11T12:45:15.552Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c00w7rum",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-11T12:45:14.299Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0i891tv",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-11T12:45:12.175Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c08r6ogl",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-11T12:45:10.780Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0x9nq8j",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-11T12:45:09.549Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0do6acc",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-11T12:45:07.824Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0frcmcx",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-11T12:45:06.440Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0ccjkub",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-11T12:45:05.030Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0a0gmpl",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-11T12:45:03.670Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c08m4yum",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-11T12:45:02.411Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c02a1ynr",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-11T12:45:01.064Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0ta538w",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-11T12:44:59.531Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0lkpkuc",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-11T12:44:58.323Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0hsgoa6",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-11T12:44:57.113Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0e7sc5b",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-11T12:44:55.874Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0wi8ere",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-11T12:44:54.613Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0l389gj",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-11T12:44:53.451Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0vow6jh",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-11T12:44:52.247Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c01k5lts",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-11T12:44:51.056Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0duj9rp",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-11T12:44:49.808Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0j1k587",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-11T12:44:48.026Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0pr2dsz",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-11T12:44:46.789Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0hs3czc",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-11T12:44:45.665Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c07xffyh",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-11T12:44:44.510Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0fo37ov",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-11T12:44:43.339Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c00sxc6r",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-11T12:44:41.961Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0dv8dlk",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-11T12:44:40.697Z",
-      "by": "Main",
-      "action": "card.criteria-remove",
-      "ref": "c0vow6jh",
-      "note": "#5: G11 sweep 2026-11-11 (G11Speed, checked by Main): obsolete: a python harness; Tools/perf is Jet (#2858 c99); the measurement stays as c1-c4; was [open]: [#3133] `Tools/perf/enumset_bench.py --samples 5` covers every cell (Set/Bits/mask/packed vs Rust mask). No Flags family."
-    },
-    {
-      "at": "2026-11-11T12:44:39.493Z",
-      "by": "Main",
-      "action": "card.criteria-remove",
-      "ref": "c0hs3czc",
-      "note": "#124: G11 sweep 2026-11-11 (G11Speed, checked by Main): obsolete: Jet has no LLVM backend; ThinLTO and per-unit LLVM artifacts do not exist; was [open]: O2 per-unit ThinLTO link time and size (#2514): [#2522] O2 imports per-unit LLVM artifacts and uses a store-managed ThinLTO cache. On the 3349-line corpus program, a leaf edit links in under 3 s and a"
-    },
-    {
-      "at": "2026-11-11T12:44:38.333Z",
-      "by": "Main",
-      "action": "card.criteria-remove",
-      "ref": "c0hs3czc",
-      "note": "#59: G11 sweep 2026-11-11 (G11Speed, checked by Main): obsolete: Tools/perf/build-matrix.sh and its Cargo matrix no longer exist; was [open]: (was #2859) [#2530] `Tools/perf/build-matrix.sh --check` produces every real-program, profile and state cell against ordinary and fastest-valid expert Cargo, with separate rustc/cargo identities. The "
-    },
-    {
-      "at": "2026-11-11T12:44:37.179Z",
-      "by": "Main",
-      "action": "card.criteria-remove",
-      "ref": "c0hs3czc",
-      "note": "#58: G11 sweep 2026-11-11 (G11Speed, checked by Main): obsolete: a python gauntlet command over an incremental Jetpack edit; Tools/perf is Jet (c99) and caches are off (#6639 c7); was [open]: (was #2859) [retarget] c14 replacement: after exactly one comment-only edit to a Jetpack/ source file (the Jet port; dogfood/jetpack no longer exists), `python3 Tools/gauntlet/harness/timer.py -- jet "
-    },
-    {
-      "at": "2026-11-11T12:44:35.440Z",
-      "by": "Main",
-      "action": "card.criteria-remove",
-      "ref": "c0hs3czc",
-      "note": "#60: G11 sweep 2026-11-11 (G11Speed, checked by Main): superseded by the #5479 c1 cell and c5 train speed gate; the old compiler-speed dashboard rows, cli_compiler_speed canaries and shell scripts (tools/perf/ci-perf-check.sh no longer exists) are replaced; was [open]: (was #2859) [#3153] A bounded generic-enum/visitor/codec family records clean and incremental wall time, peak RSS and artifact size via `Tools/perf/dashboard.sh --construct-scale-json`. Case-addition "
-    },
-    {
-      "at": "2026-11-11T12:44:34.292Z",
-      "by": "Main",
-      "action": "card.criteria-remove",
-      "ref": "c0hs3czc",
-      "note": "#57: G11 sweep 2026-11-11 (G11Speed, checked by Main): superseded by the #5479 c1 cell and c5 train speed gate; the old compiler-speed dashboard rows, cli_compiler_speed canaries and shell scripts (tools/perf/ci-perf-check.sh no longer exists) are replaced; was [open]: (was #2859) [retarget] Every compiler-speed row identifies the self-hosted compiler build (source hash of Compiler/) as the measured front end."
-    },
-    {
-      "at": "2026-11-11T12:44:33.103Z",
-      "by": "Main",
-      "action": "card.criteria-remove",
-      "ref": "c0hs3czc",
-      "note": "#45: G11 sweep 2026-11-11 (G11Speed, checked by Main): superseded by the #5479 c1 cell and c5 train speed gate; the old compiler-speed dashboard rows, cli_compiler_speed canaries and shell scripts (tools/perf/ci-perf-check.sh no longer exists) are replaced; was [open]: (was #2859) From #1026 c2: The canonical dashboard covers every required O0, O1 and O2 clean, no-change, and representative-edit row with pinned stage, profile/backend, machine/tool identities, latenc"
     }
   ],
   "nextNum": 368,
