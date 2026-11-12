@@ -35,10 +35,8 @@ encoding: module {
     #Import(c) priv write_text: fn(writer: &FileWriter, text: String) -[IO]> EncodingCause! = "jet_raw_encoding_write_text"
     #Import(c) priv flush: fn(writer: &FileWriter) -[IO]> EncodingCause! = "jet_raw_encoding_flush"
 
-    // The untyped JSON decoder's coercion audit: the wall clock in ms since
-    // the epoch, and one line on stderr. `priv`: only core.encoding.json calls
-    // them, inside its audited `#Unsafe` regions, which keep this hidden
-    // clock read and stderr write out of `decode`'s effect row.
-    #Import(c) priv coerce_now: fn() -> Int = "jet_raw_json_coerce_now"
+    // The untyped JSON decoder's coercion audit: one line on stderr. `priv`:
+    // only core.encoding.json calls it, inside its audited `#Unsafe` region,
+    // which keeps this hidden stderr write out of `decode`'s effect row.
     #Import(c) priv coerce_emit: fn(line: String) = "jet_raw_json_coerce_emit"
 }

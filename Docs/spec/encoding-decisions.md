@@ -1377,12 +1377,12 @@ along with their seed functions, signatures, gates and native lowering handlers.
 A repository-wide reference search found declarations and handlers only, not
 any Jet codec, emitter, JS or comptime consumer.
 
-The D-JSON3 coercion audit calls the `priv` runtime bindings
-`jet.runtime.encoding.coerce_now` and `coerce_emit`: the epoch-millisecond
-sampling leaf and the stderr leaf. Coercion traversal and audit formatting
-remain in `json.jet`, which calls them only inside its audited `#Unsafe`
-regions. The shipped hidden Time/IO effects remain unchanged pending the
-separately recorded effect-truthfulness ruling.
+The D-JSON3 coercion audit calls the `priv` runtime binding
+`jet.runtime.encoding.coerce_emit`, the stderr leaf. Coercion traversal and
+audit formatting remain in `json.jet`, which calls it only inside its audited
+`#Unsafe` region. The audit line carries no timestamp, so the decoder reads no
+clock ([host-reads.md](reference/host-reads.md) H4). Its hidden IO effect
+remains unchanged pending the separately recorded effect-truthfulness ruling.
 
 `core.encoding.json.writer` now constructs a source `JSONWriter` around the
 existing Jet `stream.JSONPush` policy. `write`, `flush`, and `finish` delegate

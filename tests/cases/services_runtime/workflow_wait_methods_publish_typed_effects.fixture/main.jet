@@ -4,7 +4,7 @@ time_wait: fn(workflow: ServiceWorkflow, duration: &&Duration) -[FS, Time]> {
     workflow.sleep(duration) ?? return
 }
 
-activity_wait: fn(workflow: ServiceWorkflow) -[FS]> {
+activity_wait: fn(workflow: ServiceWorkflow) -[FS, Time]> {
     workflow.activity("charge", "charge-1") ?? return
     (workflow.all(["charge-1"]) ?? return).drop("the effect row, not the joined ids, is under test")
 }

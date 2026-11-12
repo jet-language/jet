@@ -102,7 +102,6 @@ row_splits: fn() -> [RowSplit] Never! {
         RowSplit{symbol: "jet_std_os_family", rule: "core.files reads the OS family as a pure platform fact, core.sys.family under Env"},
         RowSplit{symbol: "jet_term_stdout_is_terminal", rule: "core.term's TTY probe is pure, the terminal8 state machine's declares IO"},
         RowSplit{symbol: "jet_term_stderr_is_terminal", rule: "core.term's TTY probe is pure, the terminal8 state machine's declares IO"},
-        RowSplit{symbol: "jet_sys_current_dir_raw", rule: "core.sys reads it under Env, core.service resolves its store path under its own row"},
         RowSplit{symbol: "jet_fs_temp_directory_raw", rule: "mktemp names Env for the temporary directory, the temp_* constructors FS"},
         RowSplit{symbol: "jet_fs_temp_path_sample_raw", rule: "mktemp names Time for the name's clock sample, the temp_* constructors FS"},
         RowSplit{symbol: "jet_time_raw_host_monotonic_ns", rule: "a fresh read declares Time, a Clock's own reading is pure (its owner holds Time)"},
@@ -110,8 +109,8 @@ row_splits: fn() -> [RowSplit] Never! {
         // exception kept by Core/Net/SSL/Defs.jet ssl_time: a handshake needs
         // Net alone, and the engine's certificate and session clock is not
         // surfaced as Time.
-        RowSplit{symbol: "jet_time_raw_wall_sample", rule: "core.time reads the wall clock under Time, core.service's record stamps are pure (its owner holds Time), the TLS engine's clock is under Net"},
-        RowSplit{symbol: "jet_random_os_entropy", rule: "crypto.random draws under Rand, a service authority token is pure, the TLS engine's draw is under Net"},
+        RowSplit{symbol: "jet_time_raw_wall_sample", rule: "core.time reads the wall clock under Time, the TLS engine's clock is under Net"},
+        RowSplit{symbol: "jet_random_os_entropy", rule: "crypto.random and a service authority token draw under Rand, the TLS engine's draw is under Net"},
         RowSplit{symbol: "jet_files_read_bytes_os", rule: "core.files reads under FS.Read, the TLS engine's certificate reads under Net"},
         RowSplit{symbol: "jet_fs_directory_open", rule: "core.files opens under FS.Read, the TLS engine's CA directory under Net"},
         RowSplit{symbol: "jet_fs_directory_close", rule: "an atomic write's parent closes under FS.Write, a Directory under FS.Read, the TLS engine's CA directory under Net"},

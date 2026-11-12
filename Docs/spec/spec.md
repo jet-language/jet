@@ -2298,7 +2298,12 @@ A call to an opaque `extern rust` or C function contributes the maximal effect
 set because the checker cannot inspect its body. This keeps inference sound
 without attempting to read foreign code. Deterministic constructors such as a
 seeded `Clock` or `RNG` carry no ambient effect; reading ambient time or
-randomness still does.
+randomness still does, except where the runtime or Core reads the host under
+another effect's row.
+[Host reads under another effect](reference/host-reads.md) lists each such
+read. One example is the resolver's `/etc/hosts` read under `Net`. The page
+also says how each read is classified, and a row or a denial covers a read
+only as that page says.
 The opaque Rust bridge example `Examples/Interop/FFI/FFI.jet` therefore
 declares the complete maximal grant, including `Secret` and `Time`; its base64
 operation is unchanged, and this grant does not assert that the foreign body
@@ -2401,7 +2406,7 @@ effects in plain words:
 note: tool.jet reads files and uses the network (-A hides this)
 ```
 
-The list is sema's sound row for the entry: it follows calls and every
+The list is sema's row for the entry: it follows calls and every
 function the program takes as a value, so a function reached only through a
 value still lists its effects. An open-world call (a C binding no descriptor
 owns, an unannotated foreign call) lists `FFI`, whose words say the program
@@ -2427,7 +2432,9 @@ on stderr whose `effects` field lists the noticed rights, beside
 the notice. `--allow=R` acknowledges `R`, leaving it out of the notice; a
 scoped right (`--allow='FS.Read("data/")'`) still confines the run through the host sandbox.
 `--deny=R` wins over every grant: a run that reaches a denied effect stops
-with E1803 before host state changes.
+with E1803 before host state changes. A host read that runs under another
+effect's row is denied only as [host-reads.md](reference/host-reads.md)
+classifies it.
 
 A written authority row is a ceiling. This holds for an `authority` row in
 `package.jet` or in a script's inline `package: { … }` block, a module's

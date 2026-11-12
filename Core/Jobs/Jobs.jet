@@ -127,7 +127,7 @@ JobQueueStatus: struct {
 // The queue binds to the package endpoint, whose private authority file sits
 // beside the database (`<database>.authority`), so every run of the package
 // reaches the same rows.
-queue: fn() -[DB, Env, FS, Time]> JobQueue ServiceError! {
+queue: fn() -[DB, Env, FS, Rand, Time]> JobQueue ServiceError! {
     name: "default"
     queue_validate_text(name, "job queue", 256, false) ?? return Err(err)
     path: queue_default_path()

@@ -797,7 +797,20 @@ call_effect: fn(module_name: String, member: String) -> String? Never! {
         // ir_comptime_ambient_refusal).
         "core.compute" -> if member == "__simd_lanes" || member == "device_cpu" -> None else -> Val("GPU")
         "core.data" -> if member == "__host_path_is_file" -> Val("FS") else -> None
-        "core.service" -> if member == "state_store" || SERVICE_READS.contains(member) || SERVICE_WRITES.contains(member) -> Val("FS") else -> when_listed(member, SERVICE_SLEEPS, "Time")
+        // A service's record stamps read the wall clock, its authority tokens
+        // draw from the OS generator, and its store identity resolves against
+        // the working directory. The process id in a temporary name has no
+        // row yet, like an atomic write's; host-reads.md lists both as open.
+        "core.service" -> if {
+            member == "state_store" || SERVICE_READS.contains(member) || SERVICE_WRITES.contains(member) -> Val("FS")
+            member == "__host_entropy" -> Val("Rand")
+            member == "__host_current_dir" -> Val("Env")
+            member == "__host_wall_sample" || SERVICE_SLEEPS.contains(member) -> Val("Time")
+            else -> None
+        }
+        // The terminal-capability variables (COLUMNS, TERM, NO_COLOR, …)
+        // change what a TUI draws, so reading them is Env.
+        "core.tui" -> if member == "__cap_env_bytes" -> Val("Env") else -> None
         "core.net.tls" | "core.net.ws" | "core.http.client" | "core.http.server" | "core.http.middleware" -> Val("Net")
         "core.http" -> if member == "serve" || member == "get" -> Val("Net") else -> None
         // Key generation draws from the OS generator, like crypto.random.bytes.

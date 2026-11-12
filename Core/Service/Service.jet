@@ -1255,14 +1255,14 @@ endpoint_receive: fn(endpoint: ServiceEndpoint) -> String ServiceError! {
 // wider mode or half-written; a run that loses that race reads the winner's
 // file. An existing file that is not a regular file owned by this user with
 // no group or other permission bits is refused, never overwritten.
-__active_endpoint: fn(secret_path: String) -[Env, FS]> ServiceEndpoint ServiceError! {
+__active_endpoint: fn(secret_path: String) -[Env, FS, Rand]> ServiceEndpoint ServiceError! {
     authority: package_authority(secret_path) ?? return Err(err)
     endpoint: endpoint_new("jobs", "package", 1, authority) ?? return Err(err)
     authority_register(endpoint, true, None) ?? return Err(err)
     Ok(endpoint)
 }
 
-package_authority: fn(path: String) -[Env, FS]> String ServiceError! {
+package_authority: fn(path: String) -[Env, FS, Rand]> String ServiceError! {
     if service_files.exists(path) == false {
         issued: service_issue_authority() ?? return Err(err)
         nonce: service_issue_authority() ?? return Err(err)

@@ -1,0 +1,14 @@
+// Starting a service tree issues its authority token from OS entropy (Rand),
+// stamps its records with the wall clock (Time) and resolves its store path
+// against the working directory (Env).
+use service: core.service
+
+worker: fn() {}
+
+run: fn() {
+    tree := service.tree("orders")
+    _endpoint: tree.worker("intake", worker, capacity: 1) ?? panic("worker")
+    tree.start() ?? panic("start")
+    print("started")
+    tree.stop() ?? panic("stop")
+}

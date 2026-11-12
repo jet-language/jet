@@ -1,5 +1,5 @@
 // core.encoding / core.data raw leaves. Rust providers: (text into bytes),
-// (coerce clock and audit line, stream writes), (the hostile streaming law
+// (coerce audit line, stream writes), (the hostile streaming law
 // seam, active only when JET_ENC_HOSTILE_IO is set):11 (host path metadata).
 // Codec policy is Jet.
 
@@ -10,9 +10,6 @@
     jet_rt_string_drop(value)
     result
 }
-
-// SystemTime ms since the epoch (0 before it).
-#Export(c) jet_raw_json_coerce_now: fn() -> I64 { jet_int_owned_from_i64(deadline_wall_now_ms()) }
 
 #Export(c) jet_raw_json_coerce_emit: fn(line: I64) { _ := host_stdio_text_failure(line, true, true, false) }
 

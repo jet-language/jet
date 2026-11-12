@@ -121,11 +121,7 @@ emit_coercion: fn(line: String) Never! {
 
 coerce_line: fn(path: String, target: String) -> String Never! {
     label: if path == "" -> "<root>" else -> path
-    timestamp := 0
-    #Unsafe("preserve the shipped decoder's hidden wall-clock snapshot at its existing host boundary") {
-        timestamp = rt.coerce_now()
-    }
-    "{{\"level\":\"info\",\"body\":\"json coerce: field \"{label}\" string → {target}\",\"ts\":{timestamp}}}"
+    "{{\"level\":\"info\",\"body\":\"json coerce: field \"{label}\" string → {target}\"}}"
 }
 
 coerce_tree: fn(value: Dyn, path: String, emit: fn(String) Never!) -> Dyn Never! {

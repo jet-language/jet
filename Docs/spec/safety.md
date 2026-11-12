@@ -211,10 +211,10 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 <!-- unsafe-ratchet:data
 {
   "schema": 1,
-  "total": 1423,
+  "total": 1422,
   "counts": {
     "Compiler": 750,
-    "Core": 171,
+    "Core": 170,
     "Docs": 8,
     "Examples": 41,
     "Jetpack": 9,
@@ -3970,14 +3970,14 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/RouteAEncoding.jet",
-      "line": 98,
+      "line": 95,
       "column": 9,
       "reason": "runtime-init runs before any other thread exists"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/RouteAEncoding.jet",
-      "line": 472,
+      "line": 469,
       "column": 5,
       "reason": "the terminated raw path and the 128-byte stat fact row are live for the syscall"
     },
@@ -5972,21 +5972,14 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Core",
       "file": "Core/Encoding/Json.jet",
-      "line": 125,
-      "column": 5,
-      "reason": "preserve the shipped decoder's hidden wall-clock snapshot at its existing host boundary"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Encoding/Json.jet",
-      "line": 1310,
+      "line": 1306,
       "column": 13,
       "reason": "preserve the native compiler-private Dyn carriers in Core JSON event projection"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/Json.jet",
-      "line": 1315,
+      "line": 1311,
       "column": 13,
       "reason": "preserve the native compiler-private Dyn carriers in Core JSON event projection"
     },
@@ -10192,13 +10185,13 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | crate/package | regions |
 | --- | ---: |
 | Compiler | 750 |
-| Core | 171 |
+| Core | 170 |
 | Docs | 8 |
 | Examples | 41 |
 | Jetpack | 9 |
 | Tools | 6 |
 | tests | 438 |
-| **total** | **1423** |
+| **total** | **1422** |
 
 ### Regions
 
@@ -10739,8 +10732,8 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Source/Refcount.jet | 90:9 | "LOCK CMPXCHG on the aligned prefix word of a live refcounted block; the caller's reference keeps it live" |
 | Compiler | Compiler/JetRuntime/Source/RouteACore.jet | 21:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/RouteACore.jet | 29:5 | "runtime-init runs before any other thread exists" |
-| Compiler | Compiler/JetRuntime/Source/RouteAEncoding.jet | 98:9 | "runtime-init runs before any other thread exists" |
-| Compiler | Compiler/JetRuntime/Source/RouteAEncoding.jet | 472:5 | "the terminated raw path and the 128-byte stat fact row are live for the syscall" |
+| Compiler | Compiler/JetRuntime/Source/RouteAEncoding.jet | 95:9 | "runtime-init runs before any other thread exists" |
+| Compiler | Compiler/JetRuntime/Source/RouteAEncoding.jet | 469:5 | "the terminated raw path and the 128-byte stat fact row are live for the syscall" |
 | Compiler | Compiler/JetRuntime/Source/RouteAFiles.jet | 31:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/RouteAFiles.jet | 488:5 | "the audited caller supplies the Linux syscall's valid word arguments and live buffers" |
 | Compiler | Compiler/JetRuntime/Source/RouteAFiles.jet | 494:5 | "the audited caller supplies the Linux syscall's valid word arguments and live buffers" |
@@ -11025,9 +11018,8 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Core | Core/Encoding/Csv.jet | 1055:25 | "every byte of the field is below 128, so it is whole UTF-8" |
 | Core | Core/Encoding/Eetf.jet | 549:9 | "inspect private typed carriers without changing public Dyn variants" |
 | Core | Core/Encoding/Json.jet | 117:5 | "preserve the shipped decoder's hidden stderr effect at its existing host boundary" |
-| Core | Core/Encoding/Json.jet | 125:5 | "preserve the shipped decoder's hidden wall-clock snapshot at its existing host boundary" |
-| Core | Core/Encoding/Json.jet | 1310:13 | "preserve the native compiler-private Dyn carriers in Core JSON event projection" |
-| Core | Core/Encoding/Json.jet | 1315:13 | "preserve the native compiler-private Dyn carriers in Core JSON event projection" |
+| Core | Core/Encoding/Json.jet | 1306:13 | "preserve the native compiler-private Dyn carriers in Core JSON event projection" |
+| Core | Core/Encoding/Json.jet | 1311:13 | "preserve the native compiler-private Dyn carriers in Core JSON event projection" |
 | Core | Core/Encoding/Stream.jet | 25:5 | "the shared parser validated this exact numeric lexeme" |
 | Core | Core/Encoding/Stream.jet | 352:9 | "the shared UTF-8 validator just accepted this owned byte allocation" |
 | Core | Core/Encoding/Stream.jet | 492:9 | "the shared UTF-8 validator just accepted this owned ASCII token" |
@@ -11739,7 +11731,6 @@ the function body; they do not exempt a wrapper from the proof requirement.
   {"file":"Core/Encoding/Csv.jet","function":"field_text","proof":"Not a core.encoding.csv export (Compiler/Prelude/Core.jet:105-106); its callers are parse_rows_with's loop (Csv.jet:461, :470, :480, :486, :513, :515). raw is the input String's bytes (:411), and each argument is raw.slice(start, i) or a quoted field of such bytes plus ASCII 0x22 for doubled quotes, cut only at an ASCII quote, CR or LF, or at a whole match of the delimiter, which rows checks is one character of a String (:64-67) and delimiter_at matches in full (:385-391). A UTF-8 continuation byte never equals an ASCII or lead byte, so every cut is a scalar boundary and __bytes_into_text receives complete UTF-8."},
   {"file":"Core/Encoding/Csv.jet","function":"__take_plain","proof":"The gate at Csv.jet:1040-1042 copies buffer[start..<end] into a String. The scan at :1031 advances end only while stops[byte] == 0, and stops (a priv field, built once by reader at :1141 and never written again) is 1 for every byte from 128, so each byte of the slice is ASCII and the slice is whole UTF-8. start..<end lies inside buffer: end < start + room <= buffer.len() (:1033)."},
   {"file":"Core/Encoding/Json.jet","function":"emit_coercion","proof":"json.jet:101-102 calls __coerce_emit with ordinary borrowed String text; it supplies no pointer, descriptor or callback. The reserved leaf preserves the existing stderr emission boundary, and the helper returns no borrowed storage. Caller-selected message bytes remain valid UTF-8 and cannot become an unchecked address or outlive the call as a native reference."},
-  {"file":"Core/Encoding/Json.jet","function":"coerce_line","proof":"The gate at json.jet:109-110 calls __coerce_now with no arguments and assigns its owned Int clock snapshot. Subsequent interpolation(:112) is safe String construction. No caller can choose a raw memory operand or receive a host borrow through this parameterless scalar query."},
   {"file":"Core/Encoding/Json.jet","function":"append_events","proof":"json.jet:707-709 match each private Dyn.Number/TypedText/Bytes discriminant before projecting its initialized String/list into the corresponding typed DataEvent. Only owned enum payloads are returned; no mismatched variant access, pointer formation or borrowed backing view escapes. Public variants are recursively handled outside the gate(:712-735)."},
   {"file":"Core/Encoding/Stream.jet","function":"typed_number","proof":"The gate at stream.jet:33-34 constructs the compiler-private Number enum from a consuming typed String; it does not reinterpret memory. Its source caller json.jet:562 is in Parser.number after numeric grammar validation and checked String construction(:561). The owned lexeme is retained for typed decoding, never used as an address or unchecked index; consumers use normal checked numeric parsing. Callers cannot corrupt enum layout or retain the moved String's storage."},
   {"file":"Core/Encoding/Stream.jet","function":"read_string","proof":"stream.jet:294 validates the exact decoded byte list, returning Syntax and releasing tracked capacity on failure(:295-296). The __bytes_into_text gate(:299-300) immediately copies that same list without intervening mutation. Escaped or raw wire bytes therefore cannot bypass UTF-8 validation or expose a dangling parser buffer."},

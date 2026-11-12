@@ -1,0 +1,69 @@
+# #6755 c6: a host read that can change what a program does or prints is
+# declared under its own effect, so `--deny` of that effect refuses it before
+# anything runs, on every tier. Starting a service tree draws its authority
+# token from OS entropy (Rand), stamps its records with the wall clock (Time)
+# and resolves its store path against the working directory (Env).
+# `Path.home()` reads HOME (Env) and touches no file.
+fixture: deny_refuses_host_reads_under_their_own_effect/input
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step envzero: jet run -O0 --deny=Env service.jet
+exit: 1
+stdout: = "" # the tree never starts
+stderr: ~ "Error [jet.ApplicationAuthorityDenied]: Application authority denies `Env`" # the store path's working-directory read
+stderr: ~ "This program reads environment variables" # the notice words for Env
+step envone: jet run -O1 --deny=Env service.jet
+exit: 1
+stdout: = "" # the tree never starts
+stderr: ~ "Application authority denies `Env`" # the same refusal on O1
+step envtwo: jet run -O2 --deny=Env service.jet
+exit: 1
+stdout: = "" # the tree never starts
+stderr: ~ "Application authority denies `Env`" # the same refusal on O2
+step randzero: jet run -O0 --deny=Rand service.jet
+exit: 1
+stdout: = "" # the tree never starts
+stderr: ~ "Error [jet.ApplicationAuthorityDenied]: Application authority denies `Rand`" # the authority token's entropy draw
+stderr: ~ "This program draws random numbers" # the notice words for Rand
+step randone: jet run -O1 --deny=Rand service.jet
+exit: 1
+stdout: = "" # the tree never starts
+stderr: ~ "Application authority denies `Rand`" # the same refusal on O1
+step randtwo: jet run -O2 --deny=Rand service.jet
+exit: 1
+stdout: = "" # the tree never starts
+stderr: ~ "Application authority denies `Rand`" # the same refusal on O2
+step timezero: jet run -O0 --deny=Time service.jet
+exit: 1
+stdout: = "" # the tree never starts
+stderr: ~ "Error [jet.ApplicationAuthorityDenied]: Application authority denies `Time`" # the record stamps' wall-clock read
+stderr: ~ "This program reads the clock" # the notice words for Time
+step timeone: jet run -O1 --deny=Time service.jet
+exit: 1
+stdout: = "" # the tree never starts
+stderr: ~ "Application authority denies `Time`" # the same refusal on O1
+step timetwo: jet run -O2 --deny=Time service.jet
+exit: 1
+stdout: = "" # the tree never starts
+stderr: ~ "Application authority denies `Time`" # the same refusal on O2
+step service: jet run -A service.jet
+exit: 0
+stdout: = "started\n" # without a deny, the same tree starts and stops
+step homezero: jet run -O0 --deny=Env home.jet
+exit: 1
+stdout: = "" # nothing prints
+stderr: ~ "Error [jet.ApplicationAuthorityDenied]: Application authority denies `Env`" # HOME is an environment read
+step homeone: jet run -O1 --deny=Env home.jet
+exit: 1
+stdout: = "" # nothing prints
+stderr: ~ "Application authority denies `Env`" # the same refusal on O1
+step hometwo: jet run -O2 --deny=Env home.jet
+exit: 1
+stdout: = "" # nothing prints
+stderr: ~ "Application authority denies `Env`" # the same refusal on O2
+step homefs: jet run --deny=FS home.jet
+exit: 0
+stdout: = "home is absolute: true\n" # no file is touched, so denying FS leaves it running
+step home: jet run -A home.jet
+exit: 0
+stdout: = "home is absolute: true\n" # without a deny, the same program prints

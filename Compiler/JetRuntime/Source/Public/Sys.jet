@@ -75,11 +75,11 @@ sys: module {
 
     // The working directory a service resolves its store path against, or
     // an Err with the reason (core.service).
-    #Import(c) priv service_current_dir: fn() -> String Err! = "jet_sys_current_dir_raw"
+    #Import(c) priv service_current_dir: fn() -[Env]> String Err! = "jet_sys_current_dir_raw"
 
     // `count` bytes of operating-system entropy for a service authority
     // token, None when the host can't supply them (core.service).
-    #Import(c) priv service_entropy: fn(count: Int) -> [U8]? = "jet_random_os_entropy"
+    #Import(c) priv service_entropy: fn(count: Int) -[Rand]> [U8]? = "jet_random_os_entropy"
 
     // Makes `path` the working directory, or an Err with the reason.
     #Import(c) priv set_current_dir: fn(path: String) -[Env]> Err! = "jet_sys_set_current_dir_raw"
