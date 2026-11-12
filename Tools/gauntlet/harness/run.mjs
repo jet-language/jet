@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import http from "node:http";
 import net from "node:net";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { killProcessTree, processesEnded, processTreePids, processTreeRssKb, runLiveReloadAxis as runLiveReloadAxisAdapter, signalProcessTree } from "./live-reload.mjs";
@@ -18,6 +19,7 @@ const harnessDir = path.dirname(fileURLToPath(import.meta.url));
 const repoDir = path.resolve(harnessDir, "../../..");
 const envRunner = path.join(repoDir, "Tools/agent/JetEnv.jet");
 const timer = path.join(harnessDir, "timer.py");
+const launcherSource = path.join(harnessDir, "launch.c");
 
 const TOOL_VERSION_COMMANDS = Object.freeze({
   python3: ["python3", "--version"],
@@ -432,8 +434,22 @@ async function timedSequence(cwd, commands, { full = false } = {}) {
   return sample;
 }
 
-function startProcess(cwd, args, { full = false, env = undefined } = {}) {
-  const child = spawn(envRunner, [...(full ? ["full"] : []), ...args], {
+// Builds launch.c, the launcher every measured command runs through (the
+// timer's commands and each service), into `runDir` once per run, and names
+// it to the timers through JET_GAUNTLET_LAUNCHER.
+async function buildLauncher(runDir) {
+  const built = path.join(runDir, "launch");
+  const result = await runProcess(runDir, ["cc", "-O2", "-o", built, launcherSource]);
+  if (result.code !== 0) throw new Error(`cannot build the launcher from ${launcherSource}: ${result.stderr.toString("utf8").trim().slice(0, 300)}`);
+  process.env.JET_GAUNTLET_LAUNCHER = built;
+}
+
+// Starts `args` in the dev shell. With a `report`, it runs through the
+// launcher, which writes it (see launch.c): the start line before the
+// command's exec, the end line, with its peak memory, once it has exited.
+function startProcess(cwd, args, { full = false, env = undefined, report = null } = {}) {
+  const launched = report === null ? args : [process.env.JET_GAUNTLET_LAUNCHER, report, ...args];
+  const child = spawn(envRunner, [...(full ? ["full"] : []), ...launched], {
     cwd,
     env: env === undefined ? process.env : { ...process.env, ...env },
     stdio: ["ignore", "ignore", "pipe"],
@@ -444,6 +460,14 @@ function startProcess(cwd, args, { full = false, env = undefined } = {}) {
   child.stderr.on("data", (chunk) => stderr.push(chunk));
   child.stderrText = () => Buffer.concat(stderr).toString("utf8").trim().slice(0, 500);
   return child;
+}
+
+// The fields of a launcher report's `kind` line ("start" or "end") as
+// numbers, or null while the report lacks it.
+async function launchReport(report, kind) {
+  const text = await fs.readFile(report, "utf8").catch(() => "");
+  const line = text.split("\n").find((row) => row.startsWith(`${kind} `));
+  return line === undefined ? null : line.split(" ").slice(1).map(Number);
 }
 
 // Stops `child` and every process of its tree: SIGTERM to each, then SIGKILL to
@@ -1683,23 +1707,38 @@ async function freePort() {
   });
 }
 
-async function waitForReady(child, port, service) {
+// Polls the service started through the launcher until it answers its
+// readiness probe. Its startup runs from the launcher's start line (just
+// before the service's exec; node's hrtime and the launcher both read
+// CLOCK_MONOTONIC) to the answer, so it holds neither JetEnv's nor the
+// launcher's own startup.
+async function waitForReady(child, port, service, report) {
   const protocol = service.protocol ?? "http";
   const started = performance.now();
+  const answered = async (result) => {
+    const readyNs = process.hrtime.bigint();
+    const start = await launchReport(report, "start");
+    if (start === null) throw new Error("service answered before its launcher's report began");
+    return { seconds: Number(readyNs - BigInt(start[1])) / 1e9, result };
+  };
   while (performance.now() - started < 10000) {
     if (child.exitCode !== null) throw new Error(`service exited ${child.exitCode}${child.stderrText() ? `: ${child.stderrText()}` : ""}`);
     if (protocol === "line") {
       const ready = service.ready ?? { send: "ready\n", expect: "ready\n" };
       const result = await lineProbe(port, ready, 500);
-      if (result.ok && result.body === ready.expect) return { seconds: (performance.now() - started) / 1000, result };
+      if (result.ok && result.body === ready.expect) return answered(result);
     } else {
       const result = await httpProbe(port, { method: "GET", path: service.readyPath }, 500);
-      if (result.ok) return { seconds: (performance.now() - started) / 1000, result };
+      if (result.ok) return answered(result);
     }
   }
   throw new Error(`service did not answer ${protocol === "line" ? "line readiness probe" : service.readyPath}`);
 }
 
+// Measures a service: a verification run, then a measured run whose startup,
+// probe latencies and peak memory are the result. Both run through the
+// launcher; the peak is the launcher's, each service process's exact VmHWM
+// at its exit (the largest), read from its report once the service exits.
 async function runService(language, sourceDir, artifact, entry, commandForOverride = null) {
   const service = entry.spec?.service ?? entry.service ?? {};
   const protocol = service.protocol ?? "http";
@@ -1709,10 +1748,13 @@ async function runService(language, sourceDir, artifact, entry, commandForOverri
   let child = null;
   let startupSeconds = null;
   let failure = null;
+  const reports = await fs.mkdtemp(path.join(os.tmpdir(), "jet-service-"));
+  const verifyReport = path.join(reports, "verify");
+  const report = path.join(reports, "measure");
   try {
     const port = await freePort();
-    child = startProcess(sourceDir, commandFor(port), { full: entry.spec?.fullShell === true });
-    startupSeconds = (await waitForReady(child, port, service)).seconds;
+    child = startProcess(sourceDir, commandFor(port), { full: entry.spec?.fullShell === true, report: verifyReport });
+    startupSeconds = (await waitForReady(child, port, service, verifyReport)).seconds;
     const verification = await probeSequence(port, probes, protocol);
     if (!verification.ok) failure = `probe ${verification.index} failed: ${verification.reason}`;
     const firstExit = await waitForExit(child, 1000);
@@ -1725,26 +1767,21 @@ async function runService(language, sourceDir, artifact, entry, commandForOverri
     failure = error.message;
     if (child) await stopProcess(child);
   }
-  if (failure) return { failure, startupSeconds };
+  if (failure) {
+    await fs.rm(reports, { recursive: true, force: true });
+    return { failure, startupSeconds };
+  }
 
   const port = await freePort();
-  child = startProcess(sourceDir, commandFor(port), { full: entry.spec?.fullShell === true });
+  child = startProcess(sourceDir, commandFor(port), { full: entry.spec?.fullShell === true, report });
   let ready;
   try {
-    ready = await waitForReady(child, port, service);
+    ready = await waitForReady(child, port, service, report);
   } catch (error) {
     await stopProcess(child);
+    await fs.rm(reports, { recursive: true, force: true });
     return { failure: error.message, startupSeconds };
   }
-  let rssKb = await processTreeRssKb(child.pid);
-  let rssSamplePromise = Promise.resolve();
-  const sampleRss = () => {
-    rssSamplePromise = rssSamplePromise.then(async () => {
-      const value = await processTreeRssKb(child.pid);
-      if (Number.isFinite(value)) rssKb = Math.max(rssKb ?? 0, value);
-    }).catch(() => {});
-  };
-  const rssTimer = setInterval(sampleRss, 20);
   const latencies = [];
   const repeatProbes = probes.slice(0, -1);
   let measurementFailure = null;
@@ -1766,14 +1803,11 @@ async function runService(language, sourceDir, artifact, entry, commandForOverri
     }
   } catch (error) {
     measurementFailure = error.message;
-  } finally {
-    clearInterval(rssTimer);
-    await rssSamplePromise;
   }
-  const finalRssKb = await processTreeRssKb(child.pid);
-  if (Number.isFinite(finalRssKb)) rssKb = Math.max(rssKb ?? 0, finalRssKb);
   const exit = await waitForExit(child, 5000);
   if (exit.code === null) await stopProcess(child);
+  const rssKb = (await launchReport(report, "end"))?.[3] ?? null;
+  await fs.rm(reports, { recursive: true, force: true });
   const measurementInvalid = !positiveMetricValue("service_startup_seconds", startupSeconds) ||
     !positiveMetricValue("service_peak_rss_kb", rssKb) ||
     latencies.length === 0 ||
@@ -4190,6 +4224,7 @@ async function main() {
   const runId = `${dateStamp().replaceAll("-", "")}-${process.pid}-${Date.now().toString(36)}`;
   const runDir = path.join(stateRoot(), "gauntlet/work", runId);
   await fs.mkdir(runDir, { recursive: true });
+  await buildLauncher(runDir);
   const jetBin = await resolveJetBinary(options);
   const toolchains = await toolchainFingerprint(runDir, jetBin);
   const dev = await devAvailable(jetBin, runDir);
@@ -4244,8 +4279,12 @@ async function main() {
     console.error(`gauntlet: tool ${item.entry.name} done`);
   }
   // `--entry` naming a tool entry runs only its parity cases, and the exit
-  // status is their verdict.
+  // status is their verdict. A partial run of program entries cannot
+  // publish, so its exit status is its own verdict: the corpus checks found
+  // nothing, every language row of every entry it ran is ok, and its tools
+  // pass. Full and axis runs exit by the publication rule.
   const toolOnly = options.entry !== null && loaded.length === 0 && tools.length > 0;
+  const partial = !fullScope && !axisOnly && !toolOnly;
   const covered = axisOnly ? new Set() : new Set(results.flatMap((result) => result.entry.cells ?? []));
   const uncovered = axisOnly ? [] : (matrix.cells ?? []).map((cell) => cell.id).filter((id) => !covered.has(id));
   const tower = axisOnly ? null : await readLiveTowerCards();
@@ -4382,7 +4421,9 @@ async function main() {
     }
   }
   const toolsPass = toolResults.every((tool) => tool.status === "pass");
+  const rowsOk = results.every((result) => result.status !== "broken" && (result.languages ?? []).every((language) => result.rows?.[language]?.status === "ok"));
   if (toolOnly) process.exitCode = toolsPass ? 0 : 1;
+  else if (partial) process.exitCode = validationIssues.length === 0 && skipped.length === 0 && results.length > 0 && rowsOk && toolsPass ? 0 : 1;
   else if (!publication.complete || !toolsPass) process.exitCode = 1;
 }
 

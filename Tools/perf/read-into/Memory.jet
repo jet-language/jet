@@ -5,7 +5,7 @@
 // net_read_into_vs_read`, into the row's evidence_file). This measures the
 // row's metrics the harness does not: allocations per read and peak live heap
 // bytes, from the runtime counting policy's own facts in a counted build of
-// each arm, plus peak RSS (getrusage through the gauntlet timer) of the
+// each arm, plus peak RSS (the gauntlet timer's, the program's exact VmHWM) of the
 // uncounted build. Both arms build from the row's surface_source and
 // plain_source at --optimize=full. Each metric gets its own verdict under the
 // harness's rule that only strictly below plain wins. --write replaces the

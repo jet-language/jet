@@ -2,13 +2,15 @@
 //
 //   jet Tools/perf/scriptbench/Bench.jet --list
 //   jet Tools/perf/scriptbench/Bench.jet --data DIR --out DIR [--only w05,w13] [--jet PATH]
+//   jet Tools/perf/scriptbench/Bench.jet --check-floor --out DIR [--jet PATH]
 //
 // Run it from the repository root. manifest.json is the single source of truth:
 // the pinned peer runtimes, the method, the comparator and the workloads. Each
 // run writes the inputs (Gen.jet), builds every run.jet at O0, O1 and O2 (`jet
 // build --release`), checks that every Jet build, each `jet run` phase and every
 // peer prints the workload's expected.out, then times the jet-bin tier, the two
-// jet-run phases and every peer with hyperfine. It prints one cell per workload,
+// jet-run phases and every peer with hyperfine. Peak memory comes from the
+// gauntlet's launcher instead (LAUNCHER). It prints one cell per workload,
 // tier, peer and metric, writes the cells to OUT/cells.tsv, and exits 1 on any
 // LOSS or any wrong output.
 //
@@ -17,6 +19,11 @@
 // before every timed run; jet-run-edit runs a copy of run.jet,
 // OUT/edit/ID/run.jet, whose last line `Bench.jet --edit FILE` changes before
 // every timed run.
+//
+// `--check-floor` holds the launcher's peak against a reference reading: the
+// release hello and coreutils `true` each print one row with the launcher's
+// median and their /proc VmHWM's (check_floor), and it exits 1 unless both
+// sit within 5%.
 package: {
     name: "scriptbench"
     authority: { allow: [Env, Exec, Exec.Args, FS, IO, Mem.Alloc, Net, Time, Time.Wait] }
@@ -97,6 +104,7 @@ Stat: struct {
 
 Options: struct {
     list: Bool
+    check_floor: Bool
     only: [String]
     data: String
     out: String
@@ -172,7 +180,7 @@ peer_named: fn(m: Manifest, name: String) -> Peer {
 
 options: fn() -> Options {
     argv: process.args()
-    opts := Options{list: false, only: [String]{}, data: "", out: "", jet: process.which("jet") ?? "", edit: ""}
+    opts := Options{list: false, check_floor: false, only: [String]{}, data: "", out: "", jet: process.which("jet") ?? "", edit: ""}
     i := 0
     loop i < argv.len() {
         flag: argv[i]
@@ -183,12 +191,17 @@ options: fn() -> Options {
                 i += 1
                 next
             }
+            "--check-floor" -> {
+                opts.check_floor = true
+                i += 1
+                next
+            }
             "--only" -> opts.only = value.split(",").to_list()
             "--data" -> opts.data = value
             "--out" -> opts.out = value
             "--jet" -> opts.jet = value
             "--edit" -> opts.edit = value
-            else -> fail("unknown argument `{flag}`; usage: Bench.jet --list | --data DIR --out DIR [--only w01,w02] [--jet PATH]")
+            else -> fail("unknown argument `{flag}`; usage: Bench.jet --list | --check-floor --out DIR [--jet PATH] | --data DIR --out DIR [--only w01,w02] [--jet PATH]")
         }
         i += 2
     }
@@ -272,6 +285,21 @@ with_cache: fn(spec: ProcessSpec, c: Command) -> ProcessSpec {
     spec.env("XDG_CACHE_HOME", c.cache.copy())
 }
 
+// The gauntlet's launcher, from the repository's root. It reads each process's
+// exact VmHWM at its exit, and the largest is the peak. hyperfine's
+// memory_usage_byte can't give the peak: it is ru_maxrss, which Linux carries
+// across exec, so a command reads at least hyperfine's own high-water mark
+// (about 3.7 MB).
+LAUNCHER: "Tools/gauntlet/harness/launch.c"
+
+// Builds the launcher into OUT and returns its path.
+build_launcher: fn(root: String, out: String) -> String {
+    built: "{out}/launch"
+    receipt: process.cmd(["cc", "-O2", "-o", built.copy(), "{root}/{LAUNCHER}"]).output_limit(16777216).run() ?? fail("cc could not start")
+    if !receipt.success -> fail("the launcher {LAUNCHER} does not build: {receipt.errors}")
+    built
+}
+
 // The last line of a jet-run-edit copy of run.jet, before its count.
 EDIT_HEAD: "bench_edit: fn() -> Int {{ "
 
@@ -322,15 +350,17 @@ check: fn(m: Manifest, opts: Options, c: Command, expected: String, wid: String)
 }
 
 // The runs of one command in one round: wall times and CPU (user + system)
-// per run in microseconds, peak RSS per run in bytes.
+// per timed run in microseconds, and the peak memory of the round's memory run
+// in bytes.
 Sample: struct {
     walls: [Int]
     cpu: [Int]
     rss: [Int]
 }
 
-// Times one command for one round.
-round: fn(m: Manifest, opts: Options, c: Command, file: String) -> Sample? {
+// Times one command for one round with hyperfine, then runs it once more
+// through the launcher for its peak memory (peak_memory).
+round: fn(m: Manifest, opts: Options, c: Command, file: String, launcher: String) -> Sample? {
     warmup: if c.slow -> m.method.slow_warmup else -> m.method.warmup
     runs: if c.slow -> m.method.slow_runs else -> m.method.runs
     argv := [m.hyperfine.copy(), "-N", "--style", "none", "--warmup", "{warmup}", "--runs", "{runs}", "--export-json", file.copy(), "-n", c.name.copy()]
@@ -351,11 +381,105 @@ round: fn(m: Manifest, opts: Options, c: Command, file: String) -> Sample? {
     loop t in items(member(result, "times")) -> sample.walls.push(micros(t))
     per_run: micros(member(result, "user")) + micros(member(result, "system"))
     loop _ in 0..<runs -> sample.cpu.push(per_run)
-    loop b in items(member(result, "memory_usage_byte")) -> sample.rss.push(b.int() ?? 0)
+    sample.rss.push(peak_memory(m, opts, c, launcher, "{file}.launch") ?? return None)
     return .Val(sample)
 }
 
-measure: fn(m: Manifest, opts: Options, wid: String, commands: [Command]) -> [Stat]? {
+// Runs a command once through the launcher, after its prepare command as
+// hyperfine runs it, and returns its peak memory in bytes; None after printing
+// why the run failed.
+peak_memory: fn(m: Manifest, opts: Options, c: Command, launcher: String, report: String) -> Int? {
+    if c.prepare != "" {
+        prepared: with_cache(with_path(process.cmd(c.prepare.split(" ").to_list()).cwd(opts.data).output_limit(16777216), m), c).run() ?? fail("the prepare command of {c.name} could not start")
+        if !prepared.success {
+            print("  {c.name}: the prepare command failed (exit {prepared.code})")
+            return None
+        }
+    }
+    argv := [launcher.copy(), report.copy()]
+    argv.extend(c.argv.copy())
+    receipt: with_cache(with_path(process.cmd(argv).cwd(opts.data).timeout(time.duration_ms(m.method.timeout_s * 1000)).output_limit(67108864), m), c).run() ?? fail("the launcher could not start")
+    // The launcher's end line: exit code, wall ns, first stdout ns, peak KiB,
+    // user us, system us, exec errno.
+    end := [String]{}
+    loop line in (fs.read(report) ?? "").lines() {
+        fields: line.split(" ").to_list()
+        if fields[0] == "end" -> end = fields
+    }
+    if receipt.timed_out || end.len() != 8 || end[1] != "0" {
+        print("  {c.name}: the memory run failed (exit {receipt.code})")
+        loop line in receipt.errors.lines().take(6) -> print("    {line}")
+        return None
+    }
+    .Val((Int.parse(end[4]) ?? 0) * 1024)
+}
+
+// The workload whose release binary is the hello of the floor check.
+HELLO: "w01"
+
+// The reference reader the floor check holds the launcher against, from the
+// repository's root: it traces one process alone and reads its VmHWM at the
+// exit stop.
+READER: "Tools/perf/scriptbench/vmhwm.c"
+
+// Readings per command in the floor check, and how far, in percent, the
+// launcher's median may sit from the reader's.
+FLOOR_RUNS: 11
+FLOOR_PERCENT: 5
+
+median: fn(values: [Int]) -> Int {
+    sorted := values.copy()
+    sorted.sort()
+    sorted[sorted.len() /% 2]
+}
+
+// The reader's VmHWM of one run of `argv` in `cwd`, in KiB.
+reader_kb: fn(reader: String, report: String, argv: [String], cwd: String) -> Int {
+    full := [reader.copy(), report.copy()]
+    full.extend(argv.copy())
+    receipt: process.cmd(full).cwd(cwd).output_limit(16777216).run() ?? fail("the reader could not start")
+    kb: Int.parse((fs.read(report) ?? "").trim().removeprefix("vmhwm ")) ?? -1
+    if !receipt.success || kb < 0 -> fail("the reader's run of {argv[0]} failed (exit {receipt.code}): {receipt.errors}")
+    kb
+}
+
+// `--check-floor`: the release hello (HELLO) and coreutils `true`, each read
+// FLOOR_RUNS times through the launcher as every rss cell is (peak_memory)
+// and through the reader (READER), one row each with both medians. Returns 1
+// unless each launcher median sits within FLOOR_PERCENT of its VmHWM.
+check_floor: fn(m: Manifest, opts: Options, root: String, bench: String, launcher: String) -> Int {
+    reader: "{opts.out}/vmhwm"
+    built: process.cmd(["cc", "-O2", "-o", reader, "{root}/{READER}"]).output_limit(16777216).run() ?? fail("cc could not start")
+    if !built.success -> fail("the reader {READER} does not build: {built.errors}")
+    hello := ""
+    loop w in m.workloads {
+        if w.id == HELLO -> hello = build(opts, bench, w, "O2", "--release") ?? fail("the hello {w.dir} does not build")
+    }
+    if hello == "" -> fail("manifest: no workload `{HELLO}`")
+    names: ["hello", "true"]
+    programs: [hello, process.which("true") ?? fail("no `true` on PATH")]
+    failed := 0
+    loop k in 0..<names.len() {
+        c: Command{name: names[k].copy(), argv: [programs[k].copy()], slow: false, cache: "", prepare: ""}
+        launched := [Int]{}
+        exact := [Int]{}
+        loop _ in 0..<FLOOR_RUNS {
+            launched.push((peak_memory(m, opts, c, launcher, "{opts.out}/floor.launch") ?? fail("the launcher's run of {c.name} failed")) /% 1024)
+            exact.push(reader_kb(reader, "{opts.out}/floor.vmhwm", c.argv, opts.data))
+        }
+        got: median(launched)
+        want: median(exact)
+        gap: if got > want -> got - want else -> want - got
+        tenths: if want > 0 -> gap * 1000 /% want else -> 1000
+        within: gap * 100 <= want * FLOOR_PERCENT
+        if !within -> failed += 1
+        verdict: if within -> "ok" else -> "FAIL"
+        print("floor {c.name.pad_end(5, " ")} launcher {"{got}".pad_start(7, " ")} kB  /proc VmHWM {"{want}".pad_start(7, " ")} kB  off {tenths /% 10}.{tenths %% 10}%  {verdict} (within {FLOOR_PERCENT}%; medians of {FLOOR_RUNS}; {c.argv[0]})")
+    }
+    if failed > 0 -> 1 else -> 0
+}
+
+measure: fn(m: Manifest, opts: Options, wid: String, commands: [Command], launcher: String) -> [Stat]? {
     walls := [[Int]]{}
     cpus := [[Int]]{}
     rsss := [[Int]]{}
@@ -369,7 +493,7 @@ measure: fn(m: Manifest, opts: Options, wid: String, commands: [Command]) -> [St
         loop k in 0..<n {
             i: (k + r) %% n
             file: "{opts.out}/json/{wid}-{commands[i].name}-{r}.json"
-            sample: round(m, opts, commands[i], file) ?? return None
+            sample: round(m, opts, commands[i], file, launcher) ?? return None
             loop v in sample.walls -> walls[i].push(v)
             loop v in sample.cpu -> cpus[i].push(v)
             loop v in sample.rss -> rsss[i].push(v)
@@ -424,8 +548,14 @@ run: fn() {
     bench: "{root}/Tools/perf/scriptbench"
     m: load("{bench}/manifest.json")
     if opts.list -> process.exit(list(m))
-    if opts.data == "" || opts.out == "" || opts.jet == "" -> fail("--data, --out and a jet compiler (--jet or PATH) are required")
+    if opts.check_floor && opts.out != "" && opts.jet != "" {
+        fs.create_dir_all(opts.out) ?? fail("mkdir {opts.out}")
+        floor_opts: Options{list: false, check_floor: true, only: [String]{}, data: opts.out.copy(), out: opts.out.copy(), jet: opts.jet.copy(), edit: ""}
+        process.exit(check_floor(m, floor_opts, root, bench, build_launcher(root, opts.out)))
+    }
+    if opts.data == "" || opts.out == "" || opts.jet == "" -> fail("--data, --out and a jet compiler (--jet or PATH) are required; --check-floor needs --out and the compiler")
     fs.create_dir_all("{opts.out}/json") ?? fail("mkdir {opts.out}/json")
+    launcher: build_launcher(root, opts.out)
     gen: process.cmd([opts.jet.copy(), "run", "{bench}/Gen.jet", "--", opts.data.copy()]).output_limit(16777216).run() ?? fail("Gen.jet could not start")
     if !gen.success -> fail("Gen.jet failed (exit {gen.code}): {gen.output}{gen.errors}")
     errors := 0
@@ -488,7 +618,7 @@ run: fn() {
                 errors += 1
             }
         }
-        measured: measure(m, opts, w.id, commands)
+        measured: measure(m, opts, w.id, commands, launcher)
         loop child in servers -> child.kill().drop("the fixture server may already be gone")
         if measured == .Val(stats) {
             loop s in stats -> print("  {s.name.pad_end(13, " ")} wall {ms_text(s.wall).pad_start(11, " ")}  cpu {ms_text(s.cpu).pad_start(11, " ")}  rss {mb_text(s.rss).pad_start(9, " ")}")

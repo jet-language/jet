@@ -30,14 +30,26 @@ A full run does the following:
    Each command gets 2 warmups and 5 timed runs per round, over 3 rounds. The commands go one
    after another, starting one position later each round, so they interleave. A command whose
    check run took over 10 s gets 0 warmups and 1 timed run per round instead.
-4. The metrics are wall (the median of all runs), CPU (the mean of user + system) and peak
-   RSS (the largest across runs). The w08 and w11 fixture server, `server.js`, runs only while
-   its workload does.
+4. The metrics are wall (the median of all runs) and CPU (the mean of user + system) from
+   hyperfine, and peak RSS. After each round's timed runs, each command runs once more, after its
+   prepare step, through the gauntlet's launcher (`Tools/gauntlet/harness/launch.c`, built with
+   `cc` into `OUT/launch`). The launcher reads the exact VmHWM of each of the command's processes
+   at its exit, and the RSS is the largest across rounds. hyperfine's own `memory_usage_byte` is
+   not used: it is ru_maxrss, which Linux carries across exec, so every command reads at least
+   hyperfine's own high-water mark (about 3.7 MB). The w08 and w11 fixture server, `server.js`,
+   runs only while its workload does.
 5. One cell is printed per workload, tier, peer and metric, with the ratio Jet / peer; each
    jet-run phase is its own tier. The cells are also written to `OUT/cells.tsv`, whose `cards`
    column names the cards that own the workload's cells (the manifest's `cards`); a printed
    `LOSS` names them too. The exit is 1 on any `LOSS` (a ratio of 1.00 or more) or any wrong
    output. A jet-run number cited on a card names its phase.
+
+`Bench.jet --check-floor --out DIR [--jet PATH]` checks the launcher's reading against a
+reference. It builds the w01 hello at `--release` and `vmhwm.c`, a reader that traces one
+process alone and reads its VmHWM at the exit stop. Then it reads the hello and coreutils
+`true` 11 times each, through the launcher as every RSS cell is and through the reader, and
+prints one `floor` row per program with both medians. The exit is 1 unless each launcher median
+is within 5% of its VmHWM.
 
 The comparator is the AGENTS.md rule: Jet beats every peer on every metric, with no averaging
 across peers or workloads. A peer that overruns the 120 s timeout is reported as such: its wall

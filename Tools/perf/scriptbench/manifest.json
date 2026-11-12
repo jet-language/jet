@@ -9,7 +9,7 @@
     "slow_warmup": 0,
     "slow_runs": 1,
     "timeout_s": 120,
-    "note": "hyperfine -N with every command of a workload in one invocation per round; the command order rotates by one each round, so the commands interleave. Wall is the median of all timed runs, CPU the mean of user + system, RSS the largest peak across runs. A command whose correctness run takes over slow_ms gets slow_warmup and slow_runs per round (the correctness run itself warms the caches)."
+    "note": "hyperfine -N with every command of a workload in one invocation per round; the command order rotates by one each round, so the commands interleave. Wall is the median of all timed runs and CPU the mean of user + system. RSS is the largest peak across rounds, each read by one more run of the command through the gauntlet's launcher (Tools/gauntlet/harness/launch.c), which takes the exact VmHWM of each of its processes at exit; hyperfine's memory_usage_byte is ru_maxrss, which carries hyperfine's own high-water mark across exec. A command whose correctness run takes over slow_ms gets slow_warmup and slow_runs per round (the correctness run itself warms the caches)."
   },
   "hyperfine": "/nix/store/m2h6y8mbq2388413sfa4k4sb48cwpl9s-hyperfine-1.20.0/bin/hyperfine",
   "server": ["/nix/store/hi7j7adiizy4cfprlj7xnx9ag3mrzmam-nodejs-slim-24.21.0/bin/node", "server.js"],

@@ -38,8 +38,10 @@
 //     interleaved (the original first in even rounds, Jet first in odd
 //     ones), after the parity runs have warmed both. A round's wall time is
 //     the sum over its cases and its peak memory the largest peak resident
-//     size of one case (GNU time's %M: ru_maxrss, the largest process; every
-//     run goes through `time`, which must be on PATH). Jet wins a measure
+//     size of one case. Every run goes through the gauntlet's launcher
+//     (LAUNCHER, built with `cc`), which times the program from its exec to
+//     its reap and reads each of its processes' exact VmHWM at exit, the
+//     largest being the peak. Jet wins a measure
 //     only when every Jet round beats every original round;
 //     when every original round beats every Jet round Jet loses; any overlap
 //     is inconclusive, which fails the bar too. Jet must win both measures.
@@ -140,6 +142,8 @@ use {
 ENTRIES_ROOT: "Tools/gauntlet/entries"
 // The review record, in the entry's directory.
 REVIEW_FILE: "review.json"
+// The launcher every run goes through, from the repository's root.
+LAUNCHER: "Tools/gauntlet/harness/launch.c"
 DEFAULT_RUNS: 5
 RUN_TIMEOUT_SECONDS: 600
 OUTPUT_LIMIT: 268435456
@@ -407,11 +411,24 @@ jet_env: fn(jet: String) -[Env]> [EnvVar] Never! {
 
 not_run: fn(problem: String) -> Run Never! { Run{code: -1, output: "", errors: "", wall_ns: 0, peak_bytes: 0, problem: problem.copy()} }
 
+// Builds the launcher every run goes through, from the checkout holding this
+// tool (the judged tree need not hold one), into `work`: its path, or the
+// problem when it cannot be built.
+build_launcher: fn(work: String) -[Env, Exec, FS]> (path: String, problem: String) Never! {
+    files.create_dir_all(work) ?? return (path: "", problem: "`{work}` cannot be made: {err}")
+    source: files.join(repo_root(), LAUNCHER)
+    built: files.join(work, "launch")
+    receipt: process.cmd([String]{"cc", "-O2", "-o", built.copy(), source.copy()}).run() ?? return (path: "", problem: "`cc` cannot start: {err}")
+    if receipt.code != 0 -> return (path: "", problem: "the launcher {source} does not build: {receipt.errors.trim()}")
+    (path: built, problem: "")
+}
+
 // Runs `argv` with `case`'s arguments and variables at `cwd`, a fresh copy
-// of `fixtures` (an empty directory when it is ""), under GNU `time` at
-// `timer` for its peak memory: a program the judge starts itself inherits the
-// judge's own high-water mark in ru_maxrss, one `time` starts does not.
-run_case: fn(argv: [String], case: Case, inherited: [EnvVar], fixtures: String, cwd: String, timer: String) -[Env, Exec, FS, Time, Time.Wait]> Run Never! {
+// of `fixtures` (an empty directory when it is ""), through the launcher at
+// `launcher`: its wall time and peak memory are the program's own, not the
+// judge's (a program the judge starts itself inherits the judge's own
+// high-water mark in ru_maxrss).
+run_case: fn(argv: [String], case: Case, inherited: [EnvVar], fixtures: String, cwd: String, launcher: String) -[Env, Exec, FS, Time, Time.Wait]> Run Never! {
     files.remove_all(cwd) ?? ()
     files.create_dir_all(cwd) ?? return not_run("`{cwd}` cannot be made: {err}")
     if fixtures != "" {
@@ -420,27 +437,27 @@ run_case: fn(argv: [String], case: Case, inherited: [EnvVar], fixtures: String, 
         copied: process.cmd([String]{"cp", "-a", "{fixtures}/.", cwd.copy()}).run() ?? return not_run("cp cannot start: {err}")
         if copied.code != 0 -> return not_run("the fixtures cannot be copied: {copied.errors.trim()}")
     }
-    stats: "{cwd}.peak"
-    command := [String]{timer.copy(), "-f", "%M", "-o", stats.copy(), "--"}
+    report: "{cwd}.launch"
+    command := [String]{launcher.copy(), report.copy()}
     command.extend(argv.copy())
     command.extend(case.args.copy())
     spec := process.cmd(command).cwd(cwd).timeout(time.duration_seconds(RUN_TIMEOUT_SECONDS)).output_limit(OUTPUT_LIMIT)
     loop setting in inherited -> spec = spec.env(setting.name, setting.value)
     loop setting in case.env -> spec = spec.env(setting.name, setting.value)
-    watch: time.instant()
-    receipt: spec.run() ?? return not_run("`{timer}` cannot start: {err}")
-    wall: watch.elapsed().ns
-    code := receipt.code
-    if receipt.signal == .Val(number) -> code = 128 + number
-    if receipt.timed_out -> code = 124
-    // The last line is the peak in KiB; one before it may say how the
-    // program exited.
-    peak_kib := 0
-    loop line in (files.read(stats) ?? "").lines() {
-        if line.trim() != "" -> peak_kib = Int.parse(line.trim()) ?? 0
+    receipt: spec.run() ?? return not_run("the launcher cannot start: {err}")
+    // The launcher's end line: exit code, wall ns, first stdout ns, peak
+    // KiB, user us, system us, exec errno.
+    end := [String]{}
+    loop line in (files.read(report) ?? "").lines() {
+        fields: line.split(" ").to_list()
+        if fields[0] == "end" -> end = fields
     }
-    files.remove_all(stats) ?? ()
-    Run{code: code, output: receipt.output.copy(), errors: receipt.errors.copy(), wall_ns: wall, peak_bytes: peak_kib * 1024, problem: ""}
+    files.remove_all(report) ?? ()
+    if receipt.timed_out -> return Run{code: 124, output: receipt.output.copy(), errors: receipt.errors.copy(), wall_ns: 0, peak_bytes: 0, problem: ""}
+    if end.len() != 8 -> return not_run("the launcher exited {receipt.code} without its report: {receipt.errors.trim()}")
+    wall: Int.parse(end[2]) ?? 0
+    peak_kib: Int.parse(end[4]) ?? 0
+    Run{code: receipt.code, output: receipt.output.copy(), errors: receipt.errors.copy(), wall_ns: wall, peak_bytes: peak_kib * 1024, problem: ""}
 }
 
 // `run` with the facts its job left in `cwd` as its output: what the case's
@@ -1605,8 +1622,8 @@ case_dir: fn(work: String, name: String, index: Int, side: Int) -> String Never!
 judge: fn(repo: String, name: String, jet: String, runs: Int, work: String) -[Env, Exec, FS, Time, Time.Wait]> Report Never! {
     entry := read_entry(repo, name)
     report := Report{entry: name.copy(), bars: [Bar]{}}
-    timer: process.which("time") ?? ""
-    if timer == "" -> entry.problems.push("GNU `time`, which every run goes through, is not on PATH")
+    launcher: build_launcher(work)
+    if launcher.problem != "" -> entry.problems.push(launcher.problem)
     if entry.problems.len() > 0 {
         why: "the entry cannot be judged: {entry.problems.join("; ")}"
         loop bar in BARS -> report.bars.push(Bar{name: bar.copy(), pass: false, detail: why.copy()})
@@ -1624,7 +1641,7 @@ judge: fn(repo: String, name: String, jet: String, runs: Int, work: String) -[En
     loop index in 0..<entry.cases.len() {
         same := true
         loop side in 0..<2 {
-            raw: run_case(programs[side], entry.cases[index], inherited, fixtures, case_dir(work, name, index, side), timer)
+            raw: run_case(programs[side], entry.cases[index], inherited, fixtures, case_dir(work, name, index, side), launcher.path)
             check: entry.cases[index].check
             run: if check == "" -> raw else -> checked(raw, files.join(repo, "{entry.dir}/{check}"), jet, entry.cases[index], inherited, case_dir(work, name, index, side))
             why: run_failure(run, entry.cases[index], expected[index])
@@ -1650,7 +1667,7 @@ judge: fn(repo: String, name: String, jet: String, runs: Int, work: String) -[En
             wall := 0
             peak := 0
             loop index in 0..<cases {
-                run: run_case(programs[side], entry.cases[index], inherited, fixtures, case_dir(work, name, index, side), timer)
+                run: run_case(programs[side], entry.cases[index], inherited, fixtures, case_dir(work, name, index, side), launcher.path)
                 if run.problem != "" && problems.len() == 0 -> problems.push("case {index + 1} {SIDES[side]}: {run.problem}")
                 wall += run.wall_ns
                 if run.peak_bytes > peak -> peak = run.peak_bytes
