@@ -1,17 +1,43 @@
 Error [jet.MissingMoveMarker]: `item` cannot be moved from borrowed storage
-  --> tests/ui/ownership/read_param_into_owning_argument_matches_across_call_forms.jet:10:15
+  --> tests/ui/ownership/read_param_into_owning_argument_matches_across_call_forms.jet:12:15
     |
- 10 |     rows.push(item)
+ 12 |     rows.push(item)
     |               ^^^^
  Why: `item` is a read or write parameter, so its caller keeps the value; moving it here would copy it
  Fix: Write `item.copy()` when `.push()` should receive a copy, or declare the parameter `item: &&[Int]` so the caller hands the value over
 More: jet-lang.dev/e/E0201
 
 Error [jet.MissingMoveMarker]: `item` cannot be moved from borrowed storage
-  --> tests/ui/ownership/read_param_into_owning_argument_matches_across_call_forms.jet:15:10
+  --> tests/ui/ownership/read_param_into_owning_argument_matches_across_call_forms.jet:17:10
     |
- 15 |     keep(item)
+ 17 |     keep(item)
     |          ^^^^
  Why: `item` is a read or write parameter, so its caller keeps the value; moving it here would copy it
  Fix: Write `item.copy()` when `keep` should receive a copy, or declare the parameter `item: &&[Int]` so the caller hands the value over
 More: jet-lang.dev/e/E0201
+
+Error [jet.MoveWithoutMarker]: `.push()` takes `item`, but `item` is used again later
+  --> tests/ui/ownership/read_param_into_owning_argument_matches_across_call_forms.jet:23:15
+    |
+ 23 |     rows.push(item)
+    |               ^^^^
+  --> tests/ui/ownership/read_param_into_owning_argument_matches_across_call_forms.jet:24:18
+    |
+ 24 |     rows.len() + item.len()
+    |                  ^^^^ `item` is used again here
+ Why: `.push()` takes ownership of this argument, and a call never copies on its own, so `item` has no value after this call
+ Fix: Write `item.copy()` to pass a copy and keep `item`, or reorder so this call is the last use of `item`
+More: jet-lang.dev/e/E0209
+
+Error [jet.MoveWithoutMarker]: `keep` takes `item`, but `item` is used again later
+  --> tests/ui/ownership/read_param_into_owning_argument_matches_across_call_forms.jet:29:16
+    |
+ 29 |     kept: keep(item)
+    |                ^^^^
+  --> tests/ui/ownership/read_param_into_owning_argument_matches_across_call_forms.jet:30:12
+    |
+ 30 |     kept + item.len()
+    |            ^^^^ `item` is used again here
+ Why: `keep` takes ownership of this argument, and a call never copies on its own, so `item` has no value after this call
+ Fix: Write `item.copy()` to pass a copy and keep `item`, or reorder so this call is the last use of `item`
+More: jet-lang.dev/e/E0209

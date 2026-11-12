@@ -1,6 +1,8 @@
 // #6611: an owning argument taken from a read parameter follows one rule in
 // every call form (a call never copies on its own). The
-// built-in `push` and a plain call to a `&&` parameter both report E0201.
+// built-in `push` and a plain call to a `&&` parameter both report E0201,
+// a name used after either call took it reports E0209, and `item.copy()`
+// passes in both forms.
 keep: fn(rows: &&[Int]) -> Int {
     rows.len()
 }
@@ -15,6 +17,29 @@ by_call: fn(item: [Int]) -> Int {
     keep(item)
 }
 
+used_after_push: fn() -> Int {
+    item: [Int]{3}
+    rows := [[Int]]{}
+    rows.push(item)
+    rows.len() + item.len()
+}
+
+used_after_call: fn() -> Int {
+    item: [Int]{4}
+    kept: keep(item)
+    kept + item.len()
+}
+
+copied_by_method: fn(item: [Int]) -> Int {
+    rows := [[Int]]{}
+    rows.push(item.copy())
+    rows.len()
+}
+
+copied_by_call: fn(item: [Int]) -> Int {
+    keep(item.copy())
+}
+
 run: fn() {
-    print(by_method([1]) + by_call([2]))
+    print(by_method([1]) + by_call([2]) + used_after_push() + used_after_call() + copied_by_method([5]) + copied_by_call([6]))
 }
