@@ -331,6 +331,18 @@ check (`send.reflect().effects`, a marker body, a template) reads `None`.
 `values` is the row known where it is read: the solved row once there is one,
 else the written row.
 
+A name bound once to a lambda reflects as a `ClosureInfo`: `keep.reflect()`
+reads its `name`, its `signature` (a `CallableSignature` whose parameters are
+positional and whose `effects` declares no row), the `span` and `location` of
+the name, and its `captures`, a `[CaptureInfo]` in the order the captured
+bindings are declared. Each `CaptureInfo` carries the binding's `name`, its
+`type`, the `span` where it is declared, and its `mode`, the `CaptureMode` the
+checker chose: `Read` in place, `Write` to the owner's binding, `Copy` into an
+escaping closure, `Materialize` for an owned copy of a view, or `Move` when the
+closure takes the value. Reading it is not a use of the closure value, so it
+never makes the closure escape. A `:=` name, which can be rebound to another
+value, does not reflect as a closure.
+
 Every declaration record names where its declaration is written: the
 `location` of a `TypeInfo`, a `FieldInfo` (a field or an enum case), a
 `MethodInfo` and a `FunctionInfo` is a `SourceLocation?` whose `file`, `line`

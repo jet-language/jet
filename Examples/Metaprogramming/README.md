@@ -68,7 +68,7 @@ Run a lesson from the repository root, for example `jet run Examples/Metaprogram
 
 ## Reflection
 
-- [CallableCatalog](Reflection/CallableCatalog.jet) — Functions and methods reflect one typed parameter list.
+- [CallableCatalog](Reflection/CallableCatalog.jet) — Functions and methods reflect one typed parameter list, and a closure reflects the same signature plus how it captures each binding.
 - [CallerLocation](Reflection/CallerLocation.jet) — Code-site facts (D-JAI-SITE1): a parameter whose default is `#caller` receives the place of each call that leaves it out, and `#here` is the place where it is written.
 - [CommentsAndDocs](Reflection/CommentsAndDocs/) — Comments, documentation and marker arguments stay apart: each declaration's reflection lists its `///` documentation, a module's ModuleInfo lists every comment in its file, and a `//` inside a marker argument stays text.
 - [ConsoleRegistry](Reflection/ConsoleRegistry/) — A command registry derived from metadata.

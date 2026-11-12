@@ -678,21 +678,72 @@ sema_comptime_reflection_declared_effect_names: fn(function: Func) -> [String]? 
 // called, and the type bound to each generic parameter (empty on a
 // declaration, which binds none).
 sema_comptime_reflection_callable_signature: fn(function: Func, inferred: [String]?) -> TComptimeValue Never! {
-    returned := "Unit"
-    if function.return_type == .Val(written) -> returned = if written == .Result(success, _) -> type_name(success) else -> type_name(written)
-    return_type: if returned == "Unit" -> sema_comptime_reflection_none(Type.String) else -> sema_comptime_reflection_some(TComptimeValue.String{value: returned})
     convention: if {
         function.kernel != None -> "Kernel"
         function.inline_foreign != None -> "Foreign"
         else -> "Jet"
     }
+    params: loop parameter in function.params -> sema_comptime_reflection_param_info(parameter)
+    sema_comptime_reflection_signature_record(params, function.return_type, sema_comptime_reflection_declared_effect_names(function), inferred, convention)
+}
+
+// The CallableSignature record of `params`, the written or checked return
+// type `returned` (its success type; `None` or `Unit` is no value), the
+// effect rows and the calling convention.
+sema_comptime_reflection_signature_record: fn(params: [TComptimeValue], returned: Type?, declared: [String]?, inferred: [String]?, convention: String) -> TComptimeValue Never! {
+    success := "Unit"
+    if returned == .Val(written) -> success = if written == .Result(value, _) -> type_name(value) else -> type_name(written)
+    return_type: if success == "Unit" -> sema_comptime_reflection_none(Type.String) else -> sema_comptime_reflection_some(TComptimeValue.String{value: success})
     sema_comptime_reflection_struct("CallableSignature", [SemaComptimeReflectionField]{
-        SemaComptimeReflectionField{name: "params", value: TComptimeValue.List{values: loop parameter in function.params -> sema_comptime_reflection_param_info(parameter)}},
+        SemaComptimeReflectionField{name: "params", value: TComptimeValue.List{values: params}},
         SemaComptimeReflectionField{name: "return_type", value: return_type},
-        SemaComptimeReflectionField{name: "effects", value: sema_comptime_reflection_effect_info(sema_comptime_reflection_declared_effect_names(function), inferred)},
+        SemaComptimeReflectionField{name: "effects", value: sema_comptime_reflection_effect_info(declared, inferred)},
         SemaComptimeReflectionField{name: "calling_convention", value: TComptimeValue.Enum{type_name: "CallingConvention", variant: convention, args: [TComptimeEnumArg]{}}},
         SemaComptimeReflectionField{name: "generic_bindings", value: TComptimeValue.List{values: [TComptimeValue]{}}},
     })
+}
+
+// A closure's ClosureInfo: the name it is bound to, where that name is
+// written, its CallableSignature and a CaptureInfo per captured binding. A
+// closure's parameters are positional and it writes no effect row; its body
+// row is solved after the check, so a read folded inside the check has no
+// `inferred` row, as on a function.
+sema_comptime_reflection_closure_info: fn(name: String, span: Span, lambda: TLambda, location: TComptimeValue) -> TComptimeValue Never! {
+    params := [TComptimeValue]{}
+    index := 0
+    loop index < lambda.source_params.len() && index < lambda.param_types.len() {
+        access := "Read"
+        if lambda.host_param_conventions == .Val(conventions) {
+            if index < conventions.len() -> access = sema_comptime_reflection_access_name(conventions[index])
+        }
+        params.push(sema_comptime_reflection_param_record(lambda.source_params[index], lambda.source_params[index], "PositionalOnly", type_name(lambda.param_types[index]), access, None))
+        index += 1
+    }
+    captures := loop capture in lambda.captures -> sema_comptime_reflection_struct("CaptureInfo", [SemaComptimeReflectionField]{
+        SemaComptimeReflectionField{name: "name", value: TComptimeValue.String{value: capture.source}},
+        SemaComptimeReflectionField{name: "type", value: TComptimeValue.String{value: type_name(capture.ty)}},
+        SemaComptimeReflectionField{name: "mode", value: TComptimeValue.Enum{type_name: "CaptureMode", variant: sema_comptime_reflection_capture_mode(capture.source, lambda.capture_facts), args: [TComptimeEnumArg]{}}},
+        SemaComptimeReflectionField{name: "span", value: sema_comptime_reflection_span(capture.local.span)},
+    })
+    sema_comptime_reflection_struct("ClosureInfo", [SemaComptimeReflectionField]{
+        SemaComptimeReflectionField{name: "name", value: TComptimeValue.String{value: name}},
+        SemaComptimeReflectionField{name: "signature", value: sema_comptime_reflection_signature_record(params, lambda.ret, None, None, "Jet")},
+        SemaComptimeReflectionField{name: "span", value: sema_comptime_reflection_span(span)},
+        SemaComptimeReflectionField{name: "location", value: location},
+        SemaComptimeReflectionField{name: "captures", value: TComptimeValue.List{values: captures}},
+    })
+}
+
+// How the checker captured `name` (TCaptureFacts), as a CaptureMode: `Move`
+// when the closure owns it, `Write` when the closure writes the binding,
+// `Materialize` when it holds an owned copy of a view, `Copy` when it holds
+// its own copy, and `Read` when it reads the binding in place.
+sema_comptime_reflection_capture_mode: fn(name: String, facts: TCaptureFacts) -> String Never! {
+    if facts.moved.contains(name) -> return "Move"
+    if facts.mutable.contains(name) -> return "Write"
+    if facts.materialized.contains(name) -> return "Materialize"
+    if facts.cloned.contains(name) -> return "Copy"
+    "Read"
 }
 
 sema_comptime_reflection_dimension: fn(dimension: Dimension) -> TComptimeValue Never! {
@@ -1123,20 +1174,29 @@ sema_comptime_reflection_param_info: fn(param: Param) -> TComptimeValue Never! {
         .Either -> "Either"
         .LabelOnly -> "LabelOnly"
     }
-    access: if param.convention == {
+    default: if param.default == .Val(expression) -> Val(expr_source_span(expression)) else -> None
+    sema_comptime_reflection_param_record(param.name, label, zone, type_name(param.ty), sema_comptime_reflection_access_name(param.convention), default, variadic: param.variadic)
+}
+
+// The ParamAccess variant of `convention`.
+sema_comptime_reflection_access_name: fn(convention: AccessConvention) -> String Never! {
+    if convention == {
         .Read -> "Read"
         .Write -> "Write"
         .Move -> "Move"
     }
-    default: if param.default == .Val(expression) -> Val(expr_source_span(expression)) else -> None
+}
+
+// A ParamInfo record of its parts (see sema_comptime_reflection_param_info).
+sema_comptime_reflection_param_record: fn(name: String, label: String, zone: String, ty: String, access: String, default: Span?, variadic: Bool{false}) -> TComptimeValue Never! {
     sema_comptime_reflection_struct("ParamInfo", [SemaComptimeReflectionField]{
-        SemaComptimeReflectionField{name: "name", value: TComptimeValue.String{value: param.name}},
+        SemaComptimeReflectionField{name: "name", value: TComptimeValue.String{value: name}},
         SemaComptimeReflectionField{name: "label", value: TComptimeValue.String{value: label}},
         SemaComptimeReflectionField{name: "zone", value: TComptimeValue.Enum{type_name: "ParamZone", variant: zone, args: [TComptimeEnumArg]{}}},
-        SemaComptimeReflectionField{name: "type", value: TComptimeValue.String{value: type_name(param.ty)}},
+        SemaComptimeReflectionField{name: "type", value: TComptimeValue.String{value: ty}},
         SemaComptimeReflectionField{name: "access", value: TComptimeValue.Enum{type_name: "ParamAccess", variant: access, args: [TComptimeEnumArg]{}}},
         SemaComptimeReflectionField{name: "default", value: sema_comptime_reflection_default_info(default)},
-        SemaComptimeReflectionField{name: "variadic", value: TComptimeValue.Bool{value: param.variadic}},
+        SemaComptimeReflectionField{name: "variadic", value: TComptimeValue.Bool{value: variadic}},
     })
 }
 

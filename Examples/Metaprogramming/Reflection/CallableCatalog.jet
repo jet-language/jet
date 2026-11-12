@@ -7,6 +7,10 @@
 // the checker solves from the body, read after the check
 // (`b.program.functions()`); a reflected constant is folded inside the check,
 // so it reads None. The `effects` fact read is the signature's own `effects`.
+// A name bound to a lambda reflects as a ClosureInfo: the same signature, plus
+// a CaptureInfo per captured binding with the mode the checker chose: `Read`
+// in place, `Write` to the owner's binding, `Copy` into an escaping closure,
+// `Materialize` for an owned copy of a view, `Move` when it takes the value.
 connect: fn(host: String, /, *, timeout seconds: Int{30}, tls: Bool{true}) -> String {
     "{host}:{seconds}:{tls}"
 }
@@ -20,6 +24,23 @@ Log: struct {
 }
 
 send: fn(text: String) -[Net]> Int { text.len() }
+
+capture_mode: fn(mode: CaptureMode) -> String {
+    if mode == {
+        .Read -> "reads"
+        .Write -> "writes"
+        .Copy -> "copies"
+        .Materialize -> "materializes"
+        .Move -> "takes"
+    }
+}
+
+show_closure: fn(info: ClosureInfo) {
+    params: (loop param in info.signature.params -> "{param.name}: {param.type}").join(", ")
+    line: if info.location == .Val(at) -> at.line else -> 0
+    print("{info.name}({params}) -> {info.signature.return_type ?? "nothing"}, bound on line {line}")
+    loop capture in info.captures -> print("  {info.name} {capture_mode(capture.mode)} {capture.name} ({capture.type})")
+}
 
 run: fn() {
     loop param in connect.reflect().signature.params {
@@ -55,4 +76,18 @@ run: fn() {
     }
     print("connect returns {signature.return_type ?? "nothing"} by the {convention} calling convention")
     print(connect("db"))
+    limit: 3
+    factor: 2
+    count := 0
+    keep: (name: String) -> {
+        count += 1
+        name.len() <= limit
+    }
+    budget: () -> limit * factor
+    show_closure(keep.reflect())
+    show_closure(budget.reflect())
+    kept: [budget]
+    first: keep("ada")
+    second: keep("grace")
+    print("keep ada {first}, grace {second}; {count} calls; budget {kept[0].call()}")
 }

@@ -126,6 +126,9 @@ SemaScopeBinding: struct {
     // facts: a call through the name from inside another lambda's body adds
     // them to that lambda's row (sema_expression_lambda_add_effect_facts).
     lambda_effects: TEffectFacts?{None}
+    // A `name: (…) -> …` local bound to a lambda keeps the lambda's
+    // ClosureInfo record, which `name.reflect()` reads.
+    closure: TComptimeValue?{None}
 }
 
 SemaOriginFact: struct {
@@ -2398,6 +2401,14 @@ sema_scope_mark_number_literal: fn(table: &SemaScopeTable, name: String, literal
     index: sema_scope_resolve_index(table, name) ?? return
     sema_scope_note_binding_edit(table, index)
     table.bindings[index].number_literal = literal
+}
+
+// Keeps the ClosureInfo `info` on the binding `name` just declared (see
+// SemaScopeBinding.closure).
+sema_scope_mark_closure: fn(table: &SemaScopeTable, name: String, info: &&TComptimeValue) Never! {
+    index: sema_scope_resolve_index(table, name) ?? return
+    sema_scope_note_binding_edit(table, index)
+    table.bindings[index].closure = Val(info)
 }
 
 // Keeps the name-end-through-`:` span of the binding `name` just declared

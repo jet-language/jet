@@ -1035,11 +1035,20 @@ sema_call_static_reflect_builtin: fn(name: String, span: Span, expected: Type?, 
 }
 
 // `f.reflect()` on a declared function: its FunctionInfo record, computed
-// while compiling, as `T.reflect()` is for a type. None when `name` binds no
-// function (a local of that name shadows it).
+// while compiling, as `T.reflect()` is for a type; on a local bound once to a
+// lambda, the lambda's ClosureInfo. None when `name` binds neither (another
+// local of that name shadows the function).
 sema_call_static_reflect_function: fn(name: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck? {
-    graph: program.registration_graph ?? return None
     local: sema_scope_resolve_index(scopes, name)
+    // A local bound to a lambda reflects as its ClosureInfo.
+    if local == .Val(closure_index) {
+        if scopes.bindings[closure_index].closure == .Val(closure) {
+            // copy: the binding keeps its record for every later read.
+            closure_info: sema_tree_node(sema_fact_named("ClosureInfo"), TExprKind.CtLit{value: closure.copy()}, span)
+            return Val(SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(closure_info, expected, environment, program, diagnostics)})
+        }
+    }
+    graph: program.registration_graph ?? return None
     resolved: if local == .Val(index) -> sema_scope_binding_symbol(environment, scopes, index) else -> sema_resolved_symbol(graph, sema_type_graph_lookup_symbol(graph, environment.module_identity, name) ?? return None)
     if resolved.kind != SymbolKind.Function -> return None
     info: sema_fact_function_info(resolved, graph) ?? return None

@@ -115,6 +115,7 @@ sema_fact_enum_variants: fn(enum_name: String) -> [String]? {
         enum_name == "CallingConvention" -> Val([String]{"Jet", "Kernel", "Foreign"})
         enum_name == "ContributionKind" -> Val([String]{"Declaration", "Profile", "Build", "CommandLine"})
         enum_name == "CommentKind" -> Val([String]{"Line", "Block", "Documentation"})
+        enum_name == "CaptureMode" -> Val([String]{"Read", "Write", "Copy", "Materialize", "Move"})
         enum_name == "UnitScaleProvenanceKind" -> Val([String]{"Rational", "SymbolicPi", "Conventional", "Measured"})
         else -> None
     }
@@ -439,6 +440,24 @@ sema_fact_reflection_field_type: fn(type_name: String, field: String) -> Type? {
             field == "arithmetic" -> Val(sema_fact_list_of("ArithmeticOperationInfo"))
             field == "facts" -> Val(sema_fact_list_of("FactInfo"))
             field == "markers" -> Val(sema_fact_list_of("MarkerInfo"))
+            else -> None
+        }
+    }
+    if type_name == "ClosureInfo" {
+        return if {
+            field == "name" -> Val(string)
+            field == "signature" -> Val(sema_fact_named("CallableSignature"))
+            field == "span" -> Val(sema_fact_named("SourceSpan"))
+            field == "location" -> Val(sema_fact_optional("SourceLocation"))
+            field == "captures" -> Val(sema_fact_list_of("CaptureInfo"))
+            else -> None
+        }
+    }
+    if type_name == "CaptureInfo" {
+        return if {
+            field == "name" || field == "type" -> Val(string)
+            field == "mode" -> Val(sema_fact_named("CaptureMode"))
+            field == "span" -> Val(sema_fact_named("SourceSpan"))
             else -> None
         }
     }
