@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6772,
-    "rev": 99946,
+    "rev": 99947,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -99499,12 +99499,12 @@
       "criteria": [
         {
           "n": 1,
-          "text": "The root is named (why the built artifact keeps a string past its last use when jet run does not). The fix is at that root, and memory_semantics/strings_free_at_their_last_use passes for jet run at O0/O1/O2 and for the binary jet build produces (jet build --optimize=full, then run it).",
+          "text": "memory_semantics/strings_free_at_their_last_use tests strings made at run time (their size comes from a run-time input, so the compiler can't fold them), keeps its peak assertion, and passes for jet run at O0/O1/O2 and for the binary jet build --optimize=full produces. The compile-time rule is unchanged: no size bound makes a computable value fall back to run time.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-12T10:16:31.966Z"
+          "at": "2026-11-12T10:30:15.819Z"
         }
       ],
       "refs": [],
@@ -99513,7 +99513,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-12T10:16:07.441Z",
-      "updated": "2026-11-12T10:16:31.966Z",
+      "updated": "2026-11-12T10:30:15.819Z",
       "updatedBy": "Main",
       "criteriaLastN": 1
     },
@@ -200207,6 +200207,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-12T10:30:15.819Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0xphd0i",
+      "note": "#1: Owner challenge, 2026-11-12. The compile-time rule (D-COMPTIME-WORD1=A: compute while compiling whenever it can) stays. The failure was the test: it measured freeing of build-time constants, which live in the binary. G50b's 256 KiB run-time fallback is withdrawn.; was: The root is named (why the built artifact keeps a string past its last use when jet run does not). The fix is at that root, and memory_semantics/strings_free_at_their_last_use passes for jet run at O0"
+    },
     {
       "at": "2026-11-12T10:29:57.958Z",
       "by": "Main",
