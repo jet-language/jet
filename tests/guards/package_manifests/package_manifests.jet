@@ -1,0 +1,112 @@
+// #6005 c26: the Package formatter round-trips every tracked package.jet. A
+// manifest the Package model reads (PackageFacts.parse) formats; one it
+// can't read is refused, so a refusal always means an invalid manifest. The
+// formatted text keeps every comment of the source, byte for byte and in
+// order, each beside the field or record it precedes or follows, and
+// formatting it again changes nothing. Comments are read with the Jet lexer,
+// not the formatter's own comment scan.
+use {
+    jet_lexer.[lex, TOKEN_IDENT, TOKEN_FALSE, TOKEN_LINE_COMMENT, TOKEN_BLOCK_COMMENT]
+    jet_pkg_model.[PackageFacts, pkg_format_source]
+    corpus_manifest.[guards_enter_root, policy_slice_bytes]
+    pm_files: core.files
+    pm_process: core.process
+}
+
+// A comment as written, with the name or literal just before it and just
+// after it ("" at either end of the file): the field or record it sits with.
+ManifestComment: struct {
+    text: String
+    before: String
+    after: String
+}
+
+// Each comment of `source`, in order. A name or literal is a token of the
+// kinds TOKEN_IDENT through TOKEN_FALSE; punctuation the formatter may add
+// or drop, such as a trailing comma, is not an anchor.
+pm_comments: fn(source: String) -> [ManifestComment] {
+    found := [ManifestComment]{}
+    open := [Int]{}
+    last := ""
+    loop token in lex(source.bytes()).tokens {
+        text: policy_slice_bytes(source, token.span.start, token.span.end)
+        if {
+            token.kind == TOKEN_LINE_COMMENT || token.kind == TOKEN_BLOCK_COMMENT -> {
+                found.push(ManifestComment{text: text, before: last.copy(), after: ""})
+                open.push(found.len() - 1)
+            }
+            token.kind >= TOKEN_IDENT && token.kind <= TOKEN_FALSE -> {
+                loop at in open -> found[at].after = text.copy()
+                open = [Int]{}
+                last = text
+            }
+        }
+    }
+    found
+}
+
+// Whether `formatted` holds the comments of `source` byte for byte and in
+// order, each still beside the name or literal it preceded or followed.
+pm_comments_kept: fn(source: String, formatted: String) -> Bool {
+    wanted: pm_comments(source)
+    kept: pm_comments(formatted)
+    if kept.len() != wanted.len() -> return false
+    loop at in 0..<wanted.len() {
+        if kept[at].text != wanted[at].text -> return false
+        if kept[at].before != wanted[at].before && kept[at].after != wanted[at].after -> return false
+    }
+    true
+}
+
+// What is wrong with the round trip of the manifest `source` at `path`, or
+// None when it holds.
+pm_round_trip: fn(path: String, source: String) -> String? {
+    valid: !(PackageFacts.parse(source, path) == .Err(_))
+    first: pkg_format_source(source, path) ?? {
+        if valid -> return Val("{path}: a valid manifest is refused: {err.message}")
+        return None
+    }
+    if !valid -> return Val("{path}: an invalid manifest is formatted")
+    if !pm_comments_kept(source, first) -> return Val("{path}: formatting loses, changes, reorders or moves a comment")
+    second: pkg_format_source(first, path) ?? return Val("{path}: the formatted manifest is refused: {err.message}")
+    if second != first -> return Val("{path}: formatting the formatted manifest changes it")
+    None
+}
+
+// The tracked files named package.jet.
+pm_tracked_manifests: fn() -> [String] {
+    listed: pm_process.cmd([String]{"git", "ls-files", "--", "package.jet", "*/package.jet"}).stdout(.Capture).stderr(.Capture).run() ?? panic("run git ls-files: {err}")
+    assert(listed.code == 0, "git ls-files failed: {pm_process.combined_output(listed).trim()}")
+    paths := [String]{}
+    loop line in pm_process.stdout_lines(listed) {
+        if line != "" -> paths.push(line.copy())
+    }
+    paths
+}
+
+#Test("a commented manifest formats with its comments, and an invalid one is refused") {
+    commented: "// The demo package.\n\nname:    \"demo\" // the package name\nversion: \"0.1.0\"\n"
+    assert_eq(pm_round_trip("package.jet", commented), None)
+    comments: pm_comments(commented)
+    assert_eq(comments.len(), 2)
+    assert_eq("{comments[0].text}|{comments[0].before}|{comments[0].after}", "// The demo package.||name")
+    assert_eq("{comments[1].text}|{comments[1].before}|{comments[1].after}", "// the package name|\"demo\"|version")
+    moved: "// The demo package.\n\nname: \"demo\"\nversion: \"0.1.0\" // the package name\n"
+    assert(!pm_comments_kept(commented, moved), "a comment carried to another field is not kept")
+    unclosed: "name: \"demo\"\ndeps: {{\n"
+    assert(PackageFacts.parse(unclosed, "package.jet") == .Err(_), "an unclosed manifest is invalid")
+    assert(pkg_format_source(unclosed, "package.jet") == .Err(_), "the formatter refuses an invalid manifest")
+    assert_eq(pm_round_trip("package.jet", unclosed), None)
+}
+
+#Test("every tracked package.jet round-trips through the Package formatter") {
+    guards_enter_root()
+    paths: pm_tracked_manifests()
+    assert(paths.len() > 1000, "the tracked manifests must be readable, found {paths.len()}")
+    problems := [String]{}
+    loop path in paths {
+        source: pm_files.read(path) ?? panic("read {path}: {err}")
+        if pm_round_trip(path, source) == .Val(problem) -> problems.push(problem)
+    }
+    assert(problems.len() == 0, "{problems.len()} of {paths.len()} manifests fail the round trip:\n{problems.join("\n")}")
+}
