@@ -50,7 +50,8 @@ JET_CLI_FLAG_TYPED_REASONS: comptime { [JetCLIFlagTypedReason]{
     // It names what this one run works on (`-e CODE`, `--query SQL`, `-o PATH`).
     {name: "operand", reason: "it names what one run works on"},
     // It gives permissions, which are never saved (`--allow`, `-A`, `--gate`,
-    // `--token`, `--allow-unofficial`).
+    // `--token`, `--allow-unofficial`, and `--trust-key`, whose key decides
+    // which signer `jet self update` accepts).
     {name: "authority", reason: "permissions are given on the command line each run"},
 } }
 
@@ -1019,7 +1020,7 @@ JET_CLI_FIXED_FLAGS: comptime { [JetCLIFlagSpec]{
     {long: "--endpoint", help: "With self-update: Signed toolchain channel endpoint", value: JetCLIFlagValue.Value},
     {long: "--channel", help: "With self-update: Toolchain channel name", value: JetCLIFlagValue.Value},
     {long: "--platform", help: "With self-update: Toolchain target triple", value: JetCLIFlagValue.Value},
-    {long: "--trust-key", help: "With self-update: Public trust-key file", value: JetCLIFlagValue.Value},
+    {long: "--trust-key", help: "With self-update: Public trust-key file", value: JetCLIFlagValue.Value, typed: "authority"},
     {long: "--apply", help: "With self-update/generate/new: Apply the verified artifact or planned source writes", typed: "destructive"},
     {long: "--preview", help: "With new/bind --update/build --import: Preview source writes, a binding plan, or an imported build graph without applying them"},
     {long: "--remove", help: "With new: Remove only unchanged outputs recorded by the scaffold receipt", typed: "destructive"},

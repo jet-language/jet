@@ -1,7 +1,8 @@
 # #6606 c2: a flag that gives permissions (--allow, -A, --gate, --token,
-# --allow-unofficial) has no setting. A package.jet `commands:` block or the
-# user settings file that names one is refused with E2117 before the command
-# runs, and the program never starts.
+# --allow-unofficial, --trust-key) has no setting. A package.jet `commands:`
+# block or the user settings file that names one is refused with E2117 before
+# the command runs, and the program never starts. A trust key would let a
+# settings file choose which signer `jet self update` accepts.
 fixture: permission_flags_are_never_settings.fixture
 env: NO_COLOR=1
 copy: allow.package package.jet
@@ -17,6 +18,13 @@ step: jet run main.jet
 env: XDG_CONFIG_HOME={work}/config
 exit: 2
 stderr: ~ "Error [jet.FlagNotASetting]: `run.gate`" # the user file's remembered permission is refused
+stdout: !~ "ran" # the program never starts
+copy: trust.settings config/jet/settings.jet
+step: jet run main.jet
+env: XDG_CONFIG_HOME={work}/config
+exit: 2
+stderr: ~ "Error [jet.FlagNotASetting]: `self.trust_key`" # a remembered trust key is refused too
+stderr: ~ "permissions are given on the command line each run" # for the authority reason
 stdout: !~ "ran" # the program never starts
 step: jet run main.jet
 exit: 0
