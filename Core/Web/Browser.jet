@@ -211,7 +211,9 @@ Browser: struct {
         Ok(BrowserContext{__browser: self, __scope: new_scope(id)})
     }
 
+    // A BiDi event; CDP events go through `protocol("cdp").subscribe`.
     subscribe: fn(self, event: String) BrowserError! -[Net, Time]> {
+        if event.starts_with("goog:cdp") -> return Err(BrowserError{kind: "unsupported protocol"})
         browser_command(self, "session.subscribe", obj([(key: "events", value: Dyn.Array([Dyn]{Dyn.Text(event.copy())}))]))
         Ok()
     }
@@ -557,7 +559,9 @@ BrowserIntercept: struct {
 }
 
 // The checked expert path: raw BiDi or capability-gated CDP. BiDi cannot
-// smuggle `goog:cdp.*`, and CDP methods must have the `Domain.command` shape.
+// smuggle `goog:cdp.*`, and CDP methods and events must have the
+// `Domain.name` shape. CDP events join the session's one event queue, with
+// the same slots and redaction as BiDi events, as their `Domain.event` kinds.
 BrowserProtocol: struct {
     __browser: Browser
     __kind: String
@@ -575,6 +579,19 @@ BrowserProtocol: struct {
         result: browser_command(self.__browser, "goog:cdp.sendCommand", obj([(key: "method", value: Dyn.Text(method.copy())), (key: "params", value: params)]))
         Ok(json.dumps(result) ?? return Err(BrowserError{kind: "protocol"}))
     }
+
+    subscribe: fn(self, event: String) BrowserError! -[Net, Time]> {
+        if self.__kind == "bidi" {
+            self.__browser.subscribe(event)
+            return Ok()
+        }
+        if self.__kind != "cdp" || !browser_cdp(self.__browser) -> return Err(BrowserError{kind: "unsupported protocol"})
+        if !cdp_method_ok(event) -> return Err(BrowserError{kind: "protocol"})
+        browser_command(self.__browser, "session.subscribe", obj([(key: "events", value: Dyn.Array([Dyn]{Dyn.Text("goog:cdp.{event}")}))]))
+        Ok()
+    }
+
+    next_event: fn(self, timeout: BrowserTimeout) -[Net, Time]> BrowserEvent BrowserError! { self.__browser.next_event(timeout) }
 }
 
 BrowserLocked: struct {
@@ -1130,7 +1147,7 @@ browser_capture_event: fn(browser: Browser, value: Dyn) -> Bool BrowserError! {
     kind: browser_text(value, "type") ?? return Err(BrowserError{kind: "protocol"})
     if kind != "event" -> return Ok(false)
     method: browser_string(value, "method")
-    event: event_facts(value, method)
+    event: if method.starts_with("goog:cdp.") -> __cdp_event_facts(value, method) else -> event_facts(value, method)
     browser_trace_push(browser, "event:{fact_hash(method)}")
     browser_queue_event(browser, event)
     Ok(true)
@@ -1148,15 +1165,35 @@ event_facts: fn(value: Dyn, method: String) -> BrowserEvent Never! {
     }
     if url == None -> url = browser_text(params, "url")
     if url == .Val(found) -> out.url_hash = fact_hash(found)
-    if browser_get(params, "response") == .Val(response) {
-        if browser_get(response, "status") == .Val(status) {
-            code: dyn_int(status) ?? -1
-            if code >= 0 && code <= 599 -> out.status_code = code
-        }
-    }
+    out.status_code = __response_status(params)
     out.download_id = browser_text(params, "download") ?? ""
     if browser_text(params, "suggestedFilename") == .Val(name) -> out.suggested_filename_hash = fact_hash(name)
     out
+}
+
+// chromedriver's BiDi mapper sends a CDP event as `goog:cdp.<Domain.event>`
+// with the CDP payload under `params.params`. It is queued as its
+// `Domain.event` kind with the same redacted network facts.
+__cdp_event_facts: fn(value: Dyn, method: String) -> BrowserEvent Never! {
+    out := BrowserEvent{method: method.remove_prefix("goog:cdp."), request_id: "", request_method: "", url_hash: "", is_blocked: false, status_code: 0, download_id: "", suggested_filename_hash: ""}
+    outer: browser_get(value, "params") ?? return out
+    params: browser_get(outer, "params") ?? return out
+    out.request_id = browser_text(params, "requestId") ?? ""
+    if browser_get(params, "request") == .Val(request) {
+        out.request_method = browser_text(request, "method") ?? ""
+        if browser_text(request, "url") == .Val(url) -> out.url_hash = fact_hash(url)
+    }
+    out.status_code = __response_status(params)
+    out
+}
+
+// The HTTP status of an event's `response`, or 0 when it has none in range.
+__response_status: fn(params: Dyn) -> Int Never! {
+    response: browser_get(params, "response") ?? return 0
+    status: browser_get(response, "status") ?? return 0
+    code: dyn_int(status) ?? -1
+    if code >= 0 && code <= 599 -> return code
+    0
 }
 
 C_BIDI_2024_11: [String]{
@@ -1942,6 +1979,19 @@ C_REPORT_HTML_TAIL: "</script><script>\nconst data=JSON.parse(document.getElemen
     assert_eq(server_host_port("http://user@host:1"), None)
     assert_eq(server_host_port("ftp://host"), None)
     assert_eq(css_attr_equals("data-testid", "a\"b"), "[data-testid=\"a\\\"b\"]")
+}
+
+#Test("a CDP event is queued as its Domain.event kind with redacted network facts") {
+    wire: "{{\"type\":\"event\",\"method\":\"goog:cdp.Network.responseReceived\",\"params\":{{\"event\":\"Network.responseReceived\",\"session\":\"S1\",\"params\":{{\"requestId\":\"R7\",\"request\":{{\"method\":\"GET\",\"url\":\"https://example.test/app.js\"}},\"response\":{{\"status\":200}}}}}}}}"
+    value: json.parse(wire) ?? panic("the CDP event parses")
+    event: __cdp_event_facts(value, "goog:cdp.Network.responseReceived")
+    assert_eq(event.kind(), "Network.responseReceived")
+    assert_eq(event.request_id(), "R7")
+    assert_eq(event.request_method(), "GET")
+    assert_eq(event.url_hash(), fact_hash("https://example.test/app.js"))
+    assert_eq(event.status_code(), 200)
+    bare: __cdp_event_facts(json.parse("{{\"type\":\"event\",\"method\":\"goog:cdp.Debugger.paused\"}}") ?? panic("the bare event parses"), "goog:cdp.Debugger.paused")
+    assert_eq("{bare.kind()} {bare.request_id()} {bare.status_code()}", "Debugger.paused  0")
 }
 
 #Test("browser report renders the v1 schema, text summary, and escaped viewer") {

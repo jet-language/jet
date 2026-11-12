@@ -1630,7 +1630,7 @@ thread that opened them (**E1102**).
 | `locator.wait(timeout)` / `locator.wait_gone(timeout)` | `!BrowserError` | Wait for a locator to appear or disappear. |
 | `locator.click()` / `locator.hover()` | `!BrowserError` | Perform checked pointer actions. |
 | `locator.fill(text)` / `locator.press(key)` | `!BrowserError` | Fill a control or send a key. |
-| `browser.subscribe(kind)` / `browser.next_event(timeout)` | `!BrowserError` / `BrowserEvent !BrowserError` | Subscribe to and receive bounded, redacted browser events. |
+| `browser.subscribe(kind)` / `browser.next_event(timeout)` | `!BrowserError` / `BrowserEvent !BrowserError` | Subscribe to and receive bounded, redacted BiDi events; a `goog:cdp` kind is refused. |
 | `browser.add_intercept(pattern)` / `add_intercept_url(pattern, url)` | `BrowserIntercept` | Install a network interception rule. |
 | `browser.continue_request(id)` / `fail_request(id)` / `fulfill_request(id, status, body)` | `!BrowserError` | Continue, fail, or fulfill an intercepted request. |
 | `page.set_cookie(name, value, domain)` / `page.cookie(name)` | `!BrowserError` / `String? !BrowserError` | Set or read a page-partition cookie. |
@@ -1640,6 +1640,7 @@ thread that opened them (**E1102**).
 | `locator.set_files(path)` | `!BrowserError` | Set files on a file-upload control. |
 | `page.screenshot()` / `page.pdf()` | `[U8] !BrowserError` | Capture a bounded screenshot or PDF artifact. |
 | `browser.protocol("bidi" \| "cdp")` / `protocol.send(method, params)` | `BrowserProtocol` / response | Access the selected protocol; CDP requires the advertised capability. |
+| `protocol.subscribe(kind)` / `protocol.next_event(timeout)` | `!BrowserError` / `BrowserEvent !BrowserError` | Subscribe to a CDP `Domain.event` (or a BiDi event) and receive it from the session's one event queue, as its `Domain.event` kind with the same slots and redaction. |
 | `browser.privacy()` | `BrowserPrivacy` | Report isolated-profile, receipt-redaction, and shared-profile policy facts. |
 | `browser.receipt()` / `browser.trace()` | `BrowserReceipt` / `BrowserTrace` | Return redacted audit facts and the bounded action trace. |
 | `begin_named(config, test, engine, attempt, path, line, column)` / `fixture_context(fixture)` / `fixture_page(fixture)` | `BrowserTestFixture !BrowserError` / `BrowserContext` / `BrowserPage` | Open a named test fixture (locked engine, isolated context, page, event subscriptions) and read its context and page. |

@@ -1,8 +1,10 @@
 // Checked expert CDP supplement.
 // `protocol("cdp")` opens the Chrome DevTools Protocol only when the session's
 // abilities report it. The BiDi protocol refuses to smuggle a `goog:cdp.*`
-// command, and the CDP protocol refuses a method that is not
-// `Domain.command`, so each request goes through exactly one checked door.
+// command or event, and the CDP protocol refuses a method or event that is not
+// `Domain.name`, so each request goes through exactly one checked door. A CDP
+// event arrives on the session's one event queue as its `Domain.event` kind,
+// redacted like a BiDi event: the URL is a hash.
 //
 // Run against a WebDriver BiDi endpoint the host supplies:
 //   jet run Examples/Network/Browser/BrowserCDP.jet -- ws://127.0.0.1:9222/session
@@ -37,7 +39,21 @@ run: fn(args: Endpoint) {
     reply: cdp.send("Network.setCacheDisabled", "{{\"cacheDisabled\":true}}")
     print("CDP Network.setCacheDisabled: {reply}")
 
+    smuggled_event: if session.subscribe("goog:cdp.Network.requestWillBeSent") == {
+        .Ok(_) -> "subscribed"
+        .Err(_) -> "refused"
+    }
+    print("BiDi subscribe goog:cdp.Network.requestWillBeSent: {smuggled_event}")
+    event: network_event(cdp, timeout)
+    print("CDP event: {event.kind()}, request {event.request_id()} {event.request_method()}, URL hash {event.url_hash()}")
+
     trace: session.trace()
     print("trace redacted: {trace.redacted()}, names the CDP method: {trace.summary().contains("Network")}")
     session.close()
+}
+
+// Subscribes to one CDP event and reads it from the session's event queue.
+network_event: fn(cdp: browser.BrowserProtocol, timeout: browser.BrowserTimeout) -[Net, Time]> browser.BrowserEvent browser.BrowserError! {
+    cdp.subscribe("Network.requestWillBeSent")
+    cdp.next_event(timeout)
 }

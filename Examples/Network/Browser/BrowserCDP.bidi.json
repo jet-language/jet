@@ -5,12 +5,21 @@
   "session.status": "{\"ready\":true,\"message\":\"ready\"}",
   "session.new": "{\"sessionId\":\"cdp\",\"capabilities\":{\"browserName\":\"mock\",\"goog:cdp\":true}}",
   "goog:cdp.sendCommand": "{\"result\":{\"cacheDisabled\":true}}",
+  "session.subscribe": "{\"subscription\":\"cdp-network\"}",
   "session.end": "{}"
+ },
+ "after": {
+  "session.subscribe": [
+   "{\"type\":\"event\",\"method\":\"goog:cdp.Network.requestWillBeSent\",\"params\":{\"event\":\"Network.requestWillBeSent\",\"session\":\"S1\",\"params\":{\"requestId\":\"1000.1\",\"request\":{\"method\":\"GET\",\"url\":\"https://example.test/app.js\"}}}}"
+  ]
  },
  "require": {
   "goog:cdp.sendCommand": [
    "\"method\":\"Network.setCacheDisabled\"",
    "\"params\":{\"cacheDisabled\":true}"
+  ],
+  "session.subscribe": [
+   "\"events\":[\"goog:cdp.Network.requestWillBeSent\"]"
   ]
  }
 }

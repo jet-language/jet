@@ -1385,8 +1385,13 @@ exposes raw BiDi and explicitly checked CDP commands through
 CDP is an explicit expert supplement (#1192), not a silent BiDi fallback.
 `session.new` must advertise `goog:cdp: true` before `protocol("cdp")`
 succeeds. CDP `send` accepts only audited `Domain.command` shapes (PascalCase
-domain). Raw BiDi `send` rejects `goog:cdp.*` so experts cannot smuggle CDP
-through the portable profile path.
+domain). Raw BiDi `send` and `Browser.subscribe` reject `goog:cdp.*` so
+experts cannot smuggle CDP through the portable profile path. CDP events use
+the same checked door: `protocol("cdp").subscribe("Domain.event")` subscribes
+to `goog:cdp.Domain.event`, and the event joins the session's one queue as its
+`Domain.event` kind, with the same 256 slots, trace hash and redacted network
+facts (`requestId`, the request method, a hashed URL, the response status) as
+a BiDi event; `protocol.next_event` reads that queue.
 
 The protocol core accepts only strict JSON objects and exact response IDs.
 Malformed messages, protocol errors, unsupported profiles, unavailable expert
