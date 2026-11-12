@@ -113,13 +113,35 @@ store_quota_fits: fn(hangar: String, incoming_bytes: Int, limit: Int, excluded: 
 }
 
 store_quota_footprint: fn(path: String, excluded: String?) -> Int StoreError! {
+    store_quota_walk(path, excluded, false)
+}
+
+// `listed`: `path` came from a directory listing. The Hangar holds other
+// processes' in-flight trees (a C toolchain build's scratch objects, a
+// staging tree being published or removed), so a listed node can be renamed
+// or deleted before it is read; a node that is gone holds no bytes. The root
+// of the walk must exist.
+store_quota_walk: fn(path: String, excluded: String?, listed: Bool) -> Int StoreError! {
     if excluded == Val((path)) -> return Ok(0)
-    metadata: files.stat(path)
+    metadata: if files.stat(path) == {
+        .Ok(value) -> value
+        .Err(error) -> {
+            if listed && StoreError.IO(error).is_not_found() -> return Ok(0)
+            return Err(StoreError.IO(error))
+        }
+    }
     if metadata.is_symlink || metadata.is_file -> return Ok(metadata.size)
     if !metadata.is_dir -> return Err(StoreError.InvalidData("Hangar footprint contains an unsupported node: {path}"))
+    entries: if files.list_dir(path) == {
+        .Ok(value) -> value
+        .Err(error) -> {
+            if listed && StoreError.IO(error).is_not_found() -> return Ok(0)
+            return Err(StoreError.IO(error))
+        }
+    }
     total := 0
-    loop entry in files.list_dir(path) {
-        size: store_quota_footprint(entry.path, excluded)
+    loop entry in entries {
+        size: store_quota_walk(entry.path, excluded, true)
         if total > STORE_INT_MAX - size -> return Err(StoreError.Other("Hangar footprint overflowed"))
         total += size
     }
