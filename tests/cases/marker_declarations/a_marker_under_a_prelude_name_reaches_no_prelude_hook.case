@@ -1,0 +1,21 @@
+# A compiler hook belongs to the Prelude marker declaration, not to its name
+# (jet_foundation MarkerHooks.jet): a dependency's own `Unsafe` and `MustUse`,
+# applied through its module, make the functions neither unsafe nor
+# must-use; a code module's own `MustUse` is its marker inside that module
+# only, so the file's other `#MustUse` still reaches the Prelude hook.
+fixture: a_marker_under_a_prelude_name_reaches_no_prelude_hook.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+step: jet check app/main.jet
+exit: 0 # no unsafe call and no ignored #MustUse result
+stderr: !~ "[E" # clean
+step: jet run app/main.jet
+exit: 0
+stdout: = a_marker_under_a_prelude_name_reaches_no_prelude_hook.out # both functions run as plain calls
+step: jet check main.jet
+cwd: scoped
+exit: 1 # only the Prelude #MustUse result outside the module is ignored
+stderr: count "[jet.MustUseIgnored]" = 1 # the code module's own MustUse reaches no hook
+stderr: ~ "`outer` must be used" # the one ignored result is the file-scope function's

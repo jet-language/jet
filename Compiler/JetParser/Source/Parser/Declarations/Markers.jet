@@ -13,9 +13,9 @@ use {
         ItemTemplateLoop,
         Marker,
         MarkerCallArg,
-        MARKER_STATE,
         MarkerDecl,
         MarkerDeclParam,
+        MarkerHook,
         STATE_ARROW_LABEL,
         Span,
         StructDef,
@@ -462,9 +462,10 @@ parser_parse_marker_value_arg: fn(state: &JetParserState, marker_name: String, l
         if parser_parse_marker_required_arg(state, args, marker_name, label) -> required.push(args.len() - 1)
         return label.copy()
     }
-    // A marker value is read, never written or taken. A `#State` name is
-    // never a struct literal or a bare `name -> body` lambda.
-    arrow: marker_name == MARKER_STATE
+    // A marker value is read, never written or taken. A name that reaches the
+    // `#State` hook is never a struct literal or a bare `name -> body` lambda.
+    at: parser_current(state).span.start
+    arrow: parser_marker_name_is_hook(state, marker_name, at, MarkerHook.State)
     argument: if arrow -> parser_parse_expression_no_struct_lit(state, 2) else -> parser_parse_expression(state, 1, 2)
     args.push(MarkerCallArg.Expr{value: argument.expr})
     // A chain `A -> B -> C` keeps every step; the `#State` applicator refuses

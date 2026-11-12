@@ -17,6 +17,7 @@ use jet_foundation.[
     Marker,
     MarkerDecl,
     MarkerDeclParam,
+    MarkerHook,
     Program,
     RuleSite,
     STATE_ARROW_LABEL,
@@ -40,6 +41,7 @@ use jet_foundation.[
     diagnostic_with_edit,
     diagnostic_with_label,
     expr_span,
+    marker_hook_of_declaration,
     symbol_id,
     type_name,
 ]
@@ -1040,7 +1042,7 @@ sema_marker_rules_validate_argument_signature: fn(marker: Marker, signature: TAp
         observe := true
         unit_argument := argument == .UnitLit(_, _, _, _, _, _, _)
         if {
-            !declared && (binding.kind == TAppliedRuleArgKind.Ident || (binding.kind == TAppliedRuleArgKind.Any && marker.name != "Default") || (binding.kind == TAppliedRuleArgKind.DurationOrString && unit_argument) || (binding.kind == TAppliedRuleArgKind.StringOrMenu && sema_marker_rules_names_menu_word(argument)) || binding.kind == TAppliedRuleArgKind.EffectRoots) -> {
+            !declared && (binding.kind == TAppliedRuleArgKind.Ident || binding.kind == TAppliedRuleArgKind.Any || (binding.kind == TAppliedRuleArgKind.DurationOrString && unit_argument) || (binding.kind == TAppliedRuleArgKind.StringOrMenu && sema_marker_rules_names_menu_word(argument)) || binding.kind == TAppliedRuleArgKind.EffectRoots) -> {
                 observe = false
             }
             !declared && binding.kind == TAppliedRuleArgKind.Bool && marker.name == MARKER_META && argument == .Ident(name, _, _) && name == "tunable" -> {
@@ -1511,14 +1513,30 @@ sema_marker_rules_application_rows: fn(applications: [AppliedRuleApplication]) -
     rows
 }
 
+// The compiler hook a marker application reaches (jet_foundation
+// MARKER_HOOKS). Registration binds every application that resolves to a
+// declaration of the graph (sema_marker_module_bind_program), local or
+// imported; such a marker is that module's own and reaches no hook, even
+// under a Prelude name. Only the Prelude's markers stay unbound.
+sema_marker_hook: fn(marker: Marker) -> MarkerHook? Never! {
+    if marker.declaration_module != None -> return None
+    marker_hook_of_declaration(marker.name)
+}
+
+// Whether `marker` reaches the compiler hook `hook`.
+sema_marker_is_hook: fn(marker: Marker, hook: MarkerHook) -> Bool Never! {
+    reached: sema_marker_hook(marker) ?? return false
+    reached == hook
+}
+
 sema_marker_rules_is_guest_marker: fn(marker: Marker, site: RuleSite?) -> Bool Never! {
     if marker.negated {
         return false
     }
-    if site == (Val(RuleSite.Function)) && (marker.name == "Import" || marker.name == "Export") {
+    if site == (Val(RuleSite.Function)) && (sema_marker_is_hook(marker, MarkerHook.Import) || sema_marker_is_hook(marker, MarkerHook.Export)) {
         return sema_marker_c_argument(marker) || sema_marker_is_wasm_export(marker)
     }
-    if site == (Val(RuleSite.Module)) && marker.name == "Import" && marker.args.len() == 0 {
+    if site == (Val(RuleSite.Module)) && sema_marker_is_hook(marker, MarkerHook.Import) && marker.args.len() == 0 {
         return true
     }
     false
@@ -1527,13 +1545,13 @@ sema_marker_rules_is_guest_marker: fn(marker: Marker, site: RuleSite?) -> Bool N
 // Whether a function marker is the ratified `#Export(c)` spelling (Rust
 // `Sema::Guest::is_guest_export_marker`).
 sema_marker_is_guest_export: fn(marker: Marker) -> Bool Never! {
-    !marker.negated && marker.name == "Export" && sema_marker_c_argument(marker)
+    !marker.negated && sema_marker_is_hook(marker, MarkerHook.Export) && sema_marker_c_argument(marker)
 }
 
 // `#Export(wasm)` is the JS-to-Wasm bridge entry, parsed as
 // `function.web_marker` (WebPartition.jet checks it).
 sema_marker_is_wasm_export: fn(marker: Marker) -> Bool Never! {
-    if marker.negated || marker.name != "Export" || marker.args.len() != 1 -> return false
+    if marker.negated || !sema_marker_is_hook(marker, MarkerHook.Export) || marker.args.len() != 1 -> return false
     if marker.args[0] == .Expr(value) {
         if value == .Ident(name, _, _) -> return name == "wasm"
     }
@@ -2280,7 +2298,7 @@ sema_marker_rules_no_prelude_error: fn(name: String, span: Span, fix: String) ->
 sema_check_memoized_function: fn(func: Func, environment: SemaScopeEnvironment, program: SemaProgramTables, generic_params: [TGenericParam], diagnostics: &[Diagnostic]) {
     memo := Marker?{None}
     loop candidate in func.markers {
-        if candidate.name == "Memo" {
+        if sema_marker_is_hook(candidate, MarkerHook.Memo) {
             memo = Val(candidate)
             break
         }

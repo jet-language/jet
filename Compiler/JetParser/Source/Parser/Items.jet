@@ -28,7 +28,6 @@ use {
         KernelMarker,
         KernelMode,
         MARKER_COMMUTATIVE,
-        MARKER_FFI,
         MARKER_INLINE,
         MARKER_MUST_USE,
         MARKER_PUBLISHED_SCHEMA,
@@ -38,6 +37,7 @@ use {
         MARKER_TARGET,
         Marker,
         MarkerCallArg,
+        MarkerHook,
         NamedSpan,
         NamedType,
         OperatorMarker,
@@ -86,6 +86,7 @@ use {
         diagnostic_with_structured_edit,
         effect_scope_argument_valid,
         effect_scope_name,
+        marker_hook_of_declaration,
         marker_registered,
         marker_registered_accepts_arguments,
         owned_trait_arithmetic,
@@ -1092,10 +1093,10 @@ parser_parse_function: fn(state: &JetParserState, modifiers: ParsedItemModifiers
         }
     }
     guest_import: loop applied in modifiers.markers {
-        if parser_marker_is_c_guest_import(applied) -> break true
+        if parser_marker_is_c_guest_import(state, applied) -> break true
     } ?? false
     is_ffi: loop applied in modifiers.markers {
-        if applied.name == "FFI" -> break true
+        if parser_marker_is_hook(state, applied, MarkerHook.FFI) -> break true
     } ?? false
     // (card #4512): a named function has one arrow, before its
     // result, and a braced body. A body `->` after the result, or an
@@ -1196,20 +1197,34 @@ parser_parse_function: fn(state: &JetParserState, modifiers: ParsedItemModifiers
     ParsedFunction{value: func, has_body: has_body}
 }
 
-// Rust `is_c_guest_import_marker`: the per-callable C import `#Import(c)`.
-// Declared infallible: it is called inside the `guest_import` loop
-// expression, which would otherwise carry its failure into the parser.
-parser_marker_is_c_guest_import: fn(marker: Marker) -> Bool Never! {
-    if marker.negated || marker.name != "Import" -> return false
+// Rust `is_c_guest_import_marker`: the per-callable C import `#Import(c)`
+// as written: the Import hook's spelling with the `c` argument, whatever it
+// resolves to. Declared infallible: it is called inside the `guest_import`
+// loop expression, which would otherwise carry its failure into the parser.
+parser_marker_spells_c_guest_import: fn(marker: Marker) -> Bool Never! {
+    hook: marker_hook_of_declaration(marker.name) ?? return false
+    if marker.negated || hook != MarkerHook.Import -> return false
     first: parser_marker_first_expr(marker) ?? return false
     if first == .Ident(name, _, _) -> return name == "c"
     false
 }
 
+// A written `#Import(c)` that reaches the Import hook (parser_marker_hook).
+parser_marker_is_c_guest_import: fn(state: &JetParserState, marker: Marker) -> Bool Never! {
+    parser_marker_spells_c_guest_import(marker) && parser_marker_hook(state, marker) != None
+}
+
 // `#FFI` and `#Import(c)` decide how a function's body is read (as foreign
 // source, or as the C symbol), so they are written above it.
-parser_marker_shapes_body: fn(marker: Marker) -> Bool Never! {
-    marker.name == MARKER_FFI || parser_marker_is_c_guest_import(marker)
+parser_marker_shapes_body: fn(state: &JetParserState, marker: Marker) -> Bool Never! {
+    parser_marker_is_hook(state, marker, MarkerHook.FFI) || parser_marker_is_c_guest_import(state, marker)
+}
+
+// The same two as written, for readers that see markers without their file
+// (marker placement edits).
+parser_marker_spells_body_shape: fn(marker: Marker) -> Bool Never! {
+    hook: marker_hook_of_declaration(marker.name) ?? return false
+    hook == MarkerHook.FFI || parser_marker_spells_c_guest_import(marker)
 }
 
 // A body-shaping line inside that body comes too late to shape it and is
@@ -1217,7 +1232,7 @@ parser_marker_shapes_body: fn(marker: Marker) -> Bool Never! {
 parser_drop_body_shaping_lines: fn(state: &JetParserState, markers: [Marker]) -> [Marker] {
     kept := [Marker]{}
     loop marker in markers {
-        if marker.inside && parser_marker_shapes_body(marker) {
+        if marker.inside && parser_marker_shapes_body(state, marker) {
             parser_add_error_code(state, "E0355", marker.span, "`#{marker.name}: …` cannot be written inside the body it shapes", "`#{marker.name}` decides how the function's body is read, so it must be known before the body starts", "write `#{parser_marker_above_text(marker)}` above the function")
             next
         }
@@ -1246,7 +1261,7 @@ parser_bind_guest_import_symbol: fn(state: &JetParserState, func: &Func) {
         return
     }
     loop index in 0..<func.markers.len() {
-        if parser_marker_is_c_guest_import(func.markers[index]) {
+        if parser_marker_is_c_guest_import(state, func.markers[index]) {
             func.markers[index].ct = Val(CtValue.Str{value: symbol})
             break
         }
@@ -1257,10 +1272,11 @@ parser_bind_guest_import_symbol: fn(state: &JetParserState, func: &Func) {
 // Rust Sema `guest_import_symbol`: the fixed C symbol the parser bound as the
 // `#Import(c)` marker's compile-time fact. A missing or empty value is an
 // invalid declaration (E3212 above), never an import. Sema and the Jetpack
-// bridge read the binding through this one reader.
+// bridge read the binding through this one reader; only the application that
+// reached the Import hook carries the fact.
 parser_guest_import_symbol: fn(function: Func) -> String? Never! {
     loop marker in function.markers {
-        if !parser_marker_is_c_guest_import(marker) -> next
+        if !parser_marker_spells_c_guest_import(marker) -> next
         if marker.ct == .Val(value) {
             if value == .Str(symbol) && symbol != "" -> return Val(symbol)
         }
@@ -1511,7 +1527,7 @@ parser_report_arrow_function_body: fn(state: &JetParserState, span: Span) {
 parser_parse_inline_foreign_body: fn(state: &JetParserState, markers: [Marker]) -> InlineForeign? {
     ffi := markers[0]
     loop applied in markers {
-        if applied.name == "FFI" -> ffi = applied
+        if parser_marker_is_hook(state, applied, MarkerHook.FFI) -> ffi = applied
     }
     lang := ""
     lang_span := ffi.span
@@ -1677,12 +1693,13 @@ parser_apply_function_markers: fn(state: &JetParserState, func: &Func, markers: 
     policy := [PolicyDeclaration]{}
     callable_policy_seen := false
     guest_import: loop applied in markers {
-        if parser_marker_is_c_guest_import(applied) -> break true
+        if parser_marker_is_c_guest_import(state, applied) -> break true
     } ?? false
     foreign: guest_import || func.inline_foreign != None
     loop marker in markers {
-        if marker.name == {
-            "Unsafe" -> {
+        hook: parser_marker_hook(state, marker) ?? next
+        if hook == {
+            .Unsafe -> {
                 func.is_unsafe = true
                 func.unsafe_span = Val(marker.span)
                 first := parser_marker_first_expr(marker)
@@ -1691,16 +1708,16 @@ parser_apply_function_markers: fn(state: &JetParserState, func: &Func, markers: 
                     state.block_policy_declarations.push(declaration)
                 }
             }
-            "Reactive" -> {
+            .Reactive -> {
                 if marker.args.len() == 0 -> func.is_reactive = true
             }
-            "Replayable" -> {
+            .Replayable -> {
                 if marker.args.len() == 0 {
                     func.is_replayable = true
                     func.replayable_span = Val(marker.span)
                 }
             }
-            "MustUse" -> {
+            .MustUse -> {
                 if marker.args.len() == 0 {
                     func.is_must_use = true
                     func.must_use_span = Val(marker.span)
@@ -1708,13 +1725,13 @@ parser_apply_function_markers: fn(state: &JetParserState, func: &Func, markers: 
             }
             // `#Export(wasm)` is the JS-to-Wasm bridge entry;
             // `#Export(c)` is the native Library export sema reads.
-            "Export" -> {
+            .Export -> {
                 if marker.args.len() == 1 && marker.args[0] == .Expr(written) {
                     if written == .Ident(name, _, _) && name == "wasm" -> func.web_marker = Val(WebPartitionMarker.WasmExport)
                 }
             }
             // `#Scrub(Tag)` names the one fact tag removed.
-            "Scrub" -> {
+            .Scrub -> {
                 if parser_marker_bindings(marker, [String]{"tag"}) == .Val(values) {
                     if values[0] == .Val(written) && written == .Ident(name, _, _) -> func.scrub_tag = Val(name)
                 }
@@ -1723,7 +1740,7 @@ parser_apply_function_markers: fn(state: &JetParserState, func: &Func, markers: 
             // is the checked promise. A written `Hint` or `Never` mode is
             // E0930 here (Rust `apply_callable_markers`); sema's menu check
             // reports any other value.
-            "Inline" -> {
+            .Inline -> {
                 func.inline_span = Val(marker.span)
                 mode := Expr?{None}
                 if parser_marker_bindings(marker, [String]{"mode"}) == .Val(values) -> mode = values[0]
@@ -1742,11 +1759,11 @@ parser_apply_function_markers: fn(state: &JetParserState, func: &Func, markers: 
             // (Rust `apply_callable_markers`): `#Pre(cond, msg)` and
             // `#Post(cond, msg)` become the function's contract clauses; both
             // arguments are required.
-            "Pre" -> parser_project_contract_marker(state, func, marker, true)
-            "Post" -> parser_project_contract_marker(state, func, marker, false)
+            .Pre -> parser_project_contract_marker(state, func, marker, true)
+            .Post -> parser_project_contract_marker(state, func, marker, false)
             // A callable chain (`#Policy(retry(3))`) stays a marker; the scoped
             // form declares function-scoped policies targeting the function.
-            "Policy" -> {
+            .Policy -> {
                 if parser_callable_policy_marker(marker) {
                     if callable_policy_seen {
                         parser_add_fatal_code(state, "E0355", marker.span, "a function can have only one `#Policy` callable chain", "the declaration marker supplies one default chain; a call-site `apply(...)` supplies replacements", "merge the policies into one `#Policy(...)` marker")
@@ -1758,7 +1775,7 @@ parser_apply_function_markers: fn(state: &JetParserState, func: &Func, markers: 
                     loop declaration in declarations -> policy.push(declaration)
                 }
             }
-            "Meta" -> {
+            .Meta -> {
                 if func.meta != None {
                     parser_add_fatal_code(state, "E0355", marker.span, "a function can have only one `#Meta` rule", "metadata fields belong in one function marker", "merge the fields into one `#Meta(...)` entry")
                     return
@@ -1775,7 +1792,7 @@ parser_apply_function_markers: fn(state: &JetParserState, func: &Func, markers: 
             }
             // The explicit kernel declaration; sema attaches the proof after
             // it has checked the body.
-            "Kernel" -> {
+            .Kernel -> {
                 if func.kernel != None {
                     parser_add_fatal_code(state, "E0003", marker.span, "a function may have only one `#Kernel` marker", "the kernel mode is a single declaration, not a stack of execution policies", "keep one `#Kernel(.parallel)` marker")
                     return
@@ -1790,7 +1807,7 @@ parser_apply_function_markers: fn(state: &JetParserState, func: &Func, markers: 
             }
             // `#State(S)` requires S; `#State(A -> B)` moves A
             // to B, and `_` as A is the entry transition.
-            "State" -> {
+            .State -> {
                 paths: parser_state_marker_paths(marker) ?? {
                     parser_state_marker_shape_fatal(state, marker)
                     return
@@ -1802,7 +1819,7 @@ parser_apply_function_markers: fn(state: &JetParserState, func: &Func, markers: 
                     func.state_transition = Val(StateTransition{from: from, to: paths[1], span: marker.span})
                 }
             }
-            "Undo" -> {
+            .Undo -> {
                 values: parser_marker_bindings(marker, [String]{"inverse"}) ?? [Expr?]{None}
                 if values[0] == .Val(written) && written == .Ident(inverse, span, _) {
                     func.undo = Val(NamedSpan{name: inverse, span: span})
@@ -1811,19 +1828,21 @@ parser_apply_function_markers: fn(state: &JetParserState, func: &Func, markers: 
                     return
                 }
             }
-            "Target" -> {
+            .Target -> {
                 partition: parser_function_web_partition(state, marker) ?? return
                 func.web_marker = Val(partition)
             }
             // C declarations select their calling convention; foreign bodies
             // never reach this applicator in Rust.
-            "ABI" -> {
+            .ABI -> {
                 if !foreign {
                     parser_add_fatal_code(state, "E3212", marker.span, "`#ABI` only applies to C declarations", "ordinary Jet functions do not select a native C calling convention", "move the function into a `#Import c.<library>: module {{ … }}` declaration or remove `#ABI`")
                     return
                 }
             }
-            else -> {}
+            // `#FFI` and `#Import(c)` shaped the body above; `#Memo` is
+            // sema's, and `#Redact` marks fields.
+            .FFI | .Import | .Memo | .Redact -> {}
         }
     }
     // `#Job` metadata and its `every:` schedule.
@@ -2006,11 +2025,7 @@ parser_parse_struct: fn(state: &JetParserState, modifiers: ParsedItemModifiers) 
                 redact := false
                 marker_index := 0
                 loop marker_index < field_markers.len() {
-                    if field_markers[marker_index].name == "Redact" -> redact = true
-                    if field_markers[marker_index].name == "Computed" {
-                        first := parser_marker_first_expr(field_markers[marker_index])
-                        if first == .Val(computed_expr) -> computed = Val(computed_expr)
-                    }
+                    if parser_marker_is_hook(state, field_markers[marker_index], MarkerHook.Redact) -> redact = true
                     marker_index += 1
                 }
                 value.fields.push(Field{is_pub: field_pub, is_package_pub: field_package_pub, name: parser_value(state, field_name), name_span: field_name.span, ty: field_type.ty, ty_span: field_type.span, serde_markers: field_markers, redact: redact, computed: computed.move(), default: default.move(), default_ct: None})

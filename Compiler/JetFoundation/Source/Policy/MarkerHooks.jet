@@ -1,0 +1,78 @@
+// The compiler hooks of the Prelude markers: a projection the parser writes
+// into typed AST fields (`#Unsafe` sets a function's unsafe facts, `#Redact`
+// a field's redaction, …) or a check sema runs (`#Memo`, the guest edge
+// `#Import(c)` and `#Export(c)`). Each row keys one hook by the Prelude
+// declaration it belongs to, named by its MARKER_SOURCE struct constant.
+// `#Import` and `#Export` are the guest-edge spellings, which no Prelude
+// struct declares; their rows key them by spelling under the same rule.
+//
+// A hook belongs to that declaration, not to its name: an application
+// reaches it only when it resolves to the Prelude marker. A marker a module
+// declares under the same name, or one applied through its own module
+// (`#Other.Unsafe`), is an ordinary marker and triggers no hook. The parser
+// asks parser_marker_hook, which also knows the markers its file declares;
+// sema asks sema_marker_hook, which reads the application's bound
+// declaration.
+
+// The guest-edge spellings.
+MARKER_GUEST_IMPORT: "Import"
+MARKER_GUEST_EXPORT: "Export"
+
+MarkerHook: enum {
+    Unsafe
+    Reactive
+    Replayable
+    MustUse
+    Export
+    Scrub
+    Inline
+    Pre
+    Post
+    Policy
+    Meta
+    Kernel
+    State
+    Undo
+    Target
+    ABI
+    FFI
+    Import
+    Memo
+    Redact
+}
+
+MarkerHookRow: struct {
+    declaration: String
+    hook: MarkerHook
+}
+
+MARKER_HOOKS: [MarkerHookRow]{
+    MarkerHookRow{declaration: MARKER_UNSAFE, hook: MarkerHook.Unsafe},
+    MarkerHookRow{declaration: MARKER_REACTIVE, hook: MarkerHook.Reactive},
+    MarkerHookRow{declaration: MARKER_REPLAYABLE, hook: MarkerHook.Replayable},
+    MarkerHookRow{declaration: MARKER_MUST_USE, hook: MarkerHook.MustUse},
+    MarkerHookRow{declaration: MARKER_GUEST_EXPORT, hook: MarkerHook.Export},
+    MarkerHookRow{declaration: MARKER_SCRUB, hook: MarkerHook.Scrub},
+    MarkerHookRow{declaration: MARKER_INLINE, hook: MarkerHook.Inline},
+    MarkerHookRow{declaration: MARKER_PRE, hook: MarkerHook.Pre},
+    MarkerHookRow{declaration: MARKER_POST, hook: MarkerHook.Post},
+    MarkerHookRow{declaration: MARKER_POLICY, hook: MarkerHook.Policy},
+    MarkerHookRow{declaration: MARKER_META, hook: MarkerHook.Meta},
+    MarkerHookRow{declaration: MARKER_KERNEL, hook: MarkerHook.Kernel},
+    MarkerHookRow{declaration: MARKER_STATE, hook: MarkerHook.State},
+    MarkerHookRow{declaration: MARKER_UNDO, hook: MarkerHook.Undo},
+    MarkerHookRow{declaration: MARKER_TARGET, hook: MarkerHook.Target},
+    MarkerHookRow{declaration: MARKER_ABI, hook: MarkerHook.ABI},
+    MarkerHookRow{declaration: MARKER_FFI, hook: MarkerHook.FFI},
+    MarkerHookRow{declaration: MARKER_GUEST_IMPORT, hook: MarkerHook.Import},
+    MarkerHookRow{declaration: MARKER_MEMO, hook: MarkerHook.Memo},
+    MarkerHookRow{declaration: MARKER_REDACT, hook: MarkerHook.Redact},
+}
+
+// The hook of the Prelude declaration named `declaration`, if it has one.
+marker_hook_of_declaration: fn(declaration: String) -> MarkerHook? Never! {
+    loop row in MARKER_HOOKS {
+        if row.declaration == declaration -> return Val(row.hook)
+    }
+    None
+}

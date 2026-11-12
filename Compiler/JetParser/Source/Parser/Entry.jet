@@ -238,6 +238,7 @@ parser_parse_prepared: fn(input: &&ParserFenceExpansion, lexer_diagnostics: [Dia
     tokens := prepared.tokens.move()
     prepared.tokens = [Token]{}
     state := JetParserState{tokens: tokens.move(), tables: [TokenTables]{tables.move()}, position: 0, diagnostics: leading.move(), source_end: source_end, block_spans: [Span]{}, pending_type_gt: false, pending_type_gt_span: Span{start: source_end, end: source_end}, statement_start: -1, line_starts: line_starts, sources: [[U8]]{source}, allow_environment_reads: allow_environment_reads}
+    state.marker_scopes = parser_marker_scopes(state.tokens, state.tables[0])
     program := parser_parse_program(state)
     program.block_spans = state.block_spans
     program.else_arms = state.else_arms
@@ -278,6 +279,8 @@ ParserChunkShared: struct {
     line_starts: [Int]
     source_end: Int
     allow_environment_reads: Bool
+    // The whole stream's marker declarations, read before the cut.
+    marker_scopes: [ParserMarkerScope]
 }
 
 // One thread's chunk: the token range `start..<end` it parses, and after the
@@ -535,7 +538,8 @@ parser_parse_chunked: fn(input: &&ParserFenceExpansion, bounds: [Int], lexer_dia
     prepared := input.move()
     tokens := prepared.tokens.move()
     prepared.tokens = [Token]{}
-    inputs: Shared{ParserChunkShared{tokens: [[Token]]{tokens.move()}, tables: [TokenTables]{tables.move()}, source: source, line_starts: line_starts, source_end: source_end, allow_environment_reads: allow_environment_reads}}
+    marker_scopes: parser_marker_scopes(tokens, tables)
+    inputs: Shared{ParserChunkShared{tokens: [[Token]]{tokens.move()}, tables: [TokenTables]{tables.move()}, source: source, line_starts: line_starts, source_end: source_end, allow_environment_reads: allow_environment_reads, marker_scopes: marker_scopes}}
     parts := [Shared<ParserChunkPart>]{}
     loop chunk in 0..<(bounds.len() - 1) -> parts.push(Shared{ParserChunkPart{start: bounds[chunk], end: bounds[chunk + 1], outputs: [ParserChunkOutput]{}}})
     _ := parser_parse_chunk_parts(inputs, parts, 0)
@@ -626,6 +630,7 @@ parser_parse_chunk_part: fn(inputs: Shared<ParserChunkShared>, part: Shared<Pars
     tokens := reads.value.tokens[0].slice(permit.value.start, permit.value.end)
     source_end: reads.value.source_end
     state := JetParserState{tokens: tokens.move(), tables: [TokenTables]{reads.value.tables[0]}, position: 0, diagnostics: [Diagnostic]{}, source_end: source_end, block_spans: [Span]{}, pending_type_gt: false, pending_type_gt_span: Span{start: source_end, end: source_end}, statement_start: -1, line_starts: reads.value.line_starts, sources: [[U8]]{reads.value.source}, allow_environment_reads: reads.value.allow_environment_reads}
+    state.marker_scopes = reads.value.marker_scopes.copy()
     program := parser_parse_program(state)
     permit.value.outputs.push(ParserChunkOutput{program: program.move(), diagnostics: state.diagnostics.move(), block_spans: state.block_spans.move(), else_arms: state.else_arms.move(), block_policy_declarations: state.block_policy_declarations.move(), statement_rules: state.statement_rules.move()})
     1

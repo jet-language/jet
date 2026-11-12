@@ -1,0 +1,104 @@
+// Marker identity at parse time. A written marker reaches its compiler hook
+// (jet_foundation MARKER_HOOKS) only when it resolves to the Prelude
+// declaration. A qualified application (`#Other.Unsafe`) names its module's
+// marker, never the Prelude's; inside one file, the one thing that turns a
+// bare name away from the Prelude is a marker the file declares under it.
+// So before items parse (and before a parallel parse cuts the stream), the
+// parse reads those declarations off the whole prepared token stream: each
+// struct holding an `impl Marker` block, with the source range its bare name
+// resolves in, which is the code module holding it or the whole file.
+use {
+    jet_foundation.[Marker, MarkerHook, marker_hook_of_declaration]
+    jet_lexer.[Token, TokenTables, token_decoded, TOKEN_IDENT, TOKEN_KW_IMPL, TOKEN_KW_MODULE, TOKEN_KW_STRUCT, TOKEN_LBRACE, TOKEN_RBRACE]
+}
+
+// A marker the file declares, and the byte range `start..<end` where its
+// bare name resolves to it.
+ParserMarkerScope: struct {
+    name: String
+    start: Int
+    end: Int
+}
+
+// One open brace of the scan: `owner` names the struct whose body it opens
+// ("" for any other brace), and `module` marks a code module body.
+ParserMarkerBrace: struct {
+    owner: String
+    module: Bool
+    start: Int
+}
+
+// The prepared stream writes heads keyword first (ColonDeclarations.jet), so
+// a struct body opens after `struct Name` and a code module body after
+// `module name`, with the moved `:` as trivia between.
+parser_marker_scopes: fn(tokens: [Token], tables: TokenTables) -> [ParserMarkerScope] Never! {
+    scopes := [ParserMarkerScope]{}
+    braces := [ParserMarkerBrace]{}
+    // The two code tokens before the current one (-1 = none yet).
+    before := -1
+    last := -1
+    loop index in 0..<tokens.len() {
+        kind: tokens[index].kind
+        if parser_is_trivia(kind) -> next
+        opens_marker: kind == TOKEN_IDENT && last >= 0 && tokens[last].kind == TOKEN_KW_IMPL && braces.len() > 0 && braces[braces.len() - 1].owner != "" && token_decoded(tables, tokens[index]) == "Marker"
+        if {
+            kind == TOKEN_LBRACE -> {
+                head: if before >= 0 && tokens[last].kind == TOKEN_IDENT -> tokens[before].kind else -> -1
+                owner: if head == TOKEN_KW_STRUCT -> token_decoded(tables, tokens[last]) else -> ""
+                braces.push(ParserMarkerBrace{owner: owner, module: head == TOKEN_KW_MODULE, start: tokens[index].span.start})
+            }
+            kind == TOKEN_RBRACE -> {
+                if braces.pop() == .Val(closed) && closed.module {
+                    loop at in 0..<scopes.len() {
+                        if scopes[at].end < 0 && scopes[at].start == closed.start -> scopes[at].end = tokens[index].span.end
+                    }
+                }
+            }
+            opens_marker -> {
+                start := 0
+                loop at in 0..<(braces.len() - 1) {
+                    if braces[at].module -> start = braces[at].start
+                }
+                scopes.push(ParserMarkerScope{name: braces[braces.len() - 1].owner.copy(), start: start, end: -1})
+            }
+            else -> {}
+        }
+        before = last
+        last = index
+    }
+    // A file-scope declaration (and one whose module never closed) resolves
+    // to the end of the file.
+    file_end: if tokens.len() > 0 -> tokens[tokens.len() - 1].span.end + 1 else -> 1
+    loop at in 0..<scopes.len() {
+        if scopes[at].end < 0 -> scopes[at].end = file_end
+    }
+    scopes
+}
+
+// The compiler hook `marker` reaches: none for a name with no hook row (a
+// qualified name never has one), or for a bare name that resolves to a
+// marker this file declares around the application.
+parser_marker_hook: fn(state: &JetParserState, marker: Marker) -> MarkerHook? Never! {
+    parser_marker_hook_at(state, marker.name, marker.span.start)
+}
+
+// The compiler hook the marker written `name` at offset `at` reaches, for a
+// reader that has not built the `Marker` yet.
+parser_marker_hook_at: fn(state: &JetParserState, name: String, at: Int) -> MarkerHook? Never! {
+    hook: marker_hook_of_declaration(name) ?? return None
+    loop scope in state.marker_scopes {
+        if scope.start <= at && at < scope.end && scope.name == name -> return None
+    }
+    Val(hook)
+}
+
+// Whether `marker` reaches the compiler hook `hook`.
+parser_marker_is_hook: fn(state: &JetParserState, marker: Marker, hook: MarkerHook) -> Bool Never! {
+    parser_marker_name_is_hook(state, marker.name, marker.span.start, hook)
+}
+
+// Whether the marker written `name` at offset `at` reaches the hook `hook`.
+parser_marker_name_is_hook: fn(state: &JetParserState, name: String, at: Int, hook: MarkerHook) -> Bool Never! {
+    reached: parser_marker_hook_at(state, name, at) ?? return false
+    reached == hook
+}

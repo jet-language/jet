@@ -8,6 +8,7 @@ use {
         Diagnostic,
         Func,
         Marker,
+        MarkerHook,
         Param,
         Span,
         TFailureCarrier,
@@ -24,7 +25,7 @@ use {
 
 // Rust `is_guest_import_marker`: the ratified `#Import(c)` spelling.
 sema_marker_is_guest_import: fn(marker: Marker) -> Bool Never! {
-    !marker.negated && marker.name == "Import" && sema_marker_c_argument(marker)
+    !marker.negated && sema_marker_is_hook(marker, MarkerHook.Import) && sema_marker_c_argument(marker)
 }
 
 // Rust `is_guest_import`: a function carrying the per-callable `#Import(c)`.

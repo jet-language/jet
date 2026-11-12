@@ -148,6 +148,9 @@ JetParserState: struct {
     // `#X: value` markers (-1 = none), and the markers read there so far.
     inbody_marker_depth: Int{-1}
     inbody_markers: [Marker]{[Marker]{}}
+    // The markers this file declares, with where each bare name resolves to
+    // it (parser_marker_scopes); a written marker there reaches no hook.
+    marker_scopes: [ParserMarkerScope]{[ParserMarkerScope]{}}
     // Pipes (`head |> step`): each token's bracket depth (built on first use),
     // the depths whose expression already owns its `|>` steps, and the open
     // steps, innermost last, with how many times each has read its `<>`.

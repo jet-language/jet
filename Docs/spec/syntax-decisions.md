@@ -8134,6 +8134,15 @@ The marker vocabulary is written as ordinary Jet source, not as a Rust table.
 - `tests/marker_declarations.rs` is the drift guard: the real Jet parser reads
   both files and must agree with the registry on every row, and no Rust file may
   build a marker row or keep a copy of the effect roots.
+- D-MARKER-REFLECT1: a marker the compiler acts on (a parser projection such
+  as `#Unsafe` or `#MustUse`, a checker hook such as `#Memo`, the guest edge
+  `#Import(c)`/`#Export(c)`) is keyed by its Prelude declaration in one table,
+  `Compiler/JetFoundation/Source/Policy/MarkerHooks.jet`, and parser and
+  checker switch on that table, never on a written name. An application reaches
+  the hook only when it resolves to the Prelude declaration: a marker a module
+  or code module declares under the same name (in force inside that module),
+  or one applied through its module (`#Other.Unsafe`), is an ordinary marker
+  and triggers nothing.
 
 ## Memory audit slate (ratified 2026-08-12, card #1889)
 
