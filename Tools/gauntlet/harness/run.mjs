@@ -4226,4 +4226,5 @@ export {
   CEILING_POLICY,
   ceilingReferenceIssues,
   matrixPeerLanguages,
+  LOSS_OWNER_CATEGORY_BY_METRIC,
 };
