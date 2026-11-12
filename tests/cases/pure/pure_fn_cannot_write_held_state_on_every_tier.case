@@ -34,6 +34,21 @@ stderr: ~ "`hidden` writes module state `HITS`" # a lambda's write is its functi
 stderr: !~ "indirect call" # the lambda's call is its written body, not an unknown callee
 stderr: ~ "`relay` reaches a write of a cell through `c`" # through an inferred helper
 stderr: ~ "Call chain: relay → write_back" # the chain names the helper
+step: jet run --optimize=none held.jet
+exit: 1
+stderr: count "Error [" = 5 # O0 refuses the receiver, alias, lease, lambda and helper routes
+stderr: ~ "`hidden` writes module state `HITS`" # the lambda route on O0
+stdout: = "" # nothing runs
+step: jet run --optimize=basic held.jet
+exit: 1
+stderr: count "Error [" = 5 # O1 refuses all five routes
+stderr: ~ "`alias` writes a cell through `held`" # the alias route on O1
+stdout: = "" # nothing runs
+step: jet run --optimize=full held.jet
+exit: 1
+stderr: count "Error [" = 5 # O2 refuses all five routes
+stderr: ~ "`relay` reaches a write of a cell through `c`" # the helper route on O2
+stdout: = "" # nothing runs
 step: jet check trait.jet
 exit: 1
 stderr: ~ "`total` reaches a write of module state `HITS`" # through a trait dispatch
