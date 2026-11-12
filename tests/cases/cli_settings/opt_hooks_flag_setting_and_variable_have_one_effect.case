@@ -1,0 +1,70 @@
+# #6606 c1, c4: the optimizer hooks have one effect however they are given.
+# --opt-disable=ssa skips the SSA pass, so `jet inspect decisions` counts no
+# SSA values; --opt-ssa-stress moves each SSA value through a fresh slot, so
+# it counts rewritten values and fresh slots. Their settings
+# `inspect.opt_disable` and `inspect.opt_ssa_stress` in the user settings file
+# (`jet inspect decisions` keeps its group's word, so its settings are
+# inspect's) and their variables JET_OPT_DISABLE and JET_OPT_SSA_STRESS print
+# the same summary. --opt-verify checks each function with IR Lint after
+# every pass and prints nothing for a function that passes, so its proof is
+# the value `jet env vars --command=build` resolves from the flag, the
+# setting `build.opt_verify` and JET_OPT_VERIFY. The kit sets
+# JET_OPT_VERIFY=1 for every case; an empty value leaves it unset.
+fixture: opt_hooks_flag_setting_and_variable_have_one_effect.fixture
+env: NO_COLOR=1
+env: JET_OPT_VERIFY=
+step: jet inspect decisions --optimize=basic main.jet
+exit: 0
+stdout: ~ "ssa 2 (rewritten 0, moves 0, fresh slots 0)" # no hook: two SSA values, none rewritten
+step: jet inspect decisions --optimize=basic --opt-disable=ssa main.jet
+exit: 0
+stdout: ~ "ssa 0 (rewritten 0, moves 0, fresh slots 0)" # the flag skips the SSA pass
+capture: disable_flag = text stdout
+write: disable_flag.out = "{cap:disable_flag}"
+step: jet inspect decisions --optimize=basic --opt-ssa-stress main.jet
+exit: 0
+stdout: ~ "ssa 2 (rewritten 2, moves 0, fresh slots 4)" # the flag moves each SSA value through a fresh slot
+capture: stress_flag = text stdout
+write: stress_flag.out = "{cap:stress_flag}"
+mkdir: config/jet
+copy: disable.settings config/jet/settings.jet
+step: jet inspect decisions --optimize=basic main.jet
+env: XDG_CONFIG_HOME={work}/config
+exit: 0
+capture: disable_setting = text stdout
+write: disable_setting.out = "{cap:disable_setting}"
+file: disable_setting.out == disable_flag.out # the setting skips it too
+copy: stress.settings config/jet/settings.jet
+step: jet inspect decisions --optimize=basic main.jet
+env: XDG_CONFIG_HOME={work}/config
+exit: 0
+capture: stress_setting = text stdout
+write: stress_setting.out = "{cap:stress_setting}"
+file: stress_setting.out == stress_flag.out # and stresses the same way
+step: jet inspect decisions --optimize=basic main.jet
+env: JET_OPT_DISABLE=ssa
+exit: 0
+capture: disable_variable = text stdout
+write: disable_variable.out = "{cap:disable_variable}"
+file: disable_variable.out == disable_flag.out # the variable skips it too
+step: jet inspect decisions --optimize=basic main.jet
+env: JET_OPT_SSA_STRESS=1
+exit: 0
+capture: stress_variable = text stdout
+write: stress_variable.out = "{cap:stress_variable}"
+file: stress_variable.out == stress_flag.out # and stresses the same way
+copy: verify.settings config/jet/settings.jet
+step: jet env vars --command=build --json -- --opt-verify
+exit: 0
+stdout: ~ "\"setting\":\"build.opt_verify\",\"value\":true,\"source\":\"flag\"" # the flag turns IR Lint on
+step: jet env vars --command=build --json
+exit: 0
+stdout: ~ "\"setting\":\"build.opt_verify\",\"value\":false,\"source\":\"default\"" # unset, it is off
+step: jet env vars --command=build --json
+env: XDG_CONFIG_HOME={work}/config
+exit: 0
+stdout: ~ "\"setting\":\"build.opt_verify\",\"value\":true,\"source\":\"setting\"" # so does its setting
+step: jet env vars --command=build --json
+env: JET_OPT_VERIFY=1
+exit: 0
+stdout: ~ "\"setting\":\"build.opt_verify\",\"value\":true,\"source\":\"environment\"" # and its variable

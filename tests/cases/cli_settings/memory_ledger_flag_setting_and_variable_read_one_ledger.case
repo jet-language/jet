@@ -1,0 +1,25 @@
+# #6606 c1, c4: the memory ledger control has one effect however it is given.
+# `jet audit memory` reads the ledger at the path the flag
+# --memory-ledger=PATH, its setting `audit.memory_ledger` in the user settings
+# file (a relative path is under the settings file's directory), or the
+# variable JET_MEMORY_LEDGER names, and refuses (E2112) naming that path when
+# no ledger is there. Without any of them, it reads the project's
+# `.jet/memory/ledger-v1.jsonl`.
+fixture: memory_ledger_flag_setting_and_variable_read_one_ledger.fixture
+env: NO_COLOR=1
+step: jet audit memory
+exit: nonzero
+stderr: ~ "/.jet/memory/ledger-v1.jsonl`." # no control: the project's ledger
+step: jet audit memory --memory-ledger=flag.ledger
+exit: nonzero
+stderr: ~ "no memory ledger exists at `flag.ledger`." # the flag names the ledger
+mkdir: config/jet
+copy: user.settings config/jet/settings.jet
+step: jet audit memory
+env: XDG_CONFIG_HOME={work}/config
+exit: nonzero
+stderr: ~ "/config/jet/setting.ledger`." # so does the setting, under its file's directory
+step: jet audit memory
+env: JET_MEMORY_LEDGER=variable.ledger
+exit: nonzero
+stderr: ~ "no memory ledger exists at `variable.ledger`." # and the variable

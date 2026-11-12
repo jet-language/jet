@@ -1,6 +1,6 @@
 # Compiler phase budget checker
 
-`check/run.jet` reads a compiler trace (`JET_TRACE_FILE=<path> jet build …`) and
+`check/run.jet` reads a compiler trace (`jet build --trace=<path> …`) and
 `budget.json` (per-phase ns per source line) and prints, per phase, its
 seconds, ns per source line, the budget of the chosen column and the ratio,
 then the subtotal of the always-on check rows. It exits 1 when any phase, the

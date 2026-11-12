@@ -1,0 +1,27 @@
+# #6606 c1, c4: the phase counters have one effect however they are given.
+# With a trace on, the flag --phase-counters, its setting
+# `check.phase_counters` in the user settings file, and the variable
+# JET_PHASE_COUNTERS each make `jet check` print every trace counter on
+# stderr, such as the parse phase's line count. Without any of them, it
+# prints none.
+fixture: phase_counters_flag_setting_and_variable_print_one_census.fixture
+env: NO_COLOR=1
+step: jet check main.jet --trace=plain.json
+exit: 0
+stderr: !~ "JET_PHASE_COUNTERS" # no control: no counters
+step: jet check main.jet --trace=flag.json --phase-counters
+exit: 0
+stderr: ~ "JET_PHASE_COUNTERS {\"phase\":\"parse\",\"lines\":7}" # the flag prints the counters
+stderr: ~ "JET_PHASE_COUNTERS {\"phase\":\"parse\",\"tokens\":39}" # and the token count
+mkdir: config/jet
+copy: user.settings config/jet/settings.jet
+step: jet check main.jet --trace=setting.json
+env: XDG_CONFIG_HOME={work}/config
+exit: 0
+stderr: ~ "JET_PHASE_COUNTERS {\"phase\":\"parse\",\"lines\":7}" # so does the setting
+stderr: ~ "JET_PHASE_COUNTERS {\"phase\":\"parse\",\"tokens\":39}" # and the token count
+step: jet check main.jet --trace=variable.json
+env: JET_PHASE_COUNTERS=1
+exit: 0
+stderr: ~ "JET_PHASE_COUNTERS {\"phase\":\"parse\",\"lines\":7}" # and the variable
+stderr: ~ "JET_PHASE_COUNTERS {\"phase\":\"parse\",\"tokens\":39}" # and the token count

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// Summarize a compiler trace written with JET_TRACE_FILE=<path> (jetc or the
-// Rust `jet`; JET_TRACE_DETAIL=functions adds per-function spans).
+// Summarize a compiler trace written with `jet build --trace=<path>`
+// (`--trace-detail=functions` adds per-function spans).
 //
 //   node Tools/perf/jetc-trace/summarize.mjs <trace.json> [--watch[=seconds]]
 //

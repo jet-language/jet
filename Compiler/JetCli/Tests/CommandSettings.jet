@@ -4,14 +4,15 @@
 // plain name here; CommandLayers.jet's tests read the settings files.
 use {
     setting_files: core.files
+    census_testing: core.testing
     core.encoding.[Dyn]
     jet_cli.[
         JetCLICommandSetting, JetCLICommandSettingLayer,
         jet_cli_command_settings_output, jet_cli_command_settings_words, jet_cli_flag_spec,
-        jet_cli_setting_command_path, jet_cli_setting_commands, jet_cli_setting_flag_name,
-        jet_cli_setting_keys, jet_cli_setting_typed,
+        jet_cli_setting_command_flags, jet_cli_setting_command_path, jet_cli_setting_commands,
+        jet_cli_setting_flag_name, jet_cli_setting_keys, jet_cli_setting_typed,
     ]
-    jet_foundation.[Diagnostic, JET_CLI_FLAGS, JetCLIFlagValue, jet_cli_flag_typed_reason]
+    jet_foundation.[Diagnostic, JET_CLI_COMMANDS, JET_CLI_FLAGS, JetCLIFlagValue, jet_cli_flag_typed_reason]
 }
 
 command_setting_on: fn(key: String, on: Bool, line: Int) -> JetCLICommandSetting Never! {
@@ -177,4 +178,29 @@ command_setting_names_flag: fn(key: String, names: [String]) -> Bool Never! {
         if spec.help.contains("{spec.long}=") -> assert(spec.value != JetCLIFlagValue.Switch)
         if spec.typed != "" && jet_cli_flag_typed_reason(spec.typed) == None -> panic("`{spec.long}` names no typed reason `{spec.typed}`")
     }
+}
+
+// The settings census: every command family in the registry and each action
+// dispatched under its own word, each flag it takes, and the flag's setting
+// key, or `none` and why the flag is typed each run. A command that takes no
+// built flag has one `-` row. A short form shares its long flag's row.
+// `jet test -u` rewrites the file.
+command_settings_census: fn() -> String Never! {
+    lines := [String]{"COMMAND\tFLAG\tSETTING"}
+    loop command in jet_cli_setting_commands() {
+        flags: jet_cli_setting_command_flags(command)
+        if flags.is_empty() -> lines.push("{command.path}\t-\tnone: it takes no built flag")
+        loop spec in flags {
+            setting: if jet_cli_flag_typed_reason(spec.typed) == .Val(typed) -> "none: {typed.reason}" else -> "{command.path}.{jet_cli_setting_flag_name(spec.long)}"
+            lines.push("{command.path}\t{spec.long}\t{setting}")
+        }
+    }
+    "{lines.join("\n")}\n"
+}
+
+#Test("the settings census lists every command family and every flag with its setting or why it has none") {
+    families := [String]{}
+    loop command in jet_cli_setting_commands() -> families.push(command.path.copy()) // copy: the census keeps its row.
+    loop command in JET_CLI_COMMANDS -> assert(families.contains(jet_cli_setting_command_path(command.name)), "the census leaves out the `{command.name}` family")
+    assert(census_testing.golden("tests/cli/command_settings_census.tsv", command_settings_census()))
 }

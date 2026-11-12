@@ -1,0 +1,24 @@
+# #6606 c1, c4: the GC trace control has one effect however it is given.
+# `jet gc report` reads the GC trace at the path the flag --gc-trace=PATH, its
+# setting `gc.gc_trace` in the user settings file (a relative path is under
+# the settings file's directory), or the variable JET_GC_TRACE names, and
+# refuses (E2110) naming that path when no trace is there. Without any of
+# them, it reads the project's `.jet/gc/trace-v1.json`.
+fixture: gc_trace_flag_setting_and_variable_read_one_trace.fixture
+env: NO_COLOR=1
+step: jet gc report
+exit: nonzero
+stderr: ~ "/.jet/gc/trace-v1.json`." # no control: the project's trace
+step: jet gc report --gc-trace=flag.trace
+exit: nonzero
+stderr: ~ "No GC trace exists at `flag.trace`." # the flag names the trace
+mkdir: config/jet
+copy: user.settings config/jet/settings.jet
+step: jet gc report
+env: XDG_CONFIG_HOME={work}/config
+exit: nonzero
+stderr: ~ "/config/jet/setting.trace`." # so does the setting, under its file's directory
+step: jet gc report
+env: JET_GC_TRACE=variable.trace
+exit: nonzero
+stderr: ~ "No GC trace exists at `variable.trace`." # and the variable
