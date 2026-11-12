@@ -3470,8 +3470,8 @@ jet_driver_empty_core_identifier_demand: fn() -> JetDriverCoreIdentifierDemand N
 // The spellings the demand scan looks for, as ids of one lexed source's
 // name table (name_find; a spelling the source never uses has no id, -1,
 // which no token carries), so the scan compares ids, never Strings. Each
-// bare module row has its name's id and, for `URL`, the id of `url` too;
-// `#here` builds a `SourceLocation`, so its word `here` is that row's alias.
+// bare module row has its name's id and the ids of its aliases
+// (jet_driver_core_bare_aliases).
 // The fields are not spelled `or_err`, `abs`, `pow` or `regex`: this scan
 // runs on the compiler's own source too, and `names.abs` would be an `abs`
 // receiver demand of the self-compile.
@@ -3498,7 +3498,7 @@ JetDriverCoreDemandNames: struct {
     input_name: Int
     field_error_under_name: Int
     bare: [Int]
-    bare_alias: [Int]
+    bare_alias: [[Int]]
     // Per name id of the table: the CORE_BARE_SOURCE_MODULES row whose name
     // or alias it is, -1 for none, -2 when it names two rows (the scan then
     // checks every row), so a bare name costs one lookup per identifier.
@@ -3518,23 +3518,18 @@ jet_driver_core_demand_name: fn(tables: TokenTables, text: String) -> Int Never!
 
 jet_driver_core_demand_names: fn(tables: TokenTables) -> JetDriverCoreDemandNames Never! {
     bare := [Int]{}
-    bare_alias := [Int]{}
+    bare_alias := [[Int]]{}
     loop row in CORE_BARE_SOURCE_MODULES {
         bare.push(jet_driver_core_demand_name(tables, row.name))
-        alias := -1
-        if row.name == "URL" -> alias = jet_driver_core_demand_name(tables, "url")
-        if row.name == "SourceLocation" -> alias = jet_driver_core_demand_name(tables, "here")
-        if row.name == "Phase" -> alias = jet_driver_core_demand_name(tables, "phase")
-        // A `meta.events` handler hears `CompilerEvent` values that the
-        // source never names.
-        if row.name == "CompilerEvent" -> alias = jet_driver_core_demand_name(tables, "events")
-        bare_alias.push(alias)
+        aliases := [Int]{}
+        loop alias in jet_driver_core_bare_aliases(row.name) -> aliases.push(jet_driver_core_demand_name(tables, alias))
+        bare_alias.push(aliases)
     }
     bare_rows := [Int]{}
     loop _ in 0..<name_count(tables.names) -> bare_rows.push(-1)
     loop at in 0..<bare.len() {
         jet_driver_core_demand_bare_row(bare_rows, bare[at], at)
-        jet_driver_core_demand_bare_row(bare_rows, bare_alias[at], at)
+        loop alias in bare_alias[at] -> jet_driver_core_demand_bare_row(bare_rows, alias, at)
     }
     source_method_names := [Int]{}
     source_method_modules := [String]{}
@@ -3556,6 +3551,23 @@ jet_driver_core_demand_names: fn(tables: TokenTables) -> JetDriverCoreDemandName
     typed_heads := [Int]{}
     loop head in BOUNDARY_TYPED_HEADS -> typed_heads.push(jet_driver_core_demand_name(tables, head))
     JetDriverCoreDemandNames{task_name: jet_driver_core_demand_name(tables, "task"), timeout_name: jet_driver_core_demand_name(tables, "timeout"), or_err_name: jet_driver_core_demand_name(tables, "or_err"), abs_name: jet_driver_core_demand_name(tables, "abs"), pow_name: jet_driver_core_demand_name(tables, "pow"), regex_name: jet_driver_core_demand_name(tables, "Regex"), source_method_names: source_method_names, source_method_modules: source_method_modules, test_suite_name: jet_driver_core_demand_name(tables, "suite"), expect_name: jet_driver_core_demand_name(tables, "expect"), event_time_name: jet_driver_core_demand_name(tables, "with_event_time"), unit_family_name: jet_driver_core_demand_name(tables, "UnitFamily"), decode_name: jet_driver_core_demand_name(tables, "decode"), migration_name: jet_driver_core_demand_name(tables, "migration"), field_error_name: jet_driver_core_demand_name(tables, "FieldError"), field_error_under_name: jet_driver_core_demand_name(tables, "under"), input_name: jet_driver_core_demand_name(tables, "input"), bare: bare, bare_alias: bare_alias, bare_rows: bare_rows, core_segments: core_segments, typed_heads: typed_heads}
+}
+
+// The words besides its name that demand a bare Core type's module: `url`
+// for `URL`, `phase` for `Phase`, `events` for `CompilerEvent` (a
+// `meta.events` handler hears `CompilerEvent` values that the source never
+// names), and for `SourceLocation` `here` (`#here`
+// builds one) and the words through which a program holds a declaration
+// record (TypeInfo, FieldInfo, MethodInfo, FunctionInfo, TraitInfo,
+// PackageInfo, CompilerChecked), whose `location` is a `SourceLocation?`
+// lowering lays out: `reflect`, a build's `Build` and its `ProgramInfo`,
+// the record names and `compiler` (`core.compiler`'s `check`).
+jet_driver_core_bare_aliases: fn(name: String) -> [String] Never! {
+    if name == "URL" -> return [String]{"url"}
+    if name == "Phase" -> return [String]{"phase"}
+    if name == "CompilerEvent" -> return [String]{"events"}
+    if name != "SourceLocation" -> return [String]{}
+    [String]{"here", "reflect", "Build", "ProgramInfo", "CompilerChecked", "TypeInfo", "FieldInfo", "MethodInfo", "FunctionInfo", "TraitInfo", "PackageInfo", "compiler"}
 }
 
 jet_driver_core_demand_bare_row: fn(rows: &[Int], id: Int, at: Int) Never! {
@@ -3637,7 +3649,7 @@ jet_driver_collect_core_identifier_demand_ids: fn(tokens: [Token], tables: Token
                     if !demand.bare_names.contains(bare) -> demand.bare_names.push(bare.copy())
                 } else if row == -2 {
                     loop at in 0..<names.bare.len() {
-                        if name == names.bare[at] || name == names.bare_alias[at] {
+                        if name == names.bare[at] || names.bare_alias[at].contains(name) {
                             bare: CORE_BARE_SOURCE_MODULES[at].name
                             if !demand.bare_names.contains(bare) -> demand.bare_names.push(bare.copy())
                         }
