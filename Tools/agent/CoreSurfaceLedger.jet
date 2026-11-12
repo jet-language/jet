@@ -3260,15 +3260,18 @@ core_api_gate: fn(root: String, rows: [Row], entries_in: [SurfaceEntry], surface
 // ---- Ledger -------------------------------------------------------------------
 
 // The compiler's Core structure (`jet inspect structure --core --json`, run by
-// $JET, else `jet` on PATH, from `root`): Core.rows's modules and the Core
-// sources the compiler loads, as the build computed them.
+// $JET, else `jet` on PATH, from `root`'s Compiler/ package, since a jet built
+// before `--core` stopped resolving the inspect target refuses it where no
+// package.jet is found): Core.rows's modules and the Core sources the compiler
+// loads, as the build computed them.
 core_structure: fn(root: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Dyn LedgerError! {
     jet: process.env_get_or("JET", process.which("jet") ?? "jet")
     argv: [String]{jet, "inspect", "structure", "--core", "--json"}
-    spec: process.cmd(argv).cwd(root).stdin(.Inherit).stderr(.Inherit).stdout(.Capture).output_limit(OUTPUT_LIMIT)
+    spec: process.cmd(argv).cwd("{root}/Compiler").stdin(.Inherit).stderr(.Inherit).stdout(.Capture).output_limit(OUTPUT_LIMIT)
     ran: process.run_all([ProcessSpec]{spec}, 1) ?? return Err(fail("{argv.join(" ")} could not start: {err}"))
     receipt: ran[0] ?? return Err(fail("{argv.join(" ")} could not start: {err}"))
-    if receipt.code != 0 || receipt.signal != None || receipt.timed_out -> return Err(fail("Command failed: {argv.join(" ")}"))
+    // `--json` prints the refusal's report on stdout.
+    if receipt.code != 0 || receipt.signal != None || receipt.timed_out -> return Err(fail("Command failed: {argv.join(" ")}: {receipt.output.trim()}"))
     answer: json.parse(receipt.output) ?? return Err(fail("{argv.join(" ")} printed no JSON: {err}"))
     core: field(answer, "core")
     if !has_field(core, "modules") || !has_field(core, "sources") -> return Err(fail("{argv.join(" ")} printed no Core modules and sources"))

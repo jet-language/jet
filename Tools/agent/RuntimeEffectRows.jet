@@ -290,14 +290,17 @@ read_text: fn(path: String) -[FS]> String RowsError! {
 }
 
 // The compiler's Core structure (`jet inspect structure --core --json`, run by
-// $JET, else `jet` on PATH): its `core` object, as the build computed it.
+// $JET, else `jet` on PATH, from the Compiler/ package, since a jet built
+// before `--core` stopped resolving the inspect target refuses it where no
+// package.jet is found): its `core` object, as the build computed it.
 core_structure: fn() -[Env, Exec, FS, IO, Time, Time.Wait]> Dyn RowsError! {
     jet: process.env_get_or("JET", process.which("jet") ?? "jet")
     argv: [String]{jet, "inspect", "structure", "--core", "--json"}
-    spec: process.cmd(argv).stdin(.Inherit).stdout(.Capture).stderr(.Inherit).output_limit(OUTPUT_LIMIT)
+    spec: process.cmd(argv).cwd("Compiler").stdin(.Inherit).stdout(.Capture).stderr(.Inherit).output_limit(OUTPUT_LIMIT)
     ran: process.run_all([ProcessSpec]{spec}, 1) ?? return Err(RowsError{message: "{argv.join(" ")} could not start: {err}"})
     receipt: ran[0] ?? return Err(RowsError{message: "{argv.join(" ")} could not start: {err}"})
-    if receipt.code != 0 || receipt.signal != None || receipt.timed_out -> return Err(RowsError{message: "command failed: {argv.join(" ")}"})
+    // `--json` prints the refusal's report on stdout.
+    if receipt.code != 0 || receipt.signal != None || receipt.timed_out -> return Err(RowsError{message: "command failed: {argv.join(" ")}: {receipt.output.trim()}"})
     answer: json.parse(receipt.output) ?? return Err(RowsError{message: "{argv.join(" ")} printed no JSON: {err}"})
     core: answer.get("core") ?? return Err(RowsError{message: "{argv.join(" ")} printed no `core` object"})
     Ok(core)
