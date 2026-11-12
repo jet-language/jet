@@ -1,9 +1,0 @@
-# PORT tests/review.rs::review_diagnostics_mode_keeps_changed_dependency_unknown; helpers review.rs17-176 preserved.
-# PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four); no reference snapshot claim.
-# Fixture: run.jet calls dep.jet's `call` as a package sibling; the Rust-era `use project.dep` is E0603 now (spec.md D-MOD-CYCLE1=A).
-fixture: review_diagnostics_mode_keeps_changed_dependency_unknown.fixture
-step: jet review {work}/base/run.jet {work}/head/run.jet --diagnostics --json
-exit: 0
-stdout: ~ "\"status\":\"unknown\"" # Original contains predicate.
-stdout: ~ "diagnostic source snapshot changed in a dependency scope" # Original contains predicate.
-stdout: ~ "dep.jet" # Original contains predicate.

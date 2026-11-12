@@ -1,2 +1,0 @@
-       01 RECORD.
-          05 AMOUNT PIC S9(7)V99 COMP-3.

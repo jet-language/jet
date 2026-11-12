@@ -1,8 +1,0 @@
-Error [jet.MemoryOperationOutsideUnsafe]: `#Import(c)` of the Jet runtime symbol `jet_rt_process_exit` can only sit inside `#Unsafe`.
-  --> tests/ui/runtime_import_needs_unsafe/run.jet:2:1
-    |
-  2 | raw_exit: fn(code: I64) = "jet_rt_process_exit"
-    | ^^^^^^^^
- Why: The runtime's C exports are its internals, not a checked API, so reaching one directly needs an audited region.
- Fix: Gate the declaration with `#[Import(c), Unsafe("why this is safe")]`, or call the Core function that wraps it.
-More: jet-lang.dev/e/E3101

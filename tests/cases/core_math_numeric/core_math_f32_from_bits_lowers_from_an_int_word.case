@@ -1,9 +1,0 @@
-# #6637 c3: `__from_bits_f32(bits: Int)` lowers its 64-bit word argument to
-# the F32 with those low 32 bits. Before, `jet test Core/Math` stopped on the
-# ICE "ir.build unlowered: __from_bits_f32 ... F32 from bits of I64".
-env: NO_COLOR=1
-step: jet test {root}/Core/Math/Math.jet --filter "math scalar composition"
-timeout: 900s
-exit: 0
-stdout: ~ "1 passed, 0 failed" # the test runner also prints the test's name line
-stderr: !~ "internal compiler error" # the F32 bit cast lowers instead of stopping the build

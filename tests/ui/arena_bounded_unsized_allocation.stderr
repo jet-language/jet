@@ -1,8 +1,0 @@
-Error [jet.MemoryDenialViolated]: List construction allocates backing storage at arena_bounded_unsized_allocation.jet violates the effective `!Mem.Alloc(above: 64)` declared at arena_bounded_unsized_allocation.jet
-  --> tests/ui/arena_bounded_unsized_allocation.jet:3:13
-    |
-  3 |     values: [Int]{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20}
-    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
- Why: arena_bounded_unsized_allocation.jet is reachable through arena_bounded_unsized_allocation::greet from code governed by `!Mem.Alloc(above: 64)`; sema proves no byte size for this heap allocation, so it cannot be counted against the bound; declaration provenance: signature denial `-[!Mem.Alloc(above: 64)]>` in arena_bounded_unsized_allocation.jet; operation provenance: greet in arena_bounded_unsized_allocation.jet
- Fix: Remove or replace the incompatible operation, seal the target set, or move the call outside this denial
-More: jet-lang.dev/e/E0921

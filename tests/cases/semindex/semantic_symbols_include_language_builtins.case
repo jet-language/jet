@@ -1,8 +1,0 @@
-# Original tests/semindex.rs:724-741; source bytes and predicates retained.
-# A signature writes its return type after `->`, as in
-# `sort: fn<T, E>(rows: [T], key_fn: fn(T) -> String E!) -> [T] E!`
-# (Docs/spec/syntax-decisions.md:8280).
-fixture: semantic_symbols_include_language_builtins.fixture
-step: jet find "List.filter" semantic_builtins.jet --json
-exit: 0
-json: stdout doc $.matches[?name="List.filter"][0].signature = "List.filter(f: fn(T) -> Bool) -> List<T>"

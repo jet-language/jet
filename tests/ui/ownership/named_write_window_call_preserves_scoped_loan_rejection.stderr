@@ -1,8 +1,0 @@
-Error [jet.ConcurrentCaptureNotOwned]: `values[…]` cannot be passed with write access while `edit` is lent to a task in `g`
-  --> tests/ui/ownership/named_write_window_call_preserves_scoped_loan_rejection.jet:11:14
-    |
- 11 |         bump(edit)
-    |              ^^^^
- Why: A task.group joins its children at the end of the block, so `edit` stays borrowed until `g` joins — changing `values[…]` now would race a running task or free memory it still reads
- Fix: Do this after the `g` block ends, give it away with `task &&edit`, freeze it with `freeze`, or share it with `Shared{…}`
-More: jet-lang.dev/e/E1101

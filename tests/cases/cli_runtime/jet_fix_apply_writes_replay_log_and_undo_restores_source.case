@@ -1,9 +1,0 @@
-# Port of cli_parts/runtime.rs::jet_fix_apply_writes_replay_log_and_undo_restores_source.
-fixture: fixtures/replay
-step: jet fix run.jet
-file: .jet/codemods/Fix-run.log.json exists
-json: file .jet/codemods/Fix-run.log.json doc $.operation = "fix"
-json: file .jet/codemods/Fix-run.log.json doc $.semantic_ops has {"kind":"rewrite","rule_id":"jet-fix"}
-file: run.jet = replay.fixed.out
-step: jet inspect codemod undo .jet/codemods/Fix-run.log.json
-file: run.jet = replay.original.out

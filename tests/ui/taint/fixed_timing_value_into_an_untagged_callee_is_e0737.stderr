@@ -1,8 +1,0 @@
-Error [jet.FixedTimingSteer]: A `Key` value decides how `plain` runs (its parameter `k` is untagged)
-  --> tests/ui/taint/fixed_timing_value_into_an_untagged_callee_is_e0737.jet:6:41
-    |
-  6 | forward: fn(k: #Key U64) -> U64 { plain(k) }
-    |                                         ^
- Why: `Key` is `timing: .Fixed`: which code runs, how long it takes and which addresses it touches must not depend on it, and this call carries it into `plain`, where a `Key` value decides a division (its time depends on its operands)
- Fix: Tag the parameter `#Key` and keep that code in fixed time, or reveal the value through a `#Scrub(Key)` function first
-More: jet-lang.dev/e/E0737

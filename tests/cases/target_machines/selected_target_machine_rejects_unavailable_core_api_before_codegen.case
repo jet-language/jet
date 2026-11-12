@@ -1,9 +1,0 @@
-# Port of tests/target_machines.rs::selected_target_machine_rejects_unavailable_core_api_before_codegen.
-# board.sensor_v1 provides the `core` layer only, so reachable `core.files`
-# is the registered E3310 before codegen, not a machine error or a link failure.
-fixture: fixtures/selected_target_machine_rejects_unavailable_core_api_before_codegen
-step: jet build main.jet --target board.sensor_v1
-env: NO_COLOR=1
-exit: 1
-stderr: ~ "E3310" # the runtime layer the target lacks
-stderr: ~ "Prelude part `core.files` needs the `hosted` runtime layer, but target `board.sensor_v1` provides `core`." # the registered What

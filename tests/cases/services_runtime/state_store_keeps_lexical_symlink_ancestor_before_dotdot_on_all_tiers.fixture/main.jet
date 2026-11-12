@@ -1,8 +1,0 @@
-use service: core.service
-run: fn() {
-    if service.state_store("link/../store") == {
-        .Err(.Policy(reason)) -> print(reason == "service state parent is a symlink: link; repair or replace the state store before retrying")
-        .Err(_) -> panic("wrong refusal kind")
-        .Ok(_) -> panic("lexical symlink ancestor disappeared")
-    }
-}

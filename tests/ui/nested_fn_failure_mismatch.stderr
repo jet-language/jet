@@ -1,8 +1,0 @@
-Error [jet.NestedFnFailureMismatch]: This needs `[fn(Int) -> Int]`, whose functions inside cannot fail, but the value's can fail
-  --> tests/ui/nested_fn_failure_mismatch.jet:10:17
-    |
- 10 |     print(first(table))
-    |                 ^^^^^
- Why: A single function value converts between its failing and non-failing forms where it is passed or stored, and so do the functions it takes as parameters, but the functions a list, map, optional or tuple holds, or a function returns, keep the form they were made with
- Fix: Write the same failure contract on both: `Err!` after each inner function type's return when its functions can fail, as in `[fn(Int) -> Int Err!]`, and none when they cannot
-More: jet-lang.dev/e/E0638

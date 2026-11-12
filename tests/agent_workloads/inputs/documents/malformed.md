@@ -1,3 +1,0 @@
-#
-
-- Missing title is rejected

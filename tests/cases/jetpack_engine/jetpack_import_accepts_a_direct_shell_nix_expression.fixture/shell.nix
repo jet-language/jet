@@ -1,1 +1,0 @@
-pkgs: mkShell { packages = [ pkgs.fd ]; }

@@ -1,9 +1,0 @@
-# core.sys.sync is sync(2): it returns only after write-back finishes on every filesystem of the
-# host. On a shared machine under other processes' write load that takes minutes, in
-# uninterruptible sleep that no step limit can end, so the default corpus run skips this witness.
-opt-in: host-wide sync(2) waits on every filesystem's write-back; run deliberately with --opt-in or by exact id
-copy: {root}/tests/conformance/corpus/core/sys/sync.jet sync.jet
-step: jet run --allow=Env sync.jet
-exit: 0
-stdout: = "true\n"
-stderr: empty

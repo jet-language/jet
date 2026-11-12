@@ -1,7 +1,0 @@
-#!/bin/sh
-# Fake Nix from tests/jetpack_criterion8.rs:219-227. It lives in the case work
-# directory, so its own path names the staging output and invocation log.
-base=${0%/nix}
-if [ "$1" = "--version" ]; then printf '%s\n' 'nix (Nix) 2.24'; exit 0; fi
-if [ "$1" = "build" ]; then printf '%s\n' invoked >> "$base/nix-invocations"; printf '[{"drvPath":"/nix/store/fallback-postgres.drv","outputs":{"out":"%s"},"jetpackImport":{"closedGraph":{"root":{"dependencies":[]}},"selectedOutputs":{"out":"%s"},"dependencies":[],"sources":[],"hashes":{"out":"output-hash"},"losses":[],"proof":{"source":"local-nix-test"},"recipe":{"kind":"compatibility"},"lock":{"system":"x86_64-linux"}}}]\n' "$base/staging" "$base/staging"; exit 0; fi
-exit 1

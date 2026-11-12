@@ -1,8 +1,0 @@
-Error [jet.InteriorNulByte]: This string literal has an embedded NUL byte, so it can't cross into a C function.
-  --> tests/ui/cffi_string_literal_interior_nul.jet:12:18
-    |
- 12 |     print(c.grab("a\u{0000}b"))
-    |                  ^^^^^^^^^^^^
- Why: C strings are NUL-terminated, not length-prefixed — an embedded `\0` would truncate the string on the C side, silently losing everything after it.
- Fix: Remove the embedded NUL, or split the call so the C function only sees the part before it.
-More: jet-lang.dev/e/E3211

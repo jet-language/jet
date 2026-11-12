@@ -1,8 +1,0 @@
-
-use process: core.process
-PII: tag { deny: [Exec] }
-account_name: fn() -> #PII String { "Ada" }
-run: fn() {
-    receipt: process.cmd(["echo", account_name()]).run() ?? return Err("test")
-    receipt.drop("only the argument flow matters here")
-}
