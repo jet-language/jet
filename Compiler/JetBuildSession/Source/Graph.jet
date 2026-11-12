@@ -120,7 +120,17 @@ build_session_validate: fn(state: BuildSessionState, default: Int) -> BuildSessi
         }
     }
     if build_session_cycle(target_edges, target_names) == .Val(nodes) -> return Val(build_session_error_diag(state, BuildSessionError.TargetDependencyCycle{nodes: nodes}))
-    if build_session_cycle(build_session_prerequisites(state), action_names) == .Val(nodes) -> return Val(build_session_error_diag(state, BuildSessionError.ActionDependencyCycle{nodes: nodes}))
+    if build_session_cycle(build_session_prerequisites(state), action_names) == .Val(nodes) {
+        // Reported at the `b.run` call of the step the chain starts from.
+        diagnostic := build_session_error_diag(state, BuildSessionError.ActionDependencyCycle{nodes: nodes})
+        loop action in state.actions {
+            if nodes.len() == 0 || action.name != nodes[0] -> next
+            diagnostic.start = action.start
+            diagnostic.end = action.end
+            break
+        }
+        return Val(diagnostic)
+    }
     None
 }
 build_session_project: fn(state: BuildSessionState) -> BuildGraph Never! {

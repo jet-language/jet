@@ -8,7 +8,7 @@ use {
     jet_sema.[SemaGraphResult, SemaSourceOrigin]
     jet_build_session.[
         BuildSessionGeneratedModule, BuildSessionPlan, BuildSessionPolicy, build_plan_graph, build_plan_selection,
-        build_plan_selected_generated, build_session_abort, build_session_append_unique,
+        build_plan_selected_generated, build_session_abort, build_session_append_unique, build_session_refused,
         build_session_compiler_node, build_session_finish, build_session_new, build_session_set_args, build_session_set_dependencies, build_session_set_identity,
     ]
 }
@@ -151,12 +151,16 @@ JetDriverBuildQueryResponse: struct {
 jet_driver_build_query_empty: fn(request: &&JetDriverCompileRequest, diagnostics: &&[Diagnostic], complete: Bool, problem: &&String?) -> JetDriverBuildQueryResponse Never! {
     {request: request.move(), query: JetDriverBuildQueryResult{plan: None, graph: None, generated: [], diagnostics: diagnostics.move(), complete: complete, internal_problem: problem.move()}}
 }
-// A build that failed: its own reports `ran` after the compile's `errors`,
-// or the staged reports alone when the staging check failed (`staged`).
+// A build that failed: the compile's `errors`, then the build's own reports
+// `ran`. After a failed staging check (`staged`) the build's reports come
+// first: what the build refused is why the staged check missed the modules
+// it would have generated.
 jet_driver_build_query_failed: fn(request: &&JetDriverCompileRequest, errors: &&[Diagnostic], ran: &&[Diagnostic], staged: Bool) -> JetDriverBuildQueryResponse Never! {
     reports := errors.move()
-    if !staged {
-        loop error in ran.move() -> reports.push(error)
+    at := if staged -> 0 else -> reports.len()
+    loop error in ran.move() {
+        reports.insert(at, error)
+        at += 1
     }
     jet_driver_build_query_empty(request, reports, false, None)
 }
@@ -254,9 +258,10 @@ jet_driver_query_build_plan: fn(owned_request: &&JetDriverCompileRequest, scope:
     config.comptime_input_adapter = jet_driver_comptime_inputs_for(request, path)
     config.compiler_query_host = Val(jet_driver_comptime_compiler_for(request))
     run := jet_driver_invocation_run(inputs, [TComptimeValue]{jet_eval_build_context_value(session_id, program)}, config, span)
-    // The build's own reports; after a failed staging check the staged
-    // reports stand alone when the build fails (a trap it reached restates
-    // them) and give way to the final checked compile when it runs.
+    // The build's own reports. After a failed staging check, a run that
+    // stopped at a trap restates the staged reports, so they stand alone;
+    // a call the build refused, or a build that ran to its end, reports
+    // first and the staged reports follow.
     ran := [Diagnostic]{}
     evaluated: run.result.move() ?? {
         build_session_abort(session)
@@ -269,6 +274,7 @@ jet_driver_query_build_plan: fn(owned_request: &&JetDriverCompileRequest, scope:
     returned: evaluated.value
     if evaluated.internal_problem != None || !evaluated.complete || returned == None {
         build_session_abort(session)
+        if staged_failed && evaluated.internal_problem == None && build_session_refused(session) -> return jet_driver_build_query_failed(request, errors, ran, true)
         if staged_failed -> return jet_driver_build_query_empty(request, errors, false, None)
         problem: if evaluated.internal_problem == .Val(internal) -> { Val("the native run of the build entry failed internally: {internal.message}") } else -> { None }
         loop error in ran -> errors.push(error)

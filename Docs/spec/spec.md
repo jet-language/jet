@@ -6073,14 +6073,23 @@ reads those rows: `#build.settings.cache_slots` folds to the contributed value
 over the declared default and the selected profile's value. Example:
 [`Examples/Metaprogramming/BuildTime/BuildContribution`](../../Examples/Metaprogramming/BuildTime/BuildContribution/run.jet).
 
-Generation is additive with one owner per managed path. Generated modules are
-ordered in dependency rounds using ordinary quoted-file imports; a later round
-can observe an earlier one. The round count is bounded by generated-module
-count, and a cycle is E3511 before any generated file is written. An action and
-generated source cannot own the same path; existing source collisions are
-E3510. `--locked` checks generated input and output hashes before materializing
-and records provenance after the complete runtime bundle is checked
-(D-BUILDENTRY1).
+Generation is additive with one owner per managed path.
+`b.generate(name) { items }` makes one module at
+`.jet/generated/<package>/<name>.jet`; a name keeps
+only letters, digits, `_` and `-` (every other character becomes `_`), so no
+name leaves that folder. Every generated module joins the package's one checked
+compile beside its hand-written sources, so a generated module can use another
+in any order and generation has no rounds to bound. A module generated twice,
+two names that share one path, and a step that writes a generated module's path
+are E3511, reported at the call that makes the second claim, before any step
+runs or any generated file is written; an empty name or item block is E3502.
+Steps that wait on each other are E3502 at the `b.run` call of the step the
+cycle starts from. A generated module that would shadow a hand-written one is
+E3510. When `run` or another hand-written function uses a module the build
+never made because it refused a call, the refusal is reported first and the
+check report follows. `--locked` checks generated input and output hashes before
+materializing and records provenance after the complete runtime bundle is
+checked (D-BUILDENTRY1).
 
 ### Remote execution and plugins
 

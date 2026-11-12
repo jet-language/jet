@@ -177,19 +177,21 @@ the [syntax registry](../../../Compiler/JetFoundation/Data/Syntax/).
 
 ## Build entries and typed generation
 
-A package may expose an ordinary `build: fn` that takes `Build` and
-returns a `BuildPlan`. It inspects typed build facts, registers typed graph
-nodes, and returns the plan; it does not become a second configuration
-language. `Build` exposes typed graph operations: `b.add_executable`,
+A package may expose an ordinary `build: fn` that takes `Build`. It inspects
+typed build facts, registers typed graph nodes, and hands the driver one plan;
+it does not become a second configuration language. `Build` exposes typed
+graph operations: `b.add_executable`,
 `b.add_library`, `b.add_test`, `b.add_asset_bundle`, `b.add_doc`,
 `b.add_install`, `b.add_package`, and `b.add_publish` register targets;
-`b.action` registers a typed action; `b.generate` registers additive generated
-Jet source; and `b.find_program`, `b.pkg_config`, `b.header_check`, and
-`b.compile_check` register typed probes. `b.plan()` hands the graph to the
-driver.
+`b.run(name, tool, caps)` registers a typed step; `b.probe(name, kind, value)`
+registers a typed `find_program`, `find_folder`, `pkg_config` or `header`
+probe; and `b.generate(name) { ... }` registers an additive generated module.
+`b.plan()` or `b.default(target)` hands the graph to the driver. The
+[programmable builds](../spec.md#programmable-builds) section of the spec owns
+each operation's rules, including the generated-module diagnostics.
 
-The checked example in [`distinct_reflect.jet`](../../../Examples/Metaprogramming/Reflection/Reflect.jet)
-uses the current return-arrow form:
+The checked example [`Reflect.jet`](../../../Examples/Metaprogramming/Reflection/Reflect.jet)
+reads the program's reflection view from a build entry:
 
 ```jet
 build: fn(b: Build) {

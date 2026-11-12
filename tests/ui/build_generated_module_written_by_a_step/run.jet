@@ -1,0 +1,17 @@
+// @programmable_build
+// @cli_build
+// #4276: a step that writes the module `b.generate("facts")` makes gives it
+// two producers (E3511), reported at the step's `.writes` call before
+// anything runs.
+build: fn(b: Build) -[Exec]> {
+    #Impure("find the shell") {
+    b.generate("facts") {
+        answer: fn() -> Int { 42 }
+    }
+    shell: b.probe("shell", "find_program", "sh")
+    make: b.run("make", b.found(shell), [])
+    make.writes(".jet/generated/run/facts.jet")
+    }
+}
+
+run: fn() {}

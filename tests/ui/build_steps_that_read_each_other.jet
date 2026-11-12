@@ -1,0 +1,17 @@
+// @programmable_build
+// @cli_build
+// #4276: two steps that each read the other's output wait on each other; the
+// cycle is reported at the `b.run` call of the step the chain starts from.
+build: fn(b: Build) -[Exec]> {
+    #Impure("find the shell") {
+    shell: b.probe("shell", "find_program", "sh")
+    first: b.run("first", b.found(shell), [])
+    second: b.run("second", b.found(shell), [])
+    first.reads("second.txt")
+    first.writes("first.txt")
+    second.reads("first.txt")
+    second.writes("second.txt")
+    }
+}
+
+run: fn() {}

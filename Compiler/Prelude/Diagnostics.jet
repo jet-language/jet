@@ -7286,12 +7286,12 @@ GenerationCycle: struct {
     impl Diagnostic {
         code: "E3511"
         stage: [.Build]
-        meaning: "Generated source rounds form a cycle or claim one path twice"
+        meaning: "A generated module name or path has two producers"
         detail: true
         no_fix: .Ambiguous
-        what: fn(self) -> String { "Generation rounds form a cycle: `{self.chain}`." }
-        why: fn(self) -> String { "Generated source must reach a bounded deterministic order, not loop until quiescent." }
-        fix: fn(self) -> String { "Break the dependency between the named generators or paths." }
+        what: fn(self) -> String { "Generated source has two producers: `{self.chain}`." }
+        why: fn(self) -> String { "Each generated module and its path have one producer, so what compiles never depends on which producer ran last." }
+        fix: fn(self) -> String { "Give each generated module its own name, and keep steps from writing a generated module's path." }
     }
 }
 

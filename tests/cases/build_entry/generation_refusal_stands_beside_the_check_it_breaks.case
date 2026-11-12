@@ -1,0 +1,13 @@
+# #4276: `run` uses a module `build: fn` generates, so the staged check fails
+# and the build still runs; the build refuses the step that claims that
+# module (E3511). The refusal is reported first, beside the check report it
+# explains (E0102), and no generated module is written.
+fixture: fixtures/generation_refusal_stands_beside_the_check_it_breaks
+env: NO_COLOR=1
+step: jet build main.jet --write-generated=on
+exit: 1
+stderr: ~ "Error [jet.GenerationCycle]: Build plan is invalid: `facts` and `.jet/generated/main/facts.jet` have two producers" # the build's own refusal is not dropped
+stderr: ~ "Error [jet.UnknownFunction]: Nothing named `answer` exists here" # the staged report it explains
+stderr: ~ "2 problems found" # both, and nothing else
+stderr: ~ "run `jet explain E3511` to learn more" # the refusal comes first
+file: .jet/generated/main/facts.jet absent # no partial module

@@ -233,6 +233,10 @@ BuildSessionState: struct {
     // The loader's identity of the build's package, which tells its own
     // functions from a dependency's (`meta.rewrite_body`).
     identity: String{""}
+    // Whether a call of `build: fn` was refused and the refusal stopped the
+    // run (build_session_refuse): that report is the build's own, not a
+    // restated check report.
+    refused: Bool{false}
     start: Int
     end: Int
 }
@@ -255,6 +259,18 @@ build_session_abort: fn(session: &BuildSession) Never! {
     permit.value.active = false
 }
 
+// The run stopped at a call the session refused: the evaluator reports that
+// refusal, as the build's own report.
+build_session_refuse: fn(session: &BuildSession) Never! {
+    permit := session.storage.guard_edit()
+    permit.value.refused = true
+}
+
+build_session_refused: fn(session: BuildSession) -> Bool Never! {
+    permit: session.storage.guard_read()
+    permit.value.refused
+}
+
 // The words after `--` on `jet build` (`b.args()`); a new session has none.
 build_session_set_args: fn(session: &BuildSession, args: [String]) Never! {
     permit := session.storage.guard_edit()
@@ -274,14 +290,20 @@ build_session_set_identity: fn(session: &BuildSession, identity: String) Never! 
     permit.value.identity = identity.copy()
 }
 
-// `build_diag`: a generated-source cycle is E3511, every other invalid graph
-// fact the E3502 invalid-plan report.
+// `build_diag`: the invalid-plan report at the current build call.
 build_session_diag: fn(state: BuildSessionState, what: String) -> BuildSessionDiagnostic {
+    build_session_plan_report(what, state.start, state.end)
+}
+
+// An invalid-plan report: a generated module name or path with two producers
+// is E3511, every other invalid graph fact the E3502 report. The driver and
+// the evaluator both word their reports here.
+build_session_plan_report: fn(what: String, start: Int, end: Int) -> BuildSessionDiagnostic Never! {
     if what.starts_with("E3511: ") {
         detail: what.removeprefix("E3511: ")
-        return {code: "E3511", what: "build plan is invalid: {detail}", why: "generated source must reach a bounded deterministic order, not loop until quiescent", fix: "break the dependency between these generators or give each generated module one owner", start: state.start, end: state.end}
+        return {code: "E3511", what: "build plan is invalid: {detail}", why: "each generated module and its path have one producer, so what compiles never depends on which producer ran last", fix: "give each generated module its own name, and keep steps from writing a generated module's path", start: start, end: end}
     }
-    {code: "E3502", what: "build plan is invalid: {what}", why: "`build: fn` must describe one deterministic typed graph whose handles all belong to that build", fix: "fix the named target/action/toolchain/probe and run `jet inspect explain-build` to inspect the graph", start: state.start, end: state.end}
+    {code: "E3502", what: "build plan is invalid: {what}", why: "`build: fn` must describe one deterministic typed graph whose handles all belong to that build", fix: "fix the named target/action/toolchain/probe and run `jet inspect explain-build` to inspect the graph", start: start, end: end}
 }
 
 build_session_fail: fn(state: BuildSessionState, what: String) -> BuildSessionReply {
@@ -871,10 +893,10 @@ build_session_error_projection: fn(error: BuildSessionError) -> BuildSessionErro
         .EmptyPluginField(value) -> build_session_error_debug("EmptyPluginField", value)
         .InvalidPluginDigest(value) -> build_session_error_one("InvalidPluginDigest", value, "build plugin component digest is invalid: {value}")
         .PackagedPlugin(value) -> build_session_error_one("PackagedPlugin", value, "packaged build plugin rejected: {value}")
-        .EmptyGeneratedModuleField(value) -> build_session_error_debug("EmptyGeneratedModuleField", value)
-        .InvalidGeneratedModulePath(value) -> build_session_error_debug("InvalidGeneratedModulePath", value)
-        .DuplicateGeneratedModuleName(value) -> build_session_error_one("DuplicateGeneratedModuleName", value, "E3511: generation rounds form a cycle: module `{value}` is generated twice")
-        .DuplicateGeneratedModulePath(value) -> build_session_error_one("DuplicateGeneratedModulePath", value, "E3511: generation rounds form a cycle: path `{value}` is generated twice")
+        .EmptyGeneratedModuleField(value) -> build_session_error_one("EmptyGeneratedModuleField", value, if value.trim() == "" -> "`b.generate` needs a module name, and `\"\"` names no module" else -> "`b.generate(\"{value}\")` has no items, and a generated module holds at least one")
+        .InvalidGeneratedModulePath(value) -> build_session_error_one("InvalidGeneratedModulePath", value, "generated module path `{value}` must be a `.jet` file inside `.jet/generated/`")
+        .DuplicateGeneratedModuleName(value) -> build_session_error_one("DuplicateGeneratedModuleName", value, "E3511: module `{value}` is generated twice")
+        .DuplicateGeneratedModulePath(value) -> build_session_error_one("DuplicateGeneratedModulePath", value, "E3511: path `{value}` is generated twice")
         .UnknownTarget(id) -> build_session_error_id("UnknownTarget", "TargetId", id)
         .UnknownAction(id) -> build_session_error_id("UnknownAction", "ActionId", id)
         .UnknownToolchain(id) -> build_session_error_id("UnknownToolchain", "ToolchainId", id)
@@ -884,7 +906,7 @@ build_session_error_projection: fn(error: BuildSessionError) -> BuildSessionErro
         .DuplicateActionOutput(action, output) -> ({variant: "DuplicateActionOutput", text: "DuplicateActionOutput {{ action: {build_key_debug_text(action)}, output: {build_key_debug_text(output)} }}", fields: [BuildSessionErrorField]{build_session_error_field("action", action), build_session_error_field("output", output)}})
         .DuplicateBuildOutput(output, first, second) -> ({variant: "DuplicateBuildOutput", text: "output `{output}` is owned by both `{first}` and `{second}`", fields: [BuildSessionErrorField]{build_session_error_field("output", output), build_session_error_field("first_action", first), build_session_error_field("second_action", second)}})
         .PluginVersionMismatch(plugin, expected, actual) -> ({variant: "PluginVersionMismatch", text: "PluginVersionMismatch {{ plugin: {build_key_debug_text(plugin)}, expected: {build_key_debug_text(expected)}, actual: {build_key_debug_text(actual)} }}", fields: [BuildSessionErrorField]{build_session_error_field("plugin", plugin), build_session_error_field("expected", expected), build_session_error_field("actual", actual)}})
-        .GeneratedModuleCycle(name, path) -> ({variant: "GeneratedModuleCycle", text: "E3511: generation rounds form a cycle: `{name}` and `{path}` have two producers", fields: [BuildSessionErrorField]{build_session_error_field("module", name), build_session_error_field("path", path)}})
+        .GeneratedModuleCycle(name, path) -> ({variant: "GeneratedModuleCycle", text: "E3511: `{name}` and `{path}` have two producers", fields: [BuildSessionErrorField]{build_session_error_field("module", name), build_session_error_field("path", path)}})
         .TargetDependencyCycle(nodes) -> build_session_error_cycle("TargetDependencyCycle", "target", nodes)
         .ActionDependencyCycle(nodes) -> build_session_error_cycle("ActionDependencyCycle", "action", nodes)
         .PolicyDenied(subject, allowed, reason, caps) -> {

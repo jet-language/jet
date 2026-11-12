@@ -1,0 +1,17 @@
+// @programmable_build
+// @cli_build
+// #4276: a module name keeps only letters, digits, `_` and `-`, so `../a`
+// can't leave `.jet/generated/run/`: it is `___a.jet` there, the path the
+// module `___a` claims too (E3511).
+build: fn(b: Build) {
+    b.generate("../a") {
+        first: fn() -> Int { 1 }
+    }
+    b.generate("___a") {
+        second: fn() -> Int { 2 }
+    }
+    app: b.add_executable("app", ["run.jet"], [])
+    b.default(app)
+}
+
+run: fn() {}

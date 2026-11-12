@@ -12,7 +12,7 @@ use {
     jet_lexer.[TOKEN_HASH, TOKEN_IDENT, lex]
     jet_build_session.[
         BuildSession, BuildSessionDiagnostic, BuildSessionReply, BuildSessionValue, build_session_call,
-        build_session_diag, build_session_graph,
+        build_session_diag, build_session_graph, build_session_refuse,
     ]
 }
 
@@ -38,7 +38,11 @@ JetDriverBuildAdapter: struct {
             // (`&`). This call writes a session of its own, and the adapter keeps its session for the
             // next build_call.
             session := self.session.copy()
-            jet_driver_build_host_call(session, self.inputs, self.base_dir, member, args, fallible, impure, span)
+            reply: jet_driver_build_host_call(session, self.inputs, self.base_dir, member, args, fallible, impure, span)
+            // A refused call stops the run, and its report is the build's own:
+            // the build query keeps it beside a failed staging check's reports.
+            if reply == .Val(answer) && answer == .Failure(_) -> build_session_refuse(session)
+            reply
         }
     }
 }

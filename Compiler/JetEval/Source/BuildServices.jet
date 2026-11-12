@@ -4,7 +4,7 @@
 use {
     jet_foundation.[Diagnostic, DiagnosticStructured, DiagnosticBuildError, DiagnosticErrorDetails, DiagnosticErrorField, DiagnosticErrorSpan, Span, TComptimeEnumArg, TComptimeField, TComptimeReport, TComptimeValue, Type, diagnostic_from_registry, diagnostic_registry_row]
     core.build.[BuildGraph, BuildGraphAction, BuildGraphFile]
-    jet_build_session.[BuildSessionDiagnostic, BuildSessionValue, build_session_error_projection]
+    jet_build_session.[BuildSessionDiagnostic, BuildSessionValue, build_session_error_projection, build_session_plan_report]
 }
 
 jet_eval_build_field: fn(data: TComptimeValue, name: String) -> TComptimeValue? Never! {
@@ -198,14 +198,10 @@ jet_eval_build_failed_diagnostic: fn(value: TComptimeValue, fallback: Span) -> D
             last: jet_eval_build_field_int(source, "end") ?? return None
             span = Span{start: first, end: last}
         }
-        cycle: message.starts_with("E3511: ")
-        code: if cycle -> "E3511" else -> "E3502"
-        text: if cycle -> message.removeprefix("E3511: ") else -> message
-        why: if cycle -> "generated source must reach a bounded deterministic order, not loop until quiescent" else -> "`build: fn` must return one deterministic typed graph whose handles all belong to that build"
-        fix: if cycle -> "break the dependency between these generators or give each generated module one owner" else -> "fix the named target/action/toolchain/probe and run `jet inspect explain-build` to inspect the graph"
-        diagnostic := diagnostic_from_registry(code, Val(span), "build plan is invalid: {text}", why, fix)
+        report: build_session_plan_report(message, span.start, span.end)
+        diagnostic := diagnostic_from_registry(report.code, Val(span), report.what, report.why, report.fix)
         diagnostic.structured = Val(DiagnosticStructured.BuildError{report: DiagnosticBuildError{
-            code: Val("E3502"), message: message, typed_identity: Val("BuildError::{variant}"),
+            code: Val(report.code), message: message, typed_identity: Val("BuildError::{variant}"),
             details: Val(DiagnosticErrorDetails{variant: variant, fields: fields, source_span: Val(DiagnosticErrorSpan{start: span.start, end: span.end})}),
         }})
         return Val(diagnostic)
