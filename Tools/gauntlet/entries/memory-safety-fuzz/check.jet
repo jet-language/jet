@@ -1,0 +1,28 @@
+// The job of a memory-safety-fuzz driver case, as facts (the harness runs it
+// in the case directory with the file holding the driver's output): the
+// output, a JSON report in canonical form with the case directory written as
+// `.`, or the error line; then the digest of the corpus the adapter staged
+// for the axis, or that it staged none.
+use {
+    crypto: core.crypto
+    files: core.files
+    json: core.encoding.json
+    process: core.process
+}
+
+#CLI
+Check: struct {
+    #Doc("The file holding the driver's output") stdout: String
+}
+
+run: fn(check: Check) {
+    here: files.cwd() ?? process.fail(1, "no working directory: {err}")
+    output: files.read(check.stdout) ?? process.fail(1, "no output file: {err}")
+    if json.parse(output) == {
+        .Ok(report) -> print((json.canonical(report) ?? process.fail(1, "the report has no canonical form: {err}")).replace(here, "."))
+        .Err(_) -> loop line in output.lines() -> print(line)
+    }
+    corpus: "run/axes/memory-safety-fuzz/fuzz-input.bin"
+    staged: if files.exists(corpus) -> crypto.sha256(files.read_bytes(corpus) ?? process.fail(1, "{corpus}: {err}")).hex() else -> "none"
+    print("corpus: {staged}")
+}

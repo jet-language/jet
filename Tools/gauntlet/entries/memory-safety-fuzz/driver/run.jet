@@ -1,0 +1,100 @@
+// The gauntlet driver of the kit's MemorySafetyFuzz module (#5072 c8), the
+// twin of Tools/gauntlet/harness/drivers/memory-safety-fuzz.mjs: it runs the
+// axis adapter on the axis in AXIS and prints the report.
+//
+//   jet driver AXIS JET
+//
+// The adapter runs in the working directory: the run directory is `run` and
+// the repository the working directory itself. A runner's declared files are
+// copied from the repository, a tool is available when a file of its name is
+// there (and fails its probe when `<tool>.broken` is), a declared command has
+// JET in place of `{jet_bin}`, and a command runs as it is declared, in the
+// runner's directory. An adapter error prints as `error: <message>`.
+package: {
+    name: "memory_safety_fuzz_driver"
+    version: "0.0.1"
+    deps: {
+        jet_gauntlet_kit: ../../../kit,
+    }
+}
+
+use {
+    crypto: core.crypto
+    files: core.files
+    jet_gauntlet_kit.[CommandOutcome, CommandRun, FuzzRun, MEMORY_OUTPUT_LIMIT, MEMORY_TARGET_COMMIT, MemoryAxisHost, items_at, read_json, run_memory_safety_fuzz_axis, text_or_empty, texts_at]
+    json: core.encoding.json
+    process: core.process
+}
+
+#CLI
+Driver: struct {
+    #Doc("The JSON file holding the axes.memory_safety_fuzz axis") axis: String
+    #Doc("The jet a declared command's {{jet_bin}} names") jet: String
+}
+
+DriverHost: struct {
+    repo: String
+    impl MemoryAxisHost {
+        stage_files: fn(self, dir: String, declared: Dyn) -> Dyn Err! {
+            staged := [Dyn]{}
+            loop item in items_at(declared, "") {
+                source: text_or_empty(item, "source")
+                target: text_or_empty(item, "target")
+                from: files.join(self.repo, source)
+                if !files.exists(from) -> return Err("axis file is missing: {source}")
+                to: files.join(dir, target)
+                files.create_dir_all(files.dirname(to))
+                files.copy(from, to)
+                entry := Dyn.object()
+                entry["source"] = source
+                entry["target"] = target
+                staged.push(entry)
+            }
+            Ok(Dyn.Array(staged))
+        }
+        stage_path: fn(self, dir: String, relative: String) -> String Err! { Ok(files.join(dir, relative)) }
+        probe_tools: fn(self, _dir: String, tools: Dyn, _jet_bin: String) -> [Dyn] Err! {
+            probes := [Dyn]{}
+            loop tool in texts_at(tools, "") {
+                probe := Dyn.object()
+                probe["tool"] = tool
+                if {
+                    files.exists(files.join(self.repo, tool)) -> probe["status"] = "available"
+                    files.exists(files.join(self.repo, "{tool}.broken")) -> {
+                        probe["status"] = "probe_failed"
+                        probe["reason"] = "{tool} probe failed"
+                    }
+                    else -> {
+                        probe["status"] = "unavailable"
+                        probe["reason"] = "{tool} is not installed"
+                    }
+                }
+                probes.push(probe)
+            }
+            Ok(probes)
+        }
+        command: fn(self, declared: Dyn, jet_bin: String) -> [String] Err! {
+            Ok(texts_at(declared, "").map(part -> part.replace("{{jet_bin}}", jet_bin)))
+        }
+        run_command: fn(self, dir: String, command: [String], _budget: Dyn) -> CommandRun Err! {
+            done: process.cmd(command).cwd(dir).run()
+            signal: if done.signal == .Val(number) -> Val("{number}") else -> String?{None}
+            Ok(CommandRun{command: command, process: CommandOutcome{code: done.code, signal: signal, timed_out: false, resource_exceeded: None, stdout: done.output, stderr: done.errors}})
+        }
+        file_sha256: fn(self, path: String) -> String Err! { Ok(crypto.sha256(files.read_bytes(path)).hex()) }
+    }
+}
+
+run: fn(driver: Driver) {
+    axis: read_json(driver.axis) ?? process.fail(1, "{driver.axis} is not a JSON file")
+    repo: files.cwd() ?? process.fail(1, "no working directory: {err}")
+    run: FuzzRun{run_dir: files.join(repo, "run"), repo_dir: repo.copy(), jet_bin: driver.jet, output_limit: MEMORY_OUTPUT_LIMIT, target_commit: MEMORY_TARGET_COMMIT}
+    host: DriverHost{repo: repo}
+    if run_memory_safety_fuzz_axis(axis, run, host) == {
+        .Ok(report) -> print(json.stringify(report, 2))
+        .Err(failure) -> {
+            print("error: {failure.message}")
+            process.exit(1)
+        }
+    }
+}

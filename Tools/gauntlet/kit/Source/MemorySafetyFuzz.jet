@@ -1,0 +1,940 @@
+// The gauntlet adapter for axes.memory_safety_fuzz, the twin of
+// Tools/gauntlet/harness/memory-safety-fuzz.mjs. It generates the axis's
+// seeded corpus of fixed-size records, each one of five case kinds (valid,
+// boundary, out-of-bounds, use-after-free and wrong-output reads), stages it
+// beside each runner's files, runs the runner's compile and run commands under
+// the axis budget, and holds the run's stdout to the oracle: one line that
+// summarizes the corpus. A timeout, a declared evidence pattern in the output,
+// a crash and a wrong answer are findings. Findings are deduplicated into
+// receipts the Tower CLI tracks, and a receipt or a runner that did not finish
+// blocks publication.
+use {
+    base64: core.encoding.base64
+    crypto: core.crypto
+    files: core.files
+    json: core.encoding.json
+}
+
+CASE_KINDS: ["valid", "boundary", "oob", "use-after-free", "wrong-output"]
+CASE_VALID: 0
+CASE_BOUNDARY: 1
+CASE_OOB: 2
+CASE_USE_AFTER_FREE: 3
+CASE_WRONG_OUTPUT: 4
+RECORD_METADATA_BYTES: 4
+WORD_MASK: 4294967295
+CORPUS_GENERATOR: "xorshift32-v1"
+SHAPE_REFUSED: "memory-safety corpus must declare a bounded xorshift32 record shape"
+NUL: String.from_bytes_lossy([U8]{0})
+// What a run that names no target commit or output limit records.
+MEMORY_TARGET_COMMIT: "working-tree"
+MEMORY_OUTPUT_LIMIT: 8192
+
+// Where the adapter runs: the gauntlet run's directory, the repository, the
+// `jet` a declared command's `{jet_bin}` names, how much of each stream a
+// report keeps, and the commit a finding names.
+FuzzRun: struct {
+    run_dir: String
+    repo_dir: String
+    jet_bin: String
+    output_limit: Int
+    target_commit: String
+}
+
+// How one command ended, as the host saw it.
+CommandOutcome: struct {
+    code: Int?
+    signal: String?
+    timed_out: Bool
+    resource_exceeded: String?
+    stdout: String
+    stderr: String
+}
+
+// The command the host ran (a declared one, wrapped in its budget) and how
+// it ended.
+CommandRun: struct {
+    command: [String]
+    process: CommandOutcome
+}
+
+// What the gauntlet run lends the adapter: staging a runner's declared files
+// into its directory (the staged list), the path of a target staged there,
+// probing the runner's tools, the argv of a declared command, running one in
+// a directory under the axis budget, and the SHA-256 of a file.
+MemoryAxisHost: trait {
+    stage_files: fn(self, dir: String, declared: Dyn) -[FS]> Dyn Err!
+    stage_path: fn(self, dir: String, relative: String) -> String Err!
+    probe_tools: fn(self, dir: String, tools: Dyn, jet_bin: String) -[FS, Exec]> [Dyn] Err!
+    command: fn(self, declared: Dyn, jet_bin: String) -> [String] Err!
+    run_command: fn(self, dir: String, command: [String], budget: Dyn) -[FS, Exec]> CommandRun Err!
+    file_sha256: fn(self, path: String) -[FS]> String Err!
+}
+
+// The corpus: `case_count` records of `bytes_per_case` bytes, each its kind,
+// declared length, requested index and tag (the `metadata_bytes`), then its
+// payload of xorshift32 bytes.
+Corpus: struct {
+    seed: Int
+    case_count: Int
+    bytes_per_case: Int
+    metadata_bytes: Int
+    payload_bytes: Int
+    data: [U8]
+    sha256: String
+}
+
+// One record's kind and the read it asks for.
+CaseRecord: struct {
+    index: Int
+    kind: Int
+    declared_length: Int
+    requested_index: Int
+    offset: Int
+}
+
+// The records by kind and the two sums the oracle line carries.
+CorpusSummary: struct {
+    counts: [Int]
+    checksum: Int
+    semantic: Int
+    records: [CaseRecord]
+}
+
+// A command's process as a report keeps it: each stream cut to the output
+// limit and whole as base64.
+Evidence: struct {
+    code: Int?
+    signal: String?
+    timed_out: Bool
+    resource_exceeded: String?
+    stdout: String
+    stderr: String
+    stdout_bytes: String
+    stderr_bytes: String
+}
+
+Finding: struct {
+    kind: String
+    phase: String
+    detail: String
+    pattern: String
+    excerpts: [String]
+}
+
+Hit: struct {
+    pattern: String
+    line: String
+}
+
+// The findings of one signature, over every rail that hit it.
+FindingReceipt: struct {
+    dedupe_key: String
+    kind: String
+    signature: String
+    rails: [String]
+    occurrences: [Dyn]
+    payload: Dyn
+}
+
+// What every runner of one axis run shares.
+AxisPass: struct {
+    axis: Dyn
+    axis_dir: String
+    corpus: Corpus
+    summary: CorpusSummary
+    expected: String
+    run: FuzzRun
+}
+
+// Where a runner got to: the stage and command a failure is charged to, its
+// tool probes and its findings so far.
+RunnerProgress: struct {
+    stage: String
+    command: Dyn
+    probes: [Dyn]
+    findings: [Finding]
+}
+
+RunnerOutcome: struct {
+    result: Dyn
+    findings: [Finding]
+}
+
+xorshift32: fn(value: Int) -> Int {
+    state := value.bit_and(WORD_MASK)
+    state = state.bit_xor((state << 13).bit_and(WORD_MASK))
+    state = state.bit_xor(state >> 17)
+    state.bit_xor((state << 5).bit_and(WORD_MASK))
+}
+
+// A set value as a whole number (refused for another value), or `fallback`
+// when it is unset.
+whole_or: fn(value: Dyn?, fallback: Int) -> Int Err! {
+    found: value ?? return Ok(fallback)
+    if found == {
+        .Int(_) | .Number(_) -> Ok(found.decode<Int>() ?? return Err(SHAPE_REFUSED))
+        .Null | .Bool(_) | .Float(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> Err(SHAPE_REFUSED)
+    }
+}
+
+corpus_shape: fn(spec: Dyn) -> Corpus Err! {
+    seed: whole_or(first_member(spec, ["seed"]), -1)
+    case_count: whole_or(first_member(spec, ["case_count", "caseCount"]), 0)
+    bytes_per_case: whole_or(first_member(spec, ["bytes_per_case", "bytesPerCase"]), 0)
+    metadata_bytes: whole_or(first_member(spec, ["metadata_bytes", "metadataBytes"]), RECORD_METADATA_BYTES)
+    payload_bytes: whole_or(first_member(spec, ["payload_bytes", "payloadBytes"]), bytes_per_case - metadata_bytes)
+    // An unset generator is the one generator there is.
+    generator_known: [Dyn.Null, Dyn.Text(CORPUS_GENERATOR)].contains(dyn_at(spec, "generator"))
+    if seed < 0 || seed > WORD_MASK || case_count < 1 || bytes_per_case < 8 || bytes_per_case > 255 || metadata_bytes < RECORD_METADATA_BYTES || metadata_bytes >= bytes_per_case || payload_bytes < 1 || payload_bytes != bytes_per_case - metadata_bytes || !generator_known {
+        return Err(SHAPE_REFUSED)
+    }
+    Ok(Corpus{seed: seed, case_count: case_count, bytes_per_case: bytes_per_case, metadata_bytes: metadata_bytes, payload_bytes: payload_bytes, data: [U8]{}, sha256: ""})
+}
+
+byte_at: fn(data: [U8], offset: Int) -> Int { Int.from_u8(data[offset]) }
+
+// Fills the records with xorshift32 bytes from the seed, then writes each
+// record's metadata: its kind (the record index cycles through them), the
+// length it declares and the index it reads, both drawn from its payload so
+// a valid read stays inside it and an out-of-bounds one leaves it, and a tag.
+generate_corpus: fn(spec: Dyn) -> Corpus Err! {
+    corpus := corpus_shape(spec)
+    payload: corpus.payload_bytes
+    data := [U8]{}
+    state := corpus.seed
+    loop _ in 0..<(corpus.case_count * corpus.bytes_per_case) {
+        state = xorshift32(state)
+        data.push(U8{state.bit_and(255)})
+    }
+    out_of_bounds: if 255 - payload > 1 -> 255 - payload else -> 1
+    loop index in 0..<corpus.case_count {
+        offset: index * corpus.bytes_per_case
+        kind: index % CASE_KINDS.len()
+        random: fn(relative: Int) -> Int { byte_at(data, offset + corpus.metadata_bytes + relative % payload) }
+        read: if {
+            kind == CASE_VALID -> {
+                declared: 1 + random(0) % payload
+                (declared: declared, requested: random(1) % declared)
+            }
+            kind == CASE_BOUNDARY -> if index % 2 == 0 -> (declared: 0, requested: 0) else -> (declared: payload, requested: payload - 1)
+            kind == CASE_OOB -> (declared: payload + 1 + random(2) % out_of_bounds, requested: payload + random(3) % out_of_bounds)
+            kind == CASE_USE_AFTER_FREE -> {
+                declared: 1 + random(4) % payload
+                (declared: declared, requested: random(5) % declared)
+            }
+            else -> {
+                declared: 1 + random(6) % payload
+                (declared: declared, requested: random(7) % declared)
+            }
+        }
+        data[offset] = U8{kind}
+        data[offset + 1] = U8{read.declared.bit_and(255)}
+        data[offset + 2] = U8{read.requested.bit_and(255)}
+        data[offset + 3] = U8{160 + kind}
+    }
+    corpus.sha256 = crypto.sha256(data).hex()
+    corpus.data = data
+    Ok(corpus)
+}
+
+// Each record's kind and read, the byte sum of the corpus, and the semantic
+// sum: per record, the value its read yields when the reader bounds it (the
+// bounded payload sum for a valid or out-of-bounds read, the requested byte
+// otherwise, flipped for a wrong-output case), its kind and its bounded
+// length and index.
+record_summary: fn(corpus: Corpus) -> CorpusSummary {
+    data: corpus.data
+    payload: corpus.payload_bytes
+    counts := [0, 0, 0, 0, 0]
+    records := [CaseRecord]{}
+    semantic := 0
+    loop index in 0..<corpus.case_count {
+        offset: index * corpus.bytes_per_case
+        kind: byte_at(data, offset)
+        counts[kind] = counts[kind] + 1
+        declared: byte_at(data, offset + 1)
+        requested: byte_at(data, offset + 2)
+        bounded: if declared < payload -> declared else -> payload
+        safe: if requested < payload -> requested else -> payload
+        start: offset + corpus.metadata_bytes
+        value: if {
+            kind == CASE_VALID || kind == CASE_OOB -> data.slice(start, start + bounded).map(byte -> Int.from_u8(byte)).sum().bit_and(WORD_MASK)
+            requested >= payload -> 0
+            kind == CASE_WRONG_OUTPUT -> byte_at(data, start + requested).bit_xor(165)
+            else -> byte_at(data, start + requested)
+        }
+        semantic = (semantic + value + (kind + 1) * 257 + bounded + safe).bit_and(WORD_MASK)
+        records.push(CaseRecord{index: index, kind: kind, declared_length: declared, requested_index: requested, offset: offset})
+    }
+    CorpusSummary{counts: counts, checksum: data.map(byte -> Int.from_u8(byte)).sum().bit_and(WORD_MASK), semantic: semantic, records: records}
+}
+
+expected_output: fn(summary: CorpusSummary, corpus: Corpus) -> String {
+    c: summary.counts
+    "cases {corpus.case_count} valid {c[0]} boundary {c[1]} oob {c[2]} use_after_free {c[3]} wrong_output {c[4]} bytes {corpus.data.len()} checksum {summary.checksum} semantic {summary.semantic}\n"
+}
+
+case_counts: fn(summary: CorpusSummary) -> Dyn {
+    out := Dyn.object()
+    loop i in 0..<CASE_KINDS.len() -> out[CASE_KINDS[i]] = summary.counts[i]
+    out
+}
+
+sha256_text: fn(text: String) -> String { crypto.sha256(text.bytes()).hex() }
+
+limited: fn(text: String, limit: Int) -> String {
+    if text.len() > limit -> text.slice(0, limit) else -> text.copy()
+}
+
+texts: fn(list: [String]) -> Dyn { Dyn.Array(list.map(text -> Dyn.Text(text.copy()))) }
+
+or_null_int: fn(value: Int?) -> Dyn {
+    if value == .Val(n) -> Dyn.Int(n) else -> Dyn.Null
+}
+
+or_null_text: fn(value: String?) -> Dyn {
+    if value == .Val(text) -> Dyn.Text(text) else -> Dyn.Null
+}
+
+// Sets `key` of `out` to the member of `tree` at `path` when it is set.
+copy_member: fn(out: &Dyn, key: String, tree: Dyn, path: String) {
+    put_present(out, key, member(tree, path))
+}
+
+// The first member of `paths` that is set.
+first_member: fn(tree: Dyn, paths: [String]) -> Dyn? {
+    paths.filter_map(path -> member(tree, path)).first()
+}
+
+evidence_of: fn(outcome: CommandOutcome, limit: Int) -> Evidence {
+    Evidence{
+        code: outcome.code,
+        signal: outcome.signal,
+        timed_out: outcome.timed_out,
+        resource_exceeded: outcome.resource_exceeded,
+        stdout: limited(outcome.stdout, limit),
+        stderr: limited(outcome.stderr, limit),
+        stdout_bytes: base64.encode(outcome.stdout.bytes()),
+        stderr_bytes: base64.encode(outcome.stderr.bytes())
+    }
+}
+
+evidence_tree: fn(evidence: Evidence) -> Dyn {
+    out := Dyn.object()
+    out["code"] = or_null_int(evidence.code)
+    out["signal"] = or_null_text(evidence.signal)
+    out["timed_out"] = Dyn.Bool(evidence.timed_out)
+    out["resource_exceeded"] = or_null_text(evidence.resource_exceeded)
+    out["stdout"] = evidence.stdout
+    out["stderr"] = evidence.stderr
+    out["stdout_bytes"] = evidence.stdout_bytes
+    out["stderr_bytes"] = evidence.stderr_bytes
+    out
+}
+
+// The process of a stage that failed before its command ran: the reason as
+// its stderr.
+failure_process: fn(reason: String) -> Dyn {
+    evidence_tree(Evidence{code: None, signal: None, timed_out: false, resource_exceeded: None, stdout: "", stderr: reason, stdout_bytes: "", stderr_bytes: base64.encode(reason.bytes())})
+}
+
+// A finding's text with the run's roots, addresses, line numbers and runs of
+// space made uniform, so the same fault on another host or build has the
+// same signature.
+normalize_finding_text: fn(text: String, run: FuzzRun, limit: Int) -> String {
+    normalized := text.copy()
+    loop root in [run.run_dir, run.repo_dir].filter(root -> root != "") -> normalized = normalized.replace(root, "<path>")
+    addresses: Regex{"0[xX][0-9a-fA-F]+"}.replace(normalized, "0xADDRESS")
+    lines: Regex{":\d+(?::\d+)?"}.replace(addresses, ":LINE")
+    limited(Regex{"\s+"}.replace(lines, " ").trim(), limit)
+}
+
+// Each output line (ANSI control sequences dropped) that holds an evidence
+// pattern, pattern by pattern.
+evidence_hits: fn(patterns: [String], output: String) -> [Hit] {
+    plain: Regex{"\x1b\[[0-?]*[ -/]*[@-~]"}.replace(output, "")
+    lines: plain.split("\n").to_list().map(line -> line.trim()).filter(line -> line != "")
+    patterns.flat_map(pattern -> lines.filter(line -> line.contains(pattern)).map(line -> Hit{pattern: pattern.copy(), line: line.copy()}))
+}
+
+kind_for_evidence: fn(hit: Hit) -> String {
+    sanitizer: Regex{"sanitizer|undefinedbehavior|use-after-free|out.of.bounds|heap-buffer-overflow|stack-buffer-overflow"}
+    if sanitizer.is_match("{hit.pattern} {hit.line}".lower()) -> "sanitizer" else -> "crash"
+}
+
+shown_code: fn(code: Int?) -> String {
+    if code == .Val(n) -> "{n}" else -> "null"
+}
+
+// The budget's wall timeout as the axis declares it.
+wall_budget: fn(pass: AxisPass) -> String {
+    found: member(pass.axis, "budget/wall_timeout_ms") ?? return "declared"
+    json.stringify(found)
+}
+
+// The findings of one stage's process: a timeout or exceeded resource, each
+// evidence hit, an unexplained crash or non-zero exit, and (for the run) an
+// answer that is not the oracle's.
+classify: fn(phase: String, evidence: Evidence, pass: AxisPass, patterns: [String]) -> [Finding] {
+    hits: evidence_hits(patterns, "{evidence.stdout}\n{evidence.stderr}")
+    findings := [Finding]{}
+    stopped: evidence.timed_out || evidence.resource_exceeded != None
+    if stopped {
+        detail: evidence.resource_exceeded ?? "wall timeout after {wall_budget(pass)}ms"
+        findings.push(Finding{kind: "timeout", phase: phase, detail: detail, pattern: "timeout", excerpts: [detail]})
+    }
+    loop hit in hits -> findings.push(Finding{kind: kind_for_evidence(hit), phase: phase, detail: hit.line, pattern: hit.pattern, excerpts: [hit.line]})
+    failed: evidence.signal != None || (evidence.code != None && evidence.code != Val(0))
+    if !stopped && hits.len() == 0 && failed {
+        detail: if evidence.signal == .Val(signal) -> "signal {signal}" else -> "exit {shown_code(evidence.code)}"
+        excerpt: if {
+            evidence.stderr != "" -> evidence.stderr.copy()
+            evidence.stdout != "" -> evidence.stdout.copy()
+            else -> "exit {shown_code(evidence.code)}"
+        }
+        findings.push(Finding{kind: "crash", phase: phase, detail: detail, pattern: "non-zero exit", excerpts: [excerpt]})
+    }
+    if phase == "run" && !stopped && evidence.code == Val(0) && evidence.stdout != pass.expected {
+        detail: "expected {sha256_text(pass.expected)} but received {sha256_text(evidence.stdout)}"
+        findings.push(Finding{kind: "wrong-output", phase: phase, detail: detail, pattern: "oracle mismatch", excerpts: [limited(evidence.stdout, pass.run.output_limit)]})
+    }
+    findings
+}
+
+// The record that best reproduces a finding of `kind`: the wrong-output case
+// for a wrong answer, an unsafe read for a sanitizer hit or crash, a boundary
+// read for a timeout; the first record when the corpus has none.
+minimized_case: fn(pass: AxisPass, kind: String) -> Dyn {
+    preferred: if {
+        kind == "wrong-output" -> [CASE_WRONG_OUTPUT]
+        kind == "sanitizer" || kind == "crash" -> [CASE_OOB, CASE_USE_AFTER_FREE, CASE_BOUNDARY]
+        else -> [CASE_BOUNDARY, CASE_OOB, CASE_USE_AFTER_FREE]
+    }
+    records: pass.summary.records
+    record: preferred.filter_map(wanted -> records.find(record -> record.kind == wanted)).first() ?? pass.summary.records[0]
+    bytes: pass.corpus.data.slice(record.offset, record.offset + pass.corpus.bytes_per_case)
+    out := Dyn.object()
+    out["index"] = record.index
+    out["kind"] = CASE_KINDS[record.kind]
+    out["byte_count"] = bytes.len()
+    out["sha256"] = Dyn.Text(crypto.sha256(bytes).hex())
+    out["encoding"] = "base64"
+    out["bytes"] = Dyn.Text(base64.encode(bytes))
+    out["declared_length"] = record.declared_length
+    out["requested_index"] = record.requested_index
+    out
+}
+
+// The Tower hardening key of a finding kind. Every part is URI-safe as
+// written, so none needs escaping.
+hardening_key: fn(kind: String) -> String {
+    "hardening:v1|seam=unclassified.semantic-primitive|relation={kind}|tiers=all-rails|partition=memory-safety-fuzz"
+}
+
+// The card payload a receipt's Tower tracking files.
+hardening_payload: fn(finding: Finding, runner: Dyn, process: Dyn, pass: AxisPass, command: Dyn) -> Dyn {
+    minimized: minimized_case(pass, finding.kind)
+    key: hardening_key(finding.kind)
+    id: "HF-{sha256_text(key).slice(0, 16)}"
+    actual: if finding.kind == "wrong-output" -> finding.detail.copy() else -> "{finding.kind}: {finding.detail}"
+    expected: pass.expected.trim_end()
+    evidence := Dyn.object()
+    evidence["source"] = "fuzz-input.bin#case-{json.stringify(dyn_at(minimized, "index"))};base64:{text_or_empty(minimized, "bytes")}"
+    evidence["commands"] = Dyn.Array([command])
+    evidence["expectedRelation"] = expected
+    evidence["actualRelation"] = actual
+    evidence["seed"] = "{pass.corpus.seed}"
+    evidence["targetCommit"] = pass.run.target_commit
+    evidence["classification"] = finding.kind
+    copy_member(evidence, "stdoutBytes", process, "stdout_bytes")
+    copy_member(evidence, "stderrBytes", process, "stderr_bytes")
+    evidence["exit"] = dyn_at(process, "code")
+    evidence["signal"] = dyn_at(process, "signal")
+    evidence["timeout"] = Dyn.Bool(is_true(process, "timed_out") || truthy_at(process, "resource_exceeded"))
+    evidence["normalization"] = ["ANSI control sequences", "absolute paths", "addresses", "line numbers"]
+    out := Dyn.object()
+    out["hardeningDedupKey"] = key
+    out["hardeningSeam"] = "unclassified.semantic-primitive"
+    out["hardeningRelation"] = finding.kind
+    out["hardeningWrongTierMask"] = ["all-rails"]
+    out["hardeningInputPartition"] = "memory-safety-fuzz"
+    out["hardeningFindingId"] = id
+    out["hardeningEvidence"] = evidence
+    out["finding_id"] = id
+    out["dedup_key"] = key
+    out["minimized_case"] = minimized
+    out["expected_relation"] = expected
+    out["actual_relation"] = actual
+    out["seed"] = pass.corpus.seed
+    out["bytes"] = pass.corpus.data.len()
+    out["toolchain"] = dyn_at(runner, "tools")
+    out["classification"] = finding.kind
+    out["correctness_finding"] = Dyn.Bool(true)
+    out["performance_exclusion"] = Dyn.Bool(false)
+    out
+}
+
+finding_tree: fn(finding: Finding, pass: AxisPass, probes: [Dyn]) -> Dyn {
+    out := Dyn.object()
+    out["kind"] = finding.kind
+    out["phase"] = finding.phase
+    out["detail"] = finding.detail
+    out["pattern"] = finding.pattern
+    out["excerpts"] = texts(finding.excerpts)
+    out["seed"] = pass.corpus.seed
+    out["bytes"] = pass.corpus.data.len()
+    out["toolchain"] = Dyn.Array(probes.copy())
+    out["minimized_case"] = minimized_case(pass, finding.kind)
+    out["classification"] = finding.kind
+    out["correctness_finding"] = Dyn.Bool(true)
+    out["performance_exclusion"] = Dyn.Bool(false)
+    out
+}
+
+findings_tree: fn(findings: [Finding], pass: AxisPass, probes: [Dyn]) -> Dyn {
+    Dyn.Array(findings.map(finding -> finding_tree(finding, pass, probes)))
+}
+
+// Files `finding` under the receipt of its signature (a wrong answer's is
+// the expected and actual digests, another finding's its normalized
+// detail), opening the receipt on its first occurrence.
+record_finding: fn(receipts: &[FindingReceipt], finding: Finding, runner: Dyn, process: Dyn, pass: AxisPass, command: Dyn) {
+    signature: if finding.kind == "wrong-output" -> "{finding.kind}:{sha256_text(pass.expected)}:{sha256_text(text_or_empty(process, "stdout"))}" else -> "{finding.kind}:{normalize_finding_text(finding.detail, pass.run, 500)}"
+    key: sha256_text("memory_safety_fuzz{NUL}{finding.kind}{NUL}{signature}")
+    wanted: key.copy()
+    found: receipts.position(receipt -> receipt.dedupe_key == wanted)
+    if found == None -> receipts.push(FindingReceipt{dedupe_key: key, kind: finding.kind.copy(), signature: signature, rails: [String]{}, occurrences: [Dyn]{}, payload: hardening_payload(finding, runner, process, pass, command)})
+    at: found ?? receipts.len() - 1
+    rail: text_or_empty(runner, "id")
+    if !receipts[at].rails.contains(rail) -> receipts[at].rails.push(rail.copy())
+    receipts[at].rails.sort()
+    occurrence := Dyn.object()
+    occurrence["runner"] = rail
+    copy_member(occurrence, "language", runner, "language")
+    occurrence["phase"] = finding.phase
+    occurrence["pattern"] = finding.pattern
+    occurrence["excerpts"] = texts(finding.excerpts)
+    occurrence["seed"] = pass.corpus.seed
+    occurrence["bytes"] = pass.corpus.data.len()
+    occurrence["toolchain"] = dyn_at(runner, "tools")
+    occurrence["process"] = process
+    occurrence["minimized_case"] = dyn_at(receipts[at].payload, "minimized_case")
+    occurrence["classification"] = finding.kind
+    occurrence["correctness_finding"] = Dyn.Bool(true)
+    occurrence["performance_exclusion"] = Dyn.Bool(false)
+    receipts[at].occurrences.push(occurrence)
+}
+
+receipt_tree: fn(receipt: FindingReceipt) -> Dyn {
+    tracking := Dyn.object()
+    tracking["status"] = "pending"
+    tracking["transport"] = "tower-cli"
+    tracking["command"] = ["node", "Tools/tower/tower.mjs", "card", "add", "--file", "-"]
+    tracking["dedup_key"] = dyn_at(receipt.payload, "hardeningDedupKey")
+    tracking["payload"] = receipt.payload
+    out := Dyn.object()
+    out["id"] = Dyn.Text(receipt.dedupe_key.slice(0, 16))
+    out["dedupe_key"] = receipt.dedupe_key
+    out["axis"] = "memory_safety_fuzz"
+    out["kind"] = receipt.kind
+    out["classification"] = "correctness"
+    out["severity"] = if receipt.kind == "wrong-output" -> "P0" else -> "P1"
+    out["signature"] = receipt.signature
+    out["rails"] = texts(receipt.rails)
+    out["occurrences"] = Dyn.Array(receipt.occurrences.copy())
+    out["tower_tracking"] = tracking
+    out["correctness_finding"] = Dyn.Bool(true)
+    out["performance_exclusion"] = Dyn.Bool(false)
+    out
+}
+
+runner_corpus: fn(pass: AxisPass) -> Dyn {
+    corpus: pass.corpus
+    valid: pass.summary.counts[CASE_VALID]
+    out := Dyn.object()
+    copy_member(out, "path", pass.axis, "corpus/path")
+    out["seed"] = corpus.seed
+    out["case_count"] = corpus.case_count
+    out["bytes_per_case"] = corpus.bytes_per_case
+    out["bytes"] = corpus.data.len()
+    out["generated_sha256"] = corpus.sha256
+    out["copied_sha256"] = Dyn.Null
+    out["matches_generator"] = Dyn.Bool(false)
+    out["case_kinds"] = case_counts(pass.summary)
+    out["valid_case_count"] = valid
+    out["adversarial_case_count"] = corpus.case_count - valid
+    out
+}
+
+base_runner_result: fn(pass: AxisPass, runner: Dyn) -> Dyn {
+    enforcement := Dyn.object()
+    enforcement["cpu"] = "RLIMIT_CPU via ulimit -t"
+    enforcement["memory"] = "process-tree VmRSS monitor"
+    enforcement["wall"] = "harness process-group timeout"
+    out := Dyn.object()
+    copy_member(out, "id", runner, "id")
+    copy_member(out, "language", runner, "language")
+    out["tools"] = Dyn.Array([Dyn]{})
+    out["source_files"] = Dyn.Array([Dyn]{})
+    out["corpus"] = runner_corpus(pass)
+    copy_member(out, "resource_budget", pass.axis, "budget")
+    out["resource_enforcement"] = enforcement
+    copy_member(out, "evidence", runner, "evidence")
+    out["declared_compile"] = dyn_at(runner, "compile")
+    copy_member(out, "declared_run", runner, "run")
+    out["status"] = "unmeasured"
+    out["findings"] = Dyn.Array([Dyn]{})
+    out
+}
+
+stage_failure: fn(stage: String, reason: Dyn) -> Dyn {
+    out := Dyn.object()
+    out["stage"] = stage
+    out["status"] = "failed"
+    out["reason"] = reason
+    out
+}
+
+// Marks the runner failed at `stage` for `reason`, keeping what the stage
+// already recorded (its command and process) and the command it ran.
+mark_runner_failure: fn(result: &Dyn, stage: String, command: Dyn, reason: String) {
+    found: dyn_at(result, stage)
+    entry := if found == .Object(_) -> found else -> Dyn.object()
+    entry["status"] = "failed"
+    entry["command"] = if command != Dyn.Null -> command else -> dyn_at(entry, "command")
+    if member(entry, "process") == None -> entry["process"] = failure_process(reason)
+    failure := Dyn.object()
+    failure["stage"] = stage
+    failure["reason"] = reason
+    entry["failure"] = failure
+    result[stage] = entry
+    result["failure"] = stage_failure(stage, Dyn.Text(reason.copy()))
+    result["failed_stage"] = stage
+    result["status"] = "failed"
+    result["reason"] = "{stage} execution failed: {reason}"
+}
+
+stage_record: fn(command: [String], evidence: Evidence) -> Dyn {
+    out := Dyn.object()
+    out["command"] = texts(command)
+    out["process"] = evidence_tree(evidence)
+    out
+}
+
+fail_runner: fn(result: &Dyn, reason: String) {
+    result["status"] = "failed"
+    result["reason"] = reason
+}
+
+// Stages the runner, checks its copy of the corpus and its tools, then runs
+// its compile and run stages, recording each into `result`. A runner that
+// cannot go on records why and stops; a host error is the caller's to
+// charge to `progress.stage`.
+run_stages: fn<H: MemoryAxisHost>(pass: AxisPass, runner: Dyn, host: H, result: &Dyn, progress: &RunnerProgress) -[FS, Exec]> Err! {
+    runner_dir: files.join(pass.axis_dir, Regex{"[^A-Za-z0-9_.-]"}.replace(text_or_empty(runner, "id"), "_"))
+    files.create_dir_all(runner_dir)
+    staged: host.stage_files(runner_dir, dyn_at(runner, "files"))
+    if staged == .Array(_) -> result["source_files"] = staged else -> return Err("axis file staging did not return a file list")
+    input_path: host.stage_path(runner_dir, text_or_empty(pass.axis, "corpus/path"))
+    files.create_dir_all(files.dirname(input_path))
+    files.write_bytes(input_path, pass.corpus.data)
+    copied: host.file_sha256(input_path)
+    corpus := dyn_at(result, "corpus")
+    corpus["copied_sha256"] = copied
+    corpus["matches_generator"] = Dyn.Bool(copied == pass.corpus.sha256)
+    result["corpus"] = corpus
+    if copied != pass.corpus.sha256 {
+        mark_runner_failure(result, "setup", Dyn.Null, "copied fuzz corpus digest {copied} does not match generated digest {pass.corpus.sha256}")
+        return Ok()
+    }
+    progress.probes = host.probe_tools(runner_dir, dyn_at(runner, "tools"), pass.run.jet_bin)
+    result["tools"] = Dyn.Array(progress.probes.copy())
+    if progress.probes.find(probe -> text_at(probe, "status") == Val("unavailable")) == .Val(probe) {
+        result["status"] = "unavailable"
+        copy_member(result, "reason", probe, "reason")
+        return Ok()
+    }
+    if progress.probes.find(probe -> text_at(probe, "status") == Val("probe_failed")) == .Val(probe) {
+        reason: dyn_at(probe, "reason")
+        failure: stage_failure("setup", reason)
+        setup := Dyn.object()
+        setup["status"] = "failed"
+        setup["command"] = Dyn.Null
+        setup["process"] = failure_process(text_or_empty(probe, "reason"))
+        setup["failure"] = failure
+        result["status"] = "failed"
+        result["reason"] = reason
+        result["failure"] = failure
+        result["failed_stage"] = "setup"
+        result["setup"] = setup
+        return Ok()
+    }
+    patterns: texts_at(runner, "evidence/patterns")
+    budget: dyn_at(pass.axis, "budget")
+    if member(runner, "compile") == .Val(declared) {
+        progress.stage = "compile"
+        command: host.command(declared, pass.run.jet_bin)
+        progress.command = texts(command)
+        compiled: host.run_command(runner_dir, command, budget)
+        evidence: evidence_of(compiled.process, pass.run.output_limit)
+        result["compile"] = stage_record(compiled.command, evidence)
+        progress.findings.extend(classify("compile", evidence, pass, patterns))
+        if evidence.code != Val(0) || evidence.timed_out || evidence.resource_exceeded != None {
+            result["findings"] = findings_tree(progress.findings, pass, progress.probes)
+            if progress.findings.len() > 0 -> result["status"] = "finding" else -> fail_runner(result, "compile exited {shown_code(evidence.code)}")
+            return Ok()
+        }
+    }
+    progress.stage = "run"
+    command: host.command(dyn_at(runner, "run"), pass.run.jet_bin)
+    progress.command = texts(command)
+    ran: host.run_command(runner_dir, command, budget)
+    evidence: evidence_of(ran.process, pass.run.output_limit)
+    result["run"] = stage_record(ran.command, evidence)
+    result["toolchain"] = Dyn.Array(progress.probes.copy())
+    output := Dyn.object()
+    output["expected"] = pass.expected
+    output["actual_stdout"] = evidence.stdout
+    output["exact_stdout"] = Dyn.Bool(evidence.stdout == pass.expected)
+    output["expected_sha256"] = Dyn.Text(sha256_text(pass.expected))
+    output["actual_sha256"] = Dyn.Text(sha256_text(evidence.stdout))
+    result["output"] = output
+    progress.findings.extend(classify("run", evidence, pass, patterns))
+    unchanged: host.file_sha256(input_path) == copied
+    result["input_unchanged"] = Dyn.Bool(unchanged)
+    if !unchanged {
+        integrity: "runner modified the shared fuzz input"
+        progress.findings.push(Finding{kind: "wrong-output", phase: "run", detail: integrity, pattern: "input integrity", excerpts: [integrity]})
+    }
+    result["findings"] = findings_tree(progress.findings, pass, progress.probes)
+    if {
+        progress.findings.len() > 0 -> result["status"] = "finding"
+        evidence.resource_exceeded != None -> fail_runner(result, evidence.resource_exceeded ?? "")
+        evidence.timed_out -> fail_runner(result, "run exceeded {wall_budget(pass)}ms wall budget")
+        evidence.code != Val(0) -> fail_runner(result, "run exited {shown_code(evidence.code)}")
+        evidence.stdout != pass.expected -> fail_runner(result, "run stdout did not match the declared oracle")
+        else -> result["status"] = "complete"
+    }
+    Ok()
+}
+
+run_runner: fn<H: MemoryAxisHost>(pass: AxisPass, runner: Dyn, host: H) -[FS, Exec]> RunnerOutcome {
+    result := base_runner_result(pass, runner)
+    progress := RunnerProgress{stage: "setup", command: Dyn.Null, probes: [Dyn]{}, findings: [Finding]{}}
+    if run_stages(pass, runner, host, result, progress) == .Err(failure) {
+        result["findings"] = findings_tree(progress.findings, pass, progress.probes)
+        mark_runner_failure(result, progress.stage, progress.command, failure.message)
+    }
+    RunnerOutcome{result: result, findings: progress.findings}
+}
+
+finished: fn(result: Dyn) -> Bool {
+    ["complete", "finding"].contains(text_or_empty(result, "status"))
+}
+
+// Runs every runner of the axis (the manifest's axes.memory_safety_fuzz) on
+// one generated corpus, staged at <run_dir>/axes/memory-safety-fuzz and in
+// each runner's directory there, and reports the axis: complete when every
+// runner finished (with or without findings), its findings as deduplicated
+// receipts, and ready to publish only with every runner complete and no
+// receipt. The metrics are null unless the axis is complete.
+run_memory_safety_fuzz_axis: fn<H: MemoryAxisHost>(axis: Dyn, run: FuzzRun, host: H) -[FS, Exec]> Dyn Err! {
+    declared: items_at(axis, "runners")
+    spec: member(axis, "corpus") ?? return Err("memory-safety axis has no corpus or runners")
+    if declared.len() == 0 -> return Err("memory-safety axis has no corpus or runners")
+    axis_dir: files.join(run.run_dir, "axes/memory-safety-fuzz")
+    files.create_dir_all(axis_dir)
+    corpus: generate_corpus(spec)
+    summary: record_summary(corpus)
+    expected: expected_output(summary, corpus)
+    corpus_path: host.stage_path(axis_dir, text_or_empty(axis, "corpus/path"))
+    files.create_dir_all(files.dirname(corpus_path))
+    files.write_bytes(corpus_path, corpus.data)
+    pass: AxisPass{axis: axis, axis_dir: axis_dir, corpus: corpus, summary: summary, expected: expected, run: run}
+    receipts := [FindingReceipt]{}
+    runners := [Dyn]{}
+    loop runner in declared {
+        outcome: run_runner(pass, runner, host)
+        process: first_member(outcome.result, ["run/process", "compile/process"]) ?? evidence_tree(evidence_of(CommandOutcome{code: None, signal: None, timed_out: false, resource_exceeded: None, stdout: "", stderr: ""}, 0))
+        command: first_member(outcome.result, ["run/command", "compile/command", "declared_run", "declared_compile"]) ?? Dyn.Array([Dyn]{})
+        loop finding in outcome.findings -> record_finding(receipts, finding, runner, process, pass, command)
+        runners.push(outcome.result)
+    }
+    measured: runners.all(result -> finished(result))
+    receipts.sort_by((receipt: FindingReceipt) -> receipt.dedupe_key.slice(0, 16))
+    occurrences: receipts.map(receipt -> receipt.occurrences.len()).sum()
+    blockers := runners.filter(result -> !finished(result)).map(result -> "{text_or_empty(result, "id")}: {text_at(result, "reason") ?? "status {text_or_empty(result, "status")}"}")
+    if receipts.len() > 0 -> blockers.push("{receipts.len()} deduplicated finding receipt(s) require Tower CLI tracking")
+    valid: summary.counts[CASE_VALID]
+    findings: Dyn.Array(receipts.map(receipt -> receipt_tree(receipt)))
+    corpus_out := Dyn.object()
+    copy_member(corpus_out, "path", axis, "corpus/path")
+    corpus_out["generator"] = CORPUS_GENERATOR
+    corpus_out["seed"] = corpus.seed
+    corpus_out["case_count"] = corpus.case_count
+    corpus_out["bytes_per_case"] = corpus.bytes_per_case
+    corpus_out["record_metadata_bytes"] = corpus.metadata_bytes
+    corpus_out["payload_bytes"] = corpus.payload_bytes
+    corpus_out["bytes"] = corpus.data.len()
+    corpus_out["sha256"] = corpus.sha256
+    corpus_out["case_kinds"] = case_counts(summary)
+    corpus_out["valid_case_count"] = valid
+    corpus_out["adversarial_case_count"] = corpus.case_count - valid
+    corpus_out["format"] = "jet-memory-safety-case-v1"
+    declared_oracle: dyn_at(axis, "oracle")
+    oracle := if declared_oracle == .Object(_) -> declared_oracle else -> Dyn.object()
+    oracle["algorithm"] = "memory-safety-case-summary-v1"
+    oracle["output"] = expected
+    counts: [(key: "memory_safety_findings", value: receipts.len()), (key: "finding_occurrences", value: occurrences), (key: "valid_cases", value: valid), (key: "adversarial_cases", value: corpus.case_count - valid)]
+    metrics := Dyn.object()
+    loop count in counts -> metrics[count.key] = if measured -> Dyn.Int(count.value) else -> Dyn.Null
+    publication := Dyn.object()
+    publication["status"] = if blockers.len() == 0 -> "ready" else -> "blocked"
+    publication["blockers"] = texts(blockers)
+    publication["finding_receipts_deduplicated"] = Dyn.Bool(true)
+    publication["tower_transport"] = "cli-only"
+    publication["performance_exclusions"] = 0
+    out := Dyn.object()
+    out["id"] = "memory_safety_fuzz"
+    out["required"] = Dyn.Bool(text_at(axis, "status") == Val("required"))
+    out["status"] = if measured -> "complete" else -> "incomplete"
+    out["contract"] = axis
+    copy_member(out, "schema", axis, "schema")
+    copy_member(out, "metric", axis, "metric")
+    out["corpus"] = corpus_out
+    out["oracle"] = oracle
+    copy_member(out, "budget", axis, "budget")
+    copy_member(out, "fairness", axis, "fairness")
+    out["metrics"] = metrics
+    out["expected_stdout"] = expected
+    out["runners"] = Dyn.Array(runners)
+    out["findings"] = findings
+    out["finding_receipts"] = findings
+    out["publication"] = publication
+    Ok(out)
+}
+
+// The axis of memory-safety-fuzz.test.mjs: one rail whose compile and run
+// commands the test host answers.
+test_memory_axis: fn() -> Dyn {
+    json.parse("{{\"status\":\"required\",\"schema\":\"gauntlet-axis-memory-safety-fuzz-v1\",\"metric\":\"memory_safety_findings\",\"corpus\":{{\"path\":\"fuzz-input.bin\",\"generator\":\"xorshift32-v1\",\"seed\":2272,\"case_count\":5,\"bytes_per_case\":8}},\"budget\":{{\"wall_timeout_ms\":1000,\"cpu_seconds\":1,\"memory_mb\":64}},\"oracle\":{{\"algorithm\":\"memory-safety-case-summary-v1\",\"output\":\"\"}},\"runners\":[{{\"id\":\"test-rail\",\"language\":\"test\",\"tools\":[\"test-tool\"],\"files\":[{{\"source\":\"run.jet\",\"target\":\"run.jet\"}}],\"compile\":[\"test-compiler\",\"source\"],\"run\":[\"test-runner\"],\"evidence\":{{\"kind\":\"test-diagnostic\",\"patterns\":[\"failure\"]}}}}],\"fairness\":[\"same generated input file\"]}}") ?? panic("axis: {err}")
+}
+
+// A host whose every command exits 0 with no output, failing where `fails`
+// says: "staging", "compile" (every command), "run" (the test runner) or
+// "digest" (every file digest is wrong).
+TestMemoryHost: struct {
+    fails: String
+    impl MemoryAxisHost {
+        stage_files: fn(self, _dir: String, declared: Dyn) -> Dyn Err! {
+            if self.fails == "staging" -> return Err("staging failed")
+            Ok(declared)
+        }
+        stage_path: fn(self, dir: String, relative: String) -> String Err! { Ok(files.join(dir, relative)) }
+        probe_tools: fn(self, _dir: String, _tools: Dyn, _jet_bin: String) -> [Dyn] Err! {
+            Ok([json.parse("{{\"tool\":\"test-tool\",\"status\":\"available\"}}") ?? Dyn.Null])
+        }
+        command: fn(self, declared: Dyn, _jet_bin: String) -> [String] Err! { Ok(texts_at(declared, "")) }
+        run_command: fn(self, _dir: String, command: [String], _budget: Dyn) -> CommandRun Err! {
+            if self.fails == "compile" || (self.fails == "run" && command[0] == "test-runner") -> return Err("{self.fails} failed")
+            Ok(CommandRun{command: command, process: CommandOutcome{code: Val(0), signal: None, timed_out: false, resource_exceeded: None, stdout: "", stderr: ""}})
+        }
+        file_sha256: fn(self, path: String) -> String Err! {
+            if self.fails == "digest" -> return Ok("bad-digest")
+            Ok(crypto.sha256(files.read_bytes(path)).hex())
+        }
+    }
+}
+
+test_memory_report: fn(fails: String) -> Dyn {
+    dir: files.mkdtemp("memory-axis-") ?? panic("{err}")
+    run: FuzzRun{run_dir: dir.copy(), repo_dir: dir.copy(), jet_bin: "jet", output_limit: MEMORY_OUTPUT_LIMIT, target_commit: MEMORY_TARGET_COMMIT}
+    host: TestMemoryHost{fails: fails}
+    report: run_memory_safety_fuzz_axis(test_memory_axis(), run, host) ?? panic("axis: {err.message}")
+    files.remove_all(dir)
+    report
+}
+
+// The value at `path`, or the text "absent" when nothing is there.
+found_at: fn(tree: Dyn, path: String) -> Dyn { value_at(tree, path) ?? Dyn.Text("absent") }
+
+// The runner failed at `stage` and blocked publication, its corpus still the
+// generated one (`copied` is the digest its copy had).
+assert_blocked: fn(report: Dyn, stage: String, copied: Dyn) {
+    assert(text_at(report, "status") == Val("incomplete") && text_at(report, "publication/status") == Val("blocked"))
+    assert(texts_at(report, "publication/blockers").any(blocker -> blocker.contains("test-rail: {stage} execution failed")))
+    assert_eq(items_at(report, "runners").len(), 1)
+    runner: member(report, "runners/0") ?? Dyn.Null
+    assert(text_at(runner, "status") == Val("failed") && text_at(runner, "failed_stage") == Val((stage)))
+    assert(text_at(runner, "failure/stage") == Val((stage)) && text_at(runner, "failure/status") == Val("failed"))
+    assert(text_at(runner, "{stage}/status") == Val("failed") && text_at(runner, "{stage}/failure/stage") == Val((stage)))
+    generated: found_at(report, "corpus/sha256")
+    assert(found_at(runner, "corpus/generated_sha256") == generated)
+    assert(found_at(runner, "corpus/copied_sha256") == copied)
+    assert(is_true(runner, "corpus/matches_generator") == (copied == generated))
+    loop key in ["case_count", "bytes_per_case", "bytes", "case_kinds"] -> assert(found_at(runner, "corpus/{key}") == found_at(report, "corpus/{key}"))
+    assert(found_at(report, "metrics/valid_cases") == Dyn.Null && found_at(report, "metrics/adversarial_cases") == Dyn.Null)
+}
+
+#Test("the corpus is the seeded xorshift32 records and its oracle line their summary") {
+    corpus: generate_corpus(member(test_memory_axis(), "corpus") ?? Dyn.Null) ?? panic("corpus: {err.message}")
+    assert_eq(corpus.data.len(), 40)
+    assert_eq(corpus.data.slice(0, 8).map(byte -> Int.from_u8(byte)).slice(0, 4), [0, 1, 0, 160])
+    assert_eq(xorshift32(1), 270369)
+    summary: record_summary(corpus)
+    assert_eq(summary.counts, [1, 1, 1, 1, 1])
+    assert(expected_output(summary, corpus).starts_with("cases 5 valid 1 boundary 1 oob 1 use_after_free 1 wrong_output 1 bytes 40 checksum "))
+    bad: json.parse("{{\"seed\":1,\"case_count\":5,\"bytes_per_case\":4}}") ?? Dyn.Null
+    refused: if generate_corpus(bad) == {
+        .Ok(_) -> ""
+        .Err(failure) -> failure.message.copy()
+    }
+    assert_eq(refused, "memory-safety corpus must declare a bounded xorshift32 record shape")
+}
+
+#Test("setup exceptions retain corpus identity and block publication") {
+    report: test_memory_report("staging")
+    assert_blocked(report, "setup", Dyn.Null)
+    assert_eq(text_at(report, "runners/0/setup/process/stderr"), Val("staging failed"))
+}
+
+#Test("compile exceptions retain corpus identity and block publication") {
+    report: test_memory_report("compile")
+    assert_blocked(report, "compile", member(report, "corpus/sha256") ?? Dyn.Null)
+    assert_eq(text_at(report, "runners/0/compile/process/stderr"), Val("compile failed"))
+    assert_eq(texts_at(report, "runners/0/compile/command"), ["test-compiler", "source"])
+}
+
+#Test("run exceptions retain corpus identity and block publication") {
+    report: test_memory_report("run")
+    assert_blocked(report, "run", member(report, "corpus/sha256") ?? Dyn.Null)
+    assert_eq(text_at(report, "runners/0/run/process/stderr"), Val("run failed"))
+    assert_eq(texts_at(report, "runners/0/run/command"), ["test-runner"])
+}
+
+#Test("a copied corpus digest mismatch fails closed before any rail executes") {
+    report: test_memory_report("digest")
+    assert_blocked(report, "setup", Dyn.Text("bad-digest"))
+    assert((text_at(report, "runners/0/failure/reason") ?? "").contains("does not match generated digest"))
+    assert(found_at(report, "runners/0/setup/process/code") == Dyn.Null)
+}
+
+#Test("findings retain exact classification and the Tower dedup command path") {
+    report: test_memory_report("")
+    assert(text_at(report, "status") == Val("complete") && text_at(report, "publication/status") == Val("blocked"))
+    assert(texts_at(report, "publication/blockers").join("; ").contains("1 deduplicated finding receipt"))
+    assert(int_at(report, "metrics/memory_safety_findings") == Val(1) && int_at(report, "metrics/finding_occurrences") == Val(1))
+    assert_eq(items_at(report, "findings").len(), 1)
+    receipt: member(report, "findings/0") ?? Dyn.Null
+    assert(text_at(receipt, "kind") == Val("wrong-output") && text_at(receipt, "classification") == Val("correctness"))
+    assert_eq(texts_at(receipt, "rails"), ["test-rail"])
+    assert_eq(items_at(receipt, "occurrences").len(), 1)
+    assert(text_at(receipt, "occurrences/0/classification") == Val("wrong-output") && is_true(receipt, "occurrences/0/correctness_finding") && !is_true(receipt, "occurrences/0/performance_exclusion"))
+    assert_eq(texts_at(receipt, "tower_tracking/command"), ["node", "Tools/tower/tower.mjs", "card", "add", "--file", "-"])
+    assert(text_at(receipt, "tower_tracking/status") == Val("pending") && text_at(receipt, "tower_tracking/transport") == Val("tower-cli"))
+    assert(found_at(receipt, "tower_tracking/dedup_key") == found_at(receipt, "tower_tracking/payload/hardeningDedupKey"))
+    assert(text_at(receipt, "tower_tracking/payload/classification") == Val("wrong-output") && is_true(receipt, "tower_tracking/payload/correctness_finding") && !is_true(receipt, "tower_tracking/payload/performance_exclusion"))
+    assert(found_at(receipt, "tower_tracking/payload/seed") == found_at(report, "corpus/seed") && found_at(receipt, "tower_tracking/payload/bytes") == found_at(report, "corpus/bytes"))
+    assert_eq(text_at(receipt, "tower_tracking/payload/minimized_case/kind"), Val("wrong-output"))
+}
