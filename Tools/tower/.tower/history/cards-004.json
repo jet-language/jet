@@ -94843,6 +94843,254 @@
       "completedAt": "2026-11-09T11:06:07.045Z",
       "questions": [],
       "retiredAt": "2026-11-12T11:07:17.149Z"
+    },
+    {
+      "id": "c07ybrc0",
+      "num": 6111,
+      "title": "Runtime routes: route the 735 Core calls and statics that name a runtime symbol with no IR route (R4 core.route)",
+      "body": "The R4 route census finds 735 Core calls and statics whose CORE_CALLS row names a runtime symbol that no IR route carries. By module: receivers 236, core.web 208, compute 64, data 47, crypto 25, net 23, service 22, and smaller groups. Each such call stops with an ICE if a program reaches it. Census: $JET_SCRATCH_ROOT/lanes/Main/land/IrTypes-6065-c6-census.tsv and IrTypes-r4-route-gaps.tsv (IrTypes, 2026-10-29, stack 2bd6cdd29c + g3, testkit-8f, JET_OPT_VERIFY=1).",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e5",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-09",
+          "by": "Main",
+          "text": "BoardPlanner review 2026-11-09 (dev 6a06b917cb). Folded into #6615 (D-G3-1): c1-c5 are met and c6 (delete the IR route tables) is #6615's work."
+        },
+        {
+          "at": "2026-11-04",
+          "by": "Main",
+          "text": "#6563 c1 precut audit re-added 2 criteria from archived #4337, #4353: each was not proven on 9c7ddf1359. Row verdicts and reasons: Docs/audits/precut-2026-11/PRECUT-AUDIT.tsv (ff5dd7fd7b)."
+        },
+        {
+          "at": "2026-10-30",
+          "by": "Main",
+          "text": "Merged #6113 into this card (one card per stream). Its title: Runtime exports: generate the 752 jet_rt_handle_{clone,drop,show}_* helpers for every handle carrier (R4 route.export handles). Body: 752 route rows name jet_rt_handle_clone_*, jet_rt_handle_drop_* or jet_rt_handle_show_* helpers that the runtime does not export. Census: $JET_SCRATCH_ROOT/lanes/Main/land/IrTypes-6065-c6-census.tsv and IrTypes-r4-route-gaps.tsv (IrTypes, 2026-10-29, stack 2bd6cdd29c + g3, testkit-8f, JET_OPT_VERIFY=1). Plan: "
+        },
+        {
+          "at": "2026-10-30",
+          "by": "Main",
+          "text": "Merged #6112 into this card (one card per stream). Its title: Runtime exports: implement or retire the 824 IR route rows whose runtime export is missing (R4 route.export). Body: 824 IR_RUNTIME_ROUTES rows name a runtime export the Jet runtime does not provide. Families: math 189, services 99, std 85, text 62, and smaller groups. Census: $JET_SCRATCH_ROOT/lanes/Main/land/IrTypes-6065-c6-census.tsv and IrTypes-r4-route-gaps.tsv (IrTypes, 2026-10-29, stack 2bd6cdd29c + g3, testkit-8f, JET_OPT_VERIFY=1). Plan: "
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "The R4 core.route census reports 0 rows: every Core call or static that names a runtime symbol has an IR route, or its CORE_CALLS row is retired with its callers migrated.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Owner ruling 2026-11-06 (chat, cut questions): replaced by the criterion that closes with the D-HOST-LEAF1=E work (#6615), which deletes these route tables.",
+          "at": "2026-11-06T23:25:49.135Z",
+          "closure": "decision"
+        },
+        {
+          "n": 2,
+          "text": "(from #6112 Runtime exports: implement or retire the 824 IR route rows w) The R4 route.export census (excluding handle helpers) reports 0 rows: each route row has its runtime export implemented in Jet, or the row is retired because no Core call reaches it.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Owner ruling 2026-11-06 (chat, cut questions): replaced by the criterion that closes with the D-HOST-LEAF1=E work (#6615), which deletes these route tables.",
+          "at": "2026-11-06T23:25:50.200Z",
+          "closure": "decision"
+        },
+        {
+          "n": 3,
+          "text": "(from #6113 Runtime exports: generate the 752 jet_rt_handle_{clone,drop,) Every handle carrier has its clone, drop and show helpers generated from one table, and the R4 handle-helper census reports 0 rows.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Owner ruling 2026-11-06 (chat, cut questions): replaced by the criterion that closes with the D-HOST-LEAF1=E work (#6615), which deletes these route tables.",
+          "at": "2026-11-06T23:25:51.272Z",
+          "closure": "decision"
+        },
+        {
+          "n": 4,
+          "text": "(was #4337 c1) Closed by burn-down consolidation: merged into #4287; criteria carried there as [#4337] [precut audit: merged into #4287 (deleted); the same text is met on archived #4328 c1, judged with those rows; no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Owner ruling 2026-11-06 (chat, cut questions): duplicate of #4287 (deleted; the same text is met on archived #4328 c1).",
+          "at": "2026-11-06T23:23:35.314Z",
+          "closure": "duplicate"
+        },
+        {
+          "n": 5,
+          "text": "(was #4353 c1) Closed by burn-down consolidation: merged into #4381; criteria carried there as [#4353] [precut audit: merged into #4381 (deleted); the same text is met on archived #4314 c1, #4335 c1, #4355 c1 and 4 more, judged with those rows; no dev test, golden, case or…]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Owner ruling 2026-11-06 (chat, cut questions): duplicate of #4381 (the same text is met on archived #4314 c1 and #4335 c1).",
+          "at": "2026-11-06T23:23:36.377Z",
+          "closure": "duplicate"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "ir",
+        "runtime-port"
+      ],
+      "goals": [
+        "G3"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-10-29T05:50:11.021Z",
+      "updated": "2026-11-09T19:02:44.106Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 6,
+      "completedAt": "2026-11-09T19:02:44.106Z",
+      "questions": [],
+      "retiredAt": "2026-11-12T19:08:16.090Z"
+    },
+    {
+      "id": "c00emhw5",
+      "num": 6674,
+      "title": "Inline module bodies with their own imports of non-Core modules are not lowered",
+      "body": "Found by MechD-3 (#6651 c1 group E). An inline module body with its own import of a non-Core module (use rules: second) is never lowered: sema_inline_module_lowerable refuses foreign imports, so the program hits a totality fault ('inline module inner is not lowered') and exit 101. #6651 gives it a registered E2104 citing this card. Lowering it means lifting the inner import under a rewritten alias through bodies and marker paths. Case: tests/cases/marker_groups_modules/nested_import_aliases_bind_groups_locally_and_do_not_fall_through_when_shadowed.case.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "d4c27c8d33 batch row (seed-built d405d4cb6c + 8405a508b0): cases --filter nested_import_aliases_bind_groups PASS 1/1 (q1 checks clean; q2 gives E0927, the alias doesn't fall through). Regression sweep: --filter marker_groups_modules PASS 15, KNOWN-FAILING 3 (#6004); --filter inline_module PASS 8, KNOWN-FAILING 3 (#5201/#5454 web #Target). c1 stays open: the case runs only jet check, so O0/O1/O2 lowering of an inline module's non-Core import and the golden example of an inline module importing a sibling module are not yet shown."
+        },
+        {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "d4c27c8d33 (dev): an inline module's own module or file import no longer keeps it unlowered. Lifted bodies read the import through a generated file-level alias that shares the scoped declaration's span (InlineModules.jet sema_inline_alias_imports, renaming in Ident, Type Named/Apply, StructLit import_ns and member-list imports). Registration binds the alias through that declaration's own edge, foreign edges included (Items.jet). Markers keep their lexical scope through the pre-lowering binding. Only a Core module in a member list still gives E2104. The tests/known-failing.tsv row for nested_import_aliases_bind_groups_locally_and_do_not_fall_through_when_shadowed is removed. Queued for batch: cases --filter nested_import_aliases_bind_groups, marker_groups_modules, inline_module."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "An inline module's own import of a non-Core module lowers on O0, O1 and O2: nested_import_aliases_bind_groups_locally_and_do_not_fall_through_when_shadowed passes (aliases bind locally; a shadowed alias does not fall through), its E2104 and KF line are removed, and an example with a golden shows an inline module importing a sibling module.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev c40837e67e (MetaLead-1), batch b2r census rc=0; nested_import_aliases_bind_groups and inline_module cases pass",
+          "at": "2026-11-08T20:13:06.293Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G6"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-07T10:54:34.017Z",
+      "updated": "2026-11-09T18:53:11.263Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1,
+      "completedAt": "2026-11-09T18:53:11.263Z",
+      "questions": [],
+      "retiredAt": "2026-11-12T19:08:16.090Z"
+    },
+    {
+      "id": "c0bzrof5",
+      "num": 6688,
+      "title": "No C: port the runtime's 33 libm functions to Jet",
+      "body": "Owner order 2026-11-08: \"We need to fix the issue blocking build.jet but also need to remove the C dependencies. Start by directly porting the functions being used but we also need full coverage of the libraries that are dependencies. Ensure all are tracked.\"\n\nCompiler/JetRuntime/Source/CompilerNeededMath.jet imports acos, acosh, asin, asinh, atan, atan2, atanh, cbrt, ceil, cos, cosh, exp, exp2, expm1, floor, fma, fmod, hypot, log, log10, log1p, log2, pow, round, sin, sinh, sqrt, tan, tanh and trunc from musl. Port them to Jet first; sqrt, floor, ceil, trunc, round and fma may lower to the x86-64 instructions where those give the IEEE result. Then cover every remaining C23 math.h function Core exposes or will expose. Every function returns the same bits as musl's on every tier (I9), web included.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P0",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-09",
+          "by": "Main",
+          "text": "c2 and c3 reworded: correct rounding (MPFR bits on the CORE-MATH hard-case corpus) supersedes bit-for-bit musl equivalence, following the owner accuracy order (correct results before matching an existing library). musl differences become listed findings, not targets."
+        },
+        {
+          "at": "2026-11-09",
+          "by": "Main",
+          "text": "Batch b6d landed on dev (0073f4fc47): G1Lead-5r3 f506961cab (C23 exact operations, exponent/remainder/min-max), 6r3 f0c28ff1e6 (rsqrt, exp10, the MPFR-CR harness, the acosh NaN fix), 7r3 d8db0efaec (correctly rounded sinpi/cospi/tanpi), 8r3 66ceb0367f (F32 bitcast rows and routes). c3 is still partial; slices 9+ are in b7."
+        },
+        {
+          "at": "2026-11-08",
+          "by": "Main",
+          "text": "Owner ruling 2026-11-08 (chat, Q16): A. core.math gains the remaining C23 math.h functions under snake_case names, and every function also takes F32 through the existing F32 builtin dispatch (musl *f.c bits). Option C (C-ABI exports) was not chosen. c3 proceeds on this surface."
+        },
+        {
+          "at": "2026-11-08",
+          "by": "Main",
+          "text": "G1Lead landed 7639370892 (c4 local libm fixes; runtime pack rc=0; cases core_math 15 pass, 1 known-failing #5454; bits identical to musl on all 5 cells, 4M calls each) and b53d287e41 (c4 paired perf cells and musl-bit goldens). Jet over musl median wall: sin 1.20, cos 1.02 to 1.23, exp 1.41, log 1.59, pow 1.42. c4 stays open; the rest is general O1 codegen, logged on #6414 (owner Q17). Queued for Main batch."
+        },
+        {
+          "at": "2026-11-08",
+          "by": "Main",
+          "text": "G1Lead landed 71ec4588bb (c1: 29 libm routes in Jet; musl-equivalence corpus 74,409 rows, 0 differ on O0, O1, O2 and web; the m runtime has 25 undefined symbols, none math) and 66879594c0 (c2 part: erf, erfc, lgamma and gamma on musl 1.2.5 algorithms, 2,554 rows, 0 differ). Both queued for Main batch verification; not met until then. c4 is blocked: Jet is slower than musl with identical bits at O1 (sin 1.23x, cos 1.34x, exp 1.82x, log 2.04x, pow 1.74x; O2 similar). G1Lead is finding the root; general codegen roots go to #6414."
+        },
+        {
+          "at": "2026-11-08",
+          "by": "Main",
+          "text": "G1Lead progress 2026-11-08: all 29 runtime libm routes are ported (trig, exp and log, pow, cbrt, hypot, hyperbolics) and being verified. The libm C imports, the web host math entries and the C platform-libm fixture are gone. Found: erf, erfc, lgamma and tgamma are Abramowitz and Stegun approximations, not musl; Main approved switching them to musl bits under c2. The c3 public surface (about 45 C23 names and F32 forms) is an owner question. Options: A in core.math with F32 overloads; B a separate core.math.f32; C C-ABI exports only."
+        },
+        {
+          "at": "2026-11-08",
+          "by": "Main",
+          "text": "Assigned 2026-11-08 by Main: G1Lead, after its in-flight #5949 commit."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "The 33 functions are Jet, CompilerNeededMath.jet imports nothing from C, and the runtime object asks libc for no math symbol (symbol census receipt).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "71ec4588bb. Main 2026-11-08 on 5987d18926 (integration b1 build): ELF undefined-global census of the built runtime object Compiler/JetCli/.jet/build/jet-runtime/jet_runtime_jet.o: undefined 12, C math 0 (a0_039 object: 55 undefined, 30 libm). Compiler/JetRuntime/imports.list carries no libm name.",
+          "at": "2026-11-08T19:02:09.510Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "no-c",
+        "owner-direction"
+      ],
+      "goals": [
+        "G1",
+        "G7"
+      ],
+      "parentId": "c0lscvc9",
+      "needsAcceptance": false,
+      "created": "2026-11-08T15:46:49.544Z",
+      "updated": "2026-11-09T18:56:27.913Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 4,
+      "completedAt": "2026-11-09T18:56:27.913Z",
+      "questions": [],
+      "retiredAt": "2026-11-12T19:08:16.090Z"
     }
   ]
 }
