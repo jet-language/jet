@@ -1,12 +1,14 @@
 {
   "name": "canvas-driver-lifecycle",
   "mode": "tool",
-  "description": "The isolated Chromium lifecycle check of the Canvas browser harness, Tools/canvas-test/driver-lifecycle.mjs with its CDP driver Tools/canvas-test/driver.mjs, and its Jet twin, Tools/canvas-test/Run.jet driver-lifecycle, #5072 c3: COUNT Chromium sessions launch with isolated profiles, each answers, and each closes for good (the original also checks that a Chromium whose launch fails releases every pending CDP command and event). Each side's driver supplies the repository's pinned nixpkgs Chromium (and, for the twin, its chromedriver in a generated .jet/lock), or the browsers $CHROMIUM and $CHROMEDRIVER name.",
+  "description": "The isolated Chromium lifecycle check of the Canvas browser harness, Tools/canvas-test/driver-lifecycle.mjs with its CDP driver Tools/canvas-test/driver.mjs, and its Jet twin, Tools/canvas-test/Run.jet driver-lifecycle, #5072 c3: COUNT Chromium sessions launch with isolated profiles, each answers, and each closes for good (the original also checks that a Chromium whose launch fails releases every pending CDP command and event). Each side's driver supplies the pinned nixpkgs Chromium of the repository's flake.lock ($FLAKE_LOCK when set; a lock that pins nixpkgs other than from GitHub is refused with exit 1), with, for the twin, its chromedriver in a generated .jet/lock, or the browsers $CHROMIUM and $CHROMEDRIVER name.",
   "tool": {
     "original": "Tools/gauntlet/harness/drivers/canvas-driver-lifecycle.mjs",
     "jet": "Tools/gauntlet/entries/canvas-driver-lifecycle/driver/run.jet",
+    "fixtures": "fixtures",
     "cases": [
       {"args": ["driver-lifecycle", "2"], "env": {"CHROMIUM": "/definitely/missing/chromium", "CHROMEDRIVER": "/definitely/missing/chromedriver"}, "exit": 1, "expected": "expected/empty.out"},
+      {"args": ["driver-lifecycle", "2"], "env": {"FLAKE_LOCK": "path-flake.lock"}, "exit": 1, "expected": "expected/empty.out"},
       {"args": ["driver-lifecycle", "2"], "expected": "expected/pass.out"}
     ]
   }

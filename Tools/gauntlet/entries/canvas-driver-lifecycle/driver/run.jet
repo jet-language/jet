@@ -7,10 +7,11 @@
 //   jet driver driver-lifecycle [COUNT]
 //
 // Chromium is $CHROMIUM and chromedriver $CHROMEDRIVER, each when set, else
-// its build from the nixpkgs revision the repository's flake.lock pins, so
-// the check runs the same on any machine with the repository's nix inputs.
-// A browser that cannot be locked (jetpack says why) leaves no lock, and
-// Run.jet refuses the missing lock.
+// its build from the nixpkgs revision the repository's flake.lock ($FLAKE_LOCK
+// when set) pins, so the check runs the same on any machine with the
+// repository's nix inputs. A lock that pins nixpkgs other than from GitHub is
+// refused (exit 1). A browser that cannot be locked (jetpack says why) leaves
+// no lock, and Run.jet refuses the missing lock.
 use {
     files: core.files
     json: core.encoding.json
@@ -25,15 +26,19 @@ USAGE: "usage: driver driver-lifecycle [COUNT]"
 // This driver's path below the checkout that holds it.
 DRIVER: "/Tools/gauntlet/entries/canvas-driver-lifecycle/driver/run.jet"
 
-// The part of flake.lock that names the pinned nixpkgs.
+// The part of flake.lock that names the pinned nixpkgs. Its source decodes
+// only from GitHub, so a lock of any other type is refused.
 FlakeLock: struct { nodes: FlakeNodes }
 FlakeNodes: struct { nixpkgs: FlakeNode }
 FlakeNode: struct { locked: FlakeRevision }
-FlakeRevision: struct { owner: String, repo: String, rev: String }
+FlakeRevision: struct { type: FlakeSource, owner: String, repo: String, rev: String }
+#Rename(.Lower)
+FlakeSource: enum { Github }
 
-// The nixpkgs revision `repo`'s flake.lock pins, as a flake reference.
+// The nixpkgs revision that $FLAKE_LOCK, else `repo`'s flake.lock, pins, as a
+// flake reference.
 pinned_nixpkgs: fn(repo: String) -> String (IOError | EncodingError | [FieldError])! {
-    tree: json.parse(files.read(files.join(repo, "flake.lock")))
+    tree: json.parse(files.read(process.env_get("FLAKE_LOCK") ?? files.join(repo, "flake.lock")))
     pinned: tree.decode<FlakeLock>().nodes.nixpkgs.locked
     Ok("github:{pinned.owner}/{pinned.repo}/{pinned.rev}")
 }

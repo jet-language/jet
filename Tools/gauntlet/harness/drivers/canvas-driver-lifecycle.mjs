@@ -6,8 +6,9 @@
 //   node canvas-driver-lifecycle.mjs driver-lifecycle [COUNT]
 //
 // Chromium is $CHROMIUM when set, else the chromium of the nixpkgs revision
-// the repository's flake.lock pins, so the check runs the same on any
-// machine with the repository's nix inputs.
+// the repository's flake.lock ($FLAKE_LOCK when set) pins, so the check runs
+// the same on any machine with the repository's nix inputs. A lock that pins
+// nixpkgs other than from GitHub is refused (exit 1).
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -20,9 +21,10 @@ if (mode !== 'driver-lifecycle') {
   process.exit(2);
 }
 
-// The nixpkgs revision the repository's flake.lock pins, as a flake reference.
+// The nixpkgs revision that $FLAKE_LOCK, else the repository's flake.lock,
+// pins, as a flake reference.
 function pinnedNixpkgs() {
-  const lock = JSON.parse(readFileSync(join(repo, 'flake.lock'), 'utf8'));
+  const lock = JSON.parse(readFileSync(process.env.FLAKE_LOCK ?? join(repo, 'flake.lock'), 'utf8'));
   const locked = lock.nodes[lock.nodes.root.inputs.nixpkgs].locked;
   if (locked.type !== 'github') throw new Error('flake.lock pins nixpkgs other than from GitHub');
   return `github:${locked.owner}/${locked.repo}/${locked.rev}`;
