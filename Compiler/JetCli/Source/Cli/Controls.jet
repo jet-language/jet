@@ -261,9 +261,13 @@ jet_cli_env_vars: fn(jet_argv: [String], passthrough: [String]?, color: Bool, js
     } else if flags.len() > 0 {
         return jet_cli_fail("E2104", "the flags after `--` are a command's, and `jet env vars` names no command", jet_cli_why("E2104"), "add `--command=COMMAND`", color, JET_DRIVER_EXIT_USAGE)
     }
+    // The word whose settings the command takes, as the front door picks it:
+    // an action that keeps its group's word (`decisions`, which runs as `jet
+    // inspect decisions`) has its group's settings (`inspect.opt_dump`).
+    settings_word: if command == .Val(word) -> jet_cli_settings_word(jet_cli_dispatch_form([String]{word.copy()}).split(" ").to_list()) else -> None // copy: the command keeps its word.
     // The front door refused a settings file's problem already.
     settings := [String]{}
-    if command == .Val(word) {
+    if settings_word == .Val(word) {
         if jet_cli_command_flag_words(word, flags, true) == .Words(words) -> settings = words
     }
     values := [JetCLIControlValue]{}
@@ -273,15 +277,16 @@ jet_cli_env_vars: fn(jet_argv: [String], passthrough: [String]?, color: Bool, js
         }
         values.push(jet_cli_control_resolve(control, flags, settings, controls_sys.get(control.variable)))
     }
-    if json -> return jet_cli_done("{jet_cli_status_render("env.vars", true, jet_cli_env_vars_fields(command, values))}\n", "", JET_DRIVER_EXIT_OK)
-    jet_cli_done(jet_cli_env_vars_table(command, values), "", JET_DRIVER_EXIT_OK)
+    if json -> return jet_cli_done("{jet_cli_status_render("env.vars", true, jet_cli_env_vars_fields(command, settings_word, values))}\n", "", JET_DRIVER_EXIT_OK)
+    jet_cli_done(jet_cli_env_vars_table(settings_word, values), "", JET_DRIVER_EXIT_OK)
 }
 
-// A control's setting key under COMMAND (`build.keep_going`); without a
-// command, the key with `<command>` in its place.
-jet_cli_env_vars_setting: fn(command: String?, control: JetCLIControlSpec) -> String Never! {
+// A control's setting key under the settings of the command `word`
+// (`build.keep_going`); without a command, the key with `<command>` in its
+// place.
+jet_cli_env_vars_setting: fn(word: String?, control: JetCLIControlSpec) -> String Never! {
     name: jet_cli_setting_flag_name(jet_cli_control_flag(control))
-    if command == .Val(word) -> return "{jet_cli_setting_command_path(word)}.{name}"
+    if word == .Val(found) -> return "{jet_cli_setting_command_path(found)}.{name}"
     "<command>.{name}"
 }
 
@@ -339,8 +344,9 @@ jet_cli_env_redact: fn(text: String) -> String Never! {
     "{scheme.head}://***@{user.tail}{authority.sep}{authority.tail}"
 }
 
-// The `env.vars` status fields: the command, and one object per control.
-jet_cli_env_vars_fields: fn(command: String?, values: [JetCLIControlValue]) -> [JetCLIStatusField] Never! {
+// The `env.vars` status fields: the command, and one object per control with
+// its setting key under the settings of `settings_word`.
+jet_cli_env_vars_fields: fn(command: String?, settings_word: String?, values: [JetCLIControlValue]) -> [JetCLIStatusField] Never! {
     rows := [JetCLIStatusValue]{}
     loop resolved in values {
         control: resolved.control
@@ -350,7 +356,7 @@ jet_cli_env_vars_fields: fn(command: String?, values: [JetCLIControlValue]) -> [
             jet_cli_status_field("flag", jet_cli_status_text(jet_cli_control_flag(control))),
             jet_cli_status_field("variable", jet_cli_status_text(control.variable.copy())), // copy: the row keeps its control.
             jet_cli_status_field("kind", jet_cli_status_text(jet_cli_env_vars_kind(control.value))),
-            jet_cli_status_field("setting", jet_cli_status_text(jet_cli_env_vars_setting(command, control))),
+            jet_cli_status_field("setting", jet_cli_status_text(jet_cli_env_vars_setting(settings_word, control))),
             jet_cli_status_field("value", jet_cli_env_vars_redacted(resolved.value)),
             jet_cli_status_field("source", jet_cli_status_text(jet_cli_env_vars_source(resolved.source))),
             jet_cli_status_field("location", jet_cli_status_text(resolved.location.copy())), // copy: the row keeps its location.
@@ -364,14 +370,15 @@ jet_cli_env_vars_fields: fn(command: String?, values: [JetCLIControlValue]) -> [
     }
 }
 
-// The `jet env vars` table: one row per control, its columns aligned, and a
-// variable a flag hides named after the row's source.
-jet_cli_env_vars_table: fn(command: String?, values: [JetCLIControlValue]) -> String Never! {
+// The `jet env vars` table: one row per control, its columns aligned, its
+// setting key under the settings of `settings_word`, and a variable a flag
+// hides named after the row's source.
+jet_cli_env_vars_table: fn(settings_word: String?, values: [JetCLIControlValue]) -> String Never! {
     rows := [[String]]{[String]{"FLAG", "VARIABLE", "SETTING", "VALUE", "SOURCE"}}
     loop resolved in values {
         source := jet_cli_env_vars_source(resolved.source)
         if resolved.shadowed && resolved.variable == .Val(input) -> source = "{source} (hides {resolved.control.variable}={jet_cli_env_redact(input)})"
-        rows.push([String]{jet_cli_control_flag(resolved.control), resolved.control.variable.copy(), jet_cli_env_vars_setting(command, resolved.control), jet_cli_env_vars_cell(resolved.value), source}) // copy: the row keeps its control.
+        rows.push([String]{jet_cli_control_flag(resolved.control), resolved.control.variable.copy(), jet_cli_env_vars_setting(settings_word, resolved.control), jet_cli_env_vars_cell(resolved.value), source}) // copy: the row keeps its control.
     }
     widths := [Int]{0, 0, 0, 0}
     loop row in rows {

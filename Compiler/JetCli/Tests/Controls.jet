@@ -119,6 +119,21 @@ controls_test_refused: fn(argv: [String]) -> String Never! {
     assert_eq(controls_test_refused([String]{"env", "vars", "--command=check", "--", "--opt-dump=main"}), "E2102")
 }
 
+#Test("jet env vars names the setting key the command's settings use") {
+    // `decisions` runs as `jet inspect decisions`, which keeps its group's
+    // word, so its settings are inspect's, the key the resolver takes.
+    expected: [[String]]{[String]{"decisions", "inspect.opt_dump"}, [String]{"inspect", "inspect.opt_dump"}, [String]{"build", "build.opt_dump"}}
+    loop row in expected {
+        if jet_cli_plan([String]{"env", "vars", "--command={row[0]}"}) == .Done(output) {
+            dump: output.stdout.split("\n").to_list().filter(line -> line.starts_with("--opt-dump "))
+            assert_eq(dump.len(), 1)
+            assert(dump[0].contains(" {row[1]} "), "--command={row[0]} names {row[1]}: {dump[0]}")
+        } else {
+            panic("`jet env vars --command={row[0]}` lists the controls")
+        }
+    }
+}
+
 #Test("a URL's user and password never show") {
     assert_eq(jet_cli_env_redact("https://user:secret@example.com/trace.json"), "https://***@example.com/trace.json")
     assert_eq(jet_cli_env_redact("https://example.com/a@b"), "https://example.com/a@b")
