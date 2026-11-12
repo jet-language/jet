@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6771,
-    "rev": 99942,
+    "nextNum": 6772,
+    "rev": 99944,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -99544,6 +99544,45 @@
       "needsAcceptance": false,
       "created": "2026-11-12T10:16:09.694Z",
       "updated": "2026-11-12T10:16:33.082Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1
+    },
+    {
+      "id": "c04gcx43",
+      "num": 6771,
+      "title": "I2: the IR builder refuses a build fn that loops over b.program.types() ([TypeInfo] host record list)",
+      "body": "G12Docs-4 found on 2026-11-12 that seed-b12 and seed-b13 both ICE on the existing case run_tier_diagnostics/programmable_build_check_matches_aot_interpreter_dev_and_web. jet build main.jet fails: 'the IR builder refused the invocation's code: build [...]: type [TypeInfo]'. Any 'loop x in b.program.types()' in a build fn hits it, which blocks the #3526 c18 and c19 proofs. Suspected root: JetIR ir_value_type for a list of a host record. Under I2 the backend refusing checked code is an internal compiler error, so this is a compiler defect.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e14",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P0",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "The root is named and fixed in the IR lowering of host-record lists (no special case for TypeInfo). The case run_tier_diagnostics/programmable_build_check_matches_aot_interpreter_dev_and_web passes, and a second build fn that loops over a different host-record list (for example b.program.functions() or the fields of a type) builds and prints its rows at O0.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-12T10:25:28.038Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-12T10:25:18.575Z",
+      "updated": "2026-11-12T10:25:28.038Z",
       "updatedBy": "Main",
       "criteriaLastN": 1
     }
@@ -200159,6 +200198,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-12T10:25:28.038Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c04gcx43",
+      "note": "#1 The root is named and fixed in the IR lowering of host-recor"
+    },
+    {
+      "at": "2026-11-12T10:25:18.575Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c04gcx43",
+      "note": "I2: the IR builder refuses a build fn that loops over b.program.types() ([TypeInfo] host record list)"
+    },
     {
       "at": "2026-11-12T10:23:07.052Z",
       "by": "Main",
