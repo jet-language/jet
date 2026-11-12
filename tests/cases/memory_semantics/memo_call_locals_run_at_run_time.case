@@ -1,0 +1,10 @@
+# A local that calls a `#Memo` function stays run-time code: the result store
+# and the counts `name.cache()` reads belong to the running program, so the
+# first call is a miss and the second a hit.
+fixture: memo_call_locals_run_at_run_time.fixture
+step: jet run memo.jet
+exit: 0
+stdout: = "49 49 hits=1 misses=1\n"
+step: jet run --release memo.jet
+exit: 0
+stdout: = "49 49 hits=1 misses=1\n"

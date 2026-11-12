@@ -7498,7 +7498,10 @@ sema_comptime_codec_methods_add: fn(graph: SemaRegistrationGraph, ty: Type, modu
 // binding or other foreign body. Their rows grant authority but don't prove
 // the call pure: the runtime reads the process it runs in (the live and auth
 // registry cells, the clocks, the pid, entropy, the task and its cancel
-// state), and the compiler's own process would stand in for every run's.
+// state), and the compiler's own process would stand in for every run's. So
+// is a call of a `#Memo` function: its result store and the hit and miss
+// counts `name.cache()` reads belong to the running program, and a call
+// computed while building would never reach them.
 sema_comptime_call_facts_impurity: fn(graph: SemaRegistrationGraph, call_facts: [SemaCallSiteFact], runtime_runs: Bool) -> String? Never! {
     loop fact in call_facts {
         name: if fact.callee == .Val(callee) -> "`{sema_effect_comptime_callee_name(callee.key)}`" else if fact.intrinsic_api == .Val(api) -> "`{api}`" else -> "a function value"
@@ -7507,6 +7510,7 @@ sema_comptime_call_facts_impurity: fn(graph: SemaRegistrationGraph, call_facts: 
         if runtime_runs && fact.callee == .Val(callee) {
             if sema_registration_callable_row(graph, callee.key) == .Val(row) {
                 if row == .Foreign(_, _) -> return Val("it calls foreign code ({name})")
+                if sema_comptime_callable_memoized(graph, row) -> return Val("it calls {name}, a `#Memo` function whose result store the running program keeps")
             }
         }
         if fact.facts.effect_bound == .Val(row) {
@@ -7523,6 +7527,18 @@ sema_comptime_call_facts_impurity: fn(graph: SemaRegistrationGraph, call_facts: 
         if callable == .Foreign(_, _) -> return Val("it calls foreign code ({name})")
     }
     None
+}
+
+// Whether callable `row` is a `#Memo` function or method, read from its
+// declaration in place.
+sema_comptime_callable_memoized: fn(graph: SemaRegistrationGraph, row: SemaRegistrationCallableRow) -> Bool Never! {
+    memo: if row == {
+        .Function(module_index, index) -> sema_function_header_memo_config(graph.modules[module_index].functions[index].declaration)
+        .NominalMethod(module_index, owner, index) -> sema_function_header_memo_config(graph.modules[module_index].nominals[owner].methods[index].declaration)
+        .ImplMethod(module_index, owner, index) -> sema_function_header_memo_config(graph.modules[module_index].impls[owner].methods[index].declaration)
+        .Foreign(_, _) -> SemaMemoConfig{bound: None, unbounded: false}
+    }
+    memo.bound != None || memo.unbounded
 }
 
 // Why checked closure body `function` keeps a value from being computed while

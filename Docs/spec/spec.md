@@ -586,7 +586,9 @@ build on, at every optimization level; any other block value computes at run
 time, where O1 and O2 may still fold it. They never fold a value whose
 computation calls something the runtime answers from the running program
 (a clock, the task, the process, its environment or its live and auth
-stores): a build would bake its own process's answer. A folded value is laid
+stores): a build would bake its own process's answer. Nor do they fold a call
+of a `#Memo` function, whose result store and `name.cache()` counts belong
+to the running program. A folded value is laid
 out once as read-only data, as a module constant is, rather than built part by
 part at each use. `NAME: #run value` at file
 scope, and `lanes: #run calculate()` in a block, where names stay
