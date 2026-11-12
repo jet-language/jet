@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6777,
-    "rev": 100100,
+    "rev": 100104,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -37256,6 +37256,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-04T23:48:00.131Z"
+        },
+        {
+          "n": 17,
+          "text": "core.compress's gzip and zstd encoders compress: their output for compressible input is smaller than the input, within 10% of the reference tool at its default level. On seed-b13 they write stored blocks only (Core/Archive/Zstd.jet, Archive.jet), found by the D-COMPTIME-SIZE1 review, 2026-11-12.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-12T22:19:10.071Z"
         }
       ],
       "refs": [],
@@ -37268,10 +37277,11 @@
       "parentId": "c0u1wtj7",
       "needsAcceptance": false,
       "created": "2026-09-22T00:15:05.017Z",
-      "updated": "2026-11-06T18:38:47.603Z",
+      "updated": "2026-11-12T22:19:10.071Z",
       "updatedBy": "Main",
       "claimedAt": "2026-11-06T18:38:47.603Z",
-      "goals": []
+      "goals": [],
+      "criteriaLastN": 17
     },
     {
       "id": "c0ty25lu",
@@ -42688,6 +42698,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-09T19:38:02.050Z"
+        },
+        {
+          "n": 83,
+          "text": "The retired build-time spelling #run is not Jet syntax: it gets only the generic unknown-marker error, and no compiler path accepts it. seed-b13 still accepts #run and gives the same bytes as NAME: comptime { value } (D-COMPTIME-SIZE1 review, 2026-11-12). A jet fix rewrite to the comptime form is registered per D-LANG-MIGRATE1=A.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-12T22:19:11.022Z"
         }
       ],
       "refs": [
@@ -42705,12 +42724,12 @@
       "parentId": "c0xnvmrf",
       "needsAcceptance": false,
       "created": "2026-09-28T17:48:29.940Z",
-      "updated": "2026-11-12T09:15:26.627Z",
+      "updated": "2026-11-12T22:19:11.022Z",
       "updatedBy": "Main",
       "goals": [
         "G5"
       ],
-      "criteriaLastN": 82
+      "criteriaLastN": 83
     },
     {
       "id": "c0jxsy7l",
@@ -98564,6 +98583,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-12T21:36:18.313Z"
+        },
+        {
+          "n": 6,
+          "text": "Build-time evaluation costs no more than running the same code: building the D-COMPTIME-SIZE1 Collatz table at compile time takes at most the time and peak memory of the same code run at run time plus the compiler's own floor. Measured by the ballot review on seed-b13, 2026-11-12: 12 s and 4.1 GB at compile time against 1.24-1.29 s and 596 MB at run time ($JET_SCRATCH_ROOT/lanes/Main/ballots/probes/D-COMPTIME-SIZE1/review/runtime.txt).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-12T22:19:09.158Z"
         }
       ],
       "refs": [],
@@ -98572,9 +98600,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-12T10:16:07.441Z",
-      "updated": "2026-11-12T21:36:19.184Z",
+      "updated": "2026-11-12T22:19:09.158Z",
       "updatedBy": "Main",
-      "criteriaLastN": 5
+      "criteriaLastN": 6
     },
     {
       "id": "c0yysi3q",
@@ -196339,256 +196367,282 @@
       "id": "D-COMPTIME-SIZE1",
       "cardId": "c0xphd0i",
       "group": "build",
-      "title": "Large build-time values: report their cost, require acknowledgment, or change their storage",
-      "situation": "A small expression can produce a large value while building. The owner's rule on #6769 stays: size alone never moves that computation to run time. An independent seed-b13 probe with two different 50 MB strings produced a 100,077,552-byte executable. Those are two payloads, not a duplicate copy. The values occupy writable image data on this seed, despite being immutable in Jet. This vote chooses optional cost reporting, no new report, compact storage, or a required acknowledgment. It does not choose a size limit on evaluation. The recommendation replaces the draft's warning with the existing optional-report path, preserving the ratified no-warnings rule.",
-      "gist": "How should Jet handle the cost of a large value computed while building?",
-      "lesson": "Computing a value early saves its construction at run time, but storing the answer can make the executable large. Evaluation, storage, and reporting are different choices. A size report need not change when the computation runs.",
-      "explainer": "A payload is the value's stored bytes, excluding its header and surrounding executable. RSS measures physical memory currently resident; peak RSS is the highest measured residency. Neither executable size nor peak RSS is a permanent memory reservation. A tidy error blocks check and build, but not run, dev, or test.",
-      "story": "A developer writes two repeat calls and uses only their lengths. Every option uses the same complete program. It prints 100000000; D first requires a reasoned allowance to build it.",
-      "inWild": "Zig comptime, C++ constexpr, Rust const evaluation, D CTFE, and Jai #run are strong precedents for computing values early. Rust Clippy also checks large constant arrays and recommends static storage to avoid repeated instances. That is a storage-sharing recommendation, not a run-time fallback or a guarantee of a small binary. Sources are linked below; peer compilers were not benchmarked or exercised here.",
-      "detail": "Scope. Card #6773 was merged into #6769 criterion 2; this payload uses that card's internal ID. D-COMPTIME-SIZE1 was absent from the decision list when checked. The owner rejected size-triggered run-time fallback on #6769; it is not selectable here. Successful evaluation still has finite compiler resources. No option promises every pure expression currently folds.\n\nSame complete program. SIZE is 50000000. last_use binds big to x repeated SIZE times, reads its length, then binds other to y repeated SIZE times and adds its length. run prints the result. All option samples contain that same program. D diagnoses it before building unless acknowledged.\n\nIndependent evidence. On seed-b13, dev tip 4cb7555849, constant.jet built with --optimize=full into an external output directory. GNU time 1.10 measured 5.82 seconds wall time and 514,252 KiB build peak RSS. The executable has 100,077,552 bytes and prints 100000000. Its program peak RSS was 97,332 KiB. These are single local observations, not cold-cache benchmarks.\n\nReference. runtime.jet passes an environment-derived size into the same function, reading STRING_BYTES=50000000 with core.sys.get and Int.parse in run. Its executable has 136,272 bytes. Build wall time was 0.93 seconds, build peak RSS 246,424 KiB, and program peak RSS 49,488 KiB. It prints 100000000. Input parsing is additional source and work; this reference is not an identical program or a proposed option's measurement.\n\nThe draft's larger fixture numbers were not measurements of its displayed program. The old 100,227,872/232,544-byte binaries and 6.52/0.72-second builds are therefore not retained as reproduced evidence. Neither are its 633,124/246,036 KiB build peaks or 147,020/49,508 KiB program peaks. Use the independently measured pair above.\n\nStorage. The constant executable contains one 50,000,000-byte x run at file offset 6720 and one y run at 50006744. Both are in a read/write ELF LOAD segment, flags 6, not read-only pages. The object writer places this program data in .data. Treat immutable-payload page permissions as a separate defect candidate, not as an approved storage contract.\n\nNo duplicate was observed. Changing both repeats to x produced a 50,077,680-byte executable and the same answer. Compiler/JetIR/Source/IR.jet, ir_intern_text, shares equal text. This does not establish cross-library deduplication for every value kind. Two different 50 MB strings explain the original 100 MB payload.\n\nLifetime. Compiler/JetIR/Source/X64Module.jet, ir_x64_text_header, emits a capacity-zero immortal String header. Compiler/JetRuntime/Source/Text.jet, rt_text_immortal and jet_rt_string_drop, recognize it and do not free its image data. Ending a binding's lifetime does not unmap its executable. Linux can reclaim clean file-backed pages, so the draft's permanent-residency claim was wrong.\n\nNot zero runtime work. Emitted IR for last_use calls jet_char_len twice. Core/Text/String.jet defines len as Unicode scalar counting; the runtime scans bytes. Producer folding does not establish consumer folding. Eliminating unnecessary intermediate payloads is an independent optimizer improvement required by the performance policy, not another owner-only mechanism. Do not predict an optimal compiler's size as today's result.\n\nExisting reporting machinery. Compiler/Prelude/Diagnostics.jet owns diagnostic declarations. Compiler/JetFoundation/Source/Registry/DiagnosticRows.jet is their generated projection. Source/Policy/LintPolicy.jet resolves policy names, and Compiler/JetSema/Source/Sema/LintAllowances.jet applies reasoned #Allow scopes. A registered finding must retain what, why, fix, source attribution, and a UI snapshot. No second registry or size-acceptance marker is needed.\n\nExisting settings. package.jet accepts policy: { lints: { deny: [unused_local_binding] } }. A probe makes check exit 1 as jet.DeniedLint, E1293. The reader permits only deny in that block, not a numeric threshold setting. The proposed large_build_time_value name, diagnostic type, and threshold do not exist yet. The existing #Allow mechanism was separately exercised with jet.UnusedLocalBinding; check and run succeed.\n\nRatification matters. D-NO-WARNINGS1=A chooses style fixes, tidy errors, and optional reports. Old warning behavior still present in the seed is not authorization for a new warning. A uses the optional cost report; D uses the ratified tidy path, not the seed's deny-by-request policy. D requires that no-warnings contract to be implemented for this finding.\n\nPhase spelling. Both comptime { \"x\".repeat(17) } and #run { \"x\".repeat(17) } run on seed-b13 and print 17 x characters. D-META-SPELL1=A ratified #run in place of the word. Neither phase spelling acknowledges storage cost. The draft's proposed comptime suppression gives one spelling two meanings and is removed.\n\nReporting contract for A and D. Use a fixed display/finding threshold strictly above 1,048,576 distinct payload bytes. Count UTF-8 bytes, not Unicode scalars. Count retained target payload after interning and reachability where available, show shared storage once, and separate header/layout overhead. Label pre-link estimates; only the final image establishes exact linked totals. Many small values may exceed the per-value threshold in total, so show the distinct total too.\n\nEdge cases for all options. Cover empty and exact-threshold values, shared and nested aggregates, aliases, generic specializations, eliminated branches, dead consumers, explicit #run, #Static, generated code, and dependencies. Attribute a generated finding to its authoring site where available. Do not silently exempt vendored code or charge shared payloads to each use. No automatic phase-changing fix is behavior-preserving. Compiler exhaustion must not trigger silent phase fallback.\n\nC is a storage proposal, not measured behavior. Keep full build-time evaluation, then encode the resulting bytes, never a replay of the source computation. Initially only repeated-byte runs in immutable, address-insensitive local Strings qualify. Choose encoding only when payload plus its share of decoder code is smaller. Other values remain raw; arbitrary computed tables, arithmetic lists, and aggregates are not promised compression.\n\nC's lifetime contract. Decode each local binding when reached on each invocation, using ordinary owned storage and last-use freeing. There is no global lazy cache or once-only initialization. Concurrent invocations allocate independently; repeated calls repeat decoding. Escaping and address-observable values stay raw. #Static keeps its stable storage promise; the small #Static TABLE: #run { \"x\".repeat(17) } probe prints length 17 today.\n\nC's costs. Decoding adds runtime allocation, writes, allocation-failure behavior, and effects, which this option explicitly authorizes. Build-time evaluation still consumes time and memory. A shared lazy alternative would require synchronized publication, reentrancy, and failure rules; freeing it after one caller's last use would invalidate later callers. Keeping it instead restores process-long retention. O2 must not inflate encodings back into the image or treat decoding as a plain static load.\n\nC's acceptance. Prove repeated and concurrent calls, escaping values, stable addresses, UTF-8 runs, allocator refusal, and O0/O1/O2/web equivalence. Every decoded buffer must be cleaned up with its owners. Meet the paired-program performance gate before claiming an advantage. No exact binary, compile, or RSS prediction is offered.\n\nPrior art, fairly. Zig's documented comptime expressions run ordinary functions early and its branch quota bounds compiler work, not output size. C++ constexpr variables require constant initialization; a constexpr function does not force every call early. Rust const contexts require evaluation, while constants need not share an address. Clippy large_const_arrays recommends static storage and documents a configurable array-size-threshold, default 16,384.\n\nD CTFE runs ordinary functions in contexts requiring early values, with documented restrictions and potentially substantial compiler cost. Jai community documentation describes #run returning values and arrays and broader arbitrary compile-time work. That is documentary precedent, not a tested claim about a current private compiler. None of these language features alone promises compression or a small executable.\n\nReview verdict. Agree with exposing cost, not with the author's warning or overloaded suppression. Added the optional-report versus default-tidy choice because the existing no-warnings decision requires that distinction. C was repaired to one local ownership model instead of contradictory once-only initialization and immediate freeing. Do not post the original draft's residency, read-only, zero-runtime-work, duplicate-copy, or near-232-KB promises.\n\nSeparate defect candidates. Immutable payloads are mapped writable, and the length-only constant program retains and scans data instead of reducing its known result. The latter needs a general consumer-folding investigation. No equal-text duplicate payload defect was observed. This ballot does not bless either implementation cost as necessary.",
+      "title": "Large build-time data the program reads: store it smaller by a fixed rule, keep it raw, or compress it when asked",
+      "situation": "Some programs build a large table while compiling and then read it while running. This vote decides how Jet stores such data in the executable file. Today Jet copies every byte in, so two fifty-million-byte values make a hundred-million-byte program. Hand-written code does better in one case: a long run of one repeated byte, which it rebuilds instead of storing. Irregular data, which is what real lookup tables hold, stays raw in every language measured. You are asked whether Jet stores runs as a short recipe, whether it also compresses other data, and what turns that on. We recommend A: one fixed rule that stores long runs as a recipe, keeps everything else raw, and never compresses behind the author's back.",
+      "gist": "For large build-time data a program reads while running, should Jet store it smaller, and what switches that on?",
+      "lesson": "Storing a value smaller and reading it quickly usually pull against each other. A long run of one repeated byte is the exception: a few bytes describe it, and rebuilding it is faster than reading it from the file. Real tables are irregular. Compressing them saves file bytes but costs decoding time and private memory on every run, so the cost belongs where the author can see it.",
+      "explainer": "Raw means the exact bytes sit in the executable file. Read-only pages are mapped from that file; every running copy shares them, and the system can drop them under memory pressure without writing anything. Private memory is memory one process filled itself; it is never shared and can only be reclaimed by writing it to swap.\n\nZero-fill memory is handed out already zeroed and costs no file bytes. A run is a whole value made of one byte, or one short pattern, repeated. Decoding rebuilds the original bytes from a compressed form. Cycles means run time; bytes means file and memory size.",
+      "story": "A developer builds two values while compiling: a table of Collatz step counts for fifty million numbers, and a rule line of fifty million dashes. The program looks up one number's step count and prints the whole rule line. Every option uses this same program and prints the same output; option D adds one marker word. Real tables from Jet's own library are measured in the detail, because the dash line is the rare case.",
+      "inWild": "C, C++, Rust, and Zig keep constant data raw in read-only data. Measured here, gcc, clang, and Rust stored fifty million zero bytes in the file when the array was declared constant. A plain, non-constant C array of zeros goes to zero-fill memory instead, in a 16,024-byte file. Linkers compress only debug sections, never data the program loads. Whole-program packers such as UPX are a separate outside tool. Embedded font libraries such as u8g2 compress glyphs in their own code and decode one glyph per draw. None of the compilers measured here compresses data the program reads.",
+      "detail": "Settled baseline. Card #6769 already decided three things, and no option here reopens them. Build-time bytes that nothing reads are not emitted. The length of a constant folds to a number. Data that is read lives raw in read-only pages. This vote covers only large data the program reads while running: may Jet store it smaller, and what switches that on?\n\nSame complete program. COUNT is 50,000,000. STEPS is a build-time table of Collatz step counts, one irregular byte per number. RULE is fifty million dashes, one byte repeated. Both use the ratified forced build-time form, NAME: comptime { value }. The program reads one byte of STEPS for the number on the command line, then prints every byte of RULE. Only the storage of the two values differs between options.\n\nMeasured today on seed-b13 with --optimize=full (probe review/spelling.jet). The build took 12.04 s with a 4,105,916 KiB peak, and the executable is 100,123,056 bytes. Both values sit in a writable segment, so read-only placement has not reached this seed. Running with 27 prints \"27 takes 111 steps\" and the dashes in 0.01 s or less. Its peak was 48.6 to 49.0 MB. An index of 60000000 stops with E3010. The earlier #run spelling gave the same bytes.\n\nEvery native tier behaves the same today (review/tiers-rerun.txt, agreeing with tiers.txt). Optimize none, basic, and full, each with small false and true, produced images of 100,123,056 to 100,123,312 bytes. All six gave identical output digests for 27 and for 49999999. So --small changes nothing about stored data today; it only limits inlining.\n\nThe web build wrote a 100,006,747-byte app.wasm; neither run executed the web build. A rerun of zero.jet stored ten million zero bytes as file bytes, in a 10,065,936-byte image.\n\nMeasured storage costs, using C probes on the same bytes (rss.txt, rerun in review/rss-rerun.txt). Reading one byte of STEPS kept raw takes 0.01 ms and adds almost no memory. Reading all of it took 24 to 28 ms in the first run and 65 ms in the rerun, on a busier machine. It holds 50,000,000 bytes of file pages. A second running copy shares them, halving each copy's share. Under memory pressure the kernel dropped them without writing anything.\n\nCompressing STEPS changes that (decode.txt, rerun in review/decode-rerun.txt). zstd level 19 stores 17,101,885 bytes, 2.92 times smaller, and decodes in 62 to 63 ms. LZ4 HC level 12 stores 23,975,076 bytes, 2.09 times smaller, and decodes in 14.6 to 15.0 ms. That is about 1.25 ms per megabyte for zstd and 0.3 ms for LZ4. Both decode the whole table even for a one-byte read, and leave 48.9 MB of private memory per process.\n\nReal tables, measured (review/realdata.txt and review/decode-real.txt). The review took five. Three come from Jet's library: the Unicode name index (1,487,610 bytes), the collation elements (500,849), and the built-in font (65,068). The others are a CRC-32 table (1,024) and a flat table with one category byte per code point (1,114,112). None of the five is a run as a whole value. So A stores all five raw, exactly as today. The dash line in the story is the rare case.\n\nCompression does better on real tables, and costs less because they are smaller. zstd shrinks the name index 5.09 times, decoding in 1.57 ms, and the collation elements 1.92 times, in 0.55 ms. In the flat category table, 10 of 17 aligned 64 KiB blocks hold one byte. zstd shrinks it 336 times, to 3,313 bytes, decoding in 0.29 ms. Jet's own table generator avoids that waste in the source, storing 1,398 seven-byte ranges.\n\nRULE is different, because it can be rebuilt faster than it can be read (emit.txt, rerun in review/emit-rerun.txt). Writing fifty million dashes to a file from raw bytes took 17.5 to 20.3 ms in the first run and 27.6 to 28.7 ms in the rerun. Filling a fresh buffer and writing it took 17.5 to 19.4 ms, then 11.2 to 14.3 ms, with 48.9 MB of private memory.\n\nWriting one 64 KiB buffer over and over took 12.4 to 13.7 ms, then 8.1 to 8.8 ms, with about 0.2 MB. So printing from raw bytes took 1.3 to 3.5 times as long as streaming. The order held in both runs while machine load moved the times. Reading fifty million zero-fill bytes took 0.72 to 0.90 ms and added no memory.\n\nWhere the owner's rule draws the line. The owner ruled that size never moves evaluation to run time. Under every option, the build evaluates each value completely, and the compiler looks only at the finished bytes. At run time Jet may then only place bytes the build already knows: copy them, fill them from a pattern, or stream them. It never calls the author's code and never computes anything new.\n\nPlacing bytes is the same kind of work the system loader does when it reads file pages, and a browser does when it copies data segments. Filling RULE measured 3.5 to 4.9 ms, faster than reading the same bytes raw. By this line, decoding compressed bytes is placement too, so C and D do not break the owner's rule. They are judged on their cost instead.\n\nThe performance gate decides this vote. Jet must match hand-optimized code in both cycles and bytes. For irregular data that is read, the fastest hand-written code keeps it raw, so raw is the bar. For a repeated byte, hand-written code generates it and never stores it, so raw storage fails on both bytes and time. Where a build must be smallest, hand-written code compresses in its own code and pays the decode where it can see it.\n\nA hand-coder could also skip the table and compute one number's steps directly. That is an algorithm choice the author makes in the source. This vote covers only how the compiler stores data the source asks it to keep.\n\nWeb. A WebAssembly module's active data segments are copied into linear memory at start, so stored bytes become private memory there anyway. Web memory has no read-only pages. Servers already compress downloads with Content-Encoding. Brotli shrinks today's app.wasm to 17,025,105 bytes and gzip to 18,825,738, with no Jet feature. zstd on STEPS alone gives 17,101,885, so compressing inside the module saves about nothing on the wire and adds a decode.\n\nEmbedded. Microcontrollers such as the RP2040 run code and read-only data straight from flash, with only 264 kB of RAM. Decoding a whole table into RAM, as C and D do, fails for any table larger than that. Flash-tight code instead decodes a small piece on each read, as u8g2 does per glyph. That is a data-format choice in the author's code, which A leaves open. Jet has no embedded back end yet, only x86-64 and web, so none of this is measured in Jet.\n\nThe author's own path has a gap today. Under A, an author who wants a table smaller compresses it at build time and decodes it at run time with core.archive.zstd. But Core's zstd and gzip encoders write stored blocks only, so that build-time step shrinks nothing. Until Core gets a real encoder, the author compresses with an outside tool and embeds the file with embed_bytes. A real encoder is a Core library fix, not a language change.\n\nWhole-program packing was considered and dropped as an option. zstd level 19 shrinks today's image to 17,138,559 bytes, and decoding it took 70 ms, paid on every start. That decodes both values and the code, even when the program reads one byte. The UPX manual says packed programs do not share memory between running copies. It is also an outside tool any author can already run, so it needs no language decision.\n\nPeers, measured here. gcc 15.3 and clang 21 at -O2 kept both constant C arrays raw in .rodata, about 100,000,000 bytes, including fifty million zero bytes. Rust 1.99 did the same, in a 100,526,064-byte file. A plain, non-constant C zero array went to .bss instead: 16,024 bytes with gcc and 15,968 with clang (review/bss.txt). Zig 0.16 kept the dash array raw but emitted no zero array when its only use was one indexed read.\n\nSo B matches the peers only for arrays declared constant; a C author who wants zeros free drops the const. The only compression option ld 2.46 lists is --compress-debug-sections, for debug data, default none.\n\nBuild cost, a separate defect. Building this program took 12.04 s with a 4.1 GB peak. The same Collatz table built while running took 1.24 to 1.29 s with a 596 MB peak (review/runtime.txt). So Jet's build-time evaluation spent about nine times the time and seven times the memory of running the same code. No option here changes that, so it needs its own card, outside this vote.\n\nBuild-time limits, for context only. Jet stops one build-time call after 10,000,000 fuel units, about 5 seconds, with error E0952. gcc caps constexpr loops at 262,144 iterations, clang at 1,048,576 steps, and Zig at 1,000 backward branches unless raised. C++20 constexpr allocations cannot survive into the program, and Rust cannot call str repeat in a constant. No option changes these limits.",
       "options": [
         {
           "key": "A",
-          "name": "Optional cost report",
-          "gist": "Keep behavior and add large values to the existing cost report.",
-          "detail": "Keep evaluation and raw storage. Add emitted large constants to jet lint --cost using the shared cost producer, without warnings or size-caused failure. The program stays unchanged and builds normally. Report big and other as 50,000,000 payload bytes each on the measured seed, before future consumer-folding improvements.\n\nBeginners build without an acknowledgment; the cost is not guaranteed to be noticed. Experts request the report and choose genuine runtime input only when that is the intended program. Gain: source-attributed cost without runtime changes. Loss: the data stays large and reporting remains optional. Reuse existing inspection help to make the report discoverable.",
-          "technical": "Proposed, unimplemented. jet lint --cost is already a registered unbuilt form; seed-b13 exits 2 with E2104 naming #6652. Extend that producer rather than add another command. Use the fixed threshold and honest distinct-byte accounting described above. No new threshold setting, phase keyword, or suppression syntax is introduced. The report does not claim exact whole-binary growth or RSS from a payload size.",
-          "code": "SIZE: 50000000\nlast_use: fn() -> Int {\n    big: \"x\".repeat(SIZE)\n    n: big.len()\n    other: \"y\".repeat(SIZE)\n    n + other.len()\n}\nrun: fn() { print(last_use()) }\n// Proposed report: jet lint --cost constant.jet\n// Program output: 100000000"
+          "name": "Fixed storage rule, no switch",
+          "gist": "Keep irregular data raw and read-only, store long runs as a recipe, and never compress.",
+          "detail": "The compiler applies one fixed storage rule to every value it emits, in every build and every tier. There is no switch, attribute, or setting. The rule looks only at the finished bytes of a whole value, never at how the source wrote it. A value of at least 64 KiB whose bytes repeat one pattern of at most 64 bytes is stored as that pattern and a length. A value of all zero bytes is the same case, kept as zero-fill memory that costs no file bytes.\n\nEverything else stays raw in read-only pages, exactly as hand-written code keeps it. jet inspect decisions lists each value stored as a pattern, with its length, so the rule is easy to check.\n\nHow a pattern value is used. Reading one item, like RULE[i], becomes a bounds check and a lookup in the pattern at every optimization level, so it never needs the whole value. Printing it, or writing it to a file or socket, streams from one reused 64 KiB buffer. Copying it into a new value, such as joining it to another string, writes the pattern straight into the new value.\n\nAny other use needs the bytes at one fixed address, for example handing RULE to a function that takes [U8]. For that use the value is filled once, the first time. Its address space is reserved when the program loads, like a C array of zeros, so the fill cannot run out of memory partway through a run. The fill runs under a one-time guard, so racing threads wait for one fill.\n\nThe probe review/fillonce.c models this. Eight racing threads filled 50,000,000 bytes once, in 3.5 to 4.2 ms, and a later write faulted because the pages were read-only. Under a 30 MB address-space limit, both it and a raw 50 MB table failed at load, before any code ran. The guard is checked where the value is taken, not on every read. Checked per read, it measured 1.04 to 1.14 ns against 0.27 to 0.29 ns.\n\nFor the ballot program, the file would hold STEPS raw plus a few bytes for RULE, about 50.1 MB instead of 100.1 MB. Printing RULE would match the measured 64 KiB buffer case. Both projections are proposed and UNCHECKED.\n\nBeginners write nothing new and get the smaller file automatically. Experts get a predictable rule: a long whole-value run is nearly free, everything else costs its size, and nothing is compressed behind their back. An expert who wants irregular data smaller compresses it in their own code, where the decoding cost is visible in the source.\n\nEdge cases. A run with one different byte is not a run, so it stays raw, which is never worse than today. A value under 64 KiB stays raw, so at most 64 KiB of a run is ever stored in full. Long runs inside a mixed value also stay raw, as in the flat category table; the hand-written fix there is a two-stage table in the source. An index past the end stops with E3010, as measured with 60000000.",
+          "technical": "Proposed, unimplemented. Classification runs once per data row of the shared IR module, after evaluation. Both writers read that mark: the x86-64 object writer and the web module writer. On native targets a zero row becomes reserved zero-fill memory. A pattern row gets a page-aligned reservation, filled once under an acquire-release guard and then made read-only. On the web, linear memory starts zeroed, so a zero row needs no data segment, and a pattern row is filled with memory.fill on first use.\n\nWeb memory has no read-only pages, so there the language's own immutability is the only guard, as it is for raw data on the web today. Item reads are lowered to the pattern at every optimization level, so memory use matches across O0, O1, O2, and web. Streaming is one library path in print and in file and socket writes. The fill and stream code is linked only into programs that hold a pattern value.\n\nConsidered and not adopted: filling every pattern value at start, which needs no guard but charges every run. Also mapping one stored tile of the file many times, which needs no private memory but works only on some systems, hits loader limits, and is impossible on the web. Proof after implementation: identical output digests on every tier, file bytes never above raw, and the C stream and fill probes as the bar.",
+          "code": "use process: core.process\n\n// Both values are built while compiling and read while running.\nCOUNT: 50000000\n\n// Steps the Collatz walk takes from each number down to 1, one byte each\n// (the count wraps at 256). A walk stops early at a smaller, known number.\ncollatz_steps: fn(count: Int) -> [U8] {\n    known := [Int]{0, 0}\n    table := [U8]{U8{0}, U8{0}}\n    loop n in 2..<count {\n        steps := 0\n        x := n\n        loop {\n            if x < n -> break\n            x = if x % 2 == 0 -> x /% 2 else -> 3 * x + 1\n            steps += 1\n        }\n        total: steps + known[x]\n        known.push(total)\n        table.push(U8.from_int(total % 256) ?? U8{0})\n    }\n    table\n}\n\nSTEPS: comptime { collatz_steps(COUNT) }   // irregular bytes\nRULE: comptime { \"-\".repeat(COUNT) }       // one byte, repeated\n\nrun: fn() {\n    n: Int.parse(process.args().first() ?? \"27\") ?? 27\n    print(\"{n} takes {STEPS[n]} steps\")   // reads one byte of STEPS\n    print(RULE)                           // reads every byte of RULE\n}\n\n// jet build lookup.jet          (no switch; the same in every build)\n// Output: \"27 takes 111 steps\", then 50,000,000 dashes.\n// Proposed storage: STEPS raw in read-only pages, 50,000,000 bytes;\n// RULE kept as \"-\" times 50,000,000, printed from one 64 KiB buffer."
         },
         {
           "key": "B",
-          "name": "No new size report",
-          "gist": "Keep the source, storage policy, and existing inspection tools.",
-          "detail": "The same program builds and prints the same answer without a new finding or report row. Storage stays as measured, subject to ordinary compiler improvements. Beginners take no extra step. Experts inspect the emitted image or use genuine runtime input when intended.\n\nGain: no new policy or report implementation. Intentional generated tables need no acknowledgment. Loss: existing tools do not gain a source-attributed explanation for this large constant. Choosing this is not approval of writable constant pages or avoidable retained intermediates.",
-          "code": "SIZE: 50000000\nlast_use: fn() -> Int {\n    big: \"x\".repeat(SIZE)\n    n: big.len()\n    other: \"y\".repeat(SIZE)\n    n + other.len()\n}\nrun: fn() { print(last_use()) }\n// jet build --optimize=full constant.jet\n// Program output: 100000000"
+          "name": "Raw and read-only, always",
+          "gist": "Keep every byte the program reads raw in read-only pages, with nothing added.",
+          "detail": "Every value the program reads stays raw in read-only pages, byte for byte. This is the settled baseline with nothing added. It matches gcc, clang, and Rust for arrays declared constant, as measured. The ballot program's file holds 100,000,000 bytes of data. Beginners and experts do nothing new. An author who wants RULE small must make it depend on run-time input, so that it is built while running.\n\nGain: the simplest rule, with every page shared between running copies and dropped freely under memory pressure. Loss: long runs cost their full size. RULE adds 50,000,000 file bytes, and printing it took 1.3 to 3.5 times as long as streaming from the 64 KiB buffer, across two runs. Zero runs cost file bytes too, as the ten-million-zero probe showed, while a plain C zero array costs none.\n\nEdge cases match A for irregular data. An index past the end stops with E3010. This option fails the gate for repeated data on both bytes and time.",
+          "technical": "No new compiler work beyond the settled read-only placement, which seed-b13 does not have yet. Output, tiers, and the web build behave as measured today, with the data pages made read-only.",
+          "code": "use process: core.process\n\n// Both values are built while compiling and read while running.\nCOUNT: 50000000\n\n// Steps the Collatz walk takes from each number down to 1, one byte each\n// (the count wraps at 256). A walk stops early at a smaller, known number.\ncollatz_steps: fn(count: Int) -> [U8] {\n    known := [Int]{0, 0}\n    table := [U8]{U8{0}, U8{0}}\n    loop n in 2..<count {\n        steps := 0\n        x := n\n        loop {\n            if x < n -> break\n            x = if x % 2 == 0 -> x /% 2 else -> 3 * x + 1\n            steps += 1\n        }\n        total: steps + known[x]\n        known.push(total)\n        table.push(U8.from_int(total % 256) ?? U8{0})\n    }\n    table\n}\n\nSTEPS: comptime { collatz_steps(COUNT) }   // irregular bytes\nRULE: comptime { \"-\".repeat(COUNT) }       // one byte, repeated\n\nrun: fn() {\n    n: Int.parse(process.args().first() ?? \"27\") ?? 27\n    print(\"{n} takes {STEPS[n]} steps\")   // reads one byte of STEPS\n    print(RULE)                           // reads every byte of RULE\n}\n\n// jet build lookup.jet\n// Output: \"27 takes 111 steps\", then 50,000,000 dashes.\n// Storage: STEPS and RULE both raw in read-only pages, 100,000,000 bytes."
         },
         {
           "key": "C",
-          "name": "Compact storage with local decoding",
-          "gist": "Compute early, store encoded bytes, and decode each local invocation.",
-          "detail": "The same source still evaluates while building, then qualifying repeated-byte String payloads are encoded. Each invocation decodes big and other when reached and frees their ordinary owned storage at last use. No exact size or RSS is measured for this proposal.\n\nBeginners keep the same source but pay runtime work. Experts retain raw stable storage through existing #Static where appropriate. Gain: smaller stored payloads for the covered shape. Loss: decoding, allocation failures and effects, repeated-call cost, and no benefit for excluded shapes. Use no global lazy cache or new public String type.",
-          "technical": "Proposed, unimplemented. Eligibility, byte-exact value preservation, address exclusions, concurrency, allocator behavior, and O2 restrictions are in detail. This option authorizes runtime decoding of evaluated bytes, not the owner's rejected runtime evaluation fallback. Build-time cost remains. No claim is made that the compiler can infer a short recipe for arbitrary values.",
-          "code": "SIZE: 50000000\nlast_use: fn() -> Int {\n    big: \"x\".repeat(SIZE)\n    n: big.len()\n    other: \"y\".repeat(SIZE)\n    n + other.len()\n}\nrun: fn() { print(last_use()) }\n// Proposed storage only; source unchanged.\n// Program output: 100000000"
+          "name": "Fixed rule, plus compression in small builds",
+          "gist": "Do everything in A, and compress large irregular data when the build asks for small.",
+          "detail": "Everything in A, plus one more step in builds marked small. The existing spelling turns it on: jet build --small, or small: true in a package build profile. Large irregular values, from 1 MiB up, are stored compressed with zstd. The whole value is decoded on first use into memory reserved at load, under A's one-time guard. The program's source and output never change.\n\nToday small only limits inlining, so this gives the existing switch a new meaning. The cost grows with size: about 1.25 ms per megabyte with zstd, measured. STEPS shrinks from 50,000,000 to 17,101,885 bytes, and first use costs about 62 ms, even for one byte, plus 48.9 MB of private memory. Jet's Unicode name index shrinks 5.09 times and decodes in 1.57 ms. Raw needs 0.01 ms for one byte.\n\nBeginners get smaller files when they ask for small, and pay start-up time they may not notice. Experts can reason about it, but the cost moves from disk to every run, for every large table in the build at once. On the web, servers already compress downloads to about the same size. On microcontrollers, decoding a whole table into RAM fails once the table is larger than RAM. Decoding in blocks would make one-byte reads cheaper but adds work to every read.",
+          "technical": "Proposed, unimplemented. Every small build that holds a compressed value carries a decoder in its runtime. The compiler also needs a real encoder, which Core lacks today. Each value needs a reservation made at load and a one-time guard for threads. The compiler, not the author, fixes the codec: zstd for size, where LZ4 would decode four times faster but store 40 percent more.",
+          "code": "use process: core.process\n\n// Both values are built while compiling and read while running.\nCOUNT: 50000000\n\n// Steps the Collatz walk takes from each number down to 1, one byte each\n// (the count wraps at 256). A walk stops early at a smaller, known number.\ncollatz_steps: fn(count: Int) -> [U8] {\n    known := [Int]{0, 0}\n    table := [U8]{U8{0}, U8{0}}\n    loop n in 2..<count {\n        steps := 0\n        x := n\n        loop {\n            if x < n -> break\n            x = if x % 2 == 0 -> x /% 2 else -> 3 * x + 1\n            steps += 1\n        }\n        total: steps + known[x]\n        known.push(total)\n        table.push(U8.from_int(total % 256) ?? U8{0})\n    }\n    table\n}\n\nSTEPS: comptime { collatz_steps(COUNT) }   // irregular bytes\nRULE: comptime { \"-\".repeat(COUNT) }       // one byte, repeated\n\nrun: fn() {\n    n: Int.parse(process.args().first() ?? \"27\") ?? 27\n    print(\"{n} takes {STEPS[n]} steps\")   // reads one byte of STEPS\n    print(RULE)                           // reads every byte of RULE\n}\n\n// jet build lookup.jet           -> stored as in A\n// jet build --small lookup.jet   -> STEPS also compressed (proposed)\n// Output: \"27 takes 111 steps\", then 50,000,000 dashes.\n// Small storage: STEPS about 17,101,885 bytes, decoded whole at first use."
         },
         {
           "key": "D",
-          "name": "Default tidy error; reasoned allowance",
-          "gist": "Make the cost visible before release without adding warnings.",
-          "detail": "Keep raw storage and report jet.LargeBuildTimeValue above the same fixed threshold. The unchanged program gets two tidy errors: check/build fail; run/dev/test are not stopped by tidiness. An expert adds #Allow(jet.LargeBuildTimeValue, \"Intentional generated test data\") above last_use to build the same values. That new diagnostic identity is proposed and UNCHECKED.\n\nBeginners see bytes and a choice before release. Experts use the existing reasoned allowance scopes, not a phase request. Gain: guaranteed visibility in check/build. Loss: valid generated tables now need acknowledgments and estimated size can create churn. Never automatically rewrite them to runtime computation.",
-          "technical": "Register one Diagnostic declaration and generated projection, with what/why/fix and a UI snapshot. Use existing #Allow resolution. D follows D-NO-WARNINGS1=A's tidy-command policy, not the seed's older deny-by-request warning policy. It needs that ratified cutover for this finding. It introduces neither an independent severity mechanism nor a numeric policy field.",
-          "code": "SIZE: 50000000\nlast_use: fn() -> Int {\n    big: \"x\".repeat(SIZE)\n    n: big.len()\n    other: \"y\".repeat(SIZE)\n    n + other.len()\n}\nrun: fn() { print(last_use()) }\n// Proposed: two tidy errors block check/build.\n// After reasoned allowance: output 100000000."
+          "name": "Fixed rule, plus compression on marked values",
+          "gist": "Do everything in A, and compress one value when its declaration carries #Compressed.",
+          "detail": "Everything in A, plus one new storage marker. Writing #Compressed before a build-time value stores it compressed, in every build and every tier. It is decoded whole on first use, into memory reserved at load, under A's one-time guard. Output never changes. The marker would join #Static and #Inline, the existing marks for how a constant is stored.\n\nThe cost is per value, and visible where the value is declared. For STEPS it is C's cost: 17,101,885 bytes in the file, then about 62 ms and 48.9 MB of private memory at first use, even for one byte. For a smaller table it is smaller: 1.57 ms for the Unicode name index. Unmarked values follow A.\n\nBeginners never meet it. Experts choose it per table, and --small keeps its meaning. It is new syntax, which is why it needs this vote. It does what an author can already write with embed_bytes and core.archive.zstd, once Core has a real encoder. On microcontrollers it has C's problem: a whole table must fit in RAM.",
+          "technical": "Proposed, unimplemented. The marker is legal only on a build-time value of at least 64 KiB; anywhere else it is a compile error. The compiler carries a real encoder, and every program with a marked value carries a decoder. jet inspect decisions lists each marked value with its stored and decoded sizes.",
+          "code": "use process: core.process\n\n// Both values are built while compiling and read while running.\nCOUNT: 50000000\n\n// Steps the Collatz walk takes from each number down to 1, one byte each\n// (the count wraps at 256). A walk stops early at a smaller, known number.\ncollatz_steps: fn(count: Int) -> [U8] {\n    known := [Int]{0, 0}\n    table := [U8]{U8{0}, U8{0}}\n    loop n in 2..<count {\n        steps := 0\n        x := n\n        loop {\n            if x < n -> break\n            x = if x % 2 == 0 -> x /% 2 else -> 3 * x + 1\n            steps += 1\n        }\n        total: steps + known[x]\n        known.push(total)\n        table.push(U8.from_int(total % 256) ?? U8{0})\n    }\n    table\n}\n\n#Compressed STEPS: comptime { collatz_steps(COUNT) }   // stored compressed\nRULE: comptime { \"-\".repeat(COUNT) }                   // one byte, repeated\n\nrun: fn() {\n    n: Int.parse(process.args().first() ?? \"27\") ?? 27\n    print(\"{n} takes {STEPS[n]} steps\")   // decodes STEPS whole, once\n    print(RULE)                           // reads every byte of RULE\n}\n\n// jet build lookup.jet          (the same in every build)\n// Output: \"27 takes 111 steps\", then 50,000,000 dashes.\n// Proposed storage: STEPS about 17,101,885 bytes, decoded whole at first\n// use; RULE as in A."
         }
       ],
       "comparisons": [],
       "rec": "A",
       "recommendation": {
         "rec": "A",
-        "why": "Expose the cost through the existing report without changing evaluation, blocking intentional data, or reviving warnings. Keep actual optimizer and storage-permission defects separate.",
+        "why": "A matches hand-optimized code in both measures. It keeps irregular data raw, which is what the fastest hand-written code does. It stores long runs as a recipe, which measured smaller and faster than raw. It needs no switch, so every build and tier behave alike. Compression saves file bytes only by spending time and memory on every run, so A leaves it to the author's own code, where that cost is visible.",
         "gains": [
-          "One cost-report mechanism",
-          "No new runtime work",
-          "No phase-changing fallback"
+          "Long runs cost almost no file bytes, with no switch",
+          "Irregular data reads as fast as hand-written code",
+          "One storage rule in every build and tier"
         ],
         "losses": [
           {
-            "loss": "Optional reporting does not guarantee discovery.",
-            "mitigation": "Link the report from existing editor and build inspection help; do not pretend that this makes it mandatory."
+            "loss": "A run used whole fills private memory that running copies cannot share.",
+            "mitigation": "Hand-filled code pays the same. Item reads, printing, and copies never fill it. Its memory is reserved at load, so the fill cannot fail partway through a run."
           },
           {
-            "loss": "The emitted data stays large.",
-            "mitigation": "Report its distinct bytes honestly and pursue general consumer-folding defects independently of this policy vote."
+            "loss": "Real tables are irregular, so A shrinks none of the five measured.",
+            "mitigation": "They stay exactly as fast and as large as today. A sparse table shrinks in source as a two-stage table, as Jet's own Unicode generator already does."
           },
           {
-            "loss": "The cost producer is not implemented yet.",
-            "mitigation": "Extend the existing #6652 producer contract and prove its source attribution and size accounting before claiming the report works."
+            "loss": "Irregular data is never compressed by the compiler, and Core's encoders cannot shrink data today.",
+            "mitigation": "Servers compress web downloads already. Authors compress with an outside tool and embed_bytes until core.archive.zstd gets a real encoder, a Core library fix."
+          },
+          {
+            "loss": "Almost-runs, such as one changed byte, stay raw.",
+            "mitigation": "They cost exactly today's raw bytes; the rule never makes storage bigger."
           }
         ],
         "whyNot": [
           {
             "key": "B",
-            "reason": "A fair minimal policy, but it gives authors no new source-attributed explanation."
+            "reason": "Simplest, but stores long runs at full size, failing the gate on bytes and time."
           },
           {
             "key": "C",
-            "reason": "Can reduce stored runs, but adds unmeasured runtime work and allocation failures while retaining full evaluation cost."
+            "reason": "Saves file bytes, but every small build pays about 1.25 ms per megabyte and the same amount of private memory, even for one byte. It also changes what --small means."
           },
           {
             "key": "D",
-            "reason": "Offers stronger visibility, but valid large tables now fail check/build unless explicitly acknowledged."
+            "reason": "Puts the cost on the one value the author marks, but adds syntax for what the author's own code can do, and still decodes the whole table."
           }
         ],
-        "tradeoff": "Authors must request cost information; intentional data remains valid without a special acknowledgment."
+        "tradeoff": "Files shrink only where bytes are cheap to rebuild; irregular data stays at full size unless the author compresses it in code."
       },
       "hybrid": null,
       "ballotMode": "full",
       "shortAuthorizedBy": null,
       "ballotProcessVersion": 5,
       "reviewPasses": {
-        "adversarial": "Author model family: Claude Opus. Adversarial model family: GPT. Fresh agent: BallotComptimeSize. Independently measured seed-b13 programs, inspected emitted payloads and compiler paths, and checked the cited rulings. Repaired storage, residency, suppression, warning-policy, and lazy-lifetime claims; added the report-versus-tidy choice and sourced strong prior art."
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: ReviewComptimeSize. Reran the seed builds on every tier and web, the C storage, decode, and emit probes, and added probes for real tables, guarded fill, zero arrays, and run-time table cost. Repaired the spelling, noisy timings, the peer zero claim, the shared-writer and O0 parity claims, A's fill failure and threading, C's cost scale, the Core encoder gap, and added option D."
       },
-      "checkInstructions": "Use seed-b13 on probes in $JET_SCRATCH_ROOT/lanes/BallotReview. Build constant.jet, runtime.jet, and identical.jet with --optimize=full and external output directories; runtime.jet reads STRING_BYTES=50000000. Measure build and program RSS separately under nice/ionice. Inspect ELF LOAD flags and payload runs, then emit last_use IR. Run explicit.jet, run-mark.jet, static.jet, allow.jet, and the policy probe.\n\nProposal behaviors are UNCHECKED; after implementation prove the cases named in detail on all applicable tiers. Validate this payload with Tools/agent/ballots/Validate.jet.",
+      "checkInstructions": "All probes live in $JET_SCRATCH_ROOT/lanes/Main/ballots/probes/D-COMPTIME-SIZE1; source env.sh for tool paths. The adversarial review's probes and outputs are in its review directory.\n\nJet: build review/spelling.jet with --optimize=full, run it with 27, 49999999, and 60000000, and read its segments with readelf -lW. review/tiers.sh writes tiers-rerun.txt for six native tiers and the web build, with download sizes. zero.jet stores ten million zero bytes. review/runtime.jet builds the same table while running.\n\nC: gen.c writes the payloads. rss.sh, decode.c, and emit.c write rss.txt, decode.txt, and emit.txt, and the review's rerun files hold the second run. review/realdata.py extracts five real tables; decode on review/real/*.bin writes decode-real.txt. review/fillonce.c models A's guarded fill. review/bss.c and exec-limit.txt cover zero arrays and failure at load. codecs.sh, peers.sh, and peers2.sh write their text files.\n\nThe A, C, and D behaviors are proposed and UNCHECKED. After implementation, prove identical output digests on every tier, file bytes never above raw, and RULE printing within the emit.c stream bar. Validate this payload with Tools/agent/ballots/Validate.jet.",
       "surface": {
-        "gist": "Should Jet report large build-time values, require acknowledgment, or change how their bytes are stored?",
-        "lesson": "A short expression can put megabytes in an executable. Computing early and storing the answer are different costs. The owner's rule stays: size never moves evaluation to run time.",
+        "gist": "Should Jet store large data a program reads in a smaller form, and if so, by fixed rule or when asked?",
+        "lesson": "A long run of one repeated byte rebuilds faster than it reads, so a stored recipe wins on size and speed. Real tables are irregular. Compressing them saves file bytes but costs decoding time and private memory on every run.",
         "trio": {
           "current": {
-            "note": "Two different 50 MB strings produced a 100 MB payload, not duplicate copies.",
-            "code": "big: \"x\".repeat(50000000)\nother: \"y\".repeat(50000000)"
+            "note": "Seed-b13 stores both values byte for byte, in a 100,123,056-byte executable.",
+            "code": "STEPS: comptime { collatz_steps(COUNT) }   // irregular bytes\nRULE: comptime { \"-\".repeat(COUNT) }       // one byte, repeated\n// jet build --optimize=full: 100,123,056 bytes;\n// both 50,000,000-byte values stored in a writable segment"
           },
           "wild": {
-            "lang": "Rust Clippy",
-            "note": "Clippy checks large constant arrays and recommends shared static storage, not runtime fallback.",
-            "code": "// Documentary precedent: large_const_arrays\n// Configured through array-size-threshold. No peer benchmark here."
+            "lang": "C (gcc 15.3, clang 21)",
+            "note": "Constant arrays stay raw, even zeros; a plain zero array costs no file bytes.",
+            "code": "static const char RULE[N] = {[0 ... N - 1] = '-'};\nstatic const char ZERO[N] = {0};   // .rodata: file bytes\nstatic char PLAIN[N];              // .bss: no file bytes\n// gcc -O2: .rodata holds 100,000,032 bytes"
           }
         },
         "options": [
           {
             "key": "A",
-            "name": "Optional cost report",
-            "gist": "Add large values to the existing cost report; leave program behavior alone.",
+            "name": "Fixed storage rule, no switch",
+            "gist": "Long runs become a recipe; everything else stays raw; nothing is compressed.",
             "gains": [
-              "Numbers without new runtime work",
-              "No warnings or build failures for size"
+              "Long runs cost almost no file bytes",
+              "Irregular reads stay as fast as raw"
             ],
             "losses": [
-              "Authors must request the report",
-              "Does not shrink the data"
+              "A run used whole takes private memory",
+              "Real irregular tables do not shrink"
             ],
             "proposed": {
-              "code": "SIZE: 50000000\nlast_use: fn() -> Int {\n    big: \"x\".repeat(SIZE)\n    n: big.len()\n    other: \"y\".repeat(SIZE)\n    n + other.len()\n}\nrun: fn() { print(last_use()) }\n// Proposed: jet lint --cost constant.jet\n// Output: 100000000"
+              "code": "use process: core.process\nCOUNT: 50000000\nSTEPS: comptime { collatz_steps(COUNT) }   // irregular bytes\nRULE: comptime { \"-\".repeat(COUNT) }       // one byte, repeated\n\nrun: fn() {\n    n: Int.parse(process.args().first() ?? \"27\") ?? 27\n    print(\"{n} takes {STEPS[n]} steps\")\n    print(RULE)\n}\n// collatz_steps: the table builder in the full program\n// Proposed: STEPS raw, read-only; RULE kept as \"-\" times 50,000,000,\n// printed from one 64 KiB buffer. No switch."
             }
           },
           {
             "key": "B",
-            "name": "No new report",
-            "gist": "Keep the same program and storage without a size finding.",
+            "name": "Raw and read-only, always",
+            "gist": "Every byte the program reads stays raw in read-only pages.",
             "gains": [
-              "No new policy"
+              "Simplest rule; matches C and Rust constants"
             ],
             "losses": [
-              "No source-attributed size explanation"
+              "Long runs are stored at full size",
+              "Printing RULE measured 1.3 to 3.5 times slower"
             ],
             "proposed": {
-              "code": "SIZE: 50000000\nlast_use: fn() -> Int {\n    big: \"x\".repeat(SIZE)\n    n: big.len()\n    other: \"y\".repeat(SIZE)\n    n + other.len()\n}\nrun: fn() { print(last_use()) }\n// Output: 100000000"
+              "code": "use process: core.process\nCOUNT: 50000000\nSTEPS: comptime { collatz_steps(COUNT) }   // irregular bytes\nRULE: comptime { \"-\".repeat(COUNT) }       // one byte, repeated\n\nrun: fn() {\n    n: Int.parse(process.args().first() ?? \"27\") ?? 27\n    print(\"{n} takes {STEPS[n]} steps\")\n    print(RULE)\n}\n// collatz_steps: the table builder in the full program\n// Storage: STEPS and RULE raw, read-only, 100,000,000 bytes."
             }
           },
           {
             "key": "C",
-            "name": "Compact storage",
-            "gist": "Encode evaluated byte runs and decode each local invocation. Proposed, not measured.",
+            "name": "Fixed rule, plus compression in small builds",
+            "gist": "A, plus compressed irregular data when building with --small.",
             "gains": [
-              "Smaller stored runs",
-              "Ordinary local freeing"
+              "STEPS shrinks to 17.1 MB on disk with zstd"
             ],
             "losses": [
-              "Runtime allocation and decoding",
-              "Repeated calls pay again",
-              "Static addresses and irregular values stay raw"
+              "First use decodes about 1.25 ms per megabyte",
+              "Decoded size held as private memory per copy",
+              "Gives --small a new meaning"
             ],
             "proposed": {
-              "code": "SIZE: 50000000\nlast_use: fn() -> Int {\n    big: \"x\".repeat(SIZE)\n    n: big.len()\n    other: \"y\".repeat(SIZE)\n    n + other.len()\n}\nrun: fn() { print(last_use()) }\n// Proposed storage; source unchanged.\n// Output: 100000000"
+              "code": "use process: core.process\nCOUNT: 50000000\nSTEPS: comptime { collatz_steps(COUNT) }   // irregular bytes\nRULE: comptime { \"-\".repeat(COUNT) }       // one byte, repeated\n\nrun: fn() {\n    n: Int.parse(process.args().first() ?? \"27\") ?? 27\n    print(\"{n} takes {STEPS[n]} steps\")\n    print(RULE)\n}\n// collatz_steps: the table builder in the full program\n// jet build --small: STEPS compressed, decoded whole at first use\n// (proposed); RULE as in A."
             }
           },
           {
             "key": "D",
-            "name": "Default tidy error",
-            "gist": "Block check/build until large data is acknowledged with an existing reasoned allowance.",
+            "name": "Fixed rule, plus compression on marked values",
+            "gist": "A, plus compression for each value marked #Compressed.",
             "gains": [
-              "Visible before release",
-              "No phase-changing fallback"
+              "The cost sits on the value the author marks"
             ],
             "losses": [
-              "Intentional tables need allowances"
+              "New syntax for what library code can do",
+              "Same decoding time and memory as C"
             ],
             "proposed": {
-              "code": "SIZE: 50000000\nlast_use: fn() -> Int {\n    big: \"x\".repeat(SIZE)\n    n: big.len()\n    other: \"y\".repeat(SIZE)\n    n + other.len()\n}\nrun: fn() { print(last_use()) }\n// Proposed: two tidy errors; check/build fail.\n// With reasoned allowance: output 100000000."
+              "code": "use process: core.process\nCOUNT: 50000000\n#Compressed STEPS: comptime { collatz_steps(COUNT) }\nRULE: comptime { \"-\".repeat(COUNT) }   // one byte, repeated\n\nrun: fn() {\n    n: Int.parse(process.args().first() ?? \"27\") ?? 27\n    print(\"{n} takes {STEPS[n]} steps\")\n    print(RULE)\n}\n// collatz_steps: the table builder in the full program\n// Proposed: STEPS compressed in every build, decoded whole at\n// first use; RULE as in A."
             }
           }
         ],
         "recommendation": {
           "rec": "A",
-          "why": "Use the existing cost-report path. Preserve evaluation and valid intentional data without new warnings or hidden runtime work.",
+          "why": "A matches hand-optimized code: irregular data stays raw, and long runs become a recipe that measured smaller and faster than raw. No switch exists, so every build and tier behave alike.",
           "gains": [
-            "One reporting mechanism",
-            "No runtime changes"
+            "Almost no file bytes for long runs",
+            "Raw speed for irregular data"
           ],
           "losses": [
             {
-              "loss": "The report is optional.",
-              "mitigation": "Link it from existing editor and build inspection help."
+              "loss": "A run used whole takes unshared memory.",
+              "mitigation": "Hand-filled code pays the same; item reads, printing, and copies never fill it."
             },
             {
-              "loss": "The data stays large.",
-              "mitigation": "Report distinct bytes honestly; investigate consumer folding separately."
-            },
-            {
-              "loss": "The cost command is unbuilt today.",
-              "mitigation": "Extend its existing producer, then prove attribution and byte accounting."
+              "loss": "Real irregular tables stay full size.",
+              "mitigation": "Compress in your own code; a sparse table shrinks as a two-stage table in source."
             }
           ],
           "whyNot": [
             {
               "key": "B",
-              "reason": "Simplest, but explains less."
+              "reason": "Stores long runs at full size, slower to print."
             },
             {
               "key": "C",
-              "reason": "Smaller runs at unmeasured runtime cost."
+              "reason": "Every small build pays decoding time and memory, even for one byte."
             },
             {
               "key": "D",
-              "reason": "Stronger visibility, but blocks valid tables."
+              "reason": "New syntax for a cost the author can already pay in code."
             }
           ],
-          "tradeoff": "Visible numbers on request, not mandatory acknowledgment."
+          "tradeoff": "Files shrink only where bytes are cheap to rebuild."
         }
       },
       "reports": [
         {
-          "title": "Zig compile-time expressions",
-          "url": "https://ziglang.org/documentation/master/#Compile-Time-Expressions",
-          "note": "One function at both phases; explicit early evaluation."
+          "title": "UPX manual",
+          "url": "https://github.com/upx/upx/blob/devel/doc/upx-doc.txt",
+          "note": "UPX decompresses the whole program before running it, and packed programs do not share RAM between running copies."
+        },
+        {
+          "title": "Zstandard README benchmark",
+          "url": "https://github.com/facebook/zstd/blob/dev/README.md",
+          "note": "Published zstd 1.5.7 speeds; this ballot's zstd numbers are measured locally."
+        },
+        {
+          "title": "LZ4 README benchmark",
+          "url": "https://github.com/lz4/lz4/blob/dev/README.md",
+          "note": "Published LZ4 decode speed; this ballot's LZ4 HC numbers come from a local build of lz4 1.10.0."
+        },
+        {
+          "title": "WebAssembly data segments",
+          "url": "https://webassembly.github.io/spec/core/syntax/modules.html#data-segments",
+          "note": "An active data segment copies its contents into memory during instantiation."
+        },
+        {
+          "title": "MDN Content-Encoding",
+          "url": "https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Content-Encoding",
+          "note": "Servers compress web downloads such as app.wasm without help from the compiler."
+        },
+        {
+          "title": "Raspberry Pi microcontroller silicon",
+          "url": "https://www.raspberrypi.com/documentation/microcontrollers/silicon.html",
+          "note": "RP2040 has 264 kB of SRAM and runs code directly from external flash."
+        },
+        {
+          "title": "u8g2 font format",
+          "url": "https://github.com/olikraus/u8g2/wiki/u8g2fontformat",
+          "note": "Glyph bitmaps are run-length coded to save flash and decoded per glyph by library code."
+        },
+        {
+          "title": "Linux memory concepts",
+          "url": "https://docs.kernel.org/admin-guide/mm/concepts.html",
+          "note": "File-backed pages can be dropped and reread; anonymous pages need swap to be reclaimed."
+        },
+        {
+          "title": "GCC C++ dialect options",
+          "url": "https://gcc.gnu.org/onlinedocs/gcc/C_002b_002b-Dialect-Options.html",
+          "note": "constexpr loop limit 262,144 and operation limit 33,554,432 by default."
+        },
+        {
+          "title": "Clang user manual",
+          "url": "https://clang.llvm.org/docs/UsersManual.html",
+          "note": "-fconstexpr-steps defaults to 1,048,576 evaluation steps."
         },
         {
           "title": "Zig evaluation branch quota",
           "url": "https://ziglang.org/documentation/master/#setEvalBranchQuota",
-          "note": "A compiler-work budget, not a result-size policy."
+          "note": "Build-time evaluation stops at 1,000 backward branches unless the quota is raised."
         },
         {
-          "title": "C++ constexpr",
-          "url": "https://en.cppreference.com/w/cpp/language/constexpr.html",
-          "note": "Constant initialization and eligible functions are different guarantees."
+          "title": "P0784R7, more constexpr containers",
+          "url": "https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2019/p0784r7.html",
+          "note": "constexpr allocations must be freed before evaluation ends."
+        },
+        {
+          "title": "GNU ld options",
+          "url": "https://sourceware.org/binutils/docs/ld/Options.html",
+          "note": "--compress-debug-sections compresses DWARF debug sections only."
         },
         {
           "title": "Rust constant evaluation",
           "url": "https://doc.rust-lang.org/reference/const_eval.html",
-          "note": "Required const contexts versus optional optimization elsewhere."
-        },
-        {
-          "title": "Rust constant items",
-          "url": "https://doc.rust-lang.org/reference/items/constant-items.html",
-          "note": "Constants are values without one guaranteed shared memory location."
-        },
-        {
-          "title": "Clippy large_const_arrays",
-          "url": "https://rust-lang.github.io/rust-clippy/master/index.html#large_const_arrays",
-          "note": "A size lint recommending static storage, with array-size-threshold configuration."
-        },
-        {
-          "title": "D compile-time function execution",
-          "url": "https://dlang.org/spec/function.html#interpretation",
-          "note": "Ordinary functions evaluated in compile-time contexts, with documented restrictions."
-        },
-        {
-          "title": "Jai community metaprogramming guide",
-          "url": "https://github.com/Jai-Community/Jai-Community-Library/wiki/Metaprogramming#run-directive",
-          "note": "Documentary precedent only; no private compiler measurement."
-        },
-        {
-          "title": "Linux memory concepts and reclaim",
-          "url": "https://docs.kernel.org/admin-guide/mm/concepts.html",
-          "note": "Mapped file data does not imply permanently resident physical pages."
+          "note": "Constants may call only const functions, so str repeat is rejected."
         }
       ],
       "draft": false,
@@ -200263,6 +200317,34 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-12T22:19:11.022Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0o8f1p4",
+      "note": "#83 The retired build-time spelling #run is not Jet syntax: it g"
+    },
+    {
+      "at": "2026-11-12T22:19:10.071Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c025w7rd",
+      "note": "#17 core.compress's gzip and zstd encoders compress: their outpu"
+    },
+    {
+      "at": "2026-11-12T22:19:09.158Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0xphd0i",
+      "note": "#6 Build-time evaluation costs no more than running the same co"
+    },
+    {
+      "at": "2026-11-12T22:19:08.230Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-COMPTIME-SIZE1",
+      "note": ""
+    },
     {
       "at": "2026-11-12T22:13:17.291Z",
       "by": "Main",
