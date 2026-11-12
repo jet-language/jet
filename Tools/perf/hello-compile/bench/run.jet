@@ -1,0 +1,209 @@
+// The Jet twin of Tools/perf/hello-compile/bench.py, the hello-world compile
+// benchmark (Docs/audits/compile-cost-hello-2026-10-02.md): for each
+// toolchain, one cold build in a fresh directory and one warm build after it,
+// each with its wall time and the peak resident memory of its process group
+// (sampled from /proc every 50 ms), then the binary's size as built and
+// stripped and its best run time of five. Each toolchain's row prints as one
+// JSON line, and results.json in the work directory holds every row.
+//
+//   jet Tools/perf/hello-compile/bench/run.jet
+//
+// BENCH_DIR (default $JET_SCRATCH_ROOT/bench-hello) is the work directory,
+// JET the Jet compiler, and ONLY a comma list: only the toolchains whose label
+// contains one of its items run. A failure ends the run with its report on
+// stderr and exit 1.
+use core.[collections, files, math, process, regex, sys, time]
+use core.encoding.json
+
+GCC: "/nix/store/l5qkpzsr4gxvksh45b3nhxbkyr5cviar-gcc-wrapper-15.3.0/bin/gcc"
+CLANG: "/nix/store/mw4gasdvwgscgpxpzihjgchfhs3hhqhn-clang-wrapper-21.1.8/bin/clang"
+ZIG: "/nix/store/kbb1kfzlvqiwbcpw4sd2j3v63vqab3vg-zig-0.16.0/bin/zig"
+GO: "/nix/store/i77g9dmcd399rmxk8688qfr4g2wzgk37-go-1.26.7/bin/go"
+RUSTC: "/nix/store/cqlx62f919g8xf2f39bmykslpjdh9z0j-rustc-1.97.1/bin/rustc"
+ODIN: "/nix/store/73b33yxdvy3fpv2x0l1l17sqa58amsxx-odin-dev-2026-05/bin/odin"
+STRIP_FALLBACK: "/nix/store/l5qkpzsr4gxvksh45b3nhxbkyr5cviar-gcc-wrapper-15.3.0/bin/strip"
+ELF_MAGIC: [U8]{U8{127}, U8{69}, U8{76}, U8{70}}
+
+// One toolchain: its label, the source it builds, its build command given the
+// build directory, and the binary it writes (None for Jet's, found after the
+// builds).
+Toolchain: struct {
+    label: String
+    source: String
+    build: fn(String) -> [String]
+    out: String?
+}
+
+// One build: its exit code (minus the signal that ended it), wall seconds,
+// peak megabytes, and the last 600 characters of its output when it failed.
+#Encode
+Phase: struct {
+    rc: Int
+    wall_s: Float
+    peak_tree_mb: Float
+    log: String?
+}
+
+// One toolchain's row; a binary, size or run time it does not have is null.
+#Encode
+Row: struct {
+    toolchain: String
+    cold: Phase
+    warm: Phase
+    binary: Dyn
+    size_bytes: Dyn
+    stripped_bytes: Dyn
+    run_ms: Dyn
+}
+
+run: fn() -> Never Err! {
+    vars: sys.env_text("""
+        STATE=${{JET_STATE_ROOT:-${{XDG_CACHE_HOME:-$HOME/.cache}}/jet-dev}}
+        BENCH=${{BENCH_DIR-${{JET_SCRATCH_ROOT:-$STATE}}/bench-hello}}
+        JET=${{JET-$STATE/scratch/jet-release-night12/jet}}
+        ONLY=${{ONLY-}}
+        """, sys.environment())
+    bench: vars["BENCH"]
+    strip: process.which("strip") ?? STRIP_FALLBACK
+    sources: [String: (file: String, text: String)]{
+        "c": (file: "main.c", text: "#include <stdio.h>\nint main(void){{puts(\"hello\");return 0;}}\n"),
+        "zig": (file: "main.zig", text: "const std = @import(\"std\");\npub fn main() void {{ std.debug.print(\"hello\\n\", .{{}}); }}\n"),
+        "rs": (file: "main.rs", text: "fn main(){{println!(\"hello\");}}\n"),
+        "go": (file: "main.go", text: "package main\nimport \"fmt\"\nfunc main(){{fmt.Println(\"hello\")}}\n"),
+        "odin": (file: "main.odin", text: "package main\nimport \"core:fmt\"\nmain :: proc() {{ fmt.println(\"hello\") }}\n"),
+        "jet": (file: "main.jet", text: "run: fn() {{\n    print(\"hello\")\n}}\n"),
+        "asm": (file: "hello.S", text: files.read(files.join(files.dirname(files.dirname(sys.executable())), "hello.S"))),
+    }
+    results := [Row]{}
+    loop toolchain in toolchains(vars["JET"]) {
+        label: toolchain.label.copy()  // copy: the ONLY filter captures the label
+        if vars["ONLY"] != "" && !vars["ONLY"].split(",").any(item -> label.contains(item)) -> next
+        dir: files.join(bench, regex.replace(Regex{"[(),]"}, toolchain.label.replace(" ", "_").replace("/", "_"), ""))
+        files.remove_all(dir).drop("a first run has no directory to remove")
+        files.create_dir_all(dir)
+        source: sources[toolchain.source]
+        files.write(files.join(dir, source.file), source.text)
+        cold: timed(toolchain.build(dir), dir)
+        if toolchain.out == .Val(name) && files.exists(files.join(dir, name)) -> files.remove(files.join(dir, name))
+        warm: timed(toolchain.build(dir), dir)
+        binary: if toolchain.out == .Val(name) -> Val(files.join(dir, name)) else -> jet_binary(dir)
+        sizes: size(binary, strip)
+        row: Row{toolchain: toolchain.label.copy(), cold: cold, warm: warm, binary: binary.encode(), size_bytes: sizes.built.encode(), stripped_bytes: sizes.stripped.encode(), run_ms: runtime(binary).encode()}  // copy: the row keeps the label
+        print(json.stringify(row))
+        results.push(row)
+    }
+    files.write(files.join(bench, "results.json"), json.stringify(results, 1))
+    process.exit(0)
+}
+
+// Every toolchain, in the order the benchmark runs them; `jet` builds the Jet
+// rows.
+toolchains: fn(jet: String) -> [Toolchain] Never! {
+    jet_cold: jet.copy()  // copy: each Jet row's command holds the compiler
+    jet_release: jet.copy()  // copy: each Jet row's command holds the compiler
+    [Toolchain]{
+        {label: "Assembly gcc -nostdlib -static", source: "asm", build: _ -> [GCC, "-nostdlib", "-static", "-o", "hello", "hello.S"], out: Val("hello")},
+        {label: "Assembly minimal ELF (-s -n, no build-id/relro)", source: "asm", build: _ -> [GCC, "-nostdlib", "-static", "-s", "-Wl,-n,--build-id=none,-z,norelro", "-o", "hello", "hello.S"], out: Val("hello")},
+        {label: "C gcc -O2", source: "c", build: _ -> [GCC, "-O2", "main.c", "-o", "hello"], out: Val("hello")},
+        {label: "C clang -O2", source: "c", build: _ -> [CLANG, "-O2", "main.c", "-o", "hello"], out: Val("hello")},
+        {label: "Zig ReleaseFast", source: "zig", build: dir -> [ZIG, "build-exe", "-O", "ReleaseFast", "main.zig", "--name", "hello", "--cache-dir", "{dir}/zc", "--global-cache-dir", "{dir}/zgc"], out: Val("hello")},
+        {label: "Zig ReleaseSmall", source: "zig", build: dir -> [ZIG, "build-exe", "-O", "ReleaseSmall", "main.zig", "--name", "hello", "--cache-dir", "{dir}/zc", "--global-cache-dir", "{dir}/zgc"], out: Val("hello")},
+        {label: "Rust rustc -O", source: "rs", build: _ -> [RUSTC, "-O", "main.rs", "-o", "hello"], out: Val("hello")},
+        {label: "Rust rustc debug", source: "rs", build: _ -> [RUSTC, "main.rs", "-o", "hello"], out: Val("hello")},
+        {label: "Go go build", source: "go", build: dir -> ["env", "GOCACHE={dir}/gocache", "GO111MODULE=off", GO, "build", "-o", "hello", "main.go"], out: Val("hello")},
+        {label: "Odin -o:speed", source: "odin", build: _ -> [ODIN, "build", "main.odin", "-file", "-o:speed", "-out:hello"], out: Val("hello")},
+        {label: "Jet jet build (Rust reference, night12)", source: "jet", build: _ -> [jet, "build", "main.jet", "--quiet"], out: None},
+        {label: "Jet jet build TRUE-COLD empty store (night12)", source: "jet", build: dir -> ["env", "JET_STORE_DIR={dir}/store", jet_cold, "build", "main.jet", "--quiet"], out: None},
+        {label: "Jet jet build --release (night12)", source: "jet", build: _ -> [jet_release, "build", "main.jet", "--release", "--quiet"], out: None},
+    }
+}
+
+// Runs `argv` in `dir` with its stdout and stderr together, sampling its
+// process group's resident memory every 50 ms until it exits. The exit is
+// looked for every millisecond, so the wall time ends with the child.
+timed: fn(argv: [String], dir: String) -> Phase Err! {
+    started: time.instant()
+    child: process.cmd(argv).cwd(dir).stdout(.Capture).stderr(.Stdout).spawn()
+    group: child.id()
+    peak := 0
+    sample_at := 0
+    loop {
+        if started.elapsed().ns >= sample_at {
+            peak = max(peak, group_resident(group))
+            sample_at += 50000000
+        }
+        if child.exited() ?? true -> break
+        time.sleep(time.duration_ms(1))
+    }
+    receipt: child.wait()
+    wall: Float.from_int(started.elapsed().ns) / 1000000000.0
+    scalars: receipt.output.chars()
+    rc: if receipt.signal == .Val(signal) -> -signal else -> receipt.code
+    Phase{
+        rc: rc,
+        wall_s: math.round_even(wall * 100.0) / 100.0,
+        peak_tree_mb: math.round_even(Float.from_int(peak) / 100000.0) / 10.0,
+        log: if rc != 0 -> Val(collections.slice_clamped(scalars, -600, scalars.len()).join("")) else -> None,
+    }
+}
+
+// The resident bytes of every process whose process group is `group`.
+group_resident: fn(group: Int) -> Int {
+    total := 0
+    loop entry in files.list_dir("/proc") ?? return 0 -> total += resident(entry.name, group) ?? 0
+    total
+}
+
+// The resident bytes of process `pid` when its process group is `group`, else
+// 0. An entry that is not a process has no stat to read; `self` is this
+// benchmark, never in the build's group.
+resident: fn(pid: String, group: Int) -> Int Err! {
+    fields: files.read("/proc/{pid}/stat").rpartition(")").tail.split(" ").filter(field -> field != "").to_list()
+    if (Int.parse(fields[2]) ?? -1) != group -> return Ok(0)
+    Ok((Int.parse(files.read("/proc/{pid}/statm").split(" ").to_list()[1]) ?? 0) * 4096)
+}
+
+// The binary's size as built and after `strip` on a copy, or None when it is
+// missing.
+size: fn(binary: String?, strip: String) -> (built: Int?, stripped: Int?) Err! {
+    path: binary ?? return Ok((built: None, stripped: None))
+    if !files.exists(path) -> return Ok((built: None, stripped: None))
+    target: "{path}.stripped"
+    files.copy(path, target)
+    _: process.cmd([strip, target]).run()
+    Ok((built: Val(files.stat(path).size), stripped: Val(files.stat(target).size)))
+}
+
+// The binary's fastest run of five in milliseconds, or None when it is
+// missing.
+runtime: fn(binary: String?) -> Float? Err! {
+    path: binary ?? return Ok(None)
+    if !files.exists(path) -> return Ok(None)
+    best := 1000000000.0
+    loop _ in 0..<5 {
+        started: time.instant()
+        _: process.cmd([path]).run()
+        seconds: Float.from_int(started.elapsed().ns) / 1000000000.0
+        if seconds < best -> best = seconds
+    }
+    Ok(Val(math.round_even(best * 100000.0) / 100.0))
+}
+
+// The newest executable ELF file under `dir` that is not a library, a
+// dependency, a build script or a stripped copy: what `jet build` wrote.
+jet_binary: fn(dir: String) -> String? Err! {
+    best := String?{None}
+    newest := -1
+    loop entry in files.walk_files(dir).list() ?? return Ok(None) {
+        path: entry.path
+        if !files.can_execute(path) || regex.is_match(Regex{"\.(?:so|d|rlib|stripped)$|/deps/|build-script"}, path) -> next
+        stat: files.stat(path) ?? next
+        if !stat.is_file || files.read_at(path, 0, 4) != ELF_MAGIC -> next
+        modified: stat.modified.to_unix_ns() ?? 0
+        if modified > newest {
+            best = Val(path.copy())  // copy: the walk's entry goes with the loop
+            newest = modified
+        }
+    }
+    Ok(best)
+}

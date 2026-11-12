@@ -1,0 +1,51 @@
+// What a hello-compile case produced (PortBars.jet runs this in the case
+// directory with the file holding the program's output): each printed row,
+// then under `== results.json` each row of the work directory's results.json
+// (or `missing`), then under `== files` the work directory's files in name
+// order. A row prints one `key: value` line per field in its order, a build's
+// fields under its phase, with the wall times, peak memory, sizes and run time,
+// which vary by run and machine, as N, and ends with `--`.
+use {
+    files: core.files
+    json: core.encoding.json
+    process: core.process
+}
+
+MEASURED: ["wall_s", "peak_tree_mb", "size_bytes", "stripped_bytes", "run_ms"]
+
+#CLI
+Check: struct {
+    #Doc("The file holding the program's output") stdout: String
+}
+
+run: fn(check: Check) {
+    printed: files.read(check.stdout) ?? process.fail(1, "{err}")
+    loop line in printed.lines() -> show(json.parse(line) ?? process.fail(1, "{line}: {err.display_text()}"))
+    print("== results.json")
+    written: files.read("bench/results.json") ?? ""
+    results: if written == "" -> Dyn.Text("missing") else -> json.parse(written) ?? process.fail(1, err.display_text())
+    if results == .Array(rows) -> loop row in rows -> show(row) else -> print(json.stringify(results))
+    print("== files")
+    if !files.is_dir("bench") -> return
+    paths := (files.walk_files("bench").list() ?? process.fail(1, "{err}")).map(entry -> files.normalize(entry.path))
+    paths.sort()
+    loop path in paths -> print(path)
+}
+
+// Prints a row's fields, then `--`.
+show: fn(row: Dyn) {
+    fields: if row == .Object(entries) -> entries.copy() else -> [(key: String, value: Dyn)]{(key: "row", value: row.copy())}  // copy: the row is only read
+    loop entry in fields {
+        if entry.value == {
+            .Object(build) -> loop field in build -> print("{entry.key}.{field.key}: {shown(field.key, field.value)}")
+            .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> print("{entry.key}: {shown(entry.key, entry.value)}")
+        }
+    }
+    print("--")
+}
+
+// A field's value as JSON, a measured number as N.
+shown: fn(key: String, value: Dyn) -> String Never! {
+    if MEASURED.contains(key) && value != Dyn.Null -> return "N"
+    json.stringify(value)
+}

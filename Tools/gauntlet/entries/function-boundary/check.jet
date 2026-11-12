@@ -1,0 +1,32 @@
+// What a function-boundary case produced (PortBars.jet runs this in the case
+// directory with the file holding the program's output): the printed table
+// with each measured millisecond and ratio column as N, since timings differ
+// run to run, then under `== files` every file in the case directory in name
+// order, and each build log under `== PATH` (`(empty)` for an empty one).
+use {
+    files: core.files
+    process: core.process
+    regex: core.regex
+}
+
+#CLI
+Check: struct {
+    #Doc("The file holding the program's output") stdout: String
+}
+
+run: fn(check: Check) {
+    printed: files.read(check.stdout) ?? process.fail(1, "{err}")
+    loop line in printed.lines() {
+        print(line.split("\t").map(column -> regex.replace(Regex{"^[0-9]+\.[0-9]+$"}, column, "N")).join("\t"))
+    }
+    paths := (files.walk_files(".").list() ?? process.fail(1, "{err}")).map(entry -> files.normalize(entry.path))
+    paths.sort()
+    print("== files")
+    loop path in paths -> print(path)
+    loop path in paths {
+        if !path.ends_with(".build.log") -> next
+        print("== {path}")
+        log: (files.read(path) ?? process.fail(1, "{err}")).remove_suffix("\n")
+        print(if log == "" -> "(empty)" else -> log)
+    }
+}

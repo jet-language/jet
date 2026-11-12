@@ -1,0 +1,23 @@
+// What an enum-codec-jet-adapter case produced (PortBars.jet runs this in
+// the case directory with the file holding the program's output): the printed
+// text, then the names of the files a --build copied into build-work, in name
+// order, under `== build-work`.
+use {
+    files: core.files
+    process: core.process
+}
+
+#CLI
+Check: struct {
+    #Doc("The file holding the program's output") stdout: String
+}
+
+run: fn(check: Check) {
+    printed: files.read(check.stdout) ?? process.fail(1, "{err}")
+    if printed != "" -> print(printed.remove_suffix("\n"))
+    if !files.is_dir("build-work") -> return
+    print("== build-work")
+    names := (files.list_dir("build-work") ?? process.fail(1, "{err}")).map(entry -> entry.name)
+    names.sort()
+    loop name in names -> print(name)
+}

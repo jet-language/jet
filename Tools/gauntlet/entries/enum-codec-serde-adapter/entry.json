@@ -1,0 +1,16 @@
+{
+  "name": "enum-codec-serde-adapter",
+  "mode": "tool",
+  "description": "Tools/perf/enum_codec/serde-adapter.sh and its Jet twin serde-adapter/run.jet, the serde peer adapter of enum_codec_bench.py: when the peer is not built under the target directory it builds it in the dev environment, both build streams on stderr, and then runs it with the options, its status passed on. The fixture target holds a stand-in peer that prints its arguments. The cases cover the options passed verbatim (an empty one and one with a space), none, the peer's status, and a missing peer, whose build stops at the dev environment's own refusal of a target directory on /tmp before it starts.",
+  "tool": {
+    "original": "Tools/perf/enum_codec/serde-adapter.sh",
+    "jet": "Tools/perf/enum_codec/serde-adapter/run.jet",
+    "fixtures": "fixtures",
+    "cases": [
+      {"args": ["--protocol", "jsonl", "--form", "internal", "a b", ""], "env": {"ENUM_CODEC_SERDE_TARGET": "target"}, "expected": "expected/options.out"},
+      {"args": [], "env": {"ENUM_CODEC_SERDE_TARGET": "target"}, "expected": "expected/none.out"},
+      {"args": ["--count", "1"], "env": {"ENUM_CODEC_SERDE_TARGET": "target", "PEER_STATUS": "5"}, "exit": 5, "expected": "expected/status.out"},
+      {"args": ["--count", "1"], "env": {"ENUM_CODEC_SERDE_TARGET": "/tmp/enum-codec-serde-adapter-refused"}, "exit": 64, "expected": "expected/empty.out"}
+    ]
+  }
+}

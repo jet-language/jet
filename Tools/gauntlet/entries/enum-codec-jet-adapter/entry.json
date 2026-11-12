@@ -1,0 +1,25 @@
+{
+  "name": "enum-codec-jet-adapter",
+  "mode": "tool",
+  "description": "Tools/perf/enum_codec/jet-adapter.sh and its Jet twin jet-adapter/run.jet, the Jet adapter of enum_codec_bench.py: --build copies adapter.jet and its package into the work directory and builds it there in the dev environment; otherwise each --form must be external (else exit 77, unavailable) and the prebuilt binary under the work directory runs with the options, its status passed on (exit 2 when it is not built). The fixture work directories hold a stand-in adapter that prints its arguments. The cases cover the options passed verbatim, the adapter's status, every refused form (one after an accepted one, --form as a form, --form last), the work directory from ENUM_CODEC_JET_WORK, from the machine's env file and from the state root, a missing adapter, and --build without JET, onto a file, and up to the dev environment's own refusal of a scratch directory on /tmp, after the two files are copied.",
+  "tool": {
+    "original": "Tools/perf/enum_codec/jet-adapter.sh",
+    "jet": "Tools/perf/enum_codec/jet-adapter/run.jet",
+    "fixtures": "fixtures",
+    "cases": [
+      {"args": ["--protocol", "jsonl", "--form", "external", "--count", "3", "a b", ""], "env": {"ENUM_CODEC_JET_WORK": "work", "XDG_CONFIG_HOME": "no-config"}, "check": "check.jet", "expected": "expected/options.out"},
+      {"args": [], "env": {"ENUM_CODEC_JET_WORK": "work", "XDG_CONFIG_HOME": "no-config"}, "check": "check.jet", "expected": "expected/none.out"},
+      {"args": ["--count", "1"], "env": {"ENUM_CODEC_JET_WORK": "work", "XDG_CONFIG_HOME": "no-config", "ADAPTER_STATUS": "3"}, "exit": 3, "check": "check.jet", "expected": "expected/status.out"},
+      {"args": ["--form", "internal"], "env": {"ENUM_CODEC_JET_WORK": "work", "XDG_CONFIG_HOME": "no-config"}, "exit": 77, "check": "check.jet", "expected": "expected/empty.out"},
+      {"args": ["--form", "external", "--form", "untagged"], "env": {"ENUM_CODEC_JET_WORK": "work", "XDG_CONFIG_HOME": "no-config"}, "exit": 77, "check": "check.jet", "expected": "expected/empty.out"},
+      {"args": ["--form", "--form", "external"], "env": {"ENUM_CODEC_JET_WORK": "work", "XDG_CONFIG_HOME": "no-config"}, "exit": 77, "check": "check.jet", "expected": "expected/empty.out"},
+      {"args": ["--count", "1", "--form"], "env": {"ENUM_CODEC_JET_WORK": "work", "XDG_CONFIG_HOME": "no-config"}, "exit": 1, "check": "check.jet", "expected": "expected/empty.out"},
+      {"args": ["x"], "env": {"ENUM_CODEC_JET_WORK": "", "XDG_CONFIG_HOME": "config"}, "check": "check.jet", "expected": "expected/env-file.out"},
+      {"args": ["x", "y"], "env": {"ENUM_CODEC_JET_WORK": "", "JET_STATE_ROOT": "state", "XDG_CONFIG_HOME": "no-config"}, "check": "check.jet", "expected": "expected/state.out"},
+      {"args": ["--form", "external"], "env": {"ENUM_CODEC_JET_WORK": "nowhere", "XDG_CONFIG_HOME": "no-config"}, "exit": 2, "check": "check.jet", "expected": "expected/empty.out"},
+      {"args": ["--build"], "env": {"ENUM_CODEC_JET_WORK": "build-work", "XDG_CONFIG_HOME": "no-config", "JET": ""}, "exit": 1, "check": "check.jet", "expected": "expected/empty.out"},
+      {"args": ["--build"], "env": {"ENUM_CODEC_JET_WORK": "plain", "XDG_CONFIG_HOME": "no-config", "JET": "jet"}, "exit": 1, "check": "check.jet", "expected": "expected/empty.out"},
+      {"args": ["--build", "--form", "internal"], "env": {"ENUM_CODEC_JET_WORK": "build-work", "XDG_CONFIG_HOME": "no-config", "JET": "jet", "CARGO_TARGET_DIR": "/tmp/enum-codec-jet-adapter-refused"}, "exit": 64, "check": "check.jet", "expected": "expected/build.out"}
+    ]
+  }
+}

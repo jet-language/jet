@@ -1,0 +1,51 @@
+// The Jet twin of Tools/perf/enum_codec/jet-adapter.sh, the Jet adapter of
+// Tools/perf/enum_codec_bench.py.
+//
+//   jet Tools/perf/enum_codec/jet-adapter/run.jet -- --build
+//   jet Tools/perf/enum_codec/jet-adapter/run.jet -- PROTOCOL-OPTION...
+//
+// --build copies adapter.jet and its package into the work directory
+// ($ENUM_CODEC_JET_WORK, else $JET_STATE_ROOT/enum-codec-jet) and builds it
+// there once with `jet build --release` in the dev environment; JET must name
+// the admitted native jet compiler binary, never a wrapper script that itself
+// takes a jet slot. Otherwise it runs the prebuilt AOT binary with the
+// options, ending with its status, and never compiles. A --form the canonical
+// codec cannot build ahead of time (all but external) ends with 77, which
+// the harness reads as unavailable, never as a verdict; an adapter not built
+// yet ends with 2. A failure ends the run with its report on stderr and
+// exit 1.
+use core.[files, process, sys]
+
+run: fn() -> Never Err! {
+    args: process.args()
+    // The checkout: three up from enum_codec, which holds this program's directory.
+    here: files.normalize("{sys.executable()}/../..")
+    root: files.normalize("{here}/../../..")
+    // What sourcing roots.sh leaves set: the environment with the machine's
+    // env file over it, the state root, and the work directory under it.
+    roots: sys.env_text("""
+        JET_STATE_ROOT=${{JET_STATE_ROOT:-${{XDG_CACHE_HOME:-$HOME/.cache}}/jet-dev}}
+        ENUM_CODEC_JET_WORK=${{ENUM_CODEC_JET_WORK:-$JET_STATE_ROOT/enum-codec-jet}}
+        JET=${{JET:-}}
+        """, sys.env_file("{sys.config_dir() ?? ""}/jet/env"))
+    work: roots["ENUM_CODEC_JET_WORK"]
+    if args.get(0) == Val("--build") {
+        jet: roots["JET"]
+        if jet == "" -> return Err("JET: JET must name the admitted native jet compiler")
+        files.create_dir_all(work)
+        files.copy(files.join(here, "adapter.jet"), files.join(work, "adapter.jet"))
+        files.copy(files.join(here, "package.jet"), files.join(work, "package.jet"))
+        built: process.cmd([String]{files.join(root, "Tools/agent/JetEnv.jet"), jet, "build", "--release", "adapter.jet"}).cwd(work).stdin(.Inherit).stdout(.Inherit).stderr(.Inherit).run()
+        process.exit(process.exit_status(built))
+    }
+    // Forms the canonical codec cannot build AOT today (internal and
+    // untagged stop the compiler; adjacent has no ratified marker).
+    loop at in 0..<args.len() {
+        if args[at] != "--form" -> next
+        form: args.get(at + 1) ?? return Err("--form: unbound variable")
+        if form != "external" -> process.fail(77, "form {form} unavailable for the Jet AOT adapter")
+    }
+    bin: "{work}/.jet/build/adapter"
+    if !files.can_execute(bin) -> process.fail(2, "jet adapter is not built; run: JET=<jet binary> {sys.executable()} --build")
+    process.exec([bin].concat(args))
+}

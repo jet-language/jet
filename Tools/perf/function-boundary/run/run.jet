@@ -1,0 +1,202 @@
+// The Jet twin of Tools/perf/function-boundary/run.sh: builds each
+// function-boundary cell's Jet (O1 = `jet build`, O2 = `jet build --release`),
+// C and Rust programs, checks every output against the cell's expected.out,
+// then times each binary pinned to one CPU and prints median and spread with
+// Jet/Rust and Jet/C ratios.
+//
+//   jet Tools/perf/function-boundary/run/run.jet -- [--jet PATH] [--runs N]
+//       [--cpu N] [--out DIR] [--levels O1,O2] [cell ...]
+//
+// Defaults: --jet target-rel4/release/jet, --runs 7, --cpu 31,
+// --out $JET_SCRATCH_ROOT/function-boundary, all cells of cells.tsv. Builds
+// and timings wait until MemAvailable >= FB_MEM_GATE_GB (default 30 GiB, the
+// AGENTS memory rule); Jet builds run in the capped small lane (Lanes.jet
+// small) with FB_LANE_MEM (default 8G), one at a time. A step that fails is
+// reported and the run goes on, as the script's does; an option without its
+// value ends the run with exit 1.
+use core.[files, process, regex, sys, term, time]
+use core.text.fmt
+
+// What one run builds and times.
+Plan: struct {
+    root: String
+    here: String
+    jet: String
+    runs: Int
+    cpu: String
+    out: String
+    levels: [String]
+    gate: Int
+    lane: String
+}
+
+// A binary's median, fastest and slowest run in milliseconds, as printed.
+Timing: struct {
+    median: String
+    low: String
+    high: String
+}
+
+run: fn() -> Never Err! {
+    args: process.args()
+    // The cells sit beside this program's directory; the checkout is three up.
+    here: files.normalize("{sys.executable()}/../..")
+    root: files.normalize("{here}/../../..")
+    // What sourcing roots.sh leaves set: the environment with the machine's
+    // env file over it, the scratch root, and the memory gate and lane cap.
+    roots: sys.env_text("""
+        JET_STATE_ROOT=${{JET_STATE_ROOT:-${{XDG_CACHE_HOME:-$HOME/.cache}}/jet-dev}}
+        JET_SCRATCH_ROOT=${{JET_SCRATCH_ROOT:-$JET_STATE_ROOT}}
+        FB_MEM_GATE_GB=${{FB_MEM_GATE_GB:-30}}
+        FB_LANE_MEM=${{FB_LANE_MEM:-8G}}
+        """, sys.env_file("{sys.config_dir() ?? ""}/jet/env"))
+    options := [String: String]{"--jet": files.join(root, "target-rel4/release/jet"), "--runs": "7", "--cpu": "31", "--out": "{roots["JET_SCRATCH_ROOT"]}/function-boundary", "--levels": "O1,O2"}
+    cells := [String]{}
+    at := 0
+    loop at < args.len() {
+        arg: args[at]
+        if {
+            options.has_key(arg) -> {
+                options[arg.copy()] = (args.get(at + 1) ?? return Err("{arg}: unbound variable")).copy()  // copy: the option keeps its value
+                at += 1
+            }
+            arg.starts_with("-") -> process.fail(64, "unknown option {arg}")
+            else -> cells.push(arg.copy())  // copy: the cell list owns its names
+        }
+        at += 1
+    }
+    manifest: files.read(files.join(here, "cells.tsv")).lines().map(line -> line.split("\t").to_list())
+    if cells.len() == 0 -> cells = manifest.map(row -> row[0].copy()).filter(cell -> !regex.is_match(Regex{"^(?:#|cell$|$)"}, cell))  // copy: the cell list owns its names
+    plan: Plan{
+        root: root,
+        here: here,
+        jet: options["--jet"],
+        runs: Int.parse(options["--runs"]) ?? 0,
+        cpu: options["--cpu"],
+        out: options["--out"],
+        levels: options["--levels"].split(",").filter(level -> level != "").to_list(),
+        gate: Int.parse(roots["FB_MEM_GATE_GB"]) ?? return Err("FB_MEM_GATE_GB must be a whole number of GiB"),
+        lane: roots["FB_LANE_MEM"],
+    }
+    files.create_dir_all(plan.out).drop("mkdir -p reports and goes on")
+    print("cell\tpair\timpl\tmedian_ms\tmin_ms\tmax_ms\tvs_rust\tvs_c")
+    loop cell in cells {
+        build(plan, cell)
+        wanted: cell.copy()  // copy: the row filter captures its own
+        rows: manifest.filter(row -> row[0] == wanted)
+        n: field(rows, 2)
+        pair: field(rows, 1)
+        expected: files.join(here, "{cell}/expected.out")
+        medians := [String: String]{}
+        loop program in ["c", "rust"].concat(plan.levels) {
+            exe: if program.starts_with("O") -> "{plan.out}/bin/{cell}.jet-{program}" else -> "{plan.out}/bin/{cell}.{program}"
+            shown: regex.replace_first(Regex{"O"}, program, "jet-O")
+            if !files.can_execute(exe) {
+                print("{cell}\t{pair}\t{shown}\tunavailable\t-\t-\t-\t-")
+                next
+            }
+            mem_gate(plan.gate)
+            timing: measure(plan, exe, n, expected) ?? {
+                print("{cell}\t{pair}\t{shown}\twrong-output\t-\t-\t-\t-")
+                next
+            }
+            medians[program.copy()] = timing.median.copy()  // copy: the medians keep each level's for the ratios
+            print("{cell}\t{pair}\t{shown}\t{timing.median}\t{timing.low}\t{timing.high}\t{ratio(program, timing.median, medians.get("rust"))}\t{ratio(program, timing.median, medians.get("c"))}")
+        }
+    }
+    process.exit(0)
+}
+
+// Column `k` of the cell's manifest rows, one line each, as awk prints it.
+field: fn(rows: [[String]], k: Int) -> String Never! {
+    rows.map(row -> row.get(k) ?? "").join("\n")
+}
+
+// Waits until MemAvailable reaches `gib` GiB.
+mem_gate: fn(gib: Int) Err! {
+    loop available_gib() < gib -> time.sleep(time.duration_seconds(30))
+}
+
+// MemAvailable in whole GiB, as the script's awk reads it; 0 when it reads none.
+available_gib: fn() -> Int Err! {
+    Int.parse(Sh{"awk {"/MemAvailable/ {{print int($2/1048576)}}"} /proc/meminfo"}.text()) ?? 0
+}
+
+// Runs `argv` from the checkout in Jet's development environment, with the
+// terminal's streams.
+env_run: fn(plan: Plan, argv: [String]) {
+    process.cmd([files.join(plan.root, "Tools/agent/JetEnv.jet")].concat(argv)).cwd(plan.root).stdin(.Inherit).stdout(.Inherit).stderr(.Inherit).run().drop("a peer that fails to build is reported unavailable")
+}
+
+// Builds a C or Rust peer from `source` with `argv` when it is there and
+// `exe` is not built yet.
+peer: fn(plan: Plan, source: String, exe: String, argv: [String]) Err! {
+    if files.is_file(source) && !files.can_execute(exe) {
+        mem_gate(plan.gate)
+        env_run(plan, argv)
+    }
+}
+
+// Builds the cell's C and Rust programs and its Jet at each level, each one
+// not built yet.
+build: fn(plan: Plan, cell: String) Err! {
+    dir: files.join(plan.here, cell)
+    bin: files.join(plan.out, "bin")
+    files.create_dir_all(bin).drop("mkdir -p reports and goes on")
+    // The devshell's cc wrapper drops -march=native unless told otherwise; Jet
+    // and the Rust peer both build for the host CPU, so C must too.
+    peer(plan, files.join(dir, "main.c"), "{bin}/{cell}.c", [String]{"env", "NIX_ENFORCE_NO_NATIVE=0", "clang", "-O2", "-march=native", "-o", "{bin}/{cell}.c", files.join(dir, "main.c")})
+    peer(plan, files.join(dir, "main.rs"), "{bin}/{cell}.rust", [String]{"rustc", "--edition", "2021", "-C", "opt-level=3", "-C", "codegen-units=1", "-C", "target-cpu=native", "-o", "{bin}/{cell}.rust", files.join(dir, "main.rs")})
+    if !files.is_file(files.join(dir, "main.jet")) -> return Ok()
+    loop level in plan.levels {
+        target: "{bin}/{cell}.jet-{level}"
+        if files.can_execute(target) -> next
+        work: "{plan.out}/work/{cell}-{level}"
+        files.remove_all(work).drop("a first build has no directory to remove")
+        files.create_dir_all(work).drop("mkdir -p reports and goes on")
+        files.copy(files.join(dir, "main.jet"), files.join(work, "main.jet")).drop("a missing copy fails the build")
+        mem_gate(plan.gate)
+        log: "{plan.out}/{cell}.{level}.build.log"
+        release: if level == "O2" -> ["--release"] else -> [String]{}
+        ran: process.cmd([plan.jet, "Tools/agent/cache/Lanes.jet", "small", "Tools/agent/JetEnv.jet", plan.jet, "build", "--quiet"].concat(release).concat(["{work}/main.jet"])).cwd(plan.root).env("LANES_MEM", plan.lane).stderr(.Stdout).run() ?? {
+            files.write(log, "{plan.jet}: {err}\n")
+            term.eprint("{cell} {level}: build failed, see {log}")
+            next
+        }
+        files.write(log, ran.output)
+        if {
+            files.can_execute("{work}/.jet/build/main") -> {
+                files.copy("{work}/.jet/build/main", target).drop("cp reports and goes on")
+                files.copy("{work}/.jet/build/main.rs", "{plan.out}/{cell}.{level}.generated.rs").drop("cp reports and goes on")
+            }
+            else -> term.eprint("{cell} {level}: build failed, see {log}")
+        }
+    }
+}
+
+// The median, fastest and slowest of the plan's runs of `exe` pinned to its
+// CPU, or None when the binary's output is not the cell's expected.out.
+measure: fn(plan: Plan, exe: String, n: String, expected: String) -> Timing? Err! {
+    pinned: [String]{"taskset", "-c", plan.cpu, exe, n}
+    got: process.cmd(pinned).run() ?? return Ok(None)
+    if regex.replace(Regex{"\n+$"}, got.output, "") != regex.replace(Regex{"\n+$"}, files.read(expected) ?? "", "") -> return Ok(None)
+    samples := [Float]{}
+    loop _ in 0..<plan.runs {
+        start: time.instant()
+        process.cmd(pinned).run().drop("the timed runs only count time")
+        samples.push(Float.from_int(start.elapsed().ns) / 1000000.0)
+    }
+    if samples.len() == 0 -> return Ok(Val(Timing{median: "0.0", low: "0.0", high: "0.0"}))
+    samples.sort_by((a, b) -> a <=> b)
+    Ok(Val(Timing{median: fmt.decimal(samples[(samples.len() + 1) /% 2 - 1], 1), low: fmt.decimal(samples[0], 1), high: fmt.decimal(samples[samples.len() - 1], 1)}))
+}
+
+// A Jet level's printed median over the peer's, to two places; "-" for a peer
+// row or without the peer, and "" over a zero median, where awk stops at the
+// division.
+ratio: fn(program: String, median: String, peer: String?) -> String Never! {
+    if !program.starts_with("O") -> return "-"
+    over: Float.parse(peer ?? return "-") ?? 0.0
+    if !(over > 0.0) -> return ""
+    fmt.decimal((Float.parse(median) ?? 0.0) / over, 2)
+}

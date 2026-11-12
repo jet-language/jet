@@ -1,0 +1,183 @@
+// The Jet twin of Tools/perf/hot-text.mjs. Writes Compiler/JetCli/hot-text.list:
+// the compiler's own functions that `jet script.jet` of a small script and
+// then a hello `jet run`, `jet check` and `jet build` enter, in first-entry
+// order (the script run's first, then those each next command adds). Every
+// run compiles its program, as nothing is kept. `jet build` of Compiler/JetCli
+// lays them out first and its data in the order they reach it, so a run
+// touches few pages of the compiler's image and a start faults in fewer.
+// Names that no longer name a function are skipped by the build (`--trace`
+// counter ir.object.hot_missing); regenerate after large renames.
+//
+//   jet Tools/perf/hot-text/run.jet -- --jet <jet> [--out Compiler/JetCli/hot-text.list]
+//
+// <jet> is a built compiler beside its jet-runtime/ directory. Only the
+// compiler's own functions are listed: its object is the link's first input,
+// so they are the functions below the first one the runtime pack
+// (jet-runtime/jet_runtime.pack.o) defines; libc and libgcc, when a link
+// takes them, come after the pack. The environment names the toolchain as for
+// any run (JET_TOOLCHAIN_ROOT, JET_COMPILER_IDENTITY). Needs a C compiler
+// (`$CC`, default `cc`) and ptrace of a child: each command runs under
+// Tools/perf/fntrace.c, which puts a breakpoint at every function of <jet>
+// and records each one's first entry. A failure ends the run with its report
+// on stderr and exit 1.
+use core.[collections, crypto, files, process, sys]
+use core.encoding.binary
+use core.text.fmt
+
+USAGE: "usage: jet Tools/perf/hot-text/run.jet -- --jet <jet> [--out <file>]"
+
+HELLO: "run: fn() {{\n    print(\"hello\")\n}}\n"
+
+// The script run's program is a small script as the gauntlet's are. It still
+// parses its source, so the script uses the common forms: `use` rows, a
+// struct, an enum and its match, a lambda, a map and a loop; it reads a file
+// (itself) and prints a summary.
+SCRIPT_LINES: [String]{
+    "use {{",
+    "    files: core.files",
+    "    process: core.process",
+    "}}",
+    "",
+    "Row: struct {{",
+    "    name: String",
+    "    count: Int",
+    "}}",
+    "",
+    "Kind: enum {{",
+    "    Empty",
+    "    Words(count: Int)",
+    "}}",
+    "",
+    "kind: fn(line: String) -> Kind Never! {{",
+    "    words: line.split(\" \").filter(w -> w != \"\").to_list()",
+    "    if words.len() == 0 -> return Kind.Empty",
+    "    Kind.Words{{count: words.len()}}",
+    "}}",
+    "",
+    "run: fn() {{",
+    "    args: process.args()",
+    "    path: if args.len() > 0 -> args[0] else -> \"script.jet\"",
+    "    text: files.read(path) ?? \"\"",
+    "    rows := [Row]{{}}",
+    "    seen := [String: Int]{{}}",
+    "    loop line in text.lines() {{",
+    "        if kind(line.trim()) == {{",
+    "            .Empty -> next",
+    "            .Words(count) -> rows.push(Row{{name: line.trim(), count: count}})",
+    "        }}",
+    "        seen[line.trim()] = (seen.get(line.trim()) ?? 0) + 1",
+    "    }}",
+    "    total := 0",
+    "    loop row in rows -> total += row.count",
+    "    longest: rows.filter(r -> r.count > 2).map(r -> r.name)",
+    "    print(\"{{rows.len()}} rows, {{total}} words, {{seen.len()}} distinct, {{longest.len()}} long\")",
+    "}}",
+}
+
+// One trace: its program and the argv it runs with.
+Trace: struct {
+    file: String
+    source: String
+    argv: [String]
+}
+
+Symbol: struct {
+    value: Int
+    name: String
+}
+
+run: fn() -> Never Err! {
+    // The checkout: three up from Tools/perf, which holds this program's directory.
+    root: files.normalize("{sys.executable()}/../../../..")
+    argv: process.args()
+    args := [String: String]{"jet": "", "out": files.join(root, "Compiler/JetCli/hot-text.list")}
+    i := 0
+    loop i < argv.len() {
+        key: argv[i].remove_prefix("--")
+        if !args.has_key(key) || i + 1 >= argv.len() -> return Err(USAGE)
+        args[key] = files.resolve(argv[i + 1])
+        i += 2
+    }
+    jet: args["jet"]
+    if jet == "" -> return Err("--jet is required")
+    jet_bytes: files.read_bytes(jet)
+    pack_path: files.join(files.dirname(jet), "jet-runtime/jet_runtime.pack.o")
+    pack: function_symbols(files.read_bytes(pack_path), pack_path).map(symbol -> symbol.name).to_set()
+    symbols: function_symbols(jet_bytes, jet)
+    boundary: symbols.filter(symbol -> pack.has(symbol.name)).map(symbol -> symbol.value).min() ?? return Err("{jet} defines none of the runtime pack's functions")
+    // `main` is the object's first function whatever the list says.
+    addresses := [Int]{}
+    by_address := [Int: String]{}
+    loop symbol in symbols.filter(symbol -> symbol.value < boundary && symbol.name != "main") {
+        if by_address.has_key(symbol.value) -> next
+        addresses.push(symbol.value)
+        by_address[symbol.value] = symbol.name.copy()  // copy: the map owns its names
+    }
+    work: files.temp_dir("hot-text")
+    tracer: files.join(work.path, "fntrace")
+    process.cmd([process.env_nonempty("CC") ?? "cc", "-O2", "-o", tracer, files.join(root, "Tools/perf/fntrace.c")]).stdin(.Inherit).stdout(.Inherit).stderr(.Inherit).run_checked()
+    address_file: files.join(work.path, "addresses")
+    files.write(address_file, "{addresses.map(value -> fmt.hex(value, 1)).join("\n")}\n")
+    traces: [Trace]{
+        {file: "script.jet", source: "{SCRIPT_LINES.join("\n")}\n", argv: [String]{"script.jet", "script.jet"}},
+        {file: "hello.jet", source: HELLO, argv: [String]{"run", "hello.jet"}},
+        {file: "hello.jet", source: HELLO, argv: [String]{"check", "hello.jet"}},
+        {file: "hello.jet", source: HELLO, argv: [String]{"build", "hello.jet"}},
+    }
+    names := [String]{}
+    listed := Set<String>.new()
+    loop index in 0..<traces.len() {
+        trace: traces[index]
+        // Each trace has a project and a user cache of its own, both empty.
+        project: files.join(work.path, "trace-{index}")
+        files.create_dir_all(project)
+        files.write(files.join(project, trace.file), trace.source)
+        entered: files.join(work.path, "{index}.entered")
+        process.cmd([tracer, address_file, entered, "--", jet].concat(trace.argv)).cwd(project).env("XDG_CACHE_HOME", files.join(work.path, "cache-{index}")).stdin(.Capture).stdout(.Capture).stderr(.Inherit).run_checked()
+        loop line in files.read(entered).split("\n").filter(line -> line != "") {
+            name: by_address.get(Int.from_radix(line, 16) ?? return Err("Cannot convert 0x{line} to a BigInt")) ?? next
+            if listed.add(name.copy()) -> names.push(name.copy())  // copy: the set and the list each keep the name
+        }
+    }
+    digest: String.from_bytes_lossy(crypto.sha256(jet_bytes).hex().bytes()[0..<16])
+    lines: [String]{
+        "# Generated by `node Tools/perf/hot-text.mjs`; do not edit.",
+        "# The {names.len()} functions `jet script.jet` and a hello `jet run`, `jet check`, `jet build` entered, first entry first (jet sha256 {digest}).",
+    }.concat(names)
+    files.write(args["out"], "{lines.join("\n")}\n")
+    print("{args["out"]}: {names.len()} functions")
+    process.exit(0)
+}
+
+// The little-endian `format` fields of the ELF file `bytes` at `at`.
+fields: fn(bytes: [U8], at: Int, format: String, path: String) -> [Int] Err! {
+    width: binary.calcsize(format) ?? 0
+    Ok(binary.unpack(format, collections.slice_clamped(bytes, at, at + width)) ?? return Err("{path}: not an ELF file, or one cut short"))
+}
+
+// Every sized FUNC symbol of the ELF file `bytes`, in symbol-table order.
+function_symbols: fn(bytes: [U8], path: String) -> [Symbol] Err! {
+    // e_shoff, then e_shnum.
+    header: fields(bytes, 40, "<Q12xH", path)
+    symbols := [Symbol]{}
+    loop k in 0..<header[1] {
+        // sh_type, sh_offset, sh_size and sh_link.
+        table: fields(bytes, header[0] + 64 * k, "<4xI16xQQI", path)
+        if table[0] != 2 -> next
+        strings: fields(bytes, header[0] + 64 * table[3], "<24xQ", path)
+        loop entry in 0..<(table[2] + 23) /% 24 {
+            // st_name, st_info, st_value and st_size.
+            symbol: fields(bytes, table[1] + 24 * entry, "<IB3xQQ", path)
+            if symbol[1].bit_and(15) != 2 || symbol[3] == 0 -> next
+            symbols.push(Symbol{value: symbol[2], name: c_string(bytes, strings[0] + symbol[0])})
+        }
+    }
+    Ok(symbols)
+}
+
+// The NUL-ended text at `start` of `bytes`; none past their end.
+c_string: fn(bytes: [U8], start: Int) -> String Never! {
+    end := min(start, bytes.len())
+    loop end < bytes.len() && bytes[end] != 0 -> end += 1
+    String.from_bytes_lossy(bytes[min(start, end)..<end])
+}

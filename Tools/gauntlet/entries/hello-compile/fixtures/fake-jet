@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# Stands in for `jet build`: writes a runnable ELF file (a copy of `true`) as
+# .jet/build/main, and refuses a build into an empty store (JET_STORE_DIR set).
+set -euo pipefail
+if [ -n "${JET_STORE_DIR:-}" ]; then
+    echo "store $JET_STORE_DIR refused" >&2
+    exit 3
+fi
+mkdir -p .jet/build
+cp "$(readlink -f "$(type -P true)")" .jet/build/main
+chmod u+w .jet/build/main
+echo "built: $*"

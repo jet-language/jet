@@ -1,0 +1,46 @@
+// What a core-activation case produced (PortBars.jet runs this in the case
+// directory with the file holding the program's output): the output, then
+// under `== <report>` (`== (no report)` when it printed none) each value of
+// the report it names (or `missing`) as `path: value`, with the wall times,
+// the allocation counts, the commit and whether the tree is dirty, which vary
+// by run and machine, as N, then under `== files` the case directory's files
+// in name order.
+use {
+    files: core.files
+    json: core.encoding.json
+    process: core.process
+}
+
+MEASURED: ["wall_ns", "samples", "median_ns", "check_wall_ns", "build_wall_ns", "startup_median_ns", "jit_wall_ns", "allocations", "frees", "peak_live_bytes", "total_bytes", "commit", "dirty_tree"]
+
+#CLI
+Check: struct {
+    #Doc("The file holding the program's output") stdout: String
+}
+
+run: fn(check: Check) {
+    printed: files.read(check.stdout) ?? process.fail(1, "{err}")
+    print(printed.trim_end())
+    report: printed.trim()
+    print("== {if report == "" -> "(no report)" else -> report}")
+    text: if report == "" -> "" else -> files.read(report) ?? ""
+    if text == "" -> print("missing") else -> show("", json.parse(text) ?? process.fail(1, err.display_text()), "")
+    print("== files")
+    paths := (files.walk_files(".").list() ?? process.fail(1, "{err}")).map(entry -> files.normalize(entry.path))
+    paths.sort()
+    loop path in paths -> print(path)
+}
+
+// Each value under `value`, the value of field `key`, as `path: value`; under
+// a measured key a number, text or flag is N.
+show: fn(path: String, value: Dyn, key: String) {
+    if value == {
+        .Object(fields) -> loop field in fields -> show("{path}.{field.key}", field.value, field.key)
+        .Array(items) -> {
+            if items.len() == 0 -> print("{path}: []")
+            loop index in 0..<items.len() -> show("{path}[{index}]", items[index], key)
+        }
+        .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bool(_) -> print("{path}: {if MEASURED.contains(key) -> "N" else -> json.stringify(value)}")
+        .Null | .Bytes(_) | .DateTime(_) -> print("{path}: {json.stringify(value)}")
+    }
+}

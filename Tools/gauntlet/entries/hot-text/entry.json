@@ -1,0 +1,19 @@
+{
+  "name": "hot-text",
+  "mode": "tool",
+  "description": "Tools/perf/hot-text.mjs and its Jet twin hot-text/run.jet, the generator of Compiler/JetCli/hot-text.list: the functions of a built jet below the first one its runtime pack defines (main left out), traced under fntrace through `jet script.jet`, `jet run`, `jet check` and `jet build` of fresh projects, listed first entry first under a header naming the jet's sha256. The jet is a stand-in static program with a stand-in pack (fixtures/source builds both). Every case takes CC as a stand-in whose tracer runs the program, logs the run and writes a fixed set of the listed addresses with repeats, an unlisted one and a blank line: the gauntlet's launcher traces every process a case starts, so the real fntrace cannot trace under it. Refusals: no --jet, an unknown option, an option without a value, a jet without a runtime pack beside it and a C compiler that fails. The check prints the output with the case directory as <case>, then the list, cc.log and trace.log (or missing).",
+  "tool": {
+    "original": "Tools/perf/hot-text.mjs",
+    "jet": "Tools/perf/hot-text/run.jet",
+    "fixtures": "fixtures",
+    "cases": [
+      {"args": ["--out", "first.list", "jet", "compiler/jet", "--out", "hot.list"], "env": {"CC": "./fake-cc"}, "check": "check.jet", "expected": "expected/listed.out"},
+      {"args": ["--jet", "compiler/jet", "--out", "hot.list"], "env": {"CC": "./fake-cc"}, "check": "check.jet", "expected": "expected/listed.out"},
+      {"args": ["--out", "hot.list"], "env": {"CC": "./fake-cc"}, "exit": 1, "check": "check.jet", "expected": "expected/refused.out"},
+      {"args": ["--jet", "compiler/jet", "--level", "2"], "env": {"CC": "./fake-cc"}, "exit": 1, "check": "check.jet", "expected": "expected/refused.out"},
+      {"args": ["--out", "hot.list", "--jet"], "env": {"CC": "./fake-cc"}, "exit": 1, "check": "check.jet", "expected": "expected/refused.out"},
+      {"args": ["--jet", "packless/jet", "--out", "hot.list"], "env": {"CC": "./fake-cc"}, "exit": 1, "check": "check.jet", "expected": "expected/refused.out"},
+      {"args": ["--jet", "compiler/jet", "--out", "hot.list"], "env": {"CC": "false"}, "exit": 1, "check": "check.jet", "expected": "expected/refused.out"}
+    ]
+  }
+}

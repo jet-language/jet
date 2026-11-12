@@ -1,0 +1,403 @@
+// The Jet twin of Tools/perf/core-activation.mjs: Core battery activation
+// cost.
+//
+// For each selected battery, three programs are built with one frozen compiler:
+//   control: no import;  import: `use` only;  use: one call.
+// Each arm reports, separately:
+//   compile: `jet check` wall and `jet build --release` wall (unavoidable compile cost);
+//   linked:  binary bytes, `size -A` sections, defined-symbol count (`nm --defined-only`);
+//   reach:   Core modules present in the generated Rust (reachable-dependency proxy);
+//   startup: process wall median over --samples runs of the AOT binary;
+//   alloc:   allocation count and peak live bytes of one AOT run (LD_PRELOAD counter);
+//   jit:     `jet run` wall (one sample; compile included).
+// Deltas are import-control and use-control. A zero claim needs a measured zero in
+// sections, startup and allocations; dead-code elimination in source is not evidence.
+//
+//   jet Tools/perf/core-activation/run.jet -- --jet <jet or wrapper> --out <file.json> [--samples 20]
+//
+// --samples takes a whole decimal number. A failure ends the run with its
+// report on stderr and exit 1.
+use core.[collections, crypto, files, process, regex, sys, term, time]
+use core.encoding.json
+
+PACKAGE: "name: \"core_activation\"\nversion: \"0.1.0\"\nauthority: {{\n    \n        allow: [IO, Mem.Alloc, Time, Net, FS, Env]\n\n}}\n"
+
+ARMS: ["control", "import", "use"]
+
+Battery: struct {
+    use_line: String
+    call: String
+}
+
+// A finished run: its exit status (None when it did not start or a signal
+// ended it), its output and its wall time.
+Ran: struct {
+    status: Int?
+    stdout: String
+    stderr: String
+    wall_ns: Int
+}
+
+// A command's exit (null when it has none) and wall time, with the end of its
+// output when the build failed.
+#Encode
+Step: struct {
+    exit: Dyn
+    wall_ns: Int
+    stderr_tail: String?
+}
+
+#Encode
+Binary: struct {
+    bytes: Int
+    sha256: String
+    sections: Dyn
+    defined_symbols: Dyn
+}
+
+#Encode
+Reach: struct {
+    generated_rust_bytes: Int
+    modules: [String]
+}
+
+// The startup runs: measured, with every sample, or unavailable at the run
+// that failed.
+#Encode
+Startup: struct {
+    status: String
+    reason: String?
+    stderr: String?
+    samples: [Int]?
+    median_ns: Int?
+    stdout: String?
+}
+
+#Encode
+Unavailable: struct {
+    status: String
+    reason: String
+}
+
+#Encode
+JITRun: struct {
+    exit: Dyn
+    wall_ns: Int
+    stdout: String
+}
+
+// One arm's row; a build that failed ends it at its status and reason.
+#Encode
+Row: struct {
+    battery: String
+    arm: String
+    source: String
+    check: Step
+    build: Step
+    binary: Binary?
+    reach: Dyn?
+    startup: Startup?
+    alloc: Dyn?
+    jit: JITRun?
+    status: String
+    reason: String?
+}
+
+#Encode
+Delta: struct {
+    battery: String
+    arm: String
+    check_wall_ns: Dyn
+    build_wall_ns: Dyn
+    binary_bytes: Dyn
+    text_bytes: Dyn
+    rodata_bytes: Dyn
+    defined_symbols: Dyn
+    generated_rust_bytes: Dyn
+    startup_median_ns: Dyn
+    allocations: Dyn
+    peak_live_bytes: Dyn
+    jit_wall_ns: Dyn
+}
+
+#Encode
+Targets: struct {
+    host_aot: String
+    jet_run: String
+    other_targets: String
+}
+
+#Encode
+Report: struct {
+    card: Int
+    finding: String
+    commit: String
+    dirty_tree: Bool
+    jet: String
+    jet_version: String
+    host: String
+    samples: Int
+    targets: Targets
+    rows: [Row]
+    deltas: [Delta]
+}
+
+// Every battery by name, in the order the report runs them by default.
+batteries: fn() -> [String: Battery] Never! {
+    [String: Battery]{
+        "json": {use_line: "use m: core.encoding.json", call: "m.to_string(Dyn.Int(42)) ?? panic(err.reason)"},
+        "regex": {use_line: "use m: core.regex", call: "m.escape(\"4.2\")"},
+        "time": {use_line: "use m: core.time", call: "m.datetime(2024, 3, 1, 12, 34, 56)"},
+        "data": {use_line: "use m: core.data", call: "m.sum([40.0, 2.0])"},
+        "http": {use_line: "use m: core.http", call: "m.status_ok()"},
+    }
+}
+
+run: fn() -> Never Err! {
+    // The checkout: three up from Tools/perf, which holds this program's directory.
+    root: files.normalize("{sys.executable()}/../../../..")
+    argv: process.args()
+    // The roots Tools/agent/roots.mjs reads: the state root and the scratch root under it.
+    roots: sys.env_text("""
+        STATE=${{JET_STATE_ROOT:-${{XDG_CACHE_HOME:-$HOME/.cache}}/jet-dev}}
+        SCRATCH=${{JET_SCRATCH_ROOT:-$STATE}}
+        """, sys.environment())
+    args := [String: String]{
+        "jet": files.join(roots["STATE"], "safe-jet.sh"),
+        "out": files.join(roots["SCRATCH"], "core-activation.json"),
+        "work": files.join(roots["STATE"], "core-activation"),
+        "samples": "20",
+        "batteries": "json,regex,time,data,http",
+    }
+    i := 0
+    loop i < argv.len() {
+        key: argv[i].remove_prefix("--")
+        if !args.has_key(key) || i + 1 >= argv.len() -> return Err("unknown or incomplete option {argv[i]}")
+        args[key] = argv[i + 1].copy()  // copy: the argv keeps its items
+        i += 2
+    }
+    samples: Int.parse(args["samples"].trim()) ?? 0
+    if samples < 1 -> return Err("--samples must be a positive integer")
+    table: batteries()
+    names: args["batteries"].split(",").to_list()
+    unknown: names.find(name -> !batteries().has_key(name))
+    if unknown == .Val(name) -> return Err("unknown battery {name}")
+    jet: args["jet"]
+    work: args["work"]
+    files.create_dir_all(work)
+    lib: build_alloc_counter(work, root)
+    version: timed(process.cmd([jet, "--version"]))
+    rows := [Row]{}
+    deltas := [Delta]{}
+    loop name in names {
+        arms := [Dyn]{}
+        loop arm in ARMS {
+            row: measure_arm(jet, work, samples, name, table[name], arm, lib)
+            term.eprint("{name}/{arm}: {row.status}")
+            arms.push(row.encode())
+            rows.push(row)
+        }
+        loop k in 1..<ARMS.len() {
+            a: arms[k]
+            control: arms[0]
+            deltas.push(Delta{
+                battery: name.copy(),  // copy: the battery names both deltas
+                arm: "{ARMS[k]}-control",
+                check_wall_ns: delta(a, control, "/check/wall_ns"),
+                build_wall_ns: delta(a, control, "/build/wall_ns"),
+                binary_bytes: delta(a, control, "/binary/bytes"),
+                text_bytes: delta(a, control, "/binary/sections/.text"),
+                rodata_bytes: delta(a, control, "/binary/sections/.rodata"),
+                defined_symbols: delta(a, control, "/binary/defined_symbols"),
+                generated_rust_bytes: delta(a, control, "/reach/generated_rust_bytes"),
+                startup_median_ns: delta(a, control, "/startup/median_ns"),
+                allocations: delta(a, control, "/alloc/allocations"),
+                peak_live_bytes: delta(a, control, "/alloc/peak_live_bytes"),
+                jit_wall_ns: delta(a, control, "/jit/wall_ns"),
+            })
+        }
+    }
+    named: version.stdout.trim()
+    report: Report{
+        card: 3245,
+        finding: "CORE-F018",
+        commit: git(root, [String]{"rev-parse", "HEAD"}).trim(),
+        dirty_tree: git(root, [String]{"status", "--porcelain"}).trim() != "",
+        jet: jet.copy(),  // copy: the report owns its text
+        jet_version: if named != "" -> named else -> version.stderr.trim(),
+        host: host(),
+        samples: samples,
+        targets: {host_aot: "measured", jet_run: "one wall sample incl. compile", other_targets: "unavailable: no cross toolchain run"},
+        rows: rows,
+        deltas: deltas,
+    }
+    files.write(args["out"], json.stringify(report, 2))
+    print(args["out"])
+    process.exit(0)
+}
+
+// Runs `spec` with its output captured (up to 256 MiB), timing it.
+timed: fn(spec: ProcessSpec) -> Ran {
+    started: time.instant()
+    receipt: spec.output_limit(268435456).run() ?? return Ran{status: None, stdout: "", stderr: "", wall_ns: started.elapsed().ns}
+    wall_ns: started.elapsed().ns
+    Ran{status: if receipt.signal == None -> Val(receipt.code) else -> None, stdout: receipt.output, stderr: receipt.errors, wall_ns: wall_ns}
+}
+
+// An exit status as JavaScript prints it.
+shown: fn(status: Int?) -> String Never! {
+    if status == .Val(code) -> return "{code}"
+    "null"
+}
+
+// The last `n` characters of `text`.
+last_chars: fn(text: String, n: Int) -> String Never! {
+    scalars: text.chars()
+    collections.slice_clamped(scalars, scalars.len() - n, scalars.len()).join("")
+}
+
+// The middle sample, or the rounded mean of the middle two.
+median: fn(values: [Int]) -> Int Never! {
+    sorted := values.copy()  // copy: the samples keep their run order
+    sorted.sort()
+    m: sorted.len() /% 2
+    if sorted.len() % 2 == 1 -> return sorted[m]
+    (sorted[m - 1] + sorted[m] + 1) /% 2
+}
+
+program: fn(battery: Battery, arm: String) -> String Never! {
+    if arm == "control" -> return "run: fn() {{\n    print(\"42\")\n}}\n"
+    if arm == "import" -> return "{battery.use_line}\n\nrun: fn() {{\n    print(\"42\")\n}}\n"
+    "{battery.use_line}\n\nrun: fn() {{\n    print({battery.call})\n}}\n"
+}
+
+// Each section's size in `size -A` order, or "unavailable".
+sections: fn(binary: String) -> Dyn {
+    ran: timed(process.cmd([String]{"size", "-A", binary}))
+    if ran.status != Val(0) -> return "unavailable".encode()
+    out := [(key: String, value: Dyn)]{}
+    loop line in ran.stdout.split("\n") {
+        found: regex.match(Regex{"^(\.\S+)\s+(\d+)\s+\d+"}, line) ?? next
+        out.push((key: found.groups[0].copy(), value: (Int.parse(found.groups[1]) ?? 0).encode()))  // copy: the match keeps its groups
+    }
+    Dyn.Object(out)
+}
+
+symbol_count: fn(binary: String) -> Dyn {
+    ran: timed(process.cmd([String]{"nm", "--defined-only", binary}))
+    if ran.status != Val(0) -> return "unavailable".encode()
+    ran.stdout.split("\n").filter(line -> line != "").len().encode()
+}
+
+reachable_core_modules: fn(rust_path: String) -> Dyn Err! {
+    if !files.exists(rust_path) -> return Ok("unavailable".encode())
+    modules := regex.matches(Regex{"corelib_x3e_sCore_s([a-z0-9_]+?)_s"}, files.read(rust_path)).map(hit -> hit.groups[0].copy()).to_set().to_list()  // copy: the match keeps its groups
+    modules.sort()
+    Ok(Reach{generated_rust_bytes: files.stat(rust_path).size, modules: modules}.encode())
+}
+
+build_alloc_counter: fn(work: String, root: String) -> String {
+    lib: files.join(work, "liballoccount.so")
+    ran: timed(process.cmd([String]{"cc", "-O2", "-shared", "-fPIC", "-o", lib, files.join(root, "Tools/perf/alloccount.c")}))
+    if ran.status == Val(0) -> lib else -> ""
+}
+
+unavailable: fn(reason: String) -> Dyn Never! { Unavailable{status: "unavailable", reason: reason}.encode() }
+
+// Number(text) as JSON.stringify writes it: null for no number.
+number: fn(text: String?) -> Dyn Never! {
+    value: text ?? return Dyn.Null
+    whole: Int.parse(value) ?? return (Float.parse(value) ?? return Dyn.Null).encode()
+    whole.encode()
+}
+
+allocations: fn(binary: String, lib: String, dir: String) -> Dyn Err! {
+    if lib == "" || !files.exists(lib) -> return Ok(unavailable("allocation counter library could not be built"))
+    out_file: files.join(dir, "alloc.count")
+    files.remove(out_file).drop("rm -f: a first run has no count")
+    ran: timed(process.cmd([binary]).env("LD_PRELOAD", lib).env("ALLOCCOUNT_OUT", out_file))
+    if ran.status != Val(0) || !files.exists(out_file) -> return Ok(unavailable("exit {shown(ran.status)}"))
+    fields := [(key: String, value: Dyn)]{(key: "status", value: "measured".encode())}
+    loop pair in files.read(out_file).trim().split(" ") {
+        parts: pair.split("=").to_list()
+        fields.push((key: parts[0].copy(), value: number(parts.get(1))))  // copy: the split keeps its parts
+    }
+    if fields.any(field -> field.key == "allocations" && field.value == 0.encode()) -> return Ok(unavailable("binary does not use the preloadable libc allocator"))
+    Ok(Dyn.Object(fields))
+}
+
+measure_arm: fn(jet: String, work: String, samples: Int, name: String, battery: Battery, arm: String, lib: String) -> Row Err! {
+    dir: files.join_all([work, name, arm])
+    files.create_dir_all(dir)
+    files.write(files.join(dir, "package.jet"), PACKAGE)
+    stem: "{name}_{arm}"
+    files.write(files.join(dir, "{stem}.jet"), program(battery, arm))
+    check: timed(process.cmd([jet, "check", "{stem}.jet"]).cwd(dir))
+    binary: files.join_all([dir, ".jet/build", stem])
+    files.remove(binary).drop("rm -f: a first build has no binary")
+    build: timed(process.cmd([jet, "build", "--release", "{stem}.jet"]).cwd(dir))
+    row := Row{
+        battery: name.copy(),  // copy: the battery names every arm
+        arm: arm.copy(),  // copy: the arm list names every battery's arms
+        source: program(battery, arm),
+        check: {exit: check.status.encode(), wall_ns: check.wall_ns, stderr_tail: None},
+        build: {exit: build.status.encode(), wall_ns: build.wall_ns, stderr_tail: None},
+        binary: None,
+        reach: None,
+        startup: None,
+        alloc: None,
+        jit: None,
+        status: "measured",
+        reason: None,
+    }
+    if build.status != Val(0) || !files.exists(binary) {
+        row.build.stderr_tail = Val(last_chars("{build.stderr}{build.stdout}", 1200))
+        row.status = "unavailable"
+        row.reason = Val("AOT build failed")
+        return Ok(row)
+    }
+    bytes: files.read_bytes(binary)
+    row.binary = Val(Binary{bytes: bytes.len(), sha256: crypto.sha256(bytes).hex(), sections: sections(binary), defined_symbols: symbol_count(binary)})
+    row.reach = Val(reachable_core_modules("{binary}.rs"))
+    walls := [Int]{}
+    stdout := ""
+    loop _ in 0..<samples {
+        ran: timed(process.cmd([binary]))
+        if ran.status != Val(0) {
+            row.startup = Val(Startup{status: "unavailable", reason: Val("exit {shown(ran.status)}"), stderr: Val(last_chars(ran.stderr, 400)), samples: None, median_ns: None, stdout: None})
+            break
+        }
+        if walls.len() == 0 -> stdout = ran.stdout
+        walls.push(ran.wall_ns)
+    }
+    if walls.len() == samples -> row.startup = Val(Startup{status: "measured", reason: None, stderr: None, samples: Val(walls.copy()), median_ns: Val(median(walls)), stdout: Val(stdout)})  // copy: the median sorts its own
+    row.alloc = Val(allocations(binary, lib, dir))
+    jit: timed(process.cmd([jet, "run", "{stem}.jet"]).cwd(dir))
+    scalars: jit.stdout.chars()
+    row.jit = Val(JITRun{exit: jit.status.encode(), wall_ns: jit.wall_ns, stdout: collections.slice_clamped(scalars, 0, 200).join("")})
+    Ok(row)
+}
+
+// a's number at the JSON pointer `path` less b's, or "unavailable" when
+// either is not a whole number.
+delta: fn(a: Dyn, b: Dyn, path: String) -> Dyn Never! {
+    if (json.pointer(a, path) ?? Dyn.Null) == .Int(x) && (json.pointer(b, path) ?? Dyn.Null) == .Int(y) -> return (x - y).encode()
+    "unavailable".encode()
+}
+
+// `git` in the checkout: its output, or the run fails, as it does past a
+// MiB of output.
+git: fn(root: String, args: [String]) -> String Err! {
+    Ok(process.cmd(["git"].concat(args)).cwd(root).stderr(.Inherit).output_limit(1048576).run_checked().output)
+}
+
+// The platform and architecture as Node names them.
+host: fn() -> String Never! {
+    arch: sys.arch()
+    node: if {
+        arch == "x86_64" -> "x64"
+        arch == "aarch64" -> "arm64"
+        else -> arch
+    }
+    "{sys.name()}-{node}"
+}
