@@ -5400,17 +5400,33 @@ sema_check_registration_module_tail: fn(owned_run: &&SemaModuleCheckRun, environ
     all_method_jobs := run.all_method_jobs.move()
     prelude_demands := run.prelude_demands.move()
     method_jobs := 0
+    // The rows of the name references and call facts that generated bodies
+    // record: a derived method keeps its template's spans and an injected
+    // conversion its Prelude text's, so neither indexes this module's source.
+    generated_references := [Span]{}
+    generated_calls := [Span]{}
     if run.check_bodies {
         loop job in all_method_jobs {
             if run.count_work -> method_jobs += 1
+            generated: sema_check_generated_method_author_span(job, module_index, environment, program) != None || sema_check_generated_codec_method(job, module_index, program)
+            references_from: module_result.name_references.len()
+            calls_from: module_result.call_facts.len()
             if !sema_check_apply_method_job(module_index, memory_plan, job, method_ready.bodies, method_ready.queries, memo, scopes, environment, program, host_hooks, comptime_functions, comptime_rows, module_result.diagnostics, module_result.functions, prelude_demands, module_result.call_facts, module_result.hardware_use, module_result.comptime_requests, module_result.name_references, module_result.comptime_body_sources, module_result.compute_facts, module_result.failure_facts, module_result.exact_int_reachable, module_result.copy_events, module_result.incomplete_reasons, run.keep_going, pending_obligations) -> module_result.complete = false
+            if generated {
+                generated_references.push(Span{start: references_from, end: module_result.name_references.len()})
+                generated_calls.push(Span{start: calls_from, end: module_result.call_facts.len()})
+            }
         }
         injected_from := module_result.functions.len()
+        references_from: module_result.name_references.len()
+        calls_from: module_result.call_facts.len()
         if !sema_inject_prelude_error_conversions(run.module_identity, environment, program, scopes, host_hooks, module_result.functions, prelude_demands, module_result.diagnostics, module_result.call_facts, module_result.comptime_requests, module_result.name_references, module_result.incomplete_reasons, run.keep_going) -> module_result.complete = false
+        generated_references.push(Span{start: references_from, end: module_result.name_references.len()})
+        generated_calls.push(Span{start: calls_from, end: module_result.call_facts.len()})
         loop index in injected_from..<module_result.functions.len() -> module_result.injected_function_keys.push(module_result.functions[index].key)
     }
     sema_check_registration_module_foreign(environment, program, module_index, module_result)
-    sema_check_soft_public_uses(environment, program, module_result)
+    sema_check_soft_public_uses(program, module_index, generated_references, generated_calls, module_result)
     if trace_sink == .Val(sink) {
         sink.progress("counters.{counter_phase}.items_scanned", run.items_scanned, -1)
         sink.progress("counters.{counter_phase}.functions_checked", run.functions_checked, -1)
@@ -5424,30 +5440,39 @@ sema_check_registration_module_tail: fn(owned_run: &&SemaModuleCheckRun, environ
 // allowed with one warning per occurrence (L0601), on the spelling the use
 // site writes, so a re-export under a plain name does not warn and one
 // under an underscore name does. Core's own modules are vetted internals.
-sema_check_soft_public_uses: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, module_result: &SemaGraphModuleResult) {
-    if environment.module_identity.starts_with("<corelib>") -> return
+// Only module `module_index`'s own text is read: the rows in
+// `generated_references` and `generated_calls` (sorted, disjoint row ranges)
+// carry spans into other text and are skipped.
+sema_check_soft_public_uses: fn(program: SemaProgramTables, module_index: Int, generated_references: [Span], generated_calls: [Span], module_result: &SemaGraphModuleResult) {
     if program.registration_graph == .Val(graph) {
-        caller: sema_scope_caller_index(environment, graph) ?? return
-        raw: graph.modules[caller].source.bytes()
+        module_identity: graph.modules[module_index].module_identity
+        if module_identity.starts_with("<corelib>") -> return
+        raw: graph.modules[module_index].source.bytes()
         codes: loop byte in raw -> Int.from_u8(byte)
         seen := [Int:Bool]{}
-        loop reference in module_result.name_references {
+        skipped := 0
+        loop (index, reference) in module_result.name_references {
+            loop skipped < generated_references.len() && generated_references[skipped].end <= index -> skipped += 1
+            if skipped < generated_references.len() && index >= generated_references[skipped].start -> next
             owner: reference.symbol.module_name
-            if owner == "" || owner == environment.module_identity -> next
+            if owner == "" || owner == module_identity -> next
             leaf: sema_soft_public_written_leaf(raw, codes, reference.span) ?? next
             sema_soft_public_warn(leaf, seen, module_result.diagnostics)
         }
         // A call's callee is a call fact, not a name reference.
-        loop call in module_result.call_facts {
+        skipped = 0
+        loop (index, call) in module_result.call_facts {
+            loop skipped < generated_calls.len() && generated_calls[skipped].end <= index -> skipped += 1
+            if skipped < generated_calls.len() && index >= generated_calls[skipped].start -> next
             callee: call.callee ?? next
             owner_and_rest: callee.key.split_once(":") ?? next
             module_and_rest: owner_and_rest.after.split_once(":") ?? next
             owner: module_and_rest.before
-            if owner == "" || owner == environment.module_identity -> next
+            if owner == "" || owner == module_identity -> next
             leaf: sema_soft_public_written_leaf(raw, codes, call.span) ?? next
             sema_soft_public_warn(leaf, seen, module_result.diagnostics)
         }
-        sema_check_soft_public_signatures(graph.modules[caller], codes, raw, seen, module_result.diagnostics)
+        sema_check_soft_public_signatures(graph.modules[module_index], codes, raw, seen, module_result.diagnostics)
     }
 }
 
@@ -5508,7 +5533,9 @@ sema_check_soft_public_signature: fn(function: Func, declared: [String:Int], cod
 // The name a use site writes, with its byte offset in the source: the last
 // identifier of the span (`n._title` gives `_title`). A span over a whole
 // call names the identifier just before the argument list that its last
-// `)` closes (type arguments skipped).
+// `)` closes (type arguments skipped). A written name is a whole token of
+// the source, so a span that cuts an identifier is no use site of this text
+// (a span another source owns) and names nothing.
 sema_soft_public_written_leaf: fn(raw: [U8], codes: [Int], span: Span) -> (start: Int, name: String)? Never! {
     if span.start < 0 || span.end > codes.len() || span.start >= span.end -> return None
     end := span.end
@@ -5541,6 +5568,7 @@ sema_soft_public_written_leaf: fn(raw: [U8], codes: [Int], span: Span) -> (start
     start := end
     loop start > span.start && sema_soft_public_word_byte(codes[start - 1]) -> start -= 1
     if start == end -> return None
+    if (start > 0 && sema_soft_public_word_byte(codes[start - 1])) || (end < codes.len() && sema_soft_public_word_byte(codes[end])) -> return None
     name: String.from_bytes(raw[start..<end]) ?? return None
     Val((start: start, name: name))
 }

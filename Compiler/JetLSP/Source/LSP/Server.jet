@@ -59,7 +59,7 @@ lsp_apply_content_change: fn(doc: &LSPDocument, change: Dyn) -> Bool Never! {
 // so a rejected edit leaves the resident document and version intact. An
 // accepted change list, even an empty one, advances the version and marks the
 // document dirty. Returns the document's URI.
-lsp_update_document: fn(state: &LSPDiagnosticState, params: Dyn?, is_open: Bool) -> String? Never! {
+lsp_update_document: fn(state: &LSPDiagnosticState, params: Dyn?, is_open: Bool{false}) -> String? Never! {
     document: lsp_param(params, "textDocument") ?? return None
     uri: lsp_text_member(document, "uri") ?? return None
     version: foundation_json_integer(lsp_member(document, "version") ?? return None) ?? return None

@@ -5,7 +5,7 @@
 use {
     core.encoding.[Dyn]
     jet_foundation.[Span, foundation_json_quote]
-    jet_lexer.[Lexed, Token, TOKEN_IDENT, token_text]
+    jet_lexer.[Lexed, Token, TOKEN_IDENT]
     jet_semindex.[SemDef, SemIndex, SemKind, SemRef, SemSymbol]
 }
 
@@ -142,7 +142,7 @@ lsp_target_at: fn(view: LSPView, offset: Int) -> LSPTarget? Never! {
 
 // Every checked occurrence of the declaration: its name when `declaration`,
 // then each reference to it, each once.
-lsp_occurrences: fn(index: SemIndex, target: LSPTarget, declaration: Bool) -> [SemRef] Never! {
+lsp_occurrences: fn(index: SemIndex, target: LSPTarget, declaration: Bool{false}) -> [SemRef] Never! {
     found := [SemRef]{}
     seen := [String:Bool]{}
     if declaration {

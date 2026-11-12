@@ -30,7 +30,7 @@ lsp_code_action_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String
 
 // The edit names the document version it was computed for, so an editor
 // drops it once the text has moved on.
-lsp_action_json: fn(view: LSPView, title: String, kind: String, edits: [TextEdit], preferred: Bool) -> String Never! {
+lsp_action_json: fn(view: LSPView, title: String, kind: String, edits: [TextEdit], preferred: Bool{false}) -> String Never! {
     preference: if preferred -> ",\"isPreferred\":true" else -> ""
     "{{\"title\":{foundation_json_quote(title)},\"kind\":{foundation_json_quote(kind)}{preference},\"edit\":{{\"documentChanges\":[{{\"textDocument\":{{\"uri\":{foundation_json_quote(view.uri)},\"version\":{view.doc.version}}},\"edits\":{lsp_text_edits_json(view.doc.text, edits)}}}]}}}}"
 }

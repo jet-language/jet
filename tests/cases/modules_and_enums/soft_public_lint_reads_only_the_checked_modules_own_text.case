@@ -1,0 +1,15 @@
+# #6650 c1: the soft-public lint (L0601) reads a use site's name only from the
+# checked module's own text. The `b64.decode` propagation injects the Prelude
+# error conversion, whose name references keep Prelude/Errors.jet offsets; the
+# fixture's `x_x_x` comment block covers those offsets, so a lint that read them
+# against main.jet warned on `_x_x_x_` fragments of the comment.
+fixture: soft_public_lint_reads_only_the_checked_modules_own_text.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet check main.jet
+exit: 0
+stderr: ~ "has no problems" # no warning at all, so no bogus L0601
+stderr: !~ "SoftPublicUse" # no L0601 on the comment block
+step run: jet run main.jet
+exit: 0
+stdout: = "3\n"
