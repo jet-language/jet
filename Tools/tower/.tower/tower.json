@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6777,
-    "rev": 100084,
+    "rev": 100089,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -34216,7 +34216,7 @@
       "parentId": "c0yfcz0w",
       "needsAcceptance": false,
       "created": "2026-09-16T19:41:29.526Z",
-      "updated": "2026-11-11T12:41:36.734Z",
+      "updated": "2026-11-12T21:39:26.278Z",
       "updatedBy": "Main",
       "goals": [
         "G6"
@@ -74583,7 +74583,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T00:04:45.539Z",
-      "updated": "2026-11-12T10:54:19.353Z",
+      "updated": "2026-11-12T21:39:24.178Z",
       "updatedBy": "Main",
       "criteriaLastN": 185
     },
@@ -75649,7 +75649,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T13:32:22.189Z",
-      "updated": "2026-11-11T12:41:38.604Z",
+      "updated": "2026-11-12T21:39:25.218Z",
       "updatedBy": "Main",
       "criteriaLastN": 10
     },
@@ -77717,6 +77717,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-09T18:54:03.251Z"
+        },
+        {
+          "n": 38,
+          "text": "Foreign effects are derived by the compiler, never declared by hand (D-FFI-FACTS1=A): for a locked foreign artifact, the compiler reads its imported symbols and internal call graph (from machine code, or from source when Jet builds it), maps each libc and system-call entry to a Jet effect through one table, and propagates through the foreign call graph with the same solver as Jet code. Unknown reach (raw system calls, callbacks into unknown code, dlopen, JIT) stays every effect. Facts are bound to the artifact hash. Proof: cases where libc abs() is admitted under !Net; a C library calling connect is refused under !Net with the chain into the library named; a library with a raw syscall instruction stays every effect; changing the artifact re-derives its facts.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-12T21:39:27.234Z"
         }
       ],
       "refs": [
@@ -77729,9 +77738,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T19:01:48.265Z",
-      "updated": "2026-11-12T05:18:20.849Z",
+      "updated": "2026-11-12T21:39:27.234Z",
       "updatedBy": "Main",
-      "criteriaLastN": 37
+      "criteriaLastN": 38
     },
     {
       "id": "c0ov7lce",
@@ -198982,9 +198991,11 @@
       "by": "owner",
       "kind": "question",
       "text": "ok i still dont think you get the point. how exactly does jet enforce, detect, verify, and implicitly determine which effects are used? this is a core critical element. we shouldnt depend on the user to define these things, but we should block the use of effects as desired, which is the !Effect syntax. if we can do that for jet why cant we do it for other languages?",
-      "status": "open",
-      "answer": "",
-      "created": "2026-11-11T10:30:29.381Z"
+      "status": "answered",
+      "answer": "Sorry this sat unanswered. The ballot was reworked at 11:39 and you ratified A at 12:40, but the rework only narrowed the permission. It never answered your actual question, so here it is.\n\nHow Jet does it for Jet code. Nobody declares effects. Every effect starts in one place: the Core function that actually performs the operation (opening a file, connecting a socket, reading the clock) carries its effect, once. Sema builds the whole program's call graph and propagates upward, so a function's effects are everything it can reach. `!Net` on a function, or a deny in a package's authority, makes sema check that graph and refuse the build if any path reaches Net, naming the call chain. Enforcement is static: code that would do it doesn't compile. A call whose target sema can't see (an unknown function value, dynamic dispatch) counts as every effect, so unknown never passes as none.\n\nOther languages today: sema treats every foreign call as opaque and gives it every effect (Compiler/JetSema/Source/Sema/Effects/Checks.jet, the foreign_opaque branch). So `!Net` already blocks foreign code, with no declarations, but bluntly: libc's abs() is refused as well.\n\nYes, we can do for other languages what we do for Jet, and we should. Foreign code acts on the world only through the operating system: system calls, almost always through libc. A compiled library's imported symbols (open, connect, send, clock_gettime…) plus its internal call graph (from the machine code, or from source when Jet builds it) show which of those each exported function can reach. Map each libc and system-call entry to a Jet effect once, in one table, the same way Core's primitives carry theirs, and propagate through the foreign call graph exactly as for Jet. abs() reaches nothing, so it's pure. sqlite3_open reaches open, fcntl and friends, so it's Files. That is the ratified D-FFI-FACTS1 rule (\"every fact traced to a hashed source\"), with the facts derived by the compiler rather than written by a person.\n\nThe honest limits:\n- Where analysis can't see, the function stays every effect: raw system-call instructions, callbacks into unknown code, dlopen, JIT, self-modifying code.\n- The facts are bound to the locked artifact's hash, so a changed library is analyzed again, never trusted.\n- Static analysis of native code is a proof about honest code, not a guarantee against a hostile library: native code shares the process and can overwrite anything, including Jet's own checks. Where you need a guarantee, the kernel enforces it. The library runs in a sandboxed worker whose seccomp and Landlock filters deny the system calls behind `!Net` or `!Files`. That's the isolated placement the ballot mentions.\n\nWhat's next: the derivation isn't built. I'm adding it as a criterion on #6366 (the foreign-contract card): the import and call-graph analysis, the one libc and system-call table, unknown staying every effect, and cases where abs() passes under !Net, a library that calls connect is refused under !Net with the chain into the library named, and a library with a raw system call stays every effect.",
+      "created": "2026-11-11T10:30:29.381Z",
+      "answeredAt": "2026-11-12",
+      "answeredBy": "Main"
     },
     {
       "id": "qbpgav13",
@@ -198993,9 +199004,11 @@
       "by": "owner",
       "kind": "question",
       "text": "I think the reworked ballot missed the second point completely. the original ballot was about allowing a python style script that doesnt have a defined entry point. a secondary question was about top level locals. we need this ballot to address the primary issue FIRST and the secondary issue, not throw out the first and only determine the second.",
-      "status": "open",
-      "answer": "",
-      "created": "2026-11-11T10:33:14.608Z"
+      "status": "answered",
+      "answer": "You're right, and I'm sorry this went unanswered. The rework was deleted at 11:39 and dropped your second point.\n\nPrimary issue, a Python-style script with no entry point: this is built and in force, per your ruling. A file of only top-level statements runs as a script, with no `run` needed. A file with `run: fn` runs that. A file with both is refused (E0621, \"Move the statements into run: fn, or remove run: fn\"). A file with neither is a library, and importing a file never runs a script body.\n\nSecond issue, functions reading top-level locals: this is NOT resolved. I just checked on seed-b13:\n    total: 5\n    show: fn() { print(total) }\n    show()\nis refused with E0107: \"`total` is a local of this file's top-level statements, which a function can't see\". Writing it as a closure, `show := fn() { print(total) }`, prints 5. You said the refusal doesn't make sense, and the earlier answer agreed: it's a compiler artifact (named functions are compiled as separate module functions), not a real limit. The rework then dropped the fix.\n\nWhat I'm doing: a new ballot for exactly this point. Its recommended option makes a named function in a script file a lexical helper that sees the script's locals, like a closure, with the normal checks (calling it before a local it reads is bound is an error, and so are capture escapes and task crossings). The alternative keeps E0107. It covers both behaviors with the same program, plus the edge cases: locals declared after the helper, helpers that assign to script locals, recursion, and helpers used by other helpers. It gets an adversarial review before it comes to you. Until you vote, E0107 stands.",
+      "created": "2026-11-11T10:33:14.608Z",
+      "answeredAt": "2026-11-12",
+      "answeredBy": "Main"
     },
     {
       "id": "qc6d93bi",
@@ -199004,9 +199017,11 @@
       "by": "owner",
       "kind": "question",
       "text": "this does not seem like the best solution. remember beginner magic full expert control, two sides of the same coin. also this seems to make too many sacrifies and does not engineer away the downsides",
-      "status": "open",
-      "answer": "",
-      "created": "2026-11-11T10:35:32.768Z"
+      "status": "answered",
+      "answer": "Sorry this sat unanswered. The ballot was reworked at 11:39, after this question, and you ratified F at 12:40, so the record here is late, not open. What the rework changed, against your points:\n- Beginner side: no copies, no annotations. Storage that has to survive a scratch block is built in its final place from the start, and ownership of compatible allocations transfers without moving bytes. A beginner writes ordinary code, and no hidden deep copy happens.\n- Expert side: full control of where values live (choosing the final storage, keeping the arena's owner alive, or an explicit copy), and the compiler reports exactly which lifetime conflicts.\n- What's left is the one physical limit: bytes can't be reclaimed while a surviving pointer still uses them. F reports that conflict instead of hiding it behind a silent copy.\nThe build criterion is #6314 c10. If F still makes sacrifices you don't accept, tell me which case and I'll put it back on a ballot.",
+      "created": "2026-11-11T10:35:32.768Z",
+      "answeredAt": "2026-11-12",
+      "answeredBy": "Main"
     },
     {
       "id": "qdir9eck",
@@ -199015,9 +199030,11 @@
       "by": "owner",
       "kind": "question",
       "text": "i dont really understand what this question is asking and why it is relevant in context. rewrite in plain english",
-      "status": "open",
-      "answer": "",
-      "created": "2026-11-11T10:50:17.291Z"
+      "status": "answered",
+      "answer": "Sorry this sat unanswered. The ballot was rewritten in plain English at 11:39, after this question, and you ratified A at 12:40. In plain terms: sometimes the right type depends on a number known while building. A container of at most 16 items should live inline, and a bigger one on the heap. A asks you to write that choice as the body of a type alias, `Storage<N: Int>: Store #run { if N <= 16 -> Inline<N> else -> Heap }`. Every branch is checked when you write it, and the built program has no run-time switch. The alternative was a separate kind of function that returns a type. It mattered because #3505 c18 (computed generic types) had no live ruling to build to after the old type-function decision was retired. The build criterion is #3505 c24.",
+      "created": "2026-11-11T10:50:17.291Z",
+      "answeredAt": "2026-11-12",
+      "answeredBy": "Main"
     },
     {
       "id": "q0adwkpu",
@@ -199900,6 +199917,41 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-12T21:39:27.234Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0rkebo4",
+      "note": "#38 Foreign effects are derived by the compiler, never declared "
+    },
+    {
+      "at": "2026-11-12T21:39:26.278Z",
+      "by": "Main",
+      "action": "question.answer",
+      "ref": "qdir9eck",
+      "note": ""
+    },
+    {
+      "at": "2026-11-12T21:39:25.219Z",
+      "by": "Main",
+      "action": "question.answer",
+      "ref": "qc6d93bi",
+      "note": ""
+    },
+    {
+      "at": "2026-11-12T21:39:24.178Z",
+      "by": "Main",
+      "action": "question.answer",
+      "ref": "qbpgav13",
+      "note": ""
+    },
+    {
+      "at": "2026-11-12T21:39:22.981Z",
+      "by": "Main",
+      "action": "question.answer",
+      "ref": "qaswkgku",
+      "note": ""
+    },
     {
       "at": "2026-11-12T21:36:19.184Z",
       "by": "Main",
