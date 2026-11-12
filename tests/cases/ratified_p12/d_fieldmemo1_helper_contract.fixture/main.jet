@@ -1,0 +1,24 @@
+// A `#Memo` computed field's helper carries its failure contract from the
+// start: a formula that only reads values is `Int Never!`, a formula with a
+// call keeps the default `Int !`.
+Stats: struct {
+    strength: Int
+    gear_mod: Int
+    #Memo attack: Int -> strength * 2 + gear_mod
+}
+
+Party: struct {
+    scores: [Int]
+    #Memo
+    total: Int -> scores.len() * 10
+}
+
+run: fn() {
+    stats := Stats{strength: 10, gear_mod: 3}
+    party := Party{scores: [4, 7]}
+    print("attack {stats.attack}")
+    print("attack {stats.attack}")
+    print("total {party.total}")
+    party.scores.push(9)
+    print("total {party.total}")
+}

@@ -8328,10 +8328,14 @@ sema_compute_module_owns_site: fn(module_result: SemaGraphModuleResult, span: Sp
 // written, and nothing else owns its return protocol (the Rust reference's
 // `failure_inference_candidate`). A computed field's generated getter is the
 // user's formula, so its failures are inferred like a written method's: a
-// read of `path: String -> stored_path` is no failure source.
+// read of `path: String -> stored_path` is no failure source. A `#Memo`
+// field's helper is not: its contract is fixed when it is generated
+// (sema_computed_field_memo_helper_func), because a contract inferred after
+// its body was checked would leave the body built for the other one.
 sema_failure_inference_candidate: fn(func: Func) -> Bool Never! {
     if !sema_failure_contract_is_default(func.return_type) -> return false
     if func.return_type == .Val(.Apply(name, _)) && name == "Stream" -> return false
+    if sema_computed_field_memo_helper_function(func) -> return false
     (!func.compiler_generated || sema_computed_field_getter_function(func)) && !func.is_comptime && !func.is_job && func.every == None && func.inline_foreign == None && !func.gc_return && func.pre.len() == 0 && func.post.len() == 0 && func.web_marker == None && func.external_type == None
 }
 

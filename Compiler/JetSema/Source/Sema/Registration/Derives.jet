@@ -2588,6 +2588,11 @@ sema_computed_field_getter_function: fn(func: Func) -> Bool Never! {
     func.compiler_generated && func.name.starts_with("__computed_")
 }
 
+// The `#Memo` helper of a computed field (sema_computed_field_memo_helper_func).
+sema_computed_field_memo_helper_function: fn(func: Func) -> Bool Never! {
+    sema_computed_field_getter_function(func) && func.name.ends_with("__memo")
+}
+
 // A formula that only reads values (sibling fields, literals, operators)
 // makes a getter with the empty effect row (`-[]>`), so a contract may read
 // the field. A call or a member read anywhere in it (another type's computed
@@ -2690,6 +2695,12 @@ sema_derive_computed_getters: fn(items: &[Item]) {
 // formula itself as its body, where the bare names now read the parameters,
 // as the getter's rewrite reads them through `self`. A formula that reads
 // `self` also takes the receiver, so the whole value is part of the key.
+//
+// The helper's failure contract is fixed here, before its body is checked,
+// so the body is built for the contract the function returns with (it is no
+// failure inference candidate, sema_failure_inference_candidate). A formula
+// that only reads values has no failure source: `T Never!`. Any other keeps
+// the default `T !` of its written type.
 sema_computed_field_memo_helper_func: fn(definition: StructDef, field: Field, marker: Marker, formula: Expr) -> Func {
     named := [String]{}
     loop site in comptime_walk_identifiers(formula) -> named.push(site.name)
@@ -2702,10 +2713,13 @@ sema_computed_field_memo_helper_func: fn(definition: StructDef, field: Field, ma
         if sibling.name != field.name && named.contains(sibling.name) -> params.push(sema_computed_field_param(sibling.name, sibling.ty.copy(), sibling.name_span))
     }
     helper.params = params
+    reads_only: sema_computed_formula_reads_only(formula, definition.fields, 0)
     helper.return_type = Val(field.ty.copy())
+    // copy: the contract test takes the written type as a return type.
+    if reads_only && sema_failure_contract_is_default(Val(field.ty.copy())) -> helper.return_type = Val(Type.Result{ok: field.ty.copy(), err: Type.Named{name: "Never"}})
     helper.return_type_span = Val(field.ty_span)
     helper.body = [Stmt]{Stmt.Return{value: Val(formula.copy()), span: field.name_span}}
-    if sema_computed_formula_reads_only(formula, definition.fields, 0) {
+    if reads_only {
         helper.declared_effects = Val([EffectRowEntry]{})
         helper.is_pure = true
     }
