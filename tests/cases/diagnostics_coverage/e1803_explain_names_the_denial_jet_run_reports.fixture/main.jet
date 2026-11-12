@@ -1,0 +1,11 @@
+// Every effect is allowed (D-AUTH-DEFAULT1=A), so this program may start a
+// process until `--deny=Exec` takes the `Exec` root away.
+use core.process
+
+run: fn() {
+    receipt: process.cmd([String]{"true"}).run() ?? {
+        print("spawn failed")
+        return
+    }
+    print("spawned code={receipt.code}")
+}

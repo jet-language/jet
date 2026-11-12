@@ -1,0 +1,21 @@
+# #3720 c70: `jet explain E1803` describes the diagnostic `jet run` emits. Under
+# D-AUTH-DEFAULT1=A every effect is allowed, so E1803 has one meaning: a deny row
+# or `--deny` took a right the program reaches. The explain page and the run's
+# report name the same denial and the same remedy.
+fixture: e1803_explain_names_the_denial_jet_run_reports.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet explain E1803
+exit: 0
+stdout: ~ "Application authority denies a required effect" # the explain summary
+stdout: ~ "drop the matching `--deny` from the command" # the explain remedy
+stdout: !~ "undecided" # no second meaning
+step: jet run --deny=Exec main.jet
+exit: 1
+stdout: !~ "spawned" # the process never starts
+stderr: ~ "Error [jet.ApplicationAuthorityDenied]: Application authority denies `Exec`" # the emitted What names the same denial
+stderr: ~ "Fix: Drop `--deny=Exec` from the command to allow it" # the same remedy, for the right it names
+stderr: ~ "More: jet-lang.dev/e/E1803" # the same code
+step: jet run main.jet
+exit: 0
+stdout: ~ "spawned code=0" # without the deny, the same program runs
