@@ -463,7 +463,13 @@ sema_fact_reflection_field_type: fn(type_name: String, field: String) -> Type? {
             else -> None
         }
     }
-    if type_name == "EffectInfo" -> return sema_fact_field_when(field == "values", Type.List{element: string})
+    if type_name == "EffectInfo" {
+        return if {
+            field == "values" -> Val(Type.List{element: string})
+            field == "declared" || field == "inferred" -> Val(Type.Option{inner: Type.List{element: string}})
+            else -> None
+        }
+    }
     if type_name == "MethodInfo" {
         return if {
             field == "name" || field == "module" || field == "identity" || field == "return_type" || field == "signature" -> Val(string)
@@ -962,14 +968,6 @@ sema_fact_function_view_provenance: fn(function: Func) -> TComptimeValue Never! 
     sema_comptime_reflection_view_provenance(ViewProvenance{sources: [ViewSourcePath]{}, mutable: false})
 }
 
-sema_fact_function_effects: fn(function: Func) -> TComptimeValue Never! {
-    names := [String]{}
-    if function.declared_effects == .Val(rows) {
-        loop row in rows -> names.push(row.name)
-    }
-    sema_fact_struct("EffectInfo", [TComptimeField]{TComptimeField{name: "values", value: sema_comptime_reflection_string_list(names)}})
-}
-
 // The declaration a subject name resolves to, if it is a module-level item.
 sema_fact_subject_item: fn(symbol: Symbol?, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Item? {
     resolved: symbol ?? return None
@@ -1109,7 +1107,7 @@ sema_fact_subject_value: fn(read: FactRead, name: String, symbol: Symbol?, envir
         return None
     }
     if read == FactRead.Effects {
-        if item == .Val(.Func(function)) -> return Val(SemaFactReadValue{ty: sema_fact_named("EffectInfo"), value: sema_fact_function_effects(function)})
+        if item == .Val(.Func(function)) -> return Val(SemaFactReadValue{ty: sema_fact_named("EffectInfo"), value: sema_comptime_reflection_effect_info(sema_comptime_reflection_declared_effect_names(function), None)})
         return None
     }
     if !declared && (read == FactRead.Sendability || read == FactRead.Movedness || read == FactRead.Origin) -> return None

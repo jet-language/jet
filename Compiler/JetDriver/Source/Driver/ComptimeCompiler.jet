@@ -53,6 +53,7 @@ use {
         jet_eval_compiler_services_string,
     ]
     jet_pkg_model.[AuthorityError, AuthorityResolver]
+    jet_sema.[sema_comptime_reflection_declared_effect_names, sema_comptime_reflection_effect_info]
 }
 
 JET_DRIVER_COMPILER_SOURCE_IDENTITY: "compiler-eval-source"
@@ -292,7 +293,7 @@ jet_driver_compiler_query_check: fn(context: Shared<JetDriverComptimeCompilerCon
                         TComptimeField{name: "package", value: jet_eval_compiler_services_string("")},
                         TComptimeField{name: "params", value: TComptimeValue.List{values: []}},
                         TComptimeField{name: "span", value: jet_eval_compiler_services_span(function.name_span)},
-                        TComptimeField{name: "effects", value: TComptimeValue.Struct{type_name: "EffectInfo", fields: [TComptimeField]{TComptimeField{name: "values", value: TComptimeValue.List{values: []}}}}},
+                        TComptimeField{name: "effects", value: sema_comptime_reflection_effect_info(sema_comptime_reflection_declared_effect_names(function), None)},
                         TComptimeField{name: "reaches_panic", value: TComptimeValue.Bool{value: false}},
                         TComptimeField{name: "arithmetic", value: TComptimeValue.List{values: []}},
                         TComptimeField{name: "facts", value: TComptimeValue.List{values: []}},

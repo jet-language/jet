@@ -146,7 +146,9 @@ use {
         SemaScopeMembersMarkerRegistry,
         sema_compiler_semantic_index_from_checked,
         sema_comptime_reflection_arithmetic_facts,
+        sema_comptime_reflection_declared_effect_names,
         sema_comptime_reflection_declared_function_facts,
+        sema_comptime_reflection_effect_info,
         sema_comptime_reflection_location,
         sema_comptime_reflection_module_of,
         sema_comptime_reflection_param_info,
@@ -558,14 +560,16 @@ jet_eval_compiler_services_parse: fn(input: JetCompilerServicesSourceInput) -> J
 // the loader gives it. `markers` are the function's written MarkerInfo rows
 // (sema_comptime_reflection_written_markers).
 jet_eval_compiler_services_function_info: fn(function: Func, registration_module: SemaRegistrationModule, checked_module: SemaGraphModuleResult?, function_key: String?, markers: [TComptimeValue]) -> TComptimeValue {
-    solved_effects := [String]{}
+    // The solved row, when the check solved this function (a failed check
+    // leaves it None, read as not yet inferred).
+    solved_effects := [String]?{None}
     reaches_panic := false
     if checked_module == .Val(checked) {
         if function_key == .Val(key) {
             loop checked_function in checked.functions {
                 if checked_function.key != key -> next
-                solved_effects = checked_function.effects.solved
-                loop effect_name in solved_effects {
+                solved_effects = Val(checked_function.effects.solved)
+                loop effect_name in checked_function.effects.solved {
                     if effect_name == "Panic" -> reaches_panic = true
                 }
             }
@@ -582,9 +586,7 @@ jet_eval_compiler_services_function_info: fn(function: Func, registration_module
         TComptimeField{name: "package", value: jet_eval_compiler_services_string(registration_module.package_identity)},
         TComptimeField{name: "params", value: TComptimeValue.List{values: params}},
         TComptimeField{name: "span", value: jet_eval_compiler_services_span(function.name_span)},
-        TComptimeField{name: "effects", value: TComptimeValue.Struct{type_name: "EffectInfo", fields: [TComptimeField]{
-            TComptimeField{name: "values", value: jet_eval_compiler_services_string_values(solved_effects)},
-        }}},
+        TComptimeField{name: "effects", value: sema_comptime_reflection_effect_info(sema_comptime_reflection_declared_effect_names(function), solved_effects)},
         TComptimeField{name: "reaches_panic", value: TComptimeValue.Bool{value: reaches_panic}},
         TComptimeField{name: "arithmetic", value: TComptimeValue.List{values: arithmetic}},
         TComptimeField{name: "facts", value: TComptimeValue.List{values: facts}},
@@ -630,9 +632,11 @@ jet_eval_compiler_services_checked: fn(input: JetCompilerServicesCheckedInput) -
         }
         if checked_module == .Val(checked) {
             loop function in checked.functions {
-                effects.push(TComptimeValue.Struct{type_name: "EffectInfo", fields: [TComptimeField]{
-                    TComptimeField{name: "values", value: jet_eval_compiler_services_string_values(function.effects.solved)},
-                }})
+                declared := [String]?{None}
+                loop registered in registration_module.functions {
+                    if registered.symbol.id.key == function.key -> declared = sema_comptime_reflection_declared_effect_names(registered.declaration)
+                }
+                effects.push(sema_comptime_reflection_effect_info(declared, Val(function.effects.solved)))
             }
         }
     }

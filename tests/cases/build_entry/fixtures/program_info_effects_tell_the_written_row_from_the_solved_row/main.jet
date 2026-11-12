@@ -1,0 +1,24 @@
+fetch: fn() -[Net]> Int { 1 }
+
+relay: fn() -> Int { fetch() }
+
+add: fn(a: Int, b: Int) -> Int { a + b }
+
+build: fn(b: Build) {
+    loop f in b.program.functions() {
+        effects: f.effects
+        if f.name == "fetch" {
+            if effects.declared == .Val(row) && row.len() == 1 && row[0] == "Net" { b.error(f.span, "DECLARED", "the written row", "EffectInfo.declared", "ok") }
+            if effects.inferred != None { b.error(f.span, "SOLVED", "the checked row", "EffectInfo.inferred", "ok") }
+        }
+        if f.name == "relay" {
+            if effects.declared == None { b.error(f.span, "UNWRITTEN", "no written row", "EffectInfo.declared", "ok") }
+            if effects.inferred == .Val(row) && row.contains("Net") && effects.values.contains("Net") { b.error(f.span, "INFERRED", "the body's Net", "EffectInfo.inferred", "ok") }
+        }
+        if f.name == "add" && effects.inferred == .Val(row) && row.len() == 0 { b.error(f.span, "PURE", "an empty solved row", "EffectInfo.inferred", "ok") }
+    }
+}
+
+run: fn() {
+    print(relay() + add(1, 2))
+}

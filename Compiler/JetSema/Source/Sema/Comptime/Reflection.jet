@@ -466,6 +466,30 @@ sema_comptime_reflection_string_list: fn(values: [String]) -> TComptimeValue Nev
     TComptimeValue.List{values: loop value in values -> TComptimeValue.String{value: value}}
 }
 
+// A callable's EffectInfo. `declared` is the row its signature writes (`None`
+// when it writes none, so the row is inferred); `inferred` is the row the
+// checker solved from its body (`None` until the program is checked, as for a
+// compile-time read inside the check). `values` is the row known where it is
+// read: the solved row once there is one, else the written row.
+sema_comptime_reflection_effect_info: fn(declared: [String]?, inferred: [String]?) -> TComptimeValue Never! {
+    row_type: Type.List{element: Type.String}
+    declared_value: if declared == .Val(row) -> sema_comptime_reflection_string_list(row) else -> TComptimeValue.List{values: [TComptimeValue]{}}
+    inferred_value: if inferred == .Val(row) -> sema_comptime_reflection_string_list(row) else -> TComptimeValue.List{values: [TComptimeValue]{}}
+    // copy: the known row is both `values` and its own member.
+    values: if inferred != None -> inferred_value.copy() else -> declared_value.copy()
+    sema_comptime_reflection_struct("EffectInfo", [SemaComptimeReflectionField]{
+        SemaComptimeReflectionField{name: "values", value: values},
+        SemaComptimeReflectionField{name: "declared", value: if declared != None -> sema_comptime_reflection_some(declared_value) else -> sema_comptime_reflection_none(row_type)},
+        SemaComptimeReflectionField{name: "inferred", value: if inferred != None -> sema_comptime_reflection_some(inferred_value) else -> sema_comptime_reflection_none(row_type)},
+    })
+}
+
+// The effect names a signature writes, `None` when it writes no row.
+sema_comptime_reflection_declared_effect_names: fn(function: Func) -> [String]? Never! {
+    if function.declared_effects == .Val(rows) -> return Val(loop row in rows -> row.name)
+    None
+}
+
 sema_comptime_reflection_dimension: fn(dimension: Dimension) -> TComptimeValue Never! {
     axes := [TComptimeValue]{}
     loop axis in dimension.axes {
@@ -971,7 +995,6 @@ sema_comptime_reflection_method_info: fn(method: Func, module_path: String, iden
     facts := sema_comptime_reflection_declared_function_facts(method, method.name)
     signature_type: sema_comptime_reflection_method_signature_type(method)
     facts.extend(sema_comptime_reflection_type_fact_rows(method.name, signature_type))
-    effects: if method.declared_effects == .Val(rows) -> sema_comptime_reflection_string_list(loop row in rows -> row.name) else -> TComptimeValue.List{values: [TComptimeValue]{}}
     sema_comptime_reflection_struct("MethodInfo", [SemaComptimeReflectionField]{
         SemaComptimeReflectionField{name: "name", value: TComptimeValue.String{value: method.name}},
         SemaComptimeReflectionField{name: "return_type", value: TComptimeValue.String{value: return_type}},
@@ -979,7 +1002,7 @@ sema_comptime_reflection_method_info: fn(method: Func, module_path: String, iden
         SemaComptimeReflectionField{name: "failure_source", value: TComptimeValue.String{value: sema_failure_contract_source(method.return_type)}},
         SemaComptimeReflectionField{name: "params", value: TComptimeValue.List{values: loop parameter in method.params -> sema_comptime_reflection_param_info(parameter)}},
         SemaComptimeReflectionField{name: "signature", value: TComptimeValue.String{value: "{method.name}: fn({parameter_texts.join(", ")}) {return_type}"}},
-        SemaComptimeReflectionField{name: "effects", value: sema_comptime_reflection_struct("EffectInfo", [SemaComptimeReflectionField]{SemaComptimeReflectionField{name: "values", value: effects}})},
+        SemaComptimeReflectionField{name: "effects", value: sema_comptime_reflection_effect_info(sema_comptime_reflection_declared_effect_names(method), None)},
         SemaComptimeReflectionField{name: "dimensions", value: TComptimeValue.List{values: dimensions}},
         SemaComptimeReflectionField{name: "facts", value: TComptimeValue.List{values: facts}},
         SemaComptimeReflectionField{name: "arithmetic", value: TComptimeValue.List{values: sema_comptime_reflection_arithmetic_facts(method)}},
@@ -1337,15 +1360,11 @@ sema_comptime_reflection_method_failure_type: fn(method: Func) -> TComptimeValue
 }
 
 // A function's FunctionInfo (Rust `build_function_type_info`): its stable
-// source shape, its declared effect row (program-wide effect facts are a
-// separate reflection input), its written `markers` (MarkerInfo rows) and
-// where it is written. `module_name`, `identity` and `package` are the names
-// its reader shows.
+// source shape, its effects as known inside the check (the written row; the
+// solved row is read after the check, jet_eval_compiler_services_function_info),
+// its written `markers` (MarkerInfo rows) and where it is written.
+// `module_name`, `identity` and `package` are the names its reader shows.
 sema_comptime_reflection_function_info: fn(function: Func, module_name: String, identity: String, package: String, registered_module: SemaRegistrationModule, markers: [TComptimeValue]) -> TComptimeValue {
-    effects := [TComptimeValue]{}
-    if function.declared_effects == .Val(rows) {
-        loop row in rows -> effects.push(TComptimeValue.String{value: row.name})
-    }
     params: loop parameter in function.params -> sema_comptime_reflection_param_info(parameter)
     info: sema_comptime_reflection_struct("FunctionInfo", [SemaComptimeReflectionField]{
         SemaComptimeReflectionField{name: "name", value: TComptimeValue.String{value: function.name}},
@@ -1356,7 +1375,7 @@ sema_comptime_reflection_function_info: fn(function: Func, module_name: String, 
         SemaComptimeReflectionField{name: "failure_source", value: TComptimeValue.String{value: sema_failure_contract_source(function.return_type)}},
         SemaComptimeReflectionField{name: "params", value: TComptimeValue.List{values: params}},
         SemaComptimeReflectionField{name: "span", value: sema_comptime_reflection_span(function.name_span)},
-        SemaComptimeReflectionField{name: "effects", value: sema_comptime_reflection_struct("EffectInfo", [SemaComptimeReflectionField]{SemaComptimeReflectionField{name: "values", value: TComptimeValue.List{values: effects}}})},
+        SemaComptimeReflectionField{name: "effects", value: sema_comptime_reflection_effect_info(sema_comptime_reflection_declared_effect_names(function), None)},
         SemaComptimeReflectionField{name: "reaches_panic", value: TComptimeValue.Bool{value: false}},
         SemaComptimeReflectionField{name: "arithmetic", value: TComptimeValue.List{values: sema_comptime_reflection_arithmetic_facts(function)}},
         SemaComptimeReflectionField{name: "facts", value: TComptimeValue.List{values: sema_comptime_reflection_declared_function_facts(function, function.name)}},

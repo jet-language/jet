@@ -2,6 +2,10 @@
 // carries the parameter's name, the label a call writes, its zone, its type,
 // how it takes the argument, where its default is written (read, never run)
 // and whether it is variadic, so nothing here parses a signature string.
+// Effects read the same way: `declared` is the row a signature writes (None
+// when it writes none), and `inferred` is the row the checker solves from the
+// body, read after the check (`b.program.functions()`); a reflected constant is
+// folded inside the check, so it reads None.
 connect: fn(host: String, /, *, timeout seconds: Int{30}, tls: Bool{true}) -> String {
     "{host}:{seconds}:{tls}"
 }
@@ -13,6 +17,8 @@ Log: struct {
 
     drain: fn(self, sink: &[String], batch: &&[String]) -> Int { sink.len() + batch.len() }
 }
+
+send: fn(text: String) -[Net]> Int { text.len() }
 
 run: fn() {
     loop param in connect.reflect().params {
@@ -36,5 +42,9 @@ run: fn() {
             print("Log.{method.name} {access} {param.name} ({shape})")
         }
     }
+    effects: send.reflect().effects
+    declared: if effects.declared == .Val(row) -> row.join(", ") else -> "nothing"
+    solved: if effects.inferred == None -> "not solved yet" else -> "solved"
+    print("send declares {declared}; its body row is {solved}")
     print(connect("db"))
 }

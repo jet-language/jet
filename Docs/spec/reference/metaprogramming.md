@@ -314,6 +314,14 @@ read the same way as a field's and never run; and whether it is `variadic`.
 A catalog reads a callable's parameters without parsing a signature string
 (`Examples/Metaprogramming/Reflection/CallableCatalog.jet`).
 
+Their `effects` is an `EffectInfo`. `declared` is the row the signature
+writes, a `[String]?` that is `None` when it writes none and the row is
+inferred. `inferred` is the row the checker solved from the body: it is known
+after the check, so `b.program.functions()` reads it, while a read folded
+inside the check (`send.reflect().effects`, a marker body, a template) reads
+`None`. `values` is the row known where it is read: the solved row once there
+is one, else the written row.
+
 Every declaration record names where its declaration is written: the
 `location` of a `TypeInfo`, a `FieldInfo` (a field or an enum case), a
 `MethodInfo` and a `FunctionInfo` is a `SourceLocation?` whose `file`, `line`
