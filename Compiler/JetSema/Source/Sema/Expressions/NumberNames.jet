@@ -10,15 +10,22 @@
 // it. The first refusing use whose type the literal takes decides the
 // binding's type: the function is checked again with the binding declared at
 // that type (sema_function_check_passes). A later use that needs yet another
-// type is one E0112 that names both uses.
+// type is one E0112 that names both uses, and a later write of a value that
+// type refuses also points at the use that decided it.
+//
+// A number that does not fit where its name is used is the error that number
+// written there would be (`big: 300` read as a U8 is E1003), reported at the
+// use and pointing at the number.
 use jet_foundation.[
     BinOp,
+    DIAGNOSTIC_ERROR,
     Diagnostic,
     Expr,
     Span,
     Type,
     UnOp,
     diagnostic_with_label,
+    expr_span,
     type_identity_equal,
     type_name,
 ]
@@ -100,8 +107,8 @@ sema_expr_number_name_read: fn(name: String, span: Span, index: Int, expected: T
     // A literal's check opens no statement tail.
     tail_store := sema_statement_tail_store_init()
     trial := [Diagnostic]{}
-    fitted: sema_probe_expression(literal, expected, environment, program, scopes, state, tail_store, context, trial) ?? return unhandled
-    if sema_has_error_since(trial, 0) -> return unhandled
+    fitted: sema_probe_expression(literal, expected, environment, program, scopes, state, tail_store, context, trial) ?? return sema_expr_number_unfit(name, span, required, literal, trial, diagnostics)
+    if sema_has_error_since(trial, 0) -> return sema_expr_number_unfit(name, span, required, literal, trial, diagnostics)
     binding: scopes.bindings[index].symbol.span
     if scopes.bindings[index].mutable {
         loop decided in context.number_retypes_known {
@@ -121,6 +128,25 @@ sema_expr_number_name_read: fn(name: String, span: Span, index: Int, expected: T
     value := sema_check_expression(literal, expected, environment, program, scopes, state, tail_store, context, diagnostics) ?? return SemaNumberNameRead{handled: true, value: None}
     value.span = span
     SemaNumberNameRead{handled: true, value: Val(value)}
+}
+
+// A number name whose literal a numeric use refuses (`big: 300` read as a
+// U8): the refusals the literal written at the use gets, reported at the use
+// and pointing at the number. Handled once one is reported; any other
+// refusal is the caller's ordinary mismatch.
+sema_expr_number_unfit: fn(name: String, span: Span, required: Type, literal: Expr, trial: [Diagnostic], diagnostics: &[Diagnostic]) -> SemaNumberNameRead {
+    reported := false
+    if !sema_expr_is_numeric(required) && sema_expr_precise_name(required) == None -> return SemaNumberNameRead{handled: false, value: None}
+    number: expr_span(literal)
+    loop refusal in trial {
+        if refusal.severity != DIAGNOSTIC_ERROR -> next
+        // copy: the trial's report moves to the use; the trial list is dropped.
+        moved := refusal.copy()
+        moved.span = Val(span)
+        diagnostics.push(diagnostic_with_label(moved, number, "`{name}` is this number"))
+        reported = true
+    }
+    SemaNumberNameRead{handled: reported, value: None}
 }
 
 // Whether no operator rule combines numbers of types `left` and `right`:
@@ -239,6 +265,25 @@ sema_expr_number_retype_conflict: fn(name: String, decided: SemaNumberRetype, wa
     line: sema_source_line_at(environment.source_segments, decided.use_span) ?? 0
     report: sema_error("E0112", span, "`{name}` is a {type_name(decided.ty)} for its use on line {line}, but this use needs a {type_name(wanted)}", "a `:=` number name takes the type of the first use that refuses its default, and one name holds one type", "convert the value at one of the two uses, or give each use its own name")
     diagnostic_with_label(report, decided.use_span, "this use makes `{name}` a {type_name(decided.ty)}")
+}
+
+// A write to the `:=` number name `name` whose value the type an earlier use
+// decided refuses (`count := 0`, made a U8 by `take8(count)`, then
+// `count = line.len()`): each E0108 reported since `since` at the written
+// value or at the name also points at the use that decided the type.
+sema_expr_number_label_write: fn(name: String, name_span: Span, value: Span, since: Int, scopes: SemaScopeTable, context: SemaCheckContext, diagnostics: &[Diagnostic]) {
+    index: sema_scope_resolve_index(scopes, name) ?? return
+    if !scopes.bindings[index].mutable || scopes.bindings[index].number_literal == None -> return
+    binding: scopes.bindings[index].symbol.span
+    loop decided in context.number_retypes_known {
+        if !sema_expr_number_same_binding(decided.binding, binding) -> next
+        loop at in since..<diagnostics.len() {
+            reported: diagnostics[at].span ?? next
+            if diagnostics[at].code != "E0108" || (reported.start != value.start && reported.start != name_span.start) -> next
+            diagnostics[at] = diagnostic_with_label(diagnostics[at], decided.use_span, "this use makes `{name}` a {type_name(decided.ty)}")
+        }
+        return
+    }
 }
 
 sema_expr_number_same_binding: fn(left: Span, right: Span) -> Bool Never! {

@@ -154,10 +154,13 @@ vocabulary](vocabulary.md).
   one, or arithmetic on such literals and names keeps that literal; a use
   that refuses the name's own type reads it as the literal written there:
   `y: 2.5` passed to a `Float` parameter is the `Float` 2.5. A use its own
-  type serves reads the name unchanged. A `:=` binding takes the type of the
+  type serves reads the name unchanged, and a number that does not fit the
+  use is the error that number written there gets (`big: 300` read as a `U8`
+  is E1003), pointing at the number. A `:=` binding takes the type of the
   first use that refuses its default, where the literal fits; a second use
-  that needs another type is one E0112 naming both uses. Module constants
-  keep their registered type.
+  that needs another type is one E0112 naming both uses, and a later write of
+  a value that type refuses is E0108 pointing at the use that decided it.
+  Module constants keep their registered type.
 - Explicit conversion is destination-owned:
   `Target.from_source(value)`. Numeric narrowing is fallible; safe widening is
   implicit where the numeric decisions allow it. Numeric-backed distinct and

@@ -7505,7 +7505,13 @@ sema_stmt_check_assignment_target: fn(target: LValue, op: BinOp?, op_span: Span,
     hooked: sema_stmt_compound_hook_value(target, op, op_span, expr, environment, scopes)
     if hooked == .Val(binary) -> return sema_stmt_check_assignment_target(target, None, op_span, binary, environment, program, scopes, state, tail_store, context, diagnostics)
     checked: if target == {
-        .Local(name, name_span) -> sema_stmt_check_local_assignment(name, name_span, op, op_span, expr, environment, program, scopes, state, tail_store, context, diagnostics)
+        .Local(name, name_span) -> {
+            written: diagnostics.len()
+            local: sema_stmt_check_local_assignment(name, name_span, op, op_span, expr, environment, program, scopes, state, tail_store, context, diagnostics)
+            // A `:=` number name's decided type that refuses the value names its deciding use too.
+            if local == None -> sema_expr_number_label_write(name, name_span, expr_span(expr), written, scopes, context, diagnostics)
+            local
+        }
         .Field(_, _, _) -> sema_stmt_check_projected_assignment(target, op, op_span, expr, environment, program, scopes, state, tail_store, context, diagnostics)
         .Index(base, index, _, _) -> {
             // A plain `buf[i] = …` fills one slot of a fixed
