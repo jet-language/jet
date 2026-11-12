@@ -364,7 +364,7 @@ jet_driver_query_build_plan: fn(owned_request: &&JetDriverCompileRequest, scope:
 // made it, as its note (`detail`); the report itself names the module's
 // virtual source. A report in a module a `Compiler` value made names the
 // call and the function that made it, which may be a dependency's function
-// the root handed the value to.
+// the root handed the value to, then each handoff that led there.
 jet_driver_build_generated_notes: fn(diagnostics: &[Diagnostic], package: String, rows: [BuildSessionGeneratedModule], build_path: String, build_source: String) Never! {
     loop index in 0..<diagnostics.len() {
         if diagnostics[index].detail != None -> next
@@ -373,8 +373,8 @@ jet_driver_build_generated_notes: fn(diagnostics: &[Diagnostic], package: String
             if diagnostics[index].source_path != Val(jet_driver_generated_module_path(row.package ?? package, row.path)) -> next
             maker: row.producer ?? ""
             note = if {
-                row.rewrites == .Val(function) -> Val(" Note: `meta.rewrite_body` in {maker} gave `{function}` this body")
-                row.producer != None -> Val(" Note: `meta.add` in {maker} added this module through the root's `Compiler` value")
+                row.rewrites == .Val(function) -> Val(" Note: `meta.rewrite_body` in {maker} gave `{function}` this body{jet_driver_build_generated_handoffs(row)}")
+                row.producer != None -> Val(" Note: `meta.add` in {maker} added this module through the root's `Compiler` value{jet_driver_build_generated_handoffs(row)}")
                 else -> Val(" Note: `b.generate(\"{row.name}\")` at {jet_driver_build_entry_site(build_path, build_source, row.start)} generated this module")
             }
             break

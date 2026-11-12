@@ -71,6 +71,14 @@ BuildSessionGeneratedModule: struct {
     // (JetDriver BuildQueries.jet).
     authority: String?{None}
     consent: String?{None}
+    // The handoffs the `Compiler` value took before the call that made the
+    // module, the root's first ("`build` handed it to `install` at
+    // main.jet:9"). Empty when the root's own function made it.
+    handoffs: [String]{[String]{}}
+    // The module's stable identity: a digest of the package it belongs to and
+    // its path, so a rebuild, a new body or a moved call keeps it
+    // (build_session_add_generated).
+    identity: String{""}
 }
 
 BuildSessionContribution: struct {
@@ -195,12 +203,17 @@ BuildSessionOption: struct {
 
 // One `Compiler` value `b.compiler(target)` made: the target it acts on, the
 // call's span, its provenance, and the dependencies whose functions it may
-// rewrite (`meta.allow_rewrite`), by name.
+// rewrite (`meta.allow_rewrite`), by name. A value passed to a function is a
+// new value of the same build (`compiler.handoff`): `root` is the value
+// `b.compiler` made, which holds the consent, and `handoffs` the chain of
+// passes that led here, root first.
 BuildSessionCompiler: struct {
     target: Int
     start: Int
     end: Int
     rewritable: [String]{[String]{}}
+    root: Int{-1}
+    handoffs: [String]{[String]{}}
 }
 
 BuildSessionState: struct {
@@ -475,7 +488,7 @@ build_session_call: fn(session: &BuildSession, method: String, args: [BuildSessi
         source: generated_source ?? return build_session_fail(state, "`meta.add` requires a `#code` item block or source text")
         authority: build_session_text(args, 3) ?? return build_session_fail(state, "`meta.add` lost its Meta effects")
         path: ".jet/generated/{build_session_package_dir(state.package)}/{build_session_safe_name(name)}.jet"
-        added: build_session_add_generated(state, BuildSessionGeneratedModule{name: name, path: path, source: source, source_digest: "", plugin: None, start: start, end: end, producer: build_session_text(args, 2), authority: Val(authority)})
+        added: build_session_add_generated(state, BuildSessionGeneratedModule{name: name, path: path, source: source, source_digest: "", plugin: None, start: start, end: end, producer: build_session_text(args, 2), authority: Val(authority), handoffs: state.compilers[compiler].handoffs.copy()})
         if added == .Value(_) {
             target: state.compilers[compiler].target
             if !build_session_contains_string(state.targets[target].sources, path) -> state.targets[target].sources.push(path)
@@ -484,12 +497,29 @@ build_session_call: fn(session: &BuildSession, method: String, args: [BuildSessi
     }
     // `meta.allow_rewrite(package: name)` on a `Compiler` value: the root's
     // consent that the value rewrites the functions of the dependency `name`.
+    // A handed value's consent is its root's, which every handoff shares.
     if method == "compiler.allow_rewrite" {
         if args.len() != 2 -> return build_session_fail(state, "`meta.allow_rewrite` takes one `package:` name")
         compiler: build_session_handle(state, args[0], "Compiler") ?? return build_session_fail(state, "the `Compiler` value does not belong to this build")
         name: build_session_text(args, 1) ?? return build_session_fail(state, "`meta.allow_rewrite`'s package must be a string")
-        if !build_session_contains_string(state.compilers[compiler].rewritable, name) -> state.compilers[compiler].rewritable.push(name)
+        root: build_session_compiler_root(state, compiler)
+        if !build_session_contains_string(state.compilers[root].rewritable, name) -> state.compilers[root].rewritable.push(name)
         return BuildSessionReply.Value{value: BuildSessionValue.Unit}
+    }
+    // A `Compiler` value passed to a function: sema sends the pass ("`build`
+    // handed it to `install` at main.jet:9"), and the callee gets a new value
+    // of this build whose chain ends with it, so what the callee makes names
+    // every handoff. The new value expires with the build like the root's.
+    if method == "compiler.handoff" {
+        if args.len() != 2 -> return build_session_fail(state, "a `Compiler` handoff takes one value and its place")
+        compiler: build_session_handle(state, args[0], "Compiler") ?? return build_session_fail(state, "the `Compiler` value does not belong to this build")
+        step: build_session_text(args, 1) ?? return build_session_fail(state, "a `Compiler` handoff lost its place")
+        chain := state.compilers[compiler].handoffs.copy()
+        chain.push(step)
+        target: state.compilers[compiler].target
+        root: build_session_compiler_root(state, compiler)
+        state.compilers.push(BuildSessionCompiler{target: target, start: start, end: end, root: root, handoffs: chain.move()})
+        return BuildSessionReply.Value{value: BuildSessionValue.Handle{type_name: "Compiler", session: state.id, id: state.compilers.len() - 1}}
     }
     // The check `meta.events` makes before it reads a `Compiler` value's
     // checked program: the value belongs to this build, which still runs.
@@ -519,7 +549,7 @@ build_session_call: fn(session: &BuildSession, method: String, args: [BuildSessi
         pasted: build_session_text(args, 4) ?? return build_session_fail(state, "`meta.rewrite_body` lost the name its paste line uses")
         own: owner == state.identity
         package_name: build_session_package_dir(if own -> state.package else -> owner)
-        if !own && !build_session_contains_string(state.compilers[compiler].rewritable, package_name) {
+        if !own && !build_session_contains_string(state.compilers[build_session_compiler_root(state, compiler)].rewritable, package_name) {
             return BuildSessionReply.Failure{error: {code: "E3514", what: "`meta.rewrite_body` would rewrite `{function}` of package `{package_name}`, which this build has not allowed", why: "Rewriting a dependency's code needs the root's consent, one line a reviewer reads", fix: "Add `meta.allow_rewrite(package: \"{package_name}\")` after the root's `b.compiler` call", start: start, end: end}}
         }
         paste: "#{{{function}.body}}"
@@ -538,7 +568,7 @@ build_session_call: fn(session: &BuildSession, method: String, args: [BuildSessi
         }
         path: ".jet/generated/{package_name}/rewrite_body/{build_session_safe_name(function)}.jet"
         name: if own -> "{function} body" else -> "{function} body of {package_name}"
-        added: build_session_add_generated(state, BuildSessionGeneratedModule{name: name, path: path, source: source, source_digest: "", plugin: None, start: start, end: end, rewrites: Val(function), package: if own -> None else -> Val(owner), producer: producer, authority: Val("Meta.Rewrite"), consent: if own -> None else -> Val(package_name)})
+        added: build_session_add_generated(state, BuildSessionGeneratedModule{name: name, path: path, source: source, source_digest: "", plugin: None, start: start, end: end, rewrites: Val(function), package: if own -> None else -> Val(owner), producer: producer, authority: Val("Meta.Rewrite"), consent: if own -> None else -> Val(package_name), handoffs: state.compilers[compiler].handoffs.copy()})
         if own && added == .Value(_) {
             target: state.compilers[compiler].target
             if !build_session_contains_string(state.targets[target].sources, path) -> state.targets[target].sources.push(path)
@@ -649,8 +679,17 @@ build_session_add_generated: fn(state: &BuildSessionState, generated: BuildSessi
     }
     checked := generated
     checked.source_digest = "sha256:{build_crypto.sha256(checked.source.bytes()).hex()}"
+    owner: checked.package ?? state.identity
+    checked.identity = "sha256:{build_crypto.sha256("jet-generated-v1\n{owner}\n{checked.path}".bytes()).hex()}"
     state.generated.push(checked)
     BuildSessionReply.Value{value: BuildSessionValue.Unit}
+}
+
+// The value `b.compiler` made that `compiler`, perhaps a handed value, came
+// from.
+build_session_compiler_root: fn(state: BuildSessionState, compiler: Int) -> Int Never! {
+    root: state.compilers[compiler].root
+    if root >= 0 -> root else -> compiler
 }
 
 // `source` with each line that is `paste` alone replaced by the lines of

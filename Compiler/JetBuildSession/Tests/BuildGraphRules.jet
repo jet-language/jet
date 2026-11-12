@@ -208,6 +208,34 @@ build_graph_rules_made: fn(session: &BuildSession, tool: BuildSessionValue, name
     assert_eq(permit.value.generated[0].start, 5)
 }
 
+// A `Compiler` value passed to a function is a new value of the same build
+// whose chain ends with that pass: what it adds records every handoff, root
+// first, and keeps a stable identity. The consent a handed value gives is
+// its root's, which the root's own rewrites read. A value of another build is
+// not handed.
+#Test("a_handed_compiler_value_records_its_chain_and_shares_its_roots_consent") {
+    a := build_graph_rules_session(191)
+    b := build_graph_rules_session(192)
+    empty: build_graph_rules_list([String]{})
+    app: build_graph_rules_value(build_session_call(a, "add_executable", [BuildSessionValue]{.Text(value: "app"), empty, empty}, None, false, 1, 2))
+    other: build_graph_rules_value(build_session_call(b, "add_executable", [BuildSessionValue]{.Text(value: "app"), empty, empty}, None, false, 3, 4))
+    meta: build_graph_rules_value(build_session_call(a, "compiler", [BuildSessionValue]{app}, None, false, 5, 6))
+    foreign: build_graph_rules_value(build_session_call(b, "compiler", [BuildSessionValue]{other}, None, false, 7, 8))
+    once: build_graph_rules_value(build_session_call(a, "compiler.handoff", [BuildSessionValue]{meta.copy(), .Text(value: "`build` handed it to `install` at main.jet:5")}, None, false, 9, 10))
+    twice: build_graph_rules_value(build_session_call(a, "compiler.handoff", [BuildSessionValue]{once, .Text(value: "`install` handed it to `stage` at tool.jet:4")}, None, false, 11, 12))
+    assert(build_graph_rules_failed(build_session_call(a, "compiler.handoff", [BuildSessionValue]{foreign, .Text(value: "`build` handed it to `install` at main.jet:5")}, None, false, 13, 14)))
+    assert(build_graph_rules_ok(build_session_call(a, "compiler.add", [BuildSessionValue]{twice.copy(), .Text(value: "greeting"), .Text(value: "`stage` at tool.jet:8"), .Text(value: "Meta.Generate")}, Val("greeting: fn() -> String {{ \"hi\" }}\n"), false, 15, 16)))
+    assert(build_graph_rules_ok(build_session_call(a, "compiler.allow_rewrite", [BuildSessionValue]{twice, .Text(value: "dep")}, None, false, 17, 18)))
+    assert(build_graph_rules_ok(build_session_call(a, "compiler.rewrite_body", [BuildSessionValue]{meta, .Text(value: "load"), .Text(value: "`build` at main.jet:9"), .Text(value: "dep"), .Text(value: "")}, Val("print(\"enter\")\n"), false, 19, 20)))
+    permit: a.storage.guard_read()
+    assert_eq(permit.value.generated.len(), 2)
+    assert_eq(permit.value.generated[0].handoffs, [String]{"`build` handed it to `install` at main.jet:5", "`install` handed it to `stage` at tool.jet:4"})
+    assert(permit.value.generated[0].identity.starts_with("sha256:"))
+    assert(permit.value.generated[0].identity != permit.value.generated[1].identity)
+    assert_eq(permit.value.generated[1].handoffs.len(), 0)
+    assert(permit.value.generated[1].consent == Val("dep"))
+}
+
 // A second compile (a workspace) is another Compiler value from the same
 // `b.compiler(output)`. No option of a build that holds a Compiler value may
 // skip or weaken a check: `bounds: off` or `report` is refused before

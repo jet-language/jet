@@ -1,0 +1,47 @@
+# #3526 c17: a module a `Compiler` value made carries a stable identity and
+# the whole chain of handoffs that led the value to the function that made
+# it. The root's `build` hands its value to the `tool` package's `install`,
+# which hands it on to `stage`, which adds the module. The plan's generated
+# row, the module's explanation and a report from code made the same way
+# name both handoffs, root first. The identity is a digest of the module's
+# package and path, so a new body keeps it while the content digest changes.
+fixture: a_generated_module_names_every_handoff_of_its_compiler_value.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet inspect graph handed/main.jet --json
+exit: 0
+json: stdout doc $.build.generated[0].path = ".jet/generated/handed/greeting.jet"
+json: stdout doc $.build.generated[0].id ^= "sha256:" # the module's stable identity
+json: stdout doc $.build.generated[0].made_by ^= "`meta.add` in `stage` at " # the function that made it
+json: stdout doc $.build.generated[0].handoffs[0] ^= "`build` handed it to `" # the root's build passed the value first
+json: stdout doc $.build.generated[0].handoffs[0] ~ "install` at " # to the dependency's install
+json: stdout doc $.build.generated[0].handoffs[0] ~ "main.jet:5" # at the root's call
+json: stdout doc $.build.generated[0].handoffs[1] ^= "`install` handed it to `stage` at " # then install passed it on
+json: stdout doc $.build.generated[0].handoffs[1] ~ "tool.jet:4" # at its own call
+json: stdout doc $.build.generated[0].authority = "Meta.Generate"
+step: jet inspect explain-build .jet/generated/handed/greeting.jet handed/main.jet
+exit: 0
+stdout: ~ "  id=sha256:" # the explanation names the identity
+stdout: ~ "  handed=`build` handed it to `" # and each handoff, root first
+stdout: ~ "  handed=`install` handed it to `stage` at " # then the next one
+capture: first_id = text stdout.after_first("  id=").split("\n", 0)
+capture: first_digest = text stdout.after_first("  digest=").split("\n", 0)
+capture: changed = text file.replace("added by the tool", "added again by the tool") tool/tool.jet
+write: tool/tool.jet = "{cap:changed}"
+step: jet inspect explain-build .jet/generated/handed/greeting.jet handed/main.jet
+exit: 0
+capture: second_id = text stdout.after_first("  id=").split("\n", 0)
+capture: second_digest = text stdout.after_first("  digest=").split("\n", 0)
+cap:second_id: = "{cap:first_id}" # a new body keeps the module's identity
+cap:second_digest: != "{cap:first_digest}" # while its content digest changes
+step: jet build handed/main.jet
+exit: 0
+step: {work}/handed/.jet/build/app
+exit: 0
+stdout: = "added again by the tool\n"
+step: jet build broken/main.jet
+exit: 1
+stderr: ~ "Note: `meta.add` in `stage_broken` at " # the function that made the module
+stderr: ~ "added this module through the root's `Compiler` value, after `build` handed it to `" # then the root's handoff
+stderr: ~ "`install_broken` handed it to `stage_broken` at " # and the next one
+file: broken/.jet/build/app absent

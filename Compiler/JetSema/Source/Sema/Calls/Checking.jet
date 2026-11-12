@@ -1396,8 +1396,26 @@ sema_call_check_bound_arguments_owned: fn(state: &SemaOwnershipState, callee: St
     lowered := sema_call_lower_bound_arguments(typed, params, args, environment, program)
     if !sema_call_prepare_variadic_elements(typed, params, args, lowered, environment, program, scopes, state, context, diagnostics) -> return None
     pins := sema_call_pin_binder_arguments(typed, params, lowered, environment, program, scopes, span)
-    packed: sema_call_pack_variadic_arguments(typed, params, lowered, environment, program, context, span, diagnostics) ?? return None
+    packed := sema_call_pack_variadic_arguments(typed, params, lowered, environment, program, context, span, diagnostics) ?? return None
+    sema_call_compiler_handoffs(callee, packed, environment, program, scopes, span)
     Val((lowered: packed.move(), pins: pins.move()))
+}
+
+// A `Compiler` value passed to a function delegates the root's control, and
+// the build's provenance records every handoff. The
+// argument becomes the value's handoff from this call's place to `callee`,
+// a new value of the same build whose chain ends with this pass, so what the
+// callee makes names each function the value went through.
+sema_call_compiler_handoffs: fn(callee: String, args: &[TCallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, span: Span) Never! {
+    loop index in 0..<args.len() {
+        if args[index].value.ty != (Type.Named{name: "Compiler"}) -> next
+        location: sema_expression_panic_location(environment, program, scopes, span)
+        step: sema_tree_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: "`{location.function}` handed it to `{callee}` at {location.file}:{location.line}"}}}, span)
+        // copy: the handoff's receiver is the argument's checked value, which is written back as the
+        // handoff's result; Jet has no exchange on an element of the write-borrowed `args`.
+        handed: sema_tree_node(Type.Named{name: "Compiler"}, TExprKind.HostCall{call: THostCall.Method{receiver: args[index].value.copy(), method: "handoff", args: [TExpr]{step}}}, args[index].value.span)
+        args[index].value = handed
+    }
 }
 
 // The index of the argument whose source holds `diagnostic`, or `args.len()`

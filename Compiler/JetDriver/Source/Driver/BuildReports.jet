@@ -67,8 +67,10 @@ jet_driver_build_explanation: fn(plan: BuildSessionPlan, subject: String) -> Jet
     loop generated_row in permit.value.generated {
         if generated_row.path == subject {
             facts.push("generated={generated_row.name}")
+            facts.push("id={generated_row.identity}")
             facts.push("digest={generated_row.source_digest}")
             if generated_row.producer != None -> facts.push("made_by={jet_driver_build_generated_maker(generated_row)}")
+            loop step in generated_row.handoffs -> facts.push("handed={step}")
             if generated_row.authority == .Val(authority) -> facts.push("authority={authority}")
             if generated_row.consent == .Val(consent) -> facts.push("consent={consent}")
             break
@@ -117,23 +119,33 @@ jet_driver_build_plan_json: fn(plan: BuildSessionPlan) -> String Never! {
     "{{\"schema_version\":1,\"default\":{default},\"targets\":[{targets.join(",")}],\"actions\":[{actions.join(",")}],\"action_keys\":[{keys.join(",")}],\"cache_hits\":[{hits.join(",")}],\"files\":[{files.join(",")}],\"affected_files\":[{files.join(",")}],\"toolchains\":[{tools.join(",")}],\"probes\":[{probes.join(",")}],\"generated\":[{generated.join(",")}]}}"
 }
 
-// One generated module of the plan: what made it (`made_by`) and, for a
-// module a `Compiler` value made, the `Meta` effect it was made under
+// One generated module of the plan: its stable identity (`id`, kept across
+// rebuilds and new bodies), what made it (`made_by`) and, for a module a
+// `Compiler` value made, the handoffs that value took from the root's build
+// to its maker (`handoffs`, root first), the `Meta` effect it was made under
 // (`authority`) and the dependency the root's consent named (`consent`).
 jet_driver_build_generated_json: fn(row: BuildSessionGeneratedModule) -> String Never! {
     made_by: if row.producer != None -> foundation_json_quote(jet_driver_build_generated_maker(row)) else -> "null"
     authority: if row.authority == .Val(text) -> foundation_json_quote(text) else -> "null"
     consent: if row.consent == .Val(text) -> foundation_json_quote(text) else -> "null"
-    "{{\"name\":{foundation_json_quote(row.name)},\"path\":{foundation_json_quote(row.path)},\"digest\":{foundation_json_quote(row.source_digest)},\"made_by\":{made_by},\"authority\":{authority},\"consent\":{consent}}}"
+    "{{\"id\":{foundation_json_quote(row.identity)},\"name\":{foundation_json_quote(row.name)},\"path\":{foundation_json_quote(row.path)},\"digest\":{foundation_json_quote(row.source_digest)},\"made_by\":{made_by},\"handoffs\":{jet_driver_build_strings(row.handoffs)},\"authority\":{authority},\"consent\":{consent}}}"
 }
 
 // Who made a module through a `Compiler` value: the call and the function
 // that made it, with its place. The root may hand the value to a dependency's
-// function, so this is the record of that handoff.
+// function; `handoffs` records each pass that led there.
 jet_driver_build_generated_maker: fn(row: BuildSessionGeneratedModule) -> String Never! {
     maker: row.producer ?? ""
     if row.rewrites == .Val(function) -> return "`meta.rewrite_body` of `{function}` in {maker}"
     "`meta.add` in {maker}"
+}
+
+// The handoffs that led a `Compiler` value to a module's maker, as a report
+// from the module says them: ", after `build` handed it to `install` at
+// main.jet:9". Empty for the root's own call.
+jet_driver_build_generated_handoffs: fn(row: BuildSessionGeneratedModule) -> String Never! {
+    if row.handoffs.len() == 0 -> return ""
+    ", after {row.handoffs.join(", then ")}"
 }
 
 // The core.build values `jet build` records, as JSON objects whose fields

@@ -196,6 +196,9 @@ jet_driver_build_step_call: fn(session: &BuildSession, inputs: JetDriverSharedBu
 // like `meta.add` adds source text. It refuses a name that is not one
 // identifier in its kind's casing (E0357) and a field type that is not one
 // type's spelling, so values a build computes write only that declaration.
+// A `Compiler` value passed to a function sends the pass sema wrote
+// (JetBuildSession `compiler.handoff`); the callee's new value carries the
+// same checked program.
 jet_driver_compiler_call: fn(session: &BuildSession, member: String, args: [TComptimeValue], span: Span) -> JetEvalBuildReply {
     compiler: if args.len() > 0 -> jet_eval_build_session_input(args[0]) else -> None
     if (member == "Compiler.events.functions" || member == "Compiler.events.calls") && args.len() == 2 {
@@ -207,6 +210,13 @@ jet_driver_compiler_call: fn(session: &BuildSession, member: String, args: [TCom
         heard: if member == "Compiler.events.calls" -> jet_eval_reflection_calls_to(program, watched) else -> jet_eval_reflection_marked_functions(program, watched)
         events: heard ?? return jet_driver_build_host_failure(session, span, "the `Compiler` value's checked program lost what `{member}` reads")
         return JetEvalBuildReply.Value{value: events}
+    }
+    if member == "Compiler.handoff" && args.len() == 2 {
+        held: compiler ?? return jet_driver_build_host_failure(session, span, "the `Compiler` value lost its build")
+        step: jet_eval_build_session_input(args[1]) ?? return jet_driver_build_host_failure(session, span, "`{member}` lost its place")
+        reply: build_session_call(session, "compiler.handoff", [BuildSessionValue]{held, step}, None, false, span.start, span.end)
+        if reply == .Value(value) -> return JetEvalBuildReply.Value{value: jet_driver_build_compiler_value(jet_eval_build_session_output(value), args[0])}
+        return jet_driver_compiler_reply(session, reply, span)
     }
     if member == "Compiler.allow_rewrite" && args.len() == 2 {
         held: compiler ?? return jet_driver_build_host_failure(session, span, "the `Compiler` value lost its build")
