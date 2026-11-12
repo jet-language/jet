@@ -95316,6 +95316,63 @@
       "completedAt": "2026-11-09T20:02:12.425Z",
       "questions": [],
       "retiredAt": "2026-11-12T20:06:51.993Z"
+    },
+    {
+      "id": "c0bf5kow",
+      "num": 6725,
+      "title": "I9/I2: comptime drops a runtime stop (from_bits of an Int at or above 2^63) and returns a value or crashes the comptime child",
+      "body": "Repro (dev 4169604f62 and later): main.jet = `use math: core.math` + `main: fn() { x: comptime { math.to_bits(math.from_bits(0x8000000000000000)) }; print(x) }`; `jet run main.jet` prints 'internal compiler error: the native comptime run failed internally: IR evaluation: memory access through a null pointer'. The same call at runtime is fine. Any Int literal >= 2^63 passed to from_bits inside comptime fails. Also check why the comptime path reports 'IR evaluation' when I9 says compile-time code runs natively at O0 with no interpreter. Found by G1Lead-2 during G1Lead-22b.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e5",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P0",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-09",
+          "by": "Main",
+          "text": "Correction from G1Lead-2 (verified on the s9 compiler): math.from_bits takes a signed Int, so from_bits(0x8000000000000000) is a runtime stop E3010 'Value doesn't fit in destination type' (Math.jet:11557). At comptime the stop is not reported: (1) word: fn() -> Int { math.to_bits(math.from_bits(0x8000000000000000)) } with a: comptime { word() } builds and prints 1; (2) inside a [Int]-returning loop, b: comptime { words() } is an ICE 'the comptime child ended on signal 6' (the null-pointer ICE is a variant). Comptime must report the same stop the runtime does (I9), and never an ICE for a user stop (I2). The repro is with G1Lead-2's lane."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Each repro reports the same E3010 stop at comptime as at runtime, as a user diagnostic naming the comptime site, on every tier; no ICE and no value. A cases row pins the scalar and the [Int]-loop forms.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed cc9be9ffa5 on dev (train 1, 6a06b917cb..0f193199cc; SUB G1Lead-23). Every test line of the SUB ran with the train-1 compiler and passed (Lander's list of fully proven SUBs, 2026-11-09): each runtime stop kind, the scalar and the [Int]-loop from_bits forms included, stops the fold with its E3010 at the comptime call on O0, O1 and O2; cases row every_runtime_stop_at_compile_time_sto… pins both forms.",
+          "at": "2026-11-09T21:34:50.954Z"
+        },
+        {
+          "n": 2,
+          "text": "The comptime path's 'IR evaluation' wording is explained: either it is the native O0 child (and the message is corrected), or an interpreter path exists, which is an I9 defect recorded on its own card.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed cc9be9ffa5 on dev (train 1; SUB G1Lead-23), tests passed with the train-1 compiler: no interpreter exists; the 'IR evaluation' prefix named the JetEval IR module and is removed, and each caller now names the native run.",
+          "at": "2026-11-09T21:34:53.019Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-09T14:46:19.481Z",
+      "updated": "2026-11-09T21:35:15.921Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 2,
+      "completedAt": "2026-11-09T21:35:15.921Z",
+      "questions": [],
+      "retiredAt": "2026-11-12T21:36:17.191Z"
     }
   ]
 }

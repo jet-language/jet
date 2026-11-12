@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6777,
-    "rev": 100080,
+    "rev": 100084,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -55527,8 +55527,8 @@
       "parentId": "c02y3vkg",
       "needsAcceptance": false,
       "created": "2026-10-16T10:54:43.172Z",
-      "updated": "2026-11-12T12:26:57.370Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-12T21:34:06.321Z",
+      "updatedBy": "owner",
       "goals": [
         "G3"
       ],
@@ -96147,61 +96147,6 @@
       "criteriaLastN": 4
     },
     {
-      "id": "c0bf5kow",
-      "num": 6725,
-      "title": "I9/I2: comptime drops a runtime stop (from_bits of an Int at or above 2^63) and returns a value or crashes the comptime child",
-      "body": "Repro (dev 4169604f62 and later): main.jet = `use math: core.math` + `main: fn() { x: comptime { math.to_bits(math.from_bits(0x8000000000000000)) }; print(x) }`; `jet run main.jet` prints 'internal compiler error: the native comptime run failed internally: IR evaluation: memory access through a null pointer'. The same call at runtime is fine. Any Int literal >= 2^63 passed to from_bits inside comptime fails. Also check why the comptime path reports 'IR evaluation' when I9 says compile-time code runs natively at O0 with no interpreter. Found by G1Lead-2 during G1Lead-22b.",
-      "kind": "bug",
-      "track": "epoch",
-      "epoch": "e5",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P0",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-09",
-          "by": "Main",
-          "text": "Correction from G1Lead-2 (verified on the s9 compiler): math.from_bits takes a signed Int, so from_bits(0x8000000000000000) is a runtime stop E3010 'Value doesn't fit in destination type' (Math.jet:11557). At comptime the stop is not reported: (1) word: fn() -> Int { math.to_bits(math.from_bits(0x8000000000000000)) } with a: comptime { word() } builds and prints 1; (2) inside a [Int]-returning loop, b: comptime { words() } is an ICE 'the comptime child ended on signal 6' (the null-pointer ICE is a variant). Comptime must report the same stop the runtime does (I9), and never an ICE for a user stop (I2). The repro is with G1Lead-2's lane."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "Each repro reports the same E3010 stop at comptime as at runtime, as a user diagnostic naming the comptime site, on every tier; no ICE and no value. A cases row pins the scalar and the [Int]-loop forms.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Landed cc9be9ffa5 on dev (train 1, 6a06b917cb..0f193199cc; SUB G1Lead-23). Every test line of the SUB ran with the train-1 compiler and passed (Lander's list of fully proven SUBs, 2026-11-09): each runtime stop kind, the scalar and the [Int]-loop from_bits forms included, stops the fold with its E3010 at the comptime call on O0, O1 and O2; cases row every_runtime_stop_at_compile_time_sto… pins both forms.",
-          "at": "2026-11-09T21:34:50.954Z"
-        },
-        {
-          "n": 2,
-          "text": "The comptime path's 'IR evaluation' wording is explained: either it is the native O0 child (and the message is corrected), or an interpreter path exists, which is an I9 defect recorded on its own card.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Landed cc9be9ffa5 on dev (train 1; SUB G1Lead-23), tests passed with the train-1 compiler: no interpreter exists; the 'IR evaluation' prefix named the JetEval IR module and is removed, and each caller now names the native run.",
-          "at": "2026-11-09T21:34:53.019Z"
-        }
-      ],
-      "refs": [],
-      "tags": [],
-      "goals": [],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-11-09T14:46:19.481Z",
-      "updated": "2026-11-09T21:35:15.921Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 2,
-      "completedAt": "2026-11-09T21:35:15.921Z"
-    },
-    {
       "id": "c0qwfnnb",
       "num": 6726,
       "title": "The repository root tracks 209 .jet/ run artifacts (evidence, stamps, state/jobs.db, perf traces, proofs)",
@@ -98491,7 +98436,13 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-12",
+          "by": "Main",
+          "text": "Answered the owner question on D-COMPTIME-SIZE1 (q197tdsb). c3 (read-only placement), c4 (length folding) and new c5 (unread bytes not emitted) are fixes built without a vote. The ballot is to be rewritten around the one remaining owner choice: optional compressed storage for large read data in size-targeted builds, with measured options and an adversarial review, before it goes back to the owner. Option A (report only) is withdrawn as the recommendation."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -98528,6 +98479,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-12T10:57:03.266Z"
+        },
+        {
+          "n": 5,
+          "text": "Bytes of a build-time value that no run-time code reads are not emitted. In the D-COMPTIME-SIZE1 program (two 50 MB repeats used only for their lengths), the --optimize=full binary holds neither run and is within 10% of the size of the same program reading its size at run time (136,272 bytes on seed-b13). Proof: a case builds it, asserts the binary size bound and the output 100000000, and readelf shows no 50 MB run.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-12T21:36:18.313Z"
         }
       ],
       "refs": [],
@@ -98536,9 +98496,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-12T10:16:07.441Z",
-      "updated": "2026-11-12T11:20:18.865Z",
-      "updatedBy": "owner",
-      "criteriaLastN": 4
+      "updated": "2026-11-12T21:36:19.184Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 5
     },
     {
       "id": "c0yysi3q",
@@ -196716,8 +196676,10 @@
         }
       ],
       "draft": false,
-      "status": "open",
-      "created": "2026-11-12T12:26:57.370Z"
+      "status": "ratified",
+      "created": "2026-11-12T12:26:57.370Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-11-12"
     }
   ],
   "questions": [
@@ -199077,9 +199039,11 @@
       "by": "owner",
       "kind": "question",
       "text": "What would be the tradeoffs of encoding & compression? wouldnt that be part of building a binary anyway? We are trying to win against every other language and hit hand optimized machine code level for bin size, speed, performance, etc. How do other languages handle this? Sweeping it under the rug rather than fixing it doesnt seem like a good solution",
-      "status": "open",
-      "answer": "",
-      "created": "2026-11-12T11:20:18.865Z"
+      "status": "answered",
+      "answer": "You're right, and the recommendation (A, a report) was wrong. Reporting the cost leaves it in place. Here is the full answer, and what changes.\n\n1. This program shouldn't carry the data at all. It only uses the two lengths. Hand-written machine code for it prints 100000000 and holds no string bytes. Zig, Rust and C++ get there as well: the length of a constant is itself a constant, so the bytes nothing reads are never emitted. Jet today stores both 50 MB runs and then rescans them at run time to count characters. That's an optimizer defect, not a policy question, so it gets fixed without a ballot: #6769 c4 (fold the length) and a new c5 (bytes no run-time code reads are not emitted; this program's binary must come out about as small as the version that reads the size at run time, 136 KB).\n\n2. Data the program really reads goes in read-only pages, raw. That's what every peer does (C, C++, Rust, Go, Zig): constants sit uncompressed in .rodata. The kernel maps those pages from the file on demand, so only the pages actually touched use RAM, they're shared between processes running the same binary, and they can be dropped and reloaded without swap. Today Jet puts them in writable .data, which loses the sharing; #6769 c3 fixes that.\n\n3. Compression is not part of building a binary in any mainstream toolchain. Compilers and linkers don't compress code or data; the one exception is debug sections (`--compress-debug-sections=zstd`), which never load at run time. Packers like UPX are a separate, opt-in step. The trade-offs:\n- Size: large wins on repetitive data (50 MB of \"x\" compresses to a few bytes), about 2-4x on typical tables, nothing on data that's already dense.\n- Speed: the data must be decoded before use. zstd decodes at roughly 1-2 GB/s per core and LZ4 at about 4 GB/s, so 50 MB costs tens of milliseconds at startup or at first use.\n- Memory: decoded data lives in private anonymous memory. It's always resident, counted in RSS, never shared between processes, and can't be dropped without swap. Raw read-only data can be all of those things.\nSo compression swaps disk bytes for RAM and startup time. Under the gate (Jet must match hand-optimized code on cycles and bytes), it loses for data that is read, except where disk or download size is the actual target, such as embedded or web.\n\n4. How the peers handle huge compile-time values: C++ can't keep a compile-time heap string at run time at all (allocations during constant evaluation must be freed before evaluation ends), and clang and GCC cap evaluation steps. Rust's const evaluation can't build a String. Zig can build a large array at compile time, needs an explicit evaluation budget for long loops, and stores the result raw. None compress it.\n\nWhat I'm doing: c3, c4 and c5 on #6769 are built as fixes, with no vote. I'm withdrawing this ballot's current options and rewriting it around the only real choice left: whether Jet offers compressed storage for large read data, for size-targeted builds only (embedded, web), and how that's switched on. It comes back to you with measured numbers for each option, after an adversarial review.",
+      "created": "2026-11-12T11:20:18.865Z",
+      "answeredAt": "2026-11-12",
+      "answeredBy": "Main"
     }
   ],
   "ideas": [
@@ -199936,6 +199900,34 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-12T21:36:19.184Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0xphd0i",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-12T21:36:18.313Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0xphd0i",
+      "note": "#5 Bytes of a build-time value that no run-time code reads are "
+    },
+    {
+      "at": "2026-11-12T21:36:17.021Z",
+      "by": "Main",
+      "action": "question.answer",
+      "ref": "q197tdsb",
+      "note": ""
+    },
+    {
+      "at": "2026-11-12T21:34:06.321Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-CONTEXT-CB1",
+      "note": "A"
+    },
     {
       "at": "2026-11-12T21:28:19.083Z",
       "by": "Main",
