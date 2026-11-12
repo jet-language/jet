@@ -21,8 +21,8 @@
 // the fixtures and parity cases Tools/agent/ScriptPairing.jet describes. Each
 // entry is judged against its own original only. Performance ranks first:
 // the job, wall time and peak memory decide a switch, with the reasoning bar
-// beside them; source tokens are measured and reported but block a switch
-// only while a gap names no criterion.
+// beside them; source tokens are minimized, measured and reported, but never
+// fail a port: clarity beats terseness.
 //
 // (1) parity: on every case both programs, each in a fresh copy of the
 //     fixtures, exit with the case's `exit` (0 when it names none) and do the
@@ -51,10 +51,11 @@
 //     worse for Jet. A missing record, a missing or unknown checklist item,
 //     or an unknown field fails the bar; it never passes by default.
 // (4) tokens: the Jet twin's source tokens against the original's, by one
-//     written rule per language (TOKEN RULES below), always reported. Jet at
-//     or below the original passes; a twin above it passes only when the
-//     entry's `tool.token_gaps` names what closes the gap (each a Core API
-//     criterion such as "#5072 c36" or a syntax ballot such as "D-SH-RUN1").
+//     written rule per language (TOKEN RULES below), always reported and
+//     never failing a measured port. A twin above the original names the
+//     Core API or syntax it is missing in the entry's `tool.token_gaps` (each
+//     a Core API criterion such as "#5072 c36" or a syntax ballot such as
+//     "D-SH-RUN1"), which the detail reports, as it reports a gap left unnamed.
 //
 // The verdict is PASS only when all four bars hold. Every entry and every bar
 // is judged and reported: one `entry<TAB>bar<TAB>PASS|FAIL<TAB>detail` row
@@ -1547,15 +1548,16 @@ speed_bar: fn(wall_original: [Int], wall_jet: [Int], peak_original: [Int], peak_
     Bar{name: "speed", pass: wall == .Win && peak == .Win, detail: "{wall_text}; {peak_text}; medians of {wall_jet.len()} interleaved rounds"}
 }
 
-// The tokens bar: Jet at or below the original, or a gap `gaps` names what
-// closes.
+// The tokens bar: the counts and, for a twin above the original, the gaps
+// `gaps` names. A measured count never fails; only `unmeasured` (why a side
+// could not be counted) does.
 tokens_bar: fn(original: Int, twin: Int, gaps: [String], unmeasured: String) -> Bar {
     if unmeasured != "" -> return Bar{name: "tokens", pass: false, detail: unmeasured}
     counts: "Jet {twin}, original {original} ({delta(twin - original)}, Jet/original {ratio(twin, original)})"
     if {
         twin <= original -> Bar{name: "tokens", pass: true, detail: counts}
         gaps.len() > 0 -> Bar{name: "tokens", pass: true, detail: "{counts}; the gap is {gaps.join(", ")}'s"}
-        else -> Bar{name: "tokens", pass: false, detail: "{counts}; the gap names no criterion or ballot (`tool.token_gaps`)"}
+        else -> Bar{name: "tokens", pass: true, detail: "{counts}; the gap names no missing Core API or syntax yet (`tool.token_gaps`)"}
     }
 }
 
@@ -2038,7 +2040,7 @@ plant_entry: fn(dir: String, name: String, original: String, twin: String, revie
     files.remove_all(dir) ?? ()
 }
 
-#Test("a planted entry that wins every bar passes, as do a named token gap and a job its check proves, and each planted loss fails its bar alone") {
+#Test("a planted entry that wins every bar passes, as do an over-count twin with or without a named token gap and a job its check proves, and each planted loss fails its bar alone") {
     dir: work_dir("planted") ?? panic("a scratch directory cannot be made: {err}")
     // Slow and large: half a gigabyte held for a second, a margin a warmed
     // Jet run on a loaded machine stays inside.
@@ -2063,7 +2065,7 @@ plant_entry: fn(dir: String, name: String, original: String, twin: String, revie
     plant_entry(dir, "wrongjob", "Tools/fx/job.py", "Tools/fx/WrongJob.jet", review, check: check, gaps: "[\"D-SH-RUN1\"]")
     jet: absolute(process.env_get("JET") ?? "jet")
     work: work_dir("work") ?? panic("a scratch directory cannot be made: {err}")
-    expected: [[], ["parity"], ["speed"], ["tokens"], ["reasoning"], [], [], ["parity"]]
+    expected: [[], ["parity"], ["speed"], [], ["reasoning"], [], [], ["parity"]]
     names: ["pass", "parity", "speed", "tokens", "reasoning", "gapped", "job", "wrongjob"]
     loop index in 0..<names.len() {
         report: judge(dir, names[index], jet, 3, work)
@@ -2077,4 +2079,14 @@ plant_entry: fn(dir: String, name: String, original: String, twin: String, revie
     assert(read_entry(dir, "badgap").problems.any(problem -> problem.contains("not a criterion")))
     files.remove_all(dir) ?? ()
     files.remove_all(work) ?? ()
+}
+
+#Test("a measured token count never fails the tokens bar; an unmeasured one does") {
+    over: tokens_bar(10, 25, [String]{}, "")
+    assert(over.pass)
+    assert(over.detail.contains("Jet 25, original 10") && over.detail.contains("names no missing Core API or syntax yet"))
+    gapped: tokens_bar(10, 25, [String]{"#5072 c36"}, "")
+    assert(gapped.pass && gapped.detail.contains("#5072 c36"))
+    assert(tokens_bar(10, 8, [String]{}, "").pass)
+    assert(!tokens_bar(10, 8, [String]{}, "the original cannot be read").pass)
 }
