@@ -1,0 +1,23 @@
+// The program side of `jet inspect facts --store=schema --kind=marker`: the
+// same query, read while building, printed the way the command prints it.
+use compiler: core.compiler
+
+SCHEMA: #run compiler.schema()
+IDENTITY: #run SCHEMA.identity().text()
+
+// One line per marker fact: its name and where it applies.
+marker_lines: fn(snapshot: compiler.SchemaSnapshot) -> [String] {
+    lines := [String]{}
+    rows: compiler.query(compiler.FactSource.Schema{snapshot: snapshot.copy()}, compiler.FactKind.Marker) ?? return lines
+    loop row in rows {
+        if row == .Schema(fact) -> lines.push("{fact.name}  {fact.scope.join(", ")}")
+    }
+    lines
+}
+
+LINES: #run marker_lines(SCHEMA)
+
+run: fn() {
+    print("schema snapshot {IDENTITY}, kind marker: {LINES.len()} facts, complete")
+    loop line in LINES -> print(line)
+}

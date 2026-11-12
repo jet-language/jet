@@ -1,0 +1,216 @@
+// `jet inspect facts --store=schema --kind=<kind> [--json]`: the command-line
+// view of `core.compiler.query`. The command checks one generated Jet program
+// whose build-time constants make that very query over `compiler.schema()`,
+// through the one comptime path (ConfigEval.jet's), and renders what the
+// query returned: the rows a Jet tool reads, the snapshot they come from, and
+// whether the answer is complete. A failed query is an error, never an empty
+// list.
+use {
+    cli_files: core.files
+    jet_driver.[
+        JetDriverAuthorizedSourceFile,
+        JetDriverAuthorizedSourceRoot,
+        JetDriverAuthorizedSourceSnapshot,
+        JetDriverCompileMode,
+        JetDriverCompileResult,
+        JetDriverCoreSource,
+        JET_DRIVER_EXIT_OK,
+        JET_DRIVER_EXIT_USER_ERROR,
+        jet_driver_compile,
+    ]
+    jet_foundation.[
+        DIAGNOSTIC_ERROR,
+        TComptimeValue,
+    ]
+    jet_sema.[SemaComptimeItemKind]
+}
+
+// The stores `--store` names: the running toolchain's executable schema.
+JET_CLI_FACT_STORES: [String]{"schema"}
+
+// The `--kind` spellings: the variants of core.compiler `FactKind`, lowercased.
+JET_CLI_FACT_KINDS: [String]{"marker", "read"}
+
+// The generated program's one file.
+JET_CLI_FACTS_FILE: "jet_inspect_facts.jet"
+
+// What the generated program's constants hold.
+JetCLIFactsAnswer: struct {
+    snapshot: String
+    rows: TComptimeValue
+    lines: String
+    failure: TComptimeValue
+    failure_text: String
+}
+
+// The checked query program's answer, or why there is none.
+JetCLIFactsOutcome: enum {
+    Answered(answer: JetCLIFactsAnswer)
+    Failed(reason: String)
+}
+
+jet_cli_inspect_facts: fn(jet_argv: [String], color: Bool{false}, json: Bool{false}) -> JetCLIPlan Never! {
+    fix: "run `jet inspect facts --store=schema --kind=marker`"
+    store := ""
+    kind := ""
+    sources := [String]{}
+    words: jet_cli_tail(jet_argv, 1)
+    index := 0
+    loop index < words.len() {
+        argument: words[index]
+        value: if index + 1 < words.len() -> words[index + 1].copy() else -> ""
+        if {
+            argument.starts_with("--store=") -> store = argument.slice(8..<argument.len())
+            argument.starts_with("--kind=") -> kind = argument.slice(7..<argument.len())
+            argument == "--store" -> {
+                store = value
+                index += 1
+            }
+            argument == "--kind" -> {
+                kind = value
+                index += 1
+            }
+            !argument.starts_with("-") -> sources.push(argument.copy())
+            else -> {}
+        }
+        index += 1
+    }
+    if store == "" -> return jet_cli_inspect_b_fail("E2104", "`jet inspect facts` needs a store: `--store=schema`", fix, color, json, JET_DRIVER_EXIT_USER_ERROR)
+    if !JET_CLI_FACT_STORES.contains(store) -> return jet_cli_inspect_b_fail("E2104", "`--store={store}` names no fact store; the stores are {JET_CLI_FACT_STORES.join(", ")}", fix, color, json, JET_DRIVER_EXIT_USER_ERROR)
+    if sources.len() > 0 -> return jet_cli_inspect_b_fail("E2104", "the schema store is the running toolchain's and takes no SOURCE: `{sources[0]}`", fix, color, json, JET_DRIVER_EXIT_USER_ERROR)
+    if kind == "" -> return jet_cli_inspect_b_fail("E2104", "`jet inspect facts` needs a fact kind: `--kind=marker` or `--kind=read`", fix, color, json, JET_DRIVER_EXIT_USER_ERROR)
+    if !JET_CLI_FACT_KINDS.contains(kind) -> return jet_cli_inspect_b_fail("E2104", "`--kind={kind}` names no fact kind; the kinds are {JET_CLI_FACT_KINDS.join(", ")}", fix, color, json, JET_DRIVER_EXIT_USER_ERROR)
+    answer: if jet_cli_facts_answer(kind) == {
+        .Answered(answered) -> answered
+        .Failed(reason) -> { return jet_cli_inspect_b_error("E2105", "the fact query did not run: {reason}", color, json, JET_DRIVER_EXIT_USER_ERROR) }
+    }
+    complete: answer.failure_text == ""
+    if json {
+        fields := [JetCLIStatusField]{
+            jet_cli_status_field("schema_version", jet_cli_status_int(1)),
+            jet_cli_status_field("store", jet_cli_status_text(store)),
+            jet_cli_status_field("kind", jet_cli_status_text(kind)),
+            jet_cli_status_field("snapshot", jet_cli_status_text(answer.snapshot)),
+            jet_cli_status_field("complete", jet_cli_status_bool(complete)),
+        }
+        if complete -> fields.push(jet_cli_status_field("rows", jet_cli_compiler_checked_value(answer.rows)))
+        if !complete {
+            fields.push(jet_cli_status_field("error", jet_cli_compiler_checked_value(answer.failure)))
+            fields.push(jet_cli_status_field("message", jet_cli_status_text(answer.failure_text)))
+        }
+        exit_code: if complete -> JET_DRIVER_EXIT_OK else -> JET_DRIVER_EXIT_USER_ERROR
+        return jet_cli_done("{jet_cli_status_render("inspect.facts", complete, [JetCLIStatusField]{jet_cli_status_field("facts", jet_cli_status_object(fields))})}\n", "", exit_code)
+    }
+    if !complete -> return jet_cli_inspect_b_error("E2105", "the {store} snapshot {answer.snapshot} has no complete answer: {answer.failure_text}", color, json, JET_DRIVER_EXIT_USER_ERROR)
+    jet_cli_done("{store} snapshot {answer.snapshot}, kind {kind}: {jet_cli_facts_count(answer.rows)} facts, complete\n{answer.lines}", "", JET_DRIVER_EXIT_OK)
+}
+
+// The number of rows a query returned.
+jet_cli_facts_count: fn(rows: TComptimeValue) -> Int Never! {
+    if rows == {
+        .List(values) -> values.len()
+        .Present(inner) -> jet_cli_facts_count(inner)
+        .Int(_) | .Float(_, _) | .Bool(_) | .Char(_) | .String(_) | .BigInt(_) | .Bytes(_) | .Map(_) | .Struct(_, _) | .Enum(_, _, _) | .Failed(_) | .Unit -> 0
+    }
+}
+
+// The program whose constants are the query: `kind` is a `--kind` spelling.
+jet_cli_facts_program: fn(kind: String) -> String Never! {
+    variant: "{kind.slice(0..<1).to_upper()}{kind.slice(1..<kind.len())}"
+    lines: [String]{
+        "use compiler: core.compiler",
+        "",
+        "JET_FACTS_SNAPSHOT: #run compiler.schema()",
+        "JET_FACTS_IDENTITY: #run JET_FACTS_SNAPSHOT.identity().text()",
+        "",
+        "jet_facts: fn() -> [compiler.Fact] compiler.MetadataError! {{",
+        "    compiler.query(compiler.FactSource.Schema{{snapshot: JET_FACTS_SNAPSHOT.copy()}}, compiler.FactKind.{variant})",
+        "}}",
+        "",
+        "jet_facts_failure: fn() -> compiler.MetadataError? {{",
+        "    if jet_facts() == .Err(error) -> return Val(error)",
+        "    None",
+        "}}",
+        "",
+        "jet_facts_lines: fn() -> String {{",
+        "    rows: jet_facts() ?? return \"\"",
+        "    text := \"\"",
+        "    loop row in rows {{",
+        "        if row == .Schema(fact) -> text = \"{{text}}{{fact.name}}  {{fact.scope.join(\", \")}}\\n\"",
+        "    }}",
+        "    text",
+        "}}",
+        "",
+        "JET_FACTS_ROWS: #run {{ jet_facts() ?? [compiler.Fact]{{}} }}",
+        "JET_FACTS_LINES: #run jet_facts_lines()",
+        "JET_FACTS_FAILURE: #run jet_facts_failure()",
+        "JET_FACTS_FAILURE_TEXT: #run {{ if jet_facts_failure() == .Val(failure) -> failure.display() else -> \"\" }}",
+        "",
+    }
+    lines.join("\n")
+}
+
+// Check the generated program and read its constants back.
+jet_cli_facts_answer: fn(kind: String) -> JetCLIFactsOutcome Never! {
+    base: cli_files.cwd() ?? "."
+    core_sources: if jet_cli_core_sources(base) == {
+        .Loaded(sources) -> sources
+        .Missing(what, _) -> { return JetCLIFactsOutcome.Failed{reason: what} }
+    }
+    result: jet_cli_facts_compile(jet_cli_facts_program(kind), core_sources, base) ?? return JetCLIFactsOutcome.Failed{reason: "{err:Debug}"}
+    if result.internal_problem == .Val(problem) -> return JetCLIFactsOutcome.Failed{reason: problem}
+    loop diagnostic in result.diagnostics {
+        if diagnostic.severity == DIAGNOSTIC_ERROR -> return JetCLIFactsOutcome.Failed{reason: "{diagnostic.code}: {diagnostic.what}"}
+    }
+    snapshot := ""
+    rows := TComptimeValue.Unit
+    lines := ""
+    failure := TComptimeValue.Unit
+    failure_text := ""
+    found := 0
+    loop value in result.comptime_values {
+        if value.kind != SemaComptimeItemKind.Constant -> next
+        key: value.key
+        if {
+            key.ends_with(":JET_FACTS_IDENTITY") -> snapshot = jet_cli_facts_text(value.value)
+            key.ends_with(":JET_FACTS_ROWS") -> rows = value.value.copy()
+            key.ends_with(":JET_FACTS_LINES") -> lines = jet_cli_facts_text(value.value)
+            key.ends_with(":JET_FACTS_FAILURE") -> failure = value.value.copy()
+            key.ends_with(":JET_FACTS_FAILURE_TEXT") -> failure_text = jet_cli_facts_text(value.value)
+            else -> next
+        }
+        found += 1
+    }
+    if found != 5 -> return JetCLIFactsOutcome.Failed{reason: "the query program produced {found} of its 5 build-time values"}
+    JetCLIFactsOutcome.Answered{answer: JetCLIFactsAnswer{snapshot: snapshot, rows: rows, lines: lines, failure: failure, failure_text: failure_text}}
+}
+
+jet_cli_facts_text: fn(value: TComptimeValue) -> String Never! {
+    if value == {
+        .String(text) -> text.copy()
+        .Present(inner) -> jet_cli_facts_text(inner)
+        .Int(_) | .Float(_, _) | .Bool(_) | .Char(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Struct(_, _) | .Enum(_, _, _) | .Failed(_) | .Unit -> ""
+    }
+}
+
+// Check `program` as the one file of a source root at `base` and run its
+// comptime stage (jet_config_compile's shape). Unannotated like
+// `jet_cli_compile_file`: the driver makes dynamic host calls.
+jet_cli_facts_compile: fn(program: String, core_sources: [JetDriverCoreSource], base: String) -> JetDriverCompileResult {
+    root: cli_files.realpath(base) ?? base
+    path: if root == "/" -> "/{JET_CLI_FACTS_FILE}" else -> "{root}/{JET_CLI_FACTS_FILE}"
+    identity: "inspect-facts-root:{root}"
+    snapshot: JetDriverAuthorizedSourceSnapshot{
+        roots: [JetDriverAuthorizedSourceRoot]{JetDriverAuthorizedSourceRoot{
+            canonical_path: root,
+            identity: identity,
+            allow_hardlinks: false,
+            files: [JetDriverAuthorizedSourceFile]{JetDriverAuthorizedSourceFile{path: path, relative_path: JET_CLI_FACTS_FILE, identity: "inspect-facts-file:{path}", source: program}},
+            foreign_cache_files: [JetDriverAuthorizedSourceFile]{},
+        }},
+        entry_root_identity: identity,
+        entry_path: path,
+    }
+    request := jet_cli_driver_request(snapshot, core_sources, None, JetDriverCompileMode.Comptime)
+    jet_driver_compile(request)
+}

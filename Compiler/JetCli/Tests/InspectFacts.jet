@@ -1,0 +1,31 @@
+// `jet inspect facts` answers one concrete question, a store and a kind, and
+// answers it with `core.compiler.query` itself.
+use {
+    jet_cli.[jet_cli_facts_program, jet_cli_plan]
+    jet_driver.[JET_DRIVER_EXIT_USER_ERROR]
+}
+
+inspect_facts_refused: fn(argv: [String], what: String) Never! {
+    if jet_cli_plan(argv) == .Refused(report, _, code, _) {
+        assert_eq(report.code, "E2104")
+        assert(report.what.contains(what))
+        assert_eq(code, JET_DRIVER_EXIT_USER_ERROR)
+        return
+    }
+    panic("`jet {argv.join(" ")}` was not refused")
+}
+
+#Test("inspect facts needs a store and a kind, and the schema store takes no SOURCE") {
+    inspect_facts_refused([String]{"inspect", "facts", "--kind=marker"}, "needs a store")
+    inspect_facts_refused([String]{"inspect", "facts", "--store=ledger", "--kind=marker"}, "`--store=ledger` names no fact store")
+    inspect_facts_refused([String]{"inspect", "facts", "--store=schema"}, "needs a fact kind")
+    inspect_facts_refused([String]{"inspect", "facts", "--store=schema", "--kind=field"}, "`--kind=field` names no fact kind")
+    inspect_facts_refused([String]{"inspect", "facts", "--store=schema", "--kind=marker", "main.jet"}, "takes no SOURCE: `main.jet`")
+    inspect_facts_refused([String]{"inspect", "facts", "--store", "schema", "--kind", "read", "main.jet"}, "takes no SOURCE: `main.jet`")
+}
+
+#Test("inspect facts runs the core.compiler query over the running schema") {
+    program: jet_cli_facts_program("read")
+    assert(program.contains("JET_FACTS_SNAPSHOT: #run compiler.schema()"))
+    assert(program.contains("compiler.query(compiler.FactSource.Schema{{snapshot: JET_FACTS_SNAPSHOT.copy()}}, compiler.FactKind.Read)"))
+}

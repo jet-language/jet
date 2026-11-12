@@ -1,0 +1,32 @@
+# `jet inspect facts` answers one concrete question: a store and a kind. A
+# missing or unknown store or kind, or a SOURCE for the schema store (the
+# running toolchain's own), is refused before any query runs (#4276 c97).
+step: jet inspect facts --kind=marker
+env: NO_COLOR=1
+exit: nonzero
+stderr: ~ "E2104" # the usage refusal's code; its text names the CLI's own help
+stderr: ~ "needs a store" # a missing store is refused before any query runs
+step: jet inspect facts --store=ledger --kind=marker
+env: NO_COLOR=1
+exit: nonzero
+stderr: ~ "E2104" # the usage refusal's code; its text names the CLI's own help
+stderr: ~ "names no fact store" # an unknown store is refused by name
+step: jet inspect facts --store=schema
+env: NO_COLOR=1
+exit: nonzero
+stderr: ~ "E2104" # the usage refusal's code; its text names the CLI's own help
+stderr: ~ "needs a fact kind" # a missing kind is refused before any query runs
+step: jet inspect facts --store=schema --kind=field
+env: NO_COLOR=1
+exit: nonzero
+stderr: ~ "E2104" # the usage refusal's code; its text names the CLI's own help
+stderr: ~ "names no fact kind" # an unknown kind is refused by name
+step: jet inspect facts --store=schema --kind=marker main.jet
+env: NO_COLOR=1
+exit: nonzero
+stderr: ~ "E2104" # the usage refusal's code; its text names the CLI's own help
+stderr: ~ "takes no SOURCE" # the schema store is the running toolchain's own
+step: jet inspect facts --kind=marker --json
+env: NO_COLOR=1
+exit: nonzero
+stdout: ~ "E2104" # the usage refusal goes to stdout as JSON
