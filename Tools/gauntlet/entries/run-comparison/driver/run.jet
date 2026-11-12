@@ -1,0 +1,44 @@
+// The gauntlet driver of the kit's Comparison module (#5072 c8), the twin of
+// Tools/gauntlet/harness/drivers/run-comparison.mjs: the peer-comparison
+// export of Tools/gauntlet/harness/run.mjs, comparisons.
+//
+//   jet driver comparisons DIR
+//
+// DIR holds JSON files, each an object with the `entry`, its `languages`,
+// its `rows` and, when it has them, its Jet `tiers`; each is compared in
+// name order and shown as the file name and the comparisons as JSON.
+package: {
+    name: "run_comparison_driver"
+    version: "0.0.1"
+    deps: {
+        jet_gauntlet_kit: ../../../kit,
+    }
+}
+
+use {
+    files: core.files
+    jet_gauntlet_kit.[peer_comparisons, read_json, value_at]
+    json: core.encoding.json
+    process: core.process
+}
+
+USAGE: "usage: driver comparisons DIR"
+
+print_comparisons: fn(dir: String) {
+    listed: files.list_dir(dir) ?? process.fail(1, "{dir} is not a directory")
+    names := listed.filter(item -> item.name.ends_with(".json")).map(item -> item.name.copy())
+    names.sort()
+    loop name in names {
+        input: read_json(files.join(dir, name)) ?? process.fail(1, "{name} is not a JSON file")
+        compared: peer_comparisons(value_at(input, "entry") ?? Dyn.Null, value_at(input, "languages") ?? Dyn.Null, value_at(input, "rows") ?? Dyn.Null, value_at(input, "tiers") ?? Dyn.object())
+        print("{name}\t{json.stringify(compared)}")
+    }
+}
+
+run: fn() {
+    args: process.args()
+    if {
+        args.get(0) == Val("comparisons") && args.len() >= 2 -> print_comparisons(args[1])
+        else -> process.fail(64, USAGE)
+    }
+}

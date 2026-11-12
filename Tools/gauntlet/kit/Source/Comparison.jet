@@ -1,0 +1,342 @@
+// How each declared peer compares with its matched Jet configuration: per
+// tier and metric, Jet's value against the peer row's, their ratio and its
+// verdict, with paired confidence evidence for sub-millisecond readings. The
+// twin of comparisons in Tools/gauntlet/harness/run.mjs.
+use {
+    json: core.encoding.json
+}
+
+// The schema of the timer's runtime samples.
+TIMER_SCHEMA: "jet.gauntlet.timer.v2"
+// The protocol of a service probe's samples.
+SERVICE_PROBE_PROTOCOL: "jet.gauntlet.service-probe-v1"
+
+// What one tier's cells are judged against: whether the matched Jet tier is
+// ready (and why not), its metrics and runtime, the peer row and the Jet
+// configuration matched with the peer.
+CellContext: struct {
+    ready: Bool
+    unavailable_reason: String?
+    jet_metrics: Dyn
+    jet_runtime: Dyn
+    peer: Dyn
+    configuration: String
+}
+
+// The metric a result's verdict per tier is read from.
+primary_metric: fn(mode: String) -> String {
+    if mode == {
+        "service" -> "service_latency_ms_p50"
+        "web" | "web-app" -> "runtime_first_stdout_seconds"
+        else -> "runtime_wall_seconds"
+    }
+}
+
+// The comparison of each declared peer in `languages` (`jet` and `jet-expert`
+// are not peers) with the Jet configuration it is matched with: an expert
+// peer with the `jet-expert` row on the AOT tier, another with the `jet` row
+// and the Jet `tiers`. Keyed by peer, in declaration order.
+peer_comparisons: fn(entry: Dyn, languages: Dyn, rows: Dyn, tiers: Dyn) -> Dyn {
+    mode: text_at(entry, "mode") ?? ""
+    metrics: comparison_metrics(mode)
+    primary: primary_metric(mode)
+    row_map: object_or_empty(Val(rows))
+    peers: items_at(languages, "").filter_map(item -> text_at(item, "")).filter(language -> language != "jet" && language != "jet-expert")
+    output := Dyn.object()
+    loop language in peers {
+        peer: row_map.get(language) ?? Dyn.Null
+        expert: language.ends_with("-expert")
+        configuration: jet_configuration(language)
+        matched: row_map.get(configuration) ?? Dyn.Null
+        compared_tiers: if expert -> expert_tiers(matched) else -> tiers
+        policy: peer_tier_policy(entry, language)
+        required: policy.filter(rule -> rule.required).map(rule -> rule.tier)
+        ready := true
+        loop tier in required {
+            if text_at(compared_tiers, "{tier}/status") != Val("ok") -> ready = false
+        }
+        declared: (value_at(entry, "non_applicable") ?? Dyn.Null).get(language)
+        declared_reason: truthy(declared)
+        peer_not_applicable: text_at(peer, "status") == Val("not_applicable")
+        undeclared: peer_not_applicable && !declared_reason
+        comparison := Dyn.object()
+        comparison["status"] = if undeclared -> Dyn.Text("invalid") else -> member(peer, "status") ?? Dyn.Text("unavailable")
+        comparison["applicable"] = Dyn.Bool(!peer_not_applicable || declared == None)
+        comparison["basis"] = if {
+            peer_not_applicable && declared_reason -> "declared-non-applicability"
+            peer_not_applicable -> "undeclared-non-applicability"
+            expert -> "jet-expert-aot-and-matched-peer"
+            policy.any(rule -> rule.tier == "run") -> "jet-aot-and-run"
+            else -> "jet-aot"
+        }
+        comparison["jet_configuration"] = configuration
+        comparison["jet_tiers_ready"] = Dyn.Bool(ready)
+        comparison["required_tiers"] = Dyn.Array(required.map(tier -> Dyn.Text(tier.copy())))
+        comparison["tier_policy"] = tier_policy_object(policy)
+        comparison["peer_sample"] = peer_sample(language, peer)
+        comparison["primary_metric"] = primary
+        comparison["metrics"] = Dyn.object()
+        comparison["tiers"] = Dyn.object()
+        comparison["verdicts"] = Dyn.object()
+        if undeclared {
+            comparison["reason"] = "peer is marked not_applicable without a declared structural reason"
+            output[language] = comparison
+            next
+        }
+        if peer_not_applicable {
+            if value_at(peer, "reason") == .Val(reason) -> comparison["reason"] = reason
+            if value_at(peer, "evidence") == .Val(evidence) -> comparison["evidence"] = evidence
+            output[language] = comparison
+            next
+        }
+        compared := Dyn.object()
+        verdicts := Dyn.object()
+        loop rule in policy {
+            tier_row: compared_tiers.get(rule.tier) ?? Dyn.Null
+            jet_row: if rule.tier == "aot" -> matched else -> tier_row
+            context: CellContext{
+                ready: text_at(tier_row, "status") == Val("ok"),
+                unavailable_reason: None,
+                jet_metrics: member(jet_row, "metrics") ?? Dyn.Null,
+                jet_runtime: member(jet_row, "runtime") ?? Dyn.Null,
+                peer: peer,
+                configuration: configuration,
+            }
+            cells := Dyn.object()
+            loop metric in metrics {
+                cells[metric] = if rule.tier == "run" -> run_tier_cell(entry, language, metric, tier_row, context) else -> metric_cell(entry, language, metric, rule.tier, context)
+            }
+            verdicts[rule.tier] = member(cells, "{primary}/verdict") ?? Dyn.Null
+            tier_comparison := Dyn.object()
+            tier_comparison["metrics"] = cells
+            tier_comparison["peer_sample"] = peer_sample(language, peer)
+            compared[rule.tier] = tier_comparison
+        }
+        comparison["metrics"] = member(compared, "aot/metrics") ?? Dyn.object()
+        comparison["tiers"] = compared
+        comparison["verdicts"] = verdicts
+        output[language] = comparison
+    }
+    output
+}
+
+// The one tier an expert peer is compared on: the AOT build of the
+// `jet-expert` row.
+expert_tiers: fn(matched: Dyn) -> Dyn {
+    aot := Dyn.object()
+    aot["status"] = if text_at(matched, "status") == Val("ok") -> Dyn.Text("ok") else -> member(matched, "status") ?? Dyn.Text("unavailable")
+    aot["metrics"] = member(matched, "metrics") ?? Dyn.object()
+    Dyn{[String: Dyn]{"aot": aot}}
+}
+
+// Which measured row of `language` a comparison reuses for every tier.
+peer_sample: fn(language: String, peer: Dyn) -> Dyn {
+    Dyn{[String: Dyn]{
+        "binding": PEER_SAMPLE_BINDING,
+        "source": "rows.{language}.metrics",
+        "language": language,
+        "source_sha256": member(peer, "metrics/source_sha256") ?? Dyn.Null,
+    }}
+}
+
+// One metric cell of one tier: Jet's value against the peer row's value.
+metric_cell: fn(entry: Dyn, language: String, metric: String, tier: String, context: CellContext) -> Dyn {
+    applicability: metric_applicability(entry, language, metric)
+    applicability_status: text_at(applicability, "status") ?? ""
+    if applicability_status == {
+        "invalid" -> {
+            cell := unjudged_cell("unmeasured", applicability)
+            cell["reason"] = member(applicability, "reason") ?? Dyn.Null
+            return cell
+        }
+        "not_applicable" -> return unjudged_cell("not_applicable", applicability)
+        else -> {}
+    }
+    if !comparable_at_tier(metric, tier) {
+        return unjudged_cell("not_applicable", Dyn{[String: Dyn]{
+            "status": "not_applicable",
+            "basis": "no_compile_phase",
+            "reason": "{metric} is a compile-only measurement and the interpreted {tier} tier has no compile phase.",
+            "evidence": "Build, rebuild, and binary metrics are measured only from the AOT artifact; interpreted tiers have no compile phase.",
+        }})
+    }
+    jet_value: positive_or_null(context.jet_metrics.get(metric))
+    peer_metrics: member(context.peer, "metrics") ?? Dyn.object()
+    peer_value: positive_or_null(peer_metrics.get(metric))
+    peer_ok: text_at(context.peer, "status") == Val("ok")
+    jet_number: number_at(jet_value, "")
+    peer_number: number_at(peer_value, "")
+    ratio: if context.ready && peer_ok && jet_number == .Val(jet) && peer_number == .Val(peer) -> Val(jet / peer) else -> None
+    evidence: comparison_evidence(metric, jet_value, peer_value, context, member(context.peer, "runtime") ?? Dyn.Null, peer_metrics)
+    evidence_ready: if evidence == .Val(found) -> evidence_side_ready(found, "jet") && evidence_side_ready(found, "peer") else -> true
+    inconclusive: evidence != None && !evidence_ready
+    verdict: if evidence_ready -> ratio_verdict(ratio) else -> None
+    cell := Dyn.object()
+    cell["status"] = if {
+        verdict != None -> "measured"
+        inconclusive -> "inconclusive"
+        else -> "unmeasured"
+    }
+    cell["jet"] = jet_value
+    cell["peer"] = peer_value
+    cell["ratio"] = if ratio == .Val(value) -> Dyn.Float(value) else -> Dyn.Null
+    cell["verdict"] = if verdict == .Val(text) -> Dyn.Text(text) else -> Dyn.Null
+    cell["evidence"] = evidence ?? Dyn.Null
+    cell["noise"] = evidence_pair(evidence, "noise")
+    cell["confidence"] = evidence_pair(evidence, "confidence")
+    cell["reason"] = if {
+        verdict != None -> Dyn.Null
+        inconclusive -> "sub-millisecond comparison lacks paired confidence evidence"
+        !context.ready -> context.unavailable_reason ?? "matched Jet {context.configuration} {tier} tier is unavailable"
+        !peer_ok -> "peer row is unavailable"
+        jet_value == Dyn.Null -> "matched Jet {context.configuration} metric is missing or invalid"
+        peer_value == Dyn.Null -> "peer metric is missing or invalid"
+        else -> "invalid metric ratio"
+    }
+    cell
+}
+
+// A cell that is not judged: its status and applicability, with no values.
+unjudged_cell: fn(status: String, applicability: Dyn) -> Dyn {
+    Dyn{[String: Dyn]{
+        "status": status,
+        "applicability": applicability,
+        "jet": Dyn.Null,
+        "peer": Dyn.Null,
+        "ratio": Dyn.Null,
+        "verdict": Dyn.Null,
+    }}
+}
+
+// The run tier's cell judges every gated cache state: it carries the first
+// state without a verdict, or else the state with the highest Jet/peer ratio,
+// so the cell wins only when every gated state wins.
+run_tier_cell: fn(entry: Dyn, language: String, metric: String, run_tier: Dyn, context: CellContext) -> Dyn {
+    run_ok: text_at(run_tier, "status") == Val("ok")
+    ordered := [(state: String, cell: Dyn)]{}
+    loop state in GATED_RUN_CACHE_STATES {
+        measured: member(run_tier, "cache_states/{state}") ?? Dyn.Null
+        state_context: CellContext{
+            ready: run_ok && text_at(measured, "status") == Val("ok"),
+            unavailable_reason: if run_ok -> Val("matched Jet {context.configuration} run tier has no measured {state} cache state") else -> None,
+            jet_metrics: member(measured, "metrics") ?? Dyn.Null,
+            jet_runtime: member(measured, "runtime") ?? Dyn.Null,
+            peer: context.peer,
+            configuration: context.configuration,
+        }
+        ordered.push((state: state, cell: metric_cell(entry, language, metric, "run", state_context)))
+    }
+    chosen := ordered[0]
+    unsettled: ordered.filter(item -> text_at(item.cell, "status") != Val("measured") && text_at(item.cell, "status") != Val("not_applicable"))
+    if {
+        unsettled.len() > 0 -> chosen = unsettled[0]
+        else -> loop item in ordered {
+            if (number_at(item.cell, "ratio") ?? 0.0) > (number_at(chosen.cell, "ratio") ?? 0.0) -> chosen = item
+        }
+    }
+    states := Dyn.object()
+    loop item in ordered {
+        states[item.state] = Dyn{[String: Dyn]{
+            "status": member(item.cell, "status") ?? Dyn.Null,
+            "jet": member(item.cell, "jet") ?? Dyn.Null,
+            "peer": member(item.cell, "peer") ?? Dyn.Null,
+            "ratio": member(item.cell, "ratio") ?? Dyn.Null,
+            "verdict": member(item.cell, "verdict") ?? Dyn.Null,
+            "reason": member(item.cell, "reason") ?? Dyn.Null,
+        }}
+    }
+    cell := chosen.cell
+    cell["cache_state"] = chosen.state
+    cell["cache_states"] = states
+    cell
+}
+
+// The paired Jet and peer evidence of a sub-millisecond reading, none for
+// another.
+comparison_evidence: fn(metric: String, jet_value: Dyn, peer_value: Dyn, context: CellContext, peer_runtime: Dyn, peer_metrics: Dyn) -> Dyn? {
+    if !sub_millisecond(metric, Val(jet_value), Val(peer_value)) -> return None
+    service: metric.starts_with("service_latency_ms_") || metric == "service_startup_seconds"
+    Val(Dyn{[String: Dyn]{
+        "metric": metric,
+        "jet": if service -> service_evidence(context.jet_metrics, metric) else -> runtime_evidence(context.jet_runtime, metric),
+        "peer": if service -> service_evidence(peer_metrics, metric) else -> runtime_evidence(peer_runtime, metric),
+    }})
+}
+
+// The timer samples behind a runtime reading, null without timer samples.
+runtime_evidence: fn(runtime: Dyn, metric: String) -> Dyn {
+    if !truthy(Val(runtime)) || text_at(runtime, "protocol") != Val(TIMER_SCHEMA) || !(value_at(runtime, "samples") == .Val(.Array(_))) -> return Dyn.Null
+    first_stdout: metric == "runtime_first_stdout_seconds"
+    field: if first_stdout -> "time_to_first_stdout_seconds" else -> "wall_seconds"
+    raw_field: if first_stdout -> "time_to_first_stdout_ns" else -> "wall_time_ns"
+    median: member(runtime, "median/{field}") ?? Dyn.Null
+    noise: member(runtime, "noise/metrics/{field}") ?? Dyn.Null
+    samples: items_at(runtime, "samples").map(sample -> Dyn{[String: Dyn]{"value": finite_or_null(sample, field), "raw_ns": finite_or_null(sample, raw_field)}})
+    Dyn{[String: Dyn]{
+        "protocol": TIMER_SCHEMA,
+        "raw_samples": Dyn.Array(samples),
+        "median": median,
+        "noise": noise,
+        "confidence": member(runtime, "confidence") ?? Dyn.Null,
+    }}
+}
+
+// The probe samples behind a service reading, null without them.
+service_evidence: fn(metrics: Dyn, metric: String) -> Dyn {
+    if !truthy(Val(metrics)) -> return Dyn.Null
+    latency: metric.starts_with("service_latency_ms_")
+    values: value_at(metrics, if latency -> "service_latency_samples_ms" else -> "service_startup_samples_seconds") ?? Dyn.Null
+    if !(values == .Array(_)) -> return Dyn.Null
+    Dyn{[String: Dyn]{
+        "protocol": SERVICE_PROBE_PROTOCOL,
+        "raw_samples": values,
+        "median": member(metrics, metric) ?? Dyn.Null,
+        "noise": member(metrics, if latency -> "service_latency_noise" else -> "service_startup_noise") ?? Dyn.Null,
+        "confidence": member(metrics, if latency -> "service_latency_confidence" else -> "service_startup_confidence") ?? Dyn.Null,
+    }}
+}
+
+// Whether one side's evidence has available confidence, noise and samples.
+evidence_side_ready: fn(evidence: Dyn, side: String) -> Bool {
+    text_at(evidence, "{side}/confidence/status") == Val("available") && truthy_at(evidence, "{side}/noise") && non_empty(value_at(evidence, "{side}/raw_samples"))
+}
+
+// The Jet and peer `field` of `evidence`, null without evidence.
+evidence_pair: fn(evidence: Dyn?, field: String) -> Dyn {
+    found: evidence ?? return Dyn.Null
+    Dyn{[String: Dyn]{"jet": member(found, "jet/{field}") ?? Dyn.Null, "peer": member(found, "peer/{field}") ?? Dyn.Null}}
+}
+
+// `value` when it is a positive number, else null.
+positive_or_null: fn(value: Dyn?) -> Dyn {
+    if positive(value) -> return value ?? Dyn.Null
+    Dyn.Null
+}
+
+// The `field` of `sample` when it is a number, else null.
+finite_or_null: fn(sample: Dyn, field: String) -> Dyn {
+    if number_at(sample, field) == None -> return Dyn.Null
+    value_at(sample, field) ?? Dyn.Null
+}
+
+#Test("a peer is compared per tier and metric, and an undeclared not-applicable peer is invalid") {
+    entry: json.parse(`{"name": "demo", "mode": "web-app", "languages": ["jet", "rust", "js"], "non_applicable": {}}`) ?? panic("entry")
+    rows: json.parse(`{"jet": {"status": "ok", "metrics": {"runtime_first_stdout_seconds": 2, "loc": 4}}, "rust": {"status": "ok", "metrics": {"runtime_first_stdout_seconds": 4, "loc": 2, "source_sha256": "r"}}, "js": {"status": "not_applicable"}}`) ?? panic("rows")
+    tiers: json.parse(`{"aot": {"status": "ok"}}`) ?? panic("tiers")
+    shown: peer_comparisons(entry, value_at(entry, "languages") ?? Dyn.Null, rows, tiers)
+    assert_eq(text_at(shown, "rust/tiers/aot/metrics/runtime_first_stdout_seconds/verdict"), Val("win"))
+    assert_eq(text_at(shown, "rust/tiers/aot/metrics/loc/verdict"), Val("loss"))
+    assert_eq(text_at(shown, "rust/verdicts/aot"), Val("win"))
+    assert_eq(text_at(shown, "rust/tiers/aot/metrics/binary_bytes/reason"), Val("matched Jet jet metric is missing or invalid"))
+    assert_eq(text_at(shown, "js/status"), Val("invalid"))
+}
+
+#Test("a sub-millisecond run cell without paired evidence is inconclusive in its cache state") {
+    entry: json.parse(`{"name": "demo", "mode": "batch", "languages": ["jet", "python"]}`) ?? panic("entry")
+    rows: json.parse(`{"jet": {"status": "ok", "metrics": {}}, "python": {"status": "ok", "metrics": {"runtime_wall_seconds": 0.0004}}}`) ?? panic("rows")
+    tiers: json.parse(`{"aot": {"status": "ok"}, "run": {"status": "ok", "cache_states": {"edited": {"status": "ok", "metrics": {"runtime_wall_seconds": 0.0002}}}}}`) ?? panic("tiers")
+    cell: member(peer_comparisons(entry, value_at(entry, "languages") ?? Dyn.Null, rows, tiers), "python/tiers/run/metrics/runtime_wall_seconds") ?? panic("cell")
+    assert_eq(text_at(cell, "status"), Val("inconclusive"))
+    assert_eq(text_at(cell, "cache_state"), Val("edited"))
+    assert_eq(text_at(cell, "cache_states/repeat/reason"), Val("sub-millisecond comparison lacks paired confidence evidence"))
+}
