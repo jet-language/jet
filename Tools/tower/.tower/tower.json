@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6768,
-    "rev": 99923,
+    "nextNum": 6770,
+    "rev": 99925,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -99419,6 +99419,62 @@
       "needsAcceptance": false,
       "created": "2026-11-12T10:11:00.976Z",
       "updated": "2026-11-12T10:11:00.976Z",
+      "updatedBy": "Main"
+    },
+    {
+      "id": "c06pt752",
+      "num": 6768,
+      "title": "I1: Close never runs for a reassigned close local and its temporaries (resource_close/reassigned_close_local_frees_its_old_buffer_once)",
+      "body": "Reproduced by G11Speed-4 on 2026-11-12 on seed-b13 against origin/dev; not marked known-failing. tests resource_close/reassigned_close_local_frees_its_old_buffer_once fails with a snapshot mismatch on every tier (O0, O1, O2, checked-alloc, web). The golden's first 3 lines, 'close x sum 2100', 'close t sum 1500' and 'close n sum 600', are missing. In reduced(), with 't: sub(x, n); x = t', the Close of the old x, of t and of n never runs. A safe-Jet resource leak, so I1 applies. Repro: $JET_SCRATCH_ROOT/lanes/G11Speed/work/gen/devred/.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e14",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P0",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "goals": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-12T10:16:05.809Z",
+      "updated": "2026-11-12T10:16:05.809Z",
+      "updatedBy": "Main"
+    },
+    {
+      "id": "c0xphd0i",
+      "num": 6769,
+      "title": "I9: a built binary keeps strings past their last use (memory_semantics/strings_free_at_their_last_use passes on jet run, fails after jet build)",
+      "body": "Reproduced by G11Speed-4 on 2026-11-12 on seed-b13 against origin/dev; not marked known-failing. jet run at O0, O1, O2 and default passes. The built binary (jet build --optimize=full, then run it) exits 70: 'Stop [E3001]: panic: last use: peak grew 97536 kB, more than 1.5 strings of 50000000 bytes' at main.jet:31 in measure. Drop at last use holds when run from memory but not in the built artifact: one meaning across tiers (I9) is broken. Repro: $JET_SCRATCH_ROOT/lanes/G11Speed/work/gen/devred/.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e14",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "goals": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-12T10:16:07.441Z",
+      "updated": "2026-11-12T10:16:07.441Z",
       "updatedBy": "Main"
     }
   ],
@@ -200033,6 +200089,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-12T10:16:07.441Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0xphd0i",
+      "note": "I9: a built binary keeps strings past their last use (memory_semantics/strings_free_at_their_last_use passes on jet run, fails after jet build)"
+    },
+    {
+      "at": "2026-11-12T10:16:05.809Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c06pt752",
+      "note": "I1: Close never runs for a reassigned close local and its temporaries (resource_close/reassigned_close_local_frees_its_old_buffer_once)"
+    },
     {
       "at": "2026-11-12T10:11:00.976Z",
       "by": "Main",
