@@ -21,8 +21,10 @@ CoreDeclarationFile: struct {
 }
 
 // One exported Core type: its kind (`plain` or `crypto_nominal`), its enum
-// variants, its generic arity (0 when it takes none) and, until it is
-// resolved, the module a `from(core.x)` re-export names.
+// variants, its generic arity (0 when it takes none) and the module a
+// `from(core.x)` re-export names ("" for a defining leaf). Resolving a
+// re-export copies its definition's kind, variants and arity and keeps the
+// module it names.
 CoreDeclarationType: struct {
     name: String
     kind: String
@@ -447,7 +449,7 @@ core_decl_resolve_type: fn(modules: [CoreDeclarationModule], module_name: String
             nested := visiting.copy()
             nested.push(key)
             canonical: core_decl_resolve_type(modules, owner.name, target, nested) ?? return Err(err)
-            return Ok(CoreDeclarationType{name: leaf.name.copy(), kind: canonical.kind.copy(), variants: canonical.variants.copy(), generic_arity: canonical.generic_arity, from_module: ""})
+            return Ok(CoreDeclarationType{name: leaf.name.copy(), kind: canonical.kind.copy(), variants: canonical.variants.copy(), generic_arity: canonical.generic_arity, from_module: leaf.from_module.copy()})
         }
         break
     }

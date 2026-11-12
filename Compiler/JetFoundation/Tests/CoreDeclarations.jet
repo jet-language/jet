@@ -41,11 +41,15 @@ core_declarations_error: fn(source: String) -[FS]> String Never! {
     }
 }
 
-// The text of every source `declared` names, as the checkout has it.
+// The text of every source `declared` names (its source rows and parts), as
+// the checkout has it.
 core_declarations_sources: fn(declared: CoreDeclarations) -[FS]> [CoreDeclarationFile] Never! {
     paths := [String]{}
     loop row in declared.source_rows {
         if !paths.contains(row.path) -> paths.push(row.path.copy())
+    }
+    loop part in declared.parts {
+        if !paths.contains(part.path) -> paths.push(part.path.copy())
     }
     if !paths.contains(CORE_DECLARATIONS_ENCODING_PATH) -> paths.push(CORE_DECLARATIONS_ENCODING_PATH)
     loop path in paths -> CoreDeclarationFile{path: path.copy(), text: core_declarations_files.read(path) ?? panic("{path} did not read")}
@@ -116,20 +120,26 @@ core_declarations_stray: fn(kind: String, module_name: String, member: String, e
 
 #Test("Core type references resolve to their defining type and refuse a missing or cyclic target") {
     source: core_declarations_core()
-    plot_types: [String]{"Aggregate", "Backend", "Channel", "FacetKind", "FilterOp", "Interaction", "LegendPosition", "Mark", "ScaleKind", "Support"}
+    plot_types: [String]{"Aggregate", "Backend", "Channel", "Domain", "ErrorKind", "FacetKind", "FilterOp", "Interaction", "LegendPosition", "Mark", "RenderFormat", "ScaleKind", "Support", "Transform", "Value"}
     loop name in plot_types {
-        owner: core_declarations_type_in(CORE_DECLARATIONS, "core.data.plot", "JetDataPlot{name}")
-        reexport: core_declarations_type_in(CORE_DECLARATIONS, "core.data", "JetDataPlot{name}")
+        owner: core_declarations_type_in(CORE_DECLARATIONS, "core.data", "JetDataPlot{name}")
+        reexport: core_declarations_type_in(CORE_DECLARATIONS, "core.data.plot", "JetDataPlot{name}")
         assert_eq(reexport.variants, owner.variants)
         assert(reexport.generic_arity == owner.generic_arity && reexport.kind == owner.kind)
+        assert(owner.from_module == "" && reexport.from_module == "core.data")
     }
+    host_types: [String]{"UIDragOperation", "UIDragPhase", "UIDropItem"}
+    loop name in host_types {
+        assert_eq(core_declarations_type_in(CORE_DECLARATIONS, "core.ui.host", name).variants, core_declarations_type_in(CORE_DECLARATIONS, "core.ui.host.drag_drop", name).variants)
+    }
+    assert_eq(core_declarations_type_in(CORE_DECLARATIONS, "core.ui.host", "UIIMEPhase").variants, core_declarations_type_in(CORE_DECLARATIONS, "core.ui.host.ime", "UIIMEPhase").variants)
     defining: "JetDataPlotAggregate:plain(Sum|Mean|Count|Min|Max)"
     changed: source.replace(defining, "JetDataPlotAggregate:plain(None|Count|Sum|Mean|Min|Max)")
     assert(changed != source)
     reordered: core_declarations_fixture(changed) ?? panic("the reordered variants were refused: {err.message}")
-    assert_eq(core_declarations_type_in(reordered, "core.data", "JetDataPlotAggregate").variants, [String]{"None", "Count", "Sum", "Mean", "Min", "Max"})
-    assert(core_declarations_error(source.replace("JetDataPlotAggregate:from(core.data.plot)", "JetDataPlotAggregate:from(core.missing)")).contains("unknown Core type reference `core.missing.JetDataPlotAggregate`"))
-    assert(core_declarations_error(source.replace(defining, "JetDataPlotAggregate:from(core.data)")).contains("cyclic Core type reference"))
+    assert_eq(core_declarations_type_in(reordered, "core.data.plot", "JetDataPlotAggregate").variants, [String]{"None", "Count", "Sum", "Mean", "Min", "Max"})
+    assert(core_declarations_error(source.replace("JetDataPlotAggregate:from(core.data)", "JetDataPlotAggregate:from(core.missing)")).contains("unknown Core type reference `core.missing.JetDataPlotAggregate`"))
+    assert(core_declarations_error(source.replace(defining, "JetDataPlotAggregate:from(core.data.plot)")).contains("cyclic Core type reference"))
     // A private nominal is owned by its source module without joining the
     // module's public types, and still needs its exact source declaration.
     loop row in CORE_DECLARATIONS.source_rows {
@@ -142,6 +152,16 @@ core_declarations_stray: fn(kind: String, module_name: String, member: String, e
     assert(core_declarations_source_problems(hidden, core_declarations_sources(hidden)).any(problem -> problem.contains("does not declare owned type `core.time.MissingPrivateType`")))
     dropped: core_declarations_fixture(source.replace("format_row ETF core.encoding.eetf ETF\n", "")) ?? panic("the dropped format row was refused early: {err.message}")
     assert(core_declarations_source_problems(dropped, core_declarations_sources(dropped)).any(problem -> problem.contains("differ from the format_row lines")))
+}
+
+#Test("a type leaf none of its module's sources declares is a problem unless a re-export or a compiler registry owns it") {
+    source: core_declarations_core()
+    // core.data.plot re-exports JetDataPlotAggregate, which Core/Data/Data.jet
+    // declares and Core/Data/Plot.jet does not.
+    copied_source: source.replace("JetDataPlotAggregate:from(core.data)", "JetDataPlotAggregate:plain(Sum|Mean|Count|Min|Max)")
+    assert(copied_source != source)
+    copied: core_declarations_fixture(copied_source) ?? panic("the copied leaf was refused early: {err.message}")
+    assert(core_declarations_source_problems(copied, core_declarations_sources(copied)).any(problem -> problem.contains("Core type leaf JetDataPlotAggregate of core.data.plot is declared by none of its sources")))
 }
 
 #Test("dispatcher row expressions evaluate to their CoreCallRecord facts") {

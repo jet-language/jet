@@ -341,7 +341,7 @@ use the same names.
 | --- | --- | --- |
 | `ABI`, `FFILanguage`, `Target`, `Track` | enum | Calling convention, foreign language, code-generation target, and tracking policy values |
 | `ArithmeticMode`, `InlineMode`, `JobScope`, `KernelMode`, `Layout`, `MemoBound` | enum | Arithmetic, inlining, publication scope, parallel-kernel, representation, and memoization choices |
-| `Effect`, `Maturity`, `NamingCase`, `ObligationMode`, `PolicySetting`, `Site`, `TaintKind` | enum | Effect roots, maturity, field naming, proof obligations, policy, marker sites, and taint values |
+| `Effect`, `Maturity`, `NamingCase`, `ObligationMode`, `PolicySetting`, `TaintKind` | enum | Effect roots, maturity, field naming, proof obligations, policy, and taint values |
 | `Path`, `State` | struct | Marker path text and compiler-threaded typestate names |
 
 For example, `#Inline` accepts an imported enum value or a dot literal:
@@ -356,8 +356,9 @@ parse_fast: fn(text: String) -> Int {
 ```
 
 `#Inline(.Always)` is the corresponding expected-type form. The language
-module contains `ArithmeticMode`, `JobScope`, `KernelMode`, `MemoBound`, and
-`Site`; it does not export the retired `IntType` declaration.
+module contains `ArithmeticMode`, `JobScope`, `KernelMode`, and `MemoBound`;
+it does not export the retired `IntType` declaration. Marker sites are the
+prelude's `Site` enum.
 
 ### `core.compiler` — compiler-owned package views
 

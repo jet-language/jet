@@ -1,0 +1,58 @@
+// A Core enum a module re-exports with `from(...)` is the defining module's
+// type under either name: each value is built through one module's name and
+// passed where the other module's name is the parameter type.
+use {
+    data: core.data
+    plot: core.data.plot
+    host: core.ui.host
+    drag_drop: core.ui.host.drag_drop
+    ime: core.ui.host.ime
+}
+
+mark_word: fn(mark: data.JetDataPlotMark) -> String Never! {
+    mark.as_str()
+}
+
+plot_mark_word: fn(mark: plot.JetDataPlotMark) -> String Never! {
+    mark.as_str()
+}
+
+phase_word: fn(phase: host.UIDragPhase) -> String Never! {
+    if phase == {
+        .Enter -> "enter"
+        .Over -> "over"
+        .Drop -> "drop"
+        .Leave -> "leave"
+        .Cancel -> "cancel"
+    }
+}
+
+operation_word: fn(operation: host.UIDragOperation) -> String Never! {
+    if operation == {
+        .Copy -> "copy"
+        .Move -> "move"
+        .Link -> "link"
+    }
+}
+
+composition_word: fn(phase: host.UIIMEPhase) -> String Never! {
+    if phase == {
+        .Start -> "start"
+        .Update -> "update"
+        .Commit -> "commit"
+        .Cancel -> "cancel"
+    }
+}
+
+item_word: fn(item: host.UIDropItem) -> String Never! {
+    if item == {
+        .Text(_) -> "text"
+        .URI(_) -> "uri"
+        .File(_) -> "file"
+    }
+}
+
+run: fn() {
+    print("{mark_word(plot.JetDataPlotMark.Bar)} {plot_mark_word(data.JetDataPlotMark.Bar)}")
+    print("{phase_word(drag_drop.UIDragPhase.Drop)} {operation_word(drag_drop.UIDragOperation.Copy)} {composition_word(ime.UIIMEPhase.Commit)} {item_word(drag_drop.UIDropItem.Text{value: "jet"})}")
+}

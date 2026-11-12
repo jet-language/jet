@@ -3,9 +3,11 @@
 // a function its source defines and every owned type a column-0 declaration
 // there; the format rows repeat the EncodingFormat enum of
 // Core/Encoding/Encoding.jet; an owned wrapper that calls a runtime unit
-// instead of its provider leaves its dispatcher row dead; and a Core source
-// that defines a Core.rows enum leaf declares the variants Core.rows lists. A
-// source that breaks one stops the build with every problem. They run in
+// instead of its provider leaves its dispatcher row dead; a Core source that
+// defines a Core.rows enum leaf declares the variants Core.rows lists; and
+// every type leaf of a module with source rows is declared by one of its
+// sources, re-exported with `from(core.x)`, or owned by a compiler registry.
+// A source that breaks one stops the build with every problem. They run in
 // jet_cli, not in jet_foundation, so a Core source edit rebuilds only the
 // package that embeds the sources.
 
@@ -355,11 +357,75 @@ core_decl_source_text: fn(sources: [CoreDeclarationFile], path: String) -> Strin
     None
 }
 
+// The Core type names a compiler registry owns: the runtime handles, the
+// record field and literal owners, the enum payload rows and the Syntax
+// registry's TYPE_ constants by name, and a Core module's statics as
+// `<module>.<owner>`.
+core_decl_registry_types: fn() -> [String: Bool] CoreDeclarationError! {
+    names := [String: Bool]{}
+    loop row in IR_RUNTIME_HANDLES {
+        names[row.jet_name] = true
+    }
+    loop row in CORE_RECORD_FIELD_ROWS {
+        names[row.owner] = true
+    }
+    loop row in CORE_RECORD_LITERAL_ROWS {
+        names[row.owner] = true
+    }
+    loop row in CORE_ENUM_PAYLOAD_ROWS {
+        names[row.enum_name] = true
+    }
+    loop row in BUILTIN_STATIC_ROWS {
+        if row.module_name != "" -> names["{row.module_name}.{row.owner}"] = true
+    }
+    constants: core_decl_syntax_constants(CORE_DECLARATIONS_SYNTAX_FILES) ?? return Err(err)
+    loop name in constants.keys().to_list() {
+        if !name.starts_with("TYPE_") -> next
+        value: constants.get(name) ?? next
+        names[value] = true
+    }
+    Ok(names)
+}
+
+// Every type leaf of `listing`, a module with source rows, that none of its
+// sources (its rows and parts) declares and that is no `from(core.x)`
+// re-export and no name a compiler registry owns (`owned`).
+core_decl_undeclared_leaves: fn(declared: CoreDeclarations, sources: [CoreDeclarationFile], listing: CoreDeclarationModule, owned: [String: Bool]) -> [String] Never! {
+    problems := [String]{}
+    paths := [String]{}
+    loop row in declared.source_rows {
+        if row.module_name == listing.name && !paths.contains(row.path) -> paths.push(row.path.copy())
+    }
+    if paths.len() == 0 -> return problems
+    loop part in declared.parts {
+        if part.owner == listing.name && !paths.contains(part.path) -> paths.push(part.path.copy())
+    }
+    declares := [String: Bool]{}
+    loop path in paths {
+        text: core_decl_source_text(sources, path) ?? next
+        loop line in core_decl_source_lines(text) {
+            name: core_decl_type_name(line)
+            if name != "" -> declares[name] = true
+        }
+    }
+    loop leaf in listing.types {
+        if leaf.from_module != "" || (declares.get(leaf.name) ?? false) || (owned.get(leaf.name) ?? false) || (owned.get("{listing.name}.{leaf.name}") ?? false) -> next
+        problems.push("{CORE_DECLARATIONS_CORE_PATH}:{listing.line}: Core type leaf {leaf.name} of {listing.name} is declared by none of its sources ({paths.join(", ")}) and is no from() re-export, runtime handle, record, enum payload, {listing.name} static or Syntax TYPE_ constant; declare it in a source, re-export it with from(), or drop it")
+    }
+    problems
+}
+
 // Every problem with the sources `declared` names, in check order.
 core_declarations_source_problems: fn(declared: CoreDeclarations, sources: [CoreDeclarationFile]) -> [String] Never! {
     problems := [String]{}
     loop file in sources {
         if !file.path.starts_with("Core/") -> problems.push("Core source row {file.path} is outside Core/")
+    }
+    owned: core_decl_registry_types() ?? return [String]{"{CORE_DECLARATIONS_CORE_PATH}: {err.message}"}
+    loop listing in declared.modules {
+        loop problem in core_decl_undeclared_leaves(declared, sources, listing, owned) {
+            problems.push(problem)
+        }
     }
     targets := [String: String]{}
     loop row in declared.dispatchers {
