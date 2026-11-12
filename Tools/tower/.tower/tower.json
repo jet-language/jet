@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6762,
-    "rev": 99837,
+    "nextNum": 6763,
+    "rev": 99840,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -99110,6 +99110,56 @@
       "updated": "2026-11-12T04:59:56.370Z",
       "updatedBy": "Main",
       "criteriaLastN": 1
+    },
+    {
+      "id": "c0phcs40",
+      "num": 6762,
+      "title": "Debug display of a value holding Shared<T> passes sema and then ICEs in ir.build",
+      "body": "Found 2026-11-12 by Lander5. On seed-b10 (jet@a0.0.45#c089d4d3), jet build --profile dev Compiler at dev 7446243b8b exits 101 with: ir.build unlowered: jet_driver_recheck_differences: display of Shared<SemaLookupCounters> at JetDriver/Source/Driver/BodyComptime.jet:17421. The line is \"{our_graph:Debug}\" != \"{their_graph:Debug}\". Sema accepted a :Debug interpolation of a value that holds Shared<SemaLookupCounters>, but lowering has no display for Shared, so checked code reaches an internal error. That breaks I2 and I3. G4Ports-1 is changing the call site to avoid it; this card covers the root.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e14",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Either :Debug display works for every type sema accepts in an interpolation, Shared<T> included (rendered as its inner value, the same on O0, O1 and O2), or sema refuses the interpolation with a registered diagnostic that has a UI snapshot. A case covers a struct field of type Shared<T> under :Debug. jet build --profile dev Compiler no longer has a path to ICE 101 on it.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-12T06:55:38.300Z"
+        },
+        {
+          "n": 2,
+          "text": "Intake gap: ec6bdb7feb (G4Ports-ctrecheck) changed compiler sources and landed without a compiler build check, so the ICE surfaced only at the b11 build. Every compiler-input SUB at intake gets at least jet check of each touched compiler module on the train compiler, and the train's build catches the rest before landing. The Lander's intake does this, shown by its intake rule and one rejected sample.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-12T06:55:39.250Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G10"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-12T06:55:29.337Z",
+      "updated": "2026-11-12T06:55:39.251Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 2
     }
   ],
   "decisions": [
@@ -199573,6 +199623,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-12T06:55:39.251Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0phcs40",
+      "note": "#2 Intake gap: ec6bdb7feb (G4Ports-ctrecheck) changed compiler "
+    },
+    {
+      "at": "2026-11-12T06:55:38.301Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0phcs40",
+      "note": "#1 Either :Debug display works for every type sema accepts in a"
+    },
+    {
+      "at": "2026-11-12T06:55:29.337Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0phcs40",
+      "note": "Debug display of a value holding Shared<T> passes sema and then ICEs in ir.build"
+    },
     {
       "at": "2026-11-12T06:49:40.207Z",
       "by": "Main",
