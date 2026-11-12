@@ -51,14 +51,16 @@ const STATUS_POLICY_TERRITORIES = Object.freeze({
   ]),
 });
 // The machine-ceiling stage (run.mjs CEILING_POLICY): peers are the initial
-// benchmark; hand-written machine code is the final one, Jet/ceiling <= 1.00.
+// benchmark and pass or fail a cell; hand-written machine code is the final
+// one, Jet/ceiling <= 1.00, reported only until hill climbing opens.
 const STATUS_POLICY_CEILING = Object.freeze({
   stages: [
     { id: "peer_floor", role: "initial", against: "every_matched_peer", comparators: { win: "<1", loss: ">=1" } },
     { id: "machine_ceiling", role: "final", against: "hand_written_machine_code", comparators: { meet: "<=1", miss: ">1" } },
   ],
-  closes_cell: "machine_ceiling",
-  peer_win_closes_cell: false,
+  closes_cell: "peer_floor",
+  peer_win_closes_cell: true,
+  ceiling_gate: "reported_until_hill_climbing_opens",
   required_cells: "every_required_cell",
   metrics: { runtime: "cycles", latency: "cycles", binary: "bytes" },
   references: "Tools/perf/asm-parity/cells.json",
@@ -497,8 +499,8 @@ function statusPolicyIssues(matrix) {
   }
   if (typeof policy.text !== "string" ||
       !policy.text.includes("Never average away a loss") ||
-      !policy.text.includes("hand-written, maximally optimized machine code is the final one") ||
-      !policy.text.includes("Historical receipts remain immutable")) {
+      !policy.text.includes("until the owner opens it, a cell passes the gate on the peer floor") ||
+      !policy.text.includes("Historical receipts stay immutable")) {
     issues.push("matrix strict performance policy text is missing AGENTS.md law");
   }
   return issues;
@@ -620,11 +622,7 @@ export function validateStatusGate(status, matrix) {
       for (const metric of metrics) issues.push(...statusMetricFailures(id, peerName, peer, metric, mode, cell?.failures, cell?.loss_owners));
     }
     if (!cell) continue;
-    // The final benchmark: a peer win never closes a cell whose machine ceiling is unmet.
-    const ceiling = asObject(cell.ceiling);
-    if (ceiling.verdict !== "meet") {
-      issues.push(`${id}/machine-ceiling/metric: ceiling ${ceiling.verdict ?? "uncovered"}`);
-    }
+    // The machine ceiling is reported, not gated, until hill climbing opens.
     if (cell.verdict !== "win") {
       issues.push(`${id}/peer/metric: cell ${cell.verdict ?? "unmeasured"}`);
     }

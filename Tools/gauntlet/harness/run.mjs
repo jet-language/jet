@@ -78,31 +78,36 @@ const TIER_POLICY = {
 };
 // One comparator for every peer, Rust included: Jet/peer below 1 wins, anything else loses.
 const RATIO_VERDICTS = { win: "<1", loss: ">=1" };
+// The AGENTS.md Performance gate paragraphs the gate encodes, word for word.
 const STRICT_PERFORMANCE_POLICY_TEXT = [
-  "Jet targets a strict win for every matched peer on every required cell and metric. Rust is judged like every other peer: Jet/peer must be below 1.00. The target is the machine's ceiling: code as good as the best hand-written assembly for the workload; beating peers is the floor, not the goal.",
+  "Jet's performance target has two stages. The first stage is the peer floor, and it is a hard, structural requirement: a Jet program must be faster and use less peak memory than the same program in every other language. Jet/peer must be below `1.00` for every matched peer, for each required cell and for both wall time and peak memory. Rust is judged like every other peer, with no parity band. A loss to any peer on either metric is a codegen, runtime or Core failure. It is fixed generally and structurally, so that any Jet program beats the other languages, never only the measured one. The second and final stage is the machine ceiling: hand-written, maximally optimized machine code for the same workload, which Jet must match or beat in both cycles and bytes (Jet/ceiling at most `1.00`). Jet aims as close to the ceiling as it can. Closing the remaining ceiling gap is the hill-climbing stage: until the owner opens it, a cell passes the gate on the peer floor, and its ceiling ratio is measured and reported but does not fail the gate.",
   "",
-  "Peers are the initial benchmark; hand-written, maximally optimized machine code is the final one. Every required cell needs a ceiling reference: an asm-parity cell (Tools/perf/asm-parity) that names its gauntlet cell and does the work with the best known technique for the workload (SIMD, algorithmic, or syscall-level), not a naive transliteration. Jet/ceiling must be at most 1.00 for every runtime and size metric. A cell without a reference is uncovered and fails the gate, and a peer win never closes a cell whose ceiling is unmet. A better technique replaces the reference and raises the target.",
+  "Every required cell needs a ceiling reference: an asm-parity cell (Tools/perf/asm-parity) that names its gauntlet cell and does the work with the best known technique for the workload (SIMD, algorithmic, or syscall-level), not a naive transliteration. A cell without a reference is uncovered and fails the gate once hill climbing opens the ceiling stage. A better technique replaces the reference and raises the target.",
   "",
-  "Required cells cover foundations (numerics, text, files, concurrency, networking, build time, and run time) plus one real workload in each critical area: web, games, CLI and scripts, data analysis, backend services, AI/ML applications, GUI applications, and embedded. A niche becomes required only when Jet ships a first-party battery for it. Do not claim a niche win without that battery.",
+  "Required cells cover the foundations (numerics, text, files, concurrency, networking, build time, and run time) plus one real workload in each critical area: web, games, CLI and scripts, data analysis, backend services, GUI applications, and embedded. A niche becomes required only when Jet ships a first-party battery for it; never claim a niche win without one.",
   "",
-  "Apply the comparator per cell and metric. Never average away a loss, substitute an easier workload or tier, omit a peer, or pass wrong, unavailable, uncovered, mismatched, or inconclusive evidence. A performance card, milestone, dashboard, or release gate stays open while any required cell fails. Never trade semantics, diagnostics, determinism, safety, or I9 parity for a score. Manifests and gates must encode this policy; prose alone is not evidence. Historical receipts remain immutable evidence under their recorded policy and never weaken the current gate.",
+  "Apply the comparator separately to each cell and metric. Never average away a loss, substitute an easier workload or tier, drop a peer, or accept wrong, unavailable, uncovered, mismatched, or inconclusive evidence. A performance card, milestone, dashboard, or release gate stays open while any required cell fails. Never trade semantics, diagnostics, determinism, safety, or I9 parity for a score. Manifests and gates must encode this policy; prose alone is not evidence. Historical receipts stay immutable under the policy they were recorded with and never weaken the current gate.",
 ].join("\n");
 
 // The target has two stages. `peer_floor` is the per-cell, per-metric strict win
-// over every matched peer (RATIO_VERDICTS). `machine_ceiling` is the final one:
-// Jet against a hand-written, maximally optimized machine-code reference (an
-// asm-parity cell, Tools/perf/asm-parity/cells.json + <cell>/ref.S, whose
-// `gauntlet` field names the matrix cells it bounds), Jet/ceiling <= 1.00 on
-// every runtime and size metric. `metrics` maps a metric's loss-owner category
-// (LOSS_OWNER_CATEGORY_BY_METRIC) to the asm-parity measure that judges it.
+// over every matched peer (RATIO_VERDICTS); it alone passes or fails a cell.
+// `machine_ceiling` is the final one: Jet against a hand-written, maximally
+// optimized machine-code reference (an asm-parity cell,
+// Tools/perf/asm-parity/cells.json + <cell>/ref.S, whose `gauntlet` field names
+// the matrix cells it bounds), Jet/ceiling <= 1.00 on every runtime and size
+// metric. Until the owner opens hill climbing, the ceiling ratio is measured
+// and reported (`ceiling_gate`) and fails no cell. `metrics` maps a metric's
+// loss-owner category (LOSS_OWNER_CATEGORY_BY_METRIC) to the asm-parity
+// measure that judges it.
 const CEILING_VERDICTS = Object.freeze({ meet: "<=1", miss: ">1" });
 const CEILING_POLICY = Object.freeze({
   stages: Object.freeze([
     { id: "peer_floor", role: "initial", against: "every_matched_peer", comparators: RATIO_VERDICTS },
     { id: "machine_ceiling", role: "final", against: "hand_written_machine_code", comparators: CEILING_VERDICTS },
   ]),
-  closes_cell: "machine_ceiling",
-  peer_win_closes_cell: false,
+  closes_cell: "peer_floor",
+  peer_win_closes_cell: true,
+  ceiling_gate: "reported_until_hill_climbing_opens",
   required_cells: "every_required_cell",
   metrics: Object.freeze({ runtime: "cycles", latency: "cycles", binary: "bytes" }),
   references: "Tools/perf/asm-parity/cells.json",
@@ -112,6 +117,8 @@ const CEILING_POLICY = Object.freeze({
   reference_technique: "best_known_for_the_workload",
   better_technique: "replaces_reference_and_raises_target",
 });
+// Both peer-floor metrics: every matched peer and Jet must carry a reading.
+const PEER_FLOOR_METRICS = Object.freeze(["runtime_wall_seconds", "runtime_peak_rss_kb"]);
 
 const STRICT_PERFORMANCE_POLICY = Object.freeze({
   schema: "jet.strict-performance-policy.v3",
@@ -1052,6 +1059,11 @@ function metricApplicability(entry, language, metric) {
     }
     if (fact.status !== undefined && fact.status !== "not_applicable") {
       return { status: "invalid", reason: "metric applicability status must be not_applicable" };
+    }
+    // A matched peer cannot opt out of one peer-floor metric; a peer that is
+    // not applicable as a whole (`*` or `non_applicable`) is not matched.
+    if (PEER_FLOOR_METRICS.includes(metric) && Object.hasOwn(languageFacts ?? {}, metric)) {
+      return { status: "invalid", reason: `uncovered: ${metric} is a peer-floor metric and is required for Jet and every matched peer` };
     }
     return {
       status: "not_applicable",
@@ -2711,6 +2723,9 @@ function scoreboardMetricComparison(entry, language, comparison, metric, declare
       expectedVerdict !== null &&
       item.verdict === expectedVerdict;
     if (!item || !valid) {
+      const unread = PEER_FLOOR_METRICS.includes(metric)
+        ? [["jet", item?.jet], [language, item?.peer]].filter(([, value]) => !positiveMetricValue(metric, value)).map(([name]) => name)
+        : [];
       return [tier, {
         ...(item ?? {}),
         status: "unmeasured",
@@ -2718,8 +2733,13 @@ function scoreboardMetricComparison(entry, language, comparison, metric, declare
         peer: item?.peer ?? null,
         ratio: item?.ratio ?? null,
         verdict: null,
-        reason: item?.reason ?? "missing or invalid metric comparison",
+        reason: unread.length
+          ? `uncovered: no ${tier} ${metric} reading for ${unread.join(" and ")}`
+          : item?.reason ?? "missing or invalid metric comparison",
       }];
+    }
+    if (item.verdict === "loss") {
+      return [tier, { ...item, status: "measured", reason: `${tier} Jet/${language} ${item.ratio.toFixed(3)} is at or above 1.00` }];
     }
     return [tier, { ...item, status: "measured" }];
   }));
@@ -3118,26 +3138,21 @@ function buildScoreboard(matrix, results, manifest, tower, ceiling = { reference
       : (allowedUncovered.has(cell.id)
         ? {}
         : Object.fromEntries(structuralMetricNames.map((metric) => [metric, "unmeasured"])));
-    // A peer win never closes a cell while its machine ceiling is unmet.
+    // The peer floor passes or fails the cell; the machine ceiling is measured
+    // and reported only (CEILING_POLICY.ceiling_gate).
     const peerVerdict = records.length === 1 ? records[0].verdict : "unmeasured";
     const ceilingRecord = ceilingCell(cell, ceiling?.references, ceiling?.measurements ?? null, requiredCells.has(cell.id));
-    const ceilingFailures = Object.entries(ceilingRecord.metrics)
-      .filter(([, item]) => item.verdict !== "meet")
-      .map(([metric, item]) => ({ metric, peer: "machine-ceiling", verdict: item.verdict, reason: item.reason, tiers: {} }));
     return {
       id: cell.id,
       domain: cell.domain,
       kind: cell.kind,
       entries: records,
       metric_verdicts: structuralMetricVerdicts,
-      metric_failures: records.flatMap((record) => record.metric_failures).concat(structuralFailures, ceilingFailures),
+      metric_failures: records.flatMap((record) => record.metric_failures).concat(structuralFailures),
       peer_verdict: peerVerdict,
       ceiling: ceilingRecord,
       ceiling_verdict: ceilingRecord.verdict,
-      verdict: peerVerdict !== "win" ? peerVerdict
-        : ceilingRecord.verdict === "meet" ? "win"
-        : ceilingRecord.verdict === "miss" ? "loss"
-        : "unmeasured",
+      verdict: peerVerdict,
       loss_owners: records.flatMap((record) => record.loss_owners),
     };
   });

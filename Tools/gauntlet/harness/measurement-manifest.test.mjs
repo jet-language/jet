@@ -589,30 +589,32 @@ test("publication rejects peer sample identity mismatch", () => {
   assert.ok(publication.blockers.some((blocker) => blocker.includes("peer sample identity")));
 });
 
-test("the matrix encodes the peer floor and the machine ceiling, and every ceiling reference names its gauntlet cells", async () => {
+test("the matrix encodes the peer floor and the reported machine ceiling, and every ceiling reference names its gauntlet cells", async () => {
   const matrix = JSON.parse(await fs.readFile(matrixPath, "utf8"));
   assert.deepEqual(strictPerformancePolicyIssues(matrix), []);
   const ceiling = matrix.strict_performance_policy.ceiling;
   assert.deepEqual(ceiling, JSON.parse(JSON.stringify(CEILING_POLICY)));
   assert.deepEqual(ceiling.stages.map((stage) => [stage.id, stage.role]), [["peer_floor", "initial"], ["machine_ceiling", "final"]]);
   assert.deepEqual(ceiling.stages[1].comparators, { meet: "<=1", miss: ">1" });
-  assert.equal(ceiling.peer_win_closes_cell, false);
-  assert.equal(ceiling.missing_reference, "uncovered");
-  assert.ok(matrix.strict_performance_policy.failure_statuses.includes(ceiling.missing_reference));
+  assert.equal(ceiling.closes_cell, "peer_floor");
+  assert.equal(ceiling.peer_win_closes_cell, true);
+  assert.equal(ceiling.ceiling_gate, "reported_until_hill_climbing_opens");
   const references = JSON.parse(await fs.readFile(repoSourcePath(ceiling.references), "utf8"));
   assert.deepEqual(await ceilingReferenceIssues(matrix, references), []);
-  // AGENTS.md carries the ceiling paragraph word for word.
+  // AGENTS.md carries every paragraph of the gate's policy text word for word.
   const agents = (await fs.readFile(path.join(repoDir, "AGENTS.md"), "utf8")).replace(/\s+/g, " ");
-  const paragraph = STRICT_PERFORMANCE_POLICY.text.split("\n\n").find((item) => item.startsWith("Peers are the initial benchmark"));
-  assert.ok(paragraph);
-  assert.ok(agents.includes(paragraph), "AGENTS.md Performance gate lacks the machine-ceiling paragraph");
+  const paragraphs = STRICT_PERFORMANCE_POLICY.text.split("\n\n");
+  assert.equal(paragraphs.length, 4);
+  for (const paragraph of paragraphs) {
+    assert.ok(agents.includes(paragraph), `AGENTS.md Performance gate lacks: ${paragraph.slice(0, 60)}`);
+  }
   const missing = await ceilingReferenceIssues(matrix, [{ name: "nope", gauntlet: ["no.such-cell"] }, { name: "sieve" }]);
   assert.ok(missing.includes("nope: machine-ceiling reference names unknown matrix cell no.such-cell"));
   assert.ok(missing.includes("nope: machine-ceiling reference has no ref.S"));
   assert.ok(missing.includes("sieve: machine-ceiling reference does not name its gauntlet cells"));
 });
 
-test("a peer win never closes a cell whose machine ceiling is unmet", () => {
+test("a cell passes on the peer floor; its ceiling ratio is reported only", () => {
   const fixture = scoreboardFixture();
   const tower = { status: "available", revision: 1, cards: new Map() };
   const reference = [{ name: "fixture-ref", gauntlet: ["fixture.cell"] }];
@@ -624,38 +626,94 @@ test("a peer win never closes a cell whose machine ceiling is unmet", () => {
     ],
   });
   const judge = (ceiling) => buildScoreboard(fixture.matrix, [fixture.result], fixture.manifest, tower, ceiling);
+  const noCeilingBlocker = (scoreboard) => !fixturePublication(fixture, scoreboard).blockers.some((blocker) => blocker.includes("machine-ceiling"));
 
   const uncovered = judge(undefined);
   const cell = uncovered.cells[0];
   assert.equal(cell.peer_verdict, "win");
   assert.equal(cell.ceiling.status, "uncovered");
   assert.equal(cell.ceiling_verdict, "uncovered");
-  assert.equal(cell.verdict, "unmeasured");
+  assert.equal(cell.verdict, "win");
   assert.deepEqual(Object.keys(cell.ceiling.metrics), ["runtime_wall_seconds", "runtime_first_stdout_seconds", "binary_bytes"]);
+  assert.equal(cell.ceiling.metrics.runtime_wall_seconds.reason, "no hand-written machine-code reference names this cell");
   assert.deepEqual(uncovered.ceiling_coverage.uncovered, ["fixture.cell"]);
-  const blockers = fixturePublication(fixture, uncovered).blockers;
-  assert.ok(blockers.includes("fixture.cell/machine-ceiling/runtime_wall_seconds: metric uncovered (no hand-written machine-code reference names this cell)"));
-  assert.ok(blockers.includes("fixture.cell/machine-ceiling/binary_bytes: metric uncovered (no hand-written machine-code reference names this cell)"));
+  assert.equal(uncovered.summary.ceiling_uncovered, 1);
+  assert.ok(noCeilingBlocker(uncovered));
 
-  const unmeasured = judge({ references: reference, measurements: null }).cells[0];
-  assert.equal(unmeasured.ceiling.status, "covered");
-  assert.equal(unmeasured.ceiling_verdict, "unmeasured");
-  assert.equal(unmeasured.verdict, "unmeasured");
+  const unmeasured = judge({ references: reference, measurements: null });
+  assert.equal(unmeasured.cells[0].ceiling.status, "covered");
+  assert.equal(unmeasured.cells[0].ceiling_verdict, "unmeasured");
+  assert.equal(unmeasured.cells[0].verdict, "win");
+  assert.ok(noCeilingBlocker(unmeasured));
 
-  const miss = judge({ references: reference, measurements: rows(1.2, 0.9) }).cells[0];
-  assert.equal(miss.ceiling.metrics.runtime_wall_seconds.verdict, "miss");
-  assert.equal(miss.ceiling.metrics.binary_bytes.verdict, "meet");
-  assert.equal(miss.verdict, "loss");
+  const miss = judge({ references: reference, measurements: rows(1.2, 0.9) });
+  assert.equal(miss.cells[0].ceiling.metrics.runtime_wall_seconds.verdict, "miss");
+  assert.deepEqual(miss.cells[0].ceiling.metrics.runtime_wall_seconds.rows.map((row) => row.ratio), [1.2, 1.2]);
+  assert.equal(miss.cells[0].ceiling.metrics.binary_bytes.verdict, "meet");
+  assert.equal(miss.cells[0].verdict, "win");
+  assert.equal(miss.summary.ceiling_miss, 1);
+  assert.ok(noCeilingBlocker(miss));
 
-  const wrong = judge({ references: reference, measurements: rows(0.5, 0.5, "DIFF (status 1)") }).cells[0];
-  assert.equal(wrong.ceiling_verdict, "wrong");
-  assert.equal(wrong.verdict, "unmeasured");
+  const wrong = judge({ references: reference, measurements: rows(0.5, 0.5, "DIFF (status 1)") });
+  assert.equal(wrong.cells[0].ceiling_verdict, "wrong");
+  assert.equal(wrong.cells[0].verdict, "win");
 
   const meet = judge({ references: reference, measurements: rows(1, 0.8) });
   assert.equal(meet.cells[0].ceiling_verdict, "meet");
   assert.equal(meet.cells[0].verdict, "win");
   assert.deepEqual(meet.ceiling_coverage.covered, [{ cell: "fixture.cell", references: ["fixture-ref"] }]);
-  assert.equal(fixturePublication(fixture, meet).blockers.some((blocker) => blocker.includes("machine-ceiling")), false);
+  assert.ok(noCeilingBlocker(meet));
+
+  // A peer loss fails the cell however well the ceiling is met.
+  const lossFixture = scoreboardFixture({ lossMetrics: ["runtime_wall_seconds"] });
+  const lost = buildScoreboard(lossFixture.matrix, [lossFixture.result], lossFixture.manifest, tower, { references: reference, measurements: rows(0.5, 0.5) });
+  assert.equal(lost.cells[0].ceiling_verdict, "meet");
+  assert.equal(lost.cells[0].verdict, "loss");
+});
+
+test("the peer floor fails a planted wall-time or peak-memory loss and names the cell, peer, metric and ratio", () => {
+  const tower = { status: "available", revision: 1, cards: new Map() };
+  for (const metric of ["runtime_wall_seconds", "runtime_peak_rss_kb"]) {
+    // Jet/peer = 1 / 0.5 = 2.000 on both ratio tiers.
+    const fixture = scoreboardFixture({ lossMetrics: [metric] });
+    const scoreboard = buildScoreboard(fixture.matrix, [fixture.result], fixture.manifest, tower);
+    assert.equal(scoreboard.cells[0].verdict, "loss");
+    assert.equal(scoreboard.cells[0].metric_verdicts[metric], "loss");
+    const publication = fixturePublication(fixture, scoreboard);
+    assert.equal(publication.complete, false);
+    assert.ok(publication.blockers.includes(`fixture.cell/rust/${metric}: metric loss (aot Jet/rust 2.000 is at or above 1.00; run Jet/rust 2.000 is at or above 1.00)`), publication.blockers.join("\n"));
+  }
+  // Parity is a loss: Jet/peer = 1.00 is not below 1.00.
+  const parity = scoreboardFixture();
+  parity.result.rows.rust.metrics.runtime_peak_rss_kb = 1;
+  parity.result.comparisons = comparisons(parity.result.entry, Object.keys(parity.result.rows), parity.result.rows, parity.result.jet_tiers);
+  const tied = buildScoreboard(parity.matrix, [parity.result], parity.manifest, tower);
+  assert.equal(tied.cells[0].metric_verdicts.runtime_peak_rss_kb, "loss");
+  assert.ok(fixturePublication(parity, tied).blockers.some((blocker) => blocker.startsWith("fixture.cell/rust/runtime_peak_rss_kb: metric loss (aot Jet/rust 1.000 is at or above 1.00")));
+});
+
+test("a missing peak-memory reading for Jet or a peer is uncovered and fails the gate", () => {
+  const tower = { status: "available", revision: 1, cards: new Map() };
+  const noJet = scoreboardFixture({ missingMetrics: ["runtime_peak_rss_kb"] });
+  const noJetBoard = buildScoreboard(noJet.matrix, [noJet.result], noJet.manifest, tower);
+  assert.equal(noJetBoard.cells[0].verdict, "unmeasured");
+  assert.ok(fixturePublication(noJet, noJetBoard).blockers.includes("fixture.cell/rust/runtime_peak_rss_kb: metric unmeasured (uncovered: no aot runtime_peak_rss_kb reading for jet and rust; uncovered: no run runtime_peak_rss_kb reading for jet and rust)"));
+
+  const noPeer = scoreboardFixture();
+  noPeer.result.rows.rust.metrics.runtime_peak_rss_kb = null;
+  noPeer.result.comparisons = comparisons(noPeer.result.entry, Object.keys(noPeer.result.rows), noPeer.result.rows, noPeer.result.jet_tiers);
+  const noPeerBoard = buildScoreboard(noPeer.matrix, [noPeer.result], noPeer.manifest, tower);
+  assert.equal(noPeerBoard.cells[0].verdict, "unmeasured");
+  const blockers = fixturePublication(noPeer, noPeerBoard).blockers;
+  assert.ok(blockers.some((blocker) => blocker.startsWith("fixture.cell/rust/runtime_peak_rss_kb: metric unmeasured (uncovered: no aot runtime_peak_rss_kb reading for rust")), blockers.join("\n"));
+
+  // A matched peer cannot declare one peer-floor metric not applicable.
+  const optOut = scoreboardFixture();
+  optOut.result.entry.metric_applicability = { rust: { runtime_peak_rss_kb: { status: "not_applicable", basis: "no_process", reason: "r", evidence: "e" } } };
+  assert.equal(metricApplicability(optOut.result.entry, "rust", "runtime_peak_rss_kb").status, "invalid");
+  const optOutBoard = buildScoreboard(optOut.matrix, [optOut.result], optOut.manifest, tower);
+  assert.equal(optOutBoard.cells[0].metric_verdicts.runtime_peak_rss_kb, "unmeasured");
+  assert.equal(optOutBoard.cells[0].verdict, "unmeasured");
 });
 
 test("web-app results omit undeclared Jet tiers", () => {
