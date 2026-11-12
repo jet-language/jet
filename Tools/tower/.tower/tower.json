@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6756,
-    "rev": 99735,
+    "nextNum": 6757,
+    "rev": 99742,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -98765,6 +98765,83 @@
       "updated": "2026-11-12T01:52:27.214Z",
       "updatedBy": "Main",
       "criteriaLastN": 8
+    },
+    {
+      "id": "c0ef6eb1",
+      "num": 6756,
+      "title": "Peer floor, enforced structurally: Jet is faster and uses less peak memory than every other language",
+      "body": "Owner order 2026-11-11 late. A Jet program must be faster and use less peak memory than the same program in any other language. Only highly optimized hand-written machine code is exempt, and Jet aims as close to it as it can. A loss to any peer on wall time or peak memory is a codegen, runtime or Core failure. It is fixed generally, structurally and robustly in the mechanism every program uses, never per cell, so that the result holds for programs nobody measured. The machine ceiling stays the hill-climbing stage (G13): its ratio is reported, but it holds no cell until the owner opens it.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e14",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P0",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "The perf gate encodes the peer floor: on the canonical manifest it fails every required cell where Jet/peer is at or above 1.00 on wall time or on peak memory for any matched peer, names the cell, peer, metric and ratio, and reports the asm-ceiling ratio without failing on it. A unit test plants one time loss and one memory loss and expects both refusals.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-12T02:32:30.068Z"
+        },
+        {
+          "n": 2,
+          "text": "Every required cell measures peak memory for Jet and every matched peer with the same method. A cell or peer without a memory reading is reported as uncovered and fails the gate.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-12T02:32:30.921Z"
+        },
+        {
+          "n": 3,
+          "text": "A loss census on the current compiler lists every cell, peer and metric where Jet loses. It groups the losses by root (the codegen, runtime or Core mechanism responsible), and each root is on a card with its general fix.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-12T02:32:31.791Z"
+        },
+        {
+          "n": 4,
+          "text": "Structural coverage beyond the cells: a generated or curated corpus of at least 30 programs that use the language's features in varied ways (the gauntlet programs and their peer twins) is measured against the peers on wall time and peak memory, and its losses join the census, so that a fix that only helps a measured cell is caught.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-12T02:32:32.666Z"
+        },
+        {
+          "n": 5,
+          "text": "The loss census is empty: on the canonical manifest and the coverage corpus, Jet beats every matched peer on wall time and peak memory, each fix proven on a second program that uses the feature differently.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-12T02:32:33.511Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G11"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-12T02:32:29.173Z",
+      "updated": "2026-11-12T02:32:33.511Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 5
     }
   ],
   "decisions": [
@@ -199229,6 +199306,55 @@
   ],
   "events": [
     {
+      "at": "2026-11-12T02:32:34.378Z",
+      "by": "Main",
+      "action": "goal.log",
+      "ref": "G11",
+      "note": "Owner order 2026-11-11 late: the peer floor is enforced stru"
+    },
+    {
+      "at": "2026-11-12T02:32:33.511Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0ef6eb1",
+      "note": "#5 The loss census is empty: on the canonical manifest and the "
+    },
+    {
+      "at": "2026-11-12T02:32:32.666Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0ef6eb1",
+      "note": "#4 Structural coverage beyond the cells: a generated or curated"
+    },
+    {
+      "at": "2026-11-12T02:32:31.792Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0ef6eb1",
+      "note": "#3 A loss census on the current compiler lists every cell, peer"
+    },
+    {
+      "at": "2026-11-12T02:32:30.921Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0ef6eb1",
+      "note": "#2 Every required cell measures peak memory for Jet and every m"
+    },
+    {
+      "at": "2026-11-12T02:32:30.068Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0ef6eb1",
+      "note": "#1 The perf gate encodes the peer floor: on the canonical manif"
+    },
+    {
+      "at": "2026-11-12T02:32:29.173Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0ef6eb1",
+      "note": "Peer floor, enforced structurally: Jet is faster and uses less peak memory than every other language"
+    },
+    {
       "at": "2026-11-12T02:27:08.275Z",
       "by": "Main",
       "action": "goal.log",
@@ -205160,6 +205286,11 @@
         {
           "at": "2026-11-12",
           "by": "Main",
+          "text": "Owner order 2026-11-11 late: the peer floor is enforced structurally on wall time and peak memory, and any loss is a general codegen, runtime or Core failure. The work is #6756; AGENTS.md records it (SUB Main-owner-rulings-1)."
+        },
+        {
+          "at": "2026-11-12",
+          "by": "Main",
           "text": "Owner rulings 2026-11-11 late: (1) no review needs a reviewer from a different model family; (2) a Jet twin must beat its original on wall time and peak memory, while source tokens are measured, reported and minimized but a twin above the original count still passes (a longer twin names its missing Core API or syntax in tool.token_gaps; clarity of reasoning outranks terseness); (3) hand-optimized machine code is the hill-climbing ceiling, not current work: until the owner opens it, a cell passes on the peer floor and its ceiling ratio is measured and reported. AGENTS.md records them (SUB Main-owner-rulings-1)."
         },
         {
@@ -205199,7 +205330,7 @@
         }
       ],
       "created": "2026-11-04T18:09:54.108Z",
-      "updated": "2026-11-12T02:27:07.434Z",
+      "updated": "2026-11-12T02:32:34.378Z",
       "updatedBy": "Main"
     },
     {
