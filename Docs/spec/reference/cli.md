@@ -751,9 +751,12 @@ kernel runs it with jet.
 prints 3. A `;` between statements stands for the line break a file would
 have (`jet -e 'name := 1; print(name)'`). When the last statement is an
 expression, its value is shown, as `node -p` shows it: `jet -e '1 + 2'` prints
-3, a List or an Iter prints one item per line (`jet -e '"a b".words()'` prints
-`a` and `b`), and a unit value (`print(…)`, an `if` without `else`) prints
-nothing more. A value that has no display is refused with E0112, as `print`
+3, a final `if` with `->` branches or a final dispatch is the value
+(`jet -e 'if 1 > 0 -> "yes" else -> "no"'` prints `yes`; the same `if`
+before the last statement is an unused value, E0003), a String prints without
+quotes, a List or an Iter prints one item per line (`jet -e '"a b".words()'`
+prints `a` and `b`), and a unit value (`print(…)`, an `if` without `else`)
+prints nothing more. A value that has no display is refused with E0112, as `print`
 refuses it. CODE is checked as a file is, so a
 misspelled name is refused before anything runs. The file that holds it is
 written under the scripts directory (`eval/`, named by the content hash),

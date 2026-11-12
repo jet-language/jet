@@ -1,0 +1,31 @@
+# The value `jet eval CODE` prints is its last statement's (D-CLI-EVAL1, #6281
+# c160): a final `if` with `->` branches or a final dispatch is that value,
+# though the body of `run: fn` reads such an `if` as a statement elsewhere; a
+# statement `if` and a unit value print nothing more; a List prints one item
+# per line and a String prints without quotes. A value `if` before the last
+# statement is still the unused value it is (E0003).
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: XDG_CACHE_HOME={work}/xdg
+step if_value: jet eval 'if 1 > 0 -> "yes" else -> "no"'
+exit: 0
+stdout: = "yes\n"
+step dispatch_value: jet eval 'x := 2; if x == { 1 -> "one"; 2 -> "two"; else -> "many" }'
+exit: 0
+stdout: = "two\n"
+step if_statement: jet eval 'if 1 > 0 { print("hi") }'
+exit: 0
+stdout: = "hi\n"
+step unit: jet eval 'print("hi")'
+exit: 0
+stdout: = "hi\n"
+step list: jet eval '[1, 2, 3].map(n -> n * 2)'
+exit: 0
+stdout: = "2\n4\n6\n"
+step string: jet eval '"a b"'
+exit: 0
+stdout: = "a b\n"
+step value_if_not_last: jet eval 'if 1 > 0 -> "a" else -> "b"; print(1)'
+exit: 1
+stdout: = ""
+stderr: ~ "E0003"

@@ -48,7 +48,7 @@ use {
         schema_cache_dir,
     ]
     jet_foundation.[BuildOptions, build_options_key, build_options_value]
-    jet_lexer.[TOKEN_EOF, TOKEN_LBRACE, TOKEN_LBRACKET, TOKEN_LPAREN, TOKEN_RBRACE, TOKEN_RBRACKET, TOKEN_RPAREN, TOKEN_SEMI, lex]
+    jet_lexer.[TOKEN_EOF, TOKEN_KW_IF, TOKEN_LBRACE, TOKEN_LBRACKET, TOKEN_LPAREN, TOKEN_RBRACE, TOKEN_RBRACKET, TOKEN_RPAREN, TOKEN_SEMI, Token, lex]
     jet_parser.[parse_source]
 }
 
@@ -263,17 +263,58 @@ jet_cli_script_cache_dir: fn() -> String? {
 // The entry file `jet -e CODE` runs: CODE as the body of `run: fn`, its
 // statements on lines of their own (jet_cli_eval_lines), its declarations
 // above `run: fn` (jet_cli_eval_items), kept as the `eval` entry file of its
-// source (jet_cli_entry_file). The file holds CODE as written: the compile
+// source (jet_cli_entry_file). The file holds CODE as written, but for a
+// final value `if` (jet_cli_eval_final_value): the compile
 // request of an `eval` entry file (Request.jet jet_cli_driver_request) shows
 // the value of its last statement (JetSema Calls/Direct.jet
 // sema_eval_entry_show).
 jet_cli_eval_file: fn(code: String) -> String? {
     split: jet_cli_eval_items(jet_cli_eval_lines(code))
-    jet_cli_entry_file("eval", "{split.items}{JET_CLI_EVAL_HEAD}{split.body}\n}}\n")
+    at: jet_cli_eval_final_if(split.body) ?? return jet_cli_entry_file("eval", "{split.items}{JET_CLI_EVAL_HEAD}{split.body}\n}}\n")
+    head: jet_cli_repl_bytes(split.body, 0, at)
+    tail: jet_cli_repl_bytes(split.body, at, split.body.count_bytes())
+    jet_cli_entry_file("eval", "{split.items}{JET_CLI_EVAL_HEAD}{head}({tail})\n}}\n")
 }
 
 // The opening of the `run: fn` an `-e` body goes in.
 JET_CLI_EVAL_HEAD: "run: fn() {{\n"
+
+// Where the final `if` of `body` starts when that `if` is a value: `->`
+// branches with an `else`, or a dispatch (`if x == { … }`). The body of
+// `run: fn` has no result, so there such an `if` reads as a statement whose
+// value arms are E0003; in parentheses (jet_cli_eval_file) it is the value
+// the code ends in, and the `(` before it keeps every line number. The final
+// `if` opens the last line at bracket depth zero that starts with `if`, and
+// runs to the end of `body`. It counts only when a body with a result reads
+// it, `run`'s body does not and the parenthesized form does, so a statement
+// `if`, a syntax error and any other code stay as written. None otherwise.
+jet_cli_eval_final_if: fn(body: String) -> Int? Never! {
+    bytes: body.bytes()
+    tokens: lex(bytes).tokens
+    starts: jet_cli_eval_line_starts(bytes, tokens)
+    start := -1
+    line := 0
+    loop token in tokens {
+        if token.kind == TOKEN_EOF -> break
+        if line < starts.len() && token.span.start >= starts[line] {
+            if token.kind == TOKEN_KW_IF -> start = token.span.start
+            loop line < starts.len() && starts[line] <= token.span.start {
+                line += 1
+            }
+        }
+    }
+    if start < 0 -> return None
+    tail: jet_cli_repl_bytes(body, start, bytes.len())
+    if jet_cli_eval_parses(tail, "") || !jet_cli_eval_parses(tail, " -> Int") || !jet_cli_eval_parses("({tail})", "") -> return None
+    Val(start)
+}
+
+// Whether `body` parses with no error as the body of a `run` function whose
+// result is spelled `result` ("" for none).
+jet_cli_eval_parses: fn(body: String, result: String) -> Bool Never! {
+    parsed: parse_source("run: fn(){result} {{\n{body}\n}}\n".bytes())
+    jet_cli_errors(parsed.diagnostics).len() == 0
+}
 
 // `lines` parted as a REPL cell parts its input: each line at bracket depth
 // zero that parses alone as declarations (a type, a function, an impl, a
@@ -281,20 +322,7 @@ JET_CLI_EVAL_HEAD: "run: fn() {{\n"
 // included, stays in the body.
 jet_cli_eval_items: fn(lines: String) -> (items: String, body: String) Never! {
     bytes: lines.bytes()
-    starts := [Int]{0}
-    depth := 0
-    previous := 0
-    loop token in lex(bytes).tokens {
-        if token.kind == TOKEN_EOF -> break
-        if depth == 0 {
-            loop at in previous..<token.span.start {
-                if bytes[at] == (U8{10}) && starts[starts.len() - 1] < at + 1 -> starts.push(at + 1)
-            }
-        }
-        if token.kind == TOKEN_LBRACE || token.kind == TOKEN_LPAREN || token.kind == TOKEN_LBRACKET -> depth += 1
-        if (token.kind == TOKEN_RBRACE || token.kind == TOKEN_RPAREN || token.kind == TOKEN_RBRACKET) && depth > 0 -> depth -= 1
-        previous = token.span.end
-    }
+    starts: jet_cli_eval_line_starts(bytes, lex(bytes).tokens)
     items := ""
     body := [String]{}
     loop (index, start) in starts {
@@ -307,6 +335,26 @@ jet_cli_eval_items: fn(lines: String) -> (items: String, body: String) Never! {
         body.push(line)
     }
     (items: items, body: body.join("\n"))
+}
+
+// The offsets at which the lines of `bytes` (lexed as `tokens`) at bracket
+// depth zero start, the first line's 0 included.
+jet_cli_eval_line_starts: fn(bytes: [U8], tokens: [Token]) -> [Int] Never! {
+    starts := [Int]{0}
+    depth := 0
+    previous := 0
+    loop token in tokens {
+        if token.kind == TOKEN_EOF -> break
+        if depth == 0 {
+            loop at in previous..<token.span.start {
+                if bytes[at] == (U8{10}) && starts[starts.len() - 1] < at + 1 -> starts.push(at + 1)
+            }
+        }
+        if token.kind == TOKEN_LBRACE || token.kind == TOKEN_LPAREN || token.kind == TOKEN_LBRACKET -> depth += 1
+        if (token.kind == TOKEN_RBRACE || token.kind == TOKEN_RPAREN || token.kind == TOKEN_RBRACKET) && depth > 0 -> depth -= 1
+        previous = token.span.end
+    }
+    starts
 }
 
 // Whether `line` alone parses as declarations and nothing else: no
