@@ -1,0 +1,11 @@
+// E3413: a comptime `net.fetch` whose content misses its `sha256:` pin stops
+// the build at the fetch, so the content never reaches the program. The pin
+// is a well-formed 64-digit hash one digit off the payload's real hash; the
+// report shows both hashes and says to update the pin or check the URL.
+use net: core.net
+
+PAYLOAD: comptime { net.fetch("file://comptime_net_fetch_payload.txt", sha256: "e46971c0fe4c87c91ab12d79ce0f8f3de03c27b6c283bc485fe920572d87cdd5") }
+
+run: fn() {
+    print(PAYLOAD)
+}
