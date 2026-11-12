@@ -38,10 +38,29 @@ lsp_hover_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String {
         }
     }
     if markdown == None -> markdown = lsp_keyword_hover(at.view, at.offset)
+    // Anywhere in a generated module, the hover names what made it.
+    if at.view.checked.producer == .Val(producer) {
+        note: lsp_producer_markdown(producer)
+        markdown = if markdown == .Val(shown) -> Val("{shown}\n\n{note}") else -> Val(note)
+    }
     text: markdown ?? return lsp_response(id, "null")
     range := ""
     if lsp_ident_token_at(at.view.lexed, at.offset) == .Val(name) -> range = ",\"range\":{lsp_range_json(lsp_byte_span_to_range(at.view.doc.text, name.span))}"
     lsp_response(id, "{{\"contents\":{{\"kind\":\"markdown\",\"value\":{foundation_json_quote(text)}}}{range}}}")
+}
+
+// What made a generated module, as its hover says it: the call and function
+// that made it, each handoff of the `Compiler` value that led there (root
+// first), the `Meta` effect it was made under, the dependency consent it
+// used, and its stable identity.
+lsp_producer_markdown: fn(producer: LSPProducer) -> String Never! {
+    maker: producer.made_by ?? "`b.generate(\"{producer.name}\")` in the build"
+    text := "Generated module `{producer.name}`, made by {maker}"
+    if producer.handoffs.len() > 0 -> text = "{text}, after {producer.handoffs.join(", then ")}"
+    text = "{text}."
+    if producer.authority == .Val(authority) -> text = "{text} Made under `{authority}`."
+    if producer.consent == .Val(consent) -> text = "{text} Allowed by the root's consent for `{consent}`."
+    "{text}\n\nIdentity: `{producer.identity}`"
 }
 
 // A keyword under the cursor hovers with the language's own description.

@@ -151,8 +151,10 @@ jet_driver_build_generated_handoffs: fn(row: BuildSessionGeneratedModule) -> Str
 // The core.build values `jet build` records, as JSON objects whose fields
 // are the values' own, in declaration order: `.jet/build/receipt.json` (the
 // BuildGraph it built, then `kept`: the digest of each kept output's bytes
-// as the build left them) and `.jet/build/times.json` (its BuildTimes).
-jet_driver_build_graph_json: fn(graph: BuildGraph, kept: [JetDriverBuildKept]) -> String Never! {
+// as the build left them, then `generated`: each module `build: fn` made, as
+// the plan's rows say it, jet_driver_build_generated_json) and
+// `.jet/build/times.json` (its BuildTimes).
+jet_driver_build_graph_json: fn(graph: BuildGraph, kept: [JetDriverBuildKept], generated: [BuildSessionGeneratedModule]) -> String Never! {
     targets: loop target in graph.targets -> "{{\"id\":{target.id},\"name\":{foundation_json_quote(target.name)},\"kind\":{foundation_json_quote(target.kind)},\"deps\":{jet_driver_build_ints(target.deps)},\"actions\":{jet_driver_build_ints(target.actions)},\"files\":{jet_driver_build_strings(target.files)},\"plugin\":{jet_driver_build_id(target.plugin)}}}"
     actions: loop action in graph.actions -> jet_driver_build_action_json(action)
     keys: loop key in graph.action_keys -> "{{\"action\":{foundation_json_quote(key.action)},\"key\":{foundation_json_quote(key.key)}}}"
@@ -165,7 +167,8 @@ jet_driver_build_graph_json: fn(graph: BuildGraph, kept: [JetDriverBuildKept]) -
         nodes.push("{{\"kind\":{foundation_json_quote(node.kind)},\"key\":{foundation_json_quote(node.key)},\"subject\":{foundation_json_quote(node.subject)},\"inputs\":{jet_driver_build_strings(node.inputs)},\"input_digests\":[{digests.join(",")}]}}")
     }
     held: loop row in kept -> "{{\"path\":{foundation_json_quote(row.path)},\"digest\":{foundation_json_quote(row.digest)}}}"
-    "{{\"targets\":[{targets.join(",")}],\"actions\":[{actions.join(",")}],\"action_keys\":[{keys.join(",")}],\"cache_hits\":[{hits.join(",")}],\"files\":[{files.join(",")}],\"affected_files\":[{affected.join(",")}],\"nodes\":[{nodes.join(",")}],\"kept\":[{held.join(",")}]}}\n"
+    made: loop row in generated -> jet_driver_build_generated_json(row)
+    "{{\"targets\":[{targets.join(",")}],\"actions\":[{actions.join(",")}],\"action_keys\":[{keys.join(",")}],\"cache_hits\":[{hits.join(",")}],\"files\":[{files.join(",")}],\"affected_files\":[{affected.join(",")}],\"nodes\":[{nodes.join(",")}],\"kept\":[{held.join(",")}],\"generated\":[{made.join(",")}]}}\n"
 }
 jet_driver_build_action_json: fn(action: BuildGraphAction) -> String Never! {
     hit: if action.cache_hit == .Val(value) -> "{value}" else -> "null"

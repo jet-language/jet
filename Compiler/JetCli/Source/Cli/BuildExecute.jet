@@ -11,7 +11,7 @@ use {
     cli_sys: core.sys
     cli_time: core.time
     core.build.[BuildGraph, BuildGraphAction]
-    jet_build_session.[BUILD_SESSION_HOST_DIR, BUILD_SESSION_IMAGE_DIR, BuildPlanExecution, BuildPlanSelection, BuildSessionAction, BuildSessionFile, BuildSessionTarget, BuildSessionToolchain]
+    jet_build_session.[BUILD_SESSION_HOST_DIR, BUILD_SESSION_IMAGE_DIR, BuildPlanExecution, BuildPlanSelection, BuildSessionAction, BuildSessionFile, BuildSessionGeneratedModule, BuildSessionTarget, BuildSessionToolchain]
     jet_driver.[JetDriverAuthorityPolicy, JetDriverAuthorizedSourceFile, JetDriverBuildKept, JetDriverBuildTime, JetDriverFailure, JetDriverGeneratedModule, JetDriverVerbOutput, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR, jet_driver_build_graph_json, jet_driver_build_times_json]
     jet_foundation.[BUILD_REUSE_SAVED_WORK, BuildOptions, Diagnostic, build_option_duration_ms, build_options_value, diagnostic_from_registry, diagnostic_registry_row, diagnostic_render_all, jet_target_triple_os, target_os_key]
     jet_pkg_model.[OverlayPolicy, WorkspaceDeclarationCache, pkg_build_entry_source, pkg_parse_workspace_policy, pkg_resolve_workspace_source]
@@ -97,16 +97,17 @@ JetCLIBuildNeeds: struct {
 // waits on it, and every failure is reported. `member` names the workspace
 // member a workspace build runs this graph for; its invocation grant is
 // None. A step without its own time limit gets the `action_timeout` option.
-// `receipt` is the graph's core.build projection, which the run records. An
+// `receipt` is the graph's core.build projection, which the run records with
+// `made`, every module `build: fn` generated. An
 // output kept in git (`kept: true`) may replace a file no build made; the
 // last build's receipt tells a hand edit of one from the bytes it wrote.
-jet_cli_build_run_graph: fn(graph: BuildPlanExecution, receipt: BuildGraph, selected: BuildPlanSelection, root: String, policy: JetDriverAuthorityPolicy?, invocation: JetCLIInvocationAuthority?, member: String?, options: BuildOptions, threads: Int?, generated: [JetDriverGeneratedModule], trace_sink: JetCLITraceSink?, color: Bool) -> JetDriverVerbOutput {
+jet_cli_build_run_graph: fn(graph: BuildPlanExecution, receipt: BuildGraph, made: [BuildSessionGeneratedModule], selected: BuildPlanSelection, root: String, policy: JetDriverAuthorityPolicy?, invocation: JetCLIInvocationAuthority?, member: String?, options: BuildOptions, threads: Int?, generated: [JetDriverGeneratedModule], trace_sink: JetCLITraceSink?, color: Bool) -> JetDriverVerbOutput {
     action_timeout_ms: build_option_duration_ms(build_options_value(options, "action_timeout")) ?? panic("the resolved `action_timeout` is a checked duration")
     if graph.actions.len() == 0 && graph.probes.len() == 0 {
         nodes := [JetCLIBuildNode]{}
         loop index in 0..<selected.executables.len() -> nodes.push(JetCLIBuildNode{kind: .Image, id: selected.executables[index].target, name: selected.executables[index].name.copy(), needs: [Int]{}})
         loop index in 0..<selected.libraries.len() -> nodes.push(JetCLIBuildNode{kind: .Library, id: index, name: selected.libraries[index].name.copy(), needs: [Int]{}})
-        return jet_cli_build_run_nodes(nodes, None, None, [BuildEffect]{}, [BuildProbeFact]{}, graph, receipt, selected, JetCLIBuildNeeds{steps: [Int]{}, host: [Int]{}, images: [Int]{}}, root, member, options, threads, invocation, generated, [String: String]{}, trace_sink, color)
+        return jet_cli_build_run_nodes(nodes, None, None, [BuildEffect]{}, [BuildProbeFact]{}, graph, receipt, made, selected, JetCLIBuildNeeds{steps: [Int]{}, host: [Int]{}, images: [Int]{}}, root, member, options, threads, invocation, generated, [String: String]{}, trace_sink, color)
     }
     workspace := OverlayPolicy.empty()
     // copy: `refused` is a payload view of the policy read's result.
@@ -189,17 +190,17 @@ jet_cli_build_run_graph: fn(graph: BuildPlanExecution, receipt: BuildGraph, sele
     if BUILD_REUSE_SAVED_WORK && needs.steps.len() > 0 {
         store = Val(BuildArtifactStoreHandle.open() ?? return jet_cli_build_execution_failed("E3505", "couldn't open the build store: {err.message()}", None, "point `JET_STORE_DIR` at a writable store directory", color))
     }
-    jet_cli_build_run_nodes(nodes, Val(plan), store, grants, probes, graph, receipt, selected, needs, root, member, options, threads, invocation, generated, last.kept, trace_sink, color)
+    jet_cli_build_run_nodes(nodes, Val(plan), store, grants, probes, graph, receipt, made, selected, needs, root, member, options, threads, invocation, generated, last.kept, trace_sink, color)
 }
 
 // Run `nodes` to the end: each round runs every ready step at once, then
 // builds one ready target, until nothing more can start. A node waiting on a
 // failed one never starts. Every failure is reported, in the order it
-// happened. Then the run records `receipt`, with each step's reuse, the
-// digest of each kept output (`last_kept` the last build's), and the time of
-// every node that ran (jet_cli_build_record). Without `store` no step is
-// reused and nothing is stored.
-jet_cli_build_run_nodes: fn(nodes: [JetCLIBuildNode], plan: HermeticBuildPlan?, store: BuildArtifactStoreHandle?, grants: [BuildEffect], probes: [BuildProbeFact], graph: BuildPlanExecution, receipt: BuildGraph, selected: BuildPlanSelection, needs: JetCLIBuildNeeds, root: String, member: String?, options: BuildOptions, threads: Int?, invocation: JetCLIInvocationAuthority?, generated: [JetDriverGeneratedModule], last_kept: [String: String], trace_sink: JetCLITraceSink?, color: Bool) -> JetDriverVerbOutput {
+// happened. Then the run records `receipt` and `made`, with each step's
+// reuse, the digest of each kept output (`last_kept` the last build's), and
+// the time of every node that ran (jet_cli_build_record). Without `store` no
+// step is reused and nothing is stored.
+jet_cli_build_run_nodes: fn(nodes: [JetCLIBuildNode], plan: HermeticBuildPlan?, store: BuildArtifactStoreHandle?, grants: [BuildEffect], probes: [BuildProbeFact], graph: BuildPlanExecution, receipt: BuildGraph, made: [BuildSessionGeneratedModule], selected: BuildPlanSelection, needs: JetCLIBuildNeeds, root: String, member: String?, options: BuildOptions, threads: Int?, invocation: JetCLIInvocationAuthority?, generated: [JetDriverGeneratedModule], last_kept: [String: String], trace_sink: JetCLITraceSink?, color: Bool) -> JetDriverVerbOutput {
     jobs: threads ?? cli_sys.cpu_count()
     // Per node: 0 waiting, 1 done, 2 failed, 3 never started.
     states := [Int]{}
@@ -265,7 +266,7 @@ jet_cli_build_run_nodes: fn(nodes: [JetCLIBuildNode], plan: HermeticBuildPlan?, 
         }
     }
     kept: jet_cli_build_kept(root, graph, reused, last_kept)
-    if jet_cli_build_record(root, receipt, reused, kept, times, color) == .Val(unrecorded) -> failures.push(unrecorded)
+    if jet_cli_build_record(root, receipt, made, reused, kept, times, color) == .Val(unrecorded) -> failures.push(unrecorded)
     jet_cli_build_failures(failures)
 }
 
@@ -282,9 +283,11 @@ jet_cli_build_node_kind: fn(kind: JetCLIBuildNodeKind) -> String Never! {
 // Write the run's records under `<root>/.jet/build`: `receipt.json`, the
 // core.build graph it built, each step that ran marked a cache hit when
 // `reused` says the store gave back its outputs and a miss when it ran, then
-// `kept`; and `times.json`, its BuildTimes. A record that can't be written is
-// the failure returned.
-jet_cli_build_record: fn(root: String, receipt: BuildGraph, reused: [Int: Bool], kept: [JetDriverBuildKept], times: [JetDriverBuildTime], color: Bool) -[FS]> JetDriverVerbOutput? Never! {
+// `kept`, then `generated`, each module `build: fn` made (`made`) with its
+// identity and the producer chain that made it, which the editor shows on
+// the module (`jet self lsp`); and `times.json`, its BuildTimes. A record
+// that can't be written is the failure returned.
+jet_cli_build_record: fn(root: String, receipt: BuildGraph, made: [BuildSessionGeneratedModule], reused: [Int: Bool], kept: [JetDriverBuildKept], times: [JetDriverBuildTime], color: Bool) -[FS]> JetDriverVerbOutput? Never! {
     graph := receipt.copy()
     hits := [BuildGraphAction]{}
     loop index in 0..<graph.actions.len() {
@@ -299,7 +302,7 @@ jet_cli_build_record: fn(root: String, receipt: BuildGraph, reused: [Int: Bool],
     fix: "make `{directory}` writable"
     cli_files.create_dir_all(directory) ?? return Val(jet_cli_build_failed("couldn't create `{directory}` for the build's records: {err}", jet_cli_why("E2105"), fix, color))
     receipt_path: cli_files.join(directory, "receipt.json")
-    cli_files.write(receipt_path, jet_driver_build_graph_json(graph, kept)) ?? return Val(jet_cli_build_failed("couldn't write the build receipt `{receipt_path}`: {err}", jet_cli_why("E2105"), fix, color))
+    cli_files.write(receipt_path, jet_driver_build_graph_json(graph, kept, made)) ?? return Val(jet_cli_build_failed("couldn't write the build receipt `{receipt_path}`: {err}", jet_cli_why("E2105"), fix, color))
     times_path: cli_files.join(directory, "times.json")
     cli_files.write(times_path, jet_driver_build_times_json(times)) ?? return Val(jet_cli_build_failed("couldn't write the build times `{times_path}`: {err}", jet_cli_why("E2105"), fix, color))
     None

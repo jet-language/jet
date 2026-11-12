@@ -1,0 +1,34 @@
+# #3526 c17: the editor shows what made a generated module. `jet build`
+# records each module `build: fn` generated in its receipt with the module's
+# stable identity and producer chain. A hover anywhere in the module the build
+# wrote names the function that made it, each handoff of the root's `Compiler`
+# value that led there (root first), the `Meta` effect it was made under and
+# its identity. A file the build didn't make gets no such note.
+fixture: lsp_hover_in_a_generated_module_names_what_made_it.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet build handed/main.jet --write-generated=on
+exit: 0
+file: handed/.jet/build/receipt.json ~ "\"generated\":[{\"id\":\"sha256:" # the receipt records the generated module
+file: handed/.jet/build/receipt.json ~ "\"path\":\".jet/generated/handed/greeting.jet\"" # the row names the module the build wrote
+file: handed/.jet/generated/handed/greeting.jet ~ "greeting: fn() -> String" # the module the build wrote
+session lsp content-length: jet self lsp
+stderr: null
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"capabilities\":{}}}"
+recv lsp until $.id = 1
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/handed/.jet/generated/handed/greeting.jet\",\"languageId\":\"jet\",\"version\":1,\"text\":\"greeting: fn() -> String { \\\"added by the tool\\\" }\\n\"}}}"
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/hover\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/handed/.jet/generated/handed/greeting.jet\"},\"position\":{\"line\":0,\"character\":2}}}"
+recv lsp until $.id = 2
+stdout: ~ "Generated module `greeting`, made by `meta.add` in `stage` at " # the function that made it
+stdout: ~ "after `build` handed it to `" # the root's build passed the value first
+stdout: ~ "then `install` handed it to `stage` at " # then install passed it on
+stdout: ~ "Made under `Meta.Generate`." # the effect it was made under
+stdout: ~ "Identity: `sha256:" # its stable identity
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/handed/main.jet\",\"languageId\":\"jet\",\"version\":1,\"text\":\"use tool\\n\\nbuild: fn(b: Build) {\\n    app: b.add_executable(\\\"app\\\", [\\\"main.jet\\\"], [])\\n    tool.install(b.compiler(app))\\n    b.default(app)\\n}\\n\"}}}"
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"textDocument/hover\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/handed/main.jet\"},\"position\":{\"line\":2,\"character\":2}}}"
+recv lsp until $.id = 3
+stdout: !~ "Generated module" # a handwritten file names no producer
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"shutdown\",\"params\":{}}"
+recv lsp until $.id = 4
+close lsp
+exit: any # the server's status after shutdown is not what this case shows

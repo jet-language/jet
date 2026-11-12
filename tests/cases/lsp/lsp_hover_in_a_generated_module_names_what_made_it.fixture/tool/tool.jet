@@ -1,0 +1,11 @@
+// A library metaprogram that passes the root's `Compiler` value on to a
+// helper, which adds the code.
+install: fn(meta: Compiler) {
+    stage(meta)
+}
+
+stage: fn(meta: Compiler) {
+    meta.add(#code {
+        greeting: fn() -> String { "added by the tool" }
+    }, scope: "greeting")
+}

@@ -3,18 +3,20 @@
 // compile of the document as the entry with every open document's unsaved
 // text in place of its file, kept going past errors so the semantic index
 // still covers a document that does not check (as `jet fix` and codemods
-// read it). An unsaved loose buffer is checked by itself.
+// read it). An unsaved loose buffer is checked by itself. A document that is
+// a module its package's last `jet build` generated carries what made it.
 use {
     cli_files: core.files
     jet_driver.[JetDriverCompileMode, JetDriverDocModule, JetDriverKeepGoing, JetDriverVerbOutput, jet_driver_compile_keep_going, jet_driver_present_diagnostics]
     jet_foundation.[Diagnostic]
-    jet_lsp.[LSPChecked, LSPChecker, LSPOverlay, lsp_serve, lsp_write_log]
+    jet_lsp.[LSPChecked, LSPChecker, LSPOverlay, LSPProducer, lsp_serve, lsp_write_log]
     jet_semindex.[SemSymbol, semindex_build_symbols]
 }
 
 JetCLILSPChecker: struct {
     impl LSPChecker {
         check: fn(self, entry: String, overlays: [LSPOverlay]) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> LSPChecked {
+            producer: jet_cli_lsp_producer(entry)
             alone: jet_cli_lsp_unsaved_loose(entry)
             entry_path: jet_cli_overlay_path(entry)
             given := [JetCLIOverlay]{}
@@ -26,7 +28,7 @@ JetCLILSPChecker: struct {
                 // the document; the client's log shows it.
                 .Refused(output) -> {
                     lsp_write_log(output.stderr).drop("standard error is the log; a failed log write has nowhere to go")
-                    return jet_cli_lsp_unchecked()
+                    return LSPChecked{diagnostics: [Diagnostic]{}, modules: [JetDriverDocModule]{}, index: None, symbols: [SemSymbol]{}, producer: producer}
                 }
                 .Prepared(request, snapshot) -> {
                     demanded := request.move()
@@ -34,18 +36,45 @@ JetCLILSPChecker: struct {
                     result: jet_driver_compile_keep_going(demanded, JetDriverKeepGoing{skip: [String]{}})
                     if result.internal_problem == .Val(problem) -> lsp_write_log("internal compiler error checking `{entry}`: {problem}").drop("standard error is the log; a failed log write has nowhere to go")
                     diagnostics: jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
-                    if result.doc_modules.len() == 0 -> return LSPChecked{diagnostics: diagnostics, modules: [JetDriverDocModule]{}, index: None, symbols: [SemSymbol]{}}
+                    if result.doc_modules.len() == 0 -> return LSPChecked{diagnostics: diagnostics, modules: [JetDriverDocModule]{}, index: None, symbols: [SemSymbol]{}, producer: producer}
                     index: jet_cli_checked_semindex(result)
                     symbols: semindex_build_symbols(index, result.doc_modules)
-                    return LSPChecked{diagnostics: diagnostics, modules: result.doc_modules.copy(), index: Val(index), symbols: symbols}
+                    return LSPChecked{diagnostics: diagnostics, modules: result.doc_modules.copy(), index: Val(index), symbols: symbols, producer: producer}
                 }
             }
         }
     }
 }
 
-jet_cli_lsp_unchecked: fn() -> LSPChecked Never! {
-    LSPChecked{diagnostics: [Diagnostic]{}, modules: [JetDriverDocModule]{}, index: None, symbols: [SemSymbol]{}}
+// What made `entry` when it is a module under its package's `.jet/generated/`
+// that the package's last `jet build` recorded: the receipt's `generated` row
+// of that path (jet_driver_build_graph_json), whose fields are the plan's
+// (jet_driver_build_generated_json). None for any other file, and before a
+// build has recorded one.
+jet_cli_lsp_producer: fn(entry: String) -[FS]> LSPProducer? Never! {
+    place: entry.partition("/.jet/generated/")
+    if place.sep == "" -> return None
+    relative: ".jet/generated/{place.tail}"
+    text: cli_files.read(jet_cli_entry_join(place.head, ".jet/build/receipt.json")) ?? return None
+    receipt: jet_cli_status_value_parse(text) ?? return None
+    rows: jet_cli_status_list(jet_cli_status_get(receipt, "generated")) ?? return None
+    loop row in rows {
+        if jet_cli_status_string(jet_cli_status_get(row, "path")) != .Val(relative) -> next
+        handoffs := [String]{}
+        steps: jet_cli_status_list(jet_cli_status_get(row, "handoffs")) ?? [JetCLIStatusValue]{}
+        loop step in steps {
+            if jet_cli_status_string(Val(step)) == .Val(said) -> handoffs.push(said.copy())
+        }
+        return Val(LSPProducer{
+            name: jet_cli_status_string(jet_cli_status_get(row, "name")) ?? "",
+            identity: jet_cli_status_string(jet_cli_status_get(row, "id")) ?? "",
+            made_by: jet_cli_status_string(jet_cli_status_get(row, "made_by")),
+            handoffs: handoffs.move(),
+            authority: jet_cli_status_string(jet_cli_status_get(row, "authority")),
+            consent: jet_cli_status_string(jet_cli_status_get(row, "consent")),
+        })
+    }
+    None
 }
 
 // An unsaved buffer (no file holds it yet) outside every package is checked

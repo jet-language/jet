@@ -6044,11 +6044,18 @@ in the order each finished. A step's `wall_ms` is the time of the steps that ran
 with it, and `reused` is false, since every image is built. Both are
 JSON objects whose fields are the value's own, in declaration order; after
 them `receipt.json` has `kept`, one `path` and `digest` (`sha256:<hex>`) per
-kept output, of the bytes the build left there.
+kept output, of the bytes the build left there, then `generated`, one row per
+module `build: fn` generated, as `jet inspect graph` shows it (`id`, `name`,
+`path`, `digest`, `made_by`, `handoffs`, `authority`, `consent`). A hover in
+`jet self lsp` anywhere in a module under `.jet/generated/` that the last
+build's receipt lists names what made it: the call and function, each
+handoff of the `Compiler` value that led there, root first, the `Meta` effect
+and consent it used, and its identity.
 `jet inspect build --times` shows the last build's rows (`kind`, `name`,
 `wall_ms`, and `made` or `reused`), or the record itself under `--json`;
-before any build has recorded one it fails with E2104. Example:
-[`tests/cases/build_entry/run_steps_record_the_graph_and_times.case`](../../tests/cases/build_entry/run_steps_record_the_graph_and_times.case).
+before any build has recorded one it fails with E2104. Examples:
+[`tests/cases/build_entry/run_steps_record_the_graph_and_times.case`](../../tests/cases/build_entry/run_steps_record_the_graph_and_times.case),
+[`tests/cases/lsp/lsp_hover_in_a_generated_module_names_what_made_it.case`](../../tests/cases/lsp/lsp_hover_in_a_generated_module_names_what_made_it.case).
 
 There is no ambient execution fallback. On Linux each action runs under
 bubblewrap with private mount, PID, IPC, UTS, and network namespaces. Only

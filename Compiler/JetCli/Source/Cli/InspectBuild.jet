@@ -257,7 +257,7 @@ jet_cli_build_package_as: fn(file: String, color: Bool, options: BuildOptions, b
             build_files.write(path, source_file.source) ?? return jet_cli_build_failed("couldn't write the generated source `{path}`: {err}", jet_cli_why("E2105"), "make `{directory}` writable, or build with `--write-generated=off`", color)
         }
     }
-    built: jet_cli_build_run_graph(graph, projected, selected, root, policy, invocation, member, selected_options, threads, target_generated, trace_sink, color)
+    built: jet_cli_build_run_graph(graph, projected, generated, selected, root, policy, invocation, member, selected_options, threads, target_generated, trace_sink, color)
     if built.exit_code != JET_DRIVER_EXIT_OK -> return built
     // Each action output is locked beside what `build: fn` generated and
     // read, as a generated input of the targets. A locked build whose outputs
