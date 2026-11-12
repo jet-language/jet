@@ -479,19 +479,32 @@ reads `target.marker(T)` at every site kind a marker body runs on, and
 runs one on the package record: a header line above `package.jet`'s first
 field.
 A PackageInfo's `settings` lists the built package's settings, one
-SettingInfo each: the setting's `name`, its `type` as written, its `default`,
+SettingInfo each: the setting's `name`, its `type` (a TypeId), its `default`,
 the value this build `selected`, and its `contributions`, one ContributionInfo
 per writer from least to most explicit. A ContributionInfo has the writer's
 `value`, its `source`, where the value is written (such as
 `package.jet:build.release.settings.level`), its `kind`
 (`ContributionKind.Declaration`, `.Profile`, `.Build` for the package's
 `build: fn`, or `.CommandLine` for `--set`) and `selected`, true for the
-writer the contribution law chose. Values are the setting's text as written.
+writer the contribution law chose. Every value is a PreparedValue of the
+setting's type.
 The build reads settings from the built package alone, so a dependency's
 PackageInfo lists none.
 [`PackageSettings`](../../../Examples/Metaprogramming/Reflection/PackageSettings/run.jet)
 prints each setting with its writers; under `--release` the profile's value
 is selected.
+A TypeId names a type: `identity` qualifies each declared type it names by
+its module, as TypeInfo's `identity` does (`shapes.Point` is
+`shapes::Point`), so two TypeIds name one type exactly when their
+identities are equal; `name` is the type as the checker prints it. A
+PreparedValue is a compile-time value with its type kept, one case per case
+of the compile-time value algebra: `.Int(Int)`, `.Float(Float)`,
+`.Bool(Bool)`, `.Char(Char)`, `.String(String)`, `.Enum(PreparedCase)` (the
+enum's `type`, the `variant` and its `args`), `.List([PreparedValue])`,
+`.Struct(PreparedStruct)` (the struct's `type` and its `fields`, each a
+PreparedField with a `name` and a `value`) and `.Unit`. A value outside
+that algebra, such as a map or setting text that is no value of the
+setting's type, has no PreparedValue: reading it fails.
 [`ConsoleRegistry`](../../../Examples/Metaprogramming/Reflection/ConsoleRegistry/run.jet)
 builds a command registry this way in a plain library: `#CLI.Console` on a
 type reads its methods marked `#CLI.Command` and writes `run`, which parses

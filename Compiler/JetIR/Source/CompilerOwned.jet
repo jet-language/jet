@@ -183,6 +183,10 @@ IR_COMPILER_OWNED_CORE_RECORDS: #run { [IRCompilerOwnedRecord]{
     {name: "GenericBindingInfo", fields: [String]{"name", "type"}},
     {name: "NumericInfo", fields: [String]{"signed", "bits", "is_float"}},
     {name: "SourceSpan", fields: [String]{"start", "end"}},
+    {name: "TypeId", fields: [String]{"identity", "name"}},
+    {name: "PreparedCase", fields: [String]{"type", "variant", "args"}},
+    {name: "PreparedStruct", fields: [String]{"type", "fields"}},
+    {name: "PreparedField", fields: [String]{"name", "value"}},
     {name: "ModGrant", fields: [String]{"read"}},
     {name: "Expired", fields: [String]{}},
 } }
@@ -398,6 +402,8 @@ IR_COMPILER_OWNED_ENUMS: #run { [IRCompilerOwnedEnum]{
     {name: "CommentKind", variants: [String]{"Line", "Block", "Documentation"}},
     {name: "CaptureMode", variants: [String]{"Read", "Write", "Copy", "Materialize", "Move"}},
     {name: "UnitScaleProvenanceKind", variants: [String]{"Rational", "SymbolicPi", "Conventional", "Measured"}},
+    // A reflected compile-time value; its payloads are the Core enum rows.
+    {name: "PreparedValue", variants: [String]{"Int", "Float", "Bool", "Char", "String", "Enum", "List", "Struct", "Unit"}},
 } }
 
 // The payload of one compiler-owned enum variant.
@@ -461,8 +467,8 @@ ir_compiler_owned_enum_payload: fn(name: String, variant: String) -> IRCompilerO
         return ir_compiler_owned_single(Type.Named{name: "PluginFault"})
     }
     // The canonical twelve DataEvent payloads are the generated Core payload
-    // rows (data_event_payload).
-    if name == "DataEvent" {
+    // rows (data_event_payload), as are a reflected PreparedValue's.
+    if name == "DataEvent" || name == "PreparedValue" {
         payload: core_enum_variant_payload(name, variant) ?? return IRCompilerOwnedPayload.Unit
         if payload.len() == 1 -> return ir_compiler_owned_single(payload[0])
         return IRCompilerOwnedPayload.Unit

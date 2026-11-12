@@ -132,11 +132,15 @@ vocabulary](vocabulary.md).
   `b.program.packages()` holds one PackageInfo per package: its `name`,
   `identity` and `version`, the ModuleInfo of each of its file `modules`,
   all their `types` and `functions`, and its `settings`. Each SettingInfo
-  names a declared setting, its `type` as written, its `default`, the value
-  this build `selected`, and its `contributions`: one ContributionInfo per
-  writer, least explicit first, with its `value`, its `source` (where it is
-  written), its `kind` (ContributionKind: `Declaration`, `Profile`, `Build`
-  or `CommandLine`) and whether it is the `selected` writer. The build takes
+  names a declared setting, its `type` (a TypeId: the type's module-qualified
+  `identity` and its printed `name`), its `default`, the value this build
+  `selected`, and its `contributions`: one ContributionInfo per writer, least
+  explicit first, with its `value`, its `source` (where it is written), its
+  `kind` (ContributionKind: `Declaration`, `Profile`, `Build` or
+  `CommandLine`) and whether it is the `selected` writer. Every value is a
+  PreparedValue of the setting's type: `.Int`, `.Float`, `.Bool`, `.Char`,
+  `.String`, `.Enum` (a PreparedCase), `.List`, `.Struct` (a PreparedStruct)
+  or `.Unit`, the cases of the compile-time value algebra. The build takes
   its settings from the built package alone, so any other package lists none
   (Examples/Metaprogramming/Reflection/PackageSettings).
   Comments, documentation and marker arguments stay distinct. A TypeInfo,

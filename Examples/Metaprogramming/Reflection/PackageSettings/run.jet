@@ -1,7 +1,8 @@
-// `b.program.packages()` lists the built package's settings: each one's type
-// as written, its default, the value this build selected, and every writer
-// of the value with its kind and where it is written, the selected one
-// marked `*`. Fn build writes `report` itself, so it reads the others.
+// `b.program.packages()` lists the built package's settings: each one's type,
+// its default, the value this build selected, and every writer of the value
+// with its kind and where it is written, the selected one marked `*`. Each
+// value is a PreparedValue, typed as the setting is. Fn build writes `report`
+// itself, so it reads the others.
 build: fn(b: Build) {
     report := ""
     loop package in b.program.packages() {
@@ -17,13 +18,28 @@ build: fn(b: Build) {
                     .CommandLine -> "command line"
                 }
                 mark: if contribution.selected -> "*" else -> ""
-                written = "{written} {kind}{mark}={contribution.value} at {contribution.source}"
+                written = "{written} {kind}{mark}={shown(contribution.value)} at {contribution.source}"
             }
             if report != "" -> report = "{report} | "
-            report = "{report}{setting.name}: {setting.type} = {setting.selected}, default {setting.default};{written}"
+            report = "{report}{setting.name}: {setting.type.name} = {shown(setting.selected)}, default {shown(setting.default)};{written}"
         }
     }
     b.contribute("report", report)
+}
+
+// A setting value as source spells it.
+shown: fn(value: PreparedValue) -> String {
+    if value == {
+        .Int(number) -> "{number}"
+        .Float(number) -> "{number}"
+        .Bool(flag) -> "{flag}"
+        .Char(character) -> "'{character}'"
+        .String(text) -> "\"{text}\""
+        .Enum(written) -> ".{written.variant}"
+        .List(items) -> "[{items.len()} values]"
+        .Struct(record) -> record.type.name
+        .Unit -> "()"
+    }
 }
 
 run: fn() {

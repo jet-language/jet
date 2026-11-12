@@ -490,14 +490,17 @@ sema_fact_reflection_field_type: fn(type_name: String, field: String) -> Type? {
     }
     if type_name == "SettingInfo" {
         return if {
-            field == "name" || field == "type" || field == "default" || field == "selected" -> Val(string)
+            field == "name" -> Val(string)
+            field == "type" -> Val(sema_fact_named("TypeId"))
+            field == "default" || field == "selected" -> Val(sema_fact_named("PreparedValue"))
             field == "contributions" -> Val(sema_fact_list_of("ContributionInfo"))
             else -> None
         }
     }
     if type_name == "ContributionInfo" {
         return if {
-            field == "value" || field == "source" -> Val(string)
+            field == "value" -> Val(sema_fact_named("PreparedValue"))
+            field == "source" -> Val(string)
             field == "kind" -> Val(sema_fact_named("ContributionKind"))
             field == "selected" -> Val(Type.Bool)
             else -> None
@@ -603,6 +606,29 @@ sema_fact_reflection_field_type: fn(type_name: String, field: String) -> Type? {
         }
     }
     if type_name == "SourceSpan" -> return sema_fact_field_when(field == "start" || field == "end", Type.Int)
+    if type_name == "TypeId" -> return sema_fact_field_when(field == "identity" || field == "name", string)
+    if type_name == "PreparedCase" {
+        return if {
+            field == "type" -> Val(sema_fact_named("TypeId"))
+            field == "variant" -> Val(string)
+            field == "args" -> Val(sema_fact_list_of("PreparedValue"))
+            else -> None
+        }
+    }
+    if type_name == "PreparedStruct" {
+        return if {
+            field == "type" -> Val(sema_fact_named("TypeId"))
+            field == "fields" -> Val(sema_fact_list_of("PreparedField"))
+            else -> None
+        }
+    }
+    if type_name == "PreparedField" {
+        return if {
+            field == "name" -> Val(string)
+            field == "value" -> Val(sema_fact_named("PreparedValue"))
+            else -> None
+        }
+    }
     None
 }
 
@@ -833,37 +859,62 @@ sema_fact_build_setting_unquote: fn(raw: String) -> String Never! {
     out
 }
 
+// The value a setting's text spells as its declared type: `true`/`false` for
+// `Bool`, a signed 64-bit whole number for `Int`, one character (quoted or
+// not) for `Char`, the unquoted text for `String`, and for any other type a
+// fieldless enum variant written `.Variant` or `Variant`. None when the text
+// is not a value of its scalar type. The enum type is not resolved here: the
+// reading module resolves it (sema_fact_build_setting_value).
+sema_fact_build_setting_literal: fn(ty: String, text: String) -> TComptimeValue? {
+    raw: text.trim()
+    declared: ty.trim()
+    if declared == "Bool" {
+        if raw == "true" -> return Val(TComptimeValue.Bool{value: true})
+        if raw == "false" -> return Val(TComptimeValue.Bool{value: false})
+        return None
+    }
+    if declared == "Int" {
+        number: Int.parse(raw) ?? return None
+        return Val(TComptimeValue.Int{value: number})
+    }
+    if declared == "String" -> return Val(TComptimeValue.String{value: sema_fact_build_setting_unquote(raw)})
+    if declared == "Char" {
+        body := raw
+        if raw.count_bytes() >= 2 && raw.starts_with("'") && raw.ends_with("'") -> body = sema_fact_build_setting_unquote(raw.slice(1, raw.len() - 1))
+        code: sema_checked_const_char(body) ?? -1
+        count := 0
+        loop _ in body.chars() -> count += 1
+        if code < 0 || count != 1 -> return None
+        return Val(TComptimeValue.Char{value: code})
+    }
+    variant := raw
+    if raw.starts_with(".") -> variant = raw.slice(1, raw.len()).trim()
+    Val(TComptimeValue.Enum{type_name: declared, variant: variant, args: [TComptimeEnumArg]{}})
+}
+
 // The declared setting's typed value for this build (Rust
 // `parse_setting_value`): `Bool`, `Int`, `Char`, `String` or a fieldless
 // enum the reading module resolves, written `.Variant` or `Variant`.
 sema_fact_build_setting_value: fn(setting: SemaBuildSetting, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> SemaFactReadValue? {
     raw: setting.value.trim()
     ty: setting.ty.trim()
-    if ty == "Bool" {
-        if raw == "true" -> return Val(SemaFactReadValue{ty: Type.Bool, value: TComptimeValue.Bool{value: true}})
-        if raw == "false" -> return Val(SemaFactReadValue{ty: Type.Bool, value: TComptimeValue.Bool{value: false}})
-        diagnostics.push(sema_fact_build_setting_invalid(setting, "Bool settings use `true` or `false`", span))
-        return None
-    }
-    if ty == "Int" {
-        number: Int.parse(raw) ?? {
-            diagnostics.push(sema_fact_build_setting_invalid(setting, "Int settings use a signed 64-bit whole number", span))
+    if ty == "Bool" || ty == "Int" || ty == "Char" || ty == "String" {
+        value: sema_fact_build_setting_literal(ty, raw) ?? {
+            rule: if {
+                ty == "Bool" -> "Bool settings use `true` or `false`"
+                ty == "Int" -> "Int settings use a signed 64-bit whole number"
+                else -> "Char settings use one quoted character"
+            }
+            diagnostics.push(sema_fact_build_setting_invalid(setting, rule, span))
             return None
         }
-        return Val(SemaFactReadValue{ty: Type.Int, value: TComptimeValue.Int{value: number}})
-    }
-    if ty == "String" -> return Val(SemaFactReadValue{ty: Type.String, value: TComptimeValue.String{value: sema_fact_build_setting_unquote(raw)}})
-    if ty == "Char" {
-        text := raw
-        if raw.count_bytes() >= 2 && raw.starts_with("'") && raw.ends_with("'") -> text = sema_fact_build_setting_unquote(raw.slice(1, raw.len() - 1))
-        code: sema_checked_const_char(text) ?? -1
-        count := 0
-        loop _ in text.chars() -> count += 1
-        if code < 0 || count != 1 {
-            diagnostics.push(sema_fact_build_setting_invalid(setting, "Char settings use one quoted character", span))
-            return None
+        scalar: if {
+            ty == "Bool" -> Type.Bool
+            ty == "Int" -> Type.Int
+            ty == "Char" -> Type.Char
+            else -> Type.String
         }
-        return Val(SemaFactReadValue{ty: Type.Char, value: TComptimeValue.Char{value: code}})
+        return Val(SemaFactReadValue{ty: scalar, value: value})
     }
     variant := raw
     if raw.starts_with(".") -> variant = raw.slice(1, raw.len()).trim()

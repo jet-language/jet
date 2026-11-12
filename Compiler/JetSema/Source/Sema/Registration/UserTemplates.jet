@@ -10,6 +10,7 @@ use jet_foundation.[
     CtFloat,
     CtKey,
     ast_comptime_integer_key,
+    comptime_char_text,
     CtMapEntry,
     CtReport,
     CtValue,
@@ -119,7 +120,11 @@ sema_user_template_ct_value: fn(value: TComptimeValue) -> CtValue? Never! {
             }
         }
         .Unit -> Val(CtValue.Unit)
-        .Char(_) -> None
+        .Char(code) -> {
+            chars: comptime_char_text(code).chars()
+            if chars.len() != 1 -> return None
+            Val(CtValue.Char{value: chars[0]})
+        }
     }
 }
 
@@ -704,7 +709,7 @@ sema_user_template_package_info: fn(graph: SemaRegistrationGraph) -> CtValue? {
         NamedCtValue{name: "modules", value: CtValue.List{values: modules}},
         NamedCtValue{name: "types", value: CtValue.List{values: types}},
         NamedCtValue{name: "functions", value: CtValue.List{values: functions}},
-        NamedCtValue{name: "settings", value: sema_user_template_ct_value(TComptimeValue.List{values: sema_comptime_reflection_setting_infos(graph.build_facts.settings)}) ?? return None},
+        NamedCtValue{name: "settings", value: sema_user_template_ct_value(TComptimeValue.List{values: sema_comptime_reflection_setting_infos(graph, graph.build_facts.settings)}) ?? return None},
     }})
 }
 

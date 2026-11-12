@@ -2,7 +2,7 @@
 // The bootstrap unit includes that kernel beside these helpers. No graph
 // validation, policy, defaulting or key recipe is implemented at this boundary.
 use {
-    jet_foundation.[Diagnostic, DiagnosticStructured, DiagnosticBuildError, DiagnosticErrorDetails, DiagnosticErrorField, DiagnosticErrorSpan, Span, TComptimeEnumArg, TComptimeField, TComptimeReport, TComptimeValue, Type, diagnostic_from_registry, diagnostic_registry_row]
+    jet_foundation.[Diagnostic, DiagnosticStructured, DiagnosticBuildError, DiagnosticErrorDetails, DiagnosticErrorField, DiagnosticErrorSpan, Span, TComptimeEnumArg, TComptimeField, TComptimeReport, TComptimeValue, Type, comptime_char_text, diagnostic_from_registry, diagnostic_registry_row]
     core.build.[BuildGraph, BuildGraphAction, BuildGraphFile]
     jet_build_session.[BuildSessionDiagnostic, BuildSessionValue, build_session_error_projection, build_session_plan_report]
 }
@@ -38,7 +38,7 @@ jet_eval_build_session_input: fn(data: TComptimeValue) -> BuildSessionValue? Nev
         .Int(value) -> return Val(BuildSessionValue.Int{value: value})
         .Char(value) -> {
             if value < 0 || value > 1114111 || (value >= 55296 && value <= 57343) -> return None
-            chars: jet_eval_format_char_text(value).chars()
+            chars: comptime_char_text(value).chars()
             if chars.len() == 1 -> return Val(BuildSessionValue.Char{value: chars[0]})
             return None
         }

@@ -7,6 +7,7 @@ use {
         TComptimeKey,
         TComptimeField,
         ast_comptime_memo_storage_name,
+        comptime_char_text,
     ]
     jet_driver.[
         JetDriverVerbOutput, JetDriverCompileMode, JetDriverCompilerCheckInput,
@@ -14,7 +15,7 @@ use {
         jet_driver_compiler_source_snapshot,
     ]
     jet_eval.[
-        jet_eval_compiler_services_parse, jet_eval_format_char_text,
+        jet_eval_compiler_services_parse,
     ]
     jet_sema.[sema_comptime_reflection_callable_signature]
 }
@@ -38,7 +39,7 @@ jet_cli_compiler_key_text: fn(key: TComptimeKey) -> String Never! {
         .BigInt(decimal) -> decimal
         .String(text) -> text
         .Bool(flag) -> "{flag}"
-        .Char(code) -> jet_eval_format_char_text(code)
+        .Char(code) -> comptime_char_text(code)
         .Tuple(_) | .Struct(_, _) | .Enum(_, _) -> jet_cli_status_json(jet_cli_compiler_checked_value(jet_cli_compiler_key_value(key)))
     }
 }
@@ -48,7 +49,7 @@ jet_cli_compiler_checked_value: fn(value: TComptimeValue) -> JetCLIStatusValue N
         .Int(number) -> jet_cli_status_int(number)
         .Float(number, _) -> JetCLIStatusValue.Float{text: "{number}"}
         .Bool(flag) -> jet_cli_status_bool(flag)
-        .Char(code) -> jet_cli_status_text(jet_eval_format_char_text(code))
+        .Char(code) -> jet_cli_status_text(comptime_char_text(code))
         .String(text) | .BigInt(text) -> jet_cli_status_text(text)
         .Bytes(bytes) -> jet_cli_status_array(loop byte in bytes -> jet_cli_status_int(Int.from_u8(byte)))
         .List(values) -> jet_cli_status_array(loop entry in values -> jet_cli_compiler_checked_value(entry))

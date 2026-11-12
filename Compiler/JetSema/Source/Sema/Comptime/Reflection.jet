@@ -48,6 +48,7 @@ use jet_foundation.[
     TraitImplBlock,
     Type,
     TypeParam,
+    TypeTupleField,
     UnOp,
     Variant,
     VariantPayload,
@@ -72,6 +73,7 @@ use jet_foundation.[
     type_identity,
     ast_comptime_value_show,
     type_name,
+    foundation_named_type,
 ]
 use jet_lexer.[
     TOKEN_BLOCK_COMMENT,
@@ -1202,23 +1204,115 @@ sema_comptime_reflection_param_record: fn(name: String, label: String, zone: Str
 }
 
 // The built package's settings (SemaBuildFacts.settings) as SettingInfo
-// records: each declared setting's name, its type as written, its default's
-// text, the text this build selected, and a ContributionInfo for each writer
-// of its chain: the value's text, where it is written, its ContributionKind
-// and whether the contribution law selected it.
-sema_comptime_reflection_setting_infos: fn(settings: [SemaBuildSetting]) -> [TComptimeValue] Never! {
+// records: each declared setting's name, its type, its default, the value
+// this build selected, and a ContributionInfo for each writer of its chain:
+// the value it writes, where it is written, its ContributionKind and whether
+// the contribution law selected it. Values are PreparedValues of the
+// setting's type. A setting's enum type is the one the package declares by
+// that name.
+sema_comptime_reflection_setting_infos: fn(graph: SemaRegistrationGraph, settings: [SemaBuildSetting]) -> [TComptimeValue] {
     loop setting in settings -> sema_comptime_reflection_struct("SettingInfo", [SemaComptimeReflectionField]{
         SemaComptimeReflectionField{name: "name", value: TComptimeValue.String{value: setting.name}},
-        SemaComptimeReflectionField{name: "type", value: TComptimeValue.String{value: setting.ty}},
-        SemaComptimeReflectionField{name: "default", value: TComptimeValue.String{value: setting.default}},
-        SemaComptimeReflectionField{name: "selected", value: TComptimeValue.String{value: setting.value}},
+        SemaComptimeReflectionField{name: "type", value: sema_comptime_reflection_type_id(graph, -1, foundation_named_type(setting.ty.trim()))},
+        SemaComptimeReflectionField{name: "default", value: sema_comptime_reflection_setting_value(graph, setting.ty, setting.default)},
+        SemaComptimeReflectionField{name: "selected", value: sema_comptime_reflection_setting_value(graph, setting.ty, setting.value)},
         SemaComptimeReflectionField{name: "contributions", value: TComptimeValue.List{values: loop writer in setting.contributions -> sema_comptime_reflection_struct("ContributionInfo", [SemaComptimeReflectionField]{
-            SemaComptimeReflectionField{name: "value", value: TComptimeValue.String{value: writer.value}},
+            SemaComptimeReflectionField{name: "value", value: sema_comptime_reflection_setting_value(graph, setting.ty, writer.value)},
             SemaComptimeReflectionField{name: "source", value: TComptimeValue.String{value: writer.source}},
             SemaComptimeReflectionField{name: "kind", value: TComptimeValue.Enum{type_name: "ContributionKind", variant: writer.kind, args: [TComptimeEnumArg]{}}},
             SemaComptimeReflectionField{name: "selected", value: TComptimeValue.Bool{value: writer.selected}},
         })}},
     })
+}
+
+// A setting value's text as the PreparedValue of the setting's type. Text
+// that is no value of that type has none: the read fails, as reading the
+// setting itself reports it (sema_fact_build_setting_value).
+sema_comptime_reflection_setting_value: fn(graph: SemaRegistrationGraph, ty: String, text: String) -> TComptimeValue {
+    literal: sema_fact_build_setting_literal(ty, text) ?? return sema_comptime_reflection_unprepared()
+    sema_comptime_reflection_prepared(graph, -1, literal)
+}
+
+// A type's TypeId. Its `identity` names each declared type by its module, as
+// TypeInfo.identity does (`shapes::Point`, `[shapes::Point]`), so two
+// reflected types are one type exactly when their identities are equal; its
+// `name` is the type as the checker prints it (`Point`, `[Point]`). `caller`
+// is the row of the module the type is written in, -1 for none.
+sema_comptime_reflection_type_id: fn(graph: SemaRegistrationGraph, caller: Int, ty: Type) -> TComptimeValue {
+    sema_comptime_reflection_struct("TypeId", [SemaComptimeReflectionField]{
+        SemaComptimeReflectionField{name: "identity", value: TComptimeValue.String{value: type_name(sema_comptime_reflection_qualified_type(graph, caller, ty))}},
+        SemaComptimeReflectionField{name: "name", value: TComptimeValue.String{value: type_name(ty)}},
+    })
+}
+
+// `name` qualified by the module that declares it, as TypeInfo.identity
+// spells it; a name no declared type answers (a builtin, a type parameter)
+// stays as written.
+sema_comptime_reflection_qualified_name: fn(graph: SemaRegistrationGraph, caller: Int, name: String) -> String {
+    row: sema_type_resolve_nominal_row_at(graph, Type.Named{name: name}, caller) ?? return name
+    "{graph.modules[row.module_index].module_name}::{graph.modules[row.module_index].nominals[row.row].symbol.name}"
+}
+
+// `ty` with every declared type it names qualified by its module
+// (sema_comptime_reflection_qualified_name).
+sema_comptime_reflection_qualified_type: fn(graph: SemaRegistrationGraph, caller: Int, ty: Type) -> Type {
+    if ty == {
+        .Named(name) -> return Type.Named{name: sema_comptime_reflection_qualified_name(graph, caller, name)}
+        .Apply(name, args) -> return Type.Apply{name: sema_comptime_reflection_qualified_name(graph, caller, name), args: loop arg in args -> sema_comptime_reflection_qualified_type(graph, caller, arg)}
+        .List(element) -> return Type.List{element: sema_comptime_reflection_qualified_type(graph, caller, element)}
+        .Map(key, key_span, value) -> return Type.Map{key: sema_comptime_reflection_qualified_type(graph, caller, key), key_span: key_span, value: sema_comptime_reflection_qualified_type(graph, caller, value)}
+        .Shared(inner) -> return Type.Shared{inner: sema_comptime_reflection_qualified_type(graph, caller, inner)}
+        .Option(inner) -> return Type.Option{inner: sema_comptime_reflection_qualified_type(graph, caller, inner)}
+        .Result(ok, err) -> return Type.Result{ok: sema_comptime_reflection_qualified_type(graph, caller, ok), err: sema_comptime_reflection_qualified_type(graph, caller, err)}
+        .Tuple(fields) -> return Type.Tuple{fields: loop field in fields -> TypeTupleField{name: field.name, ty: sema_comptime_reflection_qualified_type(graph, caller, field.ty)}}
+        .FixedList(elem, len) -> return Type.FixedList{elem: sema_comptime_reflection_qualified_type(graph, caller, elem), len: len}
+        .Union(members) -> return Type.Union{members: loop member in members -> sema_comptime_reflection_qualified_type(graph, caller, member)}
+        .Int | .Float | .Bool | .String | .Char | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Quantity(_, _) | .Measure(_) -> {}
+    }
+    // copy: a form that names no declared type by name is its own identity.
+    ty.copy()
+}
+
+// `value` as a PreparedValue: each case of the compile-time value algebra
+// (Int, Float, Bool, Char, String, Enum, List, Struct, Unit) keeps its typed
+// payload, and an enum or struct value names its type by TypeId. An optional
+// value is its present value and a byte string is its list of byte Ints. A
+// big integer, map or failed evaluation has no PreparedValue, so reading it
+// fails.
+sema_comptime_reflection_prepared: fn(graph: SemaRegistrationGraph, caller: Int, value: TComptimeValue) -> TComptimeValue {
+    if value == {
+        .Int(number) -> return sema_comptime_reflection_prepared_case("Int", TComptimeValue.Int{value: number})
+        .Float(number, bits) -> return sema_comptime_reflection_prepared_case("Float", TComptimeValue.Float{value: number, bits: bits})
+        .Bool(flag) -> return sema_comptime_reflection_prepared_case("Bool", TComptimeValue.Bool{value: flag})
+        .Char(code) -> return sema_comptime_reflection_prepared_case("Char", TComptimeValue.Char{value: code})
+        .String(text) -> return sema_comptime_reflection_prepared_case("String", TComptimeValue.String{value: text})
+        .Enum(owner, variant, args) -> return sema_comptime_reflection_prepared_case("Enum", sema_comptime_reflection_struct("PreparedCase", [SemaComptimeReflectionField]{
+            SemaComptimeReflectionField{name: "type", value: sema_comptime_reflection_type_id(graph, caller, Type.Named{name: owner})},
+            SemaComptimeReflectionField{name: "variant", value: TComptimeValue.String{value: variant}},
+            SemaComptimeReflectionField{name: "args", value: TComptimeValue.List{values: loop arg in args -> sema_comptime_reflection_prepared(graph, caller, arg.value)}},
+        }))
+        .List(values) -> return sema_comptime_reflection_prepared_case("List", TComptimeValue.List{values: loop item in values -> sema_comptime_reflection_prepared(graph, caller, item)})
+        .Struct(owner, fields) -> return sema_comptime_reflection_prepared_case("Struct", sema_comptime_reflection_struct("PreparedStruct", [SemaComptimeReflectionField]{
+            SemaComptimeReflectionField{name: "type", value: sema_comptime_reflection_type_id(graph, caller, Type.Named{name: owner})},
+            SemaComptimeReflectionField{name: "fields", value: TComptimeValue.List{values: loop field in fields -> sema_comptime_reflection_struct("PreparedField", [SemaComptimeReflectionField]{
+                SemaComptimeReflectionField{name: "name", value: TComptimeValue.String{value: field.name}},
+                SemaComptimeReflectionField{name: "value", value: sema_comptime_reflection_prepared(graph, caller, field.value)},
+            })}},
+        }))
+        .Present(inner) -> return sema_comptime_reflection_prepared(graph, caller, inner)
+        .Unit -> return TComptimeValue.Enum{type_name: "PreparedValue", variant: "Unit", args: [TComptimeEnumArg]{}}
+        .Bytes(bytes) -> return sema_comptime_reflection_prepared_case("List", TComptimeValue.List{values: loop byte in bytes -> sema_comptime_reflection_prepared_case("Int", TComptimeValue.Int{value: Int.from_u8(byte)})})
+        .BigInt(_) | .Map(_) | .Failed(_) -> return sema_comptime_reflection_unprepared()
+    }
+}
+
+sema_comptime_reflection_prepared_case: fn(variant: String, payload: TComptimeValue) -> TComptimeValue Never! {
+    TComptimeValue.Enum{type_name: "PreparedValue", variant: variant, args: [TComptimeEnumArg]{TComptimeEnumArg{name: None, value: payload}}}
+}
+
+// A value with no PreparedValue: reading it fails.
+sema_comptime_reflection_unprepared: fn() -> TComptimeValue Never! {
+    TComptimeValue.Failed{report: TComptimeReport.Clean{ty: Type.Named{name: "PreparedValue"}}}
 }
 
 sema_comptime_reflection_type_param_info: fn(parameter: TypeParam) -> TComptimeValue Never! {
