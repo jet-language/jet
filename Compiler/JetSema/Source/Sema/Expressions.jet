@@ -4411,6 +4411,11 @@ sema_expr_check_identifier: fn(name: String, span: Span, expected: Type?, enviro
         number_read: sema_expr_number_name_read(name, span, number_index, expected, false, environment, program, scopes, state, context, diagnostics)
         if number_read.handled -> return number_read.value
     }
+    // So does a module constant bound to a number literal.
+    if expected != None && unresolved_index == .Val(constant_index) && scopes.bindings[constant_index].symbol.kind == SymbolKind.Constant {
+        constant_read: sema_expr_number_constant_read(name, span, constant_index, expected, environment, program, scopes, state, context, diagnostics)
+        if constant_read.handled -> return constant_read.value
+    }
     // E0420: a `Type{ uninit }` binding read before
     // every path wrote it reports once, then the read resolves as usual.
     if unresolved_index == .Val(read_index) && sema_ownership_uninit_take(state, scopes.bindings[read_index].symbol.id.key) != None {

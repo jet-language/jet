@@ -16,12 +16,18 @@
 // A number that does not fit where its name is used is the error that number
 // written there would be (`big: 300` read as a U8 is E1003), reported at the
 // use and pointing at the number.
+//
+// A module constant bound to a number literal with no written type
+// (`LIMIT: 200`) reads as its literal at a use in its own module that refuses
+// its type, as a `:` name in a body does. A constant computed from other
+// constants keeps its own type.
 use jet_foundation.[
     BinOp,
     DIAGNOSTIC_ERROR,
     Diagnostic,
     Expr,
     Span,
+    Symbol,
     Type,
     UnOp,
     diagnostic_with_label,
@@ -128,6 +134,46 @@ sema_expr_number_name_read: fn(name: String, span: Span, index: Int, expected: T
     value := sema_check_expression(literal, expected, environment, program, scopes, state, tail_store, context, diagnostics) ?? return SemaNumberNameRead{handled: true, value: None}
     value.span = span
     SemaNumberNameRead{handled: true, value: Val(value)}
+}
+
+// Reads the module constant `symbol` (scope row `index`) at `span` as its
+// number literal, where `expected` refuses the constant's own type. Not
+// handled for a constant of another module, one with a written type, a
+// mutable, `#Persist` or comptime one, or one whose value is not a literal.
+sema_expr_number_constant_read: fn(name: String, span: Span, index: Int, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaNumberNameRead {
+    unhandled: SemaNumberNameRead{handled: false, value: None}
+    wanted: expected ?? return unhandled
+    symbol: sema_scope_binding_symbol(environment, scopes, index)
+    if symbol.module_name != environment.module_identity -> return unhandled
+    own: sema_scope_binding_type(environment, scopes, index) ?? return unhandled
+    required: sema_call_resolved_type(wanted, environment, program)
+    if sema_call_type_assignable(required, own, environment, program) ?? true -> return unhandled
+    if sema_expr_numeric_widening_to(own, required) == (Val(true)) -> return unhandled
+    literal: sema_expr_number_constant_literal(symbol, program) ?? return unhandled
+    // A literal's check opens no statement tail.
+    tail_store := sema_statement_tail_store_init()
+    trial := [Diagnostic]{}
+    _: sema_probe_expression(literal, expected, environment, program, scopes, state, tail_store, context, trial) ?? return sema_expr_number_unfit(name, span, required, literal, trial, diagnostics)
+    if sema_has_error_since(trial, 0) -> return sema_expr_number_unfit(name, span, required, literal, trial, diagnostics)
+    context.name_references.push(SemaNameReferenceFact{span: span, symbol: symbol, kind: "const"})
+    value := sema_check_expression(literal, expected, environment, program, scopes, state, tail_store, context, diagnostics) ?? return SemaNumberNameRead{handled: true, value: None}
+    value.span = span
+    SemaNumberNameRead{handled: true, value: Val(value)}
+}
+
+// The number literal the module constant `symbol` is bound to, when it has
+// no written type and is neither mutable, `#Persist` nor comptime.
+sema_expr_number_constant_literal: fn(symbol: Symbol, program: SemaProgramTables) -> Expr? {
+    if program.registration_graph == .Val(graph) {
+        module_index: sema_registration_module_index(graph, symbol.module_name) ?? return None
+        loop constant in graph.modules[module_index].constants {
+            if constant.symbol.id.key != symbol.id.key -> next
+            if constant.declaration.ty != None || constant.declaration.mutable || constant.declaration.is_persist || constant.declaration.is_comptime || constant.declaration.ct != None -> return None
+            // A constant's value names no local, so no body scope is consulted.
+            return sema_expr_number_literal_init(constant.declaration.value, sema_scope_init(""))
+        }
+    }
+    None
 }
 
 // A number name whose literal a numeric use refuses (`big: 300` read as a

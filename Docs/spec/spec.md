@@ -177,7 +177,9 @@ vocabulary](vocabulary.md).
   first use that refuses its default, where the literal fits; a second use
   that needs another type is one E0112 naming both uses, and a later write of
   a value that type refuses is E0108 pointing at the use that decided it.
-  Module constants keep their registered type.
+  A module constant bound to a number literal with no written type
+  (`LIMIT: 200`) reads the same way at a use in its own module; a constant
+  with a written type, or computed from other constants, keeps its type.
 - Explicit conversion is destination-owned:
   `Target.from_source(value)`. Numeric narrowing is fallible; safe widening is
   implicit where the numeric decisions allow it. Numeric-backed distinct and
