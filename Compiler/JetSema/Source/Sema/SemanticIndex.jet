@@ -159,36 +159,44 @@ sema_compiler_index_definition_kind: fn(symbol: Symbol, registration: SemaRegist
     }
 }
 
-sema_compiler_index_parameter_values: fn(parameters: [SemaRegistrationParameter]) -> TComptimeValue Never! {
+// A type the index names, as the TypeId reflection gives it; `caller` is the
+// row of the module the type is written in. Every symbol the index describes
+// is registered in this compilation, so every type it names has a TypeId.
+sema_compiler_index_type_id_option: fn(registration: SemaRegistrationGraph, caller: Int, ty: Type?) -> TComptimeValue {
+    if ty == .Val(value) -> return sema_comptime_reflection_some(sema_comptime_reflection_type_id(registration, caller, value))
+    sema_comptime_reflection_none(Type.Named{name: "TypeId"})
+}
+
+sema_compiler_index_parameter_values: fn(registration: SemaRegistrationGraph, caller: Int, parameters: [SemaRegistrationParameter]) -> TComptimeValue {
     values := [TComptimeValue]{}
     loop parameter in parameters {
         values.push(TComptimeValue.Struct{type_name: "CompilerParam", fields: [TComptimeField]{
             TComptimeField{name: "name", value: sema_compiler_index_string(parameter.symbol.name)},
-            TComptimeField{name: "type", value: sema_compiler_index_string(type_name(parameter.ty))},
+            TComptimeField{name: "type", value: sema_comptime_reflection_type_id(registration, caller, parameter.ty)},
         }})
     }
     TComptimeValue.List{values: values}
 }
 
-sema_compiler_index_symbol_kind: fn(symbol: Symbol, registered_module: SemaRegistrationModule) -> TComptimeValue Never! {
+// The CompilerSymbolKind of `symbol`, declared in the module at row `caller`.
+sema_compiler_index_symbol_kind: fn(registration: SemaRegistrationGraph, caller: Int, symbol: Symbol) -> TComptimeValue {
+    registered_module: registration.modules[caller]
     kind := "type"
     params := TComptimeValue.List{values: [TComptimeValue]{}}
-    ret := String?{None}
+    ret := sema_compiler_index_type_id_option(registration, caller, None)
     parent := symbol.owner
-    ty := String?{None}
     fields := [TComptimeValue]{}
     variants := [String]{}
     mutable := TComptimeValue.Failed{report: TComptimeReport.Clean{ty: Type.Bool}}
-    if symbol.ty == .Val(value) -> ty = Val(type_name(value))
     if symbol.kind == {
         .Module -> kind = "module"
         .Function -> {
             kind = "function"
             loop function in registered_module.functions {
                 if function.symbol.id.key != symbol.id.key -> next
-                params = sema_compiler_index_parameter_values(function.parameters)
+                params = sema_compiler_index_parameter_values(registration, caller, function.parameters)
                 if function.signature == .Fn(_, return_type, _, _, _, _) {
-                    if return_type == .Val(value) -> ret = Val(type_name(value))
+                    if return_type != None -> ret = sema_compiler_index_type_id_option(registration, caller, return_type)
                 }
             }
         }
@@ -201,7 +209,7 @@ sema_compiler_index_symbol_kind: fn(symbol: Symbol, registered_module: SemaRegis
                     loop field in nominal.fields {
                         fields.push(TComptimeValue.Struct{type_name: "CompilerField", fields: [TComptimeField]{
                             TComptimeField{name: "name", value: sema_compiler_index_string(field.symbol.name)},
-                            TComptimeField{name: "type", value: sema_compiler_index_string(type_name(field.ty))},
+                            TComptimeField{name: "type", value: sema_comptime_reflection_type_id(registration, caller, field.ty)},
                         }})
                     }
                 }
@@ -225,9 +233,9 @@ sema_compiler_index_symbol_kind: fn(symbol: Symbol, registered_module: SemaRegis
     TComptimeValue.Struct{type_name: "CompilerSymbolKind", fields: [TComptimeField]{
         TComptimeField{name: "kind", value: sema_compiler_index_string(kind)},
         TComptimeField{name: "params", value: params},
-        TComptimeField{name: "ret", value: sema_compiler_index_option_string(ret)},
+        TComptimeField{name: "ret", value: ret},
         TComptimeField{name: "parent", value: sema_compiler_index_option_string(parent)},
-        TComptimeField{name: "type", value: sema_compiler_index_option_string(ty)},
+        TComptimeField{name: "type", value: sema_compiler_index_type_id_option(registration, caller, symbol.ty)},
         TComptimeField{name: "fields", value: TComptimeValue.List{values: fields}},
         TComptimeField{name: "variants", value: sema_compiler_index_strings(variants)},
         TComptimeField{name: "mutable", value: mutable},
@@ -297,13 +305,14 @@ sema_compiler_index_view_provenance_values: fn(map: ViewProvenanceMap?) -> TComp
     TComptimeValue.List{values: [TComptimeValue]{}}
 }
 
-sema_compiler_index_definition: fn(symbol: Symbol, registered_module: SemaRegistrationModule, view_provenance: TComptimeValue) -> TComptimeValue Never! {
+// `caller` is the row of the module that declares `symbol`.
+sema_compiler_index_definition: fn(registration: SemaRegistrationGraph, caller: Int, symbol: Symbol, view_provenance: TComptimeValue) -> TComptimeValue {
     TComptimeValue.Struct{type_name: "CompilerDefinition", fields: [TComptimeField]{
         TComptimeField{name: "identity", value: sema_compiler_index_string(symbol.id.key)},
         TComptimeField{name: "name", value: sema_compiler_index_string(symbol.name)},
-        TComptimeField{name: "module", value: sema_compiler_index_string(registered_module.module_path)},
-        TComptimeField{name: "span", value: sema_compiler_index_span(symbol.span, registered_module.source_file)},
-        TComptimeField{name: "kind", value: sema_compiler_index_symbol_kind(symbol, registered_module)},
+        TComptimeField{name: "module", value: sema_compiler_index_string(registration.modules[caller].module_path)},
+        TComptimeField{name: "span", value: sema_compiler_index_span(symbol.span, registration.modules[caller].source_file)},
+        TComptimeField{name: "kind", value: sema_compiler_index_symbol_kind(registration, caller, symbol)},
         TComptimeField{name: "view_provenance", value: view_provenance},
     }}
 }
@@ -418,11 +427,14 @@ sema_compiler_index_output_kind: fn(kind: OutputKind) -> String Never! {
     }
 }
 
-sema_compiler_index_output_value: fn(output: ResolvedOutput, binding: ConstDef, registered_module: SemaRegistrationModule, registration: SemaRegistrationGraph) -> TComptimeValue {
-    target: if output.module_id >= 0 && output.module_id < registration.modules.len() -> Val(registration.modules[output.module_id]) else -> None
-    target_module: target ?? registered_module
+// The CompilerOutput of a resolved `output` bound by `binding` in the module at
+// row `caller`; the entry's types are written in the entry's own module.
+sema_compiler_index_output_value: fn(output: ResolvedOutput, binding: ConstDef, registration: SemaRegistrationGraph, caller: Int) -> TComptimeValue {
+    registered_module: registration.modules[caller]
+    target_row: if output.module_id >= 0 && output.module_id < registration.modules.len() -> output.module_id else -> caller
+    target_module: registration.modules[target_row]
     params := [TComptimeValue]{}
-    loop parameter in output.params -> params.push(sema_compiler_index_string(type_name(parameter.ty)))
+    loop parameter in output.params -> params.push(sema_comptime_reflection_type_id(registration, target_row, parameter.ty))
     effects := output.effects
     TComptimeValue.Struct{type_name: "CompilerOutput", fields: [TComptimeField]{
         TComptimeField{name: "binding", value: sema_compiler_index_string(binding.name)},
@@ -437,7 +449,7 @@ sema_compiler_index_output_value: fn(output: ResolvedOutput, binding: ConstDef, 
             TComptimeField{name: "definition_span", value: sema_compiler_index_span(output.definition, target_module.source_file)},
             TComptimeField{name: "reference_span", value: sema_compiler_index_span(output.reference, registered_module.source_file)},
             TComptimeField{name: "params", value: TComptimeValue.List{values: params}},
-            TComptimeField{name: "return_type", value: sema_compiler_index_option_string(output.return_type.map((ty) -> type_name(ty)))},
+            TComptimeField{name: "return_type", value: sema_compiler_index_type_id_option(registration, target_row, output.return_type)},
             TComptimeField{name: "failure_contract", value: sema_compiler_index_string(type_name(failure_contract_shown_type(output.failure_contract)))},
             TComptimeField{name: "failure_source", value: sema_compiler_index_string(failure_contract_source(output.failure_contract))},
             TComptimeField{name: "authority", value: sema_compiler_index_string("safe-jet")},
@@ -1577,33 +1589,33 @@ sema_compiler_index_function_views: fn(graph: SemaGraphResult) -> [String:TCompt
     views
 }
 
-sema_compiler_index_append_definition: fn(symbol: Symbol, registered_module: SemaRegistrationModule, views: [String:TComptimeValue], definitions: &[TComptimeValue], seen: &[String:Bool]) Never! {
+sema_compiler_index_append_definition: fn(registration: SemaRegistrationGraph, caller: Int, symbol: Symbol, views: [String:TComptimeValue], definitions: &[TComptimeValue], seen: &[String:Bool]) {
     if seen.get(symbol.id.key) != None -> return
     seen[symbol.id.key] = true
-    definitions.push(sema_compiler_index_definition(symbol, registered_module, views.get(symbol.id.key) ?? TComptimeValue.List{values: [TComptimeValue]{}}))
+    definitions.push(sema_compiler_index_definition(registration, caller, symbol, views.get(symbol.id.key) ?? TComptimeValue.List{values: [TComptimeValue]{}}))
 }
 
-sema_compiler_index_append_checked_local: fn(local: TLocal, module_identity: String, owner: String, registered_module: SemaRegistrationModule, views: [String:TComptimeValue], definitions: &[TComptimeValue], seen: &[String:Bool]) Never! {
+sema_compiler_index_append_checked_local: fn(local: TLocal, module_identity: String, owner: String, registration: SemaRegistrationGraph, caller: Int, views: [String:TComptimeValue], definitions: &[TComptimeValue], seen: &[String:Bool]) {
     local_id: local.symbol_id ?? return
     symbol := Symbol{id: local_id, kind: SymbolKind.Local, name: local.name, module_name: module_identity, owner: Val(owner), span: local.span, ty: None, visibility: 0}
-    sema_compiler_index_append_definition(symbol, registered_module, views, definitions, seen)
+    sema_compiler_index_append_definition(registration, caller, symbol, views, definitions, seen)
 }
 
-sema_compiler_index_collect_checked_locals: fn(function: FnBody, module_identity: String, owner: String, registered_module: SemaRegistrationModule, views: [String:TComptimeValue], definitions: &[TComptimeValue], seen: &[String:Bool]) Never! {
+sema_compiler_index_collect_checked_locals: fn(function: FnBody, module_identity: String, owner: String, registration: SemaRegistrationGraph, caller: Int, views: [String:TComptimeValue], definitions: &[TComptimeValue], seen: &[String:Bool]) {
     loop statement in function.body {
         if function.tree.stmts[statement] == {
-            .Let(local, _, _, _, _, _) -> sema_compiler_index_append_checked_local(local, module_identity, owner, registered_module, views, definitions, seen)
+            .Let(local, _, _, _, _, _) -> sema_compiler_index_append_checked_local(local, module_identity, owner, registration, caller, views, definitions, seen)
             .TupleDestructure(temp, _, _, binds, _) -> {
-                sema_compiler_index_append_checked_local(temp, module_identity, owner, registered_module, views, definitions, seen)
-                loop bind in binds -> sema_compiler_index_append_checked_local(bind.local, module_identity, owner, registered_module, views, definitions, seen)
+                sema_compiler_index_append_checked_local(temp, module_identity, owner, registration, caller, views, definitions, seen)
+                loop bind in binds -> sema_compiler_index_append_checked_local(bind.local, module_identity, owner, registration, caller, views, definitions, seen)
             }
             .StructDestructure(temp, _, _, binds, _) -> {
-                sema_compiler_index_append_checked_local(temp, module_identity, owner, registered_module, views, definitions, seen)
-                loop bind in binds -> sema_compiler_index_append_checked_local(bind.local, module_identity, owner, registered_module, views, definitions, seen)
+                sema_compiler_index_append_checked_local(temp, module_identity, owner, registration, caller, views, definitions, seen)
+                loop bind in binds -> sema_compiler_index_append_checked_local(bind.local, module_identity, owner, registration, caller, views, definitions, seen)
             }
             .ListDestructure(temp, _, _, _, elements, _) -> {
-                sema_compiler_index_append_checked_local(temp, module_identity, owner, registered_module, views, definitions, seen)
-                loop local in elements -> sema_compiler_index_append_checked_local(local, module_identity, owner, registered_module, views, definitions, seen)
+                sema_compiler_index_append_checked_local(temp, module_identity, owner, registration, caller, views, definitions, seen)
+                loop local in elements -> sema_compiler_index_append_checked_local(local, module_identity, owner, registration, caller, views, definitions, seen)
             }
             .Contract(_) | .ContractScope(_, _, _, _, _) | .RefutableBind(_, _, _, _) | .Assign(_, _, _, _, _) | .CountedLoop(_, _, _, _, _, _, _) | .ForRange(_, _, _, _, _, _, _, _, _) | .Range(_, _, _, _, _, _, _, _, _, _) | .ExprStmt(_, _) | .Return(_, _) | .TaskGroup(_, _, _, _) | .DeferClose(_, _, _) | .If(_, _, _, _, _) | .Loop(_, _, _) | .While(_, _, _, _) | .Break(_, _) | .BreakValue(_, _, _) | .Continue(_, _) | .Match(_, _, _, _) | .EnumMatch(_, _, _, _, _) | .RangeSwitch(_, _, _, _) | .ForIn(_, _, _, _, _, _, _, _, _, _, _, _) | .Inline(_, _) | .DebugOnly(_, _) | .MixedSwitch(_, _, _, _, _) | .Unsafe(_, _) | .UnsafeBlock(_, _, _) | .SentryPolicy(_, _, _) | .Impure(_, _) | .Reactive(_, _) | .Region(_, _) | .Layout(_, _, _, _) | .ContextBlock(_, _, _) | .Live(_, _) | .Shield(_, _) | .ScopeMember(_, _, _) | .Transact(_, _, _, _, _) | .GCEdit(_, _, _, _, _, _, _) -> {}
         }
@@ -1620,18 +1632,18 @@ sema_compiler_semantic_index_from_checked: fn(registration: SemaRegistrationGrap
     outputs := [TComptimeValue]{}
     state_graphs := [TComptimeValue]{}
     loop registered_module_index in 0..<registration.modules.len() {
-        loop symbol_index in 0..<registration.modules[registered_module_index].symbols.len() -> sema_compiler_index_append_definition(registration.modules[registered_module_index].symbols[symbol_index], registration.modules[registered_module_index], function_views, definitions, definition_keys)
+        loop symbol_index in 0..<registration.modules[registered_module_index].symbols.len() -> sema_compiler_index_append_definition(registration, registered_module_index, registration.modules[registered_module_index].symbols[symbol_index], function_views, definitions, definition_keys)
         loop nominal_index in 0..<registration.modules[registered_module_index].nominals.len() {
-            sema_compiler_index_append_definition(registration.modules[registered_module_index].nominals[nominal_index].symbol, registration.modules[registered_module_index], function_views, definitions, definition_keys)
-            loop field_index in 0..<registration.modules[registered_module_index].nominals[nominal_index].fields.len() -> sema_compiler_index_append_definition(registration.modules[registered_module_index].nominals[nominal_index].fields[field_index].symbol, registration.modules[registered_module_index], function_views, definitions, definition_keys)
-            loop variant_index in 0..<registration.modules[registered_module_index].nominals[nominal_index].variants.len() -> sema_compiler_index_append_definition(registration.modules[registered_module_index].nominals[nominal_index].variants[variant_index].symbol, registration.modules[registered_module_index], function_views, definitions, definition_keys)
-            loop method_index in 0..<registration.modules[registered_module_index].nominals[nominal_index].methods.len() -> sema_compiler_index_append_definition(registration.modules[registered_module_index].nominals[nominal_index].methods[method_index].symbol, registration.modules[registered_module_index], function_views, definitions, definition_keys)
-            loop method_index in 0..<registration.modules[registered_module_index].nominals[nominal_index].trait_methods.len() -> sema_compiler_index_append_definition(registration.modules[registered_module_index].nominals[nominal_index].trait_methods[method_index].symbol, registration.modules[registered_module_index], function_views, definitions, definition_keys)
+            sema_compiler_index_append_definition(registration, registered_module_index, registration.modules[registered_module_index].nominals[nominal_index].symbol, function_views, definitions, definition_keys)
+            loop field_index in 0..<registration.modules[registered_module_index].nominals[nominal_index].fields.len() -> sema_compiler_index_append_definition(registration, registered_module_index, registration.modules[registered_module_index].nominals[nominal_index].fields[field_index].symbol, function_views, definitions, definition_keys)
+            loop variant_index in 0..<registration.modules[registered_module_index].nominals[nominal_index].variants.len() -> sema_compiler_index_append_definition(registration, registered_module_index, registration.modules[registered_module_index].nominals[nominal_index].variants[variant_index].symbol, function_views, definitions, definition_keys)
+            loop method_index in 0..<registration.modules[registered_module_index].nominals[nominal_index].methods.len() -> sema_compiler_index_append_definition(registration, registered_module_index, registration.modules[registered_module_index].nominals[nominal_index].methods[method_index].symbol, function_views, definitions, definition_keys)
+            loop method_index in 0..<registration.modules[registered_module_index].nominals[nominal_index].trait_methods.len() -> sema_compiler_index_append_definition(registration, registered_module_index, registration.modules[registered_module_index].nominals[nominal_index].trait_methods[method_index].symbol, function_views, definitions, definition_keys)
         }
         loop implementation_index in 0..<registration.modules[registered_module_index].impls.len() {
-            sema_compiler_index_append_definition(registration.modules[registered_module_index].impls[implementation_index].symbol, registration.modules[registered_module_index], function_views, definitions, definition_keys)
-            loop method_index in 0..<registration.modules[registered_module_index].impls[implementation_index].methods.len() -> sema_compiler_index_append_definition(registration.modules[registered_module_index].impls[implementation_index].methods[method_index].symbol, registration.modules[registered_module_index], function_views, definitions, definition_keys)
-            loop associated_index in 0..<registration.modules[registered_module_index].impls[implementation_index].associated_types.len() -> sema_compiler_index_append_definition(registration.modules[registered_module_index].impls[implementation_index].associated_types[associated_index].symbol, registration.modules[registered_module_index], function_views, definitions, definition_keys)
+            sema_compiler_index_append_definition(registration, registered_module_index, registration.modules[registered_module_index].impls[implementation_index].symbol, function_views, definitions, definition_keys)
+            loop method_index in 0..<registration.modules[registered_module_index].impls[implementation_index].methods.len() -> sema_compiler_index_append_definition(registration, registered_module_index, registration.modules[registered_module_index].impls[implementation_index].methods[method_index].symbol, function_views, definitions, definition_keys)
+            loop associated_index in 0..<registration.modules[registered_module_index].impls[implementation_index].associated_types.len() -> sema_compiler_index_append_definition(registration, registered_module_index, registration.modules[registered_module_index].impls[implementation_index].associated_types[associated_index].symbol, function_views, definitions, definition_keys)
         }
         loop constant_index in 0..<registration.modules[registered_module_index].constants.len() {
             if registration.modules[registered_module_index].constants[constant_index].declaration.resolved_output == .Val(output) {
@@ -1642,7 +1654,7 @@ sema_compiler_semantic_index_from_checked: fn(registration: SemaRegistrationGrap
                         break
                     }
                 }
-                outputs.push(sema_compiler_index_output_value(solved, registration.modules[registered_module_index].constants[constant_index].declaration, registration.modules[registered_module_index], registration))
+                outputs.push(sema_compiler_index_output_value(solved, registration.modules[registered_module_index].constants[constant_index].declaration, registration, registered_module_index))
             }
         }
         graph_facts := sema_state_graph_facts(registration.modules[registered_module_index].program.items)
@@ -1662,8 +1674,7 @@ sema_compiler_semantic_index_from_checked: fn(registration: SemaRegistrationGrap
         registered_module: registration.modules[module_index]
         loop reference in checked_module.name_references {
             target_index := sema_registration_module_index(registration, reference.symbol.module_name) ?? module_index
-            target_module: registration.modules[target_index]
-            sema_compiler_index_append_definition(reference.symbol, target_module, function_views, definitions, definition_keys)
+            sema_compiler_index_append_definition(registration, target_index, reference.symbol, function_views, definitions, definition_keys)
             references.push(sema_compiler_index_reference(reference, registration, checked_module.module_path, registered_module.source_file))
         }
         loop function in checked_module.functions {
@@ -1671,9 +1682,9 @@ sema_compiler_semantic_index_from_checked: fn(registration: SemaRegistrationGrap
             loop parameter in function.params {
                 parameter_id: parameter.local.symbol_id ?? next
                 parameter_symbol := Symbol{id: parameter_id, kind: SymbolKind.Parameter, name: parameter.name, module_name: checked_module.module_identity, owner: Val(function.key), span: parameter.span, ty: Val(parameter.ty), visibility: 0}
-                sema_compiler_index_append_definition(parameter_symbol, registered_module, function_views, definitions, definition_keys)
+                sema_compiler_index_append_definition(registration, module_index, parameter_symbol, function_views, definitions, definition_keys)
             }
-            sema_compiler_index_collect_checked_locals(function, checked_module.module_identity, function.key, registered_module, function_views, definitions, definition_keys)
+            sema_compiler_index_collect_checked_locals(function, checked_module.module_identity, function.key, registration, module_index, function_views, definitions, definition_keys)
         }
         loop call in checked_module.call_facts {
             value: sema_compiler_index_call(call, checked_module.module_path, registered_module.source_file) ?? next
