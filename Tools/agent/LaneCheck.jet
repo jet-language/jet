@@ -43,7 +43,11 @@
 // (#6605), which refuses any #Unsafe region Docs/spec/safety.md does not
 // record, and any recorded row the checkout no longer has, the vocabulary
 // rows in --check mode, which refuse a package Source/Vocabulary.jet that
-// differs from the package's Vocabulary.tsv, and the script-pairing guard
+// differs from the package's Vocabulary.tsv, the diagnostic census in --check
+// mode (Tools/agent/DiagnosticCensus.jet), which refuses a stale
+// tests/diagnostics_census.tsv and any active code that is dead or shown by no
+// ui snapshot, report fixture or case unless the shrink-only
+// tests/diagnostics_census_baseline.tsv admits it, and the script-pairing guard
 // (Tools/agent/ScriptPairing.jet --check), which refuses a script in another
 // language that the change adds without its gauntlet pair.
 //
@@ -109,6 +113,7 @@ run: fn() {
     unsafe_ratchet(repo)
     vocabulary_rows(repo)
     body_host_call_rows(repo)
+    diagnostic_census(repo)
     script_pairing(repo)
     if args.len() > 0 && args[0] == "--runtime-generators" {
         if args.len() != 1 -> usage("jet Tools/agent/LaneCheck.jet --runtime-generators")
@@ -170,6 +175,14 @@ body_host_call_rows: fn(repo: String) -[Env, Exec, FS, IO]> () {
     rows: process.cmd([String]{jet, "Tools/agent/BodyHostCallRows.jet", "--check"}).cwd(repo).run() ?? return check_refused("", "{jet} could not run Tools/agent/BodyHostCallRows.jet: {err}")
     if rows.code == 0 && rows.signal == None -> return
     check_refused(process.combined_output(rows).trim_end(), "Compiler/JetFoundation/Source/Facts/BodyHostCall.jet differs from THostCall (see above; regenerate with jet Tools/agent/BodyHostCallRows.jet --write)")
+}
+
+// The diagnostic census check with $JET, else the `jet` on PATH; it never writes.
+diagnostic_census: fn(repo: String) -[Env, Exec, FS, IO]> () {
+    jet: process.env_nonempty("JET") ?? (process.which("jet") ?? "jet")
+    census: process.cmd([String]{jet, "Tools/agent/DiagnosticCensus.jet", "--check"}).cwd(repo).run() ?? return check_refused("", "{jet} could not run Tools/agent/DiagnosticCensus.jet: {err}")
+    if census.code == 0 && census.signal == None -> return
+    check_refused(process.combined_output(census).trim_end(), "the diagnostic census refused the tree (see above; regenerate with jet Tools/agent/DiagnosticCensus.jet --write; a new dead or uncarried code needs its emitter or its ui snapshot, report fixture or case, not a baseline row)")
 }
 
 // The script-pairing guard with $JET, else the `jet` on PATH; it never writes.

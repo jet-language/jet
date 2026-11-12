@@ -103,59 +103,17 @@ dc_is_code: fn(code: String) -> Bool {
     words.len() >= 2 && words.all(word -> word != "" && word.bytes().all(byte -> (byte >= (U8{65}) && byte <= (U8{90})) || (byte >= (U8{48}) && byte <= (U8{57}))))
 }
 
-// tests/diagnostics_coverage.rs:324-355: a code standing alone between quotes
-// or between brackets. Core library errors also open their message text with
-// the code (`"E2416: invalid .env line {line}"`), so a quoted code followed by
-// `: ` emits it too.
-dc_extract_codes: fn(text: String, codes: &[String]) {
-    bytes: text.bytes()
-    loop (index, byte) in bytes {
-        if byte != (U8{34}) && byte != (U8{91}) -> next
-        close: if byte == (U8{34}) -> U8{34} else -> U8{93}
-        end := index + 1
-        loop end < bytes.len() {
-            c: bytes[end]
-            if !(c >= (U8{65}) && c <= (U8{90})) && !(c >= (U8{48}) && c <= (U8{57})) && c != (U8{45}) -> break
-            end += 1
-        }
-        coded_text: byte == (U8{34}) && end + 1 < bytes.len() && bytes[end] == (U8{58}) && bytes[end + 1] == (U8{32})
-        if end > index + 1 && end < bytes.len() && (bytes[end] == close || coded_text) {
-            code: dc_slice(text, index + 1, end)
-            if dc_is_code(code) -> dc_add(codes, code)
-        }
-    }
-}
-
-// A report header a source writes with its type path, `"Error [jet.MissingEngine]: …"`,
-// emits that row's code.
-dc_extract_type_paths: fn(text: String, names: &[String]) {
-    bytes: text.bytes()
-    loop (index, byte) in bytes {
-        if byte != (U8{91}) -> next
-        end := index + 1
-        loop end < bytes.len() {
-            c: bytes[end]
-            if !(c >= (U8{65}) && c <= (U8{90})) && !(c >= (U8{97}) && c <= (U8{122})) && !(c >= (U8{48}) && c <= (U8{57})) && c != (U8{46}) -> break
-            end += 1
-        }
-        if end < bytes.len() && bytes[end] == (U8{93}) {
-            name: dc_slice(text, index + 1, end)
-            if name.starts_with("jet.") -> dc_add(names, name)
-        }
-    }
-}
-
+// The codes the compiler, package manager and Core sources emit, as the
+// generated census classifies them (Tools/agent/DiagnosticCensus.jet scans the
+// sources; LaneCheck refuses a stale census).
 dc_emitted_codes: fn() -> [String] {
     codes := [String]{}
-    names := [String]{}
-    loop path in dc_source_paths() {
-        text: dc_read(path)
-        dc_extract_codes(text, codes)
-        dc_extract_type_paths(text, names)
+    loop line in dc_read("tests/diagnostics_census.tsv").split("\n") {
+        if line == "" || line.starts_with("#") -> next
+        columns: line.split("\t").to_list()
+        if columns.len() == 5 && columns[3] != "dead" -> dc_add(codes, columns[0])
     }
-    loop row in dc_registered_rows() {
-        if dc_has(names, row.name) -> dc_add(codes, row.code)
-    }
+    assert(codes.len() > 100, "tests/diagnostics_census.tsv must list the emitted codes")
     codes
 }
 
