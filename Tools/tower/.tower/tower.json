@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6775,
-    "rev": 100036,
+    "rev": 100037,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -55504,7 +55504,7 @@
       "parentId": "c02y3vkg",
       "needsAcceptance": false,
       "created": "2026-10-16T10:54:43.172Z",
-      "updated": "2026-11-12T11:47:16.411Z",
+      "updated": "2026-11-12T12:26:57.370Z",
       "updatedBy": "Main",
       "goals": [
         "G3"
@@ -196763,6 +196763,166 @@
       "draft": false,
       "status": "open",
       "created": "2026-11-12T10:56:52.417Z"
+    },
+    {
+      "id": "D-CONTEXT-CB1",
+      "cardId": "c0dhc7rh",
+      "group": "effects",
+      "title": "C callbacks and context: refuse reads, or allow scoped installation",
+      "situation": "C may call a Jet callback immediately, later, or on another thread. A callback cannot assume that thread carries the registering task's context. The ratified context vote allows pure Jet functions to read context, but says a C callback must install one first. Today's callback checker rejects the installation block too. The named example gets two errors; neither explains context, and one calls the read an impure call to `call`. We recommend dropping the installation clause and passing needed values explicitly, or choosing the callback before calling C. The alternative permits scoped installation, but must define foreign-thread entry and restoration. It can inherit an active Jet context on synchronous entry; it cannot recover a finished task's context.",
+      "gist": "Should C callbacks refuse context reads, or allow a scoped context block?",
+      "lesson": "A C callback does not carry the context of the task that registered it. Even if C calls it on a Jet thread, that need not be the registering task. Passing a value explicitly preserves a snapshot, not a live task. Installing a context supplies local values and defaults; it does not revive a task.",
+      "explainer": "Context holds task settings. Seed-b13 implements reads of deadline and thread; the broader field list is a ratified contract, not all working today. A callback is a C-compatible function value, not a closure carrying task state. D-CABI-CALLBACK1 bans captures, heap allocation, mutable static or thread-local state, scheduler access and panic-capable paths. #Context overrides named fields for a lexical block and restores them on exit.",
+      "story": "A developer passes `late` to C. It returns x unchanged when no deadline is installed, otherwise x + 1. Both options start with exactly named.jet. Both refuse its uninstalled read. A repairs it by selecting a context-free callback before calling C. B also offers an installation block, but a fixed installed deadline changes the program's input.",
+      "inWild": "The Way to Jai, section 29.7, shows a #c_call callback creating a Context and using push_context before calling log and print. Section 25 explains defaults and scoped restoration. This is B's strongest case: ordinary procedures can use the installed services. Jet's present callback subset bans such calls, so that benefit is not delivered by B alone. These are documentary examples, not independently compiled Jai results.",
+      "detail": "Scope. This ballot resolves #5025 c20 under D-CONTEXT-EFFECT1=F, ratified 2026-11-12. Tower contains F's full text; the supplied checkout's syntax-decisions.md does not yet contain F. D-CABI-CALLBACK1's contract is at Docs/spec/syntax-decisions.md:4360-4367. A drops F's installation clause; B defines it and explicitly amends the callback contract.\n\nBoth choices retain F's no-effect context reads, pure Jet readers and context-aware #Memo keys. Card #5025 c16 and c17 require context-reaching locals to remain run-time code and context-reaching module values to keep E0643. These are requirements, not proof that F has shipped. The supplied adversarial review is still an inbox patch, not a landed audit.\n\nObserved checks. All seven supplied probes were independently checked with seed-b13, identity jet@a0.0.45#6c8af19f74a2cb887fbb0f82ff7d830bb3236ac00549aefc4906413ed8ed461a. No C library was linked or executed. No compiler commit is inferred from this identity.\n\nplain.jet: accepted. named.jet: E3203 NonCAbiType and E3401 ImpureCallInPureContext. The latter says `late` calls the impure function `call`, although its location is the deadline read. Neither explains context. This matches #5025 c11's diagnostic defect.\n\nlambda.jet: E3203 and E0747 CallbackEffectBoundExceeded, explicitly naming the Context effect. Thus the claim that today's errors never mention context holds only for named.jet, not all callbacks.\n\ninstall.jet: E3203 alone. It installs deadline 5 but does not read it. It proves installation is rejected, not that installed reads work. helper.jet: E3203 and E3401 naming `which`.\n\narg.jet and choose.jet: accepted by check only. choose.jet preserves x and the C declaration while selecting stay or bump from the deadline's presence before entry. arg.jet repurposes the existing x slot as a presence flag. It gives the same printed result for this x=1 example, but is not a general way to pass both x and a deadline.\n\nCode basis. Callback checking is identical in the supplied checkout and $JET_SCRATCH_ROOT/lanes/G12Docs/w at Compiler/JetSema/Source/Sema/Calls/Checking.jet:406-450. It rejects calls, field/place expressions, #Context and even conditional expressions. B must admit the conditional in its installed example explicitly; merely removing the #Context refusal is insufficient.\n\nThe source snapshot under G12Docs/w contains context reads at Compiler/JetSema/Source/Sema/Expressions/Places.jet:752-768. The supplied checkout lacks this addition. In that snapshot Context is recorded at line 766. Under F, removal of that effect should remove the context-caused row errors [INFERENCE, not a rebuilt result]. The syntax-subset refusal still needs a dedicated explanation.\n\nRuntime limits. In G12Docs/w, Compiler/JetRuntime/Source/Context.jet:25 reads the current record via the thread control block. Thread.jet:102-106 sets GS; lines 115-126 allocate a block and assign a real thread index. These runtime files match seed-b13's provenance hashes. This does not establish that every foreign thread starts on Jet's zero word. Bootstrap explicitly clears a potentially stale inherited base before using it (lines 141-152). No rejected callback was forced past sema, and no foreign-thread crash is claimed.\n\nShared diagnostic contract, proposed. At conversion to a C callback, report one registered context-specific diagnostic with labels on the read and conversion. Apply it to named functions and capture-free lambdas. Suppress duplicate row/subset reports caused by that read, not independent errors. A Jet-only call to the same function remains legal under F. Reuse F's reached-context fact; do not add another effect or a second reach analysis.\n\nExplicit-input alternative, available under either choice. Read the needed fields in Jet and pass C-safe scalar snapshots through arguments the C API actually provides. A hidden context pointer is forbidden; an explicit argument is not. A user-data pointer requires its API's lifetime and unsafe-boundary rules; this ballot proves no general safe context-object transport. If C offers no suitable argument, choose between static callbacks as choose.jet does. This is A's existing argument mechanism, not a distinct third semantic option.\n\nBeginner path. The error explains that C does not carry the registering task's context. Show choose.jet for this exact C signature. Offer explicit scalar arguments only when the actual API supplies them. Under B also offer #Context(deadline: value), explaining that this supplies a new deadline rather than discovering the caller's.\n\nExpert path. Under A, keep payload and context metadata separate where the C API permits, or select a static callback. Under B the same repairs work, plus scoped installation and real executing-thread identity inside the block. Neither choice authorizes captures, user allocation, helper calls or scheduling from the callback.\n\nProposed edge contracts, not executed runtime results:\n\n1. Direct and lambda reads outside an installed block are refused under both choices. A refuses installed reads too. Under B an install value cannot itself read context before the block opens. Reads after exit are refused again.\n\n2. On synchronous entry to an attached Jet thread, B overrides its active context and restores it on every ordinary return. Unmentioned fields inherit. On a newly attached foreign thread they use library-root defaults. These are invocation-time values, never a promise about the registering task. A refuses reads even on attached threads.\n\n3. Concurrent calls share no writable context frame. B's attachment ownership must distinguish a new attachment from an existing one; inner entries must never detach the outer entry's thread. Nested #Context blocks restore in reverse order. Do not read a foreign GS pointer to decide whether it is live.\n\n4. After the registering task ends, the function pointer remains valid for the program lifetime. Neither choice retains its task record. Copied scalar metadata can survive; borrowed task storage cannot be smuggled through user data. B creates a fresh root if no attachment is active. Library retention and shutdown rules still apply.\n\n5. A deadline is an absolute timestamp, not a ticking remaining-time value. Expiring during a callback does not change its presence or interrupt the callback under this proposal. Reading a clock still needs Time, which the empty row forbids. A precomputed presence flag can therefore be stale for cancellation purposes. Neither choice adds cancellation, joining or preemption.\n\n6. A C-to-Jet-callback-to-C call is refused: both choices retain the ban on callback calls. Reentrancy allowed by the callback ABI does not itself permit such a body. If ordinary calls are later admitted, restoration and reached-context checks must cover the whole nested chain. The D-FFI-CALLBACK3 text in Docs/proposals/ffi-perfect-boundary-2026-10-31.md is a proposal, not ratification.\n\n7. context.thread is the executing attachment's index, not the registering task's identity. A refuses it. B must preserve this meaning with distinct live attachment indices, never a fabricated zero. An index need not persist across detach and reattach.\n\n8. #Export entry points are outside this function-value conversion ballot. Their root-context contract is not evidence that arbitrary callback entry is already attached. Neither choice changes that contract.\n\n9. Foreign longjmp across a Jet frame, signal-handler entry, and library calls after runtime shutdown are not authorized by either choice. B's cleanup guarantee covers supported returns, not skipped frames.\n\nI8. A introduces no transport mechanism or runtime behavior. B must use the existing scoped override and thread-attachment mechanism, not a second callback context store. Its additional entry policy and runtime safety exceptions are real surface costs, not proof that #Context inherently has two meanings.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Drop the clause; pass inputs explicitly",
+          "gist": "Keep callbacks context-free and explain the refusal at the C boundary.",
+          "detail": "F's callback sentence becomes: \"A C callback receives no implicit task context. A function value that reaches a context read cannot become a C callback; the conversion gets a registered diagnostic.\" D-CABI-CALLBACK1 stays unchanged.\n\nThe shared named.jet program is refused. Its fix for this C signature is choose.jet: read deadline presence before the call and select stay or bump. Explicit scalar metadata is another repair only if the C API has an appropriate argument. The callback's payload must not silently be replaced by that metadata.\n\nGain: no callback attachment, context lifetime or restoration policy. Loss: callbacks cannot use the ambient context convenience available to ordinary Jet code. Some C APIs provide neither user data nor enough argument slots. Selecting static callbacks works for this finite choice, not arbitrary dynamic context. A does not pretend to solve that wider FFI problem.",
+          "technical": "Proposed, unimplemented. Register a context-specific diagnostic with what/why/fix and UI snapshots for named and lambda conversions. Use F's single reached-context fact, including transitive reach if callback calls are ever admitted. Independent subset errors remain E3203. This is a compile-time rule, not a new effect, hidden parameter or runtime attachment. No measured speed advantage is claimed.",
+          "code": "use c: c.cb\n\n#Import c.cb: module {\n    call: fn(cb: fn(I32) -[]> I32, x: I32) -> I32 = \"call\"\n}\n\nlate: fn(x: I32) -[]> I32 {\n    if context.deadline == None -> return x\n    x + 1\n}\nrun: fn() { print(c.call(late, 1)) }\n// Proposed: context-specific refusal at conversion, labeling the read.\n// Same-program repair, checked as choose.jet on seed-b13:\n// stay: fn(x: I32) -[]> I32 { x }\n// bump: fn(x: I32) -[]> I32 { x + 1 }\n// run: fn() {\n//     late: if context.deadline == None -> stay else -> bump\n//     print(c.call(late, 1))\n// }\n// This snapshots presence before entry; it is not live cancellation."
+        },
+        {
+          "key": "B",
+          "name": "Permit scoped installation at callback entry",
+          "gist": "Allow #Context inside callbacks, with defined attachment and restoration.",
+          "detail": "F's callback sentence becomes: \"A C callback receives no registering-task context. Context reads require a lexical #Context block in that callback; the block supplies a scoped current context.\" This explicitly amends D-CABI-CALLBACK1's no-thread-local-state rule for the scoped context and runtime attachment bookkeeping only.\n\nAt the first block on an unattached thread, obtain an attachment scoped to the callback invocation. Start from the library root, override named fields, and restore them on exit. An already attached thread keeps its current record and real thread index. Unmentioned fields inherit that active record. Only an invocation that created an attachment releases it, on return after restoring all active blocks. Nothing retains the registering task.\n\nAdmit ordinary #Context fields and scoped reads when their initialization, use and cleanup meet the remaining callback safety rules. Admit the pure conditional used below. No captures, user heap allocation, helper calls or scheduling become legal. A field operation requiring allocation, such as an allocating trace capture, remains refused; the diagnostic must explain that independent restriction. Installation does not authorize calling a logger or allocating scratch. The same original program is refused because its read is outside a block.\n\nGain: one familiar scoped override, root defaults on foreign threads, active-context inheritance on Jet threads and real thread identity. It preserves a path toward calling context-aware libraries, but that needs a separate callback-call amendment. Loss: thread-sensitive inheritance, attachment ownership, restoration and initialization failure become part of this small callback feature. A fixed installed deadline does not preserve the original caller-dependent computation.",
+          "technical": "Proposed, unimplemented. Extend the existing thread-attachment mechanism with a scoped, allocation-free lease; do not create a callback-only TLS store. A fresh lease's control block and root live in the invocation frame. Its live index comes from the runtime's index allocator, not a constant zero. Existing attachments are borrowed, never freed by the callback. Concurrent leases have separate frames; nested leases release only what they own.\n\nPreserve and restore the prior platform TLS state without dereferencing an untrusted inherited base. No stack pointer may remain in TLS or the live registry after return. Registration and context-value lowering must remain heap-free. An initialization failure stops with a registered runtime error before executing the block, never unwinds through C. This is an explicit exception to the callback's panic-free entry guarantee, not permission for panic-capable user code.\n\nToday's jet_rt_thread_attach allocates, and jet_rt_thread_detach frees and performs scheduler/TLS cleanup. Calling that pair unchanged is not this design. The scoped lease must be a rung of that same attachment mechanism and preserve the no-user-scheduler rule. #Context still means override and restore, not capture the registering context.\n\nThe current Linux backend changes GS with arch_prctl; extra attachment work is real, but no fixed syscall count or performance number is established here. Already attached entries need no fresh attachment. Require a matched two-program measurement before claiming a cost advantage for any new performance surface.\n\nRegister the same outside-block diagnostic as A, plus snapshots for reads in install values and after exit. Prove installed conditional reads, early return restoration, fresh/attached threads, simultaneous calls and reentrant ownership on every applicable tier. Admit only operations proven allocation-free and panic-free within the body; merely accepting #Context in the syntax walker is insufficient.",
+          "code": "use c: c.cb\n\n#Import c.cb: module {\n    call: fn(cb: fn(I32) -[]> I32, x: I32) -> I32 = \"call\"\n}\n\nlate: fn(x: I32) -[]> I32 {\n    if context.deadline == None -> return x\n    x + 1\n}\nrun: fn() { print(c.call(late, 1)) }\n// Proposed: the same refusal as A for this exact program.\n// Additional permitted body, proposed and NOT checked working:\n// late: fn(x: I32) -[]> I32 {\n//     #Context(deadline: 100) {\n//         if context.deadline == None -> return x\n//         return x + 1\n//     }\n//     x\n// }\n// This installs a different input: always-present deadline 100.\n// It does not reproduce the caller's possibly absent deadline."
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "A is the smaller semantic surface under the present callback restrictions: it needs no new thread-entry policy or runtime safety exception. Prefer explicit inputs or static callback selection. This is not proof that installation is useless, impossible or slower by a measured amount.",
+        "gains": [
+          "Keeps the existing callback safety contract",
+          "Adds no callback context lifetime or attachment work",
+          "Explains the context-specific refusal"
+        ],
+        "losses": [
+          {
+            "loss": "Callbacks lose ordinary Jet code's ambient context convenience.",
+            "mitigation": "Pass scalar snapshots where the C API supports them. For this exact signature, choose.jet preserves x by selecting the callback before entry."
+          },
+          {
+            "loss": "Some C APIs cannot transport arbitrary task settings.",
+            "mitigation": "Name this limit rather than inventing a hidden pointer or claiming static selection solves arbitrary state. B supplies defaults and overrides, not retained task context."
+          },
+          {
+            "loss": "If callback calls are later admitted, context-aware libraries will need an entry policy.",
+            "mitigation": "Review installation with that broader callback amendment. A does not foreclose it; B alone still bans the calls that make Jai's pattern useful."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Scoped installation is coherent and can inherit active values or defaults. For this call-free subset, its entry, identity and failure policy buys little beyond explicit scalar inputs."
+          }
+        ],
+        "tradeoff": "Keep today's safety boundary, while accepting that explicit snapshots cannot recreate a live task or fit every C API."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: GPT. Fresh agent: SolBallotContextCB. A holds within limits; checked all seven probes and corrected inheritance, transport, thread safety, runtime citations and unsupported cost claims. B is a defined amendment, not working code; explicit arguments are covered without a duplicate option."
+      },
+      "checkInstructions": "Observed command for each probe: `nice -n 10 ionice -c 3 $JET_SCRATCH_ROOT/lanes/Main/integ/seed-b13/jet check $JET_SCRATCH_ROOT/lanes/G12Docs/ctx/cb/<name>.jet`. Names: plain, named, lambda, install, helper, arg, choose. Expected exits: 0, 1, 1, 1, 1, 0, 0. These are check results only; the C library was not linked or run.\n\nUse the G12Docs/w source snapshot for context-read and runtime references in detail. The supplied repository checkout predates those context-read additions. Runtime provenance hashes match Context.jet and Thread.jet; this is not a commit claim for the entire compiler.\n\nFrom a scratch working directory, validate the repository's Tools/agent/ballots/Validate.jet using seed-b13 with `JET_TOOLCHAIN_ROOT=$JET_SCRATCH_ROOT/lanes/G12Docs/w`. Without that toolchain setting, the supplied checkout's Core produces unrelated E1004 errors. Validation checks payload shape and prose, not proposed semantics.\n\nBoth options' new diagnostic behavior is UNIMPLEMENTED. B's scoped attachment, reads and edge contracts are UNCHECKED proposals, not passing probes. After ratification require the conversion UI cases; under B also require the restoration, thread, reentrancy and failure proofs named in its technical text.",
+      "surface": {
+        "gist": "Should C callbacks refuse context reads, or allow a scoped context block?",
+        "lesson": "A callback carries no registering-task context. C may call it on another thread or after that task ends. A keeps explicit inputs. B permits scoped installation, using active values on Jet threads and root defaults on newly attached threads. Neither revives a task.",
+        "trio": {
+          "current": {
+            "note": "Today this program gets two errors that never mention context; one blames `call`.",
+            "code": "late: fn(x: I32) -[]> I32 {\n    if context.deadline == None -> return x\n    x + 1\n}\nrun: fn() { print(c.call(late, 1)) }\n// c.call declaration is in both full examples.\n// seed-b13: E3203 and E3401 naming `call`"
+          },
+          "wild": {
+            "lang": "Jai",
+            "note": "The Way to Jai shows a callback installing context before calling ordinary procedures; Jet still bans those calls.",
+            "code": "// Documentary example, section 29.7; not compiled here.\n// A #c_call callback creates a Context,\n// then push_context permits log and print."
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Explicit inputs",
+            "gist": "Refuse callback context reads; explain how to pass snapshots or select a callback.",
+            "gains": [
+              "Keeps the existing callback safety contract",
+              "No callback attachment work"
+            ],
+            "losses": [
+              "Some C APIs cannot carry arbitrary context data"
+            ],
+            "proposed": {
+              "code": "late: fn(x: I32) -[]> I32 {\n    if context.deadline == None -> return x\n    x + 1\n}\nrun: fn() { print(c.call(late, 1)) }\n// Proposed: context-specific refusal at conversion.\n// choose.jet repairs this without changing C's signature.\n// Explicit metadata needs a suitable C argument."
+            }
+          },
+          {
+            "key": "B",
+            "name": "Scoped installation",
+            "gist": "Allow #Context with scoped attachment; outside reads still fail.",
+            "gains": [
+              "Reuses scoped overrides and supplies root defaults",
+              "Can inherit active context on a Jet thread"
+            ],
+            "losses": [
+              "Needs thread-entry, restoration and initialization-failure rules",
+              "Still cannot call context-aware helpers"
+            ],
+            "proposed": {
+              "code": "late: fn(x: I32) -[]> I32 {\n    if context.deadline == None -> return x\n    x + 1\n}\nrun: fn() { print(c.call(late, 1)) }\n// Proposed: same refusal as A for the same program.\n// B also permits a #Context(deadline: 100) body.\n// That supplies a new input, not the caller's deadline."
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A keeps the present safety contract without a new thread-entry policy. B has real uses, but still bans context-aware helper calls.",
+          "gains": [
+            "No callback attachment",
+            "A context-specific error"
+          ],
+          "losses": [
+            {
+              "loss": "No ambient context convenience in callbacks.",
+              "mitigation": "Pass scalar snapshots where C permits; choose.jet handles this example without changing the signature."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Adds scoped attachment and a fatal initialization-failure exception for a call-free callback subset."
+            }
+          ],
+          "tradeoff": "Snapshots are not live tasks, and not every C API can carry them."
+        }
+      },
+      "reports": [
+        {
+          "title": "The Way to Jai: callbacks",
+          "url": "https://github.com/Ivo-Balbaert/The_Way_to_Jai/blob/main/book/29A_Interacting_with_C.md#297-callbacks-and-the-c_call-directive",
+          "note": "Section 29.7 shows #c_call, a fresh Context and push_context around log/print. Read directly; not compiled here."
+        },
+        {
+          "title": "The Way to Jai: context",
+          "url": "https://github.com/Ivo-Balbaert/The_Way_to_Jai/blob/main/book/25A_Context.md",
+          "note": "Sections 25.1-25.3 describe fields, defaults and scoped restoration. Documentary evidence only."
+        },
+        {
+          "title": "Linux arch_prctl",
+          "url": "https://man7.org/linux/man-pages/man2/arch_prctl.2.html",
+          "note": "Defines ARCH_SET_GS and ARCH_GET_GS. It does not establish a fixed syscall count or measured cost for B."
+        }
+      ],
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-12T12:26:57.370Z"
     }
   ],
   "questions": [
@@ -199981,6 +200141,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-12T12:26:57.370Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-CONTEXT-CB1",
+      "note": "C callbacks and context: refuse reads, or allow scoped installation"
+    },
     {
       "at": "2026-11-12T12:02:57.466Z",
       "by": "Main",
