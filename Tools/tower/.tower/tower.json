@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6772,
-    "rev": 99945,
+    "rev": 99946,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -99577,12 +99577,12 @@
       "criteria": [
         {
           "n": 1,
-          "text": "The root is named and fixed in the IR lowering of host-record lists (no special case for TypeInfo). The case run_tier_diagnostics/programmable_build_check_matches_aot_interpreter_dev_and_web passes, and a second build fn that loops over a different host-record list (for example b.program.functions() or the fields of a type) builds and prints its rows at O0.",
+          "text": "The root is fixed in the Core load closure (compiler-owned records load the Core structs their fields hold; G12Docs-53b), with no TypeInfo special case. b.program.types() and functions() list only the program's own modules, never Core-source modules loaded for layout. The case run_tier_diagnostics/programmable_build_check_matches_aot_interpreter_dev_and_web passes, and a second build fn that loops over functions() and a type's fields builds and prints its generated module at O0.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-12T10:25:28.038Z"
+          "at": "2026-11-12T10:29:57.958Z"
         }
       ],
       "refs": [],
@@ -99591,7 +99591,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-12T10:25:18.575Z",
-      "updated": "2026-11-12T10:25:28.038Z",
+      "updated": "2026-11-12T10:29:57.958Z",
       "updatedBy": "Main",
       "criteriaLastN": 1
     }
@@ -200207,6 +200207,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-12T10:29:57.958Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c04gcx43",
+      "note": "#1: G12Docs-4 found the root on seed-b13: it is the Core load closure, not the IR. TypeInfo's location: SourceLocation? needs core.prelude, which is unloaded unless the source spells SourceLocation, and G12Docs-53b fixes that. Loading it then exposed a second defect: b.program views listed Core prelude types.; was: The root is named and fixed in the IR lowering of host-record lists (no special case for TypeInfo). The case run_tier_diagnostics/programmable_build_check_matches_aot_interpreter_dev_and_web passes, a"
+    },
     {
       "at": "2026-11-12T10:27:12.810Z",
       "by": "Main",
