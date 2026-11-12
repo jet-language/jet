@@ -1,11 +1,15 @@
 #!/bin/sh
 # A stand-in for `perf stat -x, -e cycles:u,instructions:u EXE ARGS...`: it
-# runs EXE and reports fixed counts, the reference's (an EXE named ref) below
-# the Jet binaries', so the table and its gates are the same every run.
+# runs EXE and reports recorded counts, the reference's (an EXE named ref)
+# below the Jet binaries', so the table and its gates are the same every run.
+# A Jet binary counts 1250 cycles; FAKE_PERF_DEFAULT and FAKE_PERF_RELEASE
+# give the default and the release build (built in src-default and
+# src-release) their own counts, to judge cycles_x near the 1.10 gate.
 shift 4
 exe=$1
 "$@" > /dev/null
 case "$exe" in
 */ref) printf '1000,,cycles:u,1000,100.00,,\n2000,,instructions:u,1000,100.00,2.00,insn per cycle\n' >&2 ;;
-*) printf '1250,,cycles:u,1000,100.00,,\n2100,,instructions:u,1000,100.00,1.68,insn per cycle\n' >&2 ;;
+*/src-default/*) printf '%s,,cycles:u,1000,100.00,,\n2100,,instructions:u,1000,100.00,1.68,insn per cycle\n' "${FAKE_PERF_DEFAULT:-1250}" >&2 ;;
+*) printf '%s,,cycles:u,1000,100.00,,\n2100,,instructions:u,1000,100.00,1.68,insn per cycle\n' "${FAKE_PERF_RELEASE:-1250}" >&2 ;;
 esac
