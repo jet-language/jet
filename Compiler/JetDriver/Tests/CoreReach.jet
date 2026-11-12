@@ -274,6 +274,33 @@ reach_test_sources: fn(dir: String, out: &[String]) {
     assert_eq(spelled, [String]{"plain/0", "fn/0", "Int/0", "Never/0", "other/2", "value/1", "LABEL/0", "named/0"})
 }
 
+#Test("a lazy routed Core unit parses only the declarations reached code names") {
+    text: "plain: fn() -> Int Never! {{ 1 }}\n\n__TABLE: 4\n\nscaled: fn() -> Int Never! {{ __TABLE * 2 }}\n\nunused: fn() -> Int Never! {{ 9 }}\n"
+    parsed: jet_driver_parse_one(JetDriverParseJob.Core{text: text, module_name: "core.math", owned_members: [String]{}, runtime: false, tested: false}, compiler_threads_single())
+    assert(!jet_driver_has_errors(parsed.parsed.diagnostics))
+    words: parsed.words ?? panic("a Core unit has words")
+    held := [String]{}
+    loop declaration in words.held -> held.push(declaration.name)
+    assert_eq(held, [String]{"plain", "__TABLE", "scaled", "unused"})
+    // Each held declaration's place holds an empty stub until it is reached.
+    loop item in parsed.parsed.program.items {
+        if item == .Func(value) {
+            assert(value.body.len() == 0 && value.return_type == None, "{value.name} is a stub")
+        } else {
+            panic("a held unit keeps only stubs here")
+        }
+    }
+    load: reach_test_load_module("use m: core.math\nrun: fn() {{ print(m.scaled()) }}\n", "core.math", [String]{}, text)
+    assert_eq(reach_test_functions(load, "core.math"), [String]{"scaled"})
+    assert_eq(reach_test_constants(load, "core.math"), [String]{"__TABLE"})
+    loop module_row in load.modules {
+        if module_row.module_name != "core.math" -> next
+        loop item in module_row.program.items {
+            if item == .Func(value) -> assert(value.body.len() == 1 && value.return_type != None, "{value.name} parsed whole")
+        }
+    }
+}
+
 reach_test_types: fn(load: JetDriverLoadResult, module_name: String) -> [String] Never! {
     names := [String]{}
     loop module_row in load.modules {

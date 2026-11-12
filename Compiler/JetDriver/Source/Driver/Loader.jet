@@ -3827,7 +3827,7 @@ jet_driver_parse_user_unit_threads: fn(text: String, retain_demand: Bool, thread
     parsed := parse_lexed_with_source_threads(scanned.lexed.move(), source, lexed.line_starts, lexed.runs, threads)
     // A typed `run: fn(args: T)` or typed Output entry gets its generated argv entry.
     if !jet_driver_has_errors(parsed.diagnostics) -> sema_cli_entry_expand(parsed.program)
-    words: jet_driver_unit_words(spellings.move(), [Item]{}, [Span]{}, false, [String]{}, jet_driver_core_routes(""))
+    words: jet_driver_unit_words(spellings.move(), [Item]{}, [JetDriverReachDeclaration]{}, [Span]{}, false, [String]{}, jet_driver_core_routes(""))
     JetDriverParsedUnit{parsed: parsed.move(), demand: demand.move(), lines: lines, tokens: tokens, line_starts: lexed.line_starts.move(), words: Val(words.move())}
 }
 
@@ -3945,7 +3945,9 @@ jet_driver_parse_one: fn(job: JetDriverParseJob, threads: CompilerThreads) -> Je
 // but a public function outside `owned_members` is dropped so its calls keep
 // the compiler-owned route. Parser lints never reach user output. An `entry`
 // is the unit a `jet test` runs (an exact runtime entry, or the tested Core
-// source): it keeps its `#Test` controls and is reached whole.
+// source): it keeps its `#Test` controls and is reached whole. Any other
+// unit holds back the declarations the load parses only once it reaches
+// them (jet_driver_reach_hold).
 jet_driver_parse_core_source: fn(text: String, module_name: String, owned_members: [String], runtime: Bool, entry: Bool, threads: CompilerThreads) -> JetDriverParsedUnit {
     source := text.bytes()
     carrier: jet_driver_inline_package_threads(text, source, threads)
@@ -3956,14 +3958,30 @@ jet_driver_parse_core_source: fn(text: String, module_name: String, owned_member
     spellings := jet_driver_unit_spellings(source, lexed.lexed.tokens, lexed.lexed.tables)
     scanned := jet_driver_collect_core_identifier_demand_threads(lexed.lexed.move(), lexed.runs, true, entry, threads)
     demand := scanned.demand.move()
-    parsed := parse_lexed_with_source_threads(scanned.lexed.move(), source, lexed.line_starts, lexed.runs, threads)
+    part_members: if module_name.starts_with("__") -> owned_members else -> [String]{}
+    routes: jet_driver_core_routes(module_name)
+    held := JetDriverReachHeld{declarations: [JetDriverReachDeclaration]{}, dropped: [Span]{}}
+    if !entry -> held = jet_driver_reach_hold(scanned.lexed, if runtime -> "" else -> module_name, owned_members, part_members, routes)
+    // The lexer's runs index the tokens before the hold took any out.
+    runs := lexed.runs
+    if held.declarations.len() > 0 || held.dropped.len() > 0 -> runs = [Int]{0, scanned.lexed.tokens.len()}
+    parsed := parse_lexed_with_source_threads(scanned.lexed.move(), source, lexed.line_starts, runs, threads)
     kept := [Item]{}
     // What the imports and the dropped declarations spell names nothing the
     // program keeps: reach takes what an import selects from the import.
     // copy: each span stays in the parsed import or item it is read from.
     quiet := [Span]{}
     loop declaration in parsed.program.imports -> quiet.push(declaration.span.copy())
+    loop span in held.dropped -> quiet.push(span)
+    next_held := 0
     loop item in parsed.program.items {
+        // A held declaration's stub keeps its place for the declaration.
+        if next_held < held.declarations.len() && item == .Func(value) && value.name_span.start == held.declarations[next_held].name_start {
+            held.declarations[next_held].position = kept.len()
+            next_held += 1
+            kept.push(item)
+            next
+        }
         if item == {
             // A runtime unit keeps every item; `#Test` controls run only
             // when the unit is the entry a `jet test` runs.
@@ -3983,10 +4001,11 @@ jet_driver_parse_core_source: fn(text: String, module_name: String, owned_member
         }
         kept.push(item)
     }
+    if next_held < held.declarations.len() && !jet_driver_has_errors(parsed.diagnostics) -> panic("{module_name}: {held.declarations.len() - next_held} held declarations left no stub")
     // A lazy declaration of a Core module (public module, private part or
     // runtime unit) counts once the program reaches it; an entry is reached
     // whole (CoreReach.jet).
-    words: jet_driver_unit_words(spellings.move(), kept, quiet, !entry, if module_name.starts_with("__") -> owned_members else -> [String]{}, jet_driver_core_routes(module_name))
+    words: jet_driver_unit_words(spellings.move(), kept, held.declarations, quiet, !entry, part_members, routes)
     parsed.program.items = kept
     diagnostics := [Diagnostic]{}
     loop diagnostic in parsed.diagnostics {
@@ -4898,6 +4917,9 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
     }
     bare_modules := [String]{}
     reach := jet_driver_reach(use_driven)
+    // The Core modules whose parse held declarations back, for
+    // jet_driver_reach_parse_held once the load has reached them.
+    held_modules := [JetDriverReachHeldModule]{}
     pending_index := 0
     meta_decided := false
     spells_program := false
@@ -5492,8 +5514,10 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
         }
         if is_core -> jet_driver_owned_parts(source_units, queued, pending, generated_records, request.core_sources, unit.module_name, scoped_imports)
         loop synthetic in synthetic_imports -> program.imports.push(synthetic)
+        unit_words: words ?? JetDriverUnitWords{words: [String]{}, items: [Int]{}, members: [String]{}, owners: [Int]{}, names: [String]{}, cascades: [Bool]{}, spells: [[Int]]{}, routed: false, held: [JetDriverReachDeclaration]{}}
+        // copy: reach admits the same rows from unit_words below.
+        if unit_words.held.len() > 0 -> held_modules.push(JetDriverReachHeldModule{loaded: modules.len(), declarations: unit_words.held.copy()})
         if reach.enabled {
-            unit_words: words ?? JetDriverUnitWords{words: [String]{}, items: [Int]{}, members: [String]{}, owners: [Int]{}, names: [String]{}, cascades: [Bool]{}, spells: [[Int]]{}, routed: false}
             reach_unit: jet_driver_reach_admit(reach, modules.len(), unit.module_name, unit_words, program.imports, !is_core || is_runtime_entry)
             loop scoped in deferred -> jet_driver_reach_defer(reach, reach_unit, scoped)
             if defers {
@@ -5508,7 +5532,16 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
             diagnostics[import_diagnostic_index] = diagnostic_with_source_path(diagnostics[import_diagnostic_index], unit.path, 0)
         }
     }
-    // The unreached rest of each Core module leaves it (CoreReach.jet).
+    // The held declarations the load reached take their stubs' places, then
+    // the unreached rest of each Core module leaves it (CoreReach.jet).
+    held_parsed: jet_driver_reach_parse_held(request, reach, held_modules, modules, source_units, diagnostics)
+    if held_parsed < 0 -> failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Parse)
+    if request.trace_sink == .Val(sink) {
+        held_total := 0
+        loop held in held_modules -> held_total += held.declarations.len()
+        sink.progress("counters.load.core_held", held_total, -1)
+        sink.progress("counters.load.core_held_parsed", held_parsed, -1)
+    }
     if reach.enabled {
         jet_driver_reach_strip(reach, modules)
         if request.trace_sink == .Val(sink) {
