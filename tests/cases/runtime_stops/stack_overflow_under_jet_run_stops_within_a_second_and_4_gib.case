@@ -1,0 +1,23 @@
+# #6744 c1: a stack overflow under `jet run` reports its E3012 stop within one
+# second and inside the 4 GiB resident bound a built O0 binary of the same
+# program stops under. The first run fills the build cache; the timed run is
+# the second, so the bound measures the stop and not the compile.
+fixture: fixtures/stack_overflow_under_jet_run_stops_within_a_second_and_4_gib
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet build --optimize=none overflow.jet
+exit: 0
+step o0: {work}/.jet/build/overflow
+limit: time=1 resident=4194304
+exit: 70
+stdout: empty
+stderr: ~ "Stop [E3012]: Stack overflow in `deep`" # the built binary's stop names the function
+step warm: jet run overflow.jet
+exit: 70
+stderr: ~ "Stop [E3012]: Stack overflow in `deep`" # the first run compiles, then stops
+step run: jet run overflow.jet
+limit: time=1 resident=4194304
+exit: 70
+stdout: empty
+stderr: ~ "Stop [E3012]: Stack overflow in `deep`" # the stop names the function
+stderr: ~ "--> overflow.jet:" # and its source line
