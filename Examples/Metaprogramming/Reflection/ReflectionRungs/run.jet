@@ -5,7 +5,9 @@
 // without `Label` reads `marker(Label)` as None at every rung. fn build also
 // reads `marker(Label)` on a function's FunctionInfo; fn build and a marker
 // on the package record (package.jet's `#FromPackage`) read the package's
-// one PackageInfo, its name, version, modules and types, the same way.
+// one PackageInfo, its name, version, modules and types, and the ModuleInfo
+// of its file module, its name, identity, types, functions and markers, the
+// same way.
 Label: struct {
     text: String
 
@@ -41,8 +43,11 @@ FromPackage: struct {
 
         expand: fn(self, target: Target) {
             seen: "{target.name} {target.version} modules={target.modules.len()} types={target.types.len()}"
+            first: target.modules[0]
+            module_seen: "{first.name} {first.identity} types={first.types.len()} functions={first.functions.len()} markers={first.markers.len()} first={first.functions[0].name}"
             impl Rungs {
                 from_package: fn() -> String { #{seen} }
+                from_module: fn() -> String { #{module_seen} }
             }
         }
     }
@@ -98,6 +103,8 @@ build: fn(b: Build) {
     loop package in b.program.packages() {
         if package.name == "reflection_rungs" {
             b.contribute("package", "{package.name} {package.version} modules={package.modules.len()} types={package.types.len()}")
+            first: package.modules[0]
+            b.contribute("module_info", "{first.name} {first.identity} types={first.types.len()} functions={first.functions.len()} markers={first.markers.len()} first={first.functions[0].name}")
         }
     }
 }
@@ -111,5 +118,7 @@ run: fn() {
     print("comptime: {PLAIN}")
     print("package marker: {Rungs.from_package()}")
     print("package build:  {#build.settings.package}")
+    print("module marker:  {Rungs.from_module()}")
+    print("module build:   {#build.settings.module_info}")
     print("function: {#build.settings.function}")
 }
