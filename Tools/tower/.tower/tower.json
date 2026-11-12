@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6777,
-    "rev": 100136,
+    "rev": 100138,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -55365,6 +55365,11 @@
         {
           "at": "2026-11-12",
           "by": "Main",
+          "text": "G3Core-ctx8-r2 (c5) cut the spec status notes. Unbuilt parts it names: allocator routing in #Context blocks (new criterion c21) and context.allocator, .scratch and .print reads (already c2, c8 and c10)."
+        },
+        {
+          "at": "2026-11-12",
+          "by": "Main",
           "text": "Unlanded work, recorded 2026-11-12 (dead-lane sweep, $JET_SCRATCH_ROOT/lanes/Main/sweep/deadlanes/REPORT.md). The G3Ctx lane has no agent. Only G3Ctx-1 (1e1fff240f) and G3Ctx-15 (a32aeb5757) are on dev. Unlanded and staged in Main/inbox: G3Ctx-2 (c3), G3Ctx-3 (c2), G3Ctx-4 (c8), G3Ctx-7 (c6), G3Ctx-8 (c5), G3Ctx-17/17b (c4 partial). G3Ctx-18 (c4 with #6314 c3) is only work in progress, saved as $JET_SCRATCH_ROOT/lanes/Main/sweep/deadlanes/G3Ctx-t9.patch, with its draft message at $JET_SCRATCH_ROOT/lanes/G3Ctx/g3ctx18.msg. The source tree is kept at lanes/G3Ctx/t4 (t7 is its worktree). All of it predates D-CONTEXT-EFFECT1=F (ratified 2026-11-12), so each SUB is re-checked against F and its review conditions (c16-c20) and rebased on dev before landing. Owner: G12Docs-4 (G3), after #5971."
         },
         {
@@ -55599,6 +55604,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-12T11:47:15.540Z"
+        },
+        {
+          "n": 21,
+          "text": "Allocator routing is real: every allocation inside `#Context(allocator: a) { … }` (in libraries too) goes to `a`, and the allocator is restored on exit. Today ir_context_block only evaluates and releases the value, and the runtime jet_ctx_push_allocator has no caller (G12Docs-4, 2026-11-12), so the c1 golden matched without routing. Proof: a golden on O0/O1/O2 that observes the routing (for example an arena whose used-bytes count grows inside the block and not outside it), plus the same check through a library call.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-12T23:41:55.343Z"
         }
       ],
       "refs": [
@@ -55616,12 +55630,12 @@
       "parentId": "c02y3vkg",
       "needsAcceptance": false,
       "created": "2026-10-16T10:54:43.172Z",
-      "updated": "2026-11-12T21:43:23.206Z",
+      "updated": "2026-11-12T23:41:56.232Z",
       "updatedBy": "Main",
       "goals": [
         "G3"
       ],
-      "criteriaLastN": 20
+      "criteriaLastN": 21
     },
     {
       "id": "c0th2wgp",
@@ -200852,6 +200866,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-12T23:41:56.232Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0dhc7rh",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-12T23:41:55.343Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0dhc7rh",
+      "note": "#21 Allocator routing is real: every allocation inside `#Context"
+    },
     {
       "at": "2026-11-12T23:33:58.061Z",
       "by": "Main",
