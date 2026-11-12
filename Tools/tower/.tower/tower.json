@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6775,
-    "rev": 99999,
+    "rev": 100000,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -99573,7 +99573,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-12T10:16:07.441Z",
-      "updated": "2026-11-12T10:46:33.179Z",
+      "updated": "2026-11-12T10:56:52.417Z",
       "updatedBy": "Main",
       "criteriaLastN": 2
     },
@@ -197228,6 +197228,266 @@
       "created": "2026-11-12T07:05:21.448Z",
       "outcome": "A",
       "ratifiedAt": "2026-11-12"
+    },
+    {
+      "id": "D-COMPTIME-SIZE1",
+      "cardId": "c0xphd0i",
+      "group": "build",
+      "title": "Large build-time values: report their cost, require acknowledgment, or change their storage",
+      "situation": "A small expression can produce a large value while building. The owner's rule on #6769 stays: size alone never moves that computation to run time. An independent seed-b13 probe with two different 50 MB strings produced a 100,077,552-byte executable. Those are two payloads, not a duplicate copy. The values occupy writable image data on this seed, despite being immutable in Jet. This vote chooses optional cost reporting, no new report, compact storage, or a required acknowledgment. It does not choose a size limit on evaluation. The recommendation replaces the draft's warning with the existing optional-report path, preserving the ratified no-warnings rule.",
+      "gist": "How should Jet handle the cost of a large value computed while building?",
+      "lesson": "Computing a value early saves its construction at run time, but storing the answer can make the executable large. Evaluation, storage, and reporting are different choices. A size report need not change when the computation runs.",
+      "explainer": "A payload is the value's stored bytes, excluding its header and surrounding executable. RSS measures physical memory currently resident; peak RSS is the highest measured residency. Neither executable size nor peak RSS is a permanent memory reservation. A tidy error blocks check and build, but not run, dev, or test.",
+      "story": "A developer writes two repeat calls and uses only their lengths. Every option uses the same complete program. It prints 100000000; D first requires a reasoned allowance to build it.",
+      "inWild": "Zig comptime, C++ constexpr, Rust const evaluation, D CTFE, and Jai #run are strong precedents for computing values early. Rust Clippy also checks large constant arrays and recommends static storage to avoid repeated instances. That is a storage-sharing recommendation, not a run-time fallback or a guarantee of a small binary. Sources are linked below; peer compilers were not benchmarked or exercised here.",
+      "detail": "Scope. Card #6773 was merged into #6769 criterion 2; this payload uses that card's internal ID. D-COMPTIME-SIZE1 was absent from the decision list when checked. The owner rejected size-triggered run-time fallback on #6769; it is not selectable here. Successful evaluation still has finite compiler resources. No option promises every pure expression currently folds.\n\nSame complete program. SIZE is 50000000. last_use binds big to x repeated SIZE times, reads its length, then binds other to y repeated SIZE times and adds its length. run prints the result. All option samples contain that same program. D diagnoses it before building unless acknowledged.\n\nIndependent evidence. On seed-b13, dev tip 4cb7555849, constant.jet built with --optimize=full into an external output directory. GNU time 1.10 measured 5.82 seconds wall time and 514,252 KiB build peak RSS. The executable has 100,077,552 bytes and prints 100000000. Its program peak RSS was 97,332 KiB. These are single local observations, not cold-cache benchmarks.\n\nReference. runtime.jet passes an environment-derived size into the same function, reading STRING_BYTES=50000000 with core.sys.get and Int.parse in run. Its executable has 136,272 bytes. Build wall time was 0.93 seconds, build peak RSS 246,424 KiB, and program peak RSS 49,488 KiB. It prints 100000000. Input parsing is additional source and work; this reference is not an identical program or a proposed option's measurement.\n\nThe draft's larger fixture numbers were not measurements of its displayed program. The old 100,227,872/232,544-byte binaries and 6.52/0.72-second builds are therefore not retained as reproduced evidence. Neither are its 633,124/246,036 KiB build peaks or 147,020/49,508 KiB program peaks. Use the independently measured pair above.\n\nStorage. The constant executable contains one 50,000,000-byte x run at file offset 6720 and one y run at 50006744. Both are in a read/write ELF LOAD segment, flags 6, not read-only pages. The object writer places this program data in .data. Treat immutable-payload page permissions as a separate defect candidate, not as an approved storage contract.\n\nNo duplicate was observed. Changing both repeats to x produced a 50,077,680-byte executable and the same answer. Compiler/JetIR/Source/IR.jet, ir_intern_text, shares equal text. This does not establish cross-library deduplication for every value kind. Two different 50 MB strings explain the original 100 MB payload.\n\nLifetime. Compiler/JetIR/Source/X64Module.jet, ir_x64_text_header, emits a capacity-zero immortal String header. Compiler/JetRuntime/Source/Text.jet, rt_text_immortal and jet_rt_string_drop, recognize it and do not free its image data. Ending a binding's lifetime does not unmap its executable. Linux can reclaim clean file-backed pages, so the draft's permanent-residency claim was wrong.\n\nNot zero runtime work. Emitted IR for last_use calls jet_char_len twice. Core/Text/String.jet defines len as Unicode scalar counting; the runtime scans bytes. Producer folding does not establish consumer folding. Eliminating unnecessary intermediate payloads is an independent optimizer improvement required by the performance policy, not another owner-only mechanism. Do not predict an optimal compiler's size as today's result.\n\nExisting reporting machinery. Compiler/Prelude/Diagnostics.jet owns diagnostic declarations. Compiler/JetFoundation/Source/Registry/DiagnosticRows.jet is their generated projection. Source/Policy/LintPolicy.jet resolves policy names, and Compiler/JetSema/Source/Sema/LintAllowances.jet applies reasoned #Allow scopes. A registered finding must retain what, why, fix, source attribution, and a UI snapshot. No second registry or size-acceptance marker is needed.\n\nExisting settings. package.jet accepts policy: { lints: { deny: [unused_local_binding] } }. A probe makes check exit 1 as jet.DeniedLint, E1293. The reader permits only deny in that block, not a numeric threshold setting. The proposed large_build_time_value name, diagnostic type, and threshold do not exist yet. The existing #Allow mechanism was separately exercised with jet.UnusedLocalBinding; check and run succeed.\n\nRatification matters. D-NO-WARNINGS1=A chooses style fixes, tidy errors, and optional reports. Old warning behavior still present in the seed is not authorization for a new warning. A uses the optional cost report; D uses the ratified tidy path, not the seed's deny-by-request policy. D requires that no-warnings contract to be implemented for this finding.\n\nPhase spelling. Both comptime { \"x\".repeat(17) } and #run { \"x\".repeat(17) } run on seed-b13 and print 17 x characters. D-META-SPELL1=A ratified #run in place of the word. Neither phase spelling acknowledges storage cost. The draft's proposed comptime suppression gives one spelling two meanings and is removed.\n\nReporting contract for A and D. Use a fixed display/finding threshold strictly above 1,048,576 distinct payload bytes. Count UTF-8 bytes, not Unicode scalars. Count retained target payload after interning and reachability where available, show shared storage once, and separate header/layout overhead. Label pre-link estimates; only the final image establishes exact linked totals. Many small values may exceed the per-value threshold in total, so show the distinct total too.\n\nEdge cases for all options. Cover empty and exact-threshold values, shared and nested aggregates, aliases, generic specializations, eliminated branches, dead consumers, explicit #run, #Static, generated code, and dependencies. Attribute a generated finding to its authoring site where available. Do not silently exempt vendored code or charge shared payloads to each use. No automatic phase-changing fix is behavior-preserving. Compiler exhaustion must not trigger silent phase fallback.\n\nC is a storage proposal, not measured behavior. Keep full build-time evaluation, then encode the resulting bytes, never a replay of the source computation. Initially only repeated-byte runs in immutable, address-insensitive local Strings qualify. Choose encoding only when payload plus its share of decoder code is smaller. Other values remain raw; arbitrary computed tables, arithmetic lists, and aggregates are not promised compression.\n\nC's lifetime contract. Decode each local binding when reached on each invocation, using ordinary owned storage and last-use freeing. There is no global lazy cache or once-only initialization. Concurrent invocations allocate independently; repeated calls repeat decoding. Escaping and address-observable values stay raw. #Static keeps its stable storage promise; the small #Static TABLE: #run { \"x\".repeat(17) } probe prints length 17 today.\n\nC's costs. Decoding adds runtime allocation, writes, allocation-failure behavior, and effects, which this option explicitly authorizes. Build-time evaluation still consumes time and memory. A shared lazy alternative would require synchronized publication, reentrancy, and failure rules; freeing it after one caller's last use would invalidate later callers. Keeping it instead restores process-long retention. O2 must not inflate encodings back into the image or treat decoding as a plain static load.\n\nC's acceptance. Prove repeated and concurrent calls, escaping values, stable addresses, UTF-8 runs, allocator refusal, and O0/O1/O2/web equivalence. Every decoded buffer must be cleaned up with its owners. Meet the paired-program performance gate before claiming an advantage. No exact binary, compile, or RSS prediction is offered.\n\nPrior art, fairly. Zig's documented comptime expressions run ordinary functions early and its branch quota bounds compiler work, not output size. C++ constexpr variables require constant initialization; a constexpr function does not force every call early. Rust const contexts require evaluation, while constants need not share an address. Clippy large_const_arrays recommends static storage and documents a configurable array-size-threshold, default 16,384.\n\nD CTFE runs ordinary functions in contexts requiring early values, with documented restrictions and potentially substantial compiler cost. Jai community documentation describes #run returning values and arrays and broader arbitrary compile-time work. That is documentary precedent, not a tested claim about a current private compiler. None of these language features alone promises compression or a small executable.\n\nReview verdict. Agree with exposing cost, not with the author's warning or overloaded suppression. Added the optional-report versus default-tidy choice because the existing no-warnings decision requires that distinction. C was repaired to one local ownership model instead of contradictory once-only initialization and immediate freeing. Do not post the original draft's residency, read-only, zero-runtime-work, duplicate-copy, or near-232-KB promises.\n\nSeparate defect candidates. Immutable payloads are mapped writable, and the length-only constant program retains and scans data instead of reducing its known result. The latter needs a general consumer-folding investigation. No equal-text duplicate payload defect was observed. This ballot does not bless either implementation cost as necessary.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Optional cost report",
+          "gist": "Keep behavior and add large values to the existing cost report.",
+          "detail": "Keep evaluation and raw storage. Add emitted large constants to jet lint --cost using the shared cost producer, without warnings or size-caused failure. The program stays unchanged and builds normally. Report big and other as 50,000,000 payload bytes each on the measured seed, before future consumer-folding improvements.\n\nBeginners build without an acknowledgment; the cost is not guaranteed to be noticed. Experts request the report and choose genuine runtime input only when that is the intended program. Gain: source-attributed cost without runtime changes. Loss: the data stays large and reporting remains optional. Reuse existing inspection help to make the report discoverable.",
+          "technical": "Proposed, unimplemented. jet lint --cost is already a registered unbuilt form; seed-b13 exits 2 with E2104 naming #6652. Extend that producer rather than add another command. Use the fixed threshold and honest distinct-byte accounting described above. No new threshold setting, phase keyword, or suppression syntax is introduced. The report does not claim exact whole-binary growth or RSS from a payload size.",
+          "code": "SIZE: 50000000\nlast_use: fn() -> Int {\n    big: \"x\".repeat(SIZE)\n    n: big.len()\n    other: \"y\".repeat(SIZE)\n    n + other.len()\n}\nrun: fn() { print(last_use()) }\n// Proposed report: jet lint --cost constant.jet\n// Program output: 100000000"
+        },
+        {
+          "key": "B",
+          "name": "No new size report",
+          "gist": "Keep the source, storage policy, and existing inspection tools.",
+          "detail": "The same program builds and prints the same answer without a new finding or report row. Storage stays as measured, subject to ordinary compiler improvements. Beginners take no extra step. Experts inspect the emitted image or use genuine runtime input when intended.\n\nGain: no new policy or report implementation. Intentional generated tables need no acknowledgment. Loss: existing tools do not gain a source-attributed explanation for this large constant. Choosing this is not approval of writable constant pages or avoidable retained intermediates.",
+          "code": "SIZE: 50000000\nlast_use: fn() -> Int {\n    big: \"x\".repeat(SIZE)\n    n: big.len()\n    other: \"y\".repeat(SIZE)\n    n + other.len()\n}\nrun: fn() { print(last_use()) }\n// jet build --optimize=full constant.jet\n// Program output: 100000000"
+        },
+        {
+          "key": "C",
+          "name": "Compact storage with local decoding",
+          "gist": "Compute early, store encoded bytes, and decode each local invocation.",
+          "detail": "The same source still evaluates while building, then qualifying repeated-byte String payloads are encoded. Each invocation decodes big and other when reached and frees their ordinary owned storage at last use. No exact size or RSS is measured for this proposal.\n\nBeginners keep the same source but pay runtime work. Experts retain raw stable storage through existing #Static where appropriate. Gain: smaller stored payloads for the covered shape. Loss: decoding, allocation failures and effects, repeated-call cost, and no benefit for excluded shapes. Use no global lazy cache or new public String type.",
+          "technical": "Proposed, unimplemented. Eligibility, byte-exact value preservation, address exclusions, concurrency, allocator behavior, and O2 restrictions are in detail. This option authorizes runtime decoding of evaluated bytes, not the owner's rejected runtime evaluation fallback. Build-time cost remains. No claim is made that the compiler can infer a short recipe for arbitrary values.",
+          "code": "SIZE: 50000000\nlast_use: fn() -> Int {\n    big: \"x\".repeat(SIZE)\n    n: big.len()\n    other: \"y\".repeat(SIZE)\n    n + other.len()\n}\nrun: fn() { print(last_use()) }\n// Proposed storage only; source unchanged.\n// Program output: 100000000"
+        },
+        {
+          "key": "D",
+          "name": "Default tidy error; reasoned allowance",
+          "gist": "Make the cost visible before release without adding warnings.",
+          "detail": "Keep raw storage and report jet.LargeBuildTimeValue above the same fixed threshold. The unchanged program gets two tidy errors: check/build fail; run/dev/test are not stopped by tidiness. An expert adds #Allow(jet.LargeBuildTimeValue, \"Intentional generated test data\") above last_use to build the same values. That new diagnostic identity is proposed and UNCHECKED.\n\nBeginners see bytes and a choice before release. Experts use the existing reasoned allowance scopes, not a phase request. Gain: guaranteed visibility in check/build. Loss: valid generated tables now need acknowledgments and estimated size can create churn. Never automatically rewrite them to runtime computation.",
+          "technical": "Register one Diagnostic declaration and generated projection, with what/why/fix and a UI snapshot. Use existing #Allow resolution. D follows D-NO-WARNINGS1=A's tidy-command policy, not the seed's older deny-by-request warning policy. It needs that ratified cutover for this finding. It introduces neither an independent severity mechanism nor a numeric policy field.",
+          "code": "SIZE: 50000000\nlast_use: fn() -> Int {\n    big: \"x\".repeat(SIZE)\n    n: big.len()\n    other: \"y\".repeat(SIZE)\n    n + other.len()\n}\nrun: fn() { print(last_use()) }\n// Proposed: two tidy errors block check/build.\n// After reasoned allowance: output 100000000."
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "Expose the cost through the existing report without changing evaluation, blocking intentional data, or reviving warnings. Keep actual optimizer and storage-permission defects separate.",
+        "gains": [
+          "One cost-report mechanism",
+          "No new runtime work",
+          "No phase-changing fallback"
+        ],
+        "losses": [
+          {
+            "loss": "Optional reporting does not guarantee discovery.",
+            "mitigation": "Link the report from existing editor and build inspection help; do not pretend that this makes it mandatory."
+          },
+          {
+            "loss": "The emitted data stays large.",
+            "mitigation": "Report its distinct bytes honestly and pursue general consumer-folding defects independently of this policy vote."
+          },
+          {
+            "loss": "The cost producer is not implemented yet.",
+            "mitigation": "Extend the existing #6652 producer contract and prove its source attribution and size accounting before claiming the report works."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "A fair minimal policy, but it gives authors no new source-attributed explanation."
+          },
+          {
+            "key": "C",
+            "reason": "Can reduce stored runs, but adds unmeasured runtime work and allocation failures while retaining full evaluation cost."
+          },
+          {
+            "key": "D",
+            "reason": "Offers stronger visibility, but valid large tables now fail check/build unless explicitly acknowledged."
+          }
+        ],
+        "tradeoff": "Authors must request cost information; intentional data remains valid without a special acknowledgment."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: GPT. Fresh agent: BallotComptimeSize. Independently measured seed-b13 programs, inspected emitted payloads and compiler paths, and checked the cited rulings. Repaired storage, residency, suppression, warning-policy, and lazy-lifetime claims; added the report-versus-tidy choice and sourced strong prior art."
+      },
+      "checkInstructions": "Use seed-b13 on probes in $JET_SCRATCH_ROOT/lanes/BallotReview. Build constant.jet, runtime.jet, and identical.jet with --optimize=full and external output directories; runtime.jet reads STRING_BYTES=50000000. Measure build and program RSS separately under nice/ionice. Inspect ELF LOAD flags and payload runs, then emit last_use IR. Run explicit.jet, run-mark.jet, static.jet, allow.jet, and the policy probe.\n\nProposal behaviors are UNCHECKED; after implementation prove the cases named in detail on all applicable tiers. Validate this payload with Tools/agent/ballots/Validate.jet.",
+      "surface": {
+        "gist": "Should Jet report large build-time values, require acknowledgment, or change how their bytes are stored?",
+        "lesson": "A short expression can put megabytes in an executable. Computing early and storing the answer are different costs. The owner's rule stays: size never moves evaluation to run time.",
+        "trio": {
+          "current": {
+            "note": "Two different 50 MB strings produced a 100 MB payload, not duplicate copies.",
+            "code": "big: \"x\".repeat(50000000)\nother: \"y\".repeat(50000000)"
+          },
+          "wild": {
+            "lang": "Rust Clippy",
+            "note": "Clippy checks large constant arrays and recommends shared static storage, not runtime fallback.",
+            "code": "// Documentary precedent: large_const_arrays\n// Configured through array-size-threshold. No peer benchmark here."
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Optional cost report",
+            "gist": "Add large values to the existing cost report; leave program behavior alone.",
+            "gains": [
+              "Numbers without new runtime work",
+              "No warnings or build failures for size"
+            ],
+            "losses": [
+              "Authors must request the report",
+              "Does not shrink the data"
+            ],
+            "proposed": {
+              "code": "SIZE: 50000000\nlast_use: fn() -> Int {\n    big: \"x\".repeat(SIZE)\n    n: big.len()\n    other: \"y\".repeat(SIZE)\n    n + other.len()\n}\nrun: fn() { print(last_use()) }\n// Proposed: jet lint --cost constant.jet\n// Output: 100000000"
+            }
+          },
+          {
+            "key": "B",
+            "name": "No new report",
+            "gist": "Keep the same program and storage without a size finding.",
+            "gains": [
+              "No new policy"
+            ],
+            "losses": [
+              "No source-attributed size explanation"
+            ],
+            "proposed": {
+              "code": "SIZE: 50000000\nlast_use: fn() -> Int {\n    big: \"x\".repeat(SIZE)\n    n: big.len()\n    other: \"y\".repeat(SIZE)\n    n + other.len()\n}\nrun: fn() { print(last_use()) }\n// Output: 100000000"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Compact storage",
+            "gist": "Encode evaluated byte runs and decode each local invocation. Proposed, not measured.",
+            "gains": [
+              "Smaller stored runs",
+              "Ordinary local freeing"
+            ],
+            "losses": [
+              "Runtime allocation and decoding",
+              "Repeated calls pay again",
+              "Static addresses and irregular values stay raw"
+            ],
+            "proposed": {
+              "code": "SIZE: 50000000\nlast_use: fn() -> Int {\n    big: \"x\".repeat(SIZE)\n    n: big.len()\n    other: \"y\".repeat(SIZE)\n    n + other.len()\n}\nrun: fn() { print(last_use()) }\n// Proposed storage; source unchanged.\n// Output: 100000000"
+            }
+          },
+          {
+            "key": "D",
+            "name": "Default tidy error",
+            "gist": "Block check/build until large data is acknowledged with an existing reasoned allowance.",
+            "gains": [
+              "Visible before release",
+              "No phase-changing fallback"
+            ],
+            "losses": [
+              "Intentional tables need allowances"
+            ],
+            "proposed": {
+              "code": "SIZE: 50000000\nlast_use: fn() -> Int {\n    big: \"x\".repeat(SIZE)\n    n: big.len()\n    other: \"y\".repeat(SIZE)\n    n + other.len()\n}\nrun: fn() { print(last_use()) }\n// Proposed: two tidy errors; check/build fail.\n// With reasoned allowance: output 100000000."
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Use the existing cost-report path. Preserve evaluation and valid intentional data without new warnings or hidden runtime work.",
+          "gains": [
+            "One reporting mechanism",
+            "No runtime changes"
+          ],
+          "losses": [
+            {
+              "loss": "The report is optional.",
+              "mitigation": "Link it from existing editor and build inspection help."
+            },
+            {
+              "loss": "The data stays large.",
+              "mitigation": "Report distinct bytes honestly; investigate consumer folding separately."
+            },
+            {
+              "loss": "The cost command is unbuilt today.",
+              "mitigation": "Extend its existing producer, then prove attribution and byte accounting."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Simplest, but explains less."
+            },
+            {
+              "key": "C",
+              "reason": "Smaller runs at unmeasured runtime cost."
+            },
+            {
+              "key": "D",
+              "reason": "Stronger visibility, but blocks valid tables."
+            }
+          ],
+          "tradeoff": "Visible numbers on request, not mandatory acknowledgment."
+        }
+      },
+      "reports": [
+        {
+          "title": "Zig compile-time expressions",
+          "url": "https://ziglang.org/documentation/master/#Compile-Time-Expressions",
+          "note": "One function at both phases; explicit early evaluation."
+        },
+        {
+          "title": "Zig evaluation branch quota",
+          "url": "https://ziglang.org/documentation/master/#setEvalBranchQuota",
+          "note": "A compiler-work budget, not a result-size policy."
+        },
+        {
+          "title": "C++ constexpr",
+          "url": "https://en.cppreference.com/w/cpp/language/constexpr.html",
+          "note": "Constant initialization and eligible functions are different guarantees."
+        },
+        {
+          "title": "Rust constant evaluation",
+          "url": "https://doc.rust-lang.org/reference/const_eval.html",
+          "note": "Required const contexts versus optional optimization elsewhere."
+        },
+        {
+          "title": "Rust constant items",
+          "url": "https://doc.rust-lang.org/reference/items/constant-items.html",
+          "note": "Constants are values without one guaranteed shared memory location."
+        },
+        {
+          "title": "Clippy large_const_arrays",
+          "url": "https://rust-lang.github.io/rust-clippy/master/index.html#large_const_arrays",
+          "note": "A size lint recommending static storage, with array-size-threshold configuration."
+        },
+        {
+          "title": "D compile-time function execution",
+          "url": "https://dlang.org/spec/function.html#interpretation",
+          "note": "Ordinary functions evaluated in compile-time contexts, with documented restrictions."
+        },
+        {
+          "title": "Jai community metaprogramming guide",
+          "url": "https://github.com/Jai-Community/Jai-Community-Library/wiki/Metaprogramming#run-directive",
+          "note": "Documentary precedent only; no private compiler measurement."
+        },
+        {
+          "title": "Linux memory concepts and reclaim",
+          "url": "https://docs.kernel.org/admin-guide/mm/concepts.html",
+          "note": "Mapped file data does not imply permanently resident physical pages."
+        }
+      ],
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-12T10:56:52.417Z"
     }
   ],
   "questions": [
@@ -200435,6 +200695,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-12T10:56:52.417Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-COMPTIME-SIZE1",
+      "note": "Large build-time values: report their cost, require acknowledgment, or change their storage"
+    },
     {
       "at": "2026-11-12T10:55:49.887Z",
       "by": "Main",
