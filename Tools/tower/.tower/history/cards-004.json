@@ -95263,6 +95263,59 @@
       "completedAt": "2026-11-09T19:31:14.577Z",
       "questions": [],
       "retiredAt": "2026-11-12T19:32:44.639Z"
+    },
+    {
+      "id": "c06l2xid",
+      "num": 6589,
+      "title": "fn build locals spliced into b.generate templates expand under an empty comptime scope",
+      "body": "Found by GoldenRoots3 on dev 32fd056cd3. Case reflect/arithmetic_policy_is_visible_in_function_reflection stays known-failing: its hand-port splices fn build locals ($operation) into b.generate, and sema expands the template under an empty comptime scope (the Rust lower_build_generate behaved the same). Needs build-time template binding: a b.generate template sees the fn build locals it names, on every tier.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A b.generate template sees the fn build locals it names on every tier, and reflect/arithmetic_policy_is_visible_in_function_reflection passes without known-failing.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Main 2026-11-09, admitted seed a0_042 on dev 6a06b917cb: jet test Compiler --profile cases --filter arithmetic_policy_is_visible_in_function_reflection: PASS 1, FAIL 0, KNOWN-FAILING 0 (the case runs every tier and carries no known-failing header).",
+          "at": "2026-11-09T20:02:09.470Z"
+        },
+        {
+          "n": 2,
+          "text": "A generated module whose template names a top-level comptime constant of the entry resolves it when a target lists the module's path. Repro (seed a0_033 and an s1 at 6f191d8098 + bbbdd8528e behave the same): run.jet holds TOKENS: comptime { 3 }; a build: fn(b: Build) with b.generate(\"facts\") { tooling_facts: fn() -> String { \"tokens={TOKENS}\" } } and app: b.add_executable(\"app\", [\"run.jet\", \"other.jet\", \".jet/generated/run/facts.jet\"], []), then b.default(app); and run: fn() { print(\"tokens={TOKENS}\") }. other.jet holds helper: fn() -> Int { 1 }. jet build run.jet fails with E0107 'Nothing named TOKENS exists here' at a wrong span (run.jet:1:42). With the target [\"run.jet\"] it prints tokens=3, because build_plan_selected_generated compiles a generated module only when a selected target lists its path. Once compiled, its template expands under an empty comptime scope (PortsLead-2, 11-07). A case pins it: build passes and prints tokens=3, and the generated module is compiled.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 2af05ff31d (MetaLead-2), batch b2r census rc=0; generated_module_reads_entry_comptime_constant_and_sibling_function passes on O1 and O2",
+          "at": "2026-11-08T20:13:07.483Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G6"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-06T03:02:51.022Z",
+      "updated": "2026-11-09T20:02:12.425Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 2,
+      "completedAt": "2026-11-09T20:02:12.425Z",
+      "questions": [],
+      "retiredAt": "2026-11-12T20:06:51.993Z"
     }
   ]
 }

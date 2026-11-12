@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6777,
-    "rev": 100073,
+    "rev": 100075,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -46787,11 +46787,11 @@
         {
           "n": 23,
           "text": "(was #3143) [retarget] Each callable category (named, non-capturing, capturing, generic, nominal wrapper) gives identical observable results where contracts agree; incompatible label/effect/lifetime/access use fails in the self-hosted checker with registered codes",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:28:23.206Z"
+          "evidence": "seed-b13 (jet@a0.0.45#6c8af19f74a2). On dev 495a5dfe90 (meet-4284, $JET_SCRATCH_ROOT/lanes/Lander/loop/out/meet-4284/): jet test Compiler --profile golden Examples/Basics/Functions/CallableCategories.jet --optimize=none,basic,full PASS 3 (named, non-capturing, capturing, generic and nominal wrapper give identical output); ui tests/ui/closures/returned_lambda_cannot_write_a_lent_parameter.jet PASS 1 (lifetime, E0120); ui tests/ui/lambda_interface_effect_mismatch.jet PASS 1 (effect); ui tests/ui/function_value_access_cannot_erase.jet PASS 1 (access). Label: G5DevX-fcl1 landed fe8ee02d6e (tested on d5d2375e1c plus the patch, which touches only that fixture and snapshot): ui tests/ui/function_contract_laundering.jet rc 0 PASS 1, both E0771 FunctionValueLabelMismatch at 12:17 and 14:18, KNOWN-FAILING row removed. 0 FAIL, KF, SKIP, ERROR or TIMEOUT.",
+          "at": "2026-11-12T20:06:51.839Z"
         },
         {
           "n": 24,
@@ -46922,7 +46922,7 @@
       "parentId": "c0jmyt4x",
       "needsAcceptance": false,
       "created": "2026-10-02T18:26:03.045Z",
-      "updated": "2026-11-12T19:43:17.723Z",
+      "updated": "2026-11-12T20:06:51.840Z",
       "updatedBy": "Main",
       "goals": [
         "G6"
@@ -62284,11 +62284,11 @@
         {
           "n": 3,
           "text": "(was #4745) Three compiler bugs found porting core.auth are fixed, each with a regression case on O0, O1 and O2: default args resolve in the caller's scope; implicit Err loses Result; bare None is mistyped in `T? E!`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T02:53:12.152Z"
+          "evidence": "G3Core-t1b landed 7dfa3007a5 (tested on fb1b8faef1 plus the patch, seed-b13; output $JET_SCRATCH_ROOT/lanes/Lander/loop/out/direct-G3Core-t1b/): jet test Compiler --profile cases --filter default_arguments_resolve_in_the_callee_module_on_every_tier PASS 1 (default args resolve in the declaring scope); imported_fallible_function_keeps_its_result_on_every_tier PASS 1 (an implicit Err keeps its Result); bare_none_from_an_optional_fallible_function_is_none_on_every_tier PASS 1 (bare None in T? E!). Each case runs O0, O1 and O2. LaneCheck rc 0; 0 FAIL, KF, SKIP, ERROR or TIMEOUT.",
+          "at": "2026-11-12T20:06:53.222Z"
         },
         {
           "n": 4,
@@ -62614,7 +62614,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T11:17:59.631Z",
-      "updated": "2026-11-12T19:50:52.056Z",
+      "updated": "2026-11-12T20:06:53.222Z",
       "updatedBy": "Main",
       "goals": [
         "G3"
@@ -87717,57 +87717,6 @@
       "created": "2026-11-06T02:04:25.306Z",
       "updated": "2026-11-12T11:22:17.211Z",
       "updatedBy": "Main"
-    },
-    {
-      "id": "c06l2xid",
-      "num": 6589,
-      "title": "fn build locals spliced into b.generate templates expand under an empty comptime scope",
-      "body": "Found by GoldenRoots3 on dev 32fd056cd3. Case reflect/arithmetic_policy_is_visible_in_function_reflection stays known-failing: its hand-port splices fn build locals ($operation) into b.generate, and sema expands the template under an empty comptime scope (the Rust lower_build_generate behaved the same). Needs build-time template binding: a b.generate template sees the fn build locals it names, on every tier.",
-      "kind": "bug",
-      "track": "sidequest",
-      "epoch": null,
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P2",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "A b.generate template sees the fn build locals it names on every tier, and reflect/arithmetic_policy_is_visible_in_function_reflection passes without known-failing.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Main 2026-11-09, admitted seed a0_042 on dev 6a06b917cb: jet test Compiler --profile cases --filter arithmetic_policy_is_visible_in_function_reflection: PASS 1, FAIL 0, KNOWN-FAILING 0 (the case runs every tier and carries no known-failing header).",
-          "at": "2026-11-09T20:02:09.470Z"
-        },
-        {
-          "n": 2,
-          "text": "A generated module whose template names a top-level comptime constant of the entry resolves it when a target lists the module's path. Repro (seed a0_033 and an s1 at 6f191d8098 + bbbdd8528e behave the same): run.jet holds TOKENS: comptime { 3 }; a build: fn(b: Build) with b.generate(\"facts\") { tooling_facts: fn() -> String { \"tokens={TOKENS}\" } } and app: b.add_executable(\"app\", [\"run.jet\", \"other.jet\", \".jet/generated/run/facts.jet\"], []), then b.default(app); and run: fn() { print(\"tokens={TOKENS}\") }. other.jet holds helper: fn() -> Int { 1 }. jet build run.jet fails with E0107 'Nothing named TOKENS exists here' at a wrong span (run.jet:1:42). With the target [\"run.jet\"] it prints tokens=3, because build_plan_selected_generated compiles a generated module only when a selected target lists its path. Once compiled, its template expands under an empty comptime scope (PortsLead-2, 11-07). A case pins it: build passes and prints tokens=3, and the generated module is compiled.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "dev 2af05ff31d (MetaLead-2), batch b2r census rc=0; generated_module_reads_entry_comptime_constant_and_sibling_function passes on O1 and O2",
-          "at": "2026-11-08T20:13:07.483Z"
-        }
-      ],
-      "refs": [],
-      "tags": [],
-      "goals": [
-        "G6"
-      ],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-11-06T03:02:51.022Z",
-      "updated": "2026-11-09T20:02:12.425Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 2,
-      "completedAt": "2026-11-09T20:02:12.425Z"
     },
     {
       "id": "c0g93joj",
@@ -199963,6 +199912,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-12T20:06:53.222Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c08s0ppt",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-12T20:06:51.840Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c06lr0kz",
+      "note": "#23"
+    },
     {
       "at": "2026-11-12T19:55:46.552Z",
       "by": "Main",
