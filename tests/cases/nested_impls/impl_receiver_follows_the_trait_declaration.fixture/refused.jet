@@ -1,0 +1,21 @@
+// The trait declares a read receiver; the implementation's `&&self` is refused.
+Measured: trait {
+    size: fn(self) -> Int
+}
+
+Box: struct {
+    n: Int
+
+    impl Measured {
+        size: fn(&&self) -> Int { self.n }
+    }
+}
+
+measure: fn(item: Measured) -> Int {
+    item.size() + item.size()
+}
+
+run: fn() {
+    item: Measured{Box{n: 3}}
+    print(measure(item))
+}

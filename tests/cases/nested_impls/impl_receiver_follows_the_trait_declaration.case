@@ -1,0 +1,14 @@
+# A trait method's declared receiver binds its implementations: `&&self` for a
+# trait's `self` is E0907, so a consuming implementation never reaches a call
+# through a trait value. Written as the trait declares it, a trait value answers
+# two calls inside `measure` and one more after it, and the program exits.
+fixture: impl_receiver_follows_the_trait_declaration.fixture
+env: NO_COLOR=1
+step: jet check refused.jet
+exit: nonzero
+stderr: ~ "[jet.TraitMethodMismatch]" # the receiver differs from the trait's
+stderr: ~ "--> refused.jet:10:9" # at the implementation's `size`
+stderr: ~ "Write `size: fn(self) -> Int`" # the declared receiver
+step: jet run matched.jet
+exit: 0
+stdout: = "6\n3\n"

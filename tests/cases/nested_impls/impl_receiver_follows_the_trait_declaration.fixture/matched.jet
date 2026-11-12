@@ -1,0 +1,23 @@
+// The implementation takes `self` as the trait declares it, so a trait value
+// answers any number of calls: twice inside `measure`, then once more.
+Measured: trait {
+    size: fn(self) -> Int
+}
+
+Box: struct {
+    n: Int
+
+    impl Measured {
+        size: fn(self) -> Int { self.n }
+    }
+}
+
+measure: fn(item: Measured) -> Int {
+    item.size() + item.size()
+}
+
+run: fn() {
+    item: Measured{Box{n: 3}}
+    print(measure(item))
+    print(item.size())
+}

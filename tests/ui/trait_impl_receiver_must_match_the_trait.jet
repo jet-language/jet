@@ -1,0 +1,17 @@
+// An implementation takes `self` the way its trait method declares it: a
+// trait's `self` is not met by `&&self`, and its `&self` is not met by `self`.
+Measured: trait {
+    size: fn(self) -> Int
+    grow: fn(&self)
+}
+
+Taking: struct {
+    n: Int
+
+    impl Measured {
+        size: fn(&&self) -> Int { self.n }
+        grow: fn(self) {}
+    }
+}
+
+run: fn() {}

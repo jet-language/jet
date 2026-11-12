@@ -3143,11 +3143,15 @@ sema_checked_validate_trait_contract: fn(graph: SemaRegistrationGraph, module_ro
         declared_signature: graph.modules[trait_ref.module_index].nominals[trait_ref.row].trait_methods[expected_index].signature
         expected_signature: sema_inference_substitute_type(declared_signature, associated_names, associated_types)
         compatible: sema_type_assignable_in_graph(graph, expected_signature, sema_checked_impl_signature(expected_signature, actual.signature), module_row.module_identity)
-        mismatch: if compatible == {
+        signature_differs: if compatible == {
             .Val(value) -> !value
             .None -> graph.complete
         }
-        if mismatch {
+        // The compared signature leaves the receiver out, so it is compared
+        // here. A compiler-owned trait's contract row states its receiver, and
+        // that check (sema_owned_method_matches) owns it.
+        receiver_differs: owned_trait(trait_name) == None && !sema_checked_receiver_matches(graph.modules[trait_ref.module_index].nominals[trait_ref.row].trait_methods[expected_index].declaration.params, actual.declaration.params)
+        if signature_differs || receiver_differs {
             expected_declaration: graph.modules[trait_ref.module_index].nominals[trait_ref.row].trait_methods[expected_index].declaration
             written: sema_checked_trait_method_expected(expected_declaration, associated_names, associated_types)
             diagnostics.push(sema_error("E0907", actual.declaration.name_span, "`{actual.declaration.name}` doesn't match the `{trait_name}` contract", "a trait implementation must use the trait method's receiver, parameters, return type, and effects", "write `{written}`, matching the `{trait_name}` declaration exactly, including `self`, types, labels, return type, and effects"))
@@ -3206,6 +3210,15 @@ sema_checked_impl_signature: fn(expected: Type, actual: Type) -> Type Never! {
         if effect_bound == None && expected == .Fn(_, _, wanted, _, _, _) -> return Type.Fn{params: params, ret: ret, effect_bound: wanted, param_contract: param_contract, call_metadata: call_metadata, return_view_provenance: return_view_provenance}
     }
     actual.copy()
+}
+
+// Whether the impl method takes `self` as the trait method declares it: both
+// without a receiver, or both with the same `self`, `&self` or `&&self`.
+sema_checked_receiver_matches: fn(declared: [Param], written: [Param]) -> Bool Never! {
+    declared_self: declared.len() > 0 && declared[0].name == "self"
+    written_self: written.len() > 0 && written[0].name == "self"
+    if declared_self != written_self -> return false
+    !declared_self || declared[0].convention == written[0].convention
 }
 
 // Rust `TraitRegistry` coherence (orphan rule). Top-level
