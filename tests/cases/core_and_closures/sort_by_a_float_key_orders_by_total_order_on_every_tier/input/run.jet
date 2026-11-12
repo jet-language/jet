@@ -1,0 +1,56 @@
+// A Float key sorts by IEEE 754 totalOrder: a negative NaN first, then -inf,
+// -0.0 before +0.0, +inf and a positive NaN last. Equal keys keep their
+// input order.
+Item: struct {
+    name: String
+    score: Float
+}
+
+Reading: struct {
+    name: String
+    level: F32
+}
+
+checked_score: fn(item: Item) -> Float Err! {
+    if item.name == "stop" { return Err("stop", code: "E_SORT") }
+    return item.score
+}
+
+names: fn(items: [Item]) -> String Never! {
+    out := ""
+    loop item in items -> out += "{item.name} "
+    out
+}
+
+run: fn() {
+    items := [Item]{
+        Item{name: "two", score: 2.0},
+        Item{name: "nan", score: Float.NAN},
+        Item{name: "zero", score: 0.0},
+        Item{name: "inf", score: Float.INFINITY},
+        Item{name: "minus_nan", score: -Float.NAN},
+        Item{name: "minus_zero", score: -0.0},
+        Item{name: "minus_inf", score: -Float.INFINITY},
+        Item{name: "also_two", score: 2.0},
+        Item{name: "minus_half", score: -0.5},
+    }
+    items.sort_by((item) -> item.score)
+    print(names(items))
+    items.sort_by_desc((item) -> item.score)
+    print(names(items))
+
+    fallible := [Item]{Item{name: "b", score: 1.5}, Item{name: "a", score: -1.5}}
+    fallible.sort_by((item) -> checked_score(item)) ?? {
+        print("{err.code}:{err.message}")
+        ()
+    }
+    print(names(fallible))
+
+    readings := [Reading]{
+        Reading{name: "high", level: F32{ 3.5 }},
+        Reading{name: "nan", level: F32.NAN},
+        Reading{name: "low", level: F32{ -1.0 }},
+    }
+    readings.sort_by((reading) -> reading.level)
+    loop reading in readings -> print(reading.name)
+}

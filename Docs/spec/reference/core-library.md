@@ -586,6 +586,9 @@ list.
 
 `partition` is stable, and the list sort family preserves source order for equal
 keys. `min_by` and `max_by` retain the last source item for equal keys.
+A Float or F32 key to `sort_by`, `sort_by_desc`, their `try_` forms, `min_by`
+or `max_by` orders by IEEE 754 totalOrder, as `<=>` does: a negative NaN
+first, then `-inf`, `-0.0` before `+0.0`, `+inf`, and a positive NaN last.
 `sort`, `sort_desc`, `min` and `max` on named tuples compare members in label
 order, not written order (S73, D-TUPLE-ORDER1=A). So `(key, index)` sorts by
 `index`, then `key`; use `sort_by` to put another member first.

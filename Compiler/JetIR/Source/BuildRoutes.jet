@@ -2816,6 +2816,14 @@ ir_free: fn(m: &IRModule, b: &IRBuilder, address: Int, bytes: Int) Never! {
     _: ir_runtime(m, b, "jet_rt_free", [Int]{address, bytes, align}, -1)
 }
 
+// Whether the key row `key_row` is a Float or F32. Such a sort, min_by or
+// max_by key compares as its IEEE 754 totalOrder word (ir_float_total_value),
+// as `<=>` orders it, under the "word" key kind.
+ir_float_key: fn(m: IRModule, key_row: Int) -> Bool Never! {
+    kind: m.types[key_row].kind
+    kind == .Float || kind == .Float32
+}
+
 // `xs.min_by(key)` / `xs.max_by(key)`: each key computed once, in order; a
 // tie replaces the best so far (max keeps the best only while key < best, min
 // only while best < key). The result is an Option box holding a copy of the
@@ -2824,7 +2832,8 @@ ir_free: fn(m: &IRModule, b: &IRBuilder, address: Int, bytes: Int) Never! {
 ir_closure_extreme_by: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, result_row: Int, list: Int, element: Int, callback: Int, closure_ty: Type, maximum: Bool, span: Span) -> Int Never! {
     key_ty: ir_closure_result(closure_ty) ?? return ir_fail_slot(b, span, "min_by/max_by key closure without a result type")
     key_row: ir_value_type(m, p, key_ty) ?? return ir_type_fail(b, span, key_ty)
-    kind: ir_map_key_kind(m, key_row)
+    float_key: ir_float_key(m, key_row)
+    kind: if float_key -> "word" else -> ir_map_key_kind(m, key_row)
     if kind == "" -> return ir_fail_slot(b, span, "min_by/max_by with a {ir_type_name(key_ty)} key")
     key_drops: m.types[key_row].drop != ""
     zero: ir_word_const(m, b, 0)
@@ -2849,7 +2858,13 @@ ir_closure_extreme_by: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, result_row:
     ir_emit(b.f, IROp.Const, replace, 1, -1, -1, b.line)
     seen: ir_bool_op(m, b, IROp.Ge, best_at, zero)
     ir_open_if(b.f, seen, b.line)
-    order: if maximum -> ir_map_order(m, p, b, kind, key, best_key) else -> ir_map_order(m, p, b, kind, best_key, key)
+    key_word := key
+    best_word := best_key
+    if float_key {
+        key_word = ir_float_total_value(m, p, b, key, span)
+        best_word = ir_float_total_value(m, p, b, best_key, span)
+    }
+    order: if maximum -> ir_map_order(m, p, b, kind, key_word, best_word) else -> ir_map_order(m, p, b, kind, best_word, key_word)
     ir_emit(b.f, IROp.Not, replace, order.less, -1, -1, b.line)
     ir_end(b.f, b.line)
     ir_open_if(b.f, replace, b.line)
@@ -2928,7 +2943,8 @@ ir_closure_sort: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, list: I
     ret_row: ir_value_type(m, p, ret) ?? return ir_type_fail(b, span, ret)
     key_row: ir_value_type(m, p, key_ty) ?? return ir_type_fail(b, span, key_ty)
     err_row: ir_value_type(m, p, err_ty) ?? return ir_type_fail(b, span, err_ty)
-    kind: ir_map_key_kind(m, key_row)
+    float_key: ir_float_key(m, key_row)
+    kind: if float_key -> "word" else -> ir_map_key_kind(m, key_row)
     if by_key && kind == "" -> return ir_fail_slot(b, span, "sort_by with a {ir_type_name(key_ty)} key")
     // An owning key that closes retires through its Close glue rather than
     // a plain drop.
@@ -3062,8 +3078,12 @@ ir_closure_sort: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, list: I
     if by_key {
         right_key_at: ir_element_address(m, b, keys, right_at, key_stride)
         left_key_at: ir_element_address(m, b, keys, left_at, key_stride)
-        right_key: ir_load_at(m, b, right_key_at, 0, key_row)
-        left_key: ir_load_at(m, b, left_key_at, 0, key_row)
+        right_key := ir_load_at(m, b, right_key_at, 0, key_row)
+        left_key := ir_load_at(m, b, left_key_at, 0, key_row)
+        if float_key {
+            right_key = ir_float_total_value(m, p, b, right_key, span)
+            left_key = ir_float_total_value(m, p, b, left_key, span)
+        }
         weigh: if ascending -> ir_map_order(m, p, b, kind, right_key, left_key) else -> ir_map_order(m, p, b, kind, left_key, right_key)
         before = weigh.less
     } else {

@@ -1,0 +1,11 @@
+# min_by and max_by with a Float or F32 key, on a List and an Iter, order by IEEE 754 totalOrder on every tier (a negative NaN least, -0.0 below +0.0, a positive NaN greatest); equal keys keep the last source item.
+fixture: min_by_and_max_by_with_a_float_key_use_total_order_on_every_tier/input
+step: jet run run.jet
+exit: 0
+stdout: = "minus_nan\nnan\nminus_zero\nzero\nlast\nlast\nlow\nhigh\nnone\nlow\nnan\n"
+step o1: jet run --optimize=basic run.jet
+exit: 0
+stdout: = "minus_nan\nnan\nminus_zero\nzero\nlast\nlast\nlow\nhigh\nnone\nlow\nnan\n"
+step o2: jet run --optimize=full run.jet
+exit: 0
+stdout: = "minus_nan\nnan\nminus_zero\nzero\nlast\nlast\nlow\nhigh\nnone\nlow\nnan\n"

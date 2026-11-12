@@ -1,0 +1,11 @@
+# sort_by, sort_by_desc and the fallible form with a Float or F32 key sort by IEEE 754 totalOrder on every tier (a negative NaN first, -0.0 before +0.0, a positive NaN last); equal keys keep input order.
+fixture: sort_by_a_float_key_orders_by_total_order_on_every_tier/input
+step: jet run run.jet
+exit: 0
+stdout: = "minus_nan minus_inf minus_half minus_zero zero two also_two inf nan \nnan inf two also_two zero minus_zero minus_half minus_inf minus_nan \na b \nlow\nhigh\nnan\n"
+step o1: jet run --optimize=basic run.jet
+exit: 0
+stdout: = "minus_nan minus_inf minus_half minus_zero zero two also_two inf nan \nnan inf two also_two zero minus_zero minus_half minus_inf minus_nan \na b \nlow\nhigh\nnan\n"
+step o2: jet run --optimize=full run.jet
+exit: 0
+stdout: = "minus_nan minus_inf minus_half minus_zero zero two also_two inf nan \nnan inf two also_two zero minus_zero minus_half minus_inf minus_nan \na b \nlow\nhigh\nnan\n"

@@ -1,0 +1,47 @@
+// A Float key to min_by and max_by orders by IEEE 754 totalOrder, as sort_by
+// does: a negative NaN is least, -0.0 is below +0.0, and a positive NaN is
+// greatest. Equal keys keep the last source item.
+Item: struct {
+    name: String
+    score: Float
+}
+
+Reading: struct {
+    name: String
+    level: F32
+}
+
+run: fn() {
+    items := [Item]{
+        Item{name: "two", score: 2.0},
+        Item{name: "nan", score: Float.NAN},
+        Item{name: "minus_inf", score: -Float.INFINITY},
+        Item{name: "minus_nan", score: -Float.NAN},
+        Item{name: "inf", score: Float.INFINITY},
+    }
+    print(items.min_by((item) -> item.score)?.name ?? "none")
+    print(items.max_by((item) -> item.score)?.name ?? "none")
+
+    zeros := [Item]{Item{name: "zero", score: 0.0}, Item{name: "minus_zero", score: -0.0}}
+    print(zeros.min_by((item) -> item.score)?.name ?? "none")
+    print(zeros.max_by((item) -> item.score)?.name ?? "none")
+
+    ties := [Item]{Item{name: "first", score: 1.5}, Item{name: "last", score: 1.5}}
+    print(ties.min_by((item) -> item.score)?.name ?? "none")
+    print(ties.max_by((item) -> item.score)?.name ?? "none")
+
+    finite := [Item]{Item{name: "mid", score: 0.5}, Item{name: "low", score: -3.0}, Item{name: "high", score: 7.25}}
+    print(finite.lazy().min_by((item) -> item.score)?.name ?? "none")
+    print(finite.lazy().max_by((item) -> item.score)?.name ?? "none")
+
+    empty := [Item]{}
+    print(empty.max_by((item) -> item.score)?.name ?? "none")
+
+    readings := [Reading]{
+        Reading{name: "high", level: F32{ 3.5 }},
+        Reading{name: "nan", level: F32.NAN},
+        Reading{name: "low", level: F32{ -1.0 }},
+    }
+    print(readings.min_by((reading) -> reading.level)?.name ?? "none")
+    print(readings.max_by((reading) -> reading.level)?.name ?? "none")
+}
