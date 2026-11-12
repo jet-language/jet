@@ -1,21 +1,19 @@
 # Card #3173 c40: a native artifact that registers `process.on_signal(.Term)`
 # drains on SIGTERM. The signal cancels the process: the entry's accept ends
 # as cancelled, so its `serve` returns its report, and every live task is
-# cancelled, so the serving task returns its report and the sleeping task
-# ends. The artifact prints both reports and exits 0 within a second, at O0,
-# O1 and O2.
+# cancelled at its wait point, so the serving task and the sleeping task both
+# join as `.Cancelled`. The artifact prints the entry's report and both
+# outcomes and exits 0 within a second, at O0, O1 and O2. Each tier builds
+# into the default directory and its session runs that build, before the next
+# tier replaces it.
 requires: os:unix
 fixture: sigterm_drains_a_serving_artifact_within_a_second.fixture
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
-step: jet build --optimize=none --output-dir=o0 --allow=Exec,Net,Time,FS.Read,IO main.jet
-exit: 0
-step: jet build --optimize=basic --output-dir=o1 --allow=Exec,Net,Time,FS.Read,IO main.jet
-exit: 0
-step: jet build --optimize=full --output-dir=o2 --allow=Exec,Net,Time,FS.Read,IO main.jet
+step: jet build --optimize=none --allow=Exec,Net,Time,FS.Read,IO main.jet
 exit: 0
 
-session o0 raw: {work}/o0/main
+session o0 raw: built
 recv o0 until = "ready\n" within 30s
 stdout: = "ready\n"
 signal o0: TERM
@@ -23,9 +21,12 @@ repeat while process {pid:o0} alive timeout 1s every 10ms fail "the O0 artifact 
 end repeat
 close o0
 exit: 0
-stdout: = "entry drained: accepted=0\ntask drained: accepted=0\nsleep: cancelled\n"
+stdout: = "entry drained: accepted=0\ntask: cancelled\nsleep: cancelled\n"
 
-session o1 raw: {work}/o1/main
+step: jet build --optimize=basic --allow=Exec,Net,Time,FS.Read,IO main.jet
+exit: 0
+
+session o1 raw: built
 recv o1 until = "ready\n" within 30s
 stdout: = "ready\n"
 signal o1: TERM
@@ -33,9 +34,12 @@ repeat while process {pid:o1} alive timeout 1s every 10ms fail "the O1 artifact 
 end repeat
 close o1
 exit: 0
-stdout: = "entry drained: accepted=0\ntask drained: accepted=0\nsleep: cancelled\n"
+stdout: = "entry drained: accepted=0\ntask: cancelled\nsleep: cancelled\n"
 
-session o2 raw: {work}/o2/main
+step: jet build --optimize=full --allow=Exec,Net,Time,FS.Read,IO main.jet
+exit: 0
+
+session o2 raw: built
 recv o2 until = "ready\n" within 30s
 stdout: = "ready\n"
 signal o2: TERM
@@ -43,4 +47,4 @@ repeat while process {pid:o2} alive timeout 1s every 10ms fail "the O2 artifact 
 end repeat
 close o2
 exit: 0
-stdout: = "entry drained: accepted=0\ntask drained: accepted=0\nsleep: cancelled\n"
+stdout: = "entry drained: accepted=0\ntask: cancelled\nsleep: cancelled\n"
