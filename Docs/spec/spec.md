@@ -5409,7 +5409,9 @@ A compile-time `CompilerChecked` value retains source text, checked function and
 effect facts, optional semantic-index data, syntax, and diagnostics. The
 `inspect compiler` command exposes the same operations as deterministic JSON
 with `schema_version: 1` and `api_version: 1`; its operations are `lex`,
-`parse`, `check`, and `source-map`. Runtime calls to `core.compiler` are E0956.
+`parse`, `check`, and `source-map`. `inspect facts` likewise renders the fact
+query `core.compiler.query` (see Compiler and package model APIs).
+Runtime calls to `core.compiler` are E0956.
 
 Diagnostics are value records with code, severity, message, why, fix, and span.
 Semantic facts reuse the existing index schema. The API does not return
@@ -6181,6 +6183,15 @@ the host keeps its typed override fields alongside the System reference.
 semantic facts, and generated-line mappings. `jet inspect compiler` mirrors
 these operations as deterministic JSON with schema and API version 1. Runtime
 calls are E0956.
+
+Facts have one reader. `query(source: FactSource, kind: FactKind)` answers the
+executable schema (`schema()`), a checked program (`b.program`) and a recorded
+run (`receipt(path)`) as typed rows, and `jet inspect facts
+--store=<schema|program|run>` renders that same call: the command checks a
+program that calls `query` and prints the rows it returns, so the command and a
+build read the same rows, with the same identities and errors, on every
+optimization level. No tool or command answers a fact question another way
+(core-library.md, "Fact queries").
 
 Package-model operations use separate schema version 1 views:
 
