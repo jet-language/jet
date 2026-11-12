@@ -46,7 +46,10 @@ run: fn() {
     big: Big{a: 1, b: 2, c: 3, d: 4, e: 5, name: "jet"}
     seen: look(big)
     used: consume(big)
-    g: grow(3)
+    // `i` is 100 here. A run-time argument keeps the call in the program: a
+    // local value of a constant call folds at build time, and it would read
+    // the folded result rather than build it.
+    g: grow(i - 97)
     print(total)
     print(seen + used)
     print("{g.w} {g.x} {g.y} {g.z}")

@@ -27,10 +27,10 @@ position: fn(k: #Key U64, items: [U64]) -> #Key U64 {
 }
 
 run: fn() {
-    same: reveal_flag(check_fast(#Key [U8]{1, 2, 3}, [U8]{1, 2, 3}))
-    differ: reveal_flag(check_fast(#Key [U8]{1, 2, 3}, [U8]{1, 9, 3}))
-    short: reveal_flag(check_fast(#Key [U8]{1, 2}, [U8]{1, 2, 3}))
-    print("check {same} {differ} {short}")
+    // The checks are called where they print, not bound to local values: a
+    // local value of constant inputs folds at build time, and the masked
+    // branch of the function it calls with it.
+    print("check {reveal_flag(check_fast(#Key [U8]{1, 2, 3}, [U8]{1, 2, 3}))} {reveal_flag(check_fast(#Key [U8]{1, 2, 3}, [U8]{1, 9, 3}))} {reveal_flag(check_fast(#Key [U8]{1, 2}, [U8]{1, 2, 3}))}")
     items: [U64]{3, 5, 7}
     print("position {reveal(position(#Key U64{5}, items))} {reveal(position(#Key U64{9}, items))} {reveal(position(#Key U64{3}, items))}")
 }
