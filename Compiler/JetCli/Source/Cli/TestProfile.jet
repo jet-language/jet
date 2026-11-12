@@ -60,6 +60,10 @@ JET_CLI_TEST_SUITE_ROWS_ENV: "JET_TEST_SUITE_ROWS"
 JET_CLI_TEST_SUITE_ROOT_ENV: "JET_TEST_SUITE_ROOT"
 JET_CLI_TEST_SUITE_FILTER_ENV: "JET_TEST_SUITE_FILTER"
 JET_CLI_TEST_SUITE_JET_ENV: "JET"
+// Set in a code suite's child to the profile's `memory` setting, in bytes, when
+// one is set: the budget the suite sizes its own runs from (Compiler/test.jet
+// package_jobs), as the corpus pool sizes its entries.
+JET_CLI_TEST_SUITE_MEMORY_ENV: "JET_TEST_SUITE_MEMORY"
 
 // One child `jet test` of a profile run.
 JetCLITestProfileRun: struct {
@@ -356,6 +360,11 @@ jet_cli_test_profile_runs: fn(profile: String, root: String, settings: [TestSett
             if filter == .Val(text) {
                 env.push(JET_CLI_TEST_SUITE_FILTER_ENV)
                 env.push(text.copy())
+            }
+            memory: test_settings_number(settings, "memory")
+            if memory > 0 {
+                env.push(JET_CLI_TEST_SUITE_MEMORY_ENV)
+                env.push("{memory}")
             }
             envs.push(env.move())
             next

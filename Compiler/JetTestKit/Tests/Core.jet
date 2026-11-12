@@ -377,6 +377,24 @@ kit_test_pool_report: fn(env: KitEnv, root: String, index: Int, done: Sender<Int
     assert_eq(kit_exec_host_room(0, 8 * gib), 0)
 }
 
+#Test("a pool of claimed runs fits the CPUs, the memory budget and the runs") {
+    gib: 1073741824
+    claim: 5 * gib
+    // A quarter of the CPUs, held between 4 and 8, with no memory gate.
+    assert_eq(kit_claim_jobs(0, claim, 64, 4, 8, 100), 8)
+    assert_eq(kit_claim_jobs(0, claim, 8, 4, 8, 100), 4)
+    assert_eq(kit_claim_jobs(0, claim, 24, 4, 8, 100), 6)
+    // The budget holds whole claims only.
+    assert_eq(kit_claim_jobs(22 * gib, claim, 64, 4, 8, 100), 4)
+    assert_eq(kit_claim_jobs(10 * gib, claim, 64, 4, 8, 100), 2)
+    // A budget below one claim still runs one at a time.
+    assert_eq(kit_claim_jobs(3 * gib, claim, 64, 4, 8, 100), 1)
+    // Never more than the runs there are, and never fewer than one.
+    assert_eq(kit_claim_jobs(0, claim, 64, 4, 8, 2), 2)
+    assert_eq(kit_claim_jobs(22 * gib, claim, 64, 4, 8, 3), 3)
+    assert_eq(kit_claim_jobs(0, claim, 64, 4, 8, 0), 1)
+}
+
 #Test("the pool runs measured entries longest first and weighs each by its last peak") {
     slot: kit_job_memory()
     gib: 1073741824

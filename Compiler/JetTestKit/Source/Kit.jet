@@ -978,6 +978,21 @@ kit_execute_budget: fn(requested: Int, available: Int) -> Int {
     if requested > 0 -> requested else -> available
 }
 
+// How many runs a pool of child processes starts at once (Compiler/test.jet's
+// package runs): a quarter of the `cpus`, held between `least` and `most`, then
+// lowered to the claims of `claim` bytes each that fit in `budget`
+// (kit_execute_budget; 0 is unknown: no memory gate) and to the `runs` there
+// are. Never fewer than one: a budget below one claim runs them one at a time.
+kit_claim_jobs: fn(budget: Int, claim: Int, cpus: Int, least: Int, most: Int, runs: Int) -> Int {
+    jobs := cpus /% 4
+    if jobs < least -> jobs = least
+    if jobs > most -> jobs = most
+    if budget > 0 && claim > 0 && budget /% claim < jobs -> jobs = budget /% claim
+    if jobs > runs -> jobs = runs
+    if jobs < 1 -> jobs = 1
+    jobs
+}
+
 // How the pool runs the corpus: `order` lists corpus indexes longest-first, `weights`
 // is each entry's memory claim and `guards` its resident guard, all in bytes. Entries
 // start in order while their claims fit under `budget` (0 is unknown: no memory gate)

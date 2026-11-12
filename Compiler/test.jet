@@ -11,14 +11,16 @@ use {
     json: core.encoding.json
     process: core.process
     sys: core.sys
+    jet_testkit.[kit_claim_jobs, kit_exec_available_memory, kit_execute_budget]
 }
 
-// The packages a `packages` run tests at once: a quarter of the CPUs, at
-// least PACKAGE_JOBS and at most PACKAGE_JOBS_MAX (package_jobs). One
-// package run can hold about 5.5 GB, so the cap keeps a batch inside a
-// 64 GB host.
+// The runs a `packages` or `core` run makes at once (package_jobs): a quarter
+// of the CPUs, at least PACKAGE_JOBS and at most PACKAGE_JOBS_MAX, then only as
+// many PACKAGE_MEMORY claims as the corpus pool's memory budget holds, and
+// never more than the runs there are. One package run can hold about 5.5 GiB.
 PACKAGE_JOBS: 4
 PACKAGE_JOBS_MAX: 8
+PACKAGE_MEMORY: 5905580032
 
 // The trees whose packages a `packages` run tests, from the checkout:
 // tests/guards holds the repository guard packages (the top package,
@@ -199,7 +201,7 @@ package_suite_rows: fn(rows: TestRows) {
         }
         specs.push(jet_command(setup, setup.jet, args).env("JET_BIN", setup.jet))
     }
-    results: process.run_all(specs, package_jobs()) ?? {
+    results: process.run_all(specs, package_jobs(specs.len())) ?? {
         rows.fail("packages", "couldn't start the package runs: {err}")
         return
     }
@@ -294,12 +296,14 @@ engine_selected: fn(rows: TestRows, sources: [TestSource]) -> Bool {
     false
 }
 
-// The package runs at once (PACKAGE_JOBS).
-package_jobs: fn() -[Env]> Int {
-    count: sys.cpu_count() /% 4
-    if count < PACKAGE_JOBS -> return PACKAGE_JOBS
-    if count > PACKAGE_JOBS_MAX -> return PACKAGE_JOBS_MAX
-    count
+// The runs at once, of `runs` (kit_claim_jobs). The budget is the corpus
+// pool's (kit_execute_budget): the profile's `memory` setting, which the
+// profile run passes in JET_TEST_SUITE_MEMORY, else the room this process may
+// still claim under its cgroup's memory.high and memory.max and the host's
+// (kit_exec_available_memory).
+package_jobs: fn(runs: Int) -[Env, FS]> Int {
+    requested: Int.parse(sys.get("JET_TEST_SUITE_MEMORY") ?? "") ?? 0
+    kit_claim_jobs(kit_execute_budget(requested, kit_exec_available_memory()), PACKAGE_MEMORY, sys.cpu_count(), PACKAGE_JOBS, PACKAGE_JOBS_MAX, runs)
 }
 
 // The engine unit made ready before the package runs: its assembled `aot`
@@ -716,7 +720,7 @@ core_rows: fn(rows: TestRows) {
             specs.push(jet_command(setup, setup.jet, [String]{"test", path, "--optimize={level}"}))
         }
     }
-    results: process.run_all(specs, package_jobs()) ?? {
+    results: process.run_all(specs, package_jobs(specs.len())) ?? {
         rows.fail("core", "couldn't start the Core runs: {err}")
         return
     }
