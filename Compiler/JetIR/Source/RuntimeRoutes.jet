@@ -4,7 +4,7 @@
 // keep every row table sorted by hand. Each table's KEYS/KEY_ROWS lookup
 // index is computed from the table at build time (ir_key_index).
 
-use jet_foundation.[IRRuntimeHandle, IR_RUNTIME_HANDLES, ir_key_index, ir_key_index_keys, ir_key_row, ir_runtime_handle_keys, ir_runtime_handle_row]
+use jet_foundation.[IRRuntimeHandle, IR_RUNTIME_HANDLES, RUNTIME_C_EXPORTS, ir_key_index, ir_key_index_keys, ir_key_row, ir_runtime_handle_keys, ir_runtime_handle_row]
 
 // The runtime ABI atom projection; nominal identities stay unchanged.
 runtime_abi_atom: fn(name: String) -> String Never! {
@@ -1277,8 +1277,40 @@ IR_NATIVE_PROVIDER_HANDLES: comptime { [IRRuntimeHandle]{
 IR_NATIVE_PROVIDER_HANDLE_KEY_ROWS: comptime { ir_key_index(ir_runtime_handle_keys(IR_NATIVE_PROVIDER_HANDLES)) }
 IR_NATIVE_PROVIDER_HANDLE_KEYS: comptime { ir_key_index_keys(ir_runtime_handle_keys(IR_NATIVE_PROVIDER_HANDLES), IR_NATIVE_PROVIDER_HANDLE_KEY_ROWS) }
 
+// The runtime's C export table (RUNTIME_C_EXPORTS, generated from every
+// JetRuntime #Export(c)), indexed for halving search.
+IR_RUNTIME_EXPORT_KEY_ROWS: comptime { ir_key_index(RUNTIME_C_EXPORTS) }
+IR_RUNTIME_EXPORT_KEYS: comptime { ir_key_index_keys(RUNTIME_C_EXPORTS, IR_RUNTIME_EXPORT_KEY_ROWS) }
+
+// Whether the runtime exports C symbol `symbol`.
+ir_runtime_exports: fn(symbol: String) -> Bool Never! {
+    ir_key_row(IR_RUNTIME_EXPORT_KEYS, IR_RUNTIME_EXPORT_KEY_ROWS, symbol) != None
+}
+
+// Whether the runtime exports the drop of runtime handle type `runtime`: the
+// symbol every route, layout and record getter of the handle is named from.
+ir_runtime_handle_exported: fn(runtime: String) -> Bool Never! {
+    ir_runtime_exports("jet_rt_handle_drop_{runtime_abi_atom(runtime)}")
+}
+
+// The runtime handle row of Jet type `name`. A Core declaration's canonical
+// identity (`<corelib>/core.encoding::EncodingCause`) whose own row names a
+// runtime type the runtime exports nothing for (a Rust-generated
+// `__jet__<identity>` name) is its bare spelling's row (ir_core_bare_handle,
+// pins and the task group kept) when the runtime exports that one: both
+// spell the same declaration, and the route names
+// (`jet_rt_handle_drop_<runtime>`, `jet_rt_record_get_<runtime>_<member>`)
+// must be the runtime's own exports. A checked jet.runtime binding spells
+// its Core types by identity (#6760: an `EncodingCause!` binding failed its
+// route's drop and getters).
 ir_runtime_handle: fn(name: String) -> IRRuntimeHandle? {
     if ir_runtime_handle_row(name) == .Val(position) {
+        if name.starts_with("<corelib>/") && name.contains("::") && !ir_runtime_handle_exported(IR_RUNTIME_HANDLES[position].runtime) {
+            parts: name.split("::").to_list()
+            if ir_core_bare_handle(name, parts[parts.len() - 1]) == .Val(bare) {
+                if ir_runtime_handle_exported(bare.runtime) -> return Val(bare)
+            }
+        }
         // copy: the caller gets an owned handle row, while the row stays in the global
         // IR_RUNTIME_HANDLES table, which can't be moved from.
         return Val(IR_RUNTIME_HANDLES[position].copy())
@@ -1882,4 +1914,30 @@ ir_route_carrier_names: fn(carrier: IRRouteCarrier, out: &[String]) Never! {
         if !readers.contains(row.jet_name) -> unread.push(row.jet_name.copy())
     }
     assert_eq(unread, [String]{})
+}
+
+// #6760: every Core declaration's identity resolves to a runtime handle the
+// runtime exports whenever its bare spelling's is exported, each error and
+// record type alike (EncodingCause, EncodingError, XMLError, the math and
+// time handles).
+#Test("a Core identity's runtime handle is the runtime's exported one") {
+    unexported := [String]{}
+    resolved := 0
+    loop row in IR_RUNTIME_HANDLES {
+        if !row.jet_name.starts_with("<corelib>/") -> next
+        if !row.jet_name.contains("::") -> next
+        parts: row.jet_name.split("::").to_list()
+        bare: ir_core_bare_handle(row.jet_name, parts[parts.len() - 1]) ?? next
+        if !ir_runtime_handle_exported(bare.runtime) -> next
+        handle: ir_runtime_handle(row.jet_name) ?? {
+            unexported.push(row.jet_name.copy())
+            next
+        }
+        if !ir_runtime_handle_exported(handle.runtime) -> unexported.push(row.jet_name.copy())
+        if handle.runtime != row.runtime -> resolved += 1
+    }
+    assert_eq(unexported, [String]{})
+    assert(resolved > 1)
+    assert(ir_runtime_exports("jet_rt_handle_drop_encoding_cause"))
+    assert(!ir_runtime_exports("jet_rt_handle_drop_jet_x3ccorelib_x3e_score_dencoding_c_c_encoding_cause"))
 }

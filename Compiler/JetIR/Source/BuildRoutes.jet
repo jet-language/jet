@@ -5590,6 +5590,26 @@ ir_route_carrier_of: fn(ty: Type) -> IRRouteCarrier? Never! {
     }
 }
 
+// #6760: a jet.runtime binding spells a Core error by its identity; its
+// route's failure handle is the one the runtime exports a drop for, for
+// each Core error the runtime holds (EncodingCause is not the only one).
+#Test("a binding's Core error routes as the runtime's exported handle") {
+    errors: [String]{"<corelib>/core.encoding::EncodingCause", "<corelib>/core.encoding::EncodingError", "<corelib>/core.encoding.xml::XMLError"}
+    loop name in errors {
+        returned: Type.Result{ok: Type.Int, err: Type.Named{name: name.copy()}}
+        route: ir_route_of_signature("jet_raw_probe", [Type]{}, [Bool]{}, Val(returned)) ?? panic("no route for a {name} failure")
+        if route.result == .Result(_, failure) {
+            if failure == .Handle(runtime) {
+                assert(ir_runtime_handle_exported(runtime))
+            } else {
+                panic("a {name} failure crossed as no handle")
+            }
+        } else {
+            panic("a {name} failure crossed as no Result")
+        }
+    }
+}
+
 // `core.mem.stream_store<T>(dst, value)`: `dst = value`, the value written
 // with one StreamStore (non-temporal where the target has a store of its
 // width, IR.jet). As an assignment's, the new value is owned before the old
