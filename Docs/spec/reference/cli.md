@@ -202,9 +202,11 @@ runs one REPL turn and prints its value in the status envelope. `?` is not a com
 unknown-command E2101.
 
 The root index below mirrors `jet help` from this checkout's compiler. It lists
-the most used commands first, in the order `node Tools/cli-census/census.mjs`
-measures from the guides, examples, and tests; `jet help --sort az` lists the
-same commands A to Z and `jet help --sort za` Z to A:
+the most used commands first, in the order of each command row's
+`frequency_rank` in the compiler's command registry (`jet
+Tools/cli-census/Census.jet --check` keeps the ranks numbering the commands 1
+to N); `jet help --sort az` lists the same commands A to Z and `jet help --sort
+za` Z to A:
 
 ```text
 jet run [-A] [<file.jet|dir>] [--no-prepare] [-- <args>] Run a program or project
