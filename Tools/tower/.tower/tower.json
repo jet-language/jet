@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6753,
-    "rev": 99676,
+    "nextNum": 6755,
+    "rev": 99681,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -98485,6 +98485,97 @@
       "updated": "2026-11-12T01:02:11.642Z",
       "updatedBy": "Main",
       "criteriaLastN": 4
+    },
+    {
+      "id": "c0ba2y7a",
+      "num": 6753,
+      "title": "A package's authority.allow takes a scoped grant with the same meaning as jet run --allow",
+      "body": "`jet run --allow='FS.Read(\"<path>\")'` confines reads to that path (spec.md, reference/cli.md, tests/cases/authority/run_allow_read_path_confines_reads_to_the_granted_paths.case). The package model refuses the same scoped grant in a manifest's `authority.allow` and accepts a scope only in `deny` or on FFI. Its message also wrongly calls the grant \"a parameterized memory denial\" (Jetpack Blocks/Authority.jet:315). Examples/Modules/Packages/PluginFailure/package.jet and tests/run/Foundations/Capabilities put `FS.Read(\"<dir>\")` in allow, so their manifests fail to parse. One meaning per form (I8): a scoped grant in allow means what the flag means. Found by G6Meta-73's manifest round trip.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e14",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "The package model accepts a scoped FS.Read/FS.Write grant in authority.allow, and a run of that package is confined exactly as `--allow` confines it (same E1803 refusal and wording). Proof: a tests/cases/authority case running a package whose manifest grants FS.Read(\"<dir>\") in allow, with a read inside and a read outside the grant.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-12T01:17:41.553Z"
+        },
+        {
+          "n": 2,
+          "text": "The two example manifests parse and their goldens pass. A scope the model still refuses gets a correct, registered message with a UI snapshot. Proof: jet test Compiler --profile golden --filter PluginFailure, and the Capabilities run case.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-12T01:17:42.669Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G5"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-12T01:17:40.458Z",
+      "updated": "2026-11-12T01:17:42.669Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 2
+    },
+    {
+      "id": "c0tpgv7j",
+      "num": 6754,
+      "title": "The Hangar store-quota walk tolerates files that another process removes during the walk",
+      "body": "store_quota_footprint walks the whole Hangar. A concurrent build's musl `.build` scratch files can vanish during the walk, and the walk then fails with E1340 \"Not found during read\". That made the cffi concurrent_* cases fail in b4-b6 and b8. Fix staged as G6Decl-74.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e14",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A file that disappears during the quota walk is skipped, not an error. Proof: the cffi concurrent_* cases PASS on a batch compiler that carries the fix, plus a unit test that removes a file mid-walk.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-12T01:17:44.886Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G5"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-12T01:17:43.749Z",
+      "updated": "2026-11-12T01:17:44.886Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1
     }
   ],
   "decisions": [
@@ -198896,6 +198987,41 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-12T01:17:44.886Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0tpgv7j",
+      "note": "#1 A file that disappears during the quota walk is skipped, not"
+    },
+    {
+      "at": "2026-11-12T01:17:43.749Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0tpgv7j",
+      "note": "The Hangar store-quota walk tolerates files that another process removes during the walk"
+    },
+    {
+      "at": "2026-11-12T01:17:42.669Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0ba2y7a",
+      "note": "#2 The two example manifests parse and their goldens pass. A sc"
+    },
+    {
+      "at": "2026-11-12T01:17:41.554Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0ba2y7a",
+      "note": "#1 The package model accepts a scoped FS.Read/FS.Write grant in"
+    },
+    {
+      "at": "2026-11-12T01:17:40.458Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0ba2y7a",
+      "note": "A package's authority.allow takes a scoped grant with the same meaning as jet run --allow"
+    },
     {
       "at": "2026-11-12T01:12:29.793Z",
       "by": "Main",
