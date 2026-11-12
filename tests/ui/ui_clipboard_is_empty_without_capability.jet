@@ -1,0 +1,19 @@
+package: {
+    name: "ui_clipboard_is_empty_without_capability"
+    version: "0.1.0"
+    authority: {
+        allow: [IO, Mem.Alloc]
+        needs: [UI.IME]
+    }
+}
+use clipboard: core.ui.host.clipboard
+
+// `is_empty` reads the clipboard through `read_text`, so it needs the same
+// capability.
+peek: fn() {
+    _empty: clipboard.is_empty()
+}
+
+run: fn() {
+    print("ready")
+}
