@@ -1,0 +1,22 @@
+// `app.serve(settings.port)`: the program asks for the port its typed
+// settings hold (APP_PORT); JET_APP_PORT, when set, chooses over it.
+package: {
+    name: "port_precedence_app"
+    authority: { allow: [Env, IO, Net, FS, Exec, Time] }
+}
+
+use {
+    env: core.sys
+    server: core.http.server
+    web: core.web
+}
+
+#[Debug, Decode]
+Settings: struct {
+    port: Int
+}
+
+run: fn() {
+    settings: env.decode<Settings>(prefix: "APP_") ?? panic("settings: {err.len()} failures")
+    web.app().get("/", fn() { Ok(server.response(200, "hi")) }).serve(settings.port)
+}

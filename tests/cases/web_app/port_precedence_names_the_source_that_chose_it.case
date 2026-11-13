@@ -1,0 +1,37 @@
+# Claim (#3078 c15): one port rule for a served app. JET_APP_PORT, when set,
+# chooses the port over the program's explicit `serve(settings.port)`, which
+# chooses it over the default 8080; a JET_APP_PORT that holds no port stops
+# with E2809 instead of falling back. Before the ready line, stderr names the
+# port and the source that chose it.
+fixture: port_precedence_names_the_source_that_chose_it.fixture
+env: NO_COLOR=1
+
+spawn both: jet run -A app.jet
+env: APP_PORT={free-port:asked}
+env: JET_APP_PORT={free-port:platform}
+stdout: file both.stdout
+stderr: file both.stderr
+poll both_ready: cat {work}/both.stdout until exit: 0 && stdout: ~ "serving http://" timeout 120s every 100ms # the app is listening
+signal both: KILL
+wait: both
+exit: any # the case kills the server; its status is not part of this proof
+file: both.stdout = "serving http://127.0.0.1:{free-port:platform}\n" # JET_APP_PORT chose the port
+file: both.stderr ~ "web app port {free-port:platform}: JET_APP_PORT, over serve(port: {free-port:asked})\n" # the report names the winner and the port it overrode
+
+spawn asked: jet run -A app.jet
+env: APP_PORT={free-port:asked}
+stdout: file asked.stdout
+stderr: file asked.stderr
+poll asked_ready: cat {work}/asked.stdout until exit: 0 && stdout: ~ "serving http://" timeout 120s every 100ms # the app is listening
+signal asked: KILL
+wait: asked
+exit: any # the case kills the server; its status is not part of this proof
+file: asked.stdout = "serving http://127.0.0.1:{free-port:asked}\n" # with no JET_APP_PORT the program's port is used
+file: asked.stderr ~ "web app port {free-port:asked}: serve(port: {free-port:asked})\n" # and the report says the program chose it
+
+step invalid: jet run -A app.jet
+env: APP_PORT={free-port:asked}
+env: JET_APP_PORT=eighty
+exit: 70
+stdout: = ""
+stderr: ~ "Stop [E2809]: The web app can't listen on JET_APP_PORT=`eighty`: a TCP port is a number from 1 to 65535." # no silent fallback to the program's port

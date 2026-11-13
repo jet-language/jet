@@ -412,12 +412,12 @@ App: struct {
 
     facts_json: fn(self) -> String Never! { __app_facts_json(self) }
 
-    // Serve on 127.0.0.1 until the process stops: on `JET_APP_PORT` when it
-    // holds a port, else on `port` (8080 for `serve()`). One ready line names
+    // Serve on 127.0.0.1 until the process stops, on the port __app_port
+    // chooses: `JET_APP_PORT`, else `port`, else 8080. One ready line names
     // the address once the socket listens.
-    serve: fn(self, port: Int{8080}) Never! -[Env, IO, Net, FS.Read, Time]> { __app_serve(self, __app_port(port)) }
+    serve: fn(self, port: Int?{None}) Never! -[Env, IO, Net, FS.Read, Time]> { __app_serve(self, __app_port(port)) }
 
-    serve_on: fn(self, port: Int) Never! -[Env, IO, Net, FS.Read, Time]> { __app_serve(self, __app_port(port)) }
+    serve_on: fn(self, port: Int) Never! -[Env, IO, Net, FS.Read, Time]> { __app_serve(self, __app_port(Val(port))) }
 
     // A server over the table on `address`; the labelled `tls:` option
     // serves HTTPS and `deadline:` bounds each connection's reads and writes.
@@ -458,7 +458,7 @@ app: fn() -> App Never! {
 // `build` makes from it as `App.serve(port)` does. Settings that do not decode,
 // or a `build` that fails, stop the program before any socket binds
 // (__app_settings, __app_build_failure).
-serve: fn<Settings: Decode>(*, prefix: String, build: fn(Settings) -> App, port: Int{8080}) Never! -[Env, IO, Net, FS, Exec, Time]> {
+serve: fn<Settings: Decode>(*, prefix: String, build: fn(Settings) -> App, port: Int?{None}) Never! -[Env, IO, Net, FS, Exec, Time]> {
     settings: __app_settings<Settings>(prefix)
     app: build(settings) ?? core.process.fail(C_APP_SETTINGS_EXIT, __app_build_failure("{err}"))
     __app_serve(app, __app_port(port))
@@ -512,12 +512,25 @@ __app_table: fn(app: App) -> HTTPMux Never! {
     guard.value.table.copy()
 }
 
-__app_port: fn(fallback: Int) -> Int Never! {
-    raw: core.sys.__env_value("JET_APP_PORT") ?? return fallback
-    text: String.from_bytes(raw) ?? return fallback
-    port: Int.parse(text) ?? return fallback
-    if port < 1 || port > 65535 -> return fallback
-    port
+// The port a served app listens on and what chose it.
+__AppPort: struct {
+    port: Int
+    source: String
+}
+
+C_APP_DEFAULT_PORT: 8080
+
+// The one port rule of `serve`: `JET_APP_PORT`, when it is set, chooses the
+// port, over a `port` the program passes (the platform or `jet dev` that runs
+// the program owns the port); else the program's `port`; else 8080. A
+// `JET_APP_PORT` that holds no port stops with E2809 instead of falling back.
+__app_port: fn(requested: Int?) -> __AppPort Never! {
+    asked: if requested == .Val(port) -> "serve(port: {port})" else -> ""
+    raw: core.sys.__env_value("JET_APP_PORT") ?? return __AppPort{port: requested ?? C_APP_DEFAULT_PORT, source: if asked == "" -> "the default, with no JET_APP_PORT and no serve port" else -> asked}
+    text: String.from_bytes(raw) ?? ""
+    port: Int.parse(text) ?? 0
+    if port < 1 || port > 65535 -> core.rt.__coded_stop("E2809", "The web app can't listen on JET_APP_PORT=`{text}`: a TCP port is a number from 1 to 65535.")
+    __AppPort{port: port, source: if asked == "" -> "JET_APP_PORT" else -> "JET_APP_PORT, over {asked}"}
 }
 
 // Whether `jet dev` runs this program (it sets JET_DEV=1): `jet dev`
@@ -529,8 +542,9 @@ __app_dev: fn() -> Bool Never! {
 
 // Under `jet dev` the table gains the live-reload row and layer. Every GET
 // no row answers renders the not-found page, unless a catch-all row of the
-// program's own answers it.
-__app_serve: fn(app: App, port: Int) Never! -[Env, IO, Net, FS.Read, Time]> {
+// program's own answers it. Stderr names the port and what chose it
+// (__app_port) before the ready line.
+__app_serve: fn(app: App, chosen: __AppPort) Never! -[Env, IO, Net, FS.Read, Time]> {
     dev: __app_dev()
     table: __app_table(app)
     if dev -> __app_dev_reload(table)
@@ -538,7 +552,8 @@ __app_serve: fn(app: App, port: Int) Never! -[Env, IO, Net, FS.Read, Time]> {
         fallback: app.copy()
         http_server.__route_add(table, "GET", "/*jet_app_unmatched", http_server.__handler(fn(request: HTTPRequest) { Ok(__app_not_found_response(fallback, request)) }), "", #here)
     }
-    server: __app_listen(table, port, dev)
+    core.term.eprint("web app port {chosen.port}: {chosen.source}")
+    server: __app_listen(table, chosen.port, dev)
     _: server.serve() ?? panic("web app server failed: {err}")
 }
 

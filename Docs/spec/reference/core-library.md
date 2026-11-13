@@ -5285,7 +5285,7 @@ route list.
 |---|---|---|
 | `app() -> App` | app | Create the default application carrier. |
 | `page(title: String, body: String) -> WebPage` | page | Build a server-rendered page. |
-| `serve<Settings: Decode>(prefix: String, build: fn(Settings) -> App, port: Int = 8080)` | never returns | Decode the typed settings, then serve the app `build` makes; a decode failure stops with E2416, exit 78. |
+| `serve<Settings: Decode>(prefix: String, build: fn(Settings) -> App, port: Int?)` | never returns | Decode the typed settings, then serve the app `build` makes on the port `App.serve`'s rule chooses; a decode failure stops with E2416, exit 78. |
 | `bind<Settings: Decode>(address: String, prefix: String, build: fn(Settings) -> App, tls:, deadline:) -> HTTPServer HTTPError!` | server | Decode the typed settings, then bind the app `build` makes on `address`. |
 | `form(Model, action: handler) -> WebFormTyped` | form | Derive typed inputs and the named action contract at compile time (D-WEBFORM1=A). |
 | `openapi(routes: App or HTTPRouter) -> String OpenAPIError!` | text | Render OpenAPI from the checked facts of the same route value that is served. |
@@ -5296,10 +5296,14 @@ route list.
 | `auth_show(auth: Auth) -> String` | text | Render the source auth summary. |
 | `sync(key: String, data: String) -> String` | text | Format a synchronized key/value update. |
 
-`App.serve(port = 8080)` and `App.serve_on(port)` serve the app's route table on
-127.0.0.1 until the process stops, on `JET_APP_PORT` when that holds a port
-(D-WEBAPP-SERVE1=D). Once the socket listens the program prints one ready
-line, `serving http://127.0.0.1:8080`. `jet run` and `jet dev` share this
+`App.serve(port?)` and `App.serve_on(port)` serve the app's route table on
+127.0.0.1 until the process stops. One rule chooses the port: `JET_APP_PORT`,
+when it is set, over a port the program passes (`serve(settings.port)`), over
+the default 8080; a `JET_APP_PORT` that holds no port from 1 to 65535 stops
+with E2809 rather than falling back. Before listening the program writes
+which source chose the port to stderr (`web app port 8123: JET_APP_PORT, over
+serve(port: 9000)`). Once the socket listens the program prints one ready
+line, `serving http://127.0.0.1:8080` (D-WEBAPP-SERVE1=D). `jet run` and `jet dev` share this
 listen step: under `jet run` a port another program holds, or one the system
 refuses, stops the program with E2809 (`jet.AppPortUnavailable`), which names
 the address and how to choose another port. `jet dev` sets `JET_DEV=1` for the
@@ -5309,7 +5313,7 @@ page carries a script that reads the run's boot id from the `/__jet/reload`
 event stream, and reloads the page once `jet dev` has restarted the program
 after a change and a new run answers with another id.
 
-`web.serve<Settings>(prefix:, build:, port = 8080)` and
+`web.serve<Settings>(prefix:, build:, port?)` and
 `web.bind<Settings>(address, prefix:, build:, tls:, deadline:)` decode the
 typed settings record with `sys.decode<Settings>(prefix:)` before any socket
 binds, then serve (as `App.serve(port)`) or bind (as `App.bind`) the app
