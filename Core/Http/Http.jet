@@ -147,10 +147,20 @@ HeaderValue: struct {
     impl Display { display: fn(self) -> String { self.__text.copy() } }
 }
 
-Body: enum {
-    Empty
-    Text(String)
-    Bytes([U8])
+// What a Body holds. The module is private, so user code can neither name
+// the carrier nor build a Body around one (E0605); Bodies come from
+// requests, responses and the `body_*` constructors.
+priv body_carrier: module {
+    BodyStream: struct {
+        held: [U8]
+    }
+}
+
+/// A message body. User code gets one from a request or response, or from
+/// `body_empty`, `body_text`, `body_bytes` and the `Body.*` constructors;
+/// its contents are private to core.http.
+Body: struct {
+    priv stream: body_carrier.BodyStream
 
     /// The body's bytes when there are at most `limit` (0..=1 GiB) of them.
     bytes: fn(self, limit: Int) -[Net]> [U8] HTTPError! { __body_bytes_within(self, limit) }
@@ -288,7 +298,7 @@ HTTPRequest: struct {
     }
 
     // `body(text)`.
-    __with_body: fn(self, text: String) -[Net]> HTTPRequest Never! { self.__with_body_value(Body.Text(text)) }
+    __with_body: fn(self, text: String) -[Net]> HTTPRequest Never! { self.__with_body_value(body_text(text)) }
 
     // `with_body(request, body)`: any body, bytes kept as bytes.
     __with_body_value: fn(self, body: Body) -> HTTPRequest Never! {
@@ -303,7 +313,7 @@ HTTPRequest: struct {
         out := self.copy()
         if json_codec.to_string(value) == {
             .Ok(text) -> {
-                out.body = Body.Bytes(text.bytes())
+                out.body = body_bytes(text.bytes())
                 out.__body_set = true
                 out.headers = headers_set_raw(out.headers, "content-type", "application/json")
             }
@@ -528,7 +538,7 @@ __upgrade_claim: fn(request: HTTPRequest) -> Int? Never! {
 }
 
 __request: fn(method: String, url: String) -> HTTPRequest Never! {
-    HTTPRequest{method: method, path: request_target_path(url), body: Body.Empty, headers: headers(), __url: url, __cell: Val(Shared{__HTTPBodyCell{taken: false}})}
+    HTTPRequest{method: method, path: request_target_path(url), body: body_empty(), headers: headers(), __url: url, __cell: Val(Shared{__HTTPBodyCell{taken: false}})}
 }
 
 __server_request: fn(method: String, path: String, body: Body, fields: Headers) -> HTTPRequest Never! {
@@ -891,15 +901,9 @@ headers_parse: fn(lines: [String]) -> Headers Never! {
     h
 }
 
-body_empty: fn() -> Body Never! { Body.Empty }
-body_text: fn(text: String) -> Body Never! {
-    if text.bytes().len() == 0 -> return Body.Empty
-    Body.Text(text)
-}
-body_bytes: fn(bytes: [U8]) -> Body Never! {
-    if bytes.len() == 0 -> return Body.Empty
-    Body.Bytes(bytes)
-}
+body_empty: fn() -> Body Never! { body_bytes([U8]{}) }
+body_text: fn(text: String) -> Body Never! { body_bytes(text.bytes()) }
+body_bytes: fn(bytes: [U8]) -> Body Never! { Body{stream: body_carrier.BodyStream{held: bytes}} }
 
 // The `http.Body.text(text, media_type)`, `http.Body.form(fields)` and
 // `http.Body.json(value)` constructors: sema checks the call and runs these.
@@ -962,25 +966,10 @@ __body_multipart: fn(fields: [String:String]) -> Body Never! {
     body_text(provider.__client_multipart(pairs, provider.__client_boundary(pairs)))
 }
 
-body_as_text: fn(body: Body) -> String Never! {
-    if body == Body.Empty -> return ""
-    if body == {
-        .Text(s) -> return s
-        .Bytes(xs) -> return String.from_bytes(xs) ?? ""
-        .Empty -> return ""
-    }
-    ""
-}
+body_as_text: fn(body: Body) -> String Never! { String.from_bytes(body.stream.held) ?? "" }
 
-body_as_bytes: fn(body: Body) -> [U8] Never! {
-    if body == {
-        .Empty -> return [U8]{}
-        .Text(s) -> return body_as_text(Body.Text(s)).bytes()
-        .Bytes(xs) -> return xs
-    }
-    [U8]{}
-}
-body_len: fn(body: Body) -> Int Never! { body_as_bytes(body).len() }
+body_as_bytes: fn(body: Body) -> [U8] Never! { body.stream.held }
+body_len: fn(body: Body) -> Int Never! { body.stream.held.len() }
 
 reason_phrase: fn(code: Int) -> String Never! {
     if code == {
@@ -1226,7 +1215,7 @@ parse_request: fn(raw: [U8]) -> HTTPRequest HTTPError! {
     // The body stays the wire bytes, sliced once after every length check
     // (#4428, #4431). A read as text decodes it then, so a binary upload parses.
     body_raw: slice_b(raw, split, raw.len())
-    body: if body_len > 0 -> Body.Bytes(body_raw) else -> Body.Empty
+    body: body_bytes(body_raw)
     // The method stays as sent: methods are case-sensitive, so `get` is not
     // `GET` (the server reads it the same way).
     Ok(__server_request(parts[0], parts[1], body, fields))
@@ -1662,7 +1651,7 @@ with_header: fn(req: HTTPRequest, name: String, value: String) -> HTTPRequest Ne
     req.__with_header(name, value)
 }
 
-// The body as given: Body.Bytes stays bytes.
+// The body as given: a byte body stays bytes.
 with_body: fn(req: HTTPRequest, body: Body) -> HTTPRequest Never! {
     req.__with_body_value(body)
 }

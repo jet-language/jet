@@ -1459,7 +1459,7 @@ __client_follow: fn(original_method: String, original_url: String, original_fiel
 }
 
 __client_finish: fn(reply: __ClientReply, history: [String]) -> HTTPResponse Never! {
-    http.__client_response(reply.status, if reply.body.len() == 0 -> http.Body.Empty else -> http.Body.Bytes(reply.body), reply.headers, history, [Int]{}, false, reply.raw_encoding, reply.body_error)
+    http.__client_response(reply.status, http.body_bytes(reply.body), reply.headers, history, [Int]{}, false, reply.raw_encoding, reply.body_error)
 }
 
 // One request on a fresh connection: dial (through the proxy when one is

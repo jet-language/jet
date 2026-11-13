@@ -1471,7 +1471,7 @@ rejected without a body allocation.
 | `version_parse(token)` / `version_text(version)` | `Version` / `String` | Parse or render HTTP/1.0 through HTTP/3 labels. |
 | `headers()` / `headers_get(h, name)` | `Headers` / `?String` | Create headers or read a case-insensitive first value. |
 | `headers_all(h, name)` / `headers_set` / `headers_append` / `headers_remove` | header values | Preserve ordered fields while replacing, appending, or removing names. |
-| `body_empty()` / `body_text(text)` / `body_bytes(bytes)` | `Body` | Construct the checked empty, text, or byte body variants. |
+| `body_empty()` / `body_text(text)` / `body_bytes(bytes)` | `Body` | Construct an empty, text, or byte body. |
 | `Body.reader(reader)` / `Body.reader(reader, length)` | `Body !HTTPError` | Take a `FileReader` and read its bytes when the body is made. With no length, read to end of file, at most 1 GiB. With a length, read exactly that many bytes: more than 1 GiB is `BodyTooLarge`, and a negative length or a source that ends short is `InvalidFraming`. The upload is not streamed. |
 | `Body.multipart(fields)` | `Body` | `multipart/form-data` text fields in map order. The boundary is the first `jet-http-boundary-%016x` that no field contains, and the body's first line is `--` plus that boundary, which the message's `Content-Type` names. |
 | `request.body()` / `response.body()` | lazy `Body` | Keep the transport body lazy; `body.text(limit)` and `body.bytes(limit)` are fallible, bounded consumption operations, not construction of the owned source variants. |
@@ -1479,8 +1479,8 @@ rejected without a body allocation.
 | `put(url, body)` / `patch(url, body)` | `HTTPResponse !HTTPError` | Perform one-shot PUT or PATCH calls. |
 | `delete(url)` / `head(url)` | `HTTPResponse !HTTPError` | Perform one-shot DELETE or HEAD calls. |
 | `exchange(method, url, body, header_lines)` | `HTTPResponse !HTTPError` | Validate and perform a request described by a method and header lines. |
-| `parse_request(raw)` / `parse_response(url, raw)` | request/response `!HTTPError` | Parse bounded CRLF-framed messages and reject invalid framing or encoding. A parsed request keeps its body as the wire bytes (`Body.Bytes`), sliced once after every length check; a text read decodes it then. |
-| `with_body(request, body)` / `request_with(method, url, headers, body)` / `response_ok(body)` | request/response | Carry the body as given: a `Body.Bytes` body stays bytes. |
+| `parse_request(raw)` / `parse_response(url, raw)` | request/response `!HTTPError` | Parse bounded CRLF-framed messages and reject invalid framing or encoding. A parsed request keeps its body as the wire bytes, sliced once after every length check; a text read decodes it then. |
+| `with_body(request, body)` / `request_with(method, url, headers, body)` / `response_ok(body)` | request/response | Carry the body as given: a byte body stays bytes. |
 | `query()` / `query_get` / `query_all` / `query_set` | query values | Build and inspect repeated query pairs. |
 | `query_decode(text)` / `form_decode(text)` | `Query` | Split a query or an `application/x-www-form-urlencoded` form the WHATWG way: one leading `?` is stripped, empty segments are skipped, a field without `=` has an empty value, and duplicate names stay in order (`query_get` returns the first). `+` is a space and `%HH` one byte, decoded once; a broken escape such as `%QZ` stays as written, and bytes that are not UTF-8 become U+FFFD, one per maximal invalid subpart. Input above 1 MiB gives an empty `Query`. |
 | `query_decode_strict(text)` / `form_decode_strict(text)` | `Query !FormDecodeError` | The same split, refusing instead of replacing: `Escape` for a broken escape, `UTF8` for bytes that are not UTF-8, `TooLarge` above 1 MiB. Code whose decoded value picks a file, path, account or other identity uses these, since `%FF` and `%FE` both decode to U+FFFD when tolerant. |
@@ -1535,8 +1535,13 @@ read. Dropping that iterator or closing the body closes its backing resource
 exactly once; closing followed by dropping does not close it again. End of
 input marks a body drained. A read error or delivered task stop does not mark
 it drained, and a task stop keeps its cancellation, deadline, budget, or panic
-meaning rather than becoming an I/O error. The public `Body.Empty`,
-`Body.Text`, and `Body.Bytes` constructor variants remain unchanged.
+meaning rather than becoming an I/O error.
+
+`Body` is a struct whose contents sit in a `priv` field, over a carrier type
+that core.http declares in a `priv module` (D-PRIVATE-NATIVE-CARRIER1=A). User
+code can neither name the carrier nor build a `Body` by hand; both are E0605.
+Bodies come only from requests, responses, `body_empty`, `body_text`,
+`body_bytes` and the `Body.*` constructors above.
 
 ### `core.http.server` — HTTP serving
 
