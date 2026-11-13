@@ -2366,6 +2366,14 @@ declares the complete maximal grant, including `Secret` and `Time`; its base64
 operation is unchanged, and this grant does not assert that the foreign body
 actually reads either capability.
 
+A read that only makes a collision-avoiding name, finds the program an `Exec`
+call starts, or inspects the running process belongs to the calling
+operation's effect (D-HOST-NONCE1=A). The temporary-name and atomic-write
+reads are part of `FS.Write`, the `PATH` lookup is part of `Exec`, and
+`/proc/self` reads are part of whatever call makes them. A name such a read
+makes is unspecified, so it differs from run to run. Any other host read
+either fits this rule or declares its own effect.
+
 For example, interpolated `print` in
 `Examples/Basics/FirstHourExpert.jet` records both `IO` and the
 `Mem.Alloc` needed for its fresh `String`; `core.process.args()` records the
