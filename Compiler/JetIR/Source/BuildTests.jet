@@ -90,7 +90,9 @@ ir_build_tests: fn(functions: &&[FnBody], decls: DeclTable, type_defs: &&[TTypeD
     // The functions the harness's renders reached (a Printable impl).
     _: ir_build_queue(m, p, failures, built)
     ir_drop_glues(m, p)
-    IRBuildResult{program: ir_merge_serial(m), failures: failures}
+    merged := ir_merge_serial(m)
+    ir_recursion_checks(merged)
+    IRBuildResult{program: merged.move(), failures: failures}
 }
 
 // `jet test --coverage`: a probed function's entry hands its line to the

@@ -126,8 +126,6 @@ web_select_body: fn(st: &WebState, m: IRModule, f: IRFunction, tables: IRX64Tabl
         web_tee(e, frame)
         web_global_set(e, WEB_GLOBAL_SP)
     }
-    // Per instruction, whether it sits in a Loop (web_stop_point).
-    in_loops: if st.stop_points && st.armed >= 0 -> web_in_loops(f) else -> [Bool]{}
     at := 0
     loop at < f.op.len() {
         if checked {
@@ -135,7 +133,7 @@ web_select_body: fn(st: &WebState, m: IRModule, f: IRFunction, tables: IRX64Tabl
             marks.push(at)
         }
         if st.stop_points && e.pad_ends.len() == 0 {
-            resume: web_stop_point(e, st, m, f, at, in_loops)
+            resume: web_stop_point(e, st, m, f, at)
             if resume >= 0 {
                 at = resume
                 next
@@ -158,10 +156,8 @@ web_select_body: fn(st: &WebState, m: IRModule, f: IRFunction, tables: IRX64Tabl
 }
 
 // The stop point at `at`, if it is one: its check and the opened edge.
-// Returns where selection resumes (-1: not a stop point). `in_loops` marks
-// the instructions in a Loop (web_in_loops; empty when the runtime names no
-// armed word).
-web_stop_point: fn(e: &WebEmitter, st: &WebState, m: IRModule, f: IRFunction, at: Int, in_loops: [Bool]) -> Int Never! {
+// Returns where selection resumes (-1: not a stop point).
+web_stop_point: fn(e: &WebEmitter, st: &WebState, m: IRModule, f: IRFunction, at: Int) -> Int Never! {
     if !web_is_stop_point(st, f, at) -> return -1
     branch: at + 1
     stopped: f.dst[at]
@@ -180,11 +176,11 @@ web_stop_point: fn(e: &WebEmitter, st: &WebState, m: IRModule, f: IRFunction, at
         web_global_get(e, WEB_GLOBAL_EDX)
         web_op(e, 0xad)
         web_store(e, stopped)
-    } else if at < in_loops.len() && in_loops[at] && !ir_opt_polls_checks_call(f, st.poll, st.trap, at) {
-        // A loop's poll that checks no call can observe only what another
-        // task asked for, which arms the runtime's word first (JetRuntime
-        // Scheduler.jet scheduler_checks_arm): while it is 0 the iteration
-        // calls nothing.
+    } else if st.armed >= 0 && !ir_opt_polls_checks_call(f, st.poll, st.trap, at) {
+        // A poll that checks no call (a loop's own check, a recursive
+        // body's entry check) can observe only what another task asked for,
+        // which arms the runtime's word first (JetRuntime Scheduler.jet
+        // scheduler_checks_arm): while it is 0 the check calls nothing.
         web_i64(e, 0)
         web_store(e, stopped)
         web_i64(e, st.armed)
@@ -204,26 +200,6 @@ web_stop_point: fn(e: &WebEmitter, st: &WebState, m: IRModule, f: IRFunction, at
     web_if(e)
     e.pad_ends.push(f.c[branch])
     branch + 1
-}
-
-// Per instruction of `f`, whether it sits in a Loop (the Loop itself and its
-// End included).
-web_in_loops: fn(f: IRFunction) -> [Bool] Never! {
-    inside := [Bool]{}
-    opens := [Bool]{}
-    loops := 0
-    loop op in f.op {
-        if op == .Block || op == .Loop || op == .If {
-            opens.push(op == .Loop)
-            if op == .Loop -> loops += 1
-        }
-        inside.push(loops > 0)
-        if op == .End {
-            closed: opens.pop() ?? false
-            if closed -> loops -= 1
-        }
-    }
-    inside
 }
 
 // Restores the stack pointer and sets the stop global (`stopped`).

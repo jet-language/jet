@@ -2580,6 +2580,64 @@ ir_loop_check: fn(m: &IRModule, b: &IRBuilder) Never! {
     ir_stop_check(m, b)
 }
 
+// The check a body starts with, before its first statement: a stop poll
+// (IR_STOP_POLL_KEY) as ir_loop_check puts at each iteration, its index
+// kept in the function (IRFunction.entry_check). A recursion that runs no
+// loop meets it at each entry, so a cancel of a task busy in one is
+// delivered there as it is at a loop's turn. ir_recursion_checks removes
+// it from every body that is not recursive once the module is built.
+ir_entry_check: fn(m: &IRModule, b: &IRBuilder) Never! {
+    if !m.stop_points || b.stopping -> return
+    b.f.entry_check = b.f.op.len()
+    ir_stop_check(m, b)
+}
+
+// Keeps the entry checks (ir_entry_check) of the bodies that can call
+// themselves only: a body on a cycle of calls (Opt.jet ir_opt_bottom_up).
+// A call through a function value (CallIndirect) counts as a call of every
+// function whose address the module takes (FunctionAddress), through one
+// extra node after the functions. Every other body's entry check goes
+// before any pass reads the module, and every body's index is reset.
+ir_recursion_checks: fn(m: &IRModule) Never! {
+    count: m.functions.len()
+    checked := false
+    loop f in m.functions {
+        if f.entry_check >= 0 {
+            checked = true
+            break
+        }
+    }
+    if !checked -> return
+    calls := OptCalls{start: [Int]{}, to: [Int]{}}
+    taken := [Int]{}
+    loop f in m.functions {
+        calls.start.push(calls.to.len())
+        indirect := false
+        loop at in 0..<f.op.len() {
+            op: f.op[at]
+            callee: f.a[at]
+            if op == .CallIndirect -> indirect = true
+            if (op == .Call || op == .FunctionAddress) && callee >= 0 && callee < count {
+                if op == .Call -> calls.to.push(callee) else -> taken.push(callee)
+            }
+        }
+        if indirect -> calls.to.push(count)
+    }
+    calls.start.push(calls.to.len())
+    calls.to.extend(taken)
+    calls.start.push(calls.to.len())
+    order: ir_opt_bottom_up(calls)
+    loop id in 0..<count {
+        at: m.functions[id].entry_check
+        if at < 0 -> next
+        m.functions[id].entry_check = -1
+        if order.recursive[id] -> next
+        end: m.functions[id].c[at + 1]
+        loop k in at..<(end + 1) -> ir_opt_kill(m.functions[id], k)
+        ir_opt_compact(m.functions[id])
+    }
+}
+
 // After instruction `at`, a user operation whose slow path can publish a
 // numeric stop: its stop edge, through the trap poll (IR_STOP_TRAP_KEY),
 // which the selector enters only from that slow path, so the hot path has

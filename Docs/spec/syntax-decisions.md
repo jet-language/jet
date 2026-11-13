@@ -3549,8 +3549,9 @@ D-TASK-SLICE1=A)*: cancellation is preemptive at wait points. A cancelled task
 (race loser, fail-fast sibling, explicit `handle.cancel()`) unwinds at its
 next wait point — channel recv/send, sleep, join, select, I/O — running
 Drop-backed cleanup, exactly as a blown deadline (E3003) already does.
-D-TASK-SLICE1=A adds the check at each loop iteration, where a cancel or a
-passed deadline lands the same way, so a task that only computes stops too. A
+D-TASK-SLICE1=A adds the check at each loop iteration and at each call of a
+function that can call itself, where a cancel or a passed deadline lands the
+same way, so a task that only computes stops too. A
 cancelled `task.all` member reports
 `Cancelled`, not a completed `Value`. A scoped shielded region defers (never
 discards) the unwind until a critical section finishes. **D-SHIELDNAME1 = A**

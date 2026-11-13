@@ -3352,12 +3352,13 @@ ir_x64_select: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocat
 // after a direct call of a selected body (ir_x64_reports_stop) the hot path
 // is `test edx, edx; jnz edge`: every body returns edx 0 from its epilogue
 // and 1 from its stop exit. Elsewhere it keeps `call poll; test rax, rax;
-// jnz edge`; in a loop the poll's tests run inline first (ir_x64_stop_quiet),
-// and a poll there that checks no call (OptStops.jet
-// ir_opt_polls_checks_call: a loop's own check) first reads only the
-// runtime's armed word, which stays zero until a stop is published to
-// another task, an interrupt is sent or a strong pause is asked for, so a
-// loop that calls nothing pays a load and a branch per iteration. The
+// jnz edge`. A poll that checks no call (OptStops.jet
+// ir_opt_polls_checks_call: a loop's own check, a recursive body's entry
+// check) first reads only the runtime's armed word, which stays zero until
+// a stop is published to another task, an interrupt is sent or a strong
+// pause is asked for, so a loop that calls nothing pays a load and a branch
+// per iteration and a recursion one per entry. In a loop any other poll's
+// tests run inline first (ir_x64_stop_quiet). The
 // edge goes after the epilogue (ir_x64_pads). A trap poll
 // keeps no hot code: the slow paths that publish a numeric stop (colds from
 // `traps` on) take the edge (IRX64Cold.pad), and after an operation
@@ -3388,11 +3389,11 @@ ir_x64_stop_point: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64All
             e.code.bytes.push(0x85)
             e.code.bytes.push(0xd2)
         } else {
-            // In a loop the poll's own tests of the task control run inline
-            // first, so while no stop is asked for the hot path calls nothing.
             // A poll that checks no call can observe only what another task
-            // asked for, which arms the runtime's word first.
-            if ir_x64_in_loop(e, f) && f.a[at] == poll && !ir_opt_polls_checks_call(f, poll, trap, at) {
+            // asked for, which arms the runtime's word first. In a loop any
+            // other poll's own tests of the task control run inline first,
+            // so while no stop is asked for the hot path calls nothing.
+            if f.a[at] == poll && !ir_opt_polls_checks_call(f, poll, trap, at) {
                 flag: x64_load_rip(e.code, X64_RAX)
                 e.relocs.push(X64Reloc{at: flag, target: X64RelocTarget.RuntimeData{symbol: IR_X64_CHECKS_ARMED_SYMBOL}})
                 x64_test_rr(e.code, X64_RAX, X64_RAX)

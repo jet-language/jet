@@ -1,0 +1,74 @@
+use time: core.time
+
+// A close that shows the cancelled task's cleanup ran.
+Marker: struct {
+    name: String
+
+    impl Close {
+        close: fn(&&self) { print("close {self.name}") }
+    }
+}
+
+// Calls itself and nothing else, with no loop and no wait point: only the
+// check each of its calls starts with can stop it.
+burn: fn(n: Int) -> Int {
+    if n < 2 -> return n
+    burn(n - 1) + burn(n - 2)
+}
+
+// Calls itself only through `twice` and a function value.
+deep: fn(n: Int) -> Int {
+    if n < 2 -> return n
+    twice(deep, n)
+}
+
+twice: fn(step: fn(Int) -> Int, n: Int) -> Int {
+    step(n - 1) + step(n - 2)
+}
+
+seven: fn() -> Int { 7 }
+
+failure_label: fn(error: TaskFailure) -> String {
+    if error == {
+        .Cancelled -> { return "cancelled" }
+        .DeadlineBlown -> { return "deadline" }
+        .Panicked(_) -> { return "panicked" }
+    }
+}
+
+run: fn() {
+    // The race returns its winner although the loser never waits: the loser
+    // stops at its next call.
+    print(task.race {burn(90), seven()} ?? panic("race failed"))
+
+    started: Atomic<Int>.try_new(0) ?? return
+    burner: task {
+        marker := Marker{name: "the burner's marker"}
+        defer close(marker)
+        started.store(1)
+        burn(90)
+    }
+    tries := 0
+    loop started.load() == 0 && tries < 2000 {
+        time.sleep(1ms)
+        tries += 1
+    }
+    time.sleep(5ms)
+    // No pause: a plain cancel stops the busy recursion, and its cleanup runs.
+    burner.cancel()
+    if burner.join() == {
+        .Ok(_) -> print("the burner finished")
+        .Err(error) -> print("the burner: {failure_label(error)}")
+    }
+
+    // A deadline passes while the task only computes through a function
+    // value: its next call stops it with the deadline failure.
+    timed: task {
+        task.timeout(20ms)
+        deep(90)
+    }
+    if timed.join() == {
+        .Ok(_) -> print("the timed burner finished")
+        .Err(error) -> print("the timed burner: {failure_label(error)}")
+    }
+}

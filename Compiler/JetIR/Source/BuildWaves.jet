@@ -170,6 +170,7 @@ ir_build_waves_kept: fn(program: &&IRProgram, roots: &&[IRWaveJob], entry: Bool,
         preps.extend(ir_waves_take_preps(slot))
     }
     merged := ir_merge(parts, preps, roots_merged, entry_index)
+    ir_recursion_checks(merged)
     IRBuildKept{result: IRBuildResult{program: merged.move(), failures: failures}, program: ir_waves_take_program(inputs)}
 }
 

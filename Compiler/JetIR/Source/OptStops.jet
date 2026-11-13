@@ -205,11 +205,13 @@ ir_opt_stops_unreported: fn(f: &IRFunction, keys: [String], bodies: [Bool], repo
 // that checks no call (since the last check only an inlined body,
 // arithmetic or other stop points, and no stop edge of the constructs just
 // closed lands on it) can observe only a stop another task asked for, which
-// a later poll observes as well. When every path from it reaches such a
-// poll, with no Loop, Return or branch on the way that could skip it, the
-// earlier one goes: a stop asked for meanwhile is delivered a little later,
-// at the later stop point, while every stop a call or a trap publishes is
-// still taken where it was.
+// a later poll that checks no call observes as well. A poll after a call
+// may test only what the call returned (X64Select.jet ir_x64_stop_point),
+// so it does not count. When every path from it reaches such a poll, with
+// no Loop, Return or branch on the way that could skip it, the earlier one
+// goes: a stop asked for meanwhile is delivered a little later, at the
+// later stop point, while every stop a call or a trap publishes is still
+// taken where it was.
 ir_opt_fold_polls: fn(f: &IRFunction, keys: [String]) Never! {
     poll := -1
     trap := -1
@@ -221,7 +223,7 @@ ir_opt_fold_polls: fn(f: &IRFunction, keys: [String]) Never! {
     loop at in 0..<f.op.len() {
         if !ir_opt_stops_poll(f, keys, at) || ir_opt_polls_checks_call(f, poll, trap, at) -> next
         end: f.c[at + 1]
-        if !ir_opt_polls_reach(f, keys, end + 1) -> next
+        if !ir_opt_polls_reach(f, keys, poll, trap, end + 1) -> next
         loop k in at..<(end + 1) -> f.op[k] = IROp.Nop
         folded = true
     }
@@ -264,14 +266,15 @@ ir_opt_polls_hands_on: fn(f: IRFunction, start: Int, end: Int) -> Bool Never! {
     false
 }
 
-// Whether every path from `start` reaches a poll outside any construct
-// opened on the way. A construct closing goes on after it (a Loop's ends
-// the search), an Else on after its If, a Br leaving the constructs opened
-// on after the End it lands on; a poll counts only past every such End a
-// branch skipped to. A Loop, Return, Unreachable or a branch back to a
-// Loop's head ends the search. Edges that never come back
-// (ir_opt_dead_end: a trap's or failure's cleanup) are passed over.
-ir_opt_polls_reach: fn(f: IRFunction, keys: [String], start: Int) -> Bool Never! {
+// Whether every path from `start` reaches a poll that checks no call
+// (ir_opt_polls_checks_call) outside any construct opened on the way. A
+// construct closing goes on after it (a Loop's ends the search), an Else
+// on after its If, a Br leaving the constructs opened on after the End it
+// lands on; a poll counts only past every such End a branch skipped to. A
+// Loop, Return, Unreachable or a branch back to a Loop's head ends the
+// search. Edges that never come back (ir_opt_dead_end: a trap's or
+// failure's cleanup) are passed over.
+ir_opt_polls_reach: fn(f: IRFunction, keys: [String], poll: Int, trap: Int, start: Int) -> Bool Never! {
     depth := 0
     past := -1
     at := start
@@ -282,7 +285,7 @@ ir_opt_polls_reach: fn(f: IRFunction, keys: [String], start: Int) -> Bool Never!
             next
         }
         op: f.op[at]
-        if depth == 0 && at > past && ir_opt_stops_poll(f, keys, at) -> return true
+        if depth == 0 && at > past && ir_opt_stops_poll(f, keys, at) && !ir_opt_polls_checks_call(f, poll, trap, at) -> return true
         if op == .Loop || op == .Return || op == .Unreachable -> return false
         if op == .Block || op == .If {
             depth += 1

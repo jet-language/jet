@@ -3746,17 +3746,20 @@ that only computes, keeps running under the default pause. Task failure uses
 `pause(mode: .CheckLoops)` is the strong pause (D-TASK-PAUSE-TIER1). Its
 argument is the compiler-owned enum `TaskPauseMode`: `.WaitPoints`, the
 default, or `.CheckLoops`. A strong pause also holds the task at its next
-check. Every loop iteration starts with a check, and the return from a call
-that can stop is also a check. Every engine and optimization level lowers the
-check from the same rule. Until some task is stopped from outside,
-interrupted, cancelled, given a deadline or strongly paused, the native check
-that starts an iteration costs one load and one branch.
+check. Every loop iteration starts with a check, and so does every call of a
+function that can call itself, directly, through other functions or through
+a function value. The return from a call that can stop is also a check. Every
+engine and optimization level lowers the check from the same rule. Until
+some task is stopped from outside, interrupted, cancelled, given a deadline
+or strongly paused, the native check that starts an iteration or a call
+costs one load and one branch.
 
 Cancellation is preemptive at wait points and at checks (D-CANCELMODEL1=C,
 amended by D-TASK-SLICE1=A). The wait points are channel send and receive,
 `time.sleep`, task join, a select arm, and I/O. A cancelled task unwinds at
 the next wait point or check, whichever comes first, and runs Drop-backed
-cleanup, so a loop that only computes stops at its next iteration. A cancelled
+cleanup, so a loop or a recursion that only computes stops at its next
+iteration or call. A cancelled
 receive unwinds instead of returning `Closed`. A busy race loser stops at its
 next iteration, so `task.race` returns once its winner does. A cancelled
 `task.all` member reports `Cancelled`. Cancelling a task also cancels every

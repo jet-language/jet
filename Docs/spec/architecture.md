@@ -472,8 +472,8 @@ The web target selects WebAssembly from the same IR. Runtime packaging
 selects the runtime library once into the runtime partition
 (`jet_runtime.wasm`), with a receipt of its data layout, table slots,
 exports and the addresses of the runtime words a program's code reads in
-place, such as the armed word a loop's stop check tests before it calls the
-poll (`jet_runtime.wasm.tsv`). `jet build --target web` selects the program
+place, such as the armed word the stop check of a loop or a recursive call
+tests before it calls the poll (`jet_runtime.wasm.tsv`). `jet build --target web` selects the program
 into the program partition `app.wasm`, placed after the runtime's data and
 table slots. The program calls the runtime through imports from module `rt`
 named by runtime symbol (a `task` links `jet_rt_native_task_spawn`), and C
