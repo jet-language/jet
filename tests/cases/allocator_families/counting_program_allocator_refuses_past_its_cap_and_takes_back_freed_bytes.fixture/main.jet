@@ -1,0 +1,34 @@
+// package.jet caps the counting program allocator at 64 MB. One 40 MB list
+// fits; a second one beside it is over the cap and is refused without
+// aborting; once the first is freed, its bytes come back, so a new 40 MB list
+// fits again, and twenty more, each freed before the next, all fit.
+reserve: fn(count: Int) -> [Int] AllocError! { List.try_with_capacity(count) }
+
+run: fn() {
+    held := [Int]{}
+    if reserve(5_000_000) == {
+        .Ok(values) -> {
+            held = values
+            print("a 40 MB list fits under the cap")
+        }
+        .Err(_error) -> print("a 40 MB list was refused")
+    }
+    if reserve(5_000_000) == {
+        .Ok(_values) -> print("a second 40 MB list fit beside the first")
+        .Err(_error) -> print("a second 40 MB list beside the first is over the cap")
+    }
+    held = [Int]{}
+    if reserve(5_000_000) == {
+        .Ok(_values) -> print("after the first is freed, a 40 MB list fits again")
+        .Err(_error) -> print("after the first is freed, a 40 MB list was still refused")
+    }
+    fitted := 0
+    loop _ in 0..<20 {
+        if reserve(5_000_000) == {
+            .Ok(_values) -> fitted += 1
+            .Err(_error) -> {}
+        }
+    }
+    print("40 MB lists freed one after another: {fitted} of 20 fit")
+    print("held at the end: {held.len()}")
+}

@@ -1,0 +1,21 @@
+# The counting program allocator compares its byte counts (live bytes against
+# the cap, freed bytes against live, the high-water mark) as unsigned words by
+# flipping the sign bit with `bit_xor`. Those sites were spelled `^`, which Jet
+# reads as power, so this pins their meaning: a list past the 64 MB cap is
+# refused without aborting, and freed bytes come back to the cap, on every
+# tier.
+fixture: counting_program_allocator_refuses_past_its_cap_and_takes_back_freed_bytes.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet
+exit: 0
+step: jet run --optimize=none main.jet
+exit: 0
+stdout: = "a 40 MB list fits under the cap\na second 40 MB list beside the first is over the cap\nafter the first is freed, a 40 MB list fits again\n40 MB lists freed one after another: 20 of 20 fit\nheld at the end: 0\n"
+step: jet run --optimize=basic main.jet
+exit: 0
+stdout: = "a 40 MB list fits under the cap\na second 40 MB list beside the first is over the cap\nafter the first is freed, a 40 MB list fits again\n40 MB lists freed one after another: 20 of 20 fit\nheld at the end: 0\n"
+step: jet run --optimize=full main.jet
+exit: 0
+stdout: = "a 40 MB list fits under the cap\na second 40 MB list beside the first is over the cap\nafter the first is freed, a 40 MB list fits again\n40 MB lists freed one after another: 20 of 20 fit\nheld at the end: 0\n"
