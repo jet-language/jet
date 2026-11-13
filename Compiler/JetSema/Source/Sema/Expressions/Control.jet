@@ -422,7 +422,7 @@ sema_expression_result_payload: fn(value: Expr, success: Bool, take_field: Bool,
     }
     result_ty: Type.Result{ok: ok_ty, err: err_ty}
     kind: if success -> TExprKind.Ok{value: payload} else -> TExprKind.Err{value: payload}
-    sema_expr_expected_owned(sema_tree_expr(result_ty, kind, span), expected, environment, program, diagnostics)
+    sema_expr_expected_owned(sema_tree_node(result_ty, kind.move(), span), expected, environment, program, diagnostics)
 }
 
 // How a `source` failure widens into the `target` error union: one member

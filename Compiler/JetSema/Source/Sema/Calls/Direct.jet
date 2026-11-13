@@ -509,7 +509,7 @@ sema_call_check_value_constructor: fn(call: Call, type_name_value: String, compo
         type_name_value == "Decimal" -> TExprKind.PreciseBuiltin{type_name: type_name_value, function: "from_str", args: values}
         else -> TExprKind.PreciseBuiltin{type_name: type_name_value, function: "from_parts", args: values}
     }
-    SemaDirectSpecialCheck{handled: true, value: sema_expr_expected_owned(sema_tree_expr(result_ty, kind, call.name_span), expected, environment, program, diagnostics)}
+    SemaDirectSpecialCheck{handled: true, value: sema_expr_expected_owned(sema_tree_node(result_ty, kind.move(), call.name_span), expected, environment, program, diagnostics)}
 }
 
 // An ambient row's IO effect, recorded as its call-site fact so the effect
@@ -1916,7 +1916,7 @@ sema_call_check_freeze: fn(call: Call, expected: Type?, environment: SemaScopeEn
     if !already_frozen {
         if sema_copy_memory_operation(facts) != None || sema_copy_effect_name(facts) != None -> context.copy_events.push(SemaCopyEvent{span: call.name_span, facts: facts})
         kind := if facts.materializes_view -> TExprKind.MaterializeView{value: checked} else -> TExprKind.Clone{value: checked, fact: CopyFact.Explicit}
-        result = sema_tree_expr(facts.target, kind, call.name_span)
+        result = sema_tree_node(facts.target, kind.move(), call.name_span)
     }
     state.freeze_sites.push(SemaOwnershipFreezeSite{span: call.name_span, line: sema_source_line_at(environment.source_segments, call.name_span) ?? 1, column: sema_source_column_at(environment.source_segments, call.name_span) ?? 1})
     checked_result := sema_expression_call_expected(result, expected, environment, program, context, diagnostics)

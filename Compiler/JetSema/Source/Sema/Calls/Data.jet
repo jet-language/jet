@@ -1062,7 +1062,7 @@ sema_call_try_data_literal: fn(ty: Type, variant: String, args: [CallArg], span:
         fresh: argument.convention != AccessConvention.Move && sema_ownership_places_from_expr_in_state(argument.expr, scopes, state).len() == 0
         if !clone_arg && !fresh && !sema_ownership_consume_expression(state, taken, scopes, "`{type_name(ty)}.{variant}`", diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
         }
-    value := sema_tree_expr(sema_dyn_type(), TExprKind.JSONLit{variant: variant, arg: payload, clone_arg: clone_arg}, span)
+    value := sema_tree_node(sema_dyn_type(), TExprKind.JSONLit{variant: variant, arg: payload, clone_arg: clone_arg}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, diagnostics)}
 }
 

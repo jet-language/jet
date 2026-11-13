@@ -1003,7 +1003,7 @@ sema_fact_prepared_expr: fn(value: TComptimeValue, ty: Type, span: Span, environ
         .String(text) -> TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: text}}}
         .Int(_) | .Float(_, _) | .Bool(_) | .Char(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Struct(_, _) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit -> TExprKind.CtLit{value: value}
     }
-    sema_tree_expr(ty, kind, span)
+    sema_tree_node(ty, kind.move(), span)
 }
 
 // The value of a checked prepared-constant path over a literal compile-time

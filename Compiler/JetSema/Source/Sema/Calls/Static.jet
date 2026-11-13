@@ -809,7 +809,7 @@ sema_call_try_builtin_static: fn(owner: String, module_name: String, method: Str
     if !sema_effect_record_intrinsic_fact(environment, program, scopes, context, callee, span, facts, diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     // A fallible builtin static in a plain slot propagates its failure as a
     // call does (`return F32.from_float(x)` under `-> F32 Err!`).
-    SemaMethodSpecialCheck{handled: true, value: sema_expression_call_expected(sema_tree_expr(result, kind, span), expected, environment, program, context, diagnostics)}
+    SemaMethodSpecialCheck{handled: true, value: sema_expression_call_expected(sema_tree_node(result, kind.move(), span), expected, environment, program, context, diagnostics)}
 }
 
 // `alias.Owner.method(...)`: a Core module alias names the owner's module.

@@ -123,12 +123,6 @@ sema_tree_node: fn(ty: Type, kind: &&TExprKind, span: Span) -> TExpr Never! {
     TExpr{ty: ty.copy(), kind: kind.move(), span: span}
 }
 
-// The read form, for a caller that keeps reading its kind.
-sema_tree_expr: fn(ty: Type, kind: TExprKind, span: Span) -> TExpr Never! {
-    // copy: the caller keeps `kind`; the node owns its own.
-    sema_tree_node(ty, kind.copy(), span)
-}
-
 // A checked node of `kind` built flat: a row of the context's arena, whose
 // children are arena row indices (sema_arena_adopt). The returned handle
 // names the row; its id and type are the node's (a retype or a filed id
@@ -2110,9 +2104,9 @@ sema_expr_unit_binary_result: fn(op: BinOp, lhs: TExpr, rhs: TExpr, left_fact: S
     right_value := sema_expr_unit_raw(sema_expr_unit_conversion(rhs, right_fact, destination, span, line, environment, program), span)
     raw := sema_tree_node(Type.Float, TExprKind.Binary{op: sema_expr_tree_binary_op(op), overflow: false, line: line, lhs: left_value, rhs: right_value}, span)
     if op == BinOp.Eq || op == BinOp.Ne || op == BinOp.Lt || op == BinOp.Gt || op == BinOp.Le || op == BinOp.Ge {
-        return sema_tree_expr(Type.Bool, raw.kind, span)
+        return sema_tree_node(Type.Bool, raw.kind.move(), span)
     }
-    if op == BinOp.Compare -> return sema_tree_expr(Type.Named{name: "Ordering"}, raw.kind, span)
+    if op == BinOp.Compare -> return sema_tree_node(Type.Named{name: "Ordering"}, raw.kind.move(), span)
     sema_expr_unit_wrap_raw(raw, destination, span, line, environment, program)
 }
 
@@ -2181,7 +2175,7 @@ sema_expr_check_unit_binary: fn(op: BinOp, lhs: TExpr, rhs: TExpr, span: Span, l
             raw_rhs := sema_expr_unit_raw(rhs, span)
             raw := sema_tree_node(Type.Float, TExprKind.Binary{op: sema_expr_tree_binary_op(op), overflow: false, line: line, lhs: raw_lhs, rhs: raw_rhs}, span)
             if dimensions.axes.len() == 0 -> return Val(raw)
-            return Val(sema_tree_expr(Type.Quantity{base: Type.Float, dimension: dimensions}, raw.kind, span))
+            return Val(sema_tree_node(Type.Quantity{base: Type.Float, dimension: dimensions}, raw.kind.move(), span))
         }
         if left_dimension != None || right_dimension != None {
             left_point := false
@@ -2212,7 +2206,7 @@ sema_expr_check_unit_binary: fn(op: BinOp, lhs: TExpr, rhs: TExpr, span: Span, l
             right_value := if sema_expr_unit_fact(rhs.ty, environment, program) != None -> sema_expr_unit_raw(rhs, span) else -> rhs
             raw := sema_tree_node(Type.Float, TExprKind.Binary{op: sema_expr_tree_binary_op(op), overflow: false, line: line, lhs: left_value, rhs: right_value}, span)
             if dimensions.axes.len() == 0 -> return Val(raw)
-            return Val(sema_tree_expr(Type.Quantity{base: Type.Float, dimension: dimensions}, raw.kind, span))
+            return Val(sema_tree_node(Type.Quantity{base: Type.Float, dimension: dimensions}, raw.kind.move(), span))
         }
     }
 
@@ -5632,8 +5626,8 @@ sema_expr_check_binary_operands: fn(op: BinOp, left: Expr, right: Expr, span: Sp
     if (op == BinOp.Add || op == BinOp.Sub || op == BinOp.Mul || op == BinOp.Div) && (sema_expr_is_integer(effective_lhs.ty) || sema_expr_is_integer(effective_rhs.ty)) -> overflow = true
     if op == BinOp.Pow && sema_expr_is_integer(effective_lhs.ty) -> overflow = true
     if (op == BinOp.Shl || op == BinOp.Shr) && sema_expr_is_integer(effective_lhs.ty) -> overflow = true
-    // Built and kept in place (sema_tree_expr and sema_expr_expected copy
-    // their borrowed value, and with it both operand trees, at every level).
+    // Built and kept in place (sema_expr_expected copies its borrowed value,
+    // and with it both operand trees, at every level).
     value: TExpr{ty: ty, kind: TExprKind.Binary{op: sema_expr_tree_binary_op(op), overflow: overflow, line: line, lhs: effective_lhs, rhs: effective_rhs}, span: span}
     if sema_expr_expected_keeps(value.ty, expected) -> return Val(value)
     sema_expr_expected(value, expected, environment, program, diagnostics)
@@ -5670,7 +5664,7 @@ sema_expr_check_copy_typed: fn(checked: TExpr, span: Span, expected: Type?, envi
         }
         diagnostics.push(report)
         ty: checked.ty
-        return sema_expr_expected_owned(sema_tree_expr(ty, TExprKind.ExplicitCopy{value: checked}, span), expected, environment, program, diagnostics)
+        return sema_expr_expected_owned(sema_tree_node(ty, TExprKind.ExplicitCopy{value: checked}, span), expected, environment, program, diagnostics)
     }
     if sema_copy_memory_operation(facts) != None && effect_name == None -> context.copy_events.push(SemaCopyEvent{span: span, facts: facts})
     result_kind := if share -> TExprKind.Clone{value: checked, fact: CopyFact.Share} else -> TExprKind.ExplicitCopy{value: checked}
@@ -5679,7 +5673,7 @@ sema_expr_check_copy_typed: fn(checked: TExpr, span: Span, expected: Type?, envi
         .MaterializeView -> result_kind = TExprKind.MaterializeView{value: checked}
         .ExplicitCopy -> {}
     }
-    sema_expr_expected_owned(sema_tree_expr(facts.target, result_kind, span), expected, environment, program, diagnostics)
+    sema_expr_expected_owned(sema_tree_node(facts.target, result_kind.move(), span), expected, environment, program, diagnostics)
 }
 
 sema_expr_check_copy: fn(value: Expr, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
@@ -6051,7 +6045,7 @@ sema_expr_check_comptime_name: fn(name: String, span: Span, embedded: CtValue?, 
             .Enum(type_name, variant, args) -> if args.len() == 0 -> TExprKind.EnumLit{enum_type: type_name, variant: variant, payload: TEnumPayload.Unit} else -> TExprKind.CtLit{value: sema_checked_comptime(value) ?? return None}
             .Int(_) | .Float(_) | .Bool(_) | .Char(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Struct(_, _) | .Present(_) | .Failed(_) | .Unit | .Closure(_) -> TExprKind.CtLit{value: sema_checked_comptime(value) ?? return None}
         }
-        return sema_expr_expected_owned(sema_tree_expr(ty, kind, span), expected, environment, program, diagnostics)
+        return sema_expr_expected_owned(sema_tree_node(ty, kind.move(), span), expected, environment, program, diagnostics)
     }
     if sema_scope_resolve_index(scopes, name) == None {
         if scopes.comptime_execution_depth == 0 -> diagnostics.push(sema_unknown_name_in(name, span, scopes))

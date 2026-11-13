@@ -210,7 +210,7 @@ sema_value_method_option_or_err: fn(receiver: Expr, receiver_value: TExpr, inner
     }
     callee: sema_call_callee_decl(program, target.symbol.id, span, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     kind := TExprKind.Call{callee: callee, type_args: target.type_args, args: [TCallArg]{sema_value_method_source_arg(receiver_value), sema_value_method_source_arg(why)}}
-    value := sema_tree_expr(Type.Result{ok: inner, err: Type.Named{name: "Err"}}, kind, span)
+    value := sema_tree_node(Type.Result{ok: inner, err: Type.Named{name: "Err"}}, kind.move(), span)
     // A success slot (`return opt.or_err("why")` in a `T Err!` body) meets the
     // carrier the way any fallible call does: the caller propagates it.
     if expected == .Val(want) && !(sema_expr_unwrap_tag(want) == .Result(_, _)) -> return SemaMethodSpecialCheck{handled: true, value: Val(value)}
@@ -343,11 +343,11 @@ sema_call_try_value_method: fn(receiver: Expr, receiver_value: TExpr, method: St
         // `x.pow(-n)` is the exact Fraction 1 / x^n (from_parts normalizes
         // the sign and reduces; x == 0 stops "divided by zero").
         exponent: sema_tree_node(Type.Int, TExprKind.Unary{op: TUnaryOp.Neg, operand: typed[0].copy()}, span)
-        power: sema_tree_expr(Type.Int, sema_value_method_kind(row, method, receiver_value, [TExpr]{exponent}, Type.Int, line, span, environment, program, scopes), span)
+        power: sema_tree_node(Type.Int, sema_value_method_kind(row, method, receiver_value, [TExpr]{exponent}, Type.Int, line, span, environment, program, scopes), span)
         one: sema_tree_node(Type.Int, TExprKind.IntLit{value: 1, width: None}, span)
         exact: sema_tree_node(Type.Named{name: "Fraction"}, TExprKind.PreciseBuiltin{type_name: "Fraction", function: "from_parts", args: [TExpr]{one, power}}, span)
         return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(exact, expected, environment, program, diagnostics)}
     }
-    value := sema_tree_expr(result, sema_value_method_kind(row, method, receiver_value, typed, result, line, span, environment, program, scopes), span)
+    value := sema_tree_node(result, sema_value_method_kind(row, method, receiver_value, typed, result, line, span, environment, program, scopes), span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, diagnostics)}
 }

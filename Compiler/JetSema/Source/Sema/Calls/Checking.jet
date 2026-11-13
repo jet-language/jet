@@ -1351,7 +1351,7 @@ sema_call_pack_variadic_arguments: fn(typed: SemaCallTypedArguments, params: [Se
             loop argument in tail -> values.push(argument.value)
             kind = TExprKind.List{values: values.move(), trait_coercion: None}
         }
-        value: sema_tree_expr(list_ty, kind, span)
+        value: sema_tree_node(list_ty, kind.move(), span)
         packed.push(TCallArg{
             value: value.move(), template_items: [SymbolID]{},
             borrow: params[slot].convention == AccessConvention.Read,
