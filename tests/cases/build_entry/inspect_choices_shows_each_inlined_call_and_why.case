@@ -1,0 +1,37 @@
+# `jet inspect choices` lists each call site the optimizer inlined as
+# `jet build` optimizes the program, at the call's line, with why it was
+# taken. Optimized, the small `bump` is spliced into `run` at line 6. With
+# `--inline=off`, or at O0, nothing is inlined and the kind says none. Under
+# `--inline=always_marked`, only the `#Inline(Always)` callee is taken, and
+# the row says so. `#Inline(Always)` locks the choice: a callee that calls
+# itself fails the build naming it (E0917; the UI snapshot is
+# tests/ui/inline_always_recursive.stderr).
+fixture: inspect_choices_shows_each_inlined_call_and_why.fixture
+env: NO_COLOR=1
+step full: jet inspect choices --optimize=full inline.jet
+exit: 0
+stdout: ~ "choices: scope=" # the report header
+stdout: ~ "storage form: none" # no reactive handle crosses a thread
+stdout: ~ "inline.jet:6 in run: bump inlined: size " # the call's line, the callee and its size
+stdout: ~ "within the O2 limit 60" # the O2 callee limit took it
+step off: jet inspect choices --optimize=full --inline=off inline.jet
+exit: 0
+stdout: ~ "inlining: none" # off inlines nothing
+stdout: !~ "bump inlined" # the call stays a call
+step none: jet inspect choices --optimize=none inline.jet
+exit: 0
+stdout: ~ "inlining: none" # O0 runs no inlining
+step marked: jet inspect choices --optimize=full --inline=always_marked marked.jet
+exit: 0
+stdout: ~ "marked.jet:7 in run: bump inlined: marked #Inline(Always)" # only the marked callee is taken
+step json: jet inspect choices --optimize=full inline.jet --json
+exit: 0
+json: stdout doc $.action = "inspect.choices"
+json: stdout doc $.kinds[1] = "inlining"
+json: stdout doc $.choices[0].kind = "inlining"
+json: stdout doc $.choices[0].function = "run"
+json: stdout doc $.choices[0].line = 6
+step locked: jet check locked.jet
+exit: nonzero
+stderr: ~ "`count` calls itself, so `#Inline(Always)` cannot expand it" # the broken lock names the recursion
+stderr: ~ "E0917" # the recursive #Inline(Always) code

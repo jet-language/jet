@@ -1,17 +1,23 @@
 // `jet inspect choices`: the automatic choices the compiler made for the
-// checked program, each with its reason, by kind. Storage form: a reactive
-// handle (`Signal`, `Derived`, `Computed`) that crosses into a task, a
-// channel or a parallel worker, or is pinned `#Shared`, is kept in
-// synchronized storage (sema's reactive upgrade facts, FunctionReactive.jet).
-// `#Local` locks the one-thread form: a crossing then fails the build naming
-// it (E1102).
+// checked program, each with its reason, by kind.
+// - Storage form: a reactive handle (`Signal`, `Derived`, `Computed`) that
+//   crosses into a task, a channel or a parallel worker, or is pinned
+//   `#Shared`, is kept in synchronized storage (sema's reactive upgrade
+//   facts, FunctionReactive.jet). `#Local` locks the one-thread form: a
+//   crossing then fails the build naming it (E1102).
+// - Inlining: each call site the optimizer inlined as `jet build` optimizes
+//   the program (jet_cli_decisions: the profile's level and the build option
+//   flags), with why it was taken (JetIR OptInline.jet). `#Inline(Always)`
+//   locks a callee inlined: a change that makes it recursive, address-taken
+//   or too large fails the build naming it (E0917-E0919).
 use {
     jet_driver.[JetDriverCompileMode, JetDriverVerbOutput, JET_DRIVER_EXIT_OK, jet_driver_present_diagnostics]
-    jet_foundation.[FnBody]
+    jet_foundation.[CompilerThreads, FnBody, build_options_stock]
+    jet_ir.[IROptInlined]
 }
 
 // The choice kinds the report lists, in order; a kind with no row says none.
-JET_CLI_CHOICE_KINDS: [String]{"storage form"}
+JET_CLI_CHOICE_KINDS: [String]{"storage form", "inlining"}
 
 // One automatic choice: its kind, the function it was made in, and what was
 // chosen with its reason.
@@ -33,25 +39,35 @@ jet_cli_choice_order: fn(left: JetCLIChoice, right: JetCLIChoice) -> Ordering Ne
     left.choice <=> right.choice
 }
 
-// The storage form choices of `functions`: one per reactive upgrade, in
-// file and line order. Each instance of a generic body repeats its
-// upgrades; identical rows are one.
+// Whether `out` has a row identical to `choice`: each instance of a generic
+// body repeats its choices.
+jet_cli_choice_seen: fn(out: [JetCLIChoice], choice: JetCLIChoice) -> Bool Never! {
+    loop row in out {
+        if row.kind == choice.kind && row.file == choice.file && row.line == choice.line && row.function == choice.function && row.choice == choice.choice -> return true
+    }
+    false
+}
+
+// The storage form choices of `functions`: one per reactive upgrade, at the
+// function's line.
 jet_cli_storage_choices: fn(functions: [FnBody]) -> [JetCLIChoice] Never! {
     out := [JetCLIChoice]{}
     loop function in functions {
         if function.synthetic -> next
         loop upgrade in function.reactive_upgrades {
-            seen := false
-            loop row in out {
-                if row.file == function.source_file && row.line == function.line && row.function == function.name && row.choice == upgrade -> seen = true
-            }
-            if seen -> next
-            out.push(JetCLIChoice{kind: "storage form", file: function.source_file.copy(), line: function.line, function: function.name.copy(), choice: upgrade.copy()})
+            choice: JetCLIChoice{kind: "storage form", file: function.source_file.copy(), line: function.line, function: function.name.copy(), choice: upgrade.copy()}
+            if !jet_cli_choice_seen(out, choice) -> out.push(choice)
         }
     }
-    // A closure comparator: a compiler older than JetIR's named-comparator fix frees a named one's result twice.
-    out.sort_by((left: JetCLIChoice, right: JetCLIChoice) -> jet_cli_choice_order(left, right))
     out
+}
+
+// The inlining choices: one per inlined call site, at the call's line.
+jet_cli_inline_choices: fn(rows: [IROptInlined], out: &[JetCLIChoice]) Never! {
+    loop row in rows {
+        choice: JetCLIChoice{kind: "inlining", file: row.file.copy(), line: row.line, function: row.caller.copy(), choice: "{row.callee} inlined: {row.reason}"}
+        if !jet_cli_choice_seen(out, choice) -> out.push(choice)
+    }
 }
 
 jet_cli_choices_report: fn(choices: [JetCLIChoice], scope: String, file: String, profile: String, json: Bool) -> String Never! {
@@ -88,7 +104,8 @@ jet_cli_choices_report: fn(choices: [JetCLIChoice], scope: String, file: String,
 
 // The checked Program compile of the authorized sources under the job's
 // profile, the check failure every inspect plane reports, then the choices
-// its checked functions record.
+// its checked functions record and, for a program with a `run: fn`, those
+// its optimization makes. The rows go in file and line order.
 jet_cli_inspect_choices_host: fn(job: JetCLIInspectJob, source: String) -> JetDriverVerbOutput {
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     prepared: jet_cli_prepare_overlays(job.file, job.file, [JetCLIOverlay]{}, job.color, job.threads, JetDriverCompileMode.Program)
@@ -98,12 +115,22 @@ jet_cli_inspect_choices_host: fn(job: JetCLIInspectJob, source: String) -> JetDr
             request := value.move()
             request.profile = job.profile
             sources := request.authorized_sources
+            compiler_threads: request.compiler_threads.copy()
             front := jet_cli_lowering_inputs(request, None)
             errors: jet_cli_errors(jet_driver_present_diagnostics(front.compile.diagnostics, sources, front.compile.generated_source_files))
             if errors.len() > 0 -> jet_cli_inspect_finish(job, jet_cli_inspect_check_failed(job, source, errors))
             if front.compile.internal_problem == .Val(problem) -> jet_cli_inspect_finish(job, jet_cli_ice(problem))
             inputs := front.inputs.move() ?? jet_cli_inspect_finish(job, jet_cli_ice("the checked compile of `{job.file}` has no lowering inputs"))
-            choices: jet_cli_storage_choices(inputs.functions)
+            choices := jet_cli_storage_choices(inputs.functions)
+            if inputs.entry_key != None {
+                threads: CompilerThreads{cap: compiler_threads.cap, cores: compiler_threads.cores, memory_available: jet_cli_memory_available()}
+                build := build_options_stock("build")
+                if job.build == .Val(given) -> build = given.copy()
+                decisions: jet_cli_decisions(inputs, build, threads, job.profile, front.compile.harden)
+                jet_cli_inline_choices(decisions.report.inlines, choices)
+            }
+            // A closure comparator: a compiler older than JetIR's named-comparator fix frees a named one's result twice.
+            choices.sort_by((left: JetCLIChoice, right: JetCLIChoice) -> jet_cli_choice_order(left, right))
             report: jet_cli_choices_report(choices, job.scope, job.file, job.profile, job.json)
             jet_cli_inspect_finish(job, JetDriverVerbOutput{stdout: report, stderr: "", exit_code: JET_DRIVER_EXIT_OK})
         }

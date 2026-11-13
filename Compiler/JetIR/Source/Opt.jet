@@ -110,6 +110,8 @@ ir_opt_enabled: fn(options: IROptOptions, pass: String) -> Bool Never! {
 IROptReport: struct {
     level: Int
     inlined_calls: Int
+    // One row per call site inlining took (OptInline.jet IROptInlined).
+    inlines: [IROptInlined]
     direct_calls: Int
     folded: Int
     branches_folded: Int
@@ -150,7 +152,7 @@ IROptReport: struct {
 }
 
 ir_opt_report: fn(level: Int) -> IROptReport Never! {
-    IROptReport{level: level, inlined_calls: 0, direct_calls: 0, folded: 0, branches_folded: 0, compares_fused: 0, short_circuits: 0, copies_coalesced: 0, dead_removed: 0, unreachable_removed: 0, aggregates_replaced: 0, unique_hoisted: 0, int_facts: 0, ssa_functions: 0, ssa_changed: 0, ssa_moves: 0, ssa_fresh: 0, instructions_before: 0, instructions_after: 0, reduced: 0, reductions_declined: 0, reductions: [String]{}, stepped: 0, steps_declined: 0, factors: 0, factors_declined: 0, steps: [String]{}, dumps: [String]{}, lint: [IRLintFinding]{}}
+    IROptReport{level: level, inlined_calls: 0, inlines: [IROptInlined]{}, direct_calls: 0, folded: 0, branches_folded: 0, compares_fused: 0, short_circuits: 0, copies_coalesced: 0, dead_removed: 0, unreachable_removed: 0, aggregates_replaced: 0, unique_hoisted: 0, int_facts: 0, ssa_functions: 0, ssa_changed: 0, ssa_moves: 0, ssa_fresh: 0, instructions_before: 0, instructions_after: 0, reduced: 0, reductions_declined: 0, reductions: [String]{}, stepped: 0, steps_declined: 0, factors: 0, factors_declined: 0, steps: [String]{}, dumps: [String]{}, lint: [IRLintFinding]{}}
 }
 
 ir_opt_report_text: fn(r: IROptReport) -> String Never! {
@@ -164,6 +166,7 @@ ir_opt_report_text: fn(r: IROptReport) -> String Never! {
 
 ir_opt_report_add: fn(total: &IROptReport, part: IROptReport) Never! {
     total.inlined_calls += part.inlined_calls
+    loop row in part.inlines -> total.inlines.push(row.copy())
     total.direct_calls += part.direct_calls
     total.folded += part.folded
     total.branches_folded += part.branches_folded

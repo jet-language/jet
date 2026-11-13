@@ -1474,6 +1474,13 @@ channel, or a parallel worker, or that is pinned `#Shared`, is kept in
 synchronized storage, for example `storage form: main.jet:3 in run: pending:
 Signal<Int> synchronized for task crossing`. `#Local` locks the one-thread
 form; a crossing then fails the build with E1102, which names the crossing.
+Inlining: for a program with a `run: fn`, each call site the optimizer inlined
+as `jet build` optimizes it (the profile's level and the build option flags,
+so `--inline=off` and `--optimize=none` list none), at the call's line, with
+why it was taken: its size within the level's callee limit and the caller's
+remaining budget, its only call, or `marked #Inline(Always)`.
+`#Inline(Always)` locks the callee inlined; a change that makes it recursive,
+address-taken, or too large fails the build (E0917-E0919).
 JSON uses the `inspect.choices` status with `kinds` and one `choices` row
 (kind, file, line, function, choice) per choice.
 
