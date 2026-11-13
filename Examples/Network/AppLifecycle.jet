@@ -1,0 +1,81 @@
+// A web app over a database pool has one lifecycle order: the pool is ready
+// before the listener binds, shutdown stops admission before the pool
+// drains, a handler still blocked when the shutdown grace runs out is
+// reported cancelled and sends nothing, and the pool closes last, once that
+// handler gives its lease back.
+package: {
+    name: "app_lifecycle"
+    authority: { allow: [DB, FS.Read, IO, Mem.Alloc, Net, Time] }
+}
+
+use {
+    db: core.db
+    http_server: core.http.server
+    net: core.net
+    time: core.time
+    web: core.web
+}
+
+// The handler holds the pool's one connection well past the shutdown grace.
+place_order: fn(pool: DBPool) -> HTTPResponse HTTPError! {
+    lease: pool.acquire(deadline: 1s) ?? return Ok(http_server.response(503, "no connection"))
+    time.sleep(500ms)
+    lease.close() ?? return Ok(http_server.response(500, "lease"))
+    Ok(http_server.response(200, "ordered"))
+}
+
+// What the client reads until the server closes the connection.
+read_all: fn(stream: TCPStream) -> String {
+    parts := [String]{}
+    loop {
+        part: stream.read_text(8192) ?? break
+        if part == "" -> break
+        parts.push(part)
+    }
+    parts.join("")
+}
+
+run: fn() (HTTPError | NetError | TaskFailure)! {
+    // A pool whose store can't open is not ready, so nothing binds.
+    missing: db.pool("missing-dir/orders.sqlite", max: 1) ?? panic("pool")
+    print("store missing, pool ready: {missing.ready() ?? false}")
+    _: missing.drain() ?? panic("drain")
+
+    pool: db.pool(":memory:", max: 1) ?? panic("pool")
+    if !(pool.ready() ?? false) -> panic("the pool is not ready")
+    print("1. pool ready before bind")
+
+    app: web.app().get("/order", fn(_req: HTTPRequest) { place_order(pool.copy()) })
+    listening: app.bind("127.0.0.1:0")
+    addr: listening.local_addr()
+    serving: task { listening.serve() ?? panic("serve") }
+    client: net.tcp_connect(addr)
+    crlf: String.from_bytes([U8]{13, 10}) ?? panic("CRLF")
+    client.write_all("GET /order HTTP/1.1{crlf}Host: local{crlf}{crlf}".bytes())
+    polls := 0
+    loop pool.receipt().leased == 0 && polls < 400 {
+        time.sleep(5ms)
+        polls = polls + 1
+    }
+    print("2. a handler holds {pool.receipt().leased} lease")
+
+    // Shutdown stops admission and waits at most its grace for the handler.
+    report: listening.shutdown(50ms)
+    serving.join()
+    print("3. admission stopped: accepted {report.accepted}, completed {report.completed}, cancelled {report.cancelled}")
+
+    // The pool drains only after admission stopped; a bounded drain while the
+    // handler still holds its lease fails, and says why.
+    if pool.drain(deadline: 20ms) == {
+        .Ok(_) -> print("4. pool drained while a lease was out")
+        .Err(_) -> print("4. pool drain within 20ms refused: {pool.receipt().leased} lease still out")
+    }
+
+    response: read_all(client)
+    answered: response.contains("200")
+    print("5. the cancelled handler's response was sent: {answered}")
+
+    closed: pool.drain(deadline: 2s) ?? panic("drain")
+    print("6. {closed}")
+    print("7. closed")
+}

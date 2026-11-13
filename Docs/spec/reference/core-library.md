@@ -1622,10 +1622,12 @@ test's `#Test(faults: [Net.Accept])` schedule fails an accept as a broken
 listener does, so a test can drive that end.
 A connection's request is shielded from cancellation (`#Shield`), so a
 delivered signal, which cancels every task, stops accepting while the
-requests in flight are answered. Once accepting stops, `serve` waits up to one
-connection deadline for the connections in flight before it reports;
-connections still open then count as `cancelled`. Every caller of `serve` and
-`shutdown` receives the same
+requests in flight are answered. Once accepting stops, `serve` waits for the
+connections in flight before it reports: up to the `shutdown` grace when
+`shutdown` stopped it, else up to one connection deadline. Connections still
+open then count as `cancelled`, and one whose handler is still running never
+sends its response: its socket closes when the handler returns. Every caller
+of `serve` and `shutdown` receives the same
 `HTTPShutdownReport{accepted, overloaded, completed, cancelled}`; a second
 `serve` is an `HTTPError.IO`. The connection deadline bounds each
 connection's reads and writes (30 seconds by default).

@@ -6,6 +6,7 @@ Run a lesson from the repository root, for example `jet run Examples/Network/<Le
 
 ## Lessons
 
+- [AppLifecycle](AppLifecycle.jet) — A web app over a database pool: the pool is ready before the listener binds, shutdown stops admission before the pool drains, a handler still blocked when the shutdown grace runs out is cancelled and sends nothing, and the pool closes last.
 - [DNSLookup](DNSLookup.jet) — DNS PTR + well-known service port table (core.net).
 - [IPPublicDestination](IPPublicDestination.jet) — Reachable versus safe to fetch.
 - [IPSpecialProfile](IPSpecialProfile.jet) — IANA IPv4 Special-Purpose Address Space, updated 2025-10-09.

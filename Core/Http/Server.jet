@@ -258,6 +258,9 @@ __route_stop: fn(code: String, message: String, at: SourceLocation) -> Never {
 
 // `live` counts the connections being served and `peers` how many of them
 // each peer address holds; each connection's task gives its count back.
+// `grace_ns` is the drain budget `shutdown` set (-1 until it does), and
+// `drained` marks that budget run out: a connection whose handler is still
+// running then never sends its response.
 __HTTPServerState: struct {
     phase: Int
     stopping: Bool
@@ -265,6 +268,8 @@ __HTTPServerState: struct {
     live: Int{0}
     completed: Int{0}
     peers: [String: Int]{}
+    grace_ns: Int{-1}
+    drained: Bool{false}
 }
 
 /// A bound listener and its mux. `serve` answers connections until
@@ -341,13 +346,12 @@ HTTPServer: struct {
             }
         }
         #Shield {
-            budget: if self.__deadline == .Val(limit) -> limit.ns else -> C_IO_NS
-            drain_end: rt.clock_mono_ns() + budget
+            drain_end: rt.clock_mono_ns() + __drain_budget(self.__state, self.__deadline)
             loop __live(self.__state) > 0 && rt.clock_mono_ns() < drain_end {
                 core.tasks.sleep(C_DRAIN_POLL_MS)
             }
         }
-        report: HTTPShutdownReport{accepted: accepted, overloaded: overloaded, completed: __completed(self.__state), cancelled: __live(self.__state)}
+        report: __drain_close(self.__state, accepted, overloaded)
         __server_finish(self, report)
         __server_signal_done(self.__done).drop("the server holds its own finish end")
         if failure == .Val(error) -> return Err(error)
@@ -358,10 +362,10 @@ HTTPServer: struct {
         self.serve()
     }
 
-    // `serve` answers the connections in flight before it reports, and
-    // shutdown waits for that report; the grace period defaults to none.
+    // `serve` answers the connections in flight before it reports, for at
+    // most `grace` (none by default), and shutdown waits for that report.
     shutdown: fn(self, grace: Duration{0ms}) -[Net]> HTTPShutdownReport HTTPError! {
-        phase: __server_request_stop(self)
+        phase: __server_request_stop(self, grace)
         if phase == 0 -> return Ok(HTTPShutdownReport{accepted: 0, overloaded: 0, completed: 0, cancelled: 0})
         if phase == 1 {
             _: self.__finished.receive() ?? 0
@@ -395,10 +399,36 @@ __server_finish: fn(server: HTTPServer, report: HTTPShutdownReport) Never! {
     guard.value.report = Val(report)
 }
 
-__server_request_stop: fn(server: HTTPServer) -> Int Never! {
+__server_request_stop: fn(server: HTTPServer, grace: Duration) -> Int Never! {
     guard := server.__state.guard_edit()
     guard.value.stopping = true
+    guard.value.grace_ns = if grace.ns < 0 -> 0 else -> grace.ns
     guard.value.phase
+}
+
+// How long serving waits for the connections in flight once accepting
+// stops: the grace `shutdown` gave, else (a cancelled accept: the serving
+// task's cancel or a delivered signal) one connection deadline.
+__drain_budget: fn(state: Shared<__HTTPServerState>, deadline: Duration?) -> Int Never! {
+    guard: state.guard_read()
+    if guard.value.grace_ns >= 0 -> return guard.value.grace_ns
+    if deadline == .Val(limit) -> limit.ns else -> C_IO_NS
+}
+
+// The drain's end: the connections still open are cancelled, and from now
+// on one whose handler returns sends nothing (__drain_ended).
+__drain_close: fn(state: Shared<__HTTPServerState>, accepted: Int, overloaded: Int) -> HTTPShutdownReport Never! {
+    guard := state.guard_edit()
+    guard.value.drained = true
+    HTTPShutdownReport{accepted: accepted, overloaded: overloaded, completed: guard.value.completed, cancelled: guard.value.live}
+}
+
+// Whether the drain of `server` (None: a lone `serve_once` connection, which
+// no drain ends) ran out before this connection's handler returned.
+__drain_ended: fn(server: Shared<__HTTPServerState>?) -> Bool Never! {
+    state: server ?? return false
+    guard: state.guard_read()
+    guard.value.drained
 }
 
 __server_report: fn(server: HTTPServer) -> HTTPShutdownReport Never! {
@@ -429,7 +459,7 @@ __admit: fn(state: Shared<__HTTPServerState>, peer: String) -> Bool Never! {
 // request finish and the count reach the drain.
 __serve_admitted: fn(state: Shared<__HTTPServerState>, handoff: Shared<[TCPStream]>, peer: String, tls: HTTPServerTLS?, mux: HTTPMux, deadline: Duration?) Never! -[Net, FS.Read, Time]> {
     #Shield {
-        answered: __serve_taken(handoff, tls, mux, deadline)
+        answered: __serve_taken(state, handoff, tls, mux, deadline)
         guard := state.guard_edit()
         guard.value.live = guard.value.live - 1
         if answered -> guard.value.completed = guard.value.completed + 1
@@ -443,10 +473,10 @@ __serve_admitted: fn(state: Shared<__HTTPServerState>, handoff: Shared<[TCPStrea
 }
 
 // The handed-off stream's handshake and request; true when it was answered.
-__serve_taken: fn(handoff: Shared<[TCPStream]>, tls: HTTPServerTLS?, mux: HTTPMux, deadline: Duration?) -[Net, FS.Read, Time]> Bool Never! {
+__serve_taken: fn(state: Shared<__HTTPServerState>, handoff: Shared<[TCPStream]>, tls: HTTPServerTLS?, mux: HTTPMux, deadline: Duration?) -[Net, FS.Read, Time]> Bool Never! {
     stream: __taken_stream(handoff) ?? return false
     conn: __accept_conn(stream, tls, deadline) ?? return false
-    __serve_connection(conn, mux, deadline)
+    __serve_connection(conn, mux, deadline, Val(state))
 }
 
 // A connection over the limits: a plain one is told 503, then closed.
@@ -519,7 +549,7 @@ __serve_once: fn(listener: TCPListener, mux: HTTPMux) HTTPError! -[Net, FS.Read,
         if __accept_timed_out(err) -> return Err(.IO{operation: "HTTP serve_once accept timed out"})
         return Err(.IO{operation: "accept: {err}"})
     }
-    _: __serve_connection(__HTTPConn{tcp: Val(stream), tls: None}, mux, None)
+    _: __serve_connection(__HTTPConn{tcp: Val(stream), tls: None}, mux, None, None)
     Ok()
 }
 
@@ -1330,8 +1360,10 @@ __accept_conn: fn(stream: &&TCPStream, tls: HTTPServerTLS?, deadline: Duration?)
 
 // Whether the connection's request was answered by the mux. A request the
 // handler upgraded to a WebSocket gets no HTTP response, and its socket is
-// left to the upgraded connection rather than closed here.
-__serve_connection: fn(stream: __HTTPConn, mux: HTTPMux, deadline: Duration?) -[Net, FS.Read, Time]> Bool Never! {
+// left to the upgraded connection rather than closed here. When the drain of
+// `server` ran out while the handler ran, the connection was reported
+// cancelled, so its response is not sent and the socket just closes.
+__serve_connection: fn(stream: __HTTPConn, mux: HTTPMux, deadline: Duration?, server: Shared<__HTTPServerState>?) -[Net, FS.Read, Time]> Bool Never! {
     budget: if deadline == .Val(limit) -> limit.ns else -> C_IO_NS
     wire := __HTTPWire{buffer: [U8]{}, end_ns: rt.clock_mono_ns() + budget}
     answered := false
@@ -1351,7 +1383,7 @@ __serve_connection: fn(stream: __HTTPConn, mux: HTTPMux, deadline: Duration?) -[
             upgraded = http.__upgraded(cell)
             if upgraded {
                 answered = true
-            } else {
+            } else if !__drain_ended(server) {
                 bytes: __response_wire(request.method, reply) ?? __error_wire(500)
                 answered = __send(stream, bytes, rt.clock_mono_ns() + budget)
             }
