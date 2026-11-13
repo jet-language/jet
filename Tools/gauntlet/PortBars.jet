@@ -19,7 +19,12 @@
 //
 // A tool entry (Tools/gauntlet/entries/<name>/entry.json, "mode": "tool")
 // names the original as `tool.original` and its Jet twin as `tool.jet`, with
-// the fixtures and parity cases Tools/agent/ScriptPairing.jet describes. Each
+// the fixtures and parity cases Tools/agent/ScriptPairing.jet describes. When
+// a side's program is a driver that runs another repository program (`jet
+// run X.jet`, a JavaScript `import('…')` of the real tool), the entry names
+// those programs in `tool.programs` (`{"original": [...], "jet": [...]}`,
+// repository paths, each in its side's language), and the tokens and
+// reasoning bars measure them as part of that side (SOURCE RULES). Each
 // entry is judged against its own original only. Performance ranks first:
 // the job, wall time and peak memory decide a switch, with the reasoning bar
 // beside them; source tokens are minimized, measured and reported, but never
@@ -89,15 +94,17 @@
 // A Jet program's `#Test(…) {…}` blocks are its proof, not
 // its program: neither the tokens nor the proxies count them.
 //
-// SOURCE RULES. Both bars measure a program, not one file: the program's
-// file, then every repository module it imports, transitively and once each,
-// counted by the same rules. A module counts when its import names it
+// SOURCE RULES. Both bars measure a program, not one file: its roots (the
+// program's file, then each of the side's `tool.programs`), then every
+// repository module they import, transitively and once each, counted by the
+// same rules. A module counts when its import names it
 // relative to the importing file and it resolves to a file inside the
 // repository: JavaScript `import … from './x.mjs'` (or '../…'); a shell
 // `. "$(dirname "$0")/x.sh"` or `source` line; Python `from .x import …`;
 // Jet `use name: "Module"` (`Module.jet` beside the file). A Jet package path
 // dependency (`deps: { kit: ../kit, }` in the file's inline `package:` block)
-// counts each file of the package's Source directory that declares a name the
+// counts each file of the package's sources (its Source directory, else the
+// package directory itself) that declares a name the
 // file's `use` lines take from it (`kit.[a, b]`, `kit.a`), then each file
 // there declaring a name such a counted file refers to (`references`: a word,
 // in its code or in the code its string literals interpolate, not written
@@ -105,7 +112,9 @@
 // itself, so a local, parameter, field label, loop variable, lambda parameter
 // or pattern binding refers to nothing there); a counted
 // package file reaches the path dependencies of its own package.jet the same
-// way. Core, Node built-ins and installed packages are never counted. The
+// way. A Jet root in a package directory (one holding a package.jet) is a
+// file of that package: its package mates count as a counted package file's
+// do. Core, Node built-ins and installed packages are never counted. The
 // tokens bar counts every token of these files; the proxies count only what
 // the REACH RULES keep of them.
 //
@@ -122,8 +131,8 @@
 // (`Type.name:`, or an `impl Type {…}` block), is an import that reaches
 // nothing (Jet `use`, JavaScript `import` and `export {…}`, Python `import`
 // and `from`), or is code that runs where it stands. The program reaches its
-// code that runs where it stands and, in Jet, its file's `run` and `main`
-// (every definition of the file when it has neither); then, transitively,
+// code that runs where it stands and, in Jet, each root's `run` and `main`
+// (every definition of a root that has neither); then, transitively,
 // every definition a reached one names, in its code or in the code its
 // string literals interpolate (Jet `{…}`, a JavaScript template's `${…}`, a
 // Python f-string's `{…}`): by `references` in Jet, by any word not written
@@ -267,6 +276,8 @@ Entry: struct {
     cases: [Case]
     // What closes the token gap: Core API criteria and syntax ballots.
     token_gaps: [String]
+    // Each side's `tool.programs`: the repository programs its driver runs.
+    programs: [[String]]
     problems: [String]
 }
 
@@ -354,7 +365,7 @@ keys_of: fn(tree: Dyn) -> [String] Never! {
 // being judged.
 read_entry: fn(repo: String, name: String) -[FS]> Entry Never! {
     dir: "{ENTRIES_ROOT}/{name}"
-    entry := Entry{name: name.copy(), dir: dir.copy(), original: "", twin: "", fixtures: "", cases: [Case]{}, token_gaps: [String]{}, problems: [String]{}}
+    entry := Entry{name: name.copy(), dir: dir.copy(), original: "", twin: "", fixtures: "", cases: [Case]{}, token_gaps: [String]{}, programs: [[String]]{[String]{}, [String]{}}, problems: [String]{}}
     text: files.read(files.join(repo, "{dir}/entry.json")) ?? {
         entry.problems.push("`{dir}/entry.json` cannot be read: {err}")
         return entry
@@ -375,6 +386,23 @@ read_entry: fn(repo: String, name: String) -[FS]> Entry Never! {
         loop gap in gaps {
             named: if gap == .Text(written) -> written.copy() else -> ""
             if named.starts_with("D-") || (named.starts_with("#") && named.contains(" c")) -> entry.token_gaps.push(named) else -> entry.problems.push("its `tool.token_gaps` holds {json.dumps(gap) ?? "a value"}, not a criterion (\"#5072 c36\") or a ballot (\"D-SH-RUN1\")")
+        }
+    }
+    programs: field(tool, "programs")
+    loop key in keys_of(programs) {
+        if !SIDES.contains(key) -> entry.problems.push("`tool.programs.{key}` is not `original` or `jet`")
+    }
+    loop side in 0..<SIDES.len() {
+        named: if field(programs, SIDES[side]) == .Array(items) -> items.copy() else -> [Dyn]{}
+        loop item in named {
+            path: if item == .Text(written) -> written.copy() else -> ""
+            language: language_at(repo, path)
+            if {
+                path == "" || !files.is_file(files.join(repo, path)) -> entry.problems.push("its `tool.programs.{SIDES[side]}` names {json.dumps(item) ?? "a value"}, not a repository file")
+                side == 0 && language != language_at(repo, entry.original) -> entry.problems.push("its `tool.programs.original` names `{path}`, not in the original's language")
+                side == 1 && language != Val(Language.Jet) -> entry.problems.push("its `tool.programs.jet` names `{path}`, not a Jet program")
+                else -> entry.programs[side].push(path)
+            }
         }
     }
     listed: if field(tool, "cases") == .Array(items) -> items.copy() else -> [Dyn]{}
@@ -951,12 +979,15 @@ language_of: fn(path: String, first_line: String) -> Language? Never! {
 
 // ---- sources ----
 
-// A program as the token and proxy bars measure it (SOURCE RULES): its file,
-// then each repository module it imports, transitively and once each, with
-// the token count of each file and the namespace imports of its files
+// A program as the token and proxy bars measure it (SOURCE RULES): its roots
+// (the program's file, then the programs it runs that its entry names), then
+// each repository module they import, transitively and once each, with the
+// token count of each file and the namespace imports of its files
 // (`namespace_aliases`).
 Program: struct {
     paths: [String]
+    // How many of `paths`, from the first, are roots.
+    roots: Int
     counts: [Int]
     tokens: [Token]
     aliases: [String]
@@ -1115,7 +1146,7 @@ declared: fn(text: String) -> [String] Never! {
 // The files of the package at `dir`'s Source directory that declare one of
 // `wanted`, in name order.
 package_sources: fn(repo: String, dir: String, wanted: [String]) -[FS]> [String] Never! {
-    source: "{dir}/Source"
+    source: if files.is_dir(files.join(repo, "{dir}/Source")) -> "{dir}/Source" else -> dir
     listed: files.list_dir(files.join(repo, source)) ?? return [String]{}
     out := [String]{}
     loop item in listed {
@@ -1227,11 +1258,16 @@ references: fn(list: [Token], start: Int, end: Int, inner: [Token]) -> [String] 
     out
 }
 
-// The program at `path` in `repo`, written in `language`.
-program: fn(repo: String, path: String, language: Language) -[FS]> Program Never! {
-    found := Program{paths: [String]{path.copy()}, counts: [Int]{}, tokens: [Token]{}, aliases: [String]{}}
-    // The package directory each path belongs to, "" for none.
-    owners := [String]{""}
+// The program whose roots are `roots` in `repo`, written in `language`.
+program: fn(repo: String, roots: [String], language: Language) -[FS]> Program Never! {
+    found := Program{paths: roots.copy(), roots: roots.len(), counts: [Int]{}, tokens: [Token]{}, aliases: [String]{}}
+    // The package directory each path belongs to, "" for none: a Jet root's
+    // own directory when it holds a package.jet.
+    owners := [String]{}
+    loop root in roots {
+        dir: files.dirname(root)
+        owners.push(if language == .Jet && files.is_file(files.join(repo, "{dir}/package.jet")) -> dir else -> "")
+    }
     index := 0
     loop index < found.paths.len() {
         file: found.paths[index].copy()
@@ -1470,11 +1506,12 @@ reached_tokens: fn(found: Program, language: Language) -> [Token] Never! {
     }
     // "file\tname" for each name a file declares.
     own := [String: Bool]{}
-    // Whether the program's own file declares one of JET_ENTRIES.
-    entered := false
+    // Whether each root declares one of JET_ENTRIES.
+    entered := [Bool]{}
+    loop entered.len() < found.roots -> entered.push(false)
     loop item in all {
         if item.name != "" && item.owner == "" -> own["{item.file}\t{item.name}"] = true
-        if item.file == 0 && item.owner == "" && JET_ENTRIES.contains(item.name) -> entered = true
+        if item.file < found.roots && item.owner == "" && JET_ENTRIES.contains(item.name) -> entered[item.file] = true
     }
     // The names reached code writes: "file\tname" when that file declares
     // the name, the bare name when it does not, and every bare name in
@@ -1492,7 +1529,7 @@ reached_tokens: fn(found: Program, language: Language) -> [Token] Never! {
         loop item in all {
             if kept[item.start] || item.inert -> next
             runs: item.name == "" && item.owner == ""
-            entry: language == .Jet && item.file == 0 && item.owner == "" && (!entered || JET_ENTRIES.contains(item.name))
+            entry: language == .Jet && item.file < found.roots && item.owner == "" && (!entered[item.file] || JET_ENTRIES.contains(item.name))
             called: item.owner == "" && (named.has_key("{item.file}\t{item.name}") || anywhere.has_key(item.name))
             method: item.owner != "" && written.has_key(item.owner) && (item.name == "" || members.has_key(item.name))
             if !(runs || entry || called || method) -> next
@@ -2013,6 +2050,18 @@ reasoning_bar: fn(path: String, review: Review?, original: Proxies, twin: Proxie
 
 first_line: fn(text: String) -> String Never! { text.partition("\n").head.copy() }
 
+// The language of the program at `path` in `repo`, by its extension or `#!`
+// line (`language_of`).
+language_at: fn(repo: String, path: String) -[FS]> Language? Never! {
+    language_of(path, first_line(files.read(files.join(repo, path)) ?? ""))
+}
+
+// The roots of side `side` of `entry`: its program, then its `tool.programs`.
+roots_of: fn(entry: Entry, side: Int) -> [String] Never! {
+    own: if side == 0 -> entry.original.copy() else -> entry.twin.copy()
+    [String]{own}.concat(entry.programs[side])
+}
+
 // Where side `side` runs case `index` of entry `name`.
 case_dir: fn(work: String, name: String, index: Int, side: Int) -> String Never! { files.join(work, "{name}/case-{index + 1}-{SIDES[side]}") }
 
@@ -2082,11 +2131,10 @@ judge: fn(repo: String, name: String, jet: String, runs: Int, work: String) -[En
     }
     report.bars.push(speed_bar(wall_original, wall_jet, peak_original, peak_jet, problems))
 
-    original_text: files.read(files.join(repo, entry.original)) ?? ""
-    language: language_of(entry.original, first_line(original_text))
+    language: language_at(repo, entry.original)
     unmeasured: if language == None -> "no token or proxy rule for the original `{entry.original}`'s language" else -> ""
-    original: program(repo, entry.original, language ?? .Shell)
-    twin: program(repo, entry.twin, .Jet)
+    original: program(repo, roots_of(entry, 0), language ?? .Shell)
+    twin: program(repo, roots_of(entry, 1), .Jet)
     record: "{entry.dir}/{REVIEW_FILE}"
     original_proxies: proxies(reached_tokens(original, language ?? .Shell), language ?? .Shell)
     report.bars.push(reasoning_bar(record, review_at(repo, record), original_proxies, proxies(reached_tokens(twin, .Jet), .Jet), unmeasured))
@@ -2107,9 +2155,8 @@ measure_lines: fn(repo: String, name: String) -[FS]> [String] Never! {
         entry.problems = [String]{}
     }
     if entry.problems.len() > 0 -> return [String]{"{name}\t-\t-\t-\t-\tcannot be measured: {entry.problems.join("; ")}"}
-    original_text: files.read(files.join(repo, entry.original)) ?? ""
-    language: language_of(entry.original, first_line(original_text)) ?? return [String]{"{name}\t-\t-\t-\t-\tno token or proxy rule for the original `{entry.original}`'s language"}
-    sides: [Program]{program(repo, entry.original, language), program(repo, entry.twin, .Jet)}
+    language: language_at(repo, entry.original) ?? return [String]{"{name}\t-\t-\t-\t-\tno token or proxy rule for the original `{entry.original}`'s language"}
+    sides: [Program]{program(repo, roots_of(entry, 0), language), program(repo, roots_of(entry, 1), .Jet)}
     languages: [Language]{language, .Jet}
     out := [String]{}
     loop side in 0..<2 {
@@ -2257,21 +2304,21 @@ run: fn() {
     plant(dir, "Tools/fx/pkg/tool.py", "from .util import go\nfrom . import extra\ngo()\n")
     plant(dir, "Tools/fx/pkg/util.py", "def go():\n    if True:\n        pass\n")
     plant(dir, "Tools/fx/pkg/extra.py", "x = 1\n")
-    javascript: program(dir, "Tools/fx/a.mjs", .JavaScript)
+    javascript: program(dir, ["Tools/fx/a.mjs"], .JavaScript)
     assert_eq(javascript.paths, ["Tools/fx/a.mjs", "Tools/fx/b.mjs", "Tools/fy/c.mjs"])
     each := 0
     loop path in javascript.paths -> each += tokens(files.read(files.join(dir, path)) ?? "", .JavaScript).len()
     assert_eq(javascript.tokens.len(), each)
     assert_eq(javascript.counts.len(), 3)
     assert_eq(proxies(javascript.tokens, .JavaScript), Proxies{branches: 2, depth: 0})
-    shell: program(dir, "Tools/fx/run.sh", .Shell)
+    shell: program(dir, ["Tools/fx/run.sh"], .Shell)
     assert_eq(shell.paths, ["Tools/fx/run.sh", "Tools/roots.sh"])
     assert_eq(proxies(shell.tokens, .Shell), Proxies{branches: 1, depth: 1})
-    twin: program(dir, "Tools/fx/Twin.jet", .Jet)
+    twin: program(dir, ["Tools/fx/Twin.jet"], .Jet)
     assert_eq(twin.paths, ["Tools/fx/Twin.jet", "Tools/fx/Helper.jet"])
     assert_eq(twin.counts[1], without_tests(tokens(files.read(files.join(dir, "Tools/fx/Helper.jet")) ?? "", .Jet)).len())
     assert_eq(proxies(twin.tokens, .Jet), Proxies{branches: 1, depth: 0})
-    python: program(dir, "Tools/fx/pkg/tool.py", .Python)
+    python: program(dir, ["Tools/fx/pkg/tool.py"], .Python)
     assert_eq(python.paths, ["Tools/fx/pkg/tool.py", "Tools/fx/pkg/util.py", "Tools/fx/pkg/extra.py"])
     assert_eq(normalized("Tools/fx/../../../x.mjs"), "")
     files.remove_all(dir) ?? ()
@@ -2287,7 +2334,7 @@ run: fn() {
     plant(dir, "Tools/kit/Source/B.jet", "beta: fn() -> Int {{ 2 }}\n")
     plant(dir, "Tools/kit/Source/C.jet", "gamma: fn() -> Int {{ 3 }}\n")
     plant(dir, "Tools/fx/twin/run.jet", "package: {{\n    name: \"twin\"\n    version: \"0.0.1\"\n    deps: {{\n        kit: ../../kit,\n    }}\n}}\n\nuse {{\n    kit.[alpha]\n    math: core.math\n}}\n\nrun: fn() {{ print(alpha()) }}\n")
-    twin: program(dir, "Tools/fx/twin/run.jet", .Jet)
+    twin: program(dir, ["Tools/fx/twin/run.jet"], .Jet)
     assert_eq(twin.paths, ["Tools/fx/twin/run.jet", "Tools/kit/Source/A.jet", "Tools/kit/Source/B.jet", "Tools/base/Source/D.jet"])
     assert_eq(package_names("use {{\n    kit.[alpha, beta]\n    one: kit.gamma\n}}\nuse kit.delta\n", "kit"), ["alpha", "beta", "gamma", "delta"])
     files.remove_all(dir) ?? ()
@@ -2300,7 +2347,7 @@ run: fn() {
     loop name in ["beta", "gamma", "delta", "epsilon", "zeta", "eta", "iota", "kappa"] -> plant(dir, "Tools/kit/Source/{name}.jet", "{name}: fn() -> Int {{ 1 }}\n")
     plant(dir, "Tools/kit/Source/theta.jet", "Theta: struct {{ kappa: Int }}\n")
     plant(dir, "Tools/fx/twin/run.jet", "package: {{\n    name: \"twin\"\n    version: \"0.0.1\"\n    deps: {{\n        kit: ../../kit,\n    }}\n}}\n\nuse kit.[alpha]\n\nrun: fn() {{ print(alpha(None, 1)) }}\n")
-    assert_eq(program(dir, "Tools/fx/twin/run.jet", .Jet).paths, ["Tools/fx/twin/run.jet", "Tools/kit/Source/A.jet", "Tools/kit/Source/theta.jet", "Tools/kit/Source/zeta.jet"])
+    assert_eq(program(dir, ["Tools/fx/twin/run.jet"], .Jet).paths, ["Tools/fx/twin/run.jet", "Tools/kit/Source/A.jet", "Tools/kit/Source/theta.jet", "Tools/kit/Source/zeta.jet"])
     files.remove_all(dir) ?? ()
 }
 
@@ -2313,11 +2360,11 @@ run: fn() {
     package: "package: {{\n    name: \"fx\"\n    version: \"0.0.1\"\n    deps: {{\n        kit: ../../kit,\n    }}\n}}\n\n"
     plant(dir, "Tools/fx/leaf/run.jet", "{package}use kit.[leaf, Box]\n\nrun: fn() {{\n    print(leaf(1) + Box{{w: 2}}.area())\n}}\n\nspare: fn(a: Int) -> Int {{\n    if a > 0 && a < 2 -> 1 else -> 0\n}}\n")
     plant(dir, "Tools/fx/gate/run.jet", "{package}use kit.[heavy]\n\nrun: fn() {{\n    print(heavy(3))\n}}\n")
-    leaf: program(dir, "Tools/fx/leaf/run.jet", .Jet)
+    leaf: program(dir, ["Tools/fx/leaf/run.jet"], .Jet)
     assert_eq(leaf.paths, ["Tools/fx/leaf/run.jet", "Tools/kit/Source/Big.jet", "Tools/kit/Source/Shape.jet", "Tools/kit/Source/Gate.jet"])
     assert_eq(proxies(leaf.tokens, .Jet), Proxies{branches: 12, depth: 1})
     assert_eq(proxies(reached_tokens(leaf, .Jet), .Jet), Proxies{branches: 3, depth: 0})
-    gate: program(dir, "Tools/fx/gate/run.jet", .Jet)
+    gate: program(dir, ["Tools/fx/gate/run.jet"], .Jet)
     assert_eq(proxies(reached_tokens(gate, .Jet), .Jet), Proxies{branches: 6, depth: 1})
     files.remove_all(dir) ?? ()
 }
@@ -2327,13 +2374,13 @@ run: fn() {
     plant(dir, "Tools/fo/main.mjs", "import * as util from './util.mjs';\nimport {{ used }} from './lib.mjs';\n\nfunction dead(x) {{\n  if (x) {{\n    return 1;\n  }}\n  return x ?? 2;\n}}\n\nfunction live(x) {{\n  return x ? 1 : 2;\n}}\n\nif (process.argv.length > 2) live(used(util.pick(1)));\n")
     plant(dir, "Tools/fo/util.mjs", "export function pick(x) {{\n  return x || 0;\n}}\n\nexport function other(x) {{\n  return x && 1;\n}}\n")
     plant(dir, "Tools/fo/lib.mjs", "export function used(x) {{\n  return x ?? 0;\n}}\n\nexport const spare = (y) => y ?? 1;\n")
-    javascript: program(dir, "Tools/fo/main.mjs", .JavaScript)
+    javascript: program(dir, ["Tools/fo/main.mjs"], .JavaScript)
     assert_eq(proxies(javascript.tokens, .JavaScript), Proxies{branches: 8, depth: 1})
     assert_eq(proxies(reached_tokens(javascript, .JavaScript), .JavaScript), Proxies{branches: 4, depth: 0})
     plant(dir, "Tools/fp/tool.py", "from . import helpers\nfrom .shared import used\n\n\ndef dead(x):\n    if x:\n        return 1\n\n\ndef main():\n    return helpers.pick(used(1))\n\n\nif __name__ == \"__main__\":\n    main()\n")
     plant(dir, "Tools/fp/helpers.py", "def pick(x):\n    return x or 0\n\n\ndef other(x):\n    return x and 1\n")
     plant(dir, "Tools/fp/shared.py", "def used(x):\n    if x:\n        return x\n    return 0\n")
-    python: program(dir, "Tools/fp/tool.py", .Python)
+    python: program(dir, ["Tools/fp/tool.py"], .Python)
     assert_eq(proxies(python.tokens, .Python), Proxies{branches: 5, depth: 1})
     assert_eq(proxies(reached_tokens(python, .Python), .Python), Proxies{branches: 3, depth: 1})
     assert_eq(namespace_aliases("import * as u from './u.mjs';\nimport * as fs from 'node:fs';\n", .JavaScript), ["u"])
@@ -2341,7 +2388,7 @@ run: fn() {
     assert_eq(namespace_aliases("use {{\n    files: core.files\n    roots: \"Roots\"\n}}\nuse kv: \"Store/kv\"\n", .Jet), ["roots", "kv"])
     plant(dir, "Tools/fj/run.jet", "use {{\n    util: \"Util\"\n}}\n\nrun: fn() {{\n    print(util.pick(1))\n}}\n")
     plant(dir, "Tools/fj/Util.jet", "pick: fn(a: Int) -> Int {{\n    if a > 0 -> a else -> 0\n}}\n\nother: fn(a: Int) -> Int {{\n    if a > 1 -> a else -> 1\n}}\n")
-    assert_eq(proxies(reached_tokens(program(dir, "Tools/fj/run.jet", .Jet), .Jet), .Jet), Proxies{branches: 1, depth: 0})
+    assert_eq(proxies(reached_tokens(program(dir, ["Tools/fj/run.jet"], .Jet), .Jet), .Jet), Proxies{branches: 1, depth: 0})
     files.remove_all(dir) ?? ()
 }
 
@@ -2353,13 +2400,13 @@ run: fn() {
     plant(dir, "Tools/kit/package.jet", "name: \"kit\"\nversion: \"0.0.1\"\n")
     plant(dir, "Tools/kit/Source/Gate.jet", "gate: fn(a: Int) -> Int {{\n    if a > 0 && a < 9 -> 1 else -> 0\n}}\n")
     plant(dir, "Tools/fx/said/run.jet", "package: {{\n    name: \"fx\"\n    version: \"0.0.1\"\n    deps: {{\n        kit: ../../kit,\n    }}\n}}\n\nuse kit.[gate]\n\nrun: fn() {{\n    print(\"{{gate(1)}}\")\n}}\n")
-    assert_eq(proxies(reached_tokens(program(dir, "Tools/fx/said/run.jet", .Jet), .Jet), .Jet), Proxies{branches: 2, depth: 0})
+    assert_eq(proxies(reached_tokens(program(dir, ["Tools/fx/said/run.jet"], .Jet), .Jet), .Jet), Proxies{branches: 2, depth: 0})
     plant(dir, "Tools/fo/main.mjs", "import {{ used }} from './lib.mjs';\n\nconsole.log(`${{used(1)}}`);\n")
     plant(dir, "Tools/fo/lib.mjs", "export function used(x) {{\n  return x ?? 0;\n}}\n")
-    assert_eq(proxies(reached_tokens(program(dir, "Tools/fo/main.mjs", .JavaScript), .JavaScript), .JavaScript), Proxies{branches: 1, depth: 0})
+    assert_eq(proxies(reached_tokens(program(dir, ["Tools/fo/main.mjs"], .JavaScript), .JavaScript), .JavaScript), Proxies{branches: 1, depth: 0})
     plant(dir, "Tools/fp/tool.py", "from .shared import used\n\nprint(f\"{{used(1)}}\")\n")
     plant(dir, "Tools/fp/shared.py", "def used(x):\n    if x:\n        return x\n    return 0\n")
-    assert_eq(proxies(reached_tokens(program(dir, "Tools/fp/tool.py", .Python), .Python), .Python), Proxies{branches: 1, depth: 1})
+    assert_eq(proxies(reached_tokens(program(dir, ["Tools/fp/tool.py"], .Python), .Python), .Python), Proxies{branches: 1, depth: 1})
     files.remove_all(dir) ?? ()
 }
 
@@ -2538,6 +2585,27 @@ plant_entry: fn(dir: String, name: String, original: String, twin: String, revie
     plant(dir, "{ENTRIES_ROOT}/lone/entry.json", "{{\"name\": \"lone\"}}\n")
     assert_eq(measure_lines(dir, "sum").map(line -> line.split("\t").take(3).to_list().join(" ")), ["sum original 6", "sum jet 13"])
     assert(measure_lines(dir, "lone")[0].contains("not a tool entry"))
+    files.remove_all(dir) ?? ()
+}
+
+#Test("an entry's `tool.programs` are roots of their side, a Jet root's package mates count when it refers to them, and a bad program is a problem") {
+    dir: work_dir("programs") ?? panic("a scratch directory cannot be made: {err}")
+    plant(dir, "Tools/fx/drive.mjs", "await import('./real.mjs');\n")
+    plant(dir, "Tools/fx/real.mjs", "if (process.argv.length > 2) console.log(3);\n")
+    plant(dir, "Tools/fx/driver.jet", "run: fn() {{ print(3) }}\n")
+    plant(dir, "Tools/fz/package.jet", "name: \"fz\"\nversion: \"0.0.1\"\nedition: \"2026\"\n")
+    plant(dir, "Tools/fz/Run.jet", "run: fn() {{\n    if ready() -> print(3)\n}}\n")
+    plant(dir, "Tools/fz/Mate.jet", "ready: fn() -> Bool {{ true && true }}\n")
+    plant(dir, "Tools/fz/Other.jet", "unused: fn() -> Bool {{ false || true }}\n")
+    plant(dir, "{ENTRIES_ROOT}/driven/entry.json", "{{\"name\": \"driven\", \"mode\": \"tool\", \"tool\": {{\"original\": \"Tools/fx/drive.mjs\", \"jet\": \"Tools/fx/driver.jet\", \"programs\": {{\"original\": [\"Tools/fx/real.mjs\"], \"jet\": [\"Tools/fz/Run.jet\"]}}, \"cases\": [{{\"args\": [], \"expected\": \"expected/three.out\"}}]}}}}\n")
+    plant(dir, "{ENTRIES_ROOT}/driven/expected/three.out", "3\n")
+    rows: measure_lines(dir, "driven")
+    assert_eq(rows.map(line -> line.split("\t").to_list()[3]), ["1", "2"])
+    assert(rows[0].contains("Tools/fx/drive.mjs ") && rows[0].contains("Tools/fx/real.mjs "))
+    assert(rows[1].contains("Tools/fx/driver.jet ") && rows[1].contains("Tools/fz/Run.jet ") && rows[1].contains("Tools/fz/Mate.jet ") && !rows[1].contains("Other.jet"))
+    plant(dir, "{ENTRIES_ROOT}/bad/entry.json", "{{\"name\": \"bad\", \"mode\": \"tool\", \"tool\": {{\"original\": \"Tools/fx/drive.mjs\", \"jet\": \"Tools/fx/driver.jet\", \"programs\": {{\"original\": [\"Tools/fz/Run.jet\", \"Tools/none.mjs\"], \"jet\": [\"Tools/fx/real.mjs\"], \"both\": []}}, \"cases\": [{{\"args\": [], \"expected\": \"expected/three.out\"}}]}}}}\n")
+    plant(dir, "{ENTRIES_ROOT}/bad/expected/three.out", "3\n")
+    assert_eq(read_entry(dir, "bad").problems, ["`tool.programs.both` is not `original` or `jet`", "its `tool.programs.original` names `Tools/fz/Run.jet`, not in the original's language", "its `tool.programs.original` names \"Tools/none.mjs\", not a repository file", "its `tool.programs.jet` names `Tools/fx/real.mjs`, not a Jet program"])
     files.remove_all(dir) ?? ()
 }
 
