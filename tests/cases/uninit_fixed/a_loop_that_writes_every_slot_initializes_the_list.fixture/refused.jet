@@ -1,0 +1,28 @@
+use core.mem
+
+// Each loop can leave a slot unwritten, so each read stays E0420.
+run: fn() {
+    short := [Int#4]{ uninit }
+    loop i in 0..<3 {
+        short[i] = i
+    }
+    print("{short[0]}")
+    cut := [Int#4]{ uninit }
+    loop i in 0..<4 {
+        cut[i] = i
+        if i == 1 -> break
+    }
+    print("{cut[0]}")
+    late := [Int#4]{ uninit }
+    loop i in 0..<4 {
+        if i == 2 -> next
+        late[i] = i
+    }
+    print("{late[0]}")
+    skipped := [Int#4]{ uninit }
+    loop i := 0, i < 4 {
+        skipped[i] = i
+        i += 2
+    }
+    print("{skipped[0]}")
+}

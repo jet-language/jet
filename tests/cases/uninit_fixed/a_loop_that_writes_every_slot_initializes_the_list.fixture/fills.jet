@@ -1,0 +1,27 @@
+use core.mem
+
+// Each loop runs its index from 0 through every slot and writes the slot
+// first on each pass, so each list is written once its loop ends.
+run: fn() {
+    squares := [Int#4]{ uninit }
+    loop i in 0..<4 {
+        squares[i] = i * i
+    }
+    tens := [Int#3]{ uninit }
+    loop i in 0..2 -> tens[i] = 10 + i
+    doubles := [Int#4]{ uninit }
+    loop i := 0, i < 4 {
+        doubles[i] = 2 * i
+        i += 1
+    }
+    counts := [Int#3]{ uninit }
+    j := 0
+    loop j < 3 {
+        counts[j] = 100 + j
+        j += 1
+    }
+    print("{squares[0]} {squares[1]} {squares[2]} {squares[3]}")
+    print("{tens[0]} {tens[1]} {tens[2]}")
+    print("{doubles[0]} {doubles[1]} {doubles[2]} {doubles[3]}")
+    print("{counts[0]} {counts[1]} {counts[2]}")
+}

@@ -1,0 +1,26 @@
+# A fixed `[T#N]{ uninit }` list is written once a loop runs its index from 0
+# through all N slots and writes `list[index]` first on every pass: a range
+# loop (`0..<N` or `0..N-1`), a state loop (`loop i := 0, i < N { … i += 1 }`)
+# and a conditional loop over an index set to 0 just before it. A loop that
+# can skip a slot (too few passes, a `break`, a `next` before the write, a
+# step other than one) leaves the list unwritten, so its read stays E0420.
+fixture: a_loop_that_writes_every_slot_initializes_the_list.fixture
+env: NO_COLOR=1
+step check: jet check fills.jet
+exit: 0
+step o0: jet run --optimize=none fills.jet
+exit: 0
+stdout: = "0 1 4 9\n10 11 12\n0 2 4 6\n100 101 102\n"
+step o1: jet run --optimize=basic fills.jet
+exit: 0
+stdout: = "0 1 4 9\n10 11 12\n0 2 4 6\n100 101 102\n"
+step o2: jet run --optimize=full fills.jet
+exit: 0
+stdout: = "0 1 4 9\n10 11 12\n0 2 4 6\n100 101 102\n"
+step refused: jet check refused.jet
+exit: 1
+stderr: ~ "jet.UninitializedRead" # each skipping loop leaves its list unwritten (E0420)
+stderr: ~ "refused.jet:9:" # a loop with too few passes
+stderr: ~ "refused.jet:15:" # a loop that can break
+stderr: ~ "refused.jet:21:" # a loop with a `next` before the write
+stderr: ~ "refused.jet:27:" # a loop with a step other than one

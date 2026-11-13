@@ -5987,6 +5987,90 @@ sema_stmt_uninit_note_slot_write: fn(state: &SemaOwnershipState, fact: SemaOwner
     sema_ownership_uninit_set(state, SemaOwnershipUninitFact{key: fact.key, name: fact.name, fixed_len: fact.fixed_len, initialized: initialized})
 }
 
+// A loop that writes every slot of a fixed `Type{ uninit }` list: its index
+// starts at 0 and steps by one through `count` passes, and each pass first
+// writes `root[index]`. Once `count` is the list's length, the list is
+// written after the loop.
+sema_stmt_uninit_fill_loop: fn(state: &SemaOwnershipState, scopes: SemaScopeTable, root: String, count: Int) Never! {
+    if state.uninit.len() == 0 -> return
+    binding: sema_scope_resolve_index(scopes, root) ?? return
+    key: scopes.bindings[binding].symbol.id.key
+    filled := false
+    loop fact in state.uninit {
+        if fact.key == key && fact.fixed_len == (Val(count)) -> filled = true
+    }
+    if filled -> _ := sema_ownership_uninit_take(state, key)
+}
+
+// The list a pass writes: `statement` is a plain `root[index] = value` whose
+// value holds no branch or fallback that could leave the pass before the
+// write. When the index is a variable the loop body could change, the value
+// holds no call or lambda either.
+sema_stmt_uninit_fill_write: fn(statement: Stmt, index_name: String, index_mutable: Bool) -> String? {
+    if statement == .Assign(target, op, _, value) {
+        if op != None -> return None
+        leaves := [Bool]{}
+        ast_visit_expr(value, (expression: Expr) -> sema_stmt_uninit_fill_note_exit(leaves, expression, index_mutable))
+        if leaves.len() > 0 -> return None
+        if target == .Index(base, index, _, _) && base == .Ident(root, _, _) && index == .Ident(name, _, _) {
+            if name == index_name && root != index_name -> return Val(root)
+        }
+    }
+    None
+}
+
+sema_stmt_uninit_fill_note_exit: fn(leaves: &[Bool], expression: Expr, calls: Bool) Never! {
+    if expression == .If(_, _, _, _, _, _, _) || expression == .OrFallback(_, _, _, _, _) -> leaves.push(true)
+    if calls && (expression == .Call(_, _) || expression == .MethodCall(_, _, _, _, _, _, _) || expression == .OptMethodCall(_, _, _, _, _, _, _) || expression == .Lambda(_, _)) -> leaves.push(true)
+}
+
+// The pass count of `index < bound` or `index <= bound` from an index that
+// starts at 0.
+sema_stmt_uninit_fill_bound: fn(condition: Expr, index_name: String) -> Int? {
+    if condition == .Binary(op, left, right, _, _) && left == .Ident(name, _, _) && right == .Int(bound, _, _, _, _) && name == index_name {
+        if op == BinOp.Lt -> return Val(bound)
+        if op == BinOp.Le -> return Val(bound + 1)
+    }
+    None
+}
+
+// `loop index in 0..<count { root[index] = value … }`: the index is fixed
+// for each pass, and no `break` cuts the passes short.
+sema_stmt_uninit_fill_range: fn(state: &SemaOwnershipState, scopes: SemaScopeTable, index_name: String, start: Expr, end: Expr, step: Expr?, exclusive: Bool, body: [Stmt]) Never! {
+    if state.uninit.len() == 0 || step != None || body.len() == 0 -> return
+    if start == .Int(first, _, _, _, _) && end == .Int(last, _, _, _, _) && first == 0 {
+        if sema_stmt_refutable_loop_body_can_break(body) -> return
+        root: sema_stmt_uninit_fill_write(body[0], index_name, false) ?? return
+        sema_stmt_uninit_fill_loop(state, scopes, root, if exclusive -> last else -> last + 1)
+    }
+}
+
+// `loop index := 0; index < count; index += 1 { root[index] = value }`, and
+// the same loop as `index := 0` then `loop index < count { root[index] =
+// value; index += 1 }`: the body is only the write (and the step), so the
+// index changes nowhere else.
+sema_stmt_uninit_fill_counted: fn(state: &SemaOwnershipState, scopes: SemaScopeTable, start: Binding, condition: Expr, step: Stmt?, body: [Stmt]) Never! {
+    if state.uninit.len() == 0 -> return
+    if start.pattern == None && start.init == .Int(first, _, _, _, _) && first == 0 {
+        count: sema_stmt_uninit_fill_bound(condition, start.name) ?? return
+        passes := 1
+        if step == None -> passes = 2
+        if body.len() != passes -> return
+        stepped: if step == .Val(given) -> sema_stmt_uninit_fill_steps(given, start.name) else -> sema_stmt_uninit_fill_steps(body[1], start.name)
+        if !stepped -> return
+        root: sema_stmt_uninit_fill_write(body[0], start.name, true) ?? return
+        sema_stmt_uninit_fill_loop(state, scopes, root, count)
+    }
+}
+
+// `index += 1`.
+sema_stmt_uninit_fill_steps: fn(statement: Stmt, index_name: String) -> Bool {
+    if statement == .Assign(target, op, _, amount) && target == .Local(name, _) && amount == .Int(one, _, _, _, _) {
+        return name == index_name && op == (Val(BinOp.Add)) && one == 1
+    }
+    false
+}
+
 // (Rust `clear_uninit_mut_args`): a name a write parameter receives does not
 // prove the callee writes every value, so the binding stays unwritten (E0420).
 sema_stmt_uninit_write_arg: fn(arg: CallArg, state: SemaOwnershipState, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) Never! {
@@ -8803,6 +8887,7 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, environment: S
                         if label != None -> sema_scope_pop_loop_label(scopes)
                         sema_single_use_leave_scope(scopes, state, diagnostics)
                         if !sema_stmt_close_loop_value_frame(context, loop_frame_index, nested.value, state, loop_fork, false, true, environment, program, diagnostics) -> valid = false
+                        sema_stmt_uninit_fill_range(state, scopes, var, start_expr, end_expr, step_expr, exclusive, body)
                         if {
                             !valid -> complete = false
                             else -> {
@@ -9050,6 +9135,7 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, environment: S
                 if label != None -> sema_scope_pop_loop_label(scopes)
                 sema_single_use_leave_scope(scopes, state, diagnostics)
                 if !sema_stmt_close_loop_value_frame(context, loop_frame_index, nested.value, state, loop_fork, true, true, environment, program, diagnostics) -> loop_scope_valid = false
+                sema_stmt_uninit_fill_counted(state, scopes, init, cond, step, body)
                 // The unchanged-state check runs once the statement is checked.
                 sema_stmt_check_state_loop_unchanged(init, cond, step, body, label, diagnostics)
                 if {
@@ -9113,6 +9199,7 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, environment: S
                         // Rust `check_stmt`: a literal `true` condition never
                         // skips the body, as `loop`.
                         if !sema_stmt_close_loop_value_frame(context, loop_frame_index, nested.value, state, loop_fork, false, !sema_stmt_refutable_expr_is_true(condition), environment, program, diagnostics) -> loop_scope_valid = false
+                        if index > 0 && statements[index - 1] == .Val(previous) -> sema_stmt_uninit_fill_counted(state, scopes, previous, condition, None, body)
                         if nested.complete && loop_scope_valid -> sema_single_use_note_drain(state, condition, body, scopes)
                         if {
                             !nested.complete || !loop_scope_valid -> complete = false
