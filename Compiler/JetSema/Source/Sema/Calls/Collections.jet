@@ -342,7 +342,7 @@ sema_call_try_builtin_collections: fn(receiver: Expr, receiver_value: TExpr, met
         // of a place read in place (E0211) or out of a borrowed parameter
         // (E0201 naming `&&`) is refused for that, never with a `.copy()` fix.
         if unmarked_take && (!sema_copy_site_refuse_resource_copy(value, environment, program, scopes, context, diagnostics) || !sema_copy_site_refuse_borrowed_copy(updated_args[index].expr, "`.{method}()`", environment, program, scopes, context, diagnostics)) -> return SemaMethodSpecialCheck{handled: true, value: None}
-        if taken_place && ((!walk_reports && sema_ownership_reject_read_param_move(state, updated_args[index].expr, scopes, diagnostics)) || sema_ownership_reject_place_alias_move(state, updated_args[index].expr, scopes, "`.{method}()`", diagnostics)) -> return SemaMethodSpecialCheck{handled: true, value: None}
+        if taken_place && ((!walk_reports && sema_ownership_reject_read_param_move(state, updated_args[index].expr, scopes, diagnostics)) || sema_ownership_reject_place_alias_move(state, updated_args[index].expr, scopes, "`.{method}()`", diagnostics) || sema_copy_site_refuse_lent_resource_move(state, updated_args[index].expr, value, environment, program, scopes, context, diagnostics)) -> return SemaMethodSpecialCheck{handled: true, value: None}
         if taken_place && sema_ownership_binding_for_expr(state, updated_args[index].expr, scopes) == .Val(root) -> taken_place = !sema_ownership_binding_is_borrowed_param(root)
         stored: sema_call_marked_move_value(state, taken_place, updated_args[index].expr, value, scopes, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
         typed.push(stored)

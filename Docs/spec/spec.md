@@ -1767,7 +1767,10 @@ through a view, `ys := xs.copy()` makes an independent copy, and
 position (binding, assignment, field initializer, collection element, result),
 and any later use of `xs` is E0121 naming the move. `.move()` below a collection
 element (`items[i].tags.move()`, whose copy is spelled `items[i].tags.copy()`)
-is E0225; on a read or write parameter it is E0201. An unmarked use that is not
+is E0225; on a read or write parameter it is E0201. A call argument that takes a
+resource-holding field out of a write parameter or window (`next(self.r.move())`)
+is E0211, as the unmarked `next(self.r)` is: a stop inside the callee before the
+field is refilled would close the resource twice. An unmarked use that is not
 the last one shares the value instead of moving it: the source stays usable and
 each holder has its own value, so a write through one never shows in the other.
 A use in `return`, or in a loop's `break` value, is the last use for the loops

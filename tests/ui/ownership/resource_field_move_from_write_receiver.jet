@@ -1,0 +1,27 @@
+// `self.r.move()` takes a resource out of storage the caller keeps owning;
+// a stop inside `next` would close it in `next` and again with `self`.
+Res: struct {
+    name: String
+
+    impl Close {
+        close: fn(&&self) { print("close {self.name}") }
+    }
+}
+
+next: fn(r: &&Res) -> Res {
+    if r.name == "a" -> panic("stop")
+    Res{name: "b"}
+}
+
+Holder: struct {
+    r: Res
+
+    step: fn(&self) {
+        self.r = next(self.r.move())
+    }
+}
+
+run: fn() {
+    h := Holder{r: Res{name: "a"}}
+    h.step()
+}

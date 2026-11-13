@@ -451,6 +451,19 @@ sema_copy_site_refuse_resource_copy: fn(value: TExpr, environment: SemaScopeEnvi
     false
 }
 
+// A call argument `self.r.move()` below a write parameter or window takes the
+// field out of storage the caller keeps owning, to be refilled after the call.
+// A value holding a resource has one cleanup owner, and a stop inside the
+// callee would leave the callee and the unrefilled place both closing it, so
+// the take is E0211 exactly as the unmarked `self.r` is
+// (sema_copy_site_refuse_resource_copy). True when refused.
+sema_copy_site_refuse_lent_resource_move: fn(state: &SemaOwnershipState, expr: Expr, value: TExpr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, context: SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
+    if expr == .Ident(_, _, _) -> return false
+    root: sema_ownership_binding_for_expr(state, expr, scopes) ?? return false
+    if !sema_ownership_binding_lends(root) -> return false
+    !sema_copy_site_refuse_resource_copy(value, environment, program, scopes, context, diagnostics)
+}
+
 // Spec "Named views and places": a read-only place entering an owning slot is
 // materialized as an owned copy, and `copies: .Explicit` makes that copy
 // written. A field or element of storage this scope does not own, or a name

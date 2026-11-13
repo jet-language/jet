@@ -1,0 +1,34 @@
+# Taking a resource field out of a write receiver (`self.r.move()`) into a call
+# is E0211, as the unmarked `self.r` is: a stop inside the callee would close
+# the value there and again with the receiver's owner, so the
+# program is refused and never prints a second "close a". The same refill on an
+# owned local moves the field out exactly, so every resource closes once, also
+# when the callee stops.
+fixture: a_resource_field_taken_from_a_write_receiver_closes_once.fixture
+env: NO_COLOR=1
+step refused: jet check refused.jet
+exit: 1
+stderr: ~ "Error [jet.CopyNotSupported]" # the field move out of the write receiver is refused (E0211)
+stderr: ~ "refused.jet:21:28" # at `self.r.move()`
+step refused_o0: jet run --optimize=none refused.jet
+exit: == refused
+stdout: = ""
+stderr: ~ "refused.jet:21:28" # the run stops at the same check
+step refused_o1: jet run --optimize=basic refused.jet
+exit: == refused
+stdout: = ""
+step refused_o2: jet run --optimize=full refused.jet
+exit: == refused
+stdout: = ""
+step check: jet check owned.jet
+exit: 0
+step o0: jet run --optimize=none owned.jet
+exit: 70
+stdout: = "close x\nrefilled b\nclose a\nclose b\n"
+stderr: ~ "panic: stop" # the callee's stop; the stderr also carries its location
+step o1: jet run --optimize=basic owned.jet
+exit: 70
+stdout: = "close x\nrefilled b\nclose a\nclose b\n"
+step o2: jet run --optimize=full owned.jet
+exit: 70
+stdout: = "close x\nrefilled b\nclose a\nclose b\n"
