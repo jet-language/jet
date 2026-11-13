@@ -1,0 +1,53 @@
+use jet_foundation.[JetDevtoolsEventBody, JetDevtoolsQueryState]
+
+protocol_test_event: fn(timestamp_ms: Int) -> JetDevtoolsEvent {
+    JetDevtoolsEvent.from_parts(timestamp_ms, "devserver", "state", "session", `{"state":"ready"}`) ?? panic("devtools event")
+}
+
+#Test("a fresh envelope serializes without metadata and assigns sequences from one") {
+    envelope := JetDevtoolsEnvelope.new("s1", 7)
+    assert_eq(envelope.push(protocol_test_event(100)), 1)
+    assert_eq(envelope.push(protocol_test_event(101)), 2)
+    assert_eq(envelope.cursor(), Val(2))
+    wire: envelope.serialize() ?? panic("serialize")
+    assert_eq(wire, `{"protocol":"jet.devtools.v1","session_id":"s1","started_at_ms":7,"events":[{"sequence":1,"timestamp_ms":100,"source":"devserver","kind":"state","entity":"session","fields":{"state":"ready"},"payload":null},{"sequence":2,"timestamp_ms":101,"source":"devserver","kind":"state","entity":"session","fields":{"state":"ready"},"payload":null}],"selection":null,"cursor":2}`)
+}
+
+#Test("the event ring keeps the newest events and marks the drop") {
+    envelope := JetDevtoolsEnvelope.new("s1", 0)
+    loop index in 0..<(JET_DEVTOOLS_MAX_EVENTS + 2) -> _: envelope.push(protocol_test_event(index))
+    assert_eq(envelope.event_count(), JET_DEVTOOLS_MAX_EVENTS)
+    assert_eq(envelope.oldest_sequence(), Val(3))
+    assert_eq(envelope.latest_sequence(), Val(JET_DEVTOOLS_MAX_EVENTS + 2))
+    assert(envelope.truncated)
+    assert_eq(envelope.events_since(Val(JET_DEVTOOLS_MAX_EVENTS)).len(), 2)
+    assert_eq(envelope.events_since(None).len(), JET_DEVTOOLS_MAX_EVENTS)
+    wire: envelope.serialize() ?? panic("serialize")
+    assert(wire.contains(`"lifecycle":"starting","freshness":{"state":"unknown","observed_at_ms":0}`))
+    assert(wire.contains(`"truncated":true,"source_identity":null}`))
+}
+
+#Test("typed bodies render canonical fields and published payloads mark privacy") {
+    event: JetDevtoolsEvent.try_new(5, "runtime", JetDevtoolsEventBody.Query{name: "users", state: JetDevtoolsQueryState.Invalidated, footprint: 3}) ?? panic("typed event")
+    assert_eq(event.kind(), "Query")
+    assert_eq(event.entity(), "users")
+    assert_eq(event.fields_json(), `{"name":"users","state":"invalidated","footprint":3}`)
+    published: event.publish(JetDevtoolsPayload.one("b", JetDevtoolsValue.text("two"))) ?? panic("publish")
+    assert_eq(published.payload_json(), Val(`{"fields":{"b":"two"}}`))
+    envelope := JetDevtoolsEnvelope.new("s1", 0)
+    _: envelope.push(published)
+    assert(envelope.privacy.published_payloads)
+}
+
+#Test("the boundary rejects malformed fields, payload values and identities") {
+    assert(JetDevtoolsEvent.from_parts(1, "devserver", "state", "session", `{"open":`) == .Err(_))
+    assert(JetDevtoolsEvent.from_parts(1, "devserver", "state", "session", `["array"]`) == .Err(_))
+    long := [String]{}
+    loop _ in 0..<(JET_DEVTOOLS_MAX_TEXT_BYTES + 1) -> long.push("x")
+    assert(protocol_test_event(1).publish(JetDevtoolsPayload.one("big", JetDevtoolsValue.text(long.join("")))) == .Err(_))
+    envelope := JetDevtoolsEnvelope.new("s1", 0)
+    assert(envelope.set_source_identity(Val(JetDevtoolsSourceIdentityFact.new(Val(long.join("")), None, None, None))) == .Err(_))
+    envelope.set_source_identity(Val(JetDevtoolsSourceIdentityFact.new(Val("src/main.jet"), None, Val("rev-1"), None))) ?? panic("identity")
+    wire: envelope.serialize() ?? panic("serialize")
+    assert(wire.contains(`"source_identity":{"source_id":"src/main.jet","revision":"rev-1"}`))
+}
