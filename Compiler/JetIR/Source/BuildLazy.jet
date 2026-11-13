@@ -453,7 +453,9 @@ ir_lazy_meta: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, span: Span
     stride: ir_list_stride(m, row)
     has_drop: m.types[row].drop != ""
     // An inline Option carrier is no box: the runtime's iter_unbox reads its
-    // word (JetRuntime Iter.jet ITER_INLINE_OPTION).
+    // word (JetRuntime Iter.jet ITER_INLINE_OPTION), whose None is the Int
+    // niche, so an optional raw pointer (None null) is not a carrier yet.
+    if m.types[row].option_null -> return ir_fail_slot(b, span, "a lazy chain over {ir_type_name(ty)} is not lowered yet")
     kind: ir_lazy_kind(m, p, ty) + (if ir_option_inline(m, row) -> IR_LAZY_INLINE_OPTION else -> 0)
     zero: ir_word_const(m, b, 0)
     clone := zero

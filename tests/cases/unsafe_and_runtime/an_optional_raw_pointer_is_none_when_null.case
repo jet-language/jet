@@ -1,0 +1,17 @@
+# An optional raw pointer `mem.Ptr<T>?` is one word whose `None` is the null
+# address: a present pointer reads through, an absent one matches None, and
+# wrapping the null address gives None, on every tier. `mem.Ptr<Int>` in a
+# signature names the same type as `*Int`.
+fixture: an_optional_raw_pointer_is_none_when_null.fixture
+env: NO_COLOR=1
+step check: jet check main.jet
+exit: 0
+step o0: jet run --optimize=none main.jet
+exit: 0
+stdout: = "42\nabsent\nnull is None\n1\n"
+step o1: jet run --optimize=basic main.jet
+exit: 0
+stdout: = "42\nabsent\nnull is None\n1\n"
+step o2: jet run --optimize=full main.jet
+exit: 0
+stdout: = "42\nabsent\nnull is None\n1\n"

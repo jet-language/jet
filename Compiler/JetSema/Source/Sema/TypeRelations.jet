@@ -1090,6 +1090,7 @@ sema_type_resolve_declared_recursive: fn(graph: SemaRegistrationGraph, ty: Type,
         .Named(name) -> if sema_type_name_is_generic(generic_params, name) -> ty else -> sema_type_graph_resolve_named(graph, name, caller)
         .Apply(name, args) -> {
             rewritten: loop arg in args -> sema_type_resolve_type_argument(graph, arg, caller, generic_params)
+            if rewritten.len() == 1 && sema_type_core_pointer_name(graph, name, caller) -> return Type.Apply{name: "Ptr", args: rewritten}
             head: if sema_type_name_is_generic(generic_params, name) -> name else -> sema_type_graph_resolve_apply_name(graph, name, caller)
             // Invalid alias graphs are rejected during registration, before
             // consumers can recurse through their transparent targets.
@@ -1241,6 +1242,20 @@ sema_type_resolve_declared_with_generics: fn(graph: SemaRegistrationGraph, ty: T
 
 sema_type_resolve_declared: fn(graph: SemaRegistrationGraph, ty: Type, caller_module_identity: String) -> Type Never! {
     sema_type_resolve_declared_recursive(graph, ty, sema_type_module_row(graph, caller_module_identity), [TGenericParam]{})
+}
+
+// Whether `name` is `<alias>.Ptr` for an import of core.mem in the caller
+// module of row `caller`: `mem.Ptr<T>` names the raw pointer `*T`.
+sema_type_core_pointer_name: fn(graph: SemaRegistrationGraph, name: String, caller: Int) -> Bool Never! {
+    if caller < 0 -> return false
+    qualified: name.split_once(".") ?? return false
+    if qualified.after != "Ptr" -> return false
+    loop import in graph.modules[caller].imports {
+        if import.declaration.alias != qualified.before || sema_registration_file_import_taken_over(graph.modules[caller], import) -> next
+        target: sema_registration_module_index(graph, import.target_module_identity) ?? return false
+        return graph.modules[target].module_name == "core.mem"
+    }
+    false
 }
 
 // A nominal's declared member type (a field, payload, or underlying type)

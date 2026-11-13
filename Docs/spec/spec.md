@@ -2978,6 +2978,18 @@ audited region. The two operations make the cast and dereference obligations
 separate. The Jai comparison is illustrated by
 [`Examples/LowLevel/PointerCastDeref.jet`](../../Examples/LowLevel/PointerCastDeref.jet). (D-POINTERCHAIN1)
 
+### Raw pointer tools
+
+`mem.Ptr<T>`, spelled through an import of `core.mem`, names the same type
+as `*T`. An optional pointer is spelled `mem.Ptr<T>?`, since Jet's one
+optional spelling is a postfix `?` (the ballot's `?mem.Ptr<T>` names this
+type; `*T?` is a pointer to a `T?`). It is one machine word. The null
+address is its `None`, so `Val(mem.Ptr<T>.from_addr(0))` is `None`, and a
+present pointer is never null. Matching `.Val(p)` hands back the pointer
+itself, with no box to unwrap. See
+`tests/cases/unsafe_and_runtime/an_optional_raw_pointer_is_none_when_null.case`.
+(D-RAWPTR2=A)
+
 ### Allocator families
 
 `core.mem` exposes `Arena`, `Bump`, `Pool`, and `Fixed`; constructing and using

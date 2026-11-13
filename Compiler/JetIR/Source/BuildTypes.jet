@@ -237,6 +237,15 @@ ir_value_type_laid: fn(m: &IRModule, p: IRProgram, ty: Type, laying: [String]) -
     }
     if ty == .Option(inner) {
         if !ir_pointee_lays_out(m, p, inner, laying) -> return None
+        if ir_raw_pointer(inner) {
+            // One word: the pointer itself when present, null when absent
+            // (the null niche: no live storage lies at address 0); nothing
+            // to drop or copy.
+            word := ir_layout(IRTypeKind.Word, ty, 8, 8, IRClass.Integer, false, 64, "")
+            word.option_word = true
+            word.option_null = true
+            return Val(ir_intern_type(m, type_carrier_identity(ty), word))
+        }
         if ir_option_int_payload(m, p, inner, laying) {
             // One word (Build.jet IR_OPTION_INT_NONE): the Int's own when
             // present, the niche 2^62 when absent; it drops and copies as

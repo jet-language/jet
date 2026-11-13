@@ -3054,8 +3054,10 @@ ir_option_inline: fn(m: IRModule, row: Int) -> Bool Never! {
     m.types[row].option_word
 }
 
-// The word of an absent Option of row `row`: null for a box.
+// The word of an absent Option of row `row`: null for a box or an optional
+// raw pointer.
 ir_option_none_word: fn(m: IRModule, row: Int) -> Int Never! {
+    if m.types[row].option_null -> return 0
     if ir_option_inline(m, row) -> return IR_OPTION_INT_NONE
     0
 }

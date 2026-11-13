@@ -192,7 +192,9 @@ IRClass: enum { Integer Pointer Float Memory }
 // `drop` is the runtime symbol that ends a value's life ("" when trivial);
 // `clone` the one that makes an owned copy of it ("" when none: a value
 // with a drop and no clone only moves). `option_word` marks an Option laid
-// out as one word, not a box (Build.jet IR_OPTION_INT_NONE).
+// out as one word, not a box (Build.jet IR_OPTION_INT_NONE); `option_null`
+// marks one whose absent word is null, not that niche (an optional raw
+// pointer).
 IRType: struct {
     ty: Type
     kind: IRTypeKind
@@ -204,6 +206,7 @@ IRType: struct {
     drop: String
     clone: String{""}
     option_word: Bool{false}
+    option_null: Bool{false}
 }
 
 IRSlotKind: enum { Param Local Temp }
