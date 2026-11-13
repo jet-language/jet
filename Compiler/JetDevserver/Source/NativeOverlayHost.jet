@@ -1,6 +1,38 @@
 // Typed native GUI/game overlay over jet.devtools.v1. Bounded draw commands for
 // the real game-window backend; adapter owns the sole projection bridge.
-use jet_foundation.[JetDevtoolsNativeColor, JetDevtoolsNativeDrawCommand, JetDevtoolsNativeFrame, JetDevtoolsNativeHost, JetDevtoolsNativeInput, JetDevtoolsNativeWindow, jettrace_has_control]
+use jet_foundation.[jettrace_has_control]
+
+// The game-window hook surface jet dev installs. These devtools types are
+// devserver-local: the backend calls the hooks; no other package names them.
+JetDevtoolsNativeColor: struct {
+    red: Int
+    green: Int
+    blue: Int
+    alpha: Int
+
+    new: fn(red: Int, green: Int, blue: Int, alpha: Int) -> JetDevtoolsNativeColor {
+        JetDevtoolsNativeColor{red: red, green: green, blue: blue, alpha: alpha}
+    }
+}
+JetDevtoolsNativeDrawCommand: enum {
+    Rectangle(x: Int, y: Int, width: Int, height: Int, color: JetDevtoolsNativeColor)
+    Text(text: String, x: Int, y: Int, size: Int, color: JetDevtoolsNativeColor)
+}
+JetDevtoolsNativeWindow: struct { session_id: String, width: Int, height: Int }
+JetDevtoolsNativeFrame: struct { session_id: String, width: Int, height: Int }
+JetDevtoolsNativeInput: enum {
+    Key(code: String, pressed: Bool)
+    Gamepad(gamepad: Int, control: String, pressed: Bool)
+}
+JetDevtoolsNativeHost: trait {
+    on_event: fn(&self, session_id: String, event: JetDevtoolsEvent)
+    on_window_open: fn(&self, window: JetDevtoolsNativeWindow)
+    on_window_close: fn(&self, session_id: String)
+    on_input: fn(&self, session_id: String, input: JetDevtoolsNativeInput) -> Bool
+    on_frame_begin: fn(&self, frame: JetDevtoolsNativeFrame) -> [JetDevtoolsNativeDrawCommand]
+    on_draw: fn(&self, session_id: String, command: JetDevtoolsNativeDrawCommand)
+    on_frame_end: fn(&self, session_id: String)
+}
 
 MAX_OVERLAY_PANELS: Int{64}
 MAX_OVERLAY_NODES: Int{512}
@@ -13,7 +45,7 @@ MAX_OVERLAY_COORDINATE: Int{2147483647}
 NativeOverlayHostError: struct {
     message: String
 
-    impl Display { display: fn(&&self) -> String { self.message } }
+    impl Display { display: fn(self) -> String { self.message } }
 }
 native_overlay_error: fn(message: String) -> NativeOverlayHostError { NativeOverlayHostError{message: message} }
 
@@ -369,7 +401,7 @@ NativeOverlayHost: struct {
         bounds: frame.bounds
         bottom: bounds.y + bounds.height
         commands.push(JetDevtoolsNativeDrawCommand.Rectangle{x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height, color: JetDevtoolsNativeColor.new(16, 20, 28, 232)})
-        commands.push(JetDevtoolsNativeDrawCommand.Text{text: "Jet Devtools [{frame.session_id}]", x: bounds.x + 12, y: bounds.y + 22, size: 18, color: JetDevtoolsNativeColor.WHITE})
+        commands.push(JetDevtoolsNativeDrawCommand.Text{text: "Jet Devtools [{frame.session_id}]", x: bounds.x + 12, y: bounds.y + 22, size: 18, color: JetDevtoolsNativeColor.new(255, 255, 255, 255)})
         y := bounds.y + 46
         loop panel in frame.panels {
             if y >= bottom || commands.len() >= MAX_OVERLAY_NODES -> break

@@ -36,7 +36,7 @@ TerminalStyleFactError: struct {
     code: TerminalStyleErrorCode
     message: String
 
-    impl Display { display: fn(&&self) -> String { "{self.code.as_str()}: {self.message}" } }
+    impl Display { display: fn(self) -> String { "{self.code.as_str()}: {self.message}" } }
 }
 terminal_style_fact_error: fn(code: TerminalStyleErrorCode, message: String) -> TerminalStyleFactError {
     TerminalStyleFactError{code: code, message: terminal_style_bounded_text(message, MAX_TERMINAL_STYLE_ERROR_BYTES)}
@@ -336,7 +336,7 @@ TerminalStyleParseError: struct {
     message: String
 
     impl Display {
-        display: fn(&&self) -> String {
+        display: fn(self) -> String {
             if self.line == 0 -> return "{self.code.as_str()}: {self.message}"
             "{self.code.as_str()} at line {self.line}: {self.message}"
         }
@@ -477,13 +477,13 @@ TerminalStyleReloadNotification: struct {
     candidate_fingerprint: String?
     error: TerminalStyleErrorFact?
 }
-TerminalStyleSubscriberId: struct { value: Int }
+TerminalStyleSubscriberID: struct { value: Int }
 
 #Error
 TerminalStyleSubscribeError: enum {
     LimitReached
 
-    impl Display { display: fn(&&self) -> String { "terminal style subscriber limit reached" } }
+    impl Display { display: fn(self) -> String { "terminal style subscriber limit reached" } }
 }
 // The reload transaction state. The host that owns it serializes access.
 TerminalStyleReload: struct {
@@ -508,14 +508,14 @@ TerminalStyleReload: struct {
         snapshot: self.current ?? return 0
         snapshot.revision
     }
-    subscribe: fn(&self) -> TerminalStyleSubscriberId TerminalStyleSubscribeError! {
+    subscribe: fn(&self) -> TerminalStyleSubscriberID TerminalStyleSubscribeError! {
         if self.subscribers.len() >= MAX_TERMINAL_STYLE_SUBSCRIBERS -> return Err(TerminalStyleSubscribeError.LimitReached)
-        id: TerminalStyleSubscriberId{value: self.next_subscriber}
+        id: TerminalStyleSubscriberID{value: self.next_subscriber}
         self.next_subscriber += 1
         self.subscribers[id.value] = [TerminalStyleReloadNotification]{}
         id
     }
-    unsubscribe: fn(&self, id: TerminalStyleSubscriberId) -> Bool {
+    unsubscribe: fn(&self, id: TerminalStyleSubscriberID) -> Bool {
         if self.subscribers.get(id.value) == None -> return false
         remaining := [Int: [TerminalStyleReloadNotification]]{}
         loop (key, mailbox) in self.subscribers {
@@ -524,7 +524,7 @@ TerminalStyleReload: struct {
         self.subscribers = remaining
         true
     }
-    drain_notifications: fn(&self, id: TerminalStyleSubscriberId) -> [TerminalStyleReloadNotification] {
+    drain_notifications: fn(&self, id: TerminalStyleSubscriberID) -> [TerminalStyleReloadNotification] {
         mailbox: self.subscribers.get(id.value) ?? return [TerminalStyleReloadNotification]{}
         self.subscribers[id.value] = [TerminalStyleReloadNotification]{}
         mailbox

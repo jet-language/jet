@@ -1,5 +1,3 @@
-use jet_foundation.[HotSwapDecision]
-
 impl NativeSwapState {
     reject: fn(self, plan: NativeSwapPlan, explanation: NativeSwapExplanation) -> NativeSwapReceipt {
         outcome: if explanation.disposition == .Restart -> NativeSwapOutcome.RestartRequired else -> NativeSwapOutcome.Rejected
@@ -22,10 +20,6 @@ impl NativeSwapState {
         if !plan.from.same_as(self.executable) -> return Err(NativeSwapError.input(source_id, .StalePlan, "plan `from` executable does not match resident executable"))
         if !plan.to.source.matches(plan.source) -> return Err(NativeSwapError.input(source_id, .SourceIdentityChanged, "candidate executable belongs to another source"))
         if plan.to.generation <= self.executable.generation -> return Err(NativeSwapError.input(source_id, .StalePlan, "candidate generation does not advance the resident generation"))
-        if plan.decision.requires_restart() {
-            return Err(restart_or_reject(source_id, plan.capability.restart, .IncompatibleType,
-                plan.decision.compatibility.reason() ?? "semantic hot-swap verdict requires a clean restart"))
-        }
         if plan.blocking_fact == .Val(fact) {
             disposition: if plan.capability.restart && fact.is_restartable() -> NativeSwapDisposition.Restart else -> NativeSwapDisposition.Rejected
             return Err(NativeSwapError{explanation: NativeSwapExplanation.new(source_id, disposition, fact, "checked producer marked this plan unsafe or incompatible")})
@@ -100,7 +94,6 @@ impl NativeSwapState {
 // A paused plan matches the applied one when every checked fact it carries is the same.
 plans_match: fn(left: NativeSwapPlan, right: NativeSwapPlan) -> Bool {
     if !left.source.matches(right.source) || !left.from.same_as(right.from) || !left.to.same_as(right.to) -> return false
-    if left.decision.module_ref != right.decision.module_ref || left.decision.changed_functions != right.decision.changed_functions || left.decision.is_compatible() != right.decision.is_compatible() -> return false
     if left.capability.code != right.capability.code || left.capability.data != right.capability.data -> return false
     if left.capability.listeners != right.capability.listeners || left.capability.connections != right.capability.connections -> return false
     if left.capability.restart != right.capability.restart || left.capability.quiescence != right.capability.quiescence -> return false
@@ -174,31 +167,6 @@ native_swap_validate_identity: fn(value: String, label: String) Err! {
 native_swap_validate_source_identity: fn(identity: NativeSwapSourceIdentity, label: String) Err! {
     native_swap_validate_identity(identity.source_id, "{label} source")
     native_swap_validate_identity(identity.module_ref, "{label} module")
-}
-validate_hot_swap_decision: fn(source_id: String, source: NativeSwapSourceIdentity, decision: HotSwapDecision) NativeSwapError! {
-    _: native_swap_validate_identity(decision.module_ref, "hot-swap decision module") ?? return Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
-    if decision.module_ref != source.module_ref -> return Err(NativeSwapError.input(source_id, .SourceIdentityChanged, "hot-swap decision module `{decision.module_ref}` does not match source module `{source.module_ref}`"))
-    facts: decision.state_facts()
-    if facts.len() > MAX_NATIVE_SWAP_FACTS -> return Err(NativeSwapError.input(source_id, .FactLimit, "hot-swap decision exceeds its retention fact limit"))
-    seen := [String: Bool]{}
-    loop fact in facts {
-        _: native_swap_validate_identity(fact.key, "hot-swap retention key") ?? return Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
-        if seen.get(fact.key) != None -> return Err(NativeSwapError.input(source_id, .DuplicateIdentity, "hot-swap retention key `{fact.key}` appears more than once"))
-        seen[fact.key] = true
-    }
-}
-decision_restart_boundary: fn(decision: HotSwapDecision) -> NativeSwapRestartBoundary {
-    affected := normalized_facts(decision.changed_functions)
-    if affected.len() == 0 -> affected.push(decision.module_ref)
-    kept := [String]{}
-    reset := [String]{}
-    loop fact in decision.state_facts() {
-        if fact.decision == {
-            .Preserve -> kept.push(fact.key)
-            else -> reset.push(fact.key)
-        }
-    }
-    NativeSwapRestartBoundary.required_by(.IncompatibleType, affected).with_state(kept, reset)
 }
 validate_listener_plan_facts: fn(source_id: String, expected_source: NativeSwapSourceIdentity, handles: [NativeSwapListenerHandle]) NativeSwapError! {
     if handles.len() > MAX_NATIVE_SWAP_FACTS -> return Err(NativeSwapError.input(source_id, .FactLimit, "native swap plan exceeds its listener fact limit"))

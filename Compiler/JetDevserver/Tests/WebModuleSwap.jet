@@ -1,5 +1,3 @@
-use jet_foundation.[HotSwapDecision, HotSwapCompatibility, StateRetentionFact]
-
 snapshot: fn(source_revision: String, build_revision: String, body: String, signal_value: String, island_identity: String) -> WebModuleSwapSnapshot {
     state: [WebModuleSwapStateFact]{
         WebModuleSwapStateFact.Signal(WebSignalFact.new("count", "Int", WebStateValue.Text(signal_value))),
@@ -13,111 +11,21 @@ snapshot: fn(source_revision: String, build_revision: String, body: String, sign
     modules: [WebModuleFact]{WebModuleFact.new("app", "iface-1", body)}
     WebModuleSwapSnapshot.new(WebModuleSwapIdentity.new("app", "/"), source_revision, build_revision, WebPageFact.new("/", "page-{build_revision}"), modules, state) ?? panic("snapshot")
 }
-decision_for: fn(before: WebModuleSwapSnapshot, candidate: WebModuleSwapSnapshot, compatible: Bool, changed_functions: [String]) -> HotSwapDecision {
-    keys := [String:Bool]{}
-    loop fact in before.state -> keys[fact.key()] = true
-    loop fact in candidate.state -> keys[fact.key()] = true
-    sorted_keys := keys.keys().to_list()
-    sorted_keys.sort()
-    state := [StateRetentionFact]{}
-    loop key in sorted_keys {
-        if compatible -> state.push(StateRetentionFact.preserve(key)) else -> state.push(StateRetentionFact.fresh(key, "checked state shape changed"))
-    }
-    compatibility: if compatible -> HotSwapCompatibility.Compatible else -> HotSwapCompatibility.Incompatible{reason: "checked semantic surface changed"}
-    changed: if compatible -> [String]{} else -> [String]{"checked semantic surface changed"}
-    HotSwapDecision{module_ref: "app", compatibility, changed, changed_functions, state, schema_migrations: [], rechecked_items: [], change_facts: []}
-}
-plan_for: fn(before: WebModuleSwapSnapshot, after: WebModuleSwapSnapshot, compatible: Bool) -> WebModuleSwapPlan {
-    decision: decision_for(before, after, compatible, [String]{"app::fn:main"})
-    WebModuleSwapPlan.from_hot_swap_decision(before, after, decision) ?? panic("plan")
-}
-has_reason: fn(codes: [WebModuleSwapReasonCode], code: WebModuleSwapReasonCode) -> Bool {
-    loop candidate in codes {
-        if candidate == code -> return true
-    }
-    false
-}
 
-#Test("compatible_body_swap_preserves_every_supported_state_family") {
+#Test("web_module_swap_plan_refuses_without_a_checked_hot_swap_decision") {
     before: snapshot("source-1", "build-1", "body-1", "7", "island-a")
     after: snapshot("source-2", "build-2", "body-2", "0", "island-a")
-    plan: plan_for(before, after, true)
-    assert(plan.is_compatible())
-    assert_eq(plan.changed_module_set(), [String]{"app"})
-    assert_eq(plan.preserved.len(), 7)
-    assert_eq(plan.reset.len(), 0)
-    assert(has_reason(plan.reason_codes, WebModuleSwapReasonCode.SourceRevisionChanged))
-    assert(has_reason(plan.reason_codes, WebModuleSwapReasonCode.BuildRevisionChanged))
-    applied: plan.applied_snapshot()
-    assert_eq(applied.state[0].value(), WebStateValue.Text("7"))
-    assert_eq(applied.state[1].value(), WebStateValue.Text("store-value"))
-    assert_eq(applied.state[2].value(), WebStateValue.Text("cached"))
-    assert_eq(applied.state[3].value(), WebStateValue.Text("dirty-draft"))
-    assert_eq(applied.state[4].value(), WebStateValue.Integer(I64{42}))
-    assert_eq(applied.state[5].value(), WebStateValue.Boolean(true))
-    assert_eq(applied.state[6].value(), WebStateValue.Text("island-state"))
-}
-#Test("identity_mismatch_is_rejected_before_state_mutation") {
-    before: snapshot("source-1", "build-1", "body-1", "7", "island-a")
-    candidate: WebModuleSwapSnapshot.new(WebModuleSwapIdentity.new("other-app", "/"), "source-2", "build-2", WebPageFact.new("/", "page-build-2"), [WebModuleFact]{WebModuleFact.new("other-app", "iface-1", "body-2")}, [WebModuleSwapStateFact]{}) ?? panic("candidate")
-    decision: decision_for(before, candidate, true, [String]{})
-    plan: WebModuleSwapPlan.from_hot_swap_decision(before, candidate, decision) ?? panic("plan")
-    state := WebModuleSwapState.new(before) ?? panic("state")
-    rejected: if state.pause(plan) == {
-        .Err(.IdentityMismatch(_, _)) -> true
-        else -> false
+    refused: if WebModuleSwapPlan.from_hot_swap_decision(before, after) == {
+        .Ok(_) -> panic("expected the web module swap plan to refuse")
+        .Err(error) -> error
     }
-    assert(rejected)
+    assert_eq(refused, WebModuleSwapError.Unavailable{feature: "checked hot-swap decision"})
+    assert("{refused}".contains("web module swap is not available"))
+}
+#Test("web_module_swap_state_keeps_the_committed_snapshot_without_a_plan") {
+    before: snapshot("source-1", "build-1", "body-1", "7", "island-a")
+    state: WebModuleSwapState.new(before) ?? panic("state")
     assert_eq(state.phase(), WebModuleSwapPhase.Committed)
     assert_eq(state.committed(), before)
-}
-#Test("rollback_keeps_last_committed_page_after_apply") {
-    before: snapshot("source-1", "build-1", "body-1", "7", "island-a")
-    after: snapshot("source-2", "build-2", "body-2", "0", "island-a")
-    state := WebModuleSwapState.new(before) ?? panic("state")
-    paused: state.pause(plan_for(before, after, true)) ?? panic("pause")
-    assert_eq(paused.status, WebModuleSwapReceiptStatus.Paused)
-    applied: state.apply() ?? panic("apply")
-    assert_eq(applied.active_page.artifact, "page-build-2")
-    assert_eq(applied.committed_page.artifact, "page-build-1")
-    rolled_back: state.rollback()
-    assert_eq(rolled_back.status, WebModuleSwapReceiptStatus.RolledBack)
-    assert_eq(rolled_back.committed_page.artifact, "page-build-1")
-    assert_eq(rolled_back.active_page.artifact, "page-build-1")
     assert_eq(state.active(), before)
-    assert_eq(state.committed(), before)
-}
-#Test("incompatible_interface_reports_changed_modules_and_resets") {
-    before: snapshot("source-1", "build-1", "body-1", "7", "island-a")
-    after := snapshot("source-2", "build-2", "body-2", "0", "island-b")
-    after.modules[0].interface_fingerprint = "iface-2"
-    after.state[0] = WebModuleSwapStateFact.Signal(WebSignalFact.new("count", "Int-v2", WebStateValue.Text("0")))
-    plan: plan_for(before, after, false)
-    assert(!plan.is_compatible())
-    assert_eq(plan.changed_module_set(), [String]{"app"})
-    assert(has_reason(plan.compatibility.reason_codes(), WebModuleSwapReasonCode.SemanticIncompatible))
-    assert(has_reason(plan.reason_codes, WebModuleSwapReasonCode.StateRetentionFresh))
-    signal_reset := false
-    loop fact in plan.reset {
-        if fact.state.kind() == WebStateKind.Signal && fact.reason == WebModuleSwapReasonCode.StateRetentionFresh -> signal_reset = true
-    }
-    assert(signal_reset)
-    state := WebModuleSwapState.new(before) ?? panic("state")
-    paused: if state.pause(plan) == {
-        .Err(_) -> false
-        else -> true
-    }
-    assert(!paused)
-    assert_eq(state.committed(), before)
-}
-#Test("receipt_audit_has_stable_order_and_all_preserved_facts") {
-    before: snapshot("source-1", "build-1", "body-1", "7", "island-a")
-    after: snapshot("source-2", "build-2", "body-2", "0", "island-a")
-    state := WebModuleSwapState.new(before) ?? panic("state")
-    receipt: state.pause(plan_for(before, after, true)) ?? panic("pause")
-    audit: receipt.audit()
-    assert(audit.contains("preserved=[signal:count,store:session,query_cache:todos,form_draft:profile,scroll:main,focus:email,island:home]"))
-    assert(audit.contains("changed_modules=[app]"))
-    assert(audit.contains("source_revision_changed"))
-    assert(audit.contains("build_revision_changed"))
 }

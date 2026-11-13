@@ -1,7 +1,6 @@
 // Backend-neutral facts and compare-and-commit transaction state for a resident native swap.
 // No method waits for quiescence or performs linker, socket, scheduler or OS operations.
 // Producers supply checked semantic, relocation, link and quiescence facts before pause.
-use jet_foundation.[HotSwapDecision]
 
 NATIVE_SWAP_PROTOCOL: String{"jet.native.swap.v1"}
 MAX_NATIVE_SWAP_ID_BYTES: Int{256}
@@ -27,7 +26,7 @@ NativeSwapSourceIdentity: struct {
         self.source_id == other.source_id && self.module_ref == other.module_ref
     }
 
-    impl Display { display: fn(&&self) -> String { self.canonical() } }
+    impl Display { display: fn(self) -> String { self.canonical() } }
 }
 NativeSwapCodeRevision: struct {
     value: String
@@ -38,7 +37,7 @@ NativeSwapCodeRevision: struct {
     }
     as_str: fn(self) -> String { self.value }
 
-    impl Display { display: fn(&&self) -> String { self.value } }
+    impl Display { display: fn(self) -> String { self.value } }
 }
 NativeSwapDataRevision: struct {
     value: String
@@ -49,7 +48,7 @@ NativeSwapDataRevision: struct {
     }
     as_str: fn(self) -> String { self.value }
 
-    impl Display { display: fn(&&self) -> String { self.value } }
+    impl Display { display: fn(self) -> String { self.value } }
 }
 NativeSwapRevision: struct {
     code: NativeSwapCodeRevision
@@ -128,7 +127,7 @@ impl NativeSwapRelocationStrategy {
     }
     permits_in_place: fn(self) -> Bool { self == .StableIdentity || self == .RebindByIdentity }
 }
-impl NativeSwapRelocationStrategy.Display { display: fn(&&self) -> String { self.as_str() } }
+impl NativeSwapRelocationStrategy.Display { display: fn(self) -> String { self.as_str() } }
 impl NativeSwapLinkStrategy {
     as_str: fn(self) -> String {
         if self == {
@@ -140,7 +139,7 @@ impl NativeSwapLinkStrategy {
     }
     permits_in_place: fn(self) -> Bool { self == .ReuseResident || self == .Relink }
 }
-impl NativeSwapLinkStrategy.Display { display: fn(&&self) -> String { self.as_str() } }
+impl NativeSwapLinkStrategy.Display { display: fn(self) -> String { self.as_str() } }
 
 NativeSwapRelocationFacts: struct {
     strategy: NativeSwapRelocationStrategy
@@ -221,7 +220,7 @@ impl NativeSwapBlockingFact {
         }
     }
 }
-impl NativeSwapBlockingFact.Display { display: fn(&&self) -> String { self.as_str() } }
+impl NativeSwapBlockingFact.Display { display: fn(self) -> String { self.as_str() } }
 
 impl NativeSwapDisposition {
     as_str: fn(self) -> String {
@@ -232,7 +231,7 @@ impl NativeSwapDisposition {
         }
     }
 }
-impl NativeSwapDisposition.Display { display: fn(&&self) -> String { self.as_str() } }
+impl NativeSwapDisposition.Display { display: fn(self) -> String { self.as_str() } }
 
 NativeSwapExplanation: struct {
     source_id: String
@@ -250,7 +249,7 @@ NativeSwapExplanation: struct {
         "reload disposition={self.disposition.as_str()} source={self.source_id} blocking_fact={self.blocking_fact.as_str()} detail={self.detail}"
     }
 
-    impl Display { display: fn(&&self) -> String { self.render() } }
+    impl Display { display: fn(self) -> String { self.render() } }
 }
 #Error
 NativeSwapError: struct {
@@ -266,7 +265,7 @@ NativeSwapError: struct {
     blocking_fact: fn(self) -> NativeSwapBlockingFact { self.explanation.blocking_fact }
     render: fn(self) -> String { self.explanation.render() }
 
-    impl Display { display: fn(&&self) -> String { self.render() } }
+    impl Display { display: fn(self) -> String { self.render() } }
 }
 NativeSwapHandleCompatibility: enum {
     Compatible Incompatible
@@ -358,12 +357,6 @@ NativeSwapRestartBoundary: struct {
     required_by: fn(reason: NativeSwapBlockingFact, affected: [String]) -> NativeSwapRestartBoundary {
         NativeSwapRestartBoundary{required: true, reason: Val(reason), affected: normalized_facts(affected), kept: [String]{}, reset: [String]{}}
     }
-    with_state: fn(self, kept: [String], reset: [String]) -> NativeSwapRestartBoundary {
-        next := self
-        next.kept = normalized_facts(kept)
-        next.reset = normalized_facts(reset)
-        next
-    }
     validate: fn(self, source_id: String) NativeSwapError! {
         validate_fact_list(source_id, self.affected)
         validate_fact_list(source_id, self.kept)
@@ -382,7 +375,6 @@ NativeSwapPlan: struct {
     source: NativeSwapSourceIdentity
     from: NativeSwapExecutable
     to: NativeSwapExecutable
-    decision: HotSwapDecision
     capability: NativeSwapCapability
     preserve_listeners: [NativeSwapListenerHandle]
     preserve_connections: [NativeSwapConnectionHandle]
@@ -394,16 +386,13 @@ NativeSwapPlan: struct {
     removed_definitions: [String]
     blocking_fact: NativeSwapBlockingFact?
 
-    new: fn(source: NativeSwapSourceIdentity, from: NativeSwapExecutable, to: NativeSwapExecutable, capability: NativeSwapCapability, decision: HotSwapDecision) -> NativeSwapPlan NativeSwapError! {
+    // A plan reads Sema's checked hot-swap decision, which this compiler does
+    // not produce yet, so planning refuses once the executables check.
+    new: fn(source: NativeSwapSourceIdentity, from: NativeSwapExecutable, to: NativeSwapExecutable) -> NativeSwapPlan NativeSwapError! {
         source_id: source.canonical()
-        validate_hot_swap_decision(source_id, source, decision)
         if !from.source.matches(source) || !to.source.matches(source) -> return Err(NativeSwapError.input(source_id, .SourceIdentityChanged, "plan source does not match both executable identities"))
         if to.generation <= from.generation -> return Err(NativeSwapError.input(source_id, .StalePlan, "candidate generation must advance beyond the resident generation"))
-        restart_boundary: if decision.is_compatible() -> NativeSwapRestartBoundary.in_place() else -> decision_restart_boundary(decision)
-        NativeSwapPlan{source: source, from: from, to: to, decision: decision, capability: capability,
-            preserve_listeners: [NativeSwapListenerHandle]{}, preserve_connections: [NativeSwapConnectionHandle]{}, restart_boundary: restart_boundary,
-            quiescence: NativeSwapQuiescence.ready(), relocation: NativeSwapRelocationFacts.stable(),
-            link: NativeSwapLinkFacts.unlinked(), changed_items: normalized_facts(decision.changed_functions), removed_definitions: [String]{}, blocking_fact: None}
+        Err(NativeSwapError.input(source_id, .CapabilityUnavailable, "native hot swap is not available: this compiler has no checked hot-swap decision"))
     }
     mark_layout_changed: fn(self, affected: [String]) -> NativeSwapPlan {
         next := self
@@ -454,16 +443,11 @@ NativeSwapPlan: struct {
     code_changed: fn(self) -> Bool { !self.from.revision.code_unchanged(self.to.revision) }
     data_changed: fn(self) -> Bool { !self.from.revision.data_unchanged(self.to.revision) }
     requires_restart: fn(self) -> Bool {
-        if self.decision.requires_restart() || self.restart_boundary.required -> return true
+        if self.restart_boundary.required -> return true
         if self.blocking_fact == .Val(fact) -> return fact.is_restartable()
         false
     }
     explanation: fn(self) -> NativeSwapExplanation {
-        if !self.decision.is_compatible() {
-            disposition: if self.capability.restart -> NativeSwapDisposition.Restart else -> NativeSwapDisposition.Rejected
-            return NativeSwapExplanation.new(self.source.canonical(), disposition, .IncompatibleType,
-                self.decision.compatibility.reason() ?? "semantic hot-swap verdict requires a clean restart")
-        }
         state: NativeSwapState.new(self.from, self.preserve_listeners, self.preserve_connections) ?? return err.explanation
         state.explain_reload(self)
     }
@@ -474,7 +458,6 @@ NativeSwapPlan: struct {
         _: native_swap_validate_source_identity(self.to.source, "candidate executable") ?? return Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
         if !self.from.source.matches(self.source) || !self.to.source.matches(self.source) -> return Err(NativeSwapError.input(source_id, .SourceIdentityChanged, "plan source does not match both executable identities"))
         if self.to.generation <= self.from.generation -> return Err(NativeSwapError.input(source_id, .StalePlan, "candidate generation must advance beyond the resident generation"))
-        validate_hot_swap_decision(source_id, self.source, self.decision)
         self.restart_boundary.validate(source_id)
         validate_fact_list(source_id, self.changed_items)
         validate_fact_list(source_id, self.removed_definitions)
@@ -496,7 +479,7 @@ impl NativeSwapOutcome {
         }
     }
 }
-impl NativeSwapOutcome.Display { display: fn(&&self) -> String { self.as_str() } }
+impl NativeSwapOutcome.Display { display: fn(self) -> String { self.as_str() } }
 
 NativeSwapReceipt: struct {
     source: NativeSwapSourceIdentity
@@ -532,7 +515,7 @@ impl NativeSwapPhase {
         }
     }
 }
-impl NativeSwapPhase.Display { display: fn(&&self) -> String { self.as_str() } }
+impl NativeSwapPhase.Display { display: fn(self) -> String { self.as_str() } }
 
 NativeSwapCheckpoint: struct {
     executable: NativeSwapExecutable

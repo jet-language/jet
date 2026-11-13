@@ -1,6 +1,5 @@
 // Backend-neutral typed web module swap facts and transaction state.
 // Sema owns compatibility and retention; this adapter never re-derives either.
-use jet_foundation.[HotSwapDecision, StateRetentionFact]
 
 WebModuleSwapIdentity: struct {
     module_ref: String
@@ -260,7 +259,7 @@ impl WebModuleSwapReasonCode {
         }
     }
 }
-impl WebModuleSwapReasonCode.Display { display: fn(&&self) -> String { self.as_str() } }
+impl WebModuleSwapReasonCode.Display { display: fn(self) -> String { self.as_str() } }
 
 WebModuleSwapCompatibility: enum {
     Compatible Incompatible(reason_codes: [WebModuleSwapReasonCode])
@@ -288,89 +287,22 @@ WebModuleSwapResetFact: struct {
 WebModuleSwapPlan: struct {
     base: WebModuleSwapSnapshot
     candidate: WebModuleSwapSnapshot
-    decision: HotSwapDecision
     compatibility: WebModuleSwapCompatibility
     changed_modules: [String]
     preserved: [WebModuleSwapStateFact]
     reset: [WebModuleSwapResetFact]
     reason_codes: [WebModuleSwapReasonCode]
 
-    from_hot_swap_decision: fn(base: WebModuleSwapSnapshot, candidate: WebModuleSwapSnapshot, decision: HotSwapDecision) -> WebModuleSwapPlan WebModuleSwapError! {
+    // A plan reads Sema's checked hot-swap decision, which this compiler
+    // does not produce yet, so the swap refuses once both snapshots check.
+    from_hot_swap_decision: fn(base: WebModuleSwapSnapshot, candidate: WebModuleSwapSnapshot) -> WebModuleSwapPlan WebModuleSwapError! {
         checked_base := base
         checked_candidate := candidate
         checked_base.normalize()
         checked_candidate.normalize()
-        if decision.module_ref.len() == 0 || decision.module_ref != checked_base.identity.module_ref -> return Err(WebModuleSwapError.DecisionModuleMismatch{expected: checked_base.identity.module_ref, found: decision.module_ref})
-        retention := [String:StateRetentionFact]{}
-        loop fact in decision.state_facts() {
-            if fact.key.len() == 0 -> return Err(WebModuleSwapError.InvalidSnapshot{detail: "hot-swap retention keys must be non-empty"})
-            if retention.get(fact.key) != None -> return Err(WebModuleSwapError.DuplicateRetentionKey{key: fact.key})
-            retention[fact.key] = fact
-        }
-        old_state: web_swap_state_by_key(checked_base.state)
-        new_state: web_swap_state_by_key(checked_candidate.state)
-        old_keys := old_state.keys().to_list()
-        old_keys.sort()
-        new_keys := new_state.keys().to_list()
-        new_keys.sort()
-        retention_keys := retention.keys().to_list()
-        retention_keys.sort()
-        // Every typed state key, resident keys first, needs exactly one Sema retention fact.
-        loop key in old_keys {
-            if retention.get(key) == None {
-                fact: new_state.get(key) ?? old_state[key]
-                return Err(WebModuleSwapError.MissingRetentionFact{kind: fact.kind(), key: key})
-            }
-        }
-        loop key in new_keys {
-            if retention.get(key) == None -> return Err(WebModuleSwapError.MissingRetentionFact{kind: new_state[key].kind(), key: key})
-        }
-        loop key in retention_keys {
-            if old_state.get(key) == None && new_state.get(key) == None -> return Err(WebModuleSwapError.UnusedRetentionFact{key: key})
-        }
-        compatible: decision.is_compatible()
-        changed: decision.changed.len() > 0 || decision.changed_functions.len() > 0
-        changed_modules := [String]{}
-        if changed || !compatible -> changed_modules.push(decision.module_ref)
-        fresh := false
-        removed := false
-        preserved := [WebModuleSwapStateFact]{}
-        reset := [WebModuleSwapResetFact]{}
-        loop key in new_keys {
-            new_fact: new_state[key]
-            if retention[key].decision == {
-                .Preserve -> {
-                    old_fact: old_state.get(key) ?? return Err(WebModuleSwapError.InvalidSnapshot{detail: "retention fact `{key}` preserves state with no resident value"})
-                    preserved.push(new_fact.with_value(old_fact.value()))
-                }
-                else -> {
-                    fresh = true
-                    reset.push(web_swap_fresh_reset(new_fact, old_state.get(key)))
-                }
-            }
-        }
-        loop key in old_keys {
-            if new_state.get(key) != None -> next
-            old_fact: old_state[key]
-            if retention[key].decision == .Preserve -> return Err(WebModuleSwapError.InvalidSnapshot{detail: "retention fact `{key}` preserves removed state"})
-            removed = true
-            reset.push(WebModuleSwapResetFact{state: old_fact, prior_identity: Val(old_fact.identity()), prior_type_fingerprint: Val(old_fact.type_fingerprint()), reason: WebModuleSwapReasonCode.StateRemoved})
-        }
-        web_swap_sort_state(preserved)
-        reset.sort_by(fn(left, right) { (left.state.kind().rank() <=> right.state.kind().rank()).then(left.state.key() <=> right.state.key()) })
-        // Reason codes are reported once each, in declaration order.
-        reason_codes := [WebModuleSwapReasonCode]{}
-        if checked_base.source_revision != checked_candidate.source_revision -> reason_codes.push(WebModuleSwapReasonCode.SourceRevisionChanged)
-        if checked_base.build_revision != checked_candidate.build_revision -> reason_codes.push(WebModuleSwapReasonCode.BuildRevisionChanged)
-        if decision.changed_functions.len() > 0 && compatible -> reason_codes.push(WebModuleSwapReasonCode.ModuleBodyChanged)
-        if removed -> reason_codes.push(WebModuleSwapReasonCode.StateRemoved)
-        if fresh -> reason_codes.push(WebModuleSwapReasonCode.StateRetentionFresh)
-        if !compatible -> reason_codes.push(WebModuleSwapReasonCode.SemanticIncompatible)
-        if reason_codes.len() == 0 -> reason_codes.push(WebModuleSwapReasonCode.NoChange)
-        compatibility: if compatible -> WebModuleSwapCompatibility.Compatible else -> WebModuleSwapCompatibility.Incompatible{reason_codes: [WebModuleSwapReasonCode]{WebModuleSwapReasonCode.SemanticIncompatible}}
-        WebModuleSwapPlan{base: checked_base, candidate: checked_candidate, decision, compatibility, changed_modules, preserved, reset, reason_codes}
+        Err(WebModuleSwapError.Unavailable{feature: "checked hot-swap decision"})
     }
-    is_compatible: fn(self) -> Bool { self.decision.is_compatible() }
+    is_compatible: fn(self) -> Bool { self.compatibility.is_compatible() }
     changed_module_set: fn(self) -> [String] { self.changed_modules }
     applied_snapshot: fn(self) -> WebModuleSwapSnapshot {
         snapshot := self.candidate
@@ -393,7 +325,7 @@ impl WebModuleSwapOperation {
         }
     }
 }
-impl WebModuleSwapOperation.Display { display: fn(&&self) -> String { self.as_str() } }
+impl WebModuleSwapOperation.Display { display: fn(self) -> String { self.as_str() } }
 
 impl WebModuleSwapPhase {
     as_str: fn(self) -> String {
@@ -404,7 +336,7 @@ impl WebModuleSwapPhase {
         }
     }
 }
-impl WebModuleSwapPhase.Display { display: fn(&&self) -> String { self.as_str() } }
+impl WebModuleSwapPhase.Display { display: fn(self) -> String { self.as_str() } }
 
 impl WebModuleSwapReceiptStatus {
     as_str: fn(self) -> String {
@@ -453,30 +385,24 @@ WebModuleSwapReceipt: struct {
 WebModuleSwapError: enum {
     InvalidSnapshot(detail: String)
     IdentityMismatch(expected: WebModuleSwapIdentity, found: WebModuleSwapIdentity)
-    DecisionModuleMismatch(expected: String, found: String)
-    MissingRetentionFact(kind: WebStateKind, key: String)
-    DuplicateRetentionKey(key: String)
-    UnusedRetentionFact(key: String)
     StalePlan(expected_source_revision: String, found_source_revision: String, expected_build_revision: String, found_build_revision: String)
     Incompatible(reason_codes: [WebModuleSwapReasonCode])
     InvalidTransition(operation: WebModuleSwapOperation, phase: WebModuleSwapPhase)
     NoPendingPlan NoAppliedPlan NoCommittedPage
+    Unavailable(feature: String)
 
     impl Display {
-        display: fn(&&self) -> String {
+        display: fn(self) -> String {
             if self == {
                 .InvalidSnapshot(detail) -> "invalid web swap snapshot: {detail}"
                 .IdentityMismatch(expected, found) -> "web swap identity mismatch: expected {expected.module_ref}/{expected.page} but found {found.module_ref}/{found.page}"
-                .DecisionModuleMismatch(expected, found) -> "web swap decision module mismatch: expected `{expected}` but found `{found}`"
-                .MissingRetentionFact(kind, key) -> "web swap has no canonical retention fact for {kind.as_str()} `{key}`"
-                .DuplicateRetentionKey(key) -> "web swap retention key `{key}` is not unique"
-                .UnusedRetentionFact(key) -> "web swap retention fact `{key}` has no typed state"
                 .StalePlan(expected_source, found_source, expected_build, found_build) -> "stale web swap plan: expected source/build {expected_source}/{expected_build} but state is {found_source}/{found_build}"
                 .Incompatible(codes) -> "web module swap is incompatible: {web_swap_reason_list(codes)}"
                 .InvalidTransition(operation, phase) -> "web swap cannot {operation.as_str()} while phase is {phase.as_str()}"
                 .NoPendingPlan -> "web swap has no pending plan"
                 .NoAppliedPlan -> "web swap has no applied plan"
                 .NoCommittedPage -> "web swap has no committed page"
+                .Unavailable(feature) -> "web module swap is not available: this compiler has no {feature}"
             }
         }
     }
@@ -577,20 +503,6 @@ WebModuleSwapState: struct {
 }
 web_swap_sort_state: fn(facts: &[WebModuleSwapStateFact]) {
     facts.sort_by(fn(left, right) { (left.kind().rank() <=> right.kind().rank()).then(left.key() <=> right.key()) })
-}
-web_swap_state_by_key: fn(facts: [WebModuleSwapStateFact]) -> [String:WebModuleSwapStateFact] WebModuleSwapError! {
-    by_key := [String:WebModuleSwapStateFact]{}
-    loop fact in facts {
-        if by_key.get(fact.key()) != None -> return Err(WebModuleSwapError.DuplicateRetentionKey{key: fact.key()})
-        by_key[fact.key()] = fact
-    }
-    by_key
-}
-web_swap_fresh_reset: fn(fact: WebModuleSwapStateFact, prior: WebModuleSwapStateFact?) -> WebModuleSwapResetFact {
-    if prior == .Val(old_fact) {
-        return WebModuleSwapResetFact{state: fact, prior_identity: Val(old_fact.identity()), prior_type_fingerprint: Val(old_fact.type_fingerprint()), reason: WebModuleSwapReasonCode.StateRetentionFresh}
-    }
-    WebModuleSwapResetFact{state: fact, prior_identity: None, prior_type_fingerprint: None, reason: WebModuleSwapReasonCode.StateAdded}
 }
 web_swap_reason_list: fn(codes: [WebModuleSwapReasonCode]) -> String {
     names := [String]{}

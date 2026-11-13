@@ -51,21 +51,21 @@ WebErrorPageError: enum {
         }
     }
 
-    impl Display { display: fn(&&self) -> String { self.message() } }
+    impl Display { display: fn(self) -> String { self.message() } }
 }
 WebErrorContentType: enum {
-    Html Json
+    HTML JSON
 
     as_str: fn(self) -> String {
         if self == {
-            .Html -> "text/html, charset=utf-8"
-            .Json -> "application/json, charset=utf-8"
+            .HTML -> "text/html, charset=utf-8"
+            .JSON -> "application/json, charset=utf-8"
         }
     }
     media_type: fn(self) -> String {
         if self == {
-            .Html -> "text/html"
-            .Json -> "application/json"
+            .HTML -> "text/html"
+            .JSON -> "application/json"
         }
     }
 }
@@ -486,8 +486,8 @@ WebErrorPage: struct {
         fact_digest: sha256_hex(facts.canonical_json())
         content_type: negotiate_content_type(accept)
         body: if content_type == {
-            .Html -> facts.render_html()
-            .Json -> facts.render_json()
+            .HTML -> facts.render_html()
+            .JSON -> facts.render_json()
         }
         if body.bytes().len() > MAX_WEB_ERROR_OUTPUT_BYTES -> return Err(WebErrorPageError.OutputTooLarge)
         WebErrorProjection{status: self.status, content_type: content_type, body: body, fact_digest: fact_digest, failure_id: self.failure_id, redacted: facts.redacted}
@@ -862,29 +862,29 @@ negotiate_content_type: fn(accept: String) -> WebErrorContentType {
         specificity := 0
         target := WebErrorContentType?{None}
         if {
-            media == "text/html" -> { target = Val(WebErrorContentType.Html); specificity = 2 }
-            media == "application/json" -> { target = Val(WebErrorContentType.Json); specificity = 2 }
-            media == "text/*" -> { target = Val(WebErrorContentType.Html); specificity = 1 }
-            media == "application/*" -> { target = Val(WebErrorContentType.Json); specificity = 1 }
+            media == "text/html" -> { target = Val(WebErrorContentType.HTML); specificity = 2 }
+            media == "application/json" -> { target = Val(WebErrorContentType.JSON); specificity = 2 }
+            media == "text/*" -> { target = Val(WebErrorContentType.HTML); specificity = 1 }
+            media == "application/*" -> { target = Val(WebErrorContentType.JSON); specificity = 1 }
             media == "*/*" || media == "*" -> {}
             else -> next
         }
         candidate: WebErrorAcceptCandidate{quality: quality, specificity: specificity, index: index}
         if target == {
-            .Val(.Html) -> { if accept_candidate_better(candidate, html) -> html = Val(candidate) }
-            .Val(.Json) -> { if accept_candidate_better(candidate, json) -> json = Val(candidate) }
+            .Val(.HTML) -> { if accept_candidate_better(candidate, html) -> html = Val(candidate) }
+            .Val(.JSON) -> { if accept_candidate_better(candidate, json) -> json = Val(candidate) }
             .None -> {
                 if accept_candidate_better(candidate, html) -> html = Val(candidate)
                 if accept_candidate_better(candidate, json) -> json = Val(candidate)
             }
         }
     }
-    json_choice: json ?? return WebErrorContentType.Html
-    html_choice: html ?? return WebErrorContentType.Json
+    json_choice: json ?? return WebErrorContentType.HTML
+    html_choice: html ?? return WebErrorContentType.JSON
     if json_choice.quality > html_choice.quality || (json_choice.quality == html_choice.quality && (json_choice.specificity > html_choice.specificity || (json_choice.specificity == html_choice.specificity && json_choice.index < html_choice.index))) {
-        return WebErrorContentType.Json
+        return WebErrorContentType.JSON
     }
-    WebErrorContentType.Html
+    WebErrorContentType.HTML
 }
 parse_quality: fn(value: String) -> Int? {
     if value == "0" -> return Val(0)
