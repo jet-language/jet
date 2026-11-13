@@ -1043,3 +1043,477 @@ mitigation and card. *(card)* means Main files a card or criterion.
 
 Once G12Docs-5 closes items 1–28, a third round needs to check only
 those items, the claim verdicts, and a re-run of the kit.
+
+# Round 3: revision 3 of the proposal
+
+Date: 2026-11-13. Reviewer: Claude Opus, lane G6. The reviewer did not
+write any revision and built no part of the shape.
+
+Subject: revision 3 of `Docs/proposals/2026-11-13-web-app-framework-shape.md`
+as submitted in G12Docs-webshape-r3 (5,967 lines, base dev `93380f43ef`,
+patch SHA-256 `88f4aa5e…91aaa9`), with its ballot file
+`6792-r3-new-cards.json`: the new cards #6824–#6831 and the ballot draft
+D-BOUND-METHOD1. Line numbers in this round refer to revision 3. This round
+checks the 28 round-two items (R2-6), attacks every c6, c7 and c8 claim
+again, and reviews the D-BOUND-METHOD1 draft.
+
+**Overall verdict for round 3: fails, narrowly.** Revision 3 closes 25 of
+the 28 round-two items, and the other three only partly. Every file
+reproduces on seed-b14 and matches the document byte for byte. c6 is met
+with one defect, and c7 is met. c8 is only partly met, for three reasons:
+
+1. CL2, CL4 and CL7 each fail the "next test" that 8.3 itself names, on
+   Crewboard's own code.
+2. The row policies that carry the safety story leave write semantics
+   undefined. Under one reading `create_project` cannot run. Under the
+   other, a member can promote themselves to owner.
+3. Crewboard has no way to remove a member or change a role. That is a
+   basic demand of a team tracker, and the proposal does not name it as a
+   gap.
+
+The D-BOUND-METHOD1 draft is not ready to post (R3-5). R3-6 lists every gap
+in one pass. Most of the gaps are text fixes.
+
+## R3-1. Method
+
+- **Reproduction.** The reviewer copied G12Docs-5's kit to the G6 scratch,
+  ran `node build.mjs` (48 files), and then ran `check.sh` with seed-b14
+  (`jet@a0.0.45#1e8010c1…`). Files were checked one at a time under a
+  memory cap, with a dev checkout at `93380f43ef` as the toolchain root.
+  `report.mjs` printed the A.3 table exactly, all 48 rows:
+  - b1–b6 each report their seeded error at line 10;
+  - `drag.jet` reports `jet.UninferableTypeArgument` at line 20;
+  - `cl1_server_only.jet` reports `jet.UnknownFunction` at lines 9 and 10
+    (`CrewRemote` has no method `webhook_secret`, then none named
+    `tell_assignee`);
+  - the other 40 files are clean, `cl5_secret_print.jet` among them.
+- **Fidelity.** A script pulled every labeled block out of the proposal
+  (55 blocks) and compared each with the kit's tree. The 48 checked files
+  and the six stub files of section 10 are byte-identical.
+- **Package isolation.** `jet check` reports a whole package, so a file
+  can be "clean" in a package that has an error elsewhere. The reviewer
+  re-checked three packages with their failing files removed, to see
+  whether the error had hidden others:
+  - `examples` without `drag.jet`;
+  - `probes` without `cl1_server_only.jet`;
+  - `style_bugs` with only b7 and b8.
+
+  None had: all three report no errors. The examples have 33 warnings
+  (unused imports and parameters, and stubs that always diverge), and b7
+  and b8 have 5. A.3's "clean" means no errors, not no warnings. The text
+  should say so.
+- **Bound-method probes.** Three small files test what seed-b14 does today
+  with a method named without a call. One is a plain method, one a method
+  that shares its name with a field, and one an `&self` method.
+
+  Today a method named without a call is an error, `jet.UnknownField`:
+  `Counter` has no field `get` (10:10), and has no field `bump` (12:10).
+  The seed accepts a field and a method that share a name, and `c.name`
+  checks clean. Because a bare method name is an error, that `c.name` is
+  the field.
+- **Cards.** The reviewer read these cards in Tower:
+  - #3709 c17–c24;
+  - #6445 c3–c7;
+  - #6801 and #6820;
+  - #6824–#6831.
+
+  Every number the proposal cites for them matches the card. The one
+  exception is `limit_sign_in` (R3-6 item 20).
+- **Sources.** No URL was fetched in this run. The reviewer named systems
+  from his own knowledge, and G12Docs-5 must open each source before citing
+  it.
+
+## R3-2. The 28 round-two items
+
+| # | Verdict | Evidence or residual |
+|---|---|---|
+| 1 | closed | #6824 and #6819 c4, c5 and c7 exist; the 7.13 table pairs each interim form with its target form. The ballot draft is reviewed in R3-5 |
+| 2 | closed | TR2 generates `CrewRemote` with only the marked methods, and the probe fails as A.3 says (reproduced) |
+| 3 | closed | 148–150, 208, 2465–2470, 4614 and 4694 all say "proposed in #6557"; the CL5 probe is clean on seed-b14 (reproduced) |
+| 4 | closed | 8.3 carries the round-two verdicts. Residual: CL2, CL4 and CL7 fail their own next tests (R3-4) |
+| 5 | closed | one route set; `.screen` only in the graph builder (#6445 c6) |
+| 6 | closed | 4665 (Qwik), 4620 and 4679 (CL7), 4624 (performance) |
+| 7 | **partly** | policies replace hand-written membership checks in reads. Residuals: write semantics (item 1), Member write access to project rows (item 2), and the `mine` test that 684 promises but `logic_test.jet` does not have (item 23) |
+| 8 | closed | `app.caller()` is non-optional, and the path rule is #6445 c4 |
+| 9 | closed | one serializable transaction per write method (#6445 c5); `move_task` takes a version; the import is one call. Residual: `attach` (item 12) |
+| 10 | closed in text | #6827. Residual: per-row policies against the query counts (item 13) |
+| 11 | closed | #3709 c23. Residual: the ID format, and `Exists` as an existence oracle (item 7) |
+| 12 | closed | #6825. Residuals: closures in the outbox (item 10), "exactly once" (item 11), and System pushes (item 5) |
+| 13 | closed | 4.7, #6826, #6829; Crewboard creates projects and sends invitations. Residuals: invitations (item 4), no removal or role change (item 5) |
+| 14 | closed | handlers are `fn() app.Notice!`, `notices.jet` converts, and 3.7 steps 1–2 agree. Residuals: handlers outside #6445 c7's list, reads that fail silently, and queued failures with no screen (items 14, 15) |
+| 15 | closed | `Crew.attach`, the attach button and `tell_assignee` are wired in |
+| 16 | closed | #6820 c3 keeps the delivery ID in the webhook's transaction for 30 days |
+| 17 | closed | #6813 c1–c4 in the stated order. Residual: the upload inside the transaction (item 12) |
+| 18 | closed | #6828. Residual: the round trip is lossy (item 19) |
+| 19 | **partly** | `viewers` reads the task first, and `key:` names the signing key. Residual: presence still counts accounts that cannot read the task (item 6) |
+| 20 | closed | `check_assignee` and #6831. Residual: `at:` on plain arguments (item 9) |
+| 21 | closed | `native.PickedFile` |
+| 22 | closed | #6801's title and c3 agree with 5.1; #6804 c3 covers a single desktop instance |
+| 23 | closed | the `realtime.jet` comment (2611–2614) |
+| 24 | closed | 4.9, #3709 c24, and the 20-viewer cost |
+| 25 | **partly** | every sub-item is done: the board in seven forms (6.2), no dead rules (6.4 item 5), the SwiftUI focus ring (3780–3798), S1 A with no wrapper, the theme-type rule, and the five new 6.3 rows. Residuals: 6.3's drag row disagrees with 5.1.7 (item 18), and `native.share` lost its example (item 17) |
+| 26 | closed | #6799–#6817 each have 2–4 criteria with a proof line |
+| 27 | closed | A.6 finding 6 |
+| 28 | closed | struct bodies have commas; `MemberKey` waits on #6251 c12 (7.13) |
+
+Twenty-five items are closed (item 10 in text only), and three are only
+partly closed: 7, 19 and 25.
+
+## R3-3. Placeholders and the new cards
+
+- No `{{N…}}` placeholder remains. The only `{{` in the file are Jet's
+  escaped braces in `style_c.jet`.
+- The proposal cites the new cards as #6824–#6831. Their Tower titles are,
+  in order:
+  1. bound method values;
+  2. jobs;
+  3. accounts and mail;
+  4. database search and relations;
+  5. CSV;
+  6. rate limits;
+  7. observability;
+  8. `field_error`.
+
+  This matches N1–N8 in the ballot file, and every criterion count matches
+  the file.
+- These criterion numbers on existing cards match Tower:
+  - #3709 c19–c24;
+  - #6445 c3–c7;
+  - #6819 c4–c7;
+  - #6820 c2 and c3;
+  - #6813 c1–c4;
+  - #6801 c3, #6802 c1, #6804 c3;
+  - #6817 c1–c3.
+- Three new criteria contradict the proposal or the code as written:
+  - #6825 c1 says "exactly once" (item 11);
+  - #6827 c2 and c3 promise query counts that the row policies break
+    (item 13);
+  - #6831 c1 makes two of Crewboard's own `field_error` calls compile
+    errors (item 9).
+
+## R3-4. Claims c6, c7 and c8, attacked again
+
+**c6 (native and web coverage).** Every need in the card has a row in the
+5.1 or 5.2 table, an example, a card and a "what runs where" column. One
+defect: share. Revision 2 showed `native.share` in the phone entry's swipe
+action. Revision 3 moved Mine to a shared screen and dropped the action, so
+no file calls `native.share` now. Yet the 5.1 table (2829) and 5.1.7
+(3087–3088) still point to "the phone entry (3.6)" (item 17).
+
+**c7 (styling).** Every row the card lists is covered:
+- the board is styled in all seven forms, with counts;
+- six of the eight seeded bugs are caught by the seed (reproduced);
+- the guarantees are stated at the size the attacks leave.
+
+On the owner's floor, the proposal reports its own count: 87 lines for
+S1 A against 51 for HTML and CSS (4243–4245). It leaves the floor to
+measure 5 on #6817. That is a named gap with its measure, not a claim, so
+c7 is met. It is not yet shown to be "at least as easy".
+
+**c8 (matrix and claims).** The matrix is fair, and no row says "best". Each
+claim was re-attacked:
+
+| Claim | Round 3 result |
+|---|---|
+| CL1 | **holds** (matches Convex). The probe fails for the stated reason. A client cannot reach `Crew` itself either: only `open_crew` makes one, and it needs `DB.Read, DB.Write` (1148). Line 152 puts that code on the server |
+| CL2 | **fails its next test.** `ProjectDraft` and `InviteDraft` live in `Screens` (1359, 1523), not `Logic`. The endpoints take loose arguments: `invite(project, email: String, role: Role)` (1030) never runs `InviteDraft.validate`, so a crafted call stores any string as an email. `create_project(name: String)` repeats `ProjectDraft`'s rule by hand (1021). That is a decode path that skips the type's `validate`, and one rule written twice (item 8) |
+| CL3 | **holds** (matches Navigation Compose and Expo Router) |
+| CL4 | **fails its next test.** 4.6 (2422–2423) predicts "only typed edits of rows already on the client", but `new_task.jet` (1656–1657) shows a queued create "as a predicted task". The subset rule in 4.6 also leaves out `app.enqueue`, which `create_task` reaches through `after_assign` (item 16) |
+| CL5 | not carried, as stated. The probe reproduces clean |
+| CL6 | **holds, narrowed.** The delivery ID is stored in the webhook's transaction (#6820 c3), so a failed run is retried, not dropped. One hole: `webhook_secret` returns `None` for an unknown project (1086), and nothing says that `None` means 401 rather than "no key, no check" (item 3) |
+| CL7 | **fails its next test.** `invitations` maps `.Failed(_)` to `ui.empty()` (1400), so a failed read of your invitations reaches the person as nothing. Handlers outside #6445 c7's list have no stated destination: `native.tray`'s menu builder, `native.background`'s `run`, `native.lifecycle`'s `on_resume`, and `native.drop_files`'s `on_drop`. `files.jet` says the drop "shows its notice by the board", but no criterion makes that so (item 14) |
+| CL8 | **holds** (matches buf; behind Apollo) |
+| CL9 | **holds** (matches Compose and vanilla-extract) |
+
+**Safety (C3), attacked through Crewboard's code:**
+
+- **Policy write semantics.** `policy.jet` (695–766) never says which row a
+  write is judged on, or whether the policy's own reads of the store see
+  the store before the write or after it.
+  - **Store before the write.** `create_project` (1020–1025) is refused.
+    For `projects.add`, `project_access` finds no member row and gives
+    `Nothing`. For `members.add` of the Owner row, `member_policy` finds no
+    role and no invitation, and gives `Nothing`.
+  - **Store after the write.** A Member who rewrites their own member row
+    with `role: Owner` passes `member_policy` (722), because `role_of` then
+    reads the new row and finds an owner.
+
+  Postgres states both checks, `USING` and `WITH CHECK`
+  (https://www.postgresql.org/docs/current/sql-createpolicy.html), and a
+  creator rule is still needed (item 1).
+- **Project rows.** `project_policy` gives every Member `Write` on the
+  `Project` row (737), which includes the name and `webhook_secret`
+  (item 2).
+- **The webhook key.** `webhook_secret: app.new_id()` (1022) is a UUIDv7:
+  a 48-bit timestamp and about 74 random bits, not a 256-bit HMAC key.
+  Nothing shows the owner the key, so it cannot be set in GitHub (item 3).
+- **Invitations.**
+  - `accept_invite` (1047–1052) does not delete the invitation. After
+    joining, it still shows under "You are invited". **Join** then fails
+    with `Exists`, which becomes `.Storage` and "Couldn't save. Try again."
+  - `invite` lowercases the address (1032), but nothing says
+    `auth.verified_email` does. A confirmed `Ana@…` never matches its
+    invitation (item 4).
+- **Membership.** No method removes a member or changes a role. When one
+  is added, two things must change:
+  - jobs run as System, so `tell_assignee` (1093–1098) and
+    `remind_due_today` (1110–1117) would push task titles to an assignee
+    who has left;
+  - line 684's "projects the caller had left" names a case that the app
+    cannot reach (item 5).
+- **Presence.** `app.presence(TaskView{id})` counts every account that has
+  the state open (stub, 4997–5000). That includes an outsider whose read of
+  the task was refused, so members see them counted (item 6).
+- **Client IDs.** `TaskID.from_string` accepts any string (`"t1"` in the
+  tests). When `add` meets a taken key, it answers `Exists` even for a row
+  the caller cannot read, so `create_task` reveals whether a task ID
+  exists in another project (item 7).
+
+**Transactions, jobs and cost:**
+
+- **The outbox.** The `app.enqueue` stub takes any closure:
+  `enqueue: fn<E>(job: fn() E!)`. An outbox row cannot hold a closure, and
+  `after_assign` captures the whole `task` (1129). No rule limits the body
+  to one job call with codable arguments (item 10).
+- **Exactly once.** #6825 c1 promises that a job runs "exactly once". A run
+  that sends the push and crashes before it records success runs again.
+  Oban (https://hexdocs.pm/oban) and Solid Queue
+  (https://github.com/rails/solid_queue) promise at least once (item 11).
+- **Uploads.** `attach` streams the upload inside a serializable
+  transaction (996–1008). Three things follow:
+  - the transaction stays open for the whole upload;
+  - a serialization retry (#6445 c5) runs again on a body already read;
+  - a blob that `keep` wrote is not rolled back with the transaction, so
+    it is orphaned (item 12).
+- **Query counts.** The policies read `members` for each row
+  (`role_of`, 748–751), and section 9 admits "one policy check per row
+  unless the predicate becomes SQL" (4708). That contradicts "two queries,
+  whatever the number of projects" (875–876, #6827 c2) and #6827 c3
+  (item 13).
+
+**Text:**
+
+- 2446 cites #6829 for `limit_sign_in`, which is #6826 c1;
+- 689 cites #3709 "c10" for policies, which are c22;
+- 682–683 says "no method checks membership by hand", but `move_task`
+  (978) and `attach` (998) do, through `role_in`;
+- A.7 points to a kit that lives in scratch (items 20–24).
+
+## R3-5. The D-BOUND-METHOD1 draft
+
+The draft asks one question: "Should Jet have bound method values
+(`obj.method` without a call is a fn value with the receiver bound)?" It
+offers two options:
+
+- **A** (recommended): "owns or copies its receiver under the existing
+  closure capture rules".
+- **B**: no.
+
+It goes with card N1 (#6824), which has two criteria. Measured against the
+proposal and the stubs:
+
+1. **The rationale is wrong.** The draft says option A "removes the
+   free-function wrappers … e.g. `native.tray(icon, tray_menu)`". But
+   `native.tray`, `native.background` and `native.lifecycle` take
+   `fn(S) …`, a function of the service that the graph passes in (the
+   `native` stub). `tray_menu` also builds menu items from the projects. A
+   bound `crew.my_projects` cannot fill that slot, so the wrapper stays.
+   7.13's second row has the same error. The real users are `app.live` and
+   the string `key: "webhook_secret"` in `#App.Webhook`, which could
+   become a checked reference.
+2. **`app.live` needs more than a fn value.** A live query must know which
+   endpoint and which arguments it subscribes to. It needs that for three
+   things:
+   - the server's subscription;
+   - the device's cache key;
+   - #3709 c18's sharing.
+
+   Suppose a bound `crew.board` is an ordinary `fn(ProjectID) -> Board
+   TaskError!`. Then `app.live(crew.board, view.project)` tells `app.live`
+   no more than today's closure does. The stub `live: fn<T, E>(query:
+   fn() -> T E!)` already accepts the closure. The ballot must say that a
+   bound method of an `app.Remote<S>` is a typed remote-query value that
+   `app.live` can key on. If it is not, the closure form is the target
+   form, not an interim one.
+3. **Option B's consequence is unstated.** 7.12 makes D-LIVEQUERY1's
+   ratified form wait on this ballot. Under option B, the ballot must say
+   what D-LIVEQUERY1 becomes.
+4. **The receiver modes.** Jet methods take `self` or `&self`. "Owns or
+   copies its receiver" makes a bound `&self` method change a copy. That is
+   a silent bug: `g: c.bump` then `g()` leaves `c` unchanged, which is the
+   trap Go's method values set. Option A must say what a bound `&self`
+   method holds:
+   - a borrow, which cannot escape and is checked like any borrow; or
+   - nothing, because binding one is refused.
+
+   It must also say that the receiver is evaluated where the method is
+   bound.
+5. **Field and method names.** Seed-b14 accepts a struct with a field
+   `name` and a method `name`, and `c.name` is the field (R3-1). Under
+   option A, `c.name` could mean either. The ballot must say which one wins,
+   or make the clash a declaration error.
+6. **The criteria.**
+   - N1 c1's "(app.enqueue(self.tell_assignee(id)) form aside)" names a
+     call, not a bound value. Drop it.
+   - Add a criterion for the forgotten `()`. A bound value used where its
+     result was meant must give an error at that site that suggests the
+     call.
+   - Add a criterion for generic methods, and one stating that the value
+     carries the method's effects and error type.
+7. **The ballot needs code.** The draft has none. Show the same program
+   under each option: `app.live(crew.board, view.project)` against
+   `app.live(fn() { crew.board(view.project) })`, plus a `&self` case.
+
+**Verdict:** do not post it until items 25–28 of R3-6 are fixed.
+
+## R3-6. Gaps for G12Docs-5, in one pass
+
+Each item must be engineered away in the proposal, or named with its cost,
+mitigation and card. *(card)* means Main files a card or criterion.
+
+**Safety**
+
+1. State that a policy judges a write twice, as `USING` and `WITH CHECK`
+   do: on the row before the write and on the row after it, with its own
+   reads seeing the store as it was before the write. Add a creator rule so
+   that `create_project` can insert the project and its first owner. Show
+   that a Member cannot rewrite their own member row as Owner. *(criterion
+   on #3709 c22)*
+2. Make `Project` rows owner-write in `project_policy`. Members read them.
+3. Generate the webhook key as 256 random bits, not with `app.new_id()`.
+   Give the owner one way to see it so it can be set in GitHub. State that
+   a `None` key answers 401 (or 404) and never skips the check. *(criterion
+   on #6820)*
+4. Delete the invitation in `accept_invite`, and give invitations an
+   expiry. Normalize addresses on both sides, or state that
+   `auth.verified_email` returns the lowercased address. *(criterion on
+   #6826)*
+5. Add member removal and role changes to Crewboard, and state what each
+   does to:
+   - the member's assignments;
+   - open live queries;
+   - System-run jobs, which must check membership before they push
+     (`tell_assignee`, `remind_due_today`);
+   - the last owner.
+
+   *(criterion on #6826 or #6825)*
+6. Count in `app.presence` only the accounts whose read of the screen's
+   state passed. *(criterion on #3709)*
+7. Check the format of client-made IDs in the decoder (UUIDv7). When `add`
+   meets a key the caller cannot read, answer as if it were refused, not
+   `Exists`. *(criterion on #3709 c23)*
+
+**Logic once and validation**
+
+8. Move `ProjectDraft` and `InviteDraft` into `Logic`, and take them as the
+   endpoint parameters (`create_project(draft: ProjectDraft)`,
+   `invite(project, draft: InviteDraft)`), so the server runs the same
+   `validate`. Remove the hand copy at 1021.
+9. `app.field_error(at: "name")` (1021) and `at: "drafts"` (945) name
+   arguments, not fields of a decoded argument, so #6831 c1 makes both
+   compile errors. Change the code (item 8 fixes the first one) or the
+   criterion.
+
+**Transactions, jobs and cost**
+
+10. Say what `app.enqueue` accepts: a body that is one call of an
+    `#App.Job` method of the same service, with codable arguments, and a
+    compile error otherwise. Otherwise, take the job and its arguments
+    directly. *(criterion on #6825)*
+11. Change #6825 c1 from "exactly once" to "at least once". Give each run an
+    idempotency key that `app.notify` and `app.mail` pass to their
+    transport. *(criterion edit on #6825)*
+12. Spool an upload before the transaction starts, or tie `keep`'s blob to
+    the commit, deleting it on rollback. A retry must reuse the spooled
+    body. *(criterion on #6813)*
+13. State how a policy that reads the store stays within #6827's counts:
+    it compiles into the query as a join on `members`, or it is memoized
+    per project and caller within a transaction. Make #6827 c2 and c3 count
+    the policy's statements too, and say whether `search(...).limit(50)`
+    filters before it limits. *(criterion edit on #6827)*
+
+**Errors and prediction**
+
+14. Give a destination to the handlers that #6445 c7 does not list:
+    - the tray menu builder;
+    - `native.background`'s `run`;
+    - `native.lifecycle`'s `on_resume`;
+    - `native.drop_files`'s `on_drop`.
+
+    Show the invitations read's failure instead of `ui.empty()`.
+    *(criterion edit on #6445 c7)*
+15. 3.7 step 9 says where a refused queued write's notice goes. Two cases
+    are unstated:
+    - the card is no longer on screen, or the app restarted;
+    - edits queued behind the refused one were rebased on its prediction.
+
+    *(criterion on #3709)*
+16. Make 4.6 and `new_task.jet` agree on whether creates are predicted, and
+    list `app.enqueue` among what a prediction skips. *(criterion on
+    #6555 or #3709)*
+
+**Coverage and styling**
+
+17. Restore a `native.share` example and fix the pointers at 2829 and
+    3087–3088.
+18. 6.3's drag row (3949) names `kit.draggable` and "a menu action". The
+    API is `ui.draggable`, and the alternative 5.1.7 describes is the
+    keyboard pick-up and the long-press menu. Make them one.
+19. State that CSV escaping is lossy for Crewboard's own round trip. An
+    exported `=SUM(1)` re-imports as `'=SUM(1)` under #6828 c2. Give the
+    import a way to strip the apostrophe, or name the cost.
+
+**Text**
+
+20. 2446: `limit_sign_in` is #6826 c1, not #6829.
+21. 689: policies are #3709 c22, not c10.
+22. 682–683: rephrase to "no method needs a membership check to keep rows
+    private". `move_task` and `attach` still check roles through
+    `role_in`.
+23. 684: add the promised test that `mine` hides a project the caller has
+    left, once item 5 makes leaving possible.
+24. A.7: commit the kit (the stubs, `build.mjs`, `check.sh` and
+    `report.mjs`) beside the proposal, or say that the scratch copy is
+    transient. A committed document should not depend on a scratch path to
+    reproduce its results. Also say that A.3's "clean" means no errors:
+    the examples carry 33 warnings (R3-1).
+
+**D-BOUND-METHOD1 (R3-5)**
+
+25. Replace the rationale. Name `app.live` and checked webhook keys, not
+    `native.tray`, and fix 7.13's second row the same way.
+26. State that a bound method of an `app.Remote<S>` is a remote-query value
+    that `app.live` can key on, or keep the closure as the target form.
+    Say what D-LIVEQUERY1 becomes under option B.
+27. State the receiver rule: when the receiver is evaluated, and what a
+    bound `&self` method holds (a checked borrow, or a refusal), plus the
+    field and method name rule from R3-5 item 5.
+28. Fix N1's criteria: drop the `app.enqueue` parenthetical, and add the
+    forgotten-call diagnostic, generic methods, and effects in the type.
+    Add code for both options to the ballot.
+
+## R3-7. Verdicts
+
+| Claim or criterion | Round 3 verdict |
+|---|---|
+| C1 logic once | **holds within limits.** Two validation types live in `Screens`, and one rule is written twice (item 8) |
+| C2 seamless | **holds.** One route set on every target |
+| C3 safety | **fails.** Policy write semantics are undefined, project rows are member-writable, the webhook key is weak, invitations persist, and presence counts outsiders (items 1–7) |
+| C4 performance | **holds within limits.** The query counts ignore the policies (item 13) |
+| C5 completeness (c6) | **met, with one defect** (item 17) |
+| C6 styling (c7) | **met.** The floor of "as easy as HTML and CSS" is named and unproven: 87 lines against 51, left to measure 5 on #6817 |
+| c8 probe and matrix | **partly met.** The matrix is fair and claims "best" nowhere. CL2, CL4 and CL7 fail their own next tests, and the missing member removal is not named (items 5, 8, 14, 16) |
+| CL1 | holds: matches Convex, and the evidence reproduces |
+| CL2 | matches ASP.NET Core and FastAPI for decoders; Crewboard's endpoints skip it (item 8) |
+| CL3 | holds: matches Navigation Compose and Expo Router |
+| CL4 | matches Meteor and Zero, once 4.6 and `new_task.jet` agree (item 16) |
+| CL5 | not carried until #6557; the probe reproduces |
+| CL6 | holds, narrowed to marked webhooks; the `None` key needs a rule (item 3) |
+| CL7 | matches Elm, once silent failures and unlisted handlers are fixed (item 14) |
+| CL8 | holds: matches buf; behind Apollo |
+| CL9 | holds: matches Compose and vanilla-extract |
+| Placeholders and cards | **done.** #6824–#6831 replace every placeholder, and the titles and counts match |
+| D-BOUND-METHOD1 draft | **not ready** (items 25–28) |
+
+Once G12Docs-5 closes items 1–28, a fourth round needs to check only those
+items and re-run the kit.
