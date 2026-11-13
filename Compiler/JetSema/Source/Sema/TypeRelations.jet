@@ -1223,30 +1223,37 @@ sema_type_graph_lookup_symbol_at: fn(graph: SemaRegistrationGraph, caller: Int, 
         if caller < 0 -> return None
         return sema_registration_lookup_qualified(graph, graph.modules[caller].module_identity, qualified.before, qualified.after)
     }
-    // Only the established bare-owner trigger set may supply a global alias.
-    // Local declarations and explicit imports have already won above.
+    // Only the established bare-owner trigger set may supply a global alias
+    // or trait. Local declarations and explicit imports have already won above.
     bare_owner: core_bare_source_module(name)
+    core_trait := SemaRegistrationResolvedSymbol?{None}
     if bare_owner == .Val(owner_name) {
         // A prelude rename (`LocalDate as Date`) names the declared type.
         if core_bare_source_declared(name) == .Val(declared) -> return sema_type_graph_bare_rename(graph, declared, owner_name)
         loop row in sema_registration_nominal_rows_named(graph, name) {
             // The module and nominal are passed as places: binding the module
             // copied it whole per row.
-            found: sema_type_graph_bare_alias(graph.modules[row.module_index], graph.modules[row.module_index].nominals[row.row], row, owner_name)
-            if found != None -> return found
+            found: sema_type_graph_bare_owned(graph.modules[row.module_index], graph.modules[row.module_index].nominals[row.row], row, owner_name)
+            if found == None -> next
+            if graph.modules[row.module_index].nominals[row.row].kind != SemaRegistrationNominalKind.Trait -> return found
+            core_trait = found
         }
     }
-    sema_type_graph_unique_type_owner(graph, caller, name)
+    // A type the caller sees under the same name from another package (a
+    // package's own `Diagnostic` struct) wins over the bare Core trait.
+    owned: sema_type_graph_unique_type_owner(graph, caller, name)
+    if owned != None -> return owned
+    core_trait
 }
 
-// The established bare-owner alias `nominal` (graph row `row`) of
-// `module_row`, when it is one.
-sema_type_graph_bare_alias: fn(module_row: SemaRegistrationModule, nominal: SemaRegistrationNominal, row: SemaRegistrationRowRef, owner_name: String) -> SemaRegistrationResolvedSymbol? Never! {
+// The established bare-owner declaration `nominal` (graph row `row`) of
+// `module_row`, when it is one: a parameterless alias, or a trait (`Marker`,
+// `Diagnostic`), which the unique-owner scan leaves to Core's root traits.
+sema_type_graph_bare_owned: fn(module_row: SemaRegistrationModule, nominal: SemaRegistrationNominal, row: SemaRegistrationRowRef, owner_name: String) -> SemaRegistrationResolvedSymbol? Never! {
     if module_row.module_name != owner_name
         || !module_row.module_identity.starts_with("<corelib>/")
-        || nominal.kind != SemaRegistrationNominalKind.TypeAlias
-        || nominal.generic_params.len() != 0
         || nominal.symbol.visibility < 2 -> return None
+    if nominal.kind != SemaRegistrationNominalKind.Trait && (nominal.kind != SemaRegistrationNominalKind.TypeAlias || nominal.generic_params.len() != 0) -> return None
     Val(SemaRegistrationResolvedSymbol{place: SemaRegistrationSymbolPlace.Nominal{module_index: row.module_index, row: row.row}, source_module_identity: module_row.module_identity, target_module_identity: module_row.module_identity, visibility: nominal.symbol.visibility, nominal_row: Val(row)})
 }
 
