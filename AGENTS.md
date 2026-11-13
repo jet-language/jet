@@ -285,19 +285,28 @@ composed sweep and one fresh-context review; individual cards do not wait for
 that gate.
 
 One implementer owns each coherent patch. Concurrent writers need disjoint
-paths and one named close owner. The repository's working branches are
-`master` and `dev`. At the Rust cutover, the last
-commit that still contains the Rust implementation becomes the `rust` branch: a
-frozen dead-end leaf kept as a reference and a re-bootstrap safety net. Nobody
-commits to it or merges it into `dev` or `master`. Only the orchestrator, or
-the one Lander it names (see Delegation), commits, directly on `dev` in the
-dev worktree, one commit per landed
-submission that stages only that submission's paths.
-Besides the master checkout, at most three worktrees may exist: the dev worktree
-and up to two more that the orchestrator creates as detached checkouts of
-`dev`. Each extra worktree has one named owner, is kept at a current `dev`
-commit, holds no build output, and is removed as soon as it is idle; its work
-reaches `dev` before removal. Never create any other branch, worktree, or other
+paths and one named close owner. The repository has at most three branches:
+`master`, `dev`, and one other. Today the one other is `rust`: at the Rust
+cutover, the last commit that still contained the Rust implementation became
+the `rust` branch, a frozen dead-end leaf kept as a reference and a
+re-bootstrap safety net. Nobody commits to it or merges it into `dev` or
+`master`. While `rust` exists, no other branch exists and every change lands
+directly on `dev`; if the owner retires `rust`, the one other branch may be a
+single `staging` branch whose commits merge into `dev`. `master` holds the
+board and `dev` holds the code; both are pushed after every commit, so
+`origin` never lags. Only the orchestrator, or the one Lander it names (see
+Delegation), commits, directly on `dev` in the dev worktree, one commit per
+landed submission that stages only that submission's paths.
+Every worktree has one named, live owner: the dev worktree (the orchestrator),
+the Lander's trees, and at most one per standing agent within the team cap.
+Each one except the dev worktree is a detached checkout of `dev`, kept at a
+current `dev` commit (moved forward whenever its owner's work lands, never a
+day behind), and holds no build output and no commits of its own. It is
+removed as soon as its owner is idle or gone, after its work reaches `dev` or
+is recorded on its card. Stale, orphaned and superseded worktrees are removed
+whenever found and at every milestone. The master checkout holds `master`
+only: it is the board's checkout, never a copy of the code; read and run code
+from the dev worktree. Never create any other branch, worktree, or other
 ref (`refs/keep`, `refs/salvage`, `refs/archive`, private lineages), for any
 purpose: experiments, candidates, measurements, and proofs included. Work
 happens in these worktrees; no agent keeps its own copy of the repository. A
