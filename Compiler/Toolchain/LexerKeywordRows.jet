@@ -5,7 +5,9 @@
 // as borrowed byte checks, written whole to JetLexer/Source/Lexer/KeywordSpans.jet.
 // Spellings remain Jet Syntax constants; Jet token tags own the kinds. The
 // step keeps the file in git (`kept: true`), so the build rewrites a stale
-// one and refuses a hand edit of it.
+// one and refuses a hand edit of it. Each scanner tag `K_NAME` in
+// Terminators.jet must carry the number of its token kind `TOKEN_NAME` (or
+// `TOKEN_KW_NAME`) in Tokens.jet, so the two tables never drift apart.
 // Usage (from Compiler/): jet Toolchain/LexerKeywordRows.jet [--check|--write] [--syntax=DIR]
 // Paths are relative to the Compiler package, the step's working folder;
 // DIR (default JetFoundation/Data/Syntax) is the Syntax folder, which the
@@ -37,6 +39,9 @@ KEYWORD_LIST: Regex{"\nJET_KEYWORD_LIST: \[String\]\{{([\s\S]*?)\n\}}"}
 SYNTAX_CONSTANT: Regex{"^\s*(\w+)\s*:\s*(\x22(?:[^\x22\\]|\\.)*\x22)[^\S\n]*(?://[^\n]*)?$"}
 KEYWORD_TOKEN: Regex{"^TOKEN_(KW_\w+|TRUE|FALSE|SELF|NULL|BREAK|RETURN): \d+\s*$"}
 TOKEN_TAG: Regex{"^(K_\w+): "}
+// Any token kind or scanner tag with its number.
+TOKEN_NUMBER: Regex{"^TOKEN_(\w+): (\d+)\s*$"}
+TAG_NUMBER: Regex{"^K_(\w+): (\d+)\s*$"}
 SPELLING: Regex{"^[A-Za-z][A-Za-z0-9_]*$"}
 WORD_BREAK: Regex{"([a-z0-9])([A-Z])"}
 
@@ -94,6 +99,18 @@ keyword_rows: fn(mapping: String, syntax: String, tokens: String, tags: String) 
     loop line in tags.split("\n") {
         tag_line: TOKEN_TAG.match(line) ?? next
         tag_names.push(tag_line.groups[0])
+    }
+    numbers := [String:String]{}
+    loop line in tokens.split("\n") {
+        token: TOKEN_NUMBER.match(line) ?? next
+        name: token.groups[0].remove_prefix("KW_")
+        if numbers.get(name) != None -> return Err(rows_fail("token kinds TOKEN_{name} and TOKEN_KW_{name} share one tag name"))
+        numbers[name] = token.groups[1].copy()
+    }
+    loop line in tags.split("\n") {
+        scanned: TAG_NUMBER.match(line) ?? next
+        kind_number: numbers.get(scanned.groups[0]) ?? return Err(rows_fail("token tag K_{scanned.groups[0]} has no token kind TOKEN_{scanned.groups[0]} in {TOKENS_PATH}"))
+        if kind_number != scanned.groups[1] -> return Err(rows_fail("token tag K_{scanned.groups[0]} is {scanned.groups[1]}, but its token kind is {kind_number}"))
     }
     rows := [KeywordRow]{}
     spellings := [String]{}
@@ -274,4 +291,14 @@ keyword_rows_error: fn(mapping: String, syntax: String, tokens: String, tags: St
     retired: mapping.replace("\"K_FOR\", retired: false", "\"K_FOR\", retired: true")
     assert(keyword_rows_error(retired, syntax, tokens, tags).contains("retired keyword KW_FOR is in"))
     assert_eq(keyword_rows_error(retired, syntax.replace("    KW_FOR, // loops\n", ""), tokens, tags), "")
+}
+
+#Test("every scanner tag carries its token kind's number") {
+    mapping: "LEXER_KEYWORDS: [LexerKeyword]{{\n    LexerKeyword{{constant: \"KW_FN\", kind: \"KwFn\", tag: \"K_FN\", retired: false}},\n}}"
+    syntax: "KW_FN: \"fn\"\nJET_KEYWORD_LIST: [String]{{\n    KW_FN,\n}}"
+    tokens: "TOKEN_IDENT: 1\nTOKEN_STRING: 3\nTOKEN_KW_FN: 57\n"
+    assert_eq(keyword_rows_error(mapping, syntax, tokens, "K_IDENT: 1\nK_STRING: 3\nK_FN: 57\n"), "")
+    assert(keyword_rows_error(mapping, syntax, tokens, "K_IDENT: 1\nK_STRING: 4\nK_FN: 57\n").contains("token tag K_STRING is 4, but its token kind is 3"))
+    assert(keyword_rows_error(mapping, syntax, tokens, "K_IDENT: 1\nK_STR: 3\nK_FN: 57\n").contains("token tag K_STR has no token kind"))
+    assert(keyword_rows_error(mapping, syntax, "{tokens}TOKEN_FN: 58\n", "K_FN: 57\n").contains("share one tag name"))
 }

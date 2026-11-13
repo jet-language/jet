@@ -1066,7 +1066,7 @@ payload_for: fn(kind: Int, source: [U8], facts: [Int], index: Int, text: Name, c
         number: numeric_payload(kind, source, start, end, tables, diagnostics)
         return (decoded: number.decoded, keep: true, literal: number.literal)
     }
-    if kind == K_STR {
+    if kind == K_STRING {
         triple: byte_at(source, start) == 34 && byte_at(source, start + 1) == 34 && byte_at(source, start + 2) == 34
         if triple && raw_foreign_body_at(source, facts, index) {
             body: slice_text(source, start + 3, end - 3)
@@ -1080,7 +1080,7 @@ payload_for: fn(kind: Int, source: [U8], facts: [Int], index: Int, text: Name, c
         if !decoded.valid -> return (decoded: name_empty(), keep: false, literal: -1)
         return (decoded: name_intern(tables.names, decoded.decoded), keep: true, literal: literal_row(tables, text_literal(decoded.interpolations, decoded.parts)))
     }
-    if kind == K_RAW_STR {
+    if kind == K_RAW_STRING {
         raw: decode_raw_string(slice_text(source, start, end), start, tables)
         return (decoded: name_intern(tables.names, raw.decoded), keep: true, literal: literal_row(tables, text_literal(0, raw.parts)))
     }
