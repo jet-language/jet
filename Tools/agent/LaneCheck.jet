@@ -141,11 +141,11 @@ Setting: struct {
 }
 
 // The Jetpack assembly check's environment. Its Jet tool
-// (Tools/agent/CompilerPackages.jet `sources`) runs under JET_BIN, else the
-// current seed, against this checkout's Core; the seed's Core part table
-// predates every part Core gained since it (#6694 c18: Core/Crypto's
-// `__core_crypto_md` is no core module to it). So the tool runs under the jet
-// being checked, as Compiler/test.jet and Jetpack/Bootstrap/Check.jet run it.
+// (Tools/agent/CompilerPackages.jet `sources`) runs under JET_BIN against this
+// checkout's Core, which a seed's Core part table may predate (#6694 c18:
+// Core/Crypto's `__core_crypto_md` is no core module to it). So the tool runs
+// under the jet being checked, as Compiler/test.jet and
+// Jetpack/Bootstrap/Check.jet run it.
 assembly_env: fn(jet: String) -> [Setting] {
     [Setting]{Setting{name: "JETPACK_WORKER", value: "lanecheck"}, Setting{name: "JET_BIN", value: jet}}
 }

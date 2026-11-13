@@ -286,7 +286,7 @@ pkg_test_suites_refusal: fn(body: String) -> String Never! {
 }
 
 #Test("test profile fields refuse unknown fields, bad values and empty suites") {
-    assert_eq(pkg_test_profiles_refusal(`quick: TestProfile{ suites: [tests], workers: 4 }`), "test profile `quick` has an unknown field `workers` (allowed: suites, baseline, fresh, docs, filter, capture, update_snapshots, shuffle, serial, measure, trace_tiers, optimize, time_limit, opt_in, shard, list, cases, jobs, memory, allow_shrink, diagnostic_coverage, results, compiler, jetpack, coverage, grade, iterations, seed, record)")
+    assert_eq(pkg_test_profiles_refusal(`quick: TestProfile{ suites: [tests], workers: 4 }`), "test profile `quick` has an unknown field `workers` (allowed: suites, baseline, docs, filter, capture, update_snapshots, shuffle, serial, measure, trace_tiers, optimize, time_limit, opt_in, shard, list, cases, jobs, memory, allow_shrink, diagnostic_coverage, results, compiler, jetpack, coverage, grade, iterations, seed, record)")
     assert_eq(pkg_test_profiles_refusal(`quick: TestProfile{ suites: [tests], watch: true }`), "test profile `quick` field `watch` is not ported to the Jet test runner yet")
     assert_eq(pkg_test_profiles_refusal(`quick: TestProfile{ suites: [tests], jobs: 0 }`), "test profile `quick` needs `jobs:` as a whole number of at least 1")
     assert_eq(pkg_test_profiles_refusal(`quick: TestProfile{ suites: [tests], memory: lots }`), "test profile `quick` needs `memory:` as a positive size such as `16G`, `8gib` or `512mib`")

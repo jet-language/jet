@@ -39,7 +39,7 @@
 //   JETPACK_BOOTSTRAP_DEPS_FROM_HEAD=1  dependency sections read HEAD's manifests and bytes
 //   JETPACK_WORKER                 the scratch directory's writer name (default lead)
 //   JET_BIN                        the jet that runs Tools/agent/CompilerPackages.jet
-//                                  (default: the current seed)
+//                                  (default: $JET, else the jet on PATH)
 //
 // `areas` answers from `areas.list`, which declares each area's direct
 // dependencies, after validating the graph against the `# == Area ==`
@@ -193,17 +193,11 @@ state_root: fn() -> String {
     files.join(files.join(process.env_get("HOME") ?? "", ".cache"), "jet-dev")
 }
 
-// The jet that runs the repository's Jet tools: $JET_BIN, else the current seed.
+// The jet that runs the repository's Jet tools: $JET_BIN, else $JET, else the
+// jet on PATH. The tools read this checkout's Core, so a seed is no default: a
+// seed built before Core changed shape can't read it.
 tool_jet: fn() -> String {
-    given: process.env_get("JET_BIN") ?? ""
-    if given != "" -> return given
-    seed: process.env_get("JET_SEED") ?? ""
-    if seed != "" -> return "{seed}/jet"
-    seeds: process.env_get("JET_SEEDS") ?? ""
-    if seeds != "" -> return "{seeds}/current/jet"
-    data: process.env_get("XDG_DATA_HOME") ?? ""
-    home: process.env_get("HOME") ?? ""
-    if data != "" -> "{data}/jet-seeds/current/jet" else -> "{home}/.local/share/jet-seeds/current/jet"
+    process.env_nonempty("JET_BIN") ?? (process.env_nonempty("JET") ?? (process.which("jet") ?? "jet"))
 }
 
 // --- assembly -------------------------------------------------------------------
