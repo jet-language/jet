@@ -3,7 +3,8 @@
 use {
     cli_files: core.files
     jet_driver.[JetDriverBuildQueryScope, JetDriverCompileMode, JetDriverVerbOutput, jet_driver_entry_package_has_build, jet_driver_present_diagnostics, jet_driver_query_build_plan, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR]
-    jet_foundation.[Diagnostic, DiagnosticFixApplicability, DiagnosticFixSafety, DIAGNOSTIC_ERROR]
+    jet_foundation.[Diagnostic, DiagnosticFixApplicability, DiagnosticFixSafety, Span, TextEdit, DIAGNOSTIC_ERROR]
+    jet_lexer.[lex, Token, TOKEN_BLOCK_COMMENT, TOKEN_COLON, TOKEN_COLON_EQ, TOKEN_EQ, TOKEN_IDENT, TOKEN_LBRACE, TOKEN_LINE_COMMENT, TOKEN_RBRACE, TOKEN_SEMI]
     jet_parser.[jet_format_unified_diff, parser_marker_placement_edits]
 }
 
@@ -70,7 +71,8 @@ jet_cli_fix_collect: fn(file: String, source: String, all: Bool) -> JetCLIFixQue
         }
         diagnostics.push(finding)
     }
-    fixes: jet_cli_collect_fixes_from_diagnostics(diagnostics, source)
+    fixes := jet_cli_collect_fixes_from_diagnostics(diagnostics, source)
+    migrations: jet_cli_fix_migrations(diagnostics, source)
     errors := [String]{}
     failed := [Diagnostic]{}
     loop diagnostic in diagnostics {
@@ -79,8 +81,77 @@ jet_cli_fix_collect: fn(file: String, source: String, all: Bool) -> JetCLIFixQue
             failed.push(diagnostic)
         }
     }
-    repairs: jet_cli_collect_fixes_from_diagnostics(failed, source)
+    repairs := jet_cli_collect_fixes_from_diagnostics(failed, source)
+    // A migration repairs the error at the retired word, so it is both.
+    loop fix in migrations {
+        fixes.push(fix.copy()) // copy: the same edit is listed as a fix and as a repair
+        repairs.push(fix.copy()) // copy: `migrations` is borrowed by the loop
+    }
     JetCLIFixQuery.Fixes{fixes: if all -> fixes else -> jet_cli_safe_fixes(fixes), errors: errors.move(), repairs: if all -> repairs else -> jet_cli_safe_fixes(repairs)}
+}
+
+// The rewrites `jet fix` registers for retired spellings: a block after the
+// retired build-time word, `comptime { … }`, is written `#run { … }`. They
+// are offered only when the compile reported an error at one of those words,
+// so a program whose own `comptime` names something keeps it; then every such
+// word in the file is rewritten at once, so a second `jet fix` changes
+// nothing. The error itself stays the generic one and never names `#run`.
+jet_cli_fix_migrations: fn(diagnostics: [Diagnostic], source: String) -> [JetCLIFix] {
+    fixes := [JetCLIFix]{}
+    sites: jet_cli_fix_retired_run_words(source)
+    if sites.len() == 0 -> return fixes
+    reported := false
+    loop diagnostic in diagnostics {
+        if diagnostic.severity != DIAGNOSTIC_ERROR -> next
+        if diagnostic.span == .Val(span) {
+            loop site in sites {
+                if site.start == span.start -> reported = true
+            }
+        }
+    }
+    if !reported -> return fixes
+    loop site in sites -> fixes.push(JetCLIFix{title: "write the retired `comptime` block as `#run`", edit: TextEdit{span: site, new_text: "#run"}, applicability: DiagnosticFixApplicability.Safe, safety: DiagnosticFixSafety.BehaviorPreserving})
+    fixes
+}
+
+// Each `comptime` word right before a `{` where a value or a statement
+// starts: after `:`, `:=`, `=`, `{`, `}` or `;`, or first on its line. A
+// word in a condition (`if comptime {`) or an operand stays.
+jet_cli_fix_retired_run_words: fn(source: String) -> [Span] {
+    bytes: source.bytes()
+    lexed: lex(bytes)
+    sites := [Span]{}
+    previous := -1
+    loop index in 0..<lexed.tokens.len() {
+        token: lexed.tokens[index]
+        if !jet_cli_fix_meaningful(token) -> next
+        if token.kind == TOKEN_IDENT && token.span.end - token.span.start == 8 && jet_cli_codemod_slice(bytes, token.span.start, token.span.end) == "comptime" {
+            if jet_cli_fix_next_opens_block(lexed.tokens, index + 1) && jet_cli_fix_starts_value(bytes, lexed.tokens, previous, token.span.start) -> sites.push(token.span)
+        }
+        previous = index
+    }
+    sites
+}
+
+jet_cli_fix_meaningful: fn(token: Token) -> Bool {
+    token.span.start != token.span.end && token.kind != TOKEN_LINE_COMMENT && token.kind != TOKEN_BLOCK_COMMENT
+}
+
+jet_cli_fix_next_opens_block: fn(tokens: [Token], from: Int) -> Bool {
+    loop index in from..<tokens.len() {
+        if jet_cli_fix_meaningful(tokens[index]) -> return tokens[index].kind == TOKEN_LBRACE
+    }
+    false
+}
+
+jet_cli_fix_starts_value: fn(bytes: [U8], tokens: [Token], previous: Int, start: Int) -> Bool {
+    if previous < 0 -> return true
+    before: tokens[previous]
+    if before.kind == TOKEN_COLON || before.kind == TOKEN_COLON_EQ || before.kind == TOKEN_EQ || before.kind == TOKEN_LBRACE || before.kind == TOKEN_RBRACE || before.kind == TOKEN_SEMI -> return true
+    loop at in before.span.end..<start {
+        if Int.from_u8(bytes[at]) == 10 -> return true
+    }
+    false
 }
 
 // The `.Tidy` findings a package lint raises (`meta.report`) when the entry

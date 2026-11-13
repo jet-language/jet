@@ -1,0 +1,23 @@
+# The retired build-time word is an ordinary name: `NAME: comptime { value }`
+# gets only the generic unknown-type error, which never names `#run`. `jet
+# fix` carries the registered rewrite to `#run { … }` for every block after
+# the word, the module value, the `#Static` one and the local, in one pass;
+# the comment and the string that hold the old text stay. The result runs,
+# and a second `jet fix` changes nothing.
+fixture: retired_comptime_block_fix_writes_run.fixture
+env: NO_COLOR=1
+step: jet check run.jet
+exit: 1
+stderr: ~ "There's no type called `comptime`" # the generic unknown-type error
+stderr: !~ "#run" # the error teaches no new spelling
+step: jet fix run.jet
+exit: 0
+stderr: ~ "applied 3 fixes" # the three blocks after the retired word
+file: run.jet = retired_comptime_block_fix_writes_run.fixed
+step: jet fix run.jet
+exit: 0
+stderr: ~ "no changes made" # the migrated file has nothing left to fix
+file: run.jet = retired_comptime_block_fix_writes_run.fixed
+step: jet run run.jet
+exit: 0
+stdout: = "[1, 4, 9]\n100\n84\ncomptime { kept }\n"

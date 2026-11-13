@@ -413,7 +413,7 @@ the same value on every tier. No code runs before `run: fn`. A value whose
 evaluation stops, reaches the outside world, or can't run while building is a
 build error (E0643, which retires E0627), whose fix names the three ways out:
 compute it in `run`, make it a function (`#Memo` when pure), or read a pinned
-build input through `comptime { embed_file(…) }`. Inside a function a plain
+build input through `#run { embed_file(…) }`. Inside a function a plain
 `name: value` only tries to fold; top-level statement files run in order
 (D-ENTRY-STATEMENTS1).
 

@@ -309,7 +309,11 @@ reported with that error. The receipt's `skipped` rows record every edit left
 out (one needing review, or one rolled back) with its reason. A `#Deprecated`
 `use:` replacement is offered as an edit only when it is a plain rename, a
 declared function that takes the same call; otherwise L2001's Fix says to edit
-the use by hand. `--dry-run` renders the diff without publishing.
+the use by hand. `--dry-run` renders the diff without publishing. A retired
+spelling's error carries no teaching text, but `jet fix` registers its
+rewrite: when an error falls on the retired build-time word before a block,
+`NAME: comptime { value }`, every such block in the file is written
+`#run { … }` in one pass (a comment or string holding the text stays).
 `--edition=2027` performs the registered JSON/CBOR migrations first, retaining
 written propagation and making panic fallbacks idempotent. `--quiet` suppresses
 the human status. `--json` prints one `jet.status/v1` line with action `fix`
