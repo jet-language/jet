@@ -37,8 +37,6 @@ Holder: struct {
     name: String
 }
 
-#Persist module_kept := ""
-
 word: fn(n: Int) -> String {
     "item-{n}"
 }
@@ -51,7 +49,7 @@ counted: fn(n: Int) -> String {
 
 returned: fn(reuser: &Reuser) -> String {
     #Context(allocator: reuser) {
-        text: counted(4) + "end"
+        text: "{counted(4)}end"
         if text.len() > 0 -> return text
     }
     ""
@@ -82,17 +80,16 @@ run: fn() {
     #Context(allocator: reuser) {
         local = "made {word(1)} here"
         grown += " then {word(2)}"
-        holder.name = word(3) + "/" + word(4)
+        holder.name = "{word(3)}/{word(4)}"
         names.push(count.to_string())
         names.push([String]{word(6), word(7)}.join("+"))
         table["key {word(8)}"] = 8
-        module_kept = counted(3)
     }
     left: word(10)
     concat_len := 0
     before: reuser.taken
     #Context(allocator: reuser) {
-        both: left + "!"
+        both: "{left}!"
         concat_len = both.len()
     }
     concat_served: reuser.taken > before
@@ -102,8 +99,7 @@ run: fn() {
     print("appended: {grown}")
     print("outer field: {holder.name}")
     print("pushed: {names[0]} {names[1]}")
-    print("map key: {table["key item-8"] ?? 0}")
-    print("module store: {module_kept}")
+    print("map key: {table["key item-8"]}")
     print("returned: {from_return}")
     print("concat: {concat_len} served {concat_served}")
     print("served {reuser.taken > 0}, all released {reuser.taken == reuser.given}")

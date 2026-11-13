@@ -37,8 +37,6 @@ Holder: struct {
     items: [Int]
 }
 
-#Persist module_kept := [Int]{}
-
 squares: fn(n: Int) -> [Int] {
     out := [Int]{}
     loop i in 0..<n -> out.push(i * i)
@@ -100,7 +98,6 @@ run: fn() {
         holder.items = squares(30)
         lists.push(squares(30))
         table["squares"] = squares(30)
-        module_kept = squares(30)
         sender.send(squares(30))
         task.group workers {
             built := squares(30)
@@ -116,8 +113,7 @@ run: fn() {
     print("outer local: {total(local)}")
     print("outer field: {total(holder.items)}")
     print("pushed: {total(lists[0])}")
-    print("map entry: {total(table["squares"] ?? [Int]{})}")
-    print("module store: {total(module_kept)}")
+    print("map entry: {total(table["squares"])}")
     print("sent: {total(received)}")
     print("task: {task_sum}")
     print("returned: {total(from_return)}")

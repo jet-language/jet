@@ -1843,13 +1843,15 @@ ir_render_push: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, builder: Int, slot
     if kind == .Aggregate && ir_untag(ty) == .Tuple(fields) {
         members: ir_tuple_members(m, p, fields) ?? return ir_fail(b, span, "display of {ir_type_name(ty)}")
         // A named tuple renders as the record its sorted names spell:
-        // `(tag,value) { tag: "tuple", value: 1 }`.
+        // `(tag,value) { tag: "tuple", value: 1 }`, its members joined as a
+        // positional tuple's are.
         if fields.len() > 0 && fields[0].name != "" {
             names := [String]{}
             loop field in fields -> names.push(field.name)
-            ir_push_static(m, b, builder, "({names.join(",")}) {{")
+            ir_push_static(m, b, builder, "({names.join(",")}) {{ ")
             loop (index, field) in members {
-                ir_push_static(m, b, builder, "{if index == 0 -> " " else -> ", "}{fields[index].name}: ")
+                if index > 0 -> ir_render_push_separator(m, p, b, builder, mode, span)
+                ir_push_static(m, b, builder, "{fields[index].name}: ")
                 value: ir_member_read(m, b, slot, field)
                 ir_render_push_value_member(m, p, b, builder, value, mode, span)
             }
