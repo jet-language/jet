@@ -96713,6 +96713,129 @@
       "completedAt": "2026-11-10T16:29:58.292Z",
       "questions": [],
       "retiredAt": "2026-11-13T16:30:14.756Z"
+    },
+    {
+      "id": "c0xk73ss",
+      "num": 4926,
+      "title": "Sema comptime: unify the mixed J (Oct 6 env split) and retained-graph (e79f85560, Oct 9) architectures left by the branch consolidation",
+      "body": "After the 2026-10-09 consolidation, JetSema keeps both designs: CheckProgram sema_comptime_program(graph, values, trail) with its live JetDriver Pipeline caller; the program-taking Expressions/Control/Constructors APIs; SemaScopeEnvironment.registration_graph alongside SemaProgramTables.graph. e79f85560's own diff (CheckProgram, Pipeline, Comptime/BodyRequests, Scopes, Tests/ComptimeBodyIndexFixtures) is current and its duplicate pairs are resolved (ParserSemaRestore 355842295). Unify on the retained-graph design in one cutover: remove the J program-taking APIs and migrate their callers. Evidence: ParserSemaRestore report (agent transcript), git log -L on the named functions.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [
+        "c022g7qw"
+      ],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-10",
+          "by": "Main",
+          "text": "All four criteria are met, but the close gate refuses c1 and c3: their 2026-10-31 evidence names no commit. Both need a re-proof on current dev, because the fields_count golden no longer exists under that path and the comptime embed example now lives in tests/cases/comptime_cli_parity. Rerun with the landed compiler: the embed_bytes tier-parity case for c1, and a field-count golden for c3."
+        },
+        {
+          "at": "2026-11-09",
+          "by": "Main",
+          "text": "BoardPlanner review 2026-11-09 (dev 6a06b917cb). Neither open criterion (c2 comptime inputs, c4 E3410 names the real call) needs #5073's new IR; the blocker applies only to the architecture unification in the title."
+        },
+        {
+          "at": "2026-10-31",
+          "by": "Main",
+          "text": "Landed on dev at undefined in CardClose-17: CardClose-17.patch; CardClose-17.msg"
+        },
+        {
+          "at": "2026-10-31",
+          "by": "Main",
+          "text": "Landed on dev at undefined in CardClose-17: CardClose-17.patch; CardClose-17.msg"
+        },
+        {
+          "at": "2026-10-31",
+          "by": "Main",
+          "text": "Merged #6387 \"Comptime `.len()` on a fact list reports a false 'signal handler' effect (E3410)\" into this card (comptime execution architecture); its 2 open item(s) are carried as \"(was #6387)\" criteria. Owner ruling 2026-10-30: merge duplicate and superseded cards into one survivor."
+        },
+        {
+          "at": "2026-10-31",
+          "by": "Main",
+          "text": "Merged #4736 \"Jet compiler doesn't retain comptime I/O input paths, so watch/build identity can't include them (Rust: bundle.comptime_inputs)\" into this card (comptime execution architecture); its 1 open item(s) are carried as \"(was #4736)\" criteria. Owner ruling 2026-10-30: merge duplicate and superseded cards into one survivor."
+        },
+        {
+          "at": "2026-10-31",
+          "by": "Main",
+          "text": "Merged #5003 \"Native jet build never wires the comptime execution host (E0956 for prep bindings that must execute)\" into this card (comptime execution architecture); its 1 open item(s) are carried as \"(was #5003)\" criteria. Owner ruling 2026-10-30: merge duplicate and superseded cards into one survivor."
+        },
+        {
+          "at": "2026-10-23",
+          "by": "agent",
+          "text": "Board burndown 2026-10-22: Implementation homes named in this card (Rust crates and host files, TIR/MIR/LIR, the JIT, generated Rust) are retired. The work lands in Compiler/ and Core/ on the JetIR path (#5073) with Rust removed (#4717); the rest of the card stands."
+        },
+        {
+          "at": "2026-10-09",
+          "by": "Pip",
+          "text": "Interim ruling 2026-10-09: sema_comptime_graph_apply_values keeps ONE definition, the trail-taking J form (preserves sema_comptime_program undo); the retained-graph environment passes a local trail (an extra allocation accepted until unification). The newest real definition (7ef3a7532, 2 args) is restored by this card."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "(was #5003) Native jet build never wires the comptime execution host (E0956 for prep bindings that must execute)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Re-proved on dev 00a2b37a42 (train t12c) with the compiler built from that tree: tests/cases/comptime_cli_parity/.../comptime_embed_bytes/embed_bytes.jet (embed_bytes plus comptime fn calls) gives output byte-equal to tier_parity_examples_run_through_aot_jit_and_interpreter.embed_bytes.out under jet run (O0), jet build (O1) and jet build --release (O2); every exit is 0 and nothing reports E0956 ($JET_SCRATCH_ROOT/lanes/Main/runs/p4926.sh).",
+          "at": "2026-11-10T16:37:27.640Z"
+        },
+        {
+          "n": 2,
+          "text": "(was #4736) Every file a comptime block reads is recorded as an input of the build identity: editing that file makes jet build rebuild and jet watch re-run, proven by a driver test.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev (train t12c, 4a5c0ec793..aaca1c8db2 (dev 00a2b37a42)), SUB G6LeadB-4. Every test line of the SUB passes with the compiler built from the landed tree ($JET_SCRATCH_ROOT/lanes/Main/integ/t12c/REPORT.md: census rc=0, ratchets rc=0; reruns noted there for load timeouts).",
+          "at": "2026-11-10T16:28:32.674Z"
+        },
+        {
+          "n": 3,
+          "text": "(was #6387) `comptime { P.$fields.len() }` evaluates to the field count on o0, o1 and o2 (golden example).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Re-proved on dev 00a2b37a42 (train t12c) with the compiler built from that tree: golden Examples/Metaprogramming/Reflection/FactSigil.jet (count: comptime { Point.$fields.len() }) is byte-equal to FactSigil.out on O0 and O1 and to FactSigil.o2.out on O2 ($JET_SCRATCH_ROOT/lanes/Main/runs/p4926.sh).",
+          "at": "2026-11-10T16:37:29.543Z"
+        },
+        {
+          "n": 4,
+          "text": "(was #6387) E3410 names the real effectful call it found; a UI snapshot covers one true E3410 case.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev ecf04d985a (train t5b, 973d760c89..ecf04d985a), SUB G6Lead-4926c4. Every test line of the SUB passes with the compiler built from the landed tree ($JET_SCRATCH_ROOT/lanes/Main/integ/t5b/REPORT.md). ui comptime_io_rejected, impure_tier2_no_gate, impure_no_flag, comptime_impure, and the --filter impure and comptime rows PASS. The one red line, #8 (a comptime REPL case timing out under load), PASSes on rerun 244/0.",
+          "at": "2026-11-10T06:06:34.998Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "sema",
+        "comptime",
+        "merge-damage",
+        "wayfinder:task"
+      ],
+      "parentId": "c0ikz0pb",
+      "needsAcceptance": false,
+      "created": "2026-10-09T18:54:02.194Z",
+      "updated": "2026-11-10T16:37:33.599Z",
+      "updatedBy": "Main",
+      "goals": [
+        "G6"
+      ],
+      "completedAt": "2026-11-10T16:37:33.599Z",
+      "questions": [],
+      "retiredAt": "2026-11-13T16:43:08.465Z"
     }
   ]
 }
