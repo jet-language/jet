@@ -1,11 +1,16 @@
-// The generated module `pin` imports nothing, so the field type `geo.Point`
-// the build spells names no module in its scope.
+// The generated module `pin` imports nothing, so the reflected field type
+// `geo.Point` names no module in its scope.
 use geo
+
+Carrier: struct {
+    at: geo.Point
+}
 
 build: fn(b: Build) {
     app: b.add_executable("app", ["main.jet"], [])
     meta: b.compiler(app)
-    fields := [CompilerField]{CompilerField{name: "at", type: "geo.Point"}}
+    fields := [CompilerField]{}
+    loop field in Carrier.reflect().fields -> fields.push(CompilerField{name: field.name.copy(), type: field.type.copy()})
     meta.add_struct("Pin", fields, scope: "pin")
     b.default(app)
 }

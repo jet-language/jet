@@ -1,16 +1,15 @@
-# #3526 c13: types from values. `meta.add_struct(name, fields, scope:)`
-# declares a struct from a list of `CompilerField{name:, type:}` records,
-# whose names and types a build may compute. The `typed` build reads
-# `Source`'s reflected fields, drops one, renames one and keeps each type as
-# reflection spells it. The build host checks every name and type, so no
-# code a build computes is written: it uses `Meta.Generate` and `Meta.Types`
-# but not `Meta.Raw`. None, basic and full optimization give the same
-# identity, size, alignment and offsets, and a second build gives them
-# again. A row that denies `Meta.Raw` still builds it; one that denies
-# `Meta.Types` refuses it. Beside it, the same `Shape` joined into source
-# text under the `Meta.Raw` denial is refused. A computed name that is not
-# one identifier, and a computed type that is not exactly one type (a
-# default, or a second field), are refused when the build runs.
+# Types from values. `meta.add_struct(name, fields, scope:)` declares a
+# struct from a list of `CompilerField{name:, type:}` records, whose names a
+# build may compute and whose types are `TypeId` values only the compiler
+# makes. The `typed` build reads `Source`'s reflected fields, drops one,
+# renames one and keeps each reflected `TypeId`. The build host checks
+# every name, so no code a build computes is written: it uses
+# `Meta.Generate` and `Meta.Types` but not `Meta.Raw`. None, basic and full
+# optimization give the same identity, size, alignment and offsets, and a
+# second build gives them again. A row that denies `Meta.Raw` still builds
+# it; one that denies `Meta.Types` refuses it. Beside it, the same `Shape`
+# joined into source text under the `Meta.Raw` denial is refused. A
+# computed name that is not one identifier is refused when the build runs.
 fixture: a_struct_made_from_reflected_fields_needs_no_meta_raw.fixture
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
@@ -57,13 +56,3 @@ exit: 1
 stderr: ~ "E0357" # the registered casing refusal
 stderr: ~ "`meta.add_struct` was given the field name" # names the call that refused it
 file: bad_name/.jet/build/app absent
-step: jet build bad_type/main.jet
-exit: 1
-stderr: ~ "was given the type \"I64 = launch()\" for the field `field_1`, which is not one type's spelling" # a default is code, not a type
-stderr: ~ "E3502" # the registered generated-source refusal
-file: bad_type/.jet/build/app absent
-step: jet build extra_field/main.jet
-exit: 1
-stderr: ~ "E3502" # the registered generated-source refusal
-stderr: ~ "was given the type \"I64, extra: String\" for the field `field_1`, which is not one type's spelling" # a second field is not one type
-file: extra_field/.jet/build/app absent

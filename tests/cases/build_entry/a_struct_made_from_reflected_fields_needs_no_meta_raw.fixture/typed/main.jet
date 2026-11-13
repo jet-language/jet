@@ -1,6 +1,6 @@
 // The build makes `Shape` from `Source`'s reflected fields: it drops
-// `secret`, renames `count` to `total`, and keeps each field's type as the
-// reflection spells it. `meta.add_struct` declares the struct from that list.
+// `secret`, renames `count` to `total`, and keeps each field's reflected
+// `TypeId`. `meta.add_struct` declares the struct from that list.
 Source: struct {
     flag: U8
     id: I64
@@ -16,7 +16,7 @@ build: fn(b: Build) {
     loop field in source.fields {
         if field.name == "secret" -> next
         name: if field.name == "count" -> "total" else -> field.name.copy()
-        fields.push(CompilerField{name: name, type: field.type.name.copy()})
+        fields.push(CompilerField{name: name, type: field.type.copy()})
     }
     meta.add_struct("Shape", fields, scope: "shape")
     b.default(app)

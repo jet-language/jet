@@ -195,8 +195,9 @@ jet_driver_build_step_call: fn(session: &BuildSession, inputs: JetDriverSharedBu
 // runs (JetBuildSession `compiler.live`). `meta.add_struct(name, fields,
 // scope:)` declares the struct `name` of `CompilerField` values and adds it
 // like `meta.add` adds source text. It refuses a name that is not one
-// identifier in its kind's casing (E0357) and a field type that is not one
-// type's spelling, so values a build computes write only that declaration.
+// identifier in its kind's casing (E0357). A field's type is a `TypeId`,
+// which only the compiler makes, so values a build computes write only
+// that declaration.
 // A `Compiler` value passed to a function sends the pass sema wrote
 // (JetBuildSession `compiler.handoff`); the callee's new value carries the
 // same checked program.
@@ -229,17 +230,17 @@ jet_driver_compiler_call: fn(session: &BuildSession, member: String, args: [TCom
         held: compiler ?? return jet_driver_build_host_failure(session, span, "the `Compiler` value lost its build")
         name: if args[1] == .String(text) -> text.copy() else -> { return jet_driver_build_host_failure(session, span, "`{member}` lost its type's name") }
         if sema_casing_ascii_has_case(name, SemaNameCase.Pascal) != .Val(true) || name == "_" -> return jet_driver_meta_name_refusal(span, "meta.add_struct", "type", name, "PascalCase, as in `Shape`")
-        // A field's name and type may be computed (a reflected field's
-        // `type.name`), so each is checked before it is written.
+        // A field's name may be computed, so it is checked before it is
+        // written. Its type is a `TypeId` the compiler made, written as the
+        // checker prints it.
         source := "{name}: struct {{\n"
         listed: if args[2] == .List(values) -> values.copy() else -> { return jet_driver_build_host_failure(session, span, "`{member}` lost its fields") }
         loop field in listed {
             field_name: jet_eval_build_field(field, "name") ?? return jet_driver_build_host_failure(session, span, "`{member}` lost a field's name")
             field_type: jet_eval_build_field(field, "type") ?? return jet_driver_build_host_failure(session, span, "`{member}` lost a field's type")
             written: if field_name == .String(text) -> text.copy() else -> { return jet_driver_build_host_failure(session, span, "`{member}` lost a field's name") }
-            spelled: if field_type == .String(text) -> text.copy() else -> { return jet_driver_build_host_failure(session, span, "`{member}` lost a field's type") }
+            spelled: if jet_eval_build_field(field_type, "name") == .Val(.String(text)) -> text.copy() else -> { return jet_driver_build_host_failure(session, span, "`{member}` lost a field's type") }
             if sema_casing_ascii_has_case(written, SemaNameCase.Snake) != .Val(true) || written == "_" -> return jet_driver_meta_name_refusal(span, "meta.add_struct", "field", written, "snake_case, as in `count`")
-            if !jet_driver_meta_type_text_one(spelled) -> return jet_driver_meta_type_refusal(span, written, spelled)
             source = "{source}    {written}: {spelled}\n"
         }
         source = "{source}}}\n"
@@ -397,19 +398,6 @@ jet_driver_meta_name_refusal: fn(span: Span, call: String, kind: String, name: S
         what: "`{call}` was given the {kind} name \"{name}\", which is not an identifier",
         why: "A name a build computes becomes a declaration of the generated module, so it must be one ASCII identifier in its kind's casing and can't write anything else",
         fix: "Give `{call}` a {kind} name in {casing}",
-        start: span.start,
-        end: span.end,
-    })}
-}
-
-// A type a build computes for a `meta.add_struct` field is one type and no
-// other code: the field's whole type, with no default or second field.
-jet_driver_meta_type_refusal: fn(span: Span, field: String, spelled: String) -> JetEvalBuildReply Never! {
-    JetEvalBuildReply.Failure{diagnostic: jet_eval_build_session_diagnostic(BuildSessionDiagnostic{
-        code: "E3502",
-        what: "`meta.add_struct` was given the type \"{spelled}\" for the field `{field}`, which is not one type's spelling",
-        why: "A type a build computes becomes the type of one field of the generated struct, so it must be exactly one type and can't write a default, a second field or any other code",
-        fix: "Give the field `{field}` one type's spelling, as in `I64` or `[geo.Point]`",
         start: span.start,
         end: span.end,
     })}

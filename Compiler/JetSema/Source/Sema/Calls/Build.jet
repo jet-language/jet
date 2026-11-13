@@ -403,12 +403,11 @@ sema_call_try_compiler_method: fn(receiver: Expr, receiver_value: TExpr, method:
 // `meta.add_struct(name, fields, scope: module)`: the build host writes the
 // struct `name` of `fields` and adds it as the generated module `module`,
 // as `meta.add` adds source text. Each field is a `CompilerField` of a name
-// and a type's spelling, written out or read from a reflected field
-// (`f.type`), so a build makes the type from values. The build host checks
-// every name (one identifier in its kind's casing) and every type (one
-// type's spelling: no default, block, marker or second line), so no code a
-// build computes is written: it uses `Meta.Generate` and `Meta.Types`, never
-// `Meta.Raw`.
+// and a `TypeId`, read from a reflected field (`f.type`), so a build makes
+// the type from values. A `TypeId` is only ever made by the compiler, and
+// the build host checks every name (one identifier in its kind's casing),
+// so no code a build computes is written: it uses `Meta.Generate` and
+// `Meta.Types`, never `Meta.Raw`.
 sema_call_compiler_add_struct: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     failed: SemaMethodSpecialCheck{handled: true, value: None}
     shape: "meta.add_struct(\"Name\", fields, scope: \"name\")"

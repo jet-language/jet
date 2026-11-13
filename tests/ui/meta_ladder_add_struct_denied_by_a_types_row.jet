@@ -5,9 +5,13 @@
 build: fn(b: Build) -[!Meta.Types]> {
     app: b.add_executable("app", ["meta_ladder_add_struct_denied_by_a_types_row.jet"], [])
     meta: b.compiler(app)
-    fields: [CompilerField]{CompilerField{name: "id", type: "I64"}}
+    fields: [CompilerField]{CompilerField{name: "id", type: Seed.reflect().fields[0].type.copy()}}
     meta.add_struct("Shape", fields, scope: "shape")
     b.default(app)
+}
+
+Seed: struct {
+    id: I64
 }
 
 run: fn() { print(2) }
