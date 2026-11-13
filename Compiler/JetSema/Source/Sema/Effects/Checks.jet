@@ -3699,6 +3699,139 @@ sema_effect_arena_bound_inner: fn(nodes: [SemaEffectNode], node_by_key: NameRows
     SemaMemoryArena{bytes: total, witness: witness, failure: None}
 }
 
+// The worst-case heap of each function nothing calls (FnBody.heap, `jet
+// inspect memory`), by the proof sema_effect_arena_bound gives a
+// `!Mem.Alloc(above: N)` root: the arena bytes every call path from it
+// reserves, or why no bound holds (an unsized heap allocation, an open
+// dispatch, recursion, or a count no bound covers). Each node is settled
+// once: a node on a cycle is unbounded, so the walk's memo never depends on
+// the path into it.
+SemaHeapWalk: struct {
+    // 0 not seen, 1 on the walk, 2 settled.
+    state: [Int]
+    // The node's arena bytes; -1 unbounded.
+    bytes: [Int]
+    // Why the node is unbounded when it is itself the reason; "" when the
+    // reason is in `next`.
+    why: [String]
+    // The callee an unbounded node's path goes through; -1 none.
+    next: [Int]
+}
+
+sema_effect_heap_open: fn(walk: &SemaHeapWalk, index: Int, why: String, next: Int) Never! {
+    walk.bytes[index] = -1
+    walk.why[index] = why.copy()
+    walk.next[index] = next
+    walk.state[index] = 2
+}
+
+sema_effect_heap_visit: fn(walk: &SemaHeapWalk, nodes: [SemaEffectNode], node_by_key: NameRows, index: Int) Never! {
+    walk.state[index] = 1
+    node: nodes[index]
+    if node.memory_opens.len() > 0 {
+        open: node.memory_opens[0]
+        sema_effect_heap_open(walk, index, "{open.reason} at {open.source}", -1)
+        return
+    }
+    total := 0
+    loop event in sema_effect_memory_sorted_events(node.memory_events) {
+        if sema_effect_unsized_alloc(node, event) {
+            sema_effect_heap_open(walk, index, "{event.operation} at {node.source_display}", -1)
+            return
+        }
+        if event.kind != "arena" -> next
+        if event.bytes == None {
+            sema_effect_heap_open(walk, index, "{event.operation} at {node.source_display} has no proven size", -1)
+            return
+        }
+        if event.executions == None {
+            sema_effect_heap_open(walk, index, "{event.operation} at {node.source_display} runs a number of times no bound covers", -1)
+            return
+        }
+        bytes: event.bytes ?? 0
+        executions: event.executions ?? 0
+        total += bytes * executions
+    }
+    loop edge in node.call_edges {
+        target: sema_effect_node_index(node_by_key, edge) ?? next
+        if walk.state[target] == 1 {
+            sema_effect_heap_open(walk, index, "recursion through {nodes[target].display_key}", -1)
+            return
+        }
+        if walk.state[target] == 0 -> sema_effect_heap_visit(walk, nodes, node_by_key, target)
+        if walk.bytes[target] < 0 {
+            sema_effect_heap_open(walk, index, "", target)
+            return
+        }
+        if walk.bytes[target] == 0 -> next
+        counted := false
+        loop call in node.memory_calls {
+            if call.callee == edge -> counted = true
+        }
+        if !counted {
+            sema_effect_heap_open(walk, index, "a call to {nodes[target].display_key} whose count is unknown", -1)
+            return
+        }
+    }
+    loop call in node.memory_calls {
+        target: sema_effect_node_index(node_by_key, call.callee) ?? next
+        if walk.state[target] == 0 -> sema_effect_heap_visit(walk, nodes, node_by_key, target)
+        if walk.state[target] == 1 {
+            sema_effect_heap_open(walk, index, "recursion through {nodes[target].display_key}", -1)
+            return
+        }
+        if walk.bytes[target] < 0 {
+            sema_effect_heap_open(walk, index, "", target)
+            return
+        }
+        if walk.bytes[target] == 0 -> next
+        executions: call.executions ?? {
+            sema_effect_heap_open(walk, index, "a call to {nodes[target].display_key} in a loop no bound covers", -1)
+            return
+        }
+        total += walk.bytes[target] * executions
+    }
+    walk.bytes[index] = total
+    walk.state[index] = 2
+}
+
+// The heap text of every node nothing calls, by node; "" for the others.
+sema_effect_heap_bounds: fn(nodes: [SemaEffectNode], node_by_key: NameRows) -> [String] Never! {
+    called := (loop _ in nodes -> false)
+    loop node in nodes {
+        loop edge in node.call_edges {
+            target: sema_effect_node_index(node_by_key, edge) ?? next
+            called[target] = true
+        }
+    }
+    walk := SemaHeapWalk{state: (loop _ in nodes -> 0), bytes: (loop _ in nodes -> 0), why: (loop _ in nodes -> ""), next: (loop _ in nodes -> -1)}
+    texts := [String]{}
+    loop index in 0..<nodes.len() {
+        if called[index] {
+            texts.push("")
+            next
+        }
+        if walk.state[index] == 0 -> sema_effect_heap_visit(walk, nodes, node_by_key, index)
+        if walk.bytes[index] >= 0 {
+            texts.push("{walk.bytes[index]} B")
+            next
+        }
+        path := [String]{}
+        seen := [Int:Bool]{}
+        why := ""
+        row := index
+        loop row >= 0 && seen.get(row) == None {
+            seen[row] = true
+            path.push(nodes[row].display_key.copy())
+            why = walk.why[row].copy()
+            if why != "" -> break
+            row = walk.next[row]
+        }
+        texts.push("unbounded, {why} via {path.join(" -> ")}")
+    }
+    texts
+}
+
 // Rust `memory_violation`.
 sema_effect_memory_violation: fn(nodes: [SemaEffectNode], root: Int, denial: EffectRowEntry, fact: String, bounded: Bool, finding: SemaMemoryFinding) -> Diagnostic {
     declared_at: nodes[root].source_display
@@ -4162,7 +4295,9 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
     loop module_row in inputs {
         sema_effect_check_discarded(modules[module_row.module_index].call_facts, module_row, nodes, calls.node_by_key, solved, diagnostics)
     }
-    // All source reads are finished: stamp the solved rows in place.
+    // All source reads are finished: stamp the solved rows in place, and
+    // each uncalled function's heap bound.
+    heaps: sema_effect_heap_bounds(nodes, calls.node_by_key)
     loop module_row in inputs {
         target: module_row.module_index
         loop function_index in 0..<modules[target].functions.len() {
@@ -4171,6 +4306,7 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
             if cap_frames[node_index] != "" && !modules[target].functions[function_index].effect_scope.starts_with(cap_frames[node_index]) {
                 modules[target].functions[function_index].effect_scope = sema_effect_capped_scope(cap_frames[node_index], modules[target].functions[function_index].effect_scope)
             }
+            if heaps[node_index] != "" -> modules[target].functions[function_index].heap = heaps[node_index].copy()
         }
     }
     // e3401 names the first impure call and its chain; the reached row is the

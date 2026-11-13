@@ -720,6 +720,11 @@ FnBody: struct {
     is_scalar: Bool
     kernel_proof: KernelProof?
     uses_stack_sentry: Bool
+    // For a function nothing calls (an entry is one): the worst-case heap
+    // every call path from it may take, by the proof `!Mem.Alloc(above: N)`
+    // checks (JetSema Effects/Checks.jet sema_effect_heap_bounds): "N B" of
+    // arena storage, or "unbounded, <why> via <path>"; else "".
+    heap: String{""}
     body: [Int]
     kind: TFuncKind
     origin_facts: [TOriginProjection]{[TOriginProjection]{}}
