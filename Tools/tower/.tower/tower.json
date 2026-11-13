@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6777,
-    "rev": 101241,
+    "rev": 101242,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -88708,12 +88708,12 @@
       "criteria": [
         {
           "n": 1,
-          "text": "jet codemod (and the repository_semantic_edit workload) accepts any editable root inside the target repository, not only Examples/ and tests/ui/. Proof: Compiler/JetCli/Source/Cli/Codemod.jet has no Examples/|tests/ui/ root restriction (git grep), and tests/known-failing.tsv names no #6667 row. The agent_workloads/equivalent_adapters_complete_declared_tasks case is tracked by #6386 (`jet self lsp` E2104).",
+          "text": "jet codemod (and the repository_semantic_edit workload) accepts any editable root inside the target repository, not only Examples/ and tests/ui/: an unknown root falls back to the manifest root or the entry directory (Codemod.jet jet_cli_codemod_managed_project). Proof: a tests/cases row runs jet codemod on a package rooted outside Examples/ and tests/ui (for example a temp package with its own jet.toml), shows the edit applied and checked, and tests/known-failing.tsv names no #6667 row. The agent_workloads/equivalent_adapters_complete_declared_tasks case is tracked by #6386 (`jet self lsp` E2104).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T02:02:11.424Z"
+          "at": "2026-11-13T05:50:11.587Z"
         }
       ],
       "refs": [],
@@ -88724,7 +88724,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-07T09:39:22.111Z",
-      "updated": "2026-11-13T02:02:11.424Z",
+      "updated": "2026-11-13T05:50:11.587Z",
       "updatedBy": "Main",
       "criteriaLastN": 1
     },
@@ -197707,6 +197707,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-13T05:50:11.587Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c09qdr1z",
+      "note": "#1: The grep proof named an absence of text, but Codemod.jet legitimately names Examples/ and tests/ui as preferred roots and snapshot keys. A behavioral case proves the contract.; was: jet codemod (and the repository_semantic_edit workload) accepts any editable root inside the target repository, not only Examples/ and tests/ui/. Proof: Compiler/JetCli/Source/Cli/Codemod.jet has no E"
+    },
     {
       "at": "2026-11-13T05:48:29.897Z",
       "by": "Main",
