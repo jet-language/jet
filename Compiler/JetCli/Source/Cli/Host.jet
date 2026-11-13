@@ -3707,6 +3707,7 @@ jet_cli_dev_loop: fn(file: String, entry: String?, color: Bool, options: BuildOp
     root: jet_cli_manifest_root(jet_cli_parent(file) ?? ".") ?? (jet_cli_parent(file) ?? ".")
     hot_noted := false
     first := true
+    hinted := false
     loop {
         source: cli_files.read(file) ?? ""
         config := jet_driver_dev_config_stock()
@@ -3743,6 +3744,10 @@ jet_cli_dev_loop: fn(file: String, entry: String?, color: Bool, options: BuildOp
         // edit made after the check still moves it.
         inputs_stamp: jet_cli_dev_inputs_stamp(read)
         cli_term.eprint("jet dev: watching {root} (Ctrl-C to stop)")
+        if !hinted {
+            jet_cli_dev_canvas_hint(file)
+            hinted = true
+        }
         if jet_cli_dev_inputs_current(read) {
             loop jet_cli_dev_stamp(root, config.watch) == stamp && jet_cli_dev_inputs_stamp(read) == inputs_stamp -> cli_time.sleep(200ms)
         }
@@ -3756,6 +3761,13 @@ jet_cli_dev_loop: fn(file: String, entry: String?, color: Bool, options: BuildOp
         }
         cli_term.eprint("jet dev: change detected, rebuilding")
     }
+}
+
+// An interactive `jet dev` (stderr on a terminal) names the Canvas IDE once
+// it is ready: the same command with `--canvas`. Plain `jet dev` stays
+// terminal-first and never starts the Canvas endpoint itself.
+jet_cli_dev_canvas_hint: fn(file: String) {
+    if cli_term.stderr().is_tty() -> cli_term.eprint("jet dev: for the Canvas IDE, run `jet dev {file} --canvas`")
 }
 
 // The program `jet dev` runs: a child running the image from memory, else
