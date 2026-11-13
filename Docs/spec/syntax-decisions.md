@@ -495,7 +495,9 @@ a write or move parameter, on a later parameter, or on a method. Foreign
 top-level declarations preserve the marker. Normal argument compatibility,
 including numeric widening, applies to the hidden receiver. Inspect and LSP
 show the module that supplied an imported `#Root` function. Formatting preserves
-the declaration and never rewrites either call spelling.
+the declaration and never rewrites either call spelling. Every other function
+has one spelling: a free function without `#Root` is called `f(value, …)` and a
+method `value.f(…)`. The other spelling is E0311, which names the one to write.
 
 **D-CTOR1 — Named constructors only**: many ways to build a type = many
 named statics (`Point.cartesian(…)`, `Point.polar(…)`); duplicate name E0105.

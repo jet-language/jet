@@ -159,6 +159,13 @@ sema_call_unknown_function_in: fn(name: String, span: Span, scopes: SemaScopeTab
     diagnostic_with_edit(diagnostic, TextEdit{span: span, new_text: near})
 }
 
+// E0311 for `name(value, …)` when `name` is only a method of a type this module
+// declares: a method has one spelling, `value.name(…)`.
+sema_call_method_called_as_function: fn(name: String, owners: [String], span: Span) -> Diagnostic {
+    types: loop owner in owners -> "`{owner}`"
+    sema_error("E0311", span, "`{name}` is a method of {types.join(" and ")}, not a function", "a method is called on its value, which goes before the dot; only a free function whose first parameter is `#Root` takes both spellings", "call it on the value: `value.{name}(…)`")
+}
+
 sema_call_not_callable: fn(name: String, ty: Type, span: Span) -> Diagnostic {
     sema_error("E0803", span, "`{name}` is {sema_type_show(ty)}, not a function", "a direct call target must have a function type", "call a function or use a function value with a callable type")
 }
@@ -258,6 +265,11 @@ sema_call_never_type_args_valid: fn(signature: Type, generic_params: [SemaInfere
 // further out.
 sema_call_resolve_direct: fn(name: String, type_args: [Type], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, span: Span, diagnostics: &[Diagnostic]) -> SemaCallDirectTarget? {
     nearest: sema_scope_resolve_index(scopes, name) ?? {
+        owners: sema_call_method_owners(environment, name)
+        if owners.len() > 0 {
+            diagnostics.push(sema_call_method_called_as_function(name, owners, span))
+            return None
+        }
         diagnostics.push(sema_call_unknown_function_in(name, span, scopes, sema_module_no_prelude(environment, program)))
         return None
     }
