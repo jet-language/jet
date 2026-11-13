@@ -3,14 +3,14 @@
 # is_subnormal, total_order, fmod, remainder, rem_quo, fdim, the max and min
 # family, round_even, floor, ceil, trunc, logb, ldexp, next_up, next_down,
 # next_after) are C23's binary32 functions: every corpus call (binary32
-# special values, quiet and signaling NaNs with payloads, seeded random
-# operands, and for rem_quo halfway and past-2^31 quotients) returns the bits
-# glibc 2.42's float function (musl 1.2.5's fmaxf, fminf and remquof, whose
-# quotient keeps 31 bits) returns, on O0, O1, O2 and the web build. A
-# signaling NaN keeps its bits through the sign-bit, payload and signaling
-# calls, and next_up steps by one binary32 unit.
-# The other spellings abs_float, truncate, expm1 and log1p are their members'
-# F32 forms, bit for bit.
+# special values, quiet and signaling NaNs with payloads, libc-test's binary32
+# round-to-nearest vectors, seeded random operands, and for rem_quo halfway
+# and past-2^31 quotients) returns the bits glibc 2.42's float function (musl
+# 1.2.5's fmaxf, fminf and remquof, whose quotient keeps 31 bits) returns, on
+# O0, O1, O2 and the web build. A signaling NaN keeps its bits through the
+# sign-bit, payload and signaling calls, and next_up steps by one binary32
+# unit. The other spellings abs_float, truncate, expm1 and log1p are their
+# members' F32 forms, bit for bit.
 fixture: core_math_f32_exact_and_bit_functions_match_c23_on_every_tier.fixture
 env: NO_COLOR=1
 step o0: jet run --optimize=none main.jet
