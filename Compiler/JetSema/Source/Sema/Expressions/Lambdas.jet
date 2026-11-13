@@ -2401,6 +2401,10 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, e
         }
         .Val(_) | .None -> {}
     }
+    // A body that never finishes (`fn() { panic("boom") }`) fits any
+    // expected carrier, so it takes that carrier whole, success type included.
+    // copy: `required` stays in `expected_ret`, which later checks read.
+    if success_ty == (Type.Named{name: "Never"}) && expected_ret == .Val(required) && required == .Result(_, _) -> ret_ty = required.copy()
     // A callback that inferred its carrier returns it around the success value.
     if !inline_loop && lambda_context.failure_inference && lambda_context.inferred_failure_carrier == .Val(inferred) {
         if inferred == .Result(_, err) {

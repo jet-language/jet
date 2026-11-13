@@ -1,0 +1,13 @@
+# A lambda whose body only panics is accepted where a callback returning
+# `Int PickErr!` is wanted, and the program runs the same on O0 and O2.
+fixture: a_panicking_callback_fills_a_fallible_callback_slot.fixture
+step o0: jet run main.jet
+env: NO_COLOR=1
+exit: 0
+stdout: = "value 20\n"
+stderr: empty
+step o2: jet run --optimize=full main.jet
+env: NO_COLOR=1
+exit: 0
+stdout: = "value 20\n"
+stderr: empty

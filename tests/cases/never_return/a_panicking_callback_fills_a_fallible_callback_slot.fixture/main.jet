@@ -1,0 +1,17 @@
+// A callback whose body only panics never finishes, so it fits a slot that
+// wants a fallible callback, success type included, and it is never called
+// here.
+#Error
+PickErr: enum {
+    Refused
+}
+
+pick: fn(use_first: Bool, first: &&fn(Int) -> Int PickErr!, second: &&fn(Int) -> Int PickErr!) -> Int PickErr! {
+    if use_first -> return first(1)
+    second(2)
+}
+
+run: fn() {
+    value: pick(false, fn(_x: Int) { panic("never called") }, fn(x: Int) { Ok(x * 10) }) ?? 0
+    print("value {value}")
+}
