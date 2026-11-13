@@ -894,14 +894,16 @@ JetDriverComptimeRunIndex: struct {
     nodes: [JetDriverComptimeClosureNode]{[JetDriverComptimeClosureNode]{}}
 }
 
-// A function whose visit is the same in every closure of the run, `settled`
-// at the first closure that visits it so: a reused checked row `row` (complete
-// or obligation-pending) with a body and no waits whose reachable keys each
-// have one owner, or a foreign function (`foreign`, its check, which reads
-// only the graph). Such a visit adds no report and changes no run state, and
-// it queues `successors` (nodes, in the order the visit queues them) every
-// time, so a closure whose functions are all settled walks the nodes alone
-// (jet_driver_comptime_settled_closure) and gives what the full walk gives.
+// A function whose visit is the same in every later closure of the run,
+// `settled` at the first closure that visits it so: a checked row `row`
+// (complete or obligation-pending, reused or the one this visit's fresh check
+// adds, which every later visit reuses) with a body and no waits whose
+// reachable keys each have one owner, or a foreign function (`foreign`, its
+// check, which reads only the graph). A later visit adds no report and
+// changes no run state, and it queues `successors` (nodes, in the order the
+// visit queues them) every time, so a closure whose functions are all
+// settled walks the nodes alone (jet_driver_comptime_settled_closure) and
+// gives what the full walk gives.
 // A forgotten row unsettles its node. `obligations`: the function adds
 // failure obligations to its closure's (sema_comptime_failure_closure_add).
 // The impurities are the row's closure row's (JetDriverComptimeClosureRow)
@@ -1335,7 +1337,9 @@ jet_driver_comptime_function_closure: fn(
             if checked.waiting_dependencies.len() == 0 && !index.nodes[node].settled -> index.nodes[node] = JetDriverComptimeClosureNode{settled: true, foreign: Val(checked.copy()), obligations: failure_closure.obligations.len() > obligation_mark}
             next
         }
-        settles := reused_row >= 0 && checked.waiting_dependencies.len() == 0 && !index.nodes[node].settled
+        // A fresh check of a function with no row yet adds its row below,
+        // which every later visit reuses.
+        settles := (reused_row >= 0 || (fresh && index.checked_rows.get(checked_key) == None)) && checked.waiting_dependencies.len() == 0 && !index.nodes[node].settled
         loop dependency in checked.waiting_dependencies -> jet_driver_comptime_wait_add(waiting, dependency)
         if {
             !checked.obligations_pending && (!checked.complete || jet_driver_has_errors(checked.diagnostics)) -> {
@@ -1391,7 +1395,7 @@ jet_driver_comptime_function_closure: fn(
                 }
             }
         }
-        if settles -> index.nodes[node] = JetDriverComptimeClosureNode{settled: true, row: reused_row, successors: successors, obligations: failure_closure.obligations.len() > obligation_mark}
+        if settles -> index.nodes[node] = JetDriverComptimeClosureNode{settled: true, row: index.checked_rows.get(checked_key) ?? -1, successors: successors, obligations: failure_closure.obligations.len() > obligation_mark}
     }
     // A waiting closure is checked again once its dependencies land; its rows
     // are not all checked yet, so its obligations settle then.
