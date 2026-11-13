@@ -2817,7 +2817,9 @@ sema_registration_prepare_module: fn(input: SemaRegistrationModuleInput) -> Sema
 sema_registration_prepare_module_with: fn(input: SemaRegistrationModuleInput, templates: [SemaGenericModuleSource]) -> SemaRegistrationModuleResult {
     diagnostics := [Diagnostic]{}
     policies: sema_policy_declarations_checked(input.program.user_policy_declarations, diagnostics)
-    module_row := sema_registration_prepare_module_row(input.copy(), templates, policies, [SemaBuildSetting]{}, diagnostics)
+    owned := [SemaRegistrationModuleInput]{input.copy()}
+    codecs := sema_derive_foreign_codecs(owned)
+    module_row := sema_registration_prepare_module_row(owned.pop() ?? input.copy(), templates, policies, [SemaBuildSetting]{}, codecs.pop() ?? [String:Bool]{}, diagnostics)
     SemaRegistrationModuleResult{module_row: module_row, diagnostics: diagnostics, complete: !sema_has_error_since(diagnostics, 0)}
 }
 
@@ -2828,7 +2830,9 @@ sema_registration_prepare_module_with: fn(input: SemaRegistrationModuleInput, te
 // templates come from its program. `policies` are its package's checked user
 // policy declarations (Rust Registration: one policy set per package).
 // `settings` are the build's declared settings, which module arguments may read.
-sema_registration_prepare_module_row: fn(input: &&SemaRegistrationModuleInput, templates: [SemaGenericModuleSource], policies: [UserPolicyDecl], settings: [SemaBuildSetting], reported: &[Diagnostic]) -> SemaRegistrationModule {
+// `codecs` are the codecs the graph gives the types its declarations hold
+// (sema_derive_foreign_codecs).
+sema_registration_prepare_module_row: fn(input: &&SemaRegistrationModuleInput, templates: [SemaGenericModuleSource], policies: [UserPolicyDecl], settings: [SemaBuildSetting], codecs: [String:Bool], reported: &[Diagnostic]) -> SemaRegistrationModule {
     diagnostics := [Diagnostic]{}
     owned := input.move()
     module_row := SemaRegistrationModule{
@@ -2955,7 +2959,7 @@ sema_registration_prepare_module_row: fn(input: &&SemaRegistrationModuleInput, t
     sema_derive_expand_builtin_items(module_row.program.items, diagnostics)
     // Explicit and structurally selected codecs
     // enter as ordinary generated `impl T.Encode`/`impl T.Decode` items.
-    sema_serde_expand_builtin_items(module_row.program.items)
+    sema_serde_expand_builtin_items(module_row.program.items, codecs)
     // A user type that holds itself and a Clock gains its generated fork
     // function, the copy that forks each Clock it holds (ForkMethods.jet).
     if !sema_module_is_core_source(module_row.module_identity) -> sema_fork_methods_expand(module_row.program.items)
@@ -3186,6 +3190,7 @@ SemaRegistrationPrepareJob: struct {
     templates: [SemaGenericModuleSource]
     policies: [UserPolicyDecl]
     settings: [SemaBuildSetting]
+    codecs: [String:Bool]
 }
 
 // A prepared module row and the diagnostics its preparation reported.
@@ -3200,8 +3205,9 @@ sema_registration_prepare_job: fn(job: &&SemaRegistrationPrepareJob) -> SemaRegi
     templates := owned.templates.move()
     policies := owned.policies.move()
     settings := owned.settings.move()
+    codecs := owned.codecs.move()
     diagnostics := [Diagnostic]{}
-    module_row := sema_registration_prepare_module_row(input, templates, policies, settings, diagnostics)
+    module_row := sema_registration_prepare_module_row(input, templates, policies, settings, codecs, diagnostics)
     SemaRegistrationPreparedRow{module_row: module_row.move(), diagnostics: diagnostics.move()}
 }
 
@@ -4537,15 +4543,21 @@ sema_registration_prepare_graph: fn(inputs: &&[SemaRegistrationModuleInput], edg
     // Only modules declaring a module alias or a generic module keep their
     // programs as written for the alias check after registration.
     written_inputs: sema_generic_modules_written(prepared_inputs)
+    // The codecs each module's auto-derive reads off the types other modules
+    // declare: one fixed point over every parsed input before any module is
+    // prepared, so each preparation still reads only its own job.
+    codecs := sema_derive_foreign_codecs(prepared_inputs)
     // Each input moves out of the list (front to back) into its prepare job.
     prepared_inputs.reverse()
     imported_templates.reverse()
+    codecs.reverse()
     jobs := [SemaRegistrationPrepareJob]{}
     loop prepared_inputs.len() > 0 {
         input := prepared_inputs.pop() ?? break
         templates := imported_templates.pop() ?? break
+        module_codecs := codecs.pop() ?? break
         policies: package_policies.get(input.package_identity) ?? [UserPolicyDecl]{}
-        jobs.push(SemaRegistrationPrepareJob{input: input.move(), templates: templates.move(), policies: policies, settings: build_facts.settings})
+        jobs.push(SemaRegistrationPrepareJob{input: input.move(), templates: templates.move(), policies: policies, settings: build_facts.settings, codecs: module_codecs.move()})
     }
     prepared := sema_registration_prepare_rows(jobs, threads)
     // Each prepared row moves out (front to back) into its module row, after

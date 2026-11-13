@@ -3193,7 +3193,9 @@ sema_expr_declares_nominal_method: fn(environment: SemaScopeEnvironment, program
 // The receiver type's own method `method`, declared in its body, in an
 // inherent `impl`, or in an impl of a trait other than the codec itself
 // (`Encode`/`Decode`). A type's own `encode` keeps its own call instead of the
-// Encode contract route.
+// Encode contract route. A generic type's generated codec method is not its
+// own: it declares the type's parameters as its own (codec_params), which no
+// receiver binds, while the contract route codes the receiver's instance.
 sema_expr_declares_own_method: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, receiver_type: Type, method: String) -> Bool Never! {
     if program.registration_graph == .Val(graph) {
     base_name: sema_expr_type_base_name(sema_expr_unwrap_tag(receiver_type)) ?? return false
@@ -3210,6 +3212,7 @@ sema_expr_declares_own_method: fn(environment: SemaScopeEnvironment, program: Se
     caller: sema_type_module_row(graph, environment.module_identity)
     owner: sema_type_resolve_nominal_row_at(graph, sema_expr_unwrap_tag(receiver_type), caller) ?? return false
     loop function in graph.modules[owner.module_index].nominals[owner.row].methods {
+        if function.declaration.compiler_generated && function.generic_params.len() > 0 -> next
         if function.symbol.name == method && function.parameters.len() > 0 -> return true
     }
     }

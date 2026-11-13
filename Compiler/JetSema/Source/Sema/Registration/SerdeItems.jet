@@ -73,11 +73,13 @@ use jet_foundation.[
 // its explicit derives and this module's structural auto-derive fixed point,
 // then appends the generated impl headers after the written items. Every
 // question is keyed on `facts`, built once over the unchanged written items:
-// O(items + types × wire fields), not a rescan per type and field.
-sema_serde_expand_builtin_items: fn(items: &[Item]) {
+// O(items + types × wire fields), not a rescan per type and field. `foreign`
+// holds the codecs other modules give the types these items hold
+// (sema_derive_foreign_codecs, sema_serde_graph_codecs).
+sema_serde_expand_builtin_items: fn(items: &[Item], foreign: [String:Bool]) {
     facts: sema_derive_item_index(items)
-    auto_encode: sema_derive_auto_selected(items, facts, "Encode")
-    auto_decode: sema_derive_auto_selected(items, facts, "Decode")
+    auto_encode: sema_derive_auto_selected(items, facts, "Encode", foreign)
+    auto_decode: sema_derive_auto_selected(items, facts, "Decode", foreign)
     generated := [Item]{}
     loop index in 0..<items.len() {
         if items[index] == {
@@ -315,7 +317,7 @@ sema_serde_items_struct_wire: fn(definition: StructDef) -> [Type] Never! {
 sema_serde_items_struct_encode: fn(definition: StructDef, span: Span) -> Item Never! {
     params: sema_serde_items_codec_params(definition.type_params, sema_serde_items_struct_wire(definition), true, false)
     method: sema_serde_items_method("encode", params, [Param]{sema_serde_items_param("self", Type.Named{name: ""}, span)}, sema_dyn_type(), span)
-    sema_serde_items_impl(definition.name, "Encode", [Func]{method}, span)
+    sema_serde_items_impl(definition.name, "Encode", [Func]{method}, definition.is_pub, definition.is_package_pub, span)
 }
 
 // A struct with no `#Flatten` field and no migration chain reads its members
@@ -336,7 +338,7 @@ sema_serde_items_struct_decode: fn(definition: StructDef, items: [Item], span: S
     method: sema_serde_items_method("decode", params, [Param]{sema_serde_items_param("tree", sema_dyn_type(), span)}, sema_data_result(target, sema_data_decode_error()), sema_serde_items_decode_span(span))
     methods := [Func]{method}
     if sema_serde_items_struct_streams(definition, items) -> methods.push(sema_serde_items_read_method(params, target, span))
-    sema_serde_items_impl(definition.name, "Decode", methods, span)
+    sema_serde_items_impl(definition.name, "Decode", methods, definition.is_pub, definition.is_package_pub, span)
 }
 
 // `__read<__Source: __DecodeSource>(jet_serde_reader: &__Source) -> Target
@@ -370,7 +372,7 @@ sema_serde_items_enum_wire: fn(definition: EnumDef) -> [Type] Never! {
 sema_serde_items_enum_encode: fn(definition: EnumDef, encode: Bool, decode: Bool, span: Span) -> Item Never! {
     params: sema_serde_items_codec_params(definition.type_params, sema_serde_items_enum_wire(definition), encode, decode)
     method: sema_serde_items_method("encode", params, [Param]{sema_serde_items_param("self", Type.Named{name: ""}, span)}, sema_dyn_type(), span)
-    sema_serde_items_impl(definition.name, "Encode", [Func]{method}, span)
+    sema_serde_items_impl(definition.name, "Encode", [Func]{method}, definition.is_pub, definition.is_package_pub, span)
 }
 
 // The decode method's span is the zero-width end of the derive span: the
@@ -380,7 +382,7 @@ sema_serde_items_enum_decode: fn(definition: EnumDef, encode: Bool, decode: Bool
     params: sema_serde_items_codec_params(definition.type_params, sema_serde_items_enum_wire(definition), encode, decode)
     target: sema_serde_items_target_type(definition.name, definition.type_params)
     method: sema_serde_items_method("decode", params, [Param]{sema_serde_items_param("tree", sema_dyn_type(), span)}, sema_data_result(target, sema_data_decode_error()), sema_serde_items_decode_span(span))
-    sema_serde_items_impl(definition.name, "Decode", [Func]{method}, span)
+    sema_serde_items_impl(definition.name, "Decode", [Func]{method}, definition.is_pub, definition.is_package_pub, span)
 }
 
 // A `#CodableAsBase` distinct type's codec header: `encode` codes `self.raw()`,
@@ -388,11 +390,11 @@ sema_serde_items_enum_decode: fn(definition: EnumDef, encode: Bool, decode: Bool
 sema_serde_items_distinct_codec: fn(definition: DistinctDef, trait_name: String, span: Span) -> Item Never! {
     if trait_name == "Encode" {
         method: sema_serde_items_method("encode", [TypeParam]{}, [Param]{sema_serde_items_param("self", Type.Named{name: ""}, span)}, sema_dyn_type(), span)
-        return sema_serde_items_impl(definition.name, "Encode", [Func]{method}, span)
+        return sema_serde_items_impl(definition.name, "Encode", [Func]{method}, definition.is_pub, definition.is_package_pub, span)
     }
     target: Type.Named{name: definition.name}
     method: sema_serde_items_method("decode", [TypeParam]{}, [Param]{sema_serde_items_param("tree", sema_dyn_type(), span)}, sema_data_result(target.copy(), sema_data_decode_error()), sema_serde_items_decode_span(span))
-    sema_serde_items_impl(definition.name, "Decode", [Func]{method, sema_serde_items_read_method([TypeParam]{}, target, span)}, span)
+    sema_serde_items_impl(definition.name, "Decode", [Func]{method, sema_serde_items_read_method([TypeParam]{}, target, span)}, definition.is_pub, definition.is_package_pub, span)
 }
 
 // `return self.raw().encode()`, or the base read converted through the
@@ -492,8 +494,16 @@ sema_serde_items_method_body: fn(generated: SemaSerdeCodecBody, method: String) 
     generated.body.copy()
 }
 
-sema_serde_items_impl: fn(type_name: String, trait_name: String, methods: [Func], span: Span) -> Item Never! {
-    Item.Impl{value: ImplDef{span: span, type_name: type_name, type_span: span, trait_name: Val(trait_name), trait_span: Val(span), operator_rhs: None, operator_marker: None, methods: methods, delegation_field: None, assoc_type_impls: [NamedType]{}, constants: [ImplConstValue]{}, is_generated_serde: true, os_target: None}}
+// A generated codec impl of `type_name`. Its methods are as visible as the
+// type: another module's codec calls them on a field of the type, as the
+// parser makes an authored method public unless it is marked `priv`.
+sema_serde_items_impl: fn(type_name: String, trait_name: String, methods: &&[Func], is_pub: Bool, is_package_pub: Bool, span: Span) -> Item Never! {
+    visible := methods.move()
+    loop index in 0..<visible.len() {
+        visible[index].is_pub = is_pub
+        visible[index].is_package_pub = is_package_pub
+    }
+    Item.Impl{value: ImplDef{span: span, type_name: type_name, type_span: span, trait_name: Val(trait_name), trait_span: Val(span), operator_rhs: None, operator_marker: None, methods: visible, delegation_field: None, assoc_type_impls: [NamedType]{}, constants: [ImplConstValue]{}, is_generated_serde: true, os_target: None}}
 }
 
 sema_serde_items_method: fn(name: String, type_params: [TypeParam], params: [Param], return_type: Type, span: Span) -> Func Never! {
@@ -620,7 +630,7 @@ sema_serde_items_allowed_keys: fn(definition: StructDef, items: [Item]) -> [Stri
 // Rust `serde_default_expr`: the declaration default, else the `#Default`
 // marker's argument (its folded value when one is known).
 sema_serde_items_default_expr: fn(field: Field) -> Expr? Never! {
-    if field.default == .Val(value) -> return Val(value.copy())
+    if field.default == .Val(value) -> return Val(sema_serde_items_named_default(field.ty, value))
     marker := Marker?{None}
     loop candidate in field.serde_markers {
         if candidate.name == "Default" {
@@ -632,11 +642,23 @@ sema_serde_items_default_expr: fn(field: Field) -> Expr? Never! {
     if found.args.len() > 0 {
         if found.args[0] == .Expr(argument) {
             if found.ct == .Val(value) -> return sema_serde_items_ct_expr(value, expr_span(argument))
-            return Val(argument.copy())
+            return Val(sema_serde_items_named_default(field.ty, argument))
         }
     }
     folded: found.ct ?? return None
     sema_serde_items_ct_expr(folded, found.span)
+}
+
+// A leading-dot case default (`maturity: Maturity{.Tested}`) names its enum
+// from the field type: the generated `default.encode()` receiver has no
+// expected type to infer the case's enum from.
+sema_serde_items_named_default: fn(ty: Type, value: Expr) -> Expr {
+    if value == .EnumLit(type_name, variant, variant_span, args, leading_dot, span, node) {
+        if leading_dot && type_name == "" && ty == .Named(name) {
+            return Expr.EnumLit{type_name: name.copy(), variant: variant.copy(), variant_span: variant_span.copy(), args: args.copy(), leading_dot: false, span: span, id: node}
+        }
+    }
+    value.copy()
 }
 
 // Rust `serde_ct_expr`: a folded compile-time value as the literal that
@@ -1328,10 +1350,13 @@ sema_serde_items_enum_decode_body: fn(definition: EnumDef, span: Span) -> [Stmt]
         }
         // Each variant's attempt is its own scope: its candidate and field
         // results end with it, so a later variant's `return` does not also
-        // clean up every earlier variant's locals (#3871).
+        // clean up every earlier variant's locals (#3871). A variant whose key
+        // the object lacks is not tried: its payload read from `Null` would
+        // pick the wrong variant, and through a recursive payload
+        // (`Type.List(element: Type)`) recurse without end.
         candidate: "candidate_{sema_serde_items_stem(variant)}"
-        candidate_tree: Expr.OrFallback{value: sema_serde_items_method_call(sema_serde_items_copy(sema_serde_items_ident("tree", span), span), "field", [Expr]{sema_serde_items_string(wire, span)}, span), fallback: OrFallback.Value{value: sema_serde_items_dyn_variant("Null", [Expr]{}, span)}, is_option: false, span: span, id: AST_NODE_GENERATED}
-        attempt := [Stmt]{sema_serde_items_binding(candidate, None, candidate_tree, false, span)}
+        present: sema_serde_items_method_call(sema_serde_items_copy(sema_serde_items_ident("tree", span), span), "field", [Expr]{sema_serde_items_string(wire, span)}, span)
+        attempt := [Stmt]{}
         source: sema_serde_items_ident(candidate, span)
         if variant.payload == .Single(_, _) {
             binding_name: "jet_serde_enum_decoded_{sema_serde_items_stem(variant)}"
@@ -1340,7 +1365,7 @@ sema_serde_items_enum_decode_body: fn(definition: EnumDef, span: Span) -> [Stmt]
         } else {
             loop stmt in sema_serde_items_enum_decode_value(variant, source, definition.name, span) -> attempt.push(stmt)
         }
-        body.push(sema_serde_items_if(Expr.Bool{value: true, span: span, id: AST_NODE_GENERATED}, attempt, span))
+        body.push(sema_serde_items_pattern_switch(present, "Ok", [String]{candidate}, attempt, Val([Stmt]{}), span))
     }
     body.push(sema_serde_items_no_matching_enum(span))
     body
@@ -1565,6 +1590,22 @@ sema_codec_type_names: fn(ty: Type, names: &[String]) Never! {
         .Union(members) -> loop member in members -> sema_codec_type_names(member, names)
         .Int | .Float | .Bool | .String | .Char | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Quantity(_, _) | .Measure(_) -> {}
     }
+}
+
+// The codecs the graph's registered impls give the types `items` hold, as
+// sema_derive_foreign_codecs gives a module's own items before the graph
+// exists: the items a user template generates into a registered module.
+sema_serde_graph_codecs: fn(graph: SemaRegistrationGraph, items: [Item]) -> [String:Bool] {
+    names := [String]{}
+    loop item in items -> sema_derive_held_type_names(item, names)
+    codecs := [String:Bool]{}
+    loop name in names {
+        loop reference in sema_registration_impl_rows_named(graph, name) {
+            trait_name: graph.modules[reference.module_index].impls[reference.row].trait_name ?? next
+            if owned_trait_codec(trait_name) -> codecs["{trait_name}|{name}"] = true
+        }
+    }
+    codecs
 }
 
 sema_codec_demand_add: fn(demand: Shared<SemaCodecDemand>, trait_name: String, names: [String]) {

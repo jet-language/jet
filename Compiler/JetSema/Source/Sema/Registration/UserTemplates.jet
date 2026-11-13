@@ -195,7 +195,8 @@ sema_user_template_register: fn(graph: &SemaRegistrationGraph, module_index: Int
         // a written one.
         generated := written
         sema_derive_expand_builtin_items(generated, problems)
-        sema_serde_expand_builtin_items(generated)
+        codecs: sema_serde_graph_codecs(graph, generated)
+        sema_serde_expand_builtin_items(generated, codecs)
         if !sema_module_is_core_source(graph.modules[module_index].module_identity) -> sema_fork_methods_expand(generated)
         sema_registration_expand_impl_self(generated)
         module_row := graph.modules[module_index]

@@ -1,0 +1,300 @@
+// Every AST type carries the codec its declaration derives, though nearly
+// each one holds a type another member file declares (a `Span`, a `Type`):
+// a parsed program writes to CBOR and reads back to the same bytes, and the
+// decoder of each AST type reads a value and refuses an empty input.
+use {
+    cbor: core.encoding.cbor
+    jet_foundation
+    jet_foundation.[Program]
+    jet_parser.[parse_source]
+}
+
+// core.encoding.cbor's parse accepts a depth of at most 4096.
+AST_CODEC_LIMITS: cbor.CBOROptions{max_depth: 4096, max_items: 100000000, max_bytes: 1000000000, require_canonical: false}
+
+AST_CODEC_SOURCE: [String]{
+    "use {{ text: core.text }}",
+    "Shape: enum {{ Circle(radius: Float) Square(Int) Empty }}",
+    "#Codable",
+    "Point: struct {{ x: Int{{0}} y: Int{{0}} label: String? }}",
+    "Named: trait {{ name: fn(self) -> String }}",
+    "impl Point.Named {{ name: fn(self) -> String {{ \"({{self.x}}, {{self.y}})\" }} }}",
+    "Meters: distinct Int",
+    "LIMIT: 16",
+    "area: fn(shape: Shape) -> Float {{",
+    "    if shape == {{",
+    "        .Circle(radius) -> 3.14 * radius * radius",
+    "        .Square(side) -> Float.from_int(side * side)",
+    "        .Empty -> 0.0",
+    "    }}",
+    "}}",
+    "largest: fn<T: Comparable>(values: [T]) -> T? {{",
+    "    best := values.first() ?? return None",
+    "    loop value in values {{",
+    "        if value > best -> best = value",
+    "    }}",
+    "    best",
+    "}}",
+    "total: fn(points: [Point]) -> Int {{",
+    "    sum := 0",
+    "    loop (index, point) in points {{",
+    "        if index >= LIMIT -> break",
+    "        sum += point.x + point.y",
+    "    }}",
+    "    doubled: points.map(|point| point.x * 2)",
+    "    sum + doubled.len()",
+    "}}",
+    "#Test(\"area\") {{ assert_eq(area(.Square(2)), 4.0) }}",
+}
+
+// The decoder of `T` runs and refuses an input that holds no value.
+ast_codec_refuses_empty: fn<T: Decode>() -> Bool Never! {
+    if cbor.decode<T>([U8]{}, AST_CODEC_LIMITS) == .Err(_) -> return true
+    false
+}
+
+#Test("a parsed program writes to CBOR and reads back to the same bytes") {
+    parsed: parse_source(AST_CODEC_SOURCE.join("\n").bytes())
+    if parsed.program.items.len() == 0 -> panic("the AST codec source parsed to no items")
+    blob: cbor.to_bytes(parsed.program) ?? panic("a parsed program doesn't encode: {err}")
+    back: cbor.decode<Program>(blob, AST_CODEC_LIMITS) ?? panic("a parsed program doesn't decode: {err}")
+    again: cbor.to_bytes(back) ?? panic("a decoded program doesn't encode: {err}")
+    if again != blob -> panic("a program read back from CBOR writes {again.len()} bytes, not its {blob.len()}")
+}
+
+#Test("the decoder of every AST type refuses an empty input") {
+    accepted := [String]{}
+    if !ast_codec_refuses_empty<jet_foundation.AppliedRuleApplication>() -> accepted.push("AppliedRuleApplication")
+    if !ast_codec_refuses_empty<jet_foundation.ArithmeticMode>() -> accepted.push("ArithmeticMode")
+    if !ast_codec_refuses_empty<jet_foundation.ArithmeticOperation>() -> accepted.push("ArithmeticOperation")
+    if !ast_codec_refuses_empty<jet_foundation.ArithmeticPolicyFact>() -> accepted.push("ArithmeticPolicyFact")
+    if !ast_codec_refuses_empty<jet_foundation.AutoVectorizationFacts>() -> accepted.push("AutoVectorizationFacts")
+    if !ast_codec_refuses_empty<jet_foundation.BinEndian>() -> accepted.push("BinEndian")
+    if !ast_codec_refuses_empty<jet_foundation.BinMatchPart>() -> accepted.push("BinMatchPart")
+    if !ast_codec_refuses_empty<jet_foundation.BinOp>() -> accepted.push("BinOp")
+    if !ast_codec_refuses_empty<jet_foundation.BinSpec>() -> accepted.push("BinSpec")
+    if !ast_codec_refuses_empty<jet_foundation.BindName>() -> accepted.push("BindName")
+    if !ast_codec_refuses_empty<jet_foundation.BindNameRename>() -> accepted.push("BindNameRename")
+    if !ast_codec_refuses_empty<jet_foundation.BindPattern>() -> accepted.push("BindPattern")
+    if !ast_codec_refuses_empty<jet_foundation.BinderRef>() -> accepted.push("BinderRef")
+    if !ast_codec_refuses_empty<jet_foundation.Binding>() -> accepted.push("Binding")
+    if !ast_codec_refuses_empty<jet_foundation.BudgetDecl>() -> accepted.push("BudgetDecl")
+    if !ast_codec_refuses_empty<jet_foundation.BudgetField>() -> accepted.push("BudgetField")
+    if !ast_codec_refuses_empty<jet_foundation.ByteTextPart>() -> accepted.push("ByteTextPart")
+    if !ast_codec_refuses_empty<jet_foundation.CEnumTag>() -> accepted.push("CEnumTag")
+    if !ast_codec_refuses_empty<jet_foundation.CLICommandBinding>() -> accepted.push("CLICommandBinding")
+    if !ast_codec_refuses_empty<jet_foundation.CModule>() -> accepted.push("CModule")
+    if !ast_codec_refuses_empty<jet_foundation.CModuleKind>() -> accepted.push("CModuleKind")
+    if !ast_codec_refuses_empty<jet_foundation.Call>() -> accepted.push("Call")
+    if !ast_codec_refuses_empty<jet_foundation.CallArg>() -> accepted.push("CallArg")
+    if !ast_codec_refuses_empty<jet_foundation.CallArgFlags>() -> accepted.push("CallArgFlags")
+    if !ast_codec_refuses_empty<jet_foundation.CallLabel>() -> accepted.push("CallLabel")
+    if !ast_codec_refuses_empty<jet_foundation.CallMark>() -> accepted.push("CallMark")
+    if !ast_codec_refuses_empty<jet_foundation.ClosureData>() -> accepted.push("ClosureData")
+    if !ast_codec_refuses_empty<jet_foundation.CodeModule>() -> accepted.push("CodeModule")
+    if !ast_codec_refuses_empty<jet_foundation.CompileWorkloadDecl>() -> accepted.push("CompileWorkloadDecl")
+    if !ast_codec_refuses_empty<jet_foundation.ComptimeNameSite>() -> accepted.push("ComptimeNameSite")
+    if !ast_codec_refuses_empty<jet_foundation.ConstAttr>() -> accepted.push("ConstAttr")
+    if !ast_codec_refuses_empty<jet_foundation.ConstDef>() -> accepted.push("ConstDef")
+    if !ast_codec_refuses_empty<jet_foundation.ContextField>() -> accepted.push("ContextField")
+    if !ast_codec_refuses_empty<jet_foundation.ContractClause>() -> accepted.push("ContractClause")
+    if !ast_codec_refuses_empty<jet_foundation.ContribValue>() -> accepted.push("ContribValue")
+    if !ast_codec_refuses_empty<jet_foundation.Contribution>() -> accepted.push("Contribution")
+    if !ast_codec_refuses_empty<jet_foundation.CtEnumArg>() -> accepted.push("CtEnumArg")
+    if !ast_codec_refuses_empty<jet_foundation.CtFloat>() -> accepted.push("CtFloat")
+    if !ast_codec_refuses_empty<jet_foundation.CtKey>() -> accepted.push("CtKey")
+    if !ast_codec_refuses_empty<jet_foundation.CtMapEntry>() -> accepted.push("CtMapEntry")
+    if !ast_codec_refuses_empty<jet_foundation.CtOpaque>() -> accepted.push("CtOpaque")
+    if !ast_codec_refuses_empty<jet_foundation.CtReport>() -> accepted.push("CtReport")
+    if !ast_codec_refuses_empty<jet_foundation.CtValue>() -> accepted.push("CtValue")
+    if !ast_codec_refuses_empty<jet_foundation.DebugTraceSite>() -> accepted.push("DebugTraceSite")
+    if !ast_codec_refuses_empty<jet_foundation.DerivationRef>() -> accepted.push("DerivationRef")
+    if !ast_codec_refuses_empty<jet_foundation.DeriveBodyItem>() -> accepted.push("DeriveBodyItem")
+    if !ast_codec_refuses_empty<jet_foundation.DistinctDef>() -> accepted.push("DistinctDef")
+    if !ast_codec_refuses_empty<jet_foundation.EffectDecl>() -> accepted.push("EffectDecl")
+    if !ast_codec_refuses_empty<jet_foundation.EffectImpl>() -> accepted.push("EffectImpl")
+    if !ast_codec_refuses_empty<jet_foundation.ElseArmLayout>() -> accepted.push("ElseArmLayout")
+    if !ast_codec_refuses_empty<jet_foundation.ElseArmSpan>() -> accepted.push("ElseArmSpan")
+    if !ast_codec_refuses_empty<jet_foundation.ElseBranch>() -> accepted.push("ElseBranch")
+    if !ast_codec_refuses_empty<jet_foundation.EnumDef>() -> accepted.push("EnumDef")
+    if !ast_codec_refuses_empty<jet_foundation.EnumGroup>() -> accepted.push("EnumGroup")
+    if !ast_codec_refuses_empty<jet_foundation.EnumLitArg>() -> accepted.push("EnumLitArg")
+    if !ast_codec_refuses_empty<jet_foundation.EnvLit>() -> accepted.push("EnvLit")
+    if !ast_codec_refuses_empty<jet_foundation.ErrorConvDef>() -> accepted.push("ErrorConvDef")
+    if !ast_codec_refuses_empty<jet_foundation.EveryArg>() -> accepted.push("EveryArg")
+    if !ast_codec_refuses_empty<jet_foundation.EveryMarker>() -> accepted.push("EveryMarker")
+    if !ast_codec_refuses_empty<jet_foundation.EverySchedule>() -> accepted.push("EverySchedule")
+    if !ast_codec_refuses_empty<jet_foundation.EveryScheduleError>() -> accepted.push("EveryScheduleError")
+    if !ast_codec_refuses_empty<jet_foundation.Expr>() -> accepted.push("Expr")
+    if !ast_codec_refuses_empty<jet_foundation.ExprField>() -> accepted.push("ExprField")
+    if !ast_codec_refuses_empty<jet_foundation.ExprMember>() -> accepted.push("ExprMember")
+    if !ast_codec_refuses_empty<jet_foundation.ExprPair>() -> accepted.push("ExprPair")
+    if !ast_codec_refuses_empty<jet_foundation.ExternFn>() -> accepted.push("ExternFn")
+    if !ast_codec_refuses_empty<jet_foundation.ExternRustBlock>() -> accepted.push("ExternRustBlock")
+    if !ast_codec_refuses_empty<jet_foundation.FactDecl>() -> accepted.push("FactDecl")
+    if !ast_codec_refuses_empty<jet_foundation.FailureContract>() -> accepted.push("FailureContract")
+    if !ast_codec_refuses_empty<jet_foundation.FencedNames>() -> accepted.push("FencedNames")
+    if !ast_codec_refuses_empty<jet_foundation.FencedStatement>() -> accepted.push("FencedStatement")
+    if !ast_codec_refuses_empty<jet_foundation.Field>() -> accepted.push("Field")
+    if !ast_codec_refuses_empty<jet_foundation.FleetField>() -> accepted.push("FleetField")
+    if !ast_codec_refuses_empty<jet_foundation.FleetFieldValue>() -> accepted.push("FleetFieldValue")
+    if !ast_codec_refuses_empty<jet_foundation.FleetLit>() -> accepted.push("FleetLit")
+    if !ast_codec_refuses_empty<jet_foundation.FnBody>() -> accepted.push("FnBody")
+    if !ast_codec_refuses_empty<jet_foundation.ForKind>() -> accepted.push("ForKind")
+    if !ast_codec_refuses_empty<jet_foundation.FrameCompletion>() -> accepted.push("FrameCompletion")
+    if !ast_codec_refuses_empty<jet_foundation.FrameDependency>() -> accepted.push("FrameDependency")
+    if !ast_codec_refuses_empty<jet_foundation.FrameOperation>() -> accepted.push("FrameOperation")
+    if !ast_codec_refuses_empty<jet_foundation.FrameRetention>() -> accepted.push("FrameRetention")
+    if !ast_codec_refuses_empty<jet_foundation.FrameReuse>() -> accepted.push("FrameReuse")
+    if !ast_codec_refuses_empty<jet_foundation.FrameSchedule>() -> accepted.push("FrameSchedule")
+    if !ast_codec_refuses_empty<jet_foundation.FrameTransfer>() -> accepted.push("FrameTransfer")
+    if !ast_codec_refuses_empty<jet_foundation.Func>() -> accepted.push("Func")
+    if !ast_codec_refuses_empty<jet_foundation.GCPromotion>() -> accepted.push("GCPromotion")
+    if !ast_codec_refuses_empty<jet_foundation.GCPromotionEdge>() -> accepted.push("GCPromotionEdge")
+    if !ast_codec_refuses_empty<jet_foundation.GenericModuleDef>() -> accepted.push("GenericModuleDef")
+    if !ast_codec_refuses_empty<jet_foundation.GenericModuleParam>() -> accepted.push("GenericModuleParam")
+    if !ast_codec_refuses_empty<jet_foundation.HostEntry>() -> accepted.push("HostEntry")
+    if !ast_codec_refuses_empty<jet_foundation.IfStmt>() -> accepted.push("IfStmt")
+    if !ast_codec_refuses_empty<jet_foundation.ImageField>() -> accepted.push("ImageField")
+    if !ast_codec_refuses_empty<jet_foundation.ImageFieldValue>() -> accepted.push("ImageFieldValue")
+    if !ast_codec_refuses_empty<jet_foundation.ImageFromRef>() -> accepted.push("ImageFromRef")
+    if !ast_codec_refuses_empty<jet_foundation.ImageLit>() -> accepted.push("ImageLit")
+    if !ast_codec_refuses_empty<jet_foundation.ImplConstValue>() -> accepted.push("ImplConstValue")
+    if !ast_codec_refuses_empty<jet_foundation.ImplDef>() -> accepted.push("ImplDef")
+    if !ast_codec_refuses_empty<jet_foundation.ImportBinding>() -> accepted.push("ImportBinding")
+    if !ast_codec_refuses_empty<jet_foundation.ImportDecl>() -> accepted.push("ImportDecl")
+    if !ast_codec_refuses_empty<jet_foundation.ImportKind>() -> accepted.push("ImportKind")
+    if !ast_codec_refuses_empty<jet_foundation.ImportedItem>() -> accepted.push("ImportedItem")
+    if !ast_codec_refuses_empty<jet_foundation.IndexKind>() -> accepted.push("IndexKind")
+    if !ast_codec_refuses_empty<jet_foundation.InlineAsmContract>() -> accepted.push("InlineAsmContract")
+    if !ast_codec_refuses_empty<jet_foundation.InlineAsmOutput>() -> accepted.push("InlineAsmOutput")
+    if !ast_codec_refuses_empty<jet_foundation.InlineForeign>() -> accepted.push("InlineForeign")
+    if !ast_codec_refuses_empty<jet_foundation.InlineVersion>() -> accepted.push("InlineVersion")
+    if !ast_codec_refuses_empty<jet_foundation.IntegerRange>() -> accepted.push("IntegerRange")
+    if !ast_codec_refuses_empty<jet_foundation.IntegerWidth>() -> accepted.push("IntegerWidth")
+    if !ast_codec_refuses_empty<jet_foundation.Item>() -> accepted.push("Item")
+    if !ast_codec_refuses_empty<jet_foundation.ItemTemplateLoop>() -> accepted.push("ItemTemplateLoop")
+    if !ast_codec_refuses_empty<jet_foundation.JobCachePolicy>() -> accepted.push("JobCachePolicy")
+    if !ast_codec_refuses_empty<jet_foundation.JobMetadata>() -> accepted.push("JobMetadata")
+    if !ast_codec_refuses_empty<jet_foundation.JobScope>() -> accepted.push("JobScope")
+    if !ast_codec_refuses_empty<jet_foundation.JobSkip>() -> accepted.push("JobSkip")
+    if !ast_codec_refuses_empty<jet_foundation.KernelMarker>() -> accepted.push("KernelMarker")
+    if !ast_codec_refuses_empty<jet_foundation.KernelMode>() -> accepted.push("KernelMode")
+    if !ast_codec_refuses_empty<jet_foundation.KernelProof>() -> accepted.push("KernelProof")
+    if !ast_codec_refuses_empty<jet_foundation.LValue>() -> accepted.push("LValue")
+    if !ast_codec_refuses_empty<jet_foundation.Lambda>() -> accepted.push("Lambda")
+    if !ast_codec_refuses_empty<jet_foundation.LambdaBody>() -> accepted.push("LambdaBody")
+    if !ast_codec_refuses_empty<jet_foundation.LambdaMeta>() -> accepted.push("LambdaMeta")
+    if !ast_codec_refuses_empty<jet_foundation.LambdaParam>() -> accepted.push("LambdaParam")
+    if !ast_codec_refuses_empty<jet_foundation.ListPatRest>() -> accepted.push("ListPatRest")
+    if !ast_codec_refuses_empty<jet_foundation.MapPatEntry>() -> accepted.push("MapPatEntry")
+    if !ast_codec_refuses_empty<jet_foundation.Marker>() -> accepted.push("Marker")
+    if !ast_codec_refuses_empty<jet_foundation.MarkerCallArg>() -> accepted.push("MarkerCallArg")
+    if !ast_codec_refuses_empty<jet_foundation.MarkerDecl>() -> accepted.push("MarkerDecl")
+    if !ast_codec_refuses_empty<jet_foundation.MarkerDeclParam>() -> accepted.push("MarkerDeclParam")
+    if !ast_codec_refuses_empty<jet_foundation.MaturityTag>() -> accepted.push("MaturityTag")
+    if !ast_codec_refuses_empty<jet_foundation.MetaAttr>() -> accepted.push("MetaAttr")
+    if !ast_codec_refuses_empty<jet_foundation.MetaFacts>() -> accepted.push("MetaFacts")
+    if !ast_codec_refuses_empty<jet_foundation.MetaField>() -> accepted.push("MetaField")
+    if !ast_codec_refuses_empty<jet_foundation.MetadataProducerStatus>() -> accepted.push("MetadataProducerStatus")
+    if !ast_codec_refuses_empty<jet_foundation.MigrationDecl>() -> accepted.push("MigrationDecl")
+    if !ast_codec_refuses_empty<jet_foundation.MigrationOp>() -> accepted.push("MigrationOp")
+    if !ast_codec_refuses_empty<jet_foundation.ModuleAliasDef>() -> accepted.push("ModuleAliasDef")
+    if !ast_codec_refuses_empty<jet_foundation.ModuleArg>() -> accepted.push("ModuleArg")
+    if !ast_codec_refuses_empty<jet_foundation.ModuleCap>() -> accepted.push("ModuleCap")
+    if !ast_codec_refuses_empty<jet_foundation.ModuleDecl>() -> accepted.push("ModuleDecl")
+    if !ast_codec_refuses_empty<jet_foundation.ModuleInstanceApplication>() -> accepted.push("ModuleInstanceApplication")
+    if !ast_codec_refuses_empty<jet_foundation.ModuleInstanceIdentity>() -> accepted.push("ModuleInstanceIdentity")
+    if !ast_codec_refuses_empty<jet_foundation.Name>() -> accepted.push("Name")
+    if !ast_codec_refuses_empty<jet_foundation.NameRange>() -> accepted.push("NameRange")
+    if !ast_codec_refuses_empty<jet_foundation.NameRows>() -> accepted.push("NameRows")
+    if !ast_codec_refuses_empty<jet_foundation.NameTable>() -> accepted.push("NameTable")
+    if !ast_codec_refuses_empty<jet_foundation.NamedCtKey>() -> accepted.push("NamedCtKey")
+    if !ast_codec_refuses_empty<jet_foundation.NamedCtValue>() -> accepted.push("NamedCtValue")
+    if !ast_codec_refuses_empty<jet_foundation.NamedExpr>() -> accepted.push("NamedExpr")
+    if !ast_codec_refuses_empty<jet_foundation.NamedSpan>() -> accepted.push("NamedSpan")
+    if !ast_codec_refuses_empty<jet_foundation.NamedType>() -> accepted.push("NamedType")
+    if !ast_codec_refuses_empty<jet_foundation.Namespace>() -> accepted.push("Namespace")
+    if !ast_codec_refuses_empty<jet_foundation.OperatorMarker>() -> accepted.push("OperatorMarker")
+    if !ast_codec_refuses_empty<jet_foundation.OptionEntry>() -> accepted.push("OptionEntry")
+    if !ast_codec_refuses_empty<jet_foundation.OrFallback>() -> accepted.push("OrFallback")
+    if !ast_codec_refuses_empty<jet_foundation.OutputCallableAuthority>() -> accepted.push("OutputCallableAuthority")
+    if !ast_codec_refuses_empty<jet_foundation.OutputKind>() -> accepted.push("OutputKind")
+    if !ast_codec_refuses_empty<jet_foundation.OutputParam>() -> accepted.push("OutputParam")
+    if !ast_codec_refuses_empty<jet_foundation.Param>() -> accepted.push("Param")
+    if !ast_codec_refuses_empty<jet_foundation.ParseResult>() -> accepted.push("ParseResult")
+    if !ast_codec_refuses_empty<jet_foundation.PatSlot>() -> accepted.push("PatSlot")
+    if !ast_codec_refuses_empty<jet_foundation.Pattern>() -> accepted.push("Pattern")
+    if !ast_codec_refuses_empty<jet_foundation.PatternTypeHead>() -> accepted.push("PatternTypeHead")
+    if !ast_codec_refuses_empty<jet_foundation.PerfLit>() -> accepted.push("PerfLit")
+    if !ast_codec_refuses_empty<jet_foundation.PipeStep>() -> accepted.push("PipeStep")
+    if !ast_codec_refuses_empty<jet_foundation.PlaceAccess>() -> accepted.push("PlaceAccess")
+    if !ast_codec_refuses_empty<jet_foundation.PolicyDeclaration>() -> accepted.push("PolicyDeclaration")
+    if !ast_codec_refuses_empty<jet_foundation.PolicyKey>() -> accepted.push("PolicyKey")
+    if !ast_codec_refuses_empty<jet_foundation.PolicyScope>() -> accepted.push("PolicyScope")
+    if !ast_codec_refuses_empty<jet_foundation.PolicyValue>() -> accepted.push("PolicyValue")
+    if !ast_codec_refuses_empty<jet_foundation.PrepParam>() -> accepted.push("PrepParam")
+    if !ast_codec_refuses_empty<jet_foundation.ProfileLit>() -> accepted.push("ProfileLit")
+    if !ast_codec_refuses_empty<jet_foundation.Program>() -> accepted.push("Program")
+    if !ast_codec_refuses_empty<jet_foundation.ProtocolDecl>() -> accepted.push("ProtocolDecl")
+    if !ast_codec_refuses_empty<jet_foundation.ProtocolDirection>() -> accepted.push("ProtocolDirection")
+    if !ast_codec_refuses_empty<jet_foundation.ProtocolMessage>() -> accepted.push("ProtocolMessage")
+    if !ast_codec_refuses_empty<jet_foundation.QuantityInfo>() -> accepted.push("QuantityInfo")
+    if !ast_codec_refuses_empty<jet_foundation.QuantityKind>() -> accepted.push("QuantityKind")
+    if !ast_codec_refuses_empty<jet_foundation.ResolvedOutput>() -> accepted.push("ResolvedOutput")
+    if !ast_codec_refuses_empty<jet_foundation.ResourceAccess>() -> accepted.push("ResourceAccess")
+    if !ast_codec_refuses_empty<jet_foundation.ResourceAccessMode>() -> accepted.push("ResourceAccessMode")
+    if !ast_codec_refuses_empty<jet_foundation.ResourceIdentity>() -> accepted.push("ResourceIdentity")
+    if !ast_codec_refuses_empty<jet_foundation.ResourceLayout>() -> accepted.push("ResourceLayout")
+    if !ast_codec_refuses_empty<jet_foundation.ResourceRegion>() -> accepted.push("ResourceRegion")
+    if !ast_codec_refuses_empty<jet_foundation.RuleSite>() -> accepted.push("RuleSite")
+    if !ast_codec_refuses_empty<jet_foundation.RustConstKind>() -> accepted.push("RustConstKind")
+    if !ast_codec_refuses_empty<jet_foundation.SerdeWireShape>() -> accepted.push("SerdeWireShape")
+    if !ast_codec_refuses_empty<jet_foundation.ServiceEntry>() -> accepted.push("ServiceEntry")
+    if !ast_codec_refuses_empty<jet_foundation.SourceDecl>() -> accepted.push("SourceDecl")
+    if !ast_codec_refuses_empty<jet_foundation.StateDecl>() -> accepted.push("StateDecl")
+    if !ast_codec_refuses_empty<jet_foundation.StateTransition>() -> accepted.push("StateTransition")
+    if !ast_codec_refuses_empty<jet_foundation.Stmt>() -> accepted.push("Stmt")
+    if !ast_codec_refuses_empty<jet_foundation.StrFormat>() -> accepted.push("StrFormat")
+    if !ast_codec_refuses_empty<jet_foundation.StrMatchPart>() -> accepted.push("StrMatchPart")
+    if !ast_codec_refuses_empty<jet_foundation.StrPart>() -> accepted.push("StrPart")
+    if !ast_codec_refuses_empty<jet_foundation.StringMapEntry>() -> accepted.push("StringMapEntry")
+    if !ast_codec_refuses_empty<jet_foundation.StructDef>() -> accepted.push("StructDef")
+    if !ast_codec_refuses_empty<jet_foundation.StructLayout>() -> accepted.push("StructLayout")
+    if !ast_codec_refuses_empty<jet_foundation.StructPatField>() -> accepted.push("StructPatField")
+    if !ast_codec_refuses_empty<jet_foundation.SwitchArm>() -> accepted.push("SwitchArm")
+    if !ast_codec_refuses_empty<jet_foundation.SystemField>() -> accepted.push("SystemField")
+    if !ast_codec_refuses_empty<jet_foundation.SystemFieldValue>() -> accepted.push("SystemFieldValue")
+    if !ast_codec_refuses_empty<jet_foundation.SystemLit>() -> accepted.push("SystemLit")
+    if !ast_codec_refuses_empty<jet_foundation.TagDef>() -> accepted.push("TagDef")
+    if !ast_codec_refuses_empty<jet_foundation.TaskGroupArgs>() -> accepted.push("TaskGroupArgs")
+    if !ast_codec_refuses_empty<jet_foundation.TestDef>() -> accepted.push("TestDef")
+    if !ast_codec_refuses_empty<jet_foundation.TraitConstDecl>() -> accepted.push("TraitConstDecl")
+    if !ast_codec_refuses_empty<jet_foundation.TraitDef>() -> accepted.push("TraitDef")
+    if !ast_codec_refuses_empty<jet_foundation.TraitImplBlock>() -> accepted.push("TraitImplBlock")
+    if !ast_codec_refuses_empty<jet_foundation.TraitMethodSig>() -> accepted.push("TraitMethodSig")
+    if !ast_codec_refuses_empty<jet_foundation.TryConvert>() -> accepted.push("TryConvert")
+    if !ast_codec_refuses_empty<jet_foundation.TupleField>() -> accepted.push("TupleField")
+    if !ast_codec_refuses_empty<jet_foundation.TypeAliasDef>() -> accepted.push("TypeAliasDef")
+    if !ast_codec_refuses_empty<jet_foundation.TypeParam>() -> accepted.push("TypeParam")
+    if !ast_codec_refuses_empty<jet_foundation.TypedField>() -> accepted.push("TypedField")
+    if !ast_codec_refuses_empty<jet_foundation.TypedLitBody>() -> accepted.push("TypedLitBody")
+    if !ast_codec_refuses_empty<jet_foundation.TypedNamedField>() -> accepted.push("TypedNamedField")
+    if !ast_codec_refuses_empty<jet_foundation.UnOp>() -> accepted.push("UnOp")
+    if !ast_codec_refuses_empty<jet_foundation.UnitDimensionDecl>() -> accepted.push("UnitDimensionDecl")
+    if !ast_codec_refuses_empty<jet_foundation.UnitFamilyDef>() -> accepted.push("UnitFamilyDef")
+    if !ast_codec_refuses_empty<jet_foundation.UnitFamilyMember>() -> accepted.push("UnitFamilyMember")
+    if !ast_codec_refuses_empty<jet_foundation.UnitFormat>() -> accepted.push("UnitFormat")
+    if !ast_codec_refuses_empty<jet_foundation.UnitRatio>() -> accepted.push("UnitRatio")
+    if !ast_codec_refuses_empty<jet_foundation.UnitScaleProvenance>() -> accepted.push("UnitScaleProvenance")
+    if !ast_codec_refuses_empty<jet_foundation.UserPolicyDecl>() -> accepted.push("UserPolicyDecl")
+    if !ast_codec_refuses_empty<jet_foundation.VMTestField>() -> accepted.push("VMTestField")
+    if !ast_codec_refuses_empty<jet_foundation.VMTestFieldValue>() -> accepted.push("VMTestFieldValue")
+    if !ast_codec_refuses_empty<jet_foundation.VMTestLit>() -> accepted.push("VMTestLit")
+    if !ast_codec_refuses_empty<jet_foundation.Variant>() -> accepted.push("Variant")
+    if !ast_codec_refuses_empty<jet_foundation.VariantField>() -> accepted.push("VariantField")
+    if !ast_codec_refuses_empty<jet_foundation.VariantPayload>() -> accepted.push("VariantPayload")
+    if !ast_codec_refuses_empty<jet_foundation.WebBucket>() -> accepted.push("WebBucket")
+    if !ast_codec_refuses_empty<jet_foundation.WebPartitionMarker>() -> accepted.push("WebPartitionMarker")
+    assert_eq(accepted.join(", "), "")
+}

@@ -2265,12 +2265,20 @@ sema_derive_has_trait_impl: fn(index: SemaDeriveItemIndex, type_name: String, tr
 // for Equatable and Comparable over one module's items). Every requesting
 // declaration is first assumed to derive; one whose own fields fail, and
 // every declaration that relied on it, transitively, loses the derive.
-
+//
+// A codec reaches across modules: a field whose type another module declares
+// qualifies when the graph's own fixed point gives that type the codec
+// (sema_derive_foreign_codecs), read from `foreign` ("{trait}|{leaf}"). The
+// graph's fixed point runs over every module at once (`global`), each
+// candidate read against its own module's index (`indexes[module]`).
 SemaDeriveReadiness: struct {
-    index: SemaDeriveItemIndex
+    indexes: [SemaDeriveItemIndex]
+    module: Int
     trait_name: String
     candidates: [String:Int]
     relied_on: [Int]
+    foreign: [String:Bool]
+    global: Bool
 }
 
 sema_derive_builtin_supports: fn(name: String, trait_name: String) -> Bool {
@@ -2290,21 +2298,36 @@ sema_derive_builtin_supports: fn(name: String, trait_name: String) -> Bool {
     name == "Range" || name == "TLSVersion" || name == "EncodingErrorKind" || name == "EncodingFormat" || name == "EncodingCause" || name == "EncodingError" || name == "EncodingLimits" || name == "DataError" || name == "DataErrorKind" || name == "DataLimits" || name == "ComputeError"
 }
 
-// Rust `implements_trait` over this module's declarations.
+// Rust `implements_trait` over this module's declarations. A name this
+// module does not declare answers from the other modules' codecs
+// (sema_derive_foreign_ready).
 sema_derive_implements: fn(readiness: &SemaDeriveReadiness, items: [Item], name: String) -> Bool {
     if readiness.candidates.get(name) == .Val(node) {
         readiness.relied_on.push(node)
         return true
     }
     if sema_derive_builtin_supports(name, readiness.trait_name) -> return true
-    if sema_derive_has_trait_impl(readiness.index, name, readiness.trait_name) -> return true
-    position: readiness.index.nominals.get(name) ?? return false
+    if sema_derive_has_trait_impl(readiness.indexes[readiness.module], name, readiness.trait_name) -> return true
+    position: readiness.indexes[readiness.module].nominals.get(name) ?? return sema_derive_foreign_ready(readiness, name)
     if items[position] == {
         .Struct(definition) -> sema_derive_has_name(definition.derives, readiness.trait_name)
         .Enum(definition) -> sema_derive_has_name(definition.derives, readiness.trait_name)
         .Distinct(definition) -> readiness.trait_name == "Equatable" || sema_derive_has_name(definition.derives, readiness.trait_name)
         .Func(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> false
     }
+}
+
+// A codec of a type another module declares: the graph's fixed point
+// candidate of that name (`global`), else the codec the other modules give it.
+// No other capability reaches across modules.
+sema_derive_foreign_ready: fn(readiness: &SemaDeriveReadiness, name: String) -> Bool {
+    if !owned_trait_codec(readiness.trait_name) -> return false
+    leaf: sema_serde_named_leaf(name)
+    if readiness.global && readiness.candidates.get(leaf) == .Val(node) {
+        readiness.relied_on.push(node)
+        return true
+    }
+    readiness.foreign.get("{readiness.trait_name}|{leaf}") != None
 }
 
 sema_derive_native_ordering_ready: fn(ty: Type) -> Bool {
@@ -2403,12 +2426,17 @@ sema_derive_fields_ready: fn(readiness: &SemaDeriveReadiness, items: [Item], ite
             }
             true
         }
-        .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> false
+        // A type alias, a node of the graph's codec fixed point only
+        // (sema_derive_codec_ready), has the codec of the type it names.
+        .TypeAlias(definition) -> sema_derive_type_ready(readiness, items, definition.target, definition.type_params)
+        .Func(_) | .Distinct(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> false
     }
 }
 
-sema_derive_auto_selected: fn(items: [Item], index: SemaDeriveItemIndex, trait_name: String) -> [String:Bool] {
-    readiness := SemaDeriveReadiness{index: index, trait_name: trait_name, candidates: [String:Int]{}, relied_on: [Int]{}}
+// `foreign` holds the codecs other modules give the types this module's
+// declarations hold (sema_derive_foreign_codecs); empty for any other trait.
+sema_derive_auto_selected: fn(items: [Item], index: SemaDeriveItemIndex, trait_name: String, foreign: [String:Bool]) -> [String:Bool] {
+    readiness := SemaDeriveReadiness{indexes: [SemaDeriveItemIndex]{index}, module: 0, trait_name: trait_name, candidates: [String:Int]{}, relied_on: [Int]{}, foreign: foreign, global: false}
     names := [String]{}
     nodes := [Item]{}
     loop item in items {
@@ -2446,6 +2474,16 @@ sema_derive_auto_selected: fn(items: [Item], index: SemaDeriveItemIndex, trait_n
             failed[node] = true
         }
     }
+    sema_derive_fail_dependents(failed, dependents)
+    selected := [String:Bool]{}
+    loop (node, name) in names {
+        if !failed[node] -> selected[name] = true
+    }
+    selected
+}
+
+// Every node that relied on a failed node fails in turn, transitively.
+sema_derive_fail_dependents: fn(failed: &[Bool], dependents: [[Int]]) {
     pending := [Int]{}
     loop (node, is_failed) in failed {
         if is_failed -> pending.push(node)
@@ -2459,11 +2497,141 @@ sema_derive_auto_selected: fn(items: [Item], index: SemaDeriveItemIndex, trait_n
             }
         }
     }
-    selected := [String:Bool]{}
-    loop (node, name) in names {
-        if !failed[node] -> selected[name] = true
+}
+
+// The codecs the graph gives the types its modules declare, for each module
+// the entries ("{trait}|{leaf}") of the names its declarations hold
+// (sema_derive_held_type_names): a module's structural auto-derive
+// (sema_derive_auto_selected) reads a field type another module declares as
+// the graph decides it instead of trusting it. One fixed point runs over
+// every module's parsed items at once (sema_derive_codec_ready). A name no
+// module declares at its top level (a type a template, a protocol or an
+// inline module generates) has no entry: a declaration that holds one derives
+// no codec unless it asks for it.
+sema_derive_foreign_codecs: fn(inputs: [SemaRegistrationModuleInput]) -> [[String:Bool]] {
+    indexes := [SemaDeriveItemIndex]{}
+    loop input in inputs -> indexes.push(sema_derive_item_index(input.program.items))
+    readiness := SemaDeriveReadiness{indexes: indexes.move(), module: 0, trait_name: "", candidates: [String:Int]{}, relied_on: [Int]{}, foreign: [String:Bool]{}, global: true}
+    ready := [String:Bool]{}
+    codecs: [String]{"Encode", "Decode"}
+    loop trait_name in codecs -> sema_derive_codec_ready(readiness, inputs, trait_name, ready)
+    tables := [[String:Bool]]{}
+    loop input in inputs {
+        names := [String]{}
+        loop item in input.program.items -> sema_derive_held_type_names(item, names)
+        table := [String:Bool]{}
+        loop name in names {
+            loop trait_name in codecs {
+                key: "{trait_name}|{name}"
+                if ready.get(key) != None -> table[key] = true
+            }
+        }
+        tables.push(table.move())
     }
-    selected
+    tables
+}
+
+// One codec's graph-wide fixed point, into `ready`: a type has it when it
+// asks for it explicitly or writes it (`readiness.foreign`), or when the
+// structural auto-derive selects it over every module at once, as
+// sema_derive_auto_selected does over one, a type alias when the type it
+// names does. Each candidate's fields are read against its own module.
+sema_derive_codec_ready: fn(readiness: &SemaDeriveReadiness, inputs: [SemaRegistrationModuleInput], trait_name: String, ready: &[String:Bool]) {
+    readiness.trait_name = trait_name
+    readiness.candidates = [String:Int]{}
+    readiness.foreign = [String:Bool]{}
+    written := [String]{}
+    names := [String]{}
+    node_modules := [Int]{}
+    node_positions := [Int]{}
+    loop (module_index, input) in inputs {
+        loop (position, item) in input.program.items {
+            name := ""
+            requested := false
+            asked := false
+            if item == {
+                .Struct(definition) -> {
+                    name = definition.name
+                    asked = sema_derive_has_name(definition.derives, trait_name)
+                    requested = sema_type_metadata_struct_auto_ok(definition) && sema_type_metadata_trait_requested(definition.type_markers, trait_name, definition.auto_derive_default)
+                }
+                .Enum(definition) -> {
+                    name = definition.name
+                    asked = sema_derive_has_name(definition.derives, trait_name)
+                    requested = sema_type_metadata_enum_auto_ok(definition) && sema_type_metadata_trait_requested(definition.type_markers, trait_name, definition.auto_derive_default)
+                }
+                .Distinct(definition) -> {
+                    name = definition.name
+                    asked = sema_derive_has_name(definition.derives, trait_name)
+                }
+                .TypeAlias(definition) -> {
+                    name = definition.name
+                    requested = true
+                }
+                .Impl(definition) -> {
+                    if (definition.trait_name ?? "") == trait_name -> written.push("{trait_name}|{sema_serde_named_leaf(definition.type_name)}")
+                    next
+                }
+                .Func(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> next
+            }
+            if asked || sema_derive_has_trait_impl(readiness.indexes[module_index], name, trait_name) {
+                written.push("{trait_name}|{name}")
+                next
+            }
+            if !requested || readiness.candidates.get(name) != None || readiness.indexes[module_index].codec_methods.get(sema_type_metadata_impl_key(name, trait_name)) != None -> next
+            readiness.candidates[name] = names.len()
+            names.push(name)
+            node_modules.push(module_index)
+            node_positions.push(position)
+        }
+    }
+    loop key in written -> readiness.foreign[key] = true
+    failed := [Bool]{}
+    dependents := [[Int]]{}
+    loop _ in names {
+        failed.push(false)
+        dependents.push([Int]{})
+    }
+    loop (node, module_index) in node_modules {
+        readiness.module = module_index
+        readiness.relied_on = [Int]{}
+        if sema_derive_fields_ready(readiness, inputs[module_index].program.items, inputs[module_index].program.items[node_positions[node]]) {
+            loop dependency in readiness.relied_on {
+                if dependency != node -> dependents[dependency].push(node)
+            }
+        } else {
+            failed[node] = true
+        }
+    }
+    sema_derive_fail_dependents(failed, dependents)
+    loop (node, name) in names {
+        if !failed[node] -> ready["{trait_name}|{name}"] = true
+    }
+    loop key in written -> ready[key] = true
+}
+
+// The nominal leaf names a declaration's stored fields, variant payloads,
+// distinct base or alias target hold (sema_codec_type_names).
+sema_derive_held_type_names: fn(item: Item, names: &[String]) Never! {
+    if item == {
+        .Struct(definition) -> {
+            loop field in definition.fields {
+                if field.computed == None -> sema_codec_type_names(field.ty, names)
+            }
+        }
+        .Enum(definition) -> {
+            loop variant in definition.variants {
+                if variant.payload == {
+                    .Unit -> {}
+                    .Single(ty, _) -> sema_codec_type_names(ty, names)
+                    .Named(fields) -> loop field in fields -> sema_codec_type_names(field.ty, names)
+                }
+            }
+        }
+        .Distinct(definition) -> sema_codec_type_names(definition.base, names)
+        .TypeAlias(definition) -> sema_codec_type_names(definition.target, names)
+        .Func(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+    }
 }
 
 // I3: compiler-owned capability requests use the same
@@ -2476,8 +2644,8 @@ sema_derive_auto_selected: fn(items: [Item], index: SemaDeriveItemIndex, trait_n
 // declaration is rewritten, and generated impls are appended.
 sema_derive_expand_builtin_items: fn(items: &[Item], diagnostics: &[Diagnostic]) {
     facts: sema_derive_item_index(items)
-    auto_equatable: sema_derive_auto_selected(items, facts, "Equatable")
-    auto_comparable: sema_derive_auto_selected(items, facts, "Comparable")
+    auto_equatable: sema_derive_auto_selected(items, facts, "Equatable", [String:Bool]{})
+    auto_comparable: sema_derive_auto_selected(items, facts, "Comparable", [String:Bool]{})
     providers := [MarkerDecl]?{None}
     generated := [Item]{}
     // Each item is read in place; an expanded declaration gains its derived
