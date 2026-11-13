@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6782,
-    "rev": 101360,
+    "nextNum": 6783,
+    "rev": 101361,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -94789,6 +94789,36 @@
       "updated": "2026-11-13T10:02:16.249Z",
       "updatedBy": "Main",
       "criteriaLastN": 1
+    },
+    {
+      "id": "c0g4h3r9",
+      "num": 6782,
+      "title": "Derive the runtime can-stop set from the runtime IR instead of the hand-kept ir_route_can_stop list",
+      "body": "ir_route_can_stop (JetIR) is a hand-kept list of runtime routes that skip the stop poll after a call. Its generated twin RUNTIME_STOP_EXPORTS has no callers. The poll catches a stop that the callee published, so the sound set is the runtime closure of routes that can publish one, with fatal traps (allocation failure, capacity panic, invalid layout) declared fatal rather than stops. Plan (G11Speed-5, 2026-11-13): build a stops receipt from the runtime IR at library build, as the .threads receipt is built (BuildLibrary → Request → RuntimePack → Host), and prune stop points after the build from it. G11Speed-c29j1 extends the list by hand for now.",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G11"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-13T10:15:23.686Z",
+      "updated": "2026-11-13T10:15:23.686Z",
+      "updatedBy": "Main"
     }
   ],
   "decisions": [
@@ -199084,6 +199114,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-13T10:15:23.687Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0g4h3r9",
+      "note": "Derive the runtime can-stop set from the runtime IR instead of the hand-kept ir_route_can_stop list"
+    },
     {
       "at": "2026-11-13T10:10:48.566Z",
       "by": "Main",
