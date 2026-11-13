@@ -1,0 +1,33 @@
+# #6314 c8 (slice 1): AllocError is a member of the Core error family. A
+# refused allocation in `run` reaches the ordinary Err report through the
+# Prelude's nonallocating `impl AllocError -> Err` (refused/), and a
+# boundary that handles it once gets 0 (handled/), on every tier.
+fixture: fixtures/alloc_error_reaches_err
+step: jet run main.jet
+cwd: refused
+exit: 1
+stderr: ~ "memory allocation refused"
+step: jet run --release main.jet
+cwd: refused
+exit: 1
+stderr: ~ "memory allocation refused"
+step: jet build main.jet --profile=debug
+cwd: refused
+step: built
+cwd: refused
+exit: 1
+stderr: ~ "memory allocation refused"
+step: jet run main.jet
+cwd: handled
+exit: 0
+stdout: = "3\n0\n"
+step: jet run --release main.jet
+cwd: handled
+exit: 0
+stdout: = "3\n0\n"
+step: jet build main.jet --profile=debug
+cwd: handled
+step: built
+cwd: handled
+exit: 0
+stdout: = "3\n0\n"

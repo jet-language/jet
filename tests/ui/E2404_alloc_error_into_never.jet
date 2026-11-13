@@ -1,0 +1,11 @@
+// A refused allocation has no route into a `Never!` function: it propagates
+// out of a function that may fail, or the boundary handles it once.
+strict: fn() -> Int Never! {
+    rows := [Int]{}
+    rows.try_push(1)
+    rows.len()
+}
+
+run: fn() {
+    print(strict())
+}

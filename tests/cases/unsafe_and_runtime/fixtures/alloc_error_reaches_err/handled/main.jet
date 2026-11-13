@@ -1,0 +1,15 @@
+// The ballot program on the current spelling: three rows load (3), and a
+// refused reservation is handled at the boundary (0).
+use mem: core.mem
+
+load: fn(extra: Int) -> Int mem.AllocError! {
+    rows := [Int]{}
+    loop n in [1, 2, 3] -> rows.try_push(n)
+    rows.try_reserve(extra)
+    rows.len()
+}
+
+run: fn() {
+    print(load(0) ?? 0)
+    print(load(4_611_686_018_427_387_903) ?? 0)
+}

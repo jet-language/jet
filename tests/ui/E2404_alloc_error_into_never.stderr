@@ -1,0 +1,8 @@
+Error [jet.ErrorNotPropagatable]: `try_push()` fails with `AllocError`, which can't propagate into `Never` here
+  --> tests/ui/E2404_alloc_error_into_never.jet:5:10
+    |
+  5 |     rows.try_push(1)
+    |          ^^^^^^^^
+ Why: `try_push()` is defined at `Core or generated callable (no user source location)` with effective failure contract `inferred failure contract`; the caller's `explicit Never! (proven unreachable)` contract has no route from `AllocError` to `Never`
+ Fix: Declare the caller with `AllocError` as its failure domain, or add `impl AllocError -> Never { … }`; otherwise handle `try_push()` locally with `??`
+More: jet-lang.dev/e/E2404

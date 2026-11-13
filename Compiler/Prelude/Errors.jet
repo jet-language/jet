@@ -88,6 +88,12 @@ Err: struct {
     }}
 }
 
+// A refused allocation reports without allocating: the message is static
+// text, and the requested bytes stay on the AllocError a handler sees.
+impl AllocError -> Err {
+    return Err("memory allocation refused")
+}
+
 impl AppError -> Err {
     return Err("{self}")
 }

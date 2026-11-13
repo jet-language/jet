@@ -3116,8 +3116,14 @@ mutation retains its abort-on-failure behavior. The AOT emitter and the
 interpreter carry the same fallible result; they do not choose a
 different allocation policy. A value `try_alloc` accepts belongs to its
 allocator as an `alloc` value does: it closes and drops once, at reset or
-close, and the Result carrying its view owns none of it. See
-[`Examples/Memory/Allocation/TryAllocation.jet`](../../Examples/Memory/Allocation/TryAllocation.jet). (D-ALLOCFAIL1=A)
+close, and the Result carrying its view owns none of it. `AllocError` is a
+member of the Core error family, so a refused allocation propagates into the
+default `Err` (in `run`, for example) without a declared conversion. The
+Prelude's `impl AllocError -> Err` allocates nothing: its message is the
+static text `memory allocation refused`. A handler that needs the requested
+bytes handles the `AllocError` before it converts. A `Never!` function can't
+propagate it (**E2404**). See
+[`Examples/Memory/Allocation/TryAllocation.jet`](../../Examples/Memory/Allocation/TryAllocation.jet). (D-ALLOCFAIL1=A, D-ALLOC-FAIL1)
 
 ### Arena regions and scope-bound views
 

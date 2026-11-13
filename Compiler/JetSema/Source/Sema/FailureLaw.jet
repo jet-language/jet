@@ -51,11 +51,12 @@ use {
 // The standard library's own error family, exactly the
 // `impl <member> -> Err` declarations of the embedded Prelude/Errors.jet (the
 // Rust reference's `is_core_error_family_type`). Adds the
-// payload-free `CryptoError` and `FileCryptoError`. `TaskFailure` and
-// component types stay outside on purpose. The typed decode's `[FieldError]`
-// list is the one member that is not a named type (sema_core_error_family_source).
+// payload-free `CryptoError` and `FileCryptoError`, and `AllocError`, whose
+// conversion allocates nothing. `TaskFailure` and component types stay
+// outside on purpose. The typed decode's `[FieldError]` list is the one
+// member that is not a named type (sema_core_error_family_source).
 JET_CORE_ERROR_FAMILY: #run { [String]{
-    "AppError", "ArchiveError", "Base32Error", "Base64Error", "BuildError", "BrowserError", "CBORError", "ComputeError", "CryptoError", "DBError", "DataError",
+    "AllocError", "AppError", "ArchiveError", "Base32Error", "Base64Error", "BuildError", "BrowserError", "CBORError", "ComputeError", "CryptoError", "DBError", "DataError",
     "EncodingError", "EnvError", "FileCryptoError", "HTTPError", "HexError", "IOError", "MIMEError", "ModError", "NetError", "PerfError",
     "PluginError",
     "RangeError", "RegexError", "TextError", "TimeError", "UIHostError", "URLError", "UTF8Error", "UUIDError", "WsError", "XMLError",
@@ -336,7 +337,10 @@ sema_error_conversion_routine: fn(definition: ErrorConvDef, type_params: [TypePa
 // finds it.
 sema_prelude_error_conversion: fn(source: Type, diagnostics: &[Diagnostic]) -> Func? {
     leaf: sema_prelude_conversion_spelling(source)
-    parsed: parse_source("impl {leaf} -> Err {{\n    return Err(\"{{self}}\")\n}}\n".bytes()) ?? return None
+    // A refused allocation reports without allocating: static text, never
+    // the formatted AllocError.
+    message: if leaf == "AllocError" -> "memory allocation refused" else -> "{{self}}"
+    parsed: parse_source("impl {leaf} -> Err {{\n    return Err(\"{message}\")\n}}\n".bytes()) ?? return None
     if parsed.diagnostics.len() != 0 {
         loop diagnostic in parsed.diagnostics -> diagnostics.push(diagnostic)
         return None
