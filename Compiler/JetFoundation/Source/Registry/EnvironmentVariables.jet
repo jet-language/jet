@@ -2,11 +2,13 @@
 // verification read: the one hand-written home of their names. Each row names
 // the repository file that reads the variable, the value it accepts and what
 // it means. `Tools/agent/EnvironmentRows.jet` renders the tables of
-// Docs/spec/reference/environment.md from these rows, and
-// tests/guards/environment_variables.jet fails on a `JET_*` or `JETPACK_*`
-// literal in the compiler with no row, and on a row whose reader no longer
-// names it. A compiler control's variable is a row of JET_CLI_CONTROLS
-// (CLIControls.jet), not of this table.
+// Docs/spec/reference/environment.md from these rows, and the names code
+// spells them by: an `ENV_<VARIABLE>` constant (EnvironmentNames.jet beside
+// this file) and the runtime's `env_name_<variable>` accessor (JetRuntime
+// EnvironmentNames.jet). tests/guards/environment_variables.jet fails on a
+// `JET_*` or `JETPACK_*` literal in the compiler with no row, and on a row
+// whose reader no longer names it. A compiler control's variable is a row of
+// JET_CLI_CONTROLS (CLIControls.jet), not of this table.
 
 // Who sets a variable: a user or automation, a maintainer or CI run, or a
 // Jet-owned process handing state to a child (no compatibility promise).
@@ -76,9 +78,9 @@ JET_ENVIRONMENT_VARIABLES: [JetEnvironmentVariable]{
     {name: "JET_BIN", section: JetEnvironmentSection.Internal, reader: "Compiler/test.jet", value: "", meaning: "The jet under test, handed to the Jetpack bootstrap and to suite children."},
     {name: "JET_BUILD_OUTPUT", section: JetEnvironmentSection.Internal, reader: "Compiler/JetCli/Source/Cli/RustForeign.jet", value: "", meaning: "The output directory inside the Rust foreign build sandbox."},
     {name: "JET_CI_EVIDENCE_DIR", section: JetEnvironmentSection.Internal, reader: "Compiler/JetCli/Source/Cli/TestProfile.jet", value: "", meaning: "Receives each corpus suite's case verdicts as `<suite>.json`."},
-    {name: "JET_CODEMOD_CRASH_*", section: JetEnvironmentSection.Internal, reader: "Compiler/JetCli/Source/Cli/SourceTransaction.jet", value: "", meaning: "Fault injection: a source transaction exits after writing its journal or after its renames."},
+    {name: "JET_CODEMOD_CRASH_AFTER_JOURNAL", section: JetEnvironmentSection.Internal, reader: "Compiler/JetCli/Source/Cli/SourceTransaction.jet", value: "", meaning: "Fault injection: with `1`, a source transaction exits after writing its journal."},
+    {name: "JET_CODEMOD_CRASH_AFTER_RENAME", section: JetEnvironmentSection.Internal, reader: "Compiler/JetCli/Source/Cli/SourceTransaction.jet", value: "", meaning: "Fault injection: a source transaction exits after the rename this number counts, from 1."},
     {name: "JET_COMPILER_EXTENSION", section: JetEnvironmentSection.Internal, reader: "Compiler/JetTestKit/Source/Exec.jet", value: "", meaning: "Kept out of every test-kit child."},
-    {name: "JET_CONFIG_VALUE", section: JetEnvironmentSection.Internal, reader: "Compiler/JetFoundation/Source/Encoding/CompilerService.jet", value: "", meaning: "A configuration value the compiler service hands a child."},
     {name: "JET_COV_OUT", section: JetEnvironmentSection.Internal, reader: "Compiler/JetCli/Source/Cli/TestCoverage.jet", value: "", meaning: "The file a covered test program writes its coverage counts to."},
     {name: "JET_DEVELOPMENT_RECEIPT_CLOSURE_DIGEST", section: JetEnvironmentSection.Internal, reader: "Compiler/JetRuntime/Source/ProductionReceipt.jet", value: "", meaning: "The digest of the locked closure a development build's production receipt records."},
     {name: "JET_DEVELOPMENT_RECEIPT_DIRECTORY", section: JetEnvironmentSection.Internal, reader: "Compiler/JetRuntime/Source/ProductionReceipt.jet", value: "", meaning: "The directory a development build's program writes its production receipt to."},
@@ -104,16 +106,30 @@ JET_ENVIRONMENT_VARIABLES: [JetEnvironmentVariable]{
     {name: "JET_ENC_HOSTILE_READ_PLAN", section: JetEnvironmentSection.Internal, reader: "Compiler/JetRuntime/Source/RouteAEncoding.jet", value: "", meaning: "Fault injection: the comma-separated sizes of the encoding route's reads."},
     {name: "JET_ENC_HOSTILE_WRITE_MAX", section: JetEnvironmentSection.Internal, reader: "Compiler/JetRuntime/Source/RouteAEncoding.jet", value: "", meaning: "Fault injection: the largest write the encoding route makes."},
     {name: "JET_ENC_HOSTILE_WRITE_PLAN", section: JetEnvironmentSection.Internal, reader: "Compiler/JetRuntime/Source/RouteAEncoding.jet", value: "", meaning: "Fault injection: the comma-separated sizes of the encoding route's writes; the last repeats."},
-    {name: "JET_EVIDENCE_*", section: JetEnvironmentSection.Internal, reader: "Compiler/JetFoundation/Source/Evidence/EvidenceIO.jet", value: "", meaning: "The report path, report id, toolchain, target, profile and revisions an evidence report records."},
+    {name: "JET_EVIDENCE_BUILD_REVISION", section: JetEnvironmentSection.Internal, reader: "Compiler/JetFoundation/Source/Evidence/EvidenceIO.jet", value: "", meaning: "The build revision an evidence report records: the digest of the build that produced it."},
+    {name: "JET_EVIDENCE_PROFILE", section: JetEnvironmentSection.Internal, reader: "Compiler/JetFoundation/Source/Evidence/EvidenceIO.jet", value: "", meaning: "The build profile an evidence report records."},
+    {name: "JET_EVIDENCE_REPORT", section: JetEnvironmentSection.Internal, reader: "Compiler/JetFoundation/Source/Evidence/EvidenceIO.jet", value: "", meaning: "The file a test child hands its evidence report to, for the parent run to persist."},
+    {name: "JET_EVIDENCE_REPORT_ID", section: JetEnvironmentSection.Internal, reader: "Compiler/JetFoundation/Source/Evidence/EvidenceIO.jet", value: "", meaning: "The report id a test producer stamps on its evidence records."},
+    {name: "JET_EVIDENCE_REVISION", section: JetEnvironmentSection.Internal, reader: "Compiler/JetFoundation/Source/Evidence/EvidenceIO.jet", value: "", meaning: "The run revision an evidence report records."},
+    {name: "JET_EVIDENCE_SOURCE_REVISION", section: JetEnvironmentSection.Internal, reader: "Compiler/JetFoundation/Source/Evidence/EvidenceIO.jet", value: "", meaning: "The source revision an evidence report records: the digest of the source it covers."},
+    {name: "JET_EVIDENCE_TARGET", section: JetEnvironmentSection.Internal, reader: "Compiler/JetFoundation/Source/Evidence/EvidenceIO.jet", value: "", meaning: "The target triple an evidence report records."},
+    {name: "JET_EVIDENCE_TOOLCHAIN", section: JetEnvironmentSection.Internal, reader: "Compiler/JetFoundation/Source/Evidence/EvidenceIO.jet", value: "", meaning: "The toolchain version an evidence report records."},
     {name: "JET_FACTS_ANSWER", section: JetEnvironmentSection.Internal, reader: "Compiler/JetCli/Source/Cli/InspectFacts.jet", value: "", meaning: "Where the facts program `jet inspect facts` runs writes its answer."},
     {name: "JET_FFI_TRACE_WORKSPACE", section: JetEnvironmentSection.Internal, reader: "Compiler/JetCli/Source/Cli/RustForeign.jet", value: "", meaning: "With `1`, keeps the Rust foreign workspace for inspection."},
-    {name: "JET_FRONT_*", section: JetEnvironmentSection.Internal, reader: "Compiler/JetCli/Source/Cli/Request.jet", value: "", meaning: "The runtime-library object, lifecycle, pack, image and web outputs the toolchain's runtime-pack step asks of a child jet."},
+    {name: "JET_FRONT_CORE_OBJECT_OUTPUT", section: JetEnvironmentSection.Internal, reader: "Compiler/JetCli/Source/Cli/Request.jet", value: "", meaning: "The path prefix a child `jet doc` writes the Core code library object the runtime image links beside the runtime to, for the toolchain's runtime-pack step."},
+    {name: "JET_FRONT_LIBRARY_LIFECYCLE", section: JetEnvironmentSection.Internal, reader: "Compiler/JetCli/Source/Cli/Request.jet", value: "", meaning: "The lifecycle the runtime library a child jet lowers for the toolchain's runtime-pack step is built with."},
+    {name: "JET_FRONT_LIBRARY_OBJECT_OUTPUT", section: JetEnvironmentSection.Internal, reader: "Compiler/JetCli/Source/Cli/Request.jet", value: "", meaning: "The path prefix a child `jet doc` writes the runtime library object and its receipts to, for the toolchain's runtime-pack step."},
+    {name: "JET_FRONT_RUNTIME_IMAGE_OUTPUT", section: JetEnvironmentSection.Internal, reader: "Compiler/JetCli/Source/Cli/Request.jet", value: "", meaning: "The file the runtime pack prelinked at the run base is written to."},
+    {name: "JET_FRONT_RUNTIME_PACK_OUTPUT", section: JetEnvironmentSection.Internal, reader: "Compiler/JetCli/Source/Cli/Request.jet", value: "", meaning: "The file the runtime library object, linked alone into the runtime pack, is written to."},
+    {name: "JET_FRONT_RUNTIME_WEB_OUTPUT", section: JetEnvironmentSection.Internal, reader: "Compiler/JetCli/Source/Cli/Request.jet", value: "", meaning: "The path prefix the runtime's web partition and its receipt are written to."},
     {name: "JET_HOME", section: JetEnvironmentSection.Internal, reader: "Compiler/JetTestKit/Source/Exec.jet", value: "", meaning: "Set by the test kit to each case's own `.jet` under its scratch directory."},
     {name: "JET_INLINE_DEPS_FIXTURES", section: JetEnvironmentSection.Internal, reader: "Jetpack/PackageModel/Source/Scripts/InlineDeps.jet", value: "", meaning: "Isolates the inline-dependency fixtures of repository tests from user state."},
     {name: "JET_INTERNAL_ROOT_DISPATCH_PID", section: JetEnvironmentSection.Internal, reader: "Compiler/JetCli/Source/Cli/InspectB.jet", value: "", meaning: "The PID of the root `jet` that dispatched an engine process."},
     {name: "JET_LOG", section: JetEnvironmentSection.Internal, reader: "Compiler/JetCli/Source/Cli/LogExplain.jet", value: "", meaning: "The log filter pairs below the command-line filter in `jet log`'s ladder."},
     {name: "JET_MACHINE_OUTPUT", section: JetEnvironmentSection.Internal, reader: "Compiler/JetRuntime/Source/ProgressState.jet", value: "", meaning: "With `1`, a program writes no progress display and keeps its terminal output machine-readable."},
-    {name: "JET_NATIVE_TEST_*", section: JetEnvironmentSection.Internal, reader: "Compiler/JetCli/Source/Cli/NativeTests.jet", value: "", meaning: "The test id, report path and records path `jet test` hands each native test child."},
+    {name: "JET_NATIVE_TEST_ID", section: JetEnvironmentSection.Internal, reader: "Compiler/JetCli/Source/Cli/NativeTests.jet", value: "", meaning: "The id of the one test a native test child runs."},
+    {name: "JET_NATIVE_TEST_RECORDS_PATH", section: JetEnvironmentSection.Internal, reader: "Compiler/JetCli/Source/Cli/NativeTests.jet", value: "", meaning: "The file a native test child appends each test's outcome record to."},
+    {name: "JET_NATIVE_TEST_REPORT_PATH", section: JetEnvironmentSection.Internal, reader: "Compiler/JetCli/Source/Cli/NativeTests.jet", value: "", meaning: "The outcome file a native test program reports, instead of running its tests."},
     {name: "JET_OBSERVE", section: JetEnvironmentSection.Internal, reader: "Compiler/JetCli/Source/Cli/Host.jet", value: "", meaning: "Marks a program that an observed run started."},
     {name: "JET_ORG_UNSAFE_POLICY", section: JetEnvironmentSection.Internal, reader: "Compiler/JetFoundation/Data/Syntax/CoreSurface.jet", value: "", meaning: "CI and admin input naming an organization's unsafe-policy file; a configured file that cannot be read fails closed."},
     {name: "JET_PROJECT_ROOT", section: JetEnvironmentSection.Internal, reader: "Compiler/JetCli/Source/Cli/Host.jet", value: "", meaning: "The project root `jet test` hands its test child."},
@@ -126,7 +142,9 @@ JET_ENVIRONMENT_VARIABLES: [JetEnvironmentVariable]{
     {name: "JET_RECEIPT_DIGEST", section: JetEnvironmentSection.Internal, reader: "Compiler/JetRuntime/Source/ReceiptSections.jet", value: "", meaning: "The digest of the receipt a program's receipt sections extend."},
     {name: "JET_RECEIPT_DIR", section: JetEnvironmentSection.Internal, reader: "Compiler/JetRuntime/Source/ReceiptSections.jet", value: "", meaning: "The directory a program's receipt sections are written to."},
     {name: "JET_RECEIPT_WITNESS", section: JetEnvironmentSection.Internal, reader: "Jetpack/TrustRoot/Source/CacheReceipts.jet", value: "", meaning: "The witness new cache receipts record; without it, `ci` under CI, else the local account."},
-    {name: "JET_RUST_MUSL_*", section: JetEnvironmentSection.Internal, reader: "Compiler/JetCli/Source/Cli/RustForeign.jet", value: "", meaning: "The musl Rust toolchain, linker and archiver of Rust foreign builds."},
+    {name: "JET_RUST_MUSL_AR", section: JetEnvironmentSection.Internal, reader: "Compiler/JetCli/Source/Cli/RustForeign.jet", value: "", meaning: "The archiver of Rust foreign builds against musl."},
+    {name: "JET_RUST_MUSL_LINKER", section: JetEnvironmentSection.Internal, reader: "Compiler/JetCli/Source/Cli/RustForeign.jet", value: "", meaning: "The linker of Rust foreign builds against musl."},
+    {name: "JET_RUST_MUSL_TOOLCHAIN", section: JetEnvironmentSection.Internal, reader: "Compiler/JetCli/Source/Cli/RustForeign.jet", value: "", meaning: "The musl Rust toolchain whose `bin/rustc` Rust foreign builds run."},
     {name: "JET_SCHEMA_CACHE_DIR", section: JetEnvironmentSection.Internal, reader: "Compiler/JetDriver/Source/Driver/Schema.jet", value: "", meaning: "Isolates the schema cache of repository tests from user state."},
     {name: "JET_SCRATCH_ROOT", section: JetEnvironmentSection.Internal, reader: "Compiler/JetTestKit/Source/Kit.jet", value: "", meaning: "The disk-backed root under which the test kit keeps its scratch and state."},
     {name: "JET_STORE_CAP_BYTES", section: JetEnvironmentSection.Internal, reader: "Compiler/JetCli/Source/Cli/Cache.jet", value: "", meaning: "The byte cap of the build store, reported by `jet cache status` as its source."},
@@ -140,7 +158,11 @@ JET_ENVIRONMENT_VARIABLES: [JetEnvironmentVariable]{
     {name: "JET_TEST_SCRATCH_DIR", section: JetEnvironmentSection.Internal, reader: "Compiler/JetRuntime/Source/VaultGet.jet", value: "", meaning: "The scratch directory of a test run."},
     {name: "JET_TEST_SETTINGS", section: JetEnvironmentSection.Internal, reader: "Compiler/JetFoundation/Source/Registry/TestSettings.jet", value: "", meaning: "The decided settings of a run, one `name<TAB>value<TAB>source` line each, handed to each child."},
     {name: "JET_TEST_STATE_DIR", section: JetEnvironmentSection.Internal, reader: "Compiler/JetTestKit/Source/Kit.jet", value: "", meaning: "Where the test kit keeps what outlives a run: suite measurements and the FFI cache."},
-    {name: "JET_TEST_SUITE*", section: JetEnvironmentSection.Internal, reader: "Compiler/JetCli/Source/Cli/TestProfile.jet", value: "", meaning: "The suite, its rows, package root, filter and memory budget `jet test` hands a code suite."},
+    {name: "JET_TEST_SUITE", section: JetEnvironmentSection.Internal, reader: "Compiler/JetCli/Source/Cli/TestProfile.jet", value: "", meaning: "The code suite a child `jet test` of a profile run runs."},
+    {name: "JET_TEST_SUITE_FILTER", section: JetEnvironmentSection.Internal, reader: "Compiler/JetCli/Source/Cli/TestProfile.jet", value: "", meaning: "The filter a code suite's rows are selected by."},
+    {name: "JET_TEST_SUITE_MEMORY", section: JetEnvironmentSection.Internal, reader: "Compiler/JetCli/Source/Cli/TestProfile.jet", value: "", meaning: "The profile's memory budget in bytes, which a code suite sizes its own runs from."},
+    {name: "JET_TEST_SUITE_ROOT", section: JetEnvironmentSection.Internal, reader: "Compiler/JetCli/Source/Cli/TestProfile.jet", value: "", meaning: "The package root a code suite belongs to."},
+    {name: "JET_TEST_SUITE_ROWS", section: JetEnvironmentSection.Internal, reader: "Compiler/JetCli/Source/Cli/TestProfile.jet", value: "", meaning: "The file a code suite's rows append `id<TAB>state<TAB>detail` lines to."},
     {name: "JET_TEST_TRACE_TIERS", section: JetEnvironmentSection.Internal, reader: "Compiler/JetCli/Source/Cli/Host.jet", value: "", meaning: "With `1`, a test program traces its tiers."},
     {name: "JET_TOOLCHAIN_EXEC", section: JetEnvironmentSection.Internal, reader: "Compiler/JetFoundation/Data/Syntax/Predicates.jet", value: "", meaning: "Marks a child that a pinned toolchain re-executed, so it runs natively instead of re-executing again."},
     {name: "JET_TOOLCHAIN_FIXTURE", section: JetEnvironmentSection.Internal, reader: "Compiler/JetFoundation/Data/Syntax/Predicates.jet", value: "", meaning: "Points toolchain realization at a Hangar object holding prebuilt ring artifacts."},

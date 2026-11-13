@@ -10,7 +10,7 @@
 // (#3721: a clean check prints one line).
 use {
     jet_driver.[JetDriverAuthorizedSourceSnapshot, JetDriverVerbOutput, JET_DRIVER_RUN_RECEIPT_MAX_BYTES, JetDriverRecordLink, JetDriverRunReceipt, JetDriverRunReceiptInput, JetDriverRunReceiptSection, jet_driver_run_receipt_decode, jet_driver_run_receipt_digest, jet_driver_run_receipt_encode, jet_driver_run_receipt_frame, jet_driver_run_receipt_is_digest]
-    jet_foundation.[BUILD_REUSE_SAVED_WORK]
+    jet_foundation.[BUILD_REUSE_SAVED_WORK, ENV_JET_RECEIPT_BYPASS]
     jet_pkg_model.[JET_VERSION, WorkspaceDeclarationCache]
     cli_files: core.files
     cli_sys: core.sys
@@ -264,7 +264,7 @@ jet_cli_check_receipt_current: fn(receipt: JetDriverRunReceipt, identity: [U8], 
 // receipt, or runs with the claim its outcome publishes. Store failures are
 // optional-history notices; the check then runs unrecorded.
 jet_cli_check_receipt_begin: fn(args: [String], plan: JetCLIPlan) -> JetCLICheckReceiptStep {
-    if !BUILD_REUSE_SAVED_WORK || cli_sys.get("JET_RECEIPT_BYPASS") != None {
+    if !BUILD_REUSE_SAVED_WORK || cli_sys.get(ENV_JET_RECEIPT_BYPASS) != None {
         return JetCLICheckReceiptStep.Run{recording: None}
     }
     file := ""

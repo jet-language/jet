@@ -8,7 +8,7 @@ use {
     cli_files: core.files
     cli_sys: core.sys
     jet_driver.[JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR]
-    jet_foundation.[LOG_FILTER_FIX, log_filter_bad_pair]
+    jet_foundation.[ENV_JET_LOG, LOG_FILTER_FIX, log_filter_bad_pair]
 }
 
 // One source of the filter: its rung, the text it sets, and where.
@@ -47,10 +47,10 @@ jet_cli_explain_log: fn(args: [String], color: Bool, json: Bool) -[FS, Env]> Jet
             }
         }
     }
-    environment: (cli_sys.get("JET_LOG") ?? "").trim()
+    environment: (cli_sys.get(ENV_JET_LOG) ?? "").trim()
     if environment != "" {
-        if log_filter_bad_pair(environment) == .Val(pair) -> return jet_cli_fail("E2104", "JET_LOG: `{pair}` is not a log filter pair", jet_cli_why("E2104"), LOG_FILTER_FIX, color, JET_DRIVER_EXIT_USER_ERROR)
-        ladder.push(JetCLILogSource{rung: "JET_LOG", filter: environment, site: "environment"})
+        if log_filter_bad_pair(environment) == .Val(pair) -> return jet_cli_fail("E2104", "{ENV_JET_LOG}: `{pair}` is not a log filter pair", jet_cli_why("E2104"), LOG_FILTER_FIX, color, JET_DRIVER_EXIT_USER_ERROR)
+        ladder.push(JetCLILogSource{rung: ENV_JET_LOG, filter: environment, site: "environment"})
     }
     // The start filter: every source a program reads before its first line.
     pairs := [JetCLILogPair]{}

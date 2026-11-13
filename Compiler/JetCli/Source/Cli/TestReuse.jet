@@ -18,12 +18,16 @@
 // staging) keeps there, so they key by content like any other file.
 use {
     jet_driver.[jet_driver_run_receipt_frame]
+    jet_foundation.[ENV_JET_NATIVE_TEST_ID, ENV_JET_NATIVE_TEST_RECORDS_PATH, ENV_JET_NATIVE_TEST_REPORT_PATH, ENV_JET_TEST_READS_PATH]
     test_reuse_files: core.files
     test_reuse_sys: core.sys
     test_reuse_crypto: core.crypto
 }
 
-JET_CLI_TEST_READS_ENV: "JET_TEST_READS_PATH"
+JET_CLI_TEST_READS_ENV: ENV_JET_TEST_READS_PATH
+// The variables jet sets in each native test's process, which no test's
+// reads depend on.
+JET_CLI_TEST_NATIVE_ENV: [String]{ENV_JET_NATIVE_TEST_ID, ENV_JET_NATIVE_TEST_RECORDS_PATH, ENV_JET_NATIVE_TEST_REPORT_PATH}
 JET_CLI_TEST_REUSE_HEADER: "JET_TEST_RESULTS 1"
 
 // Where one `jet test` run keeps its results: `store` the record file,
@@ -162,7 +166,7 @@ jet_cli_test_reuse_print: fn(kind: String, name: String) -> String? Never! {
         names.sort()
         pairs := [String]{}
         loop each in names {
-            if each == JET_CLI_TEST_READS_ENV || each.starts_with("JET_NATIVE_TEST_") -> next
+            if each == JET_CLI_TEST_READS_ENV || JET_CLI_TEST_NATIVE_ENV.contains(each) -> next
             pairs.push("{each}={test_reuse_sys.get(each) ?? ""}")
         }
         return Val(pairs.join("\n"))

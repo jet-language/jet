@@ -2,7 +2,7 @@
 // journal is durable before the first rename.
 use {
     cli_transaction_hex: core.encoding.hex
-    jet_foundation.[foundation_json_quote]
+    jet_foundation.[ENV_JET_CODEMOD_CRASH_AFTER_JOURNAL, ENV_JET_CODEMOD_CRASH_AFTER_RENAME, foundation_json_quote]
     jet_pkg_model.[WorkspaceDeclarationCache]
     cli_files: core.files
     cli_process: core.process
@@ -237,7 +237,7 @@ jet_cli_transaction_commit_locked: fn(project: JetCLIRootedDirectory, journal: J
         loop record in records -> record.discard(project)
         return Err(err)
     }
-    if cli_sys.get("JET_CODEMOD_CRASH_AFTER_JOURNAL") == .Val(trigger) && trigger == "1" -> cli_process.exit(87)
+    if cli_sys.get(ENV_JET_CODEMOD_CRASH_AFTER_JOURNAL) == .Val(trigger) && trigger == "1" -> cli_process.exit(87)
     loop (index, record) in records {
         if record.read(project) != record.change.before -> return Err(jet_cli_read_error("observed drift before rename; journal preserved: {record.change.path}"))
         record.publish(project, record.temp, record.destination_id, record.temp_id) ?? {
@@ -248,7 +248,7 @@ jet_cli_transaction_commit_locked: fn(project: JetCLIRootedDirectory, journal: J
         }
         updated: jet_cli_transaction_journal(tx, index + 1, records, log_path, log)
         journal.replace("transaction.journal", updated, Val(0o600))
-        if cli_sys.get("JET_CODEMOD_CRASH_AFTER_RENAME") == .Val(trigger) && trigger == "{index + 1}" -> cli_process.exit(86)
+        if cli_sys.get(ENV_JET_CODEMOD_CRASH_AFTER_RENAME) == .Val(trigger) && trigger == "{index + 1}" -> cli_process.exit(86)
     }
     _: journal.publish_immutable(log_name, log, Val(0o600), JET_CLI_TRANSACTION_MAX_BYTES)
     _: journal.remove("transaction.journal")

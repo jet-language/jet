@@ -8,7 +8,7 @@ use {
     cli_process: core.process
     cli_sys: core.sys
     jet_driver.[JetDriverAuthorizedSourceSnapshot, JetDriverCDependency, JetDriverForeignLinkFacts, JetDriverInlineC, jet_driver_c_dependencies]
-    jet_foundation.[BUILD_REUSE_SAVED_WORK, BuildOptions, Type, build_options_list, sha256_bytes, sha256_hex_bytes]
+    jet_foundation.[BUILD_REUSE_SAVED_WORK, BuildOptions, ENV_JET_CC_PACK_ROOT, Type, build_options_list, sha256_bytes, sha256_hex_bytes]
     jet_pkg_model.[JET_VERSION]
     jetpack_foundation.[foundation_find_folder, foundation_library_folders]
 }
@@ -126,7 +126,7 @@ JET_CLI_CLOSURE_C_PACK_TARGET: "x86_64-unknown-linux-musl"
 jet_cli_native_c_tools: fn() -[FS, Env, Exec, Time.Wait]> JetCLINativeCTools JetCLIForeignLinkError! {
     named: cli_sys.get("CC") != None || cli_sys.get("AR") != None
     if !named {
-        if cli_sys.get("JET_CC_PACK_ROOT") == .Val(root) && root != "" -> return Ok(jet_cli_native_c_pack_at(root))
+        if cli_sys.get(ENV_JET_CC_PACK_ROOT) == .Val(root) && root != "" -> return Ok(jet_cli_native_c_pack_at(root))
         if jet_cli_native_c_engine() == .Val(engine) {
             pack: jet_cli_native_c_pack_fetch(engine) ?? return Err(err)
             return Ok(jet_cli_native_c_pack_at(pack.root))

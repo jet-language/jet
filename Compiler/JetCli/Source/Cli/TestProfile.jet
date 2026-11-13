@@ -22,6 +22,13 @@ use {
     jet_testkit.[kit_exec_nothing_selected]
     jet_driver.[JetDriverVerbOutput, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USAGE, JET_DRIVER_EXIT_USER_ERROR]
     jet_foundation.[
+        ENV_JET_CI_EVIDENCE_DIR,
+        ENV_JET_TEST_PROFILE,
+        ENV_JET_TEST_SUITE,
+        ENV_JET_TEST_SUITE_FILTER,
+        ENV_JET_TEST_SUITE_MEMORY,
+        ENV_JET_TEST_SUITE_ROOT,
+        ENV_JET_TEST_SUITE_ROWS,
         EVIDENCE_REPORT_ENV,
         EvidenceExpectation,
         EvidenceKind,
@@ -48,7 +55,7 @@ use {
 // Set in each child of a profile run to the profile's name: a child never
 // plans a profile of its own. Every child also finds the jet under test in
 // JET (JET_CLI_TEST_SUITE_JET_ENV).
-JET_CLI_TEST_PROFILE_ENV: "JET_TEST_PROFILE"
+JET_CLI_TEST_PROFILE_ENV: ENV_JET_TEST_PROFILE
 // A row's state when its test passed, and when it failed.
 JET_CLI_TEST_ROW_PASSED: "passed"
 JET_CLI_TEST_ROW_FAILED: "failed"
@@ -57,15 +64,15 @@ JET_CLI_TEST_ROW_FAILED: "failed"
 // `__suite_run`). Under a `filter`, the filter its TestRows selects row ids
 // by. The suite's code finds the package root it belongs to in
 // JET_TEST_SUITE_ROOT, and the jet under test in JET.
-JET_CLI_TEST_SUITE_ENV: "JET_TEST_SUITE"
-JET_CLI_TEST_SUITE_ROWS_ENV: "JET_TEST_SUITE_ROWS"
-JET_CLI_TEST_SUITE_ROOT_ENV: "JET_TEST_SUITE_ROOT"
-JET_CLI_TEST_SUITE_FILTER_ENV: "JET_TEST_SUITE_FILTER"
+JET_CLI_TEST_SUITE_ENV: ENV_JET_TEST_SUITE
+JET_CLI_TEST_SUITE_ROWS_ENV: ENV_JET_TEST_SUITE_ROWS
+JET_CLI_TEST_SUITE_ROOT_ENV: ENV_JET_TEST_SUITE_ROOT
+JET_CLI_TEST_SUITE_FILTER_ENV: ENV_JET_TEST_SUITE_FILTER
 JET_CLI_TEST_SUITE_JET_ENV: "JET"
 // Set in a code suite's child to the profile's `memory` setting, in bytes, when
 // one is set: the budget the suite sizes its own runs from (Compiler/test.jet
 // package_jobs), as the corpus pool sizes its entries.
-JET_CLI_TEST_SUITE_MEMORY_ENV: "JET_TEST_SUITE_MEMORY"
+JET_CLI_TEST_SUITE_MEMORY_ENV: ENV_JET_TEST_SUITE_MEMORY
 
 // One child `jet test` of a profile run.
 JetCLITestProfileRun: struct {
@@ -305,7 +312,7 @@ jet_cli_test_profile_corpus: fn(profile: String, root: String, settings: [TestSe
     refusal: kit_expect_bless_error(options.bless, options.sharded)
     if refusal != "" -> return JetDriverVerbOutput{stdout: "", stderr: "{site}: {refusal}\n", exit_code: JET_DRIVER_EXIT_USAGE}
     // JET_CI_EVIDENCE_DIR receives each suite's case verdicts as <suite>.json.
-    reports: if cli_sys.get("JET_CI_EVIDENCE_DIR") == .Val(evidence) -> Val(jet_cli_test_corpus_reports(evidence, selected)) else -> None
+    reports: if cli_sys.get(ENV_JET_CI_EVIDENCE_DIR) == .Val(evidence) -> Val(jet_cli_test_corpus_reports(evidence, selected)) else -> None
     execution: kit_execute_suites(options, ancestor, selected, reports)
     loop result in execution.results -> results.push(result.copy()) // copy: the execution keeps its rows.
     JetDriverVerbOutput{stdout: "", stderr: "", exit_code: execution.code}

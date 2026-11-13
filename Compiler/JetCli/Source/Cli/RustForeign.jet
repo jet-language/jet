@@ -10,7 +10,21 @@ use {
     core.encoding.json.[pointer]
     core.encoding.[Dyn]
     jet_driver.[JetDriverForeignLinkFacts, JetDriverRustForeignFacts, JetDriverRustForeignPlan, JetDriverRustForeignError, jet_driver_foreign_link_cache_identity, jet_driver_rust_foreign_plan, JET_DRIVER_RUST_FOREIGN_DESCRIPTOR, JET_DRIVER_RUST_FOREIGN_ARTIFACT_MODE, JET_DRIVER_RUST_FOREIGN_TARGET]
-    jet_foundation.[stable_id, sha256_bytes, sha256_hex_bytes, Diagnostic, diagnostic_from_registry, diagnostic_render_all]
+    jet_foundation.[
+        ENV_JETPACK_FAKE_SANDBOX,
+        ENV_JET_BUILD_OUTPUT,
+        ENV_JET_FFI_CACHE_DIR,
+        ENV_JET_FFI_TRACE_WORKSPACE,
+        ENV_JET_RUST_MUSL_AR,
+        ENV_JET_RUST_MUSL_LINKER,
+        ENV_JET_RUST_MUSL_TOOLCHAIN,
+        stable_id,
+        sha256_bytes,
+        sha256_hex_bytes,
+        Diagnostic,
+        diagnostic_from_registry,
+        diagnostic_render_all,
+    ]
     jetpack_foundation.[NATIVE_SANDBOX_FIX, foundation_linux_bwrap]
 }
 
@@ -89,11 +103,11 @@ jet_cli_rust_foreign_publish: fn(directory: cli_files.Directory, name: String, b
 jet_cli_rust_foreign_home: fn() -[Env]> String Never! { cli_sys.get("HOME") ?? (cli_sys.get("USERPROFILE") ?? "/tmp") }
 jet_cli_rust_foreign_cache: fn() -[Env]> String Never! {
     // Even the empty override is used verbatim, as cache_dir.
-    cli_sys.get("JET_FFI_CACHE_DIR") ?? "{jet_cli_rust_foreign_home()}/.cache/jet/ffi"
+    cli_sys.get(ENV_JET_FFI_CACHE_DIR) ?? "{jet_cli_rust_foreign_home()}/.cache/jet/ffi"
 }
 
 jet_cli_rust_foreign_rustc: fn() -[Env]> String Never! {
-    if cli_sys.get("JET_RUST_MUSL_TOOLCHAIN") == .Val(root) -> return "{root}/bin/rustc"
+    if cli_sys.get(ENV_JET_RUST_MUSL_TOOLCHAIN) == .Val(root) -> return "{root}/bin/rustc"
     cli_sys.get("RUSTC") ?? "rustc"
 }
 
@@ -121,7 +135,7 @@ jet_cli_rust_foreign_has_std: fn(root: String) -[FS]> Bool Never! {
 // The helper never switches the application's default GNU toolchain. A
 // fallback compiler is admitted only with an installed musl standard library.
 jet_cli_rust_foreign_require_std: fn() JetDriverRustForeignError! -[FS, Env]> {
-    root: cli_sys.get("JET_RUST_MUSL_TOOLCHAIN") ?? {
+    root: cli_sys.get(ENV_JET_RUST_MUSL_TOOLCHAIN) ?? {
         // A different installed rustup toolchain does not supply the selected
         // compiler's sysroot. Resolve this exact executable, without probing
         // rustc beyond the allowlisted -vV identity query.
@@ -146,7 +160,7 @@ jet_cli_rust_foreign_link_identity: fn(facts: JetDriverForeignLinkFacts) -[FS, E
     loop name in facts.direct_links -> rows.push("direct:{name.len()}:{name}")
     loop name in facts.transitive_links -> rows.push("transitive:{name.len()}:{name}")
     // Target-scoped native tool bytes participate in both planner keys.
-    loop variable in ([String]{"JET_RUST_MUSL_LINKER", "JET_RUST_MUSL_AR"}) {
+    loop variable in ([String]{ENV_JET_RUST_MUSL_LINKER, ENV_JET_RUST_MUSL_AR}) {
         if cli_sys.get(variable) == .Val(path) {
             resolved: cli_files.canonicalize(path) ?? return Err(jet_cli_rust_foreign_io("couldn't resolve native helper tool `{path}`: {err}"))
             parent: cli_files.open_directory(cli_files.dirname(resolved)) ?? return Err(jet_cli_rust_foreign_io("couldn't hold native helper tool `{path}`: {err}"))
@@ -286,7 +300,7 @@ jet_cli_rust_foreign_bwrap: fn(bwrap: String, source: String, output: String, re
     if source == "" {
         loop argument in ([String]{"--dir", "/work", "--chdir", "/work"}) -> args.push(argument)
     } else {
-        loop argument in ([String]{"--dir", "/work", "--ro-bind", source, "/work/source", "--bind", output, "/work/output", "--chdir", "/work/source", "--setenv", "JET_BUILD_OUTPUT", "/work/output", "--setenv", "CARGO_HOME", "/work/output/cargo-home", "--setenv", "CARGO_TARGET_DIR", "/work/output", "--setenv", "HOME", "/work/output/home", "--setenv", "SOURCE_DATE_EPOCH", "0"}) -> args.push(argument)
+        loop argument in ([String]{"--dir", "/work", "--ro-bind", source, "/work/source", "--bind", output, "/work/output", "--chdir", "/work/source", "--setenv", ENV_JET_BUILD_OUTPUT, "/work/output", "--setenv", "CARGO_HOME", "/work/output/cargo-home", "--setenv", "CARGO_TARGET_DIR", "/work/output", "--setenv", "HOME", "/work/output/home", "--setenv", "SOURCE_DATE_EPOCH", "0"}) -> args.push(argument)
         if registry != "" {
             loop argument in ([String]{"--dir", "/work/output/cargo-home", "--dir", "/work/output/cargo-home/registry"}) -> args.push(argument)
             jet_cli_rust_foreign_overlay(args, registry, "/work/output/cargo-home/registry")
@@ -296,15 +310,15 @@ jet_cli_rust_foreign_bwrap: fn(bwrap: String, source: String, output: String, re
         }
         rustc: jet_cli_rust_foreign_rustc()
         loop argument in ([String]{"--setenv", "RUSTC", rustc}) -> args.push(argument)
-        if cli_sys.get("JET_RUST_MUSL_LINKER") == .Val(linker) {
+        if cli_sys.get(ENV_JET_RUST_MUSL_LINKER) == .Val(linker) {
             loop name in ([String]{"CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER", "CC_x86_64_unknown_linux_musl"}) {
                 loop argument in ([String]{"--setenv", name, linker}) -> args.push(argument)
             }
         }
-        if cli_sys.get("JET_RUST_MUSL_AR") == .Val(archiver) {
+        if cli_sys.get(ENV_JET_RUST_MUSL_AR) == .Val(archiver) {
             loop argument in ([String]{"--setenv", "AR_x86_64_unknown_linux_musl", archiver}) -> args.push(argument)
         }
-        if cli_sys.get("JET_RUST_MUSL_TOOLCHAIN") == .Val(toolchain) {
+        if cli_sys.get(ENV_JET_RUST_MUSL_TOOLCHAIN) == .Val(toolchain) {
             if !toolchain.starts_with("/nix/store/") && !toolchain.starts_with("/usr/") {
                 resolved: cli_files.canonicalize(toolchain) ?? return Err(jet_cli_rust_foreign_sandbox_error("couldn't resolve native helper toolchain: {err}"))
                 jet_cli_rust_foreign_mount(args, resolved, toolchain)
@@ -332,7 +346,7 @@ jet_cli_rust_foreign_sandbox: fn(registry: String) -[FS, Env, Exec, Time.Wait]> 
     // sandbox is the Linux bubblewrap backend. `sys.name()` is the OS
     // ("linux"); `sys.family()` is the family ("unix"), which never matches.
     if cli_sys.name() != "linux" -> return Err(jet_cli_rust_foreign_sandbox_error("the native user-Rust helper requires the Linux bubblewrap backend"))
-    if cli_sys.get("JETPACK_FAKE_SANDBOX") != None -> return Err(jet_cli_rust_foreign_sandbox_error("test sandbox override prevents the native Linux backend probe"))
+    if cli_sys.get(ENV_JETPACK_FAKE_SANDBOX) != None -> return Err(jet_cli_rust_foreign_sandbox_error("test sandbox override prevents the native Linux backend probe"))
     // The one Bubblewrap every sandboxed action resolves (PATH, else Jet's
     // pinned copy in the Hangar), probed there; the probe below adds the
     // registry overlay this helper needs.
@@ -522,7 +536,7 @@ JetCLIRustForeignWorkspace: struct {
     }
 }
 jet_cli_rust_foreign_workspace: fn(source: String) -[FS, Env]> JetCLIRustForeignWorkspace JetDriverRustForeignError! {
-    retain: cli_sys.get("JET_FFI_TRACE_WORKSPACE") == Val("1")
+    retain: cli_sys.get(ENV_JET_FFI_TRACE_WORKSPACE) == Val("1")
     folder: if retain -> ".trace-workspaces" else -> ".workspaces"
     owner: cli_files.open_directory(source) ?? return Err(jet_cli_rust_foreign_io("couldn't hold FFI key folder: {err}"))
     if !cli_files.exists("{source}/{folder}") {

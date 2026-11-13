@@ -2,7 +2,7 @@
 // closure. Terminal bits are host facts, not color.
 use {
     jet_driver.[JET_DRIVER_RUN_RECEIPT_MAGIC, JetDriverRunReceiptClaim, JetDriverRunReceiptInput, jet_driver_run_receipt_frame, jet_driver_run_receipt_section_marker]
-    jet_foundation.[foundation_json_quote]
+    jet_foundation.[ENV_JET_RECEIPT_BYPASS, foundation_json_quote]
     jet_pkg_model.[AuthorityResolver, WorkspaceDeclarationCache]
     cli_sys: core.sys
     cli_files: core.files
@@ -79,7 +79,7 @@ jet_cli_receipt_environment_identity: fn(names: [String]) -[Env]> [U8] Never! {
     sorted.sort()
     out := [U8]{}
     loop name in sorted {
-        if ([String]{"INVOCATION_ID", "JET_RECEIPT_BYPASS", "NIX_BUILD_TOP", "TEMP", "TEMPDIR", "TMP", "TMPDIR"}).contains(name) -> next
+        if ([String]{"INVOCATION_ID", ENV_JET_RECEIPT_BYPASS, "NIX_BUILD_TOP", "TEMP", "TEMPDIR", "TMP", "TMPDIR"}).contains(name) -> next
         value: cli_sys.get(name) ?? next
         jet_driver_run_receipt_frame(out, name.bytes())
         jet_driver_run_receipt_frame(out, (if jet_cli_receipt_secret_environment(name) -> "<redacted>" else -> value).bytes())

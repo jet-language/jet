@@ -7,7 +7,12 @@ processes. Command-line flags remain the normal user interface. Every variable
 has one row in
 [`EnvironmentVariables.jet`](../../../Compiler/JetFoundation/Source/Registry/EnvironmentVariables.jet)
 (`JET_ENVIRONMENT_VARIABLES`), and the User, Maintainer and Internal tables
-below are generated from it by `jet Tools/agent/EnvironmentRows.jet --write`;
+below are generated from it by `jet Tools/agent/EnvironmentRows.jet --write`.
+The same command writes the names the readers spell a variable by: one
+`ENV_<VARIABLE>` constant per row for the compiler
+([`EnvironmentNames.jet`](../../../Compiler/JetFoundation/Source/Registry/EnvironmentNames.jet))
+and one `env_name_<variable>()` accessor per row for the runtime
+([`EnvironmentNames.jet`](../../../Compiler/JetRuntime/Source/EnvironmentNames.jet)).
 [`tests/guards/environment_variables.jet`](../../../tests/guards/environment_variables.jet)
 fails on a `JET_*` variable the compiler names with no row. The effect surface is
 [`EffectsSurface.jet`](../../../Compiler/JetFoundation/Data/Syntax/EffectsSurface.jet),
@@ -144,9 +149,9 @@ the text before it.
 | `JET_BIN` | `Compiler/test.jet` | The jet under test, handed to the Jetpack bootstrap and to suite children. |
 | `JET_BUILD_OUTPUT` | `Compiler/JetCli/Source/Cli/RustForeign.jet` | The output directory inside the Rust foreign build sandbox. |
 | `JET_CI_EVIDENCE_DIR` | `Compiler/JetCli/Source/Cli/TestProfile.jet` | Receives each corpus suite's case verdicts as `<suite>.json`. |
-| `JET_CODEMOD_CRASH_*` | `Compiler/JetCli/Source/Cli/SourceTransaction.jet` | Fault injection: a source transaction exits after writing its journal or after its renames. |
+| `JET_CODEMOD_CRASH_AFTER_JOURNAL` | `Compiler/JetCli/Source/Cli/SourceTransaction.jet` | Fault injection: with `1`, a source transaction exits after writing its journal. |
+| `JET_CODEMOD_CRASH_AFTER_RENAME` | `Compiler/JetCli/Source/Cli/SourceTransaction.jet` | Fault injection: a source transaction exits after the rename this number counts, from 1. |
 | `JET_COMPILER_EXTENSION` | `Compiler/JetTestKit/Source/Exec.jet` | Kept out of every test-kit child. |
-| `JET_CONFIG_VALUE` | `Compiler/JetFoundation/Source/Encoding/CompilerService.jet` | A configuration value the compiler service hands a child. |
 | `JET_COV_OUT` | `Compiler/JetCli/Source/Cli/TestCoverage.jet` | The file a covered test program writes its coverage counts to. |
 | `JET_DEVELOPMENT_RECEIPT_CLOSURE_DIGEST` | `Compiler/JetRuntime/Source/ProductionReceipt.jet` | The digest of the locked closure a development build's production receipt records. |
 | `JET_DEVELOPMENT_RECEIPT_DIRECTORY` | `Compiler/JetRuntime/Source/ProductionReceipt.jet` | The directory a development build's program writes its production receipt to. |
@@ -172,16 +177,30 @@ the text before it.
 | `JET_ENC_HOSTILE_READ_PLAN` | `Compiler/JetRuntime/Source/RouteAEncoding.jet` | Fault injection: the comma-separated sizes of the encoding route's reads. |
 | `JET_ENC_HOSTILE_WRITE_MAX` | `Compiler/JetRuntime/Source/RouteAEncoding.jet` | Fault injection: the largest write the encoding route makes. |
 | `JET_ENC_HOSTILE_WRITE_PLAN` | `Compiler/JetRuntime/Source/RouteAEncoding.jet` | Fault injection: the comma-separated sizes of the encoding route's writes; the last repeats. |
-| `JET_EVIDENCE_*` | `Compiler/JetFoundation/Source/Evidence/EvidenceIO.jet` | The report path, report id, toolchain, target, profile and revisions an evidence report records. |
+| `JET_EVIDENCE_BUILD_REVISION` | `Compiler/JetFoundation/Source/Evidence/EvidenceIO.jet` | The build revision an evidence report records: the digest of the build that produced it. |
+| `JET_EVIDENCE_PROFILE` | `Compiler/JetFoundation/Source/Evidence/EvidenceIO.jet` | The build profile an evidence report records. |
+| `JET_EVIDENCE_REPORT` | `Compiler/JetFoundation/Source/Evidence/EvidenceIO.jet` | The file a test child hands its evidence report to, for the parent run to persist. |
+| `JET_EVIDENCE_REPORT_ID` | `Compiler/JetFoundation/Source/Evidence/EvidenceIO.jet` | The report id a test producer stamps on its evidence records. |
+| `JET_EVIDENCE_REVISION` | `Compiler/JetFoundation/Source/Evidence/EvidenceIO.jet` | The run revision an evidence report records. |
+| `JET_EVIDENCE_SOURCE_REVISION` | `Compiler/JetFoundation/Source/Evidence/EvidenceIO.jet` | The source revision an evidence report records: the digest of the source it covers. |
+| `JET_EVIDENCE_TARGET` | `Compiler/JetFoundation/Source/Evidence/EvidenceIO.jet` | The target triple an evidence report records. |
+| `JET_EVIDENCE_TOOLCHAIN` | `Compiler/JetFoundation/Source/Evidence/EvidenceIO.jet` | The toolchain version an evidence report records. |
 | `JET_FACTS_ANSWER` | `Compiler/JetCli/Source/Cli/InspectFacts.jet` | Where the facts program `jet inspect facts` runs writes its answer. |
 | `JET_FFI_TRACE_WORKSPACE` | `Compiler/JetCli/Source/Cli/RustForeign.jet` | With `1`, keeps the Rust foreign workspace for inspection. |
-| `JET_FRONT_*` | `Compiler/JetCli/Source/Cli/Request.jet` | The runtime-library object, lifecycle, pack, image and web outputs the toolchain's runtime-pack step asks of a child jet. |
+| `JET_FRONT_CORE_OBJECT_OUTPUT` | `Compiler/JetCli/Source/Cli/Request.jet` | The path prefix a child `jet doc` writes the Core code library object the runtime image links beside the runtime to, for the toolchain's runtime-pack step. |
+| `JET_FRONT_LIBRARY_LIFECYCLE` | `Compiler/JetCli/Source/Cli/Request.jet` | The lifecycle the runtime library a child jet lowers for the toolchain's runtime-pack step is built with. |
+| `JET_FRONT_LIBRARY_OBJECT_OUTPUT` | `Compiler/JetCli/Source/Cli/Request.jet` | The path prefix a child `jet doc` writes the runtime library object and its receipts to, for the toolchain's runtime-pack step. |
+| `JET_FRONT_RUNTIME_IMAGE_OUTPUT` | `Compiler/JetCli/Source/Cli/Request.jet` | The file the runtime pack prelinked at the run base is written to. |
+| `JET_FRONT_RUNTIME_PACK_OUTPUT` | `Compiler/JetCli/Source/Cli/Request.jet` | The file the runtime library object, linked alone into the runtime pack, is written to. |
+| `JET_FRONT_RUNTIME_WEB_OUTPUT` | `Compiler/JetCli/Source/Cli/Request.jet` | The path prefix the runtime's web partition and its receipt are written to. |
 | `JET_HOME` | `Compiler/JetTestKit/Source/Exec.jet` | Set by the test kit to each case's own `.jet` under its scratch directory. |
 | `JET_INLINE_DEPS_FIXTURES` | `Jetpack/PackageModel/Source/Scripts/InlineDeps.jet` | Isolates the inline-dependency fixtures of repository tests from user state. |
 | `JET_INTERNAL_ROOT_DISPATCH_PID` | `Compiler/JetCli/Source/Cli/InspectB.jet` | The PID of the root `jet` that dispatched an engine process. |
 | `JET_LOG` | `Compiler/JetCli/Source/Cli/LogExplain.jet` | The log filter pairs below the command-line filter in `jet log`'s ladder. |
 | `JET_MACHINE_OUTPUT` | `Compiler/JetRuntime/Source/ProgressState.jet` | With `1`, a program writes no progress display and keeps its terminal output machine-readable. |
-| `JET_NATIVE_TEST_*` | `Compiler/JetCli/Source/Cli/NativeTests.jet` | The test id, report path and records path `jet test` hands each native test child. |
+| `JET_NATIVE_TEST_ID` | `Compiler/JetCli/Source/Cli/NativeTests.jet` | The id of the one test a native test child runs. |
+| `JET_NATIVE_TEST_RECORDS_PATH` | `Compiler/JetCli/Source/Cli/NativeTests.jet` | The file a native test child appends each test's outcome record to. |
+| `JET_NATIVE_TEST_REPORT_PATH` | `Compiler/JetCli/Source/Cli/NativeTests.jet` | The outcome file a native test program reports, instead of running its tests. |
 | `JET_OBSERVE` | `Compiler/JetCli/Source/Cli/Host.jet` | Marks a program that an observed run started. |
 | `JET_ORG_UNSAFE_POLICY` | `Compiler/JetFoundation/Data/Syntax/CoreSurface.jet` | CI and admin input naming an organization's unsafe-policy file; a configured file that cannot be read fails closed. |
 | `JET_PROJECT_ROOT` | `Compiler/JetCli/Source/Cli/Host.jet` | The project root `jet test` hands its test child. |
@@ -194,7 +213,9 @@ the text before it.
 | `JET_RECEIPT_DIGEST` | `Compiler/JetRuntime/Source/ReceiptSections.jet` | The digest of the receipt a program's receipt sections extend. |
 | `JET_RECEIPT_DIR` | `Compiler/JetRuntime/Source/ReceiptSections.jet` | The directory a program's receipt sections are written to. |
 | `JET_RECEIPT_WITNESS` | `Jetpack/TrustRoot/Source/CacheReceipts.jet` | The witness new cache receipts record; without it, `ci` under CI, else the local account. |
-| `JET_RUST_MUSL_*` | `Compiler/JetCli/Source/Cli/RustForeign.jet` | The musl Rust toolchain, linker and archiver of Rust foreign builds. |
+| `JET_RUST_MUSL_AR` | `Compiler/JetCli/Source/Cli/RustForeign.jet` | The archiver of Rust foreign builds against musl. |
+| `JET_RUST_MUSL_LINKER` | `Compiler/JetCli/Source/Cli/RustForeign.jet` | The linker of Rust foreign builds against musl. |
+| `JET_RUST_MUSL_TOOLCHAIN` | `Compiler/JetCli/Source/Cli/RustForeign.jet` | The musl Rust toolchain whose `bin/rustc` Rust foreign builds run. |
 | `JET_SCHEMA_CACHE_DIR` | `Compiler/JetDriver/Source/Driver/Schema.jet` | Isolates the schema cache of repository tests from user state. |
 | `JET_SCRATCH_ROOT` | `Compiler/JetTestKit/Source/Kit.jet` | The disk-backed root under which the test kit keeps its scratch and state. |
 | `JET_STORE_CAP_BYTES` | `Compiler/JetCli/Source/Cli/Cache.jet` | The byte cap of the build store, reported by `jet cache status` as its source. |
@@ -208,7 +229,11 @@ the text before it.
 | `JET_TEST_SCRATCH_DIR` | `Compiler/JetRuntime/Source/VaultGet.jet` | The scratch directory of a test run. |
 | `JET_TEST_SETTINGS` | `Compiler/JetFoundation/Source/Registry/TestSettings.jet` | The decided settings of a run, one `name<TAB>value<TAB>source` line each, handed to each child. |
 | `JET_TEST_STATE_DIR` | `Compiler/JetTestKit/Source/Kit.jet` | Where the test kit keeps what outlives a run: suite measurements and the FFI cache. |
-| `JET_TEST_SUITE*` | `Compiler/JetCli/Source/Cli/TestProfile.jet` | The suite, its rows, package root, filter and memory budget `jet test` hands a code suite. |
+| `JET_TEST_SUITE` | `Compiler/JetCli/Source/Cli/TestProfile.jet` | The code suite a child `jet test` of a profile run runs. |
+| `JET_TEST_SUITE_FILTER` | `Compiler/JetCli/Source/Cli/TestProfile.jet` | The filter a code suite's rows are selected by. |
+| `JET_TEST_SUITE_MEMORY` | `Compiler/JetCli/Source/Cli/TestProfile.jet` | The profile's memory budget in bytes, which a code suite sizes its own runs from. |
+| `JET_TEST_SUITE_ROOT` | `Compiler/JetCli/Source/Cli/TestProfile.jet` | The package root a code suite belongs to. |
+| `JET_TEST_SUITE_ROWS` | `Compiler/JetCli/Source/Cli/TestProfile.jet` | The file a code suite's rows append `id<TAB>state<TAB>detail` lines to. |
 | `JET_TEST_TRACE_TIERS` | `Compiler/JetCli/Source/Cli/Host.jet` | With `1`, a test program traces its tiers. |
 | `JET_TOOLCHAIN_EXEC` | `Compiler/JetFoundation/Data/Syntax/Predicates.jet` | Marks a child that a pinned toolchain re-executed, so it runs natively instead of re-executing again. |
 | `JET_TOOLCHAIN_FIXTURE` | `Compiler/JetFoundation/Data/Syntax/Predicates.jet` | Points toolchain realization at a Hangar object holding prebuilt ring artifacts. |

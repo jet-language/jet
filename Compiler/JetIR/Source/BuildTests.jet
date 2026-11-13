@@ -33,7 +33,7 @@
 //   happen (JetRuntime TestContracts.jet).
 
 use {
-    jet_foundation.[BodyScopeMemberKind, DeclTable, Span, TConstantDef, FnBody, TEST_SETTINGS_PLAN_ENV, TImplDef, TPanicLoc, TPanicLocal, TTypeDef, Type, measure_literal_value, name_rows_set]
+    jet_foundation.[BodyScopeMemberKind, DeclTable, ENV_JET_NATIVE_TEST_ID, ENV_JET_NATIVE_TEST_RECORDS_PATH, ENV_JET_NATIVE_TEST_REPORT_PATH, Span, TConstantDef, FnBody, TEST_SETTINGS_PLAN_ENV, TImplDef, TPanicLoc, TPanicLocal, TTypeDef, Type, measure_literal_value, name_rows_set]
     jet_sema.[SemaCheckedForeignFunction]
 }
 
@@ -625,7 +625,7 @@ ir_test_main: fn(m: &IRModule, p: IRProgram, harness: IRTestHarness, bodies: [In
     ir_sentry_release_link(m, p, b)
     ir_checked_alloc_link(m, p, b)
     bool_row: ir_type_row(m, Type.Bool) ?? 0
-    report_path: ir_test_env(m, b, "JET_NATIVE_TEST_REPORT_PATH")
+    report_path: ir_test_env(m, b, ENV_JET_NATIVE_TEST_REPORT_PATH)
     reporting: ir_test_present(m, b, report_path)
     ir_open_if(b.f, reporting, b.line)
     ir_test_report(m, b, report_path)
@@ -640,7 +640,7 @@ ir_test_main: fn(m: &IRModule, p: IRProgram, harness: IRTestHarness, bodies: [In
         ir_test_exit(m, b, 0)
         ir_end(b.f, b.line)
     }
-    records_path: ir_test_env(m, b, "JET_NATIVE_TEST_RECORDS_PATH")
+    records_path: ir_test_env(m, b, ENV_JET_NATIVE_TEST_RECORDS_PATH)
     present: ir_test_present(m, b, records_path)
     missing: ir_temp(m, b, bool_row)
     ir_emit(b.f, IROp.Not, missing, present, -1, -1, b.line)
@@ -650,7 +650,7 @@ ir_test_main: fn(m: &IRModule, p: IRProgram, harness: IRTestHarness, bodies: [In
     // The checked contract clauses append their first hold and first failure
     // to the same records file (BuildContracts.jet ir_contract).
     _: ir_runtime(m, b, "jet_rt_test_contracts_open", [Int]{records_path}, -1)
-    selected: ir_test_env(m, b, "JET_NATIVE_TEST_ID")
+    selected: ir_test_env(m, b, ENV_JET_NATIVE_TEST_ID)
     filtered: ir_test_present(m, b, selected)
     tasks: ir_temp(m, b, pointer_row)
     ir_emit(b.f, IROp.StackAddress, tasks, 8 * (harness.tests.len() + 1), 8, -1, b.line)

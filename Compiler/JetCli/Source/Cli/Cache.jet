@@ -12,6 +12,7 @@ use {
     cache_math: core.math
     jet_foundation.[
         Diagnostic,
+        ENV_JET_STORE_CAP_BYTES,
         diagnostic_from_registry,
     ]
     jetpack_artifact_store.[
@@ -136,7 +137,7 @@ jet_cli_cache_status: fn(store: ArtifactStore, status: ArtifactStoreStatus, json
         })
         return JetDriverVerbOutput{stdout: "{jet_cli_status_render("cache.status", true, [JetCLIStatusField]{jet_cli_status_field("cache", cache)})}\n", stderr: "", exit_code: 0}
     }
-    source: if status.host_limit_bytes != None -> "host policy" else if store.config().cap_bytes() != None -> "JET_STORE_CAP_BYTES" else -> "adaptive rule"
+    source: if status.host_limit_bytes != None -> "host policy" else if store.config().cap_bytes() != None -> ENV_JET_STORE_CAP_BYTES else -> "adaptive rule"
     out: "store      {status.root}\nlimit      {jet_cli_cache_format_size(status.limit_bytes)} ({source})\nreserve    keep {jet_cli_cache_format_size(status.reserve_bytes)} free on that filesystem\nused       {jet_cli_cache_format_size(status.footprint_bytes)} · {blobs} blobs · {records} records · {lto} ThinLTO caches\nleases     {status.live_leases} live\ntiers      {status.tiers.join(" · ")}\n"
     JetDriverVerbOutput{stdout: out, stderr: "", exit_code: 0}
 }

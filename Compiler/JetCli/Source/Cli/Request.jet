@@ -23,6 +23,15 @@ use {
         CoreSourceOwnedRow,
         core_decl_fail,
         core_decl_parts,
+        ENV_JET_COMPILER_IDENTITY,
+        ENV_JET_FRONT_CORE_OBJECT_OUTPUT,
+        ENV_JET_FRONT_LIBRARY_LIFECYCLE,
+        ENV_JET_FRONT_LIBRARY_OBJECT_OUTPUT,
+        ENV_JET_FRONT_RUNTIME_IMAGE_OUTPUT,
+        ENV_JET_FRONT_RUNTIME_PACK_OUTPUT,
+        ENV_JET_FRONT_RUNTIME_WEB_OUTPUT,
+        ENV_JET_RECHECK_VERIFY,
+        ENV_JET_TOOLCHAIN_ROOT,
         compiler_take_rows,
         compiler_transfer_rows,
         foundation_json_quote,
@@ -195,7 +204,7 @@ jet_cli_runtime_library: fn(front: &&JetDriverLoweringInputsResult, prefix: Stri
         // JET_FRONT_RUNTIME_WEB_OUTPUT: the runtime partition of a web build
         // (JetWeb Build.jet), selected from the same lowered module, as
         // `{prefix}.wasm` with its receipt `{prefix}.wasm.tsv`.
-        if cli_sys.get("JET_FRONT_RUNTIME_WEB_OUTPUT") == .Val(web_prefix) {
+        if cli_sys.get(ENV_JET_FRONT_RUNTIME_WEB_OUTPUT) == .Val(web_prefix) {
             web := web_runtime_partition(compiled.program, library.exports, library.data)
             if web.errors.len() > 0 {
                 cli_files.write("{prefix}.issues", web.errors.join("\n")) ?? return jet_driver_compile_escaped_failure("cannot write runtime library findings: {err}")
@@ -219,7 +228,7 @@ jet_cli_runtime_library: fn(front: &&JetDriverLoweringInputsResult, prefix: Stri
             // runtime; Core starts threads through the runtime, so the
             // runtime's receipt is what its own receipt reaches.
             core := [U8]?{None}
-            if cli_sys.get("JET_FRONT_CORE_OBJECT_OUTPUT") == .Val(core_prefix) {
+            if cli_sys.get(ENV_JET_FRONT_CORE_OBJECT_OUTPUT) == .Val(core_prefix) {
                 built := jet_cli_core_library(core_prefix, thread_exports, threads)
                 if built.problem != "" -> return jet_driver_compile_escaped_failure(built.problem)
                 core = Val(built.bytes.move())
@@ -247,14 +256,14 @@ jet_cli_runtime_lint_issue: fn(finding: IRLintFinding) -> String Never! {
 // a Core function by its symbol; the pack, which a full link reads, stays
 // the runtime's alone.
 jet_cli_runtime_pack: fn(result: &&JetDriverCompileResult, prefix: String, object: &&[U8], core: &&[U8]?) -> JetDriverCompileResult {
-    if cli_sys.get("JET_FRONT_RUNTIME_PACK_OUTPUT") == .Val(pack_path) {
+    if cli_sys.get(ENV_JET_FRONT_RUNTIME_PACK_OUTPUT) == .Val(pack_path) {
         linked: x64_link_runtime_pack([String]{"{prefix}.o"}, [[U8]]{object.move()}, [String]{})
         if linked.errors.len() > 0 {
             cli_files.write("{prefix}.pack-issues", linked.errors.join("\n")) ?? return jet_driver_compile_escaped_failure("cannot write runtime pack findings: {err}")
             return jet_driver_compile_escaped_failure("runtime pack linking failed; see {prefix}.pack-issues")
         }
         cli_files.write_bytes(pack_path, linked.bytes) ?? return jet_driver_compile_escaped_failure("cannot write runtime pack: {err}")
-        if cli_sys.get("JET_FRONT_RUNTIME_IMAGE_OUTPUT") == .Val(image_path) {
+        if cli_sys.get(ENV_JET_FRONT_RUNTIME_IMAGE_OUTPUT) == .Val(image_path) {
             prelinked := [U8]{}
             if core.move() == .Val(code) {
                 // The runtime object moved into the pack link; it is read
@@ -283,10 +292,10 @@ jet_cli_runtime_pack: fn(result: &&JetDriverCompileResult, prefix: String, objec
 // Names the Jet toolchain source tree: the directory that holds `Core/`.
 // Unset, the tree is found (jet_cli_toolchain_root); with no tree, jet
 // compiles against the Core sources built into it (jet_cli_core_sources).
-JET_CLI_TOOLCHAIN_ROOT_ENV: "JET_TOOLCHAIN_ROOT"
+JET_CLI_TOOLCHAIN_ROOT_ENV: ENV_JET_TOOLCHAIN_ROOT
 // This compiler's identity (`name@version#<source id>`). Unset, it is read from
 // the IDENTITY file beside the jet executable (jet_cli_compiler_identity).
-JET_CLI_COMPILER_IDENTITY_ENV: "JET_COMPILER_IDENTITY"
+JET_CLI_COMPILER_IDENTITY_ENV: ENV_JET_COMPILER_IDENTITY
 // Beside the jet executable: the file holding its identity on one line.
 JET_CLI_IDENTITY_FILE: "IDENTITY"
 
@@ -1263,7 +1272,7 @@ jet_cli_driver_request: fn(snapshot: JetDriverAuthorizedSourceSnapshot, core_sou
         build_stamp: stamp,
         build_contributions: contributions,
         toolchain_tree: jet_cli_toolchain_tree(snapshot.entry_path),
-        recheck_verify: cli_sys.get("JET_RECHECK_VERIFY") == Val("1"),
+        recheck_verify: cli_sys.get(ENV_JET_RECHECK_VERIFY) == Val("1"),
     }
 }
 
@@ -1670,10 +1679,10 @@ jet_cli_compile_prepared: fn(prepared: &&JetCLIPrepared, input_log: Shared<JetDr
             // The runtime-library seam is `jet doc`'s (Host.jet jet_cli_doc_result):
             // a check, test or build under a stray JET_FRONT_LIBRARY_OBJECT_OUTPUT
             // stays that verb's compile.
-            library_prefix: if selected.mode == JetDriverCompileMode.Doc -> cli_sys.get("JET_FRONT_LIBRARY_OBJECT_OUTPUT") else -> None
+            library_prefix: if selected.mode == JetDriverCompileMode.Doc -> cli_sys.get(ENV_JET_FRONT_LIBRARY_OBJECT_OUTPUT) else -> None
             // copy: a three-field row; the request moves into the compiler below.
             compiler_threads: selected.compiler_threads.copy()
-            result := if library_prefix == .Val(prefix) -> jet_cli_runtime_library(jet_cli_lowering_inputs(selected, trace_sink), prefix, cli_sys.get("JET_FRONT_LIBRARY_LIFECYCLE"), compiler_threads) else -> jet_cli_compile_request(selected, trace_sink)
+            result := if library_prefix == .Val(prefix) -> jet_cli_runtime_library(jet_cli_lowering_inputs(selected, trace_sink), prefix, cli_sys.get(ENV_JET_FRONT_LIBRARY_LIFECYCLE), compiler_threads) else -> jet_cli_compile_request(selected, trace_sink)
             // The host's phases after the compile (Host.jet's native backend
             // route) trace through the same sink, which the result carries,
             // and compile on the request's threads.

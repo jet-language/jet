@@ -19,6 +19,7 @@ use {
     jet_driver.[JetDriverVerbOutput, JET_DRIVER_EXIT_USAGE, JET_DRIVER_EXIT_USER_ERROR, JetDriverRecordLink, jet_driver_run_receipt_frame]
     jet_foundation.[
         BuildSettingOverride, CanonicalJSON, CanonicalJSONField, CanonicalJSONParser, Diagnostic, Effect, Expr, ImportDecl, Item, OrFallback, PatSlot, Pattern, Stmt,
+        ENV_JET_PROVE_CAPTURE_JOURNAL, ENV_JET_PROVE_REPLAY_JOURNAL, ENV_JET_PROVE_REPLAY_TIME_MS, ENV_JET_PROVE_REPLAY_TRACE,
         canonical_json_bytes, canonical_json_value, import_alias, import_walk_bindings,
     ]
     jet_parser.[parse_source]
@@ -84,13 +85,13 @@ JET_CLI_REPLAY_IDENTITY_KEYS: [String]{"abi", "build_digest", "core_abi", "entry
 JET_CLI_REPLAY_MIR_KEYS: [String]{"core_ids", "function_ids", "identity_digest", "optimized_hash", "schema", "semantic_hash", "source_map", "target_facts"}
 // The runtime's wall-clock override (JetRuntime HostTime.jet
 // `jet_time_raw_wall_override_ms`), in Unix milliseconds.
-JET_CLI_REPLAY_TIME_ENV: "JET_PROVE_REPLAY_TIME_MS"
+JET_CLI_REPLAY_TIME_ENV: ENV_JET_PROVE_REPLAY_TIME_MS
 // The test harness's authority journal (JetRuntime ProveJournal.jet): the
 // file a capture appends each raw read to, and the records and served-trace
 // files a replay reads from.
-JET_CLI_REPLAY_CAPTURE_ENV: "JET_PROVE_CAPTURE_JOURNAL"
-JET_CLI_REPLAY_RECORDS_ENV: "JET_PROVE_REPLAY_JOURNAL"
-JET_CLI_REPLAY_TRACE_ENV: "JET_PROVE_REPLAY_TRACE"
+JET_CLI_REPLAY_CAPTURE_ENV: ENV_JET_PROVE_CAPTURE_JOURNAL
+JET_CLI_REPLAY_RECORDS_ENV: ENV_JET_PROVE_REPLAY_JOURNAL
+JET_CLI_REPLAY_TRACE_ENV: ENV_JET_PROVE_REPLAY_TRACE
 // A journal record: u8 kind, u64 LE request, u64 LE result, then the
 // result's bytes for an uppercase kind. `R` is a Rand read the OS answered,
 // `r` one it refused; `I` is a stdin read of up to `request` bytes that

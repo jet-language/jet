@@ -3,7 +3,7 @@ use {
     schema_files: core.files
     schema_sys: core.sys
     jet_sema.[SchemaSnapshot, SchemaSnapshotError, SemaRegistrationGraph, SemaGraphResult, check_schema_migrations, sema_check_schema_migration_graph, sema_schema_published, sema_program_tables_init]
-    jet_foundation.[Diagnostic, Item, TTypeDef, type_name]
+    jet_foundation.[Diagnostic, ENV_JET_SCHEMA_CACHE_DIR, Item, TTypeDef, type_name]
 }
 
 // Only the schema inputs the populated checker actually reads. An absent,
@@ -31,7 +31,7 @@ JetDriverSchemaCheckResult: struct {
 }
 
 schema_cache_dir: fn(root: String) -[Env]> String {
-    schema_sys.get("JET_SCHEMA_CACHE_DIR") ?? schema_files.join(root, ".jet/cache/schema")
+    schema_sys.get(ENV_JET_SCHEMA_CACHE_DIR) ?? schema_files.join(root, ".jet/cache/schema")
 }
 
 jet_driver_read_schema_dependency: fn(root: String, type_name: String) -[Env, FS]> JetDriverSchemaRead {

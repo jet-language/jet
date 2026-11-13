@@ -85,6 +85,28 @@ use {
     ]
     jet_foundation.[
         ELF_SECTION,
+        ENV_JET_DEVTOOLS_RELAY_BUILD_ID,
+        ENV_JET_DEVTOOLS_RELAY_REVISION,
+        ENV_JET_DEVTOOLS_RELAY_SESSION_ID,
+        ENV_JET_DEVTOOLS_RELAY_SOURCE_ID,
+        ENV_JET_DEVTOOLS_RELAY_WORLD_ID,
+        ENV_JET_DEV_PORT,
+        ENV_JET_FRONT_LIBRARY_OBJECT_OUTPUT,
+        ENV_JET_FUZZ_ITERATIONS,
+        ENV_JET_OBSERVE,
+        ENV_JET_PERF_MAP,
+        ENV_JET_PROJECT_ROOT,
+        ENV_JET_PROP_SEED,
+        ENV_JET_READ_SCOPE,
+        ENV_JET_TEST_CAPTURE,
+        ENV_JET_TEST_FILTER,
+        ENV_JET_TEST_MEASURE,
+        ENV_JET_TEST_SERIAL,
+        ENV_JET_TEST_SHUFFLE_SEED,
+        ENV_JET_TEST_TRACE_TIERS,
+        ENV_JET_UPDATE_SNAPSHOTS,
+        ENV_JET_X64_EMIT_LOG,
+        ENV_JET_X64_EMIT_LOG_REPORT,
         EVIDENCE_REPORT_ENV,
         EVIDENCE_REPORT_ID_ENV,
         BuildOptionChoice,
@@ -1297,8 +1319,8 @@ jet_cli_native_program: fn(result: JetDriverCompileResult, inputs: &&JetDriverLo
 // (ir_x64_compile_module_logged); none when it is unset or
 // JET_X64_EMIT_LOG_REPORT, where the log goes, is.
 jet_cli_emit_log_names: fn() -[Env]> [String] Never! {
-    if cli_sys.get("JET_X64_EMIT_LOG_REPORT") == None -> return [String]{}
-    listed: cli_sys.get("JET_X64_EMIT_LOG") ?? return [String]{}
+    if cli_sys.get(ENV_JET_X64_EMIT_LOG_REPORT) == None -> return [String]{}
+    listed: cli_sys.get(ENV_JET_X64_EMIT_LOG) ?? return [String]{}
     names := [String]{}
     loop part in listed.split(",") {
         name: part.trim()
@@ -1310,7 +1332,7 @@ jet_cli_emit_log_names: fn() -[Env]> [String] Never! {
 // Writes the emission log `lines` to JET_X64_EMIT_LOG_REPORT; the write's
 // failure text, else "".
 jet_cli_emit_log_report: fn(lines: [String]) -[FS, Env]> String Never! {
-    report: cli_sys.get("JET_X64_EMIT_LOG_REPORT") ?? return ""
+    report: cli_sys.get(ENV_JET_X64_EMIT_LOG_REPORT) ?? return ""
     text: lines.join("\n")
     cli_files.write(report, "{text}\n") ?? return "cannot write the emission log `{report}`: {err}"
     ""
@@ -1815,7 +1837,7 @@ jet_cli_launch_plan: fn(file: String, program_args: [String], options: BuildOpti
     }
     // copy: `vars` is the caller's; the launch's rows own their own.
     env_vars := vars.copy()
-    if read_scope.len() > 0 -> env_vars.push(JetCLIEnvVar{name: "JET_READ_SCOPE", value: read_scope.join(", ")})
+    if read_scope.len() > 0 -> env_vars.push(JetCLIEnvVar{name: ENV_JET_READ_SCOPE, value: read_scope.join(", ")})
     X64Launch{argv: argv, env: jet_cli_launch_env(env_vars), executable: executable, name: jet_cli_stem(file), relaunch: relaunch, parent_death: true, read_scope: read_scope.copy()}
 }
 
@@ -1825,13 +1847,13 @@ jet_cli_launch_plan: fn(file: String, program_args: [String], options: BuildOpti
 // own environment leaves unset: this run's session, `source`, and the
 // `runtime` build and revision of the `game` world.
 jet_cli_observe_env: fn(source: String) -> [JetCLIEnvVar] {
-    vars := [JetCLIEnvVar]{JetCLIEnvVar{name: "JET_OBSERVE", value: "1"}}
+    vars := [JetCLIEnvVar]{JetCLIEnvVar{name: ENV_JET_OBSERVE, value: "1"}}
     identity: [JetCLIEnvVar]{
-        JetCLIEnvVar{name: "JET_DEVTOOLS_RELAY_SESSION_ID", value: "jet-observe-{cli_process.current_pid()}-{cli_time.unix_ns()}"},
-        JetCLIEnvVar{name: "JET_DEVTOOLS_RELAY_SOURCE_ID", value: source},
-        JetCLIEnvVar{name: "JET_DEVTOOLS_RELAY_BUILD_ID", value: "runtime"},
-        JetCLIEnvVar{name: "JET_DEVTOOLS_RELAY_REVISION", value: "runtime"},
-        JetCLIEnvVar{name: "JET_DEVTOOLS_RELAY_WORLD_ID", value: "game"},
+        JetCLIEnvVar{name: ENV_JET_DEVTOOLS_RELAY_SESSION_ID, value: "jet-observe-{cli_process.current_pid()}-{cli_time.unix_ns()}"},
+        JetCLIEnvVar{name: ENV_JET_DEVTOOLS_RELAY_SOURCE_ID, value: source},
+        JetCLIEnvVar{name: ENV_JET_DEVTOOLS_RELAY_BUILD_ID, value: "runtime"},
+        JetCLIEnvVar{name: ENV_JET_DEVTOOLS_RELAY_REVISION, value: "runtime"},
+        JetCLIEnvVar{name: ENV_JET_DEVTOOLS_RELAY_WORLD_ID, value: "game"},
     }
     loop field in identity {
         if (cli_sys.get(field.name) ?? "") == "" -> vars.push(field.copy())
@@ -1846,7 +1868,7 @@ jet_cli_observe_env: fn(source: String) -> [JetCLIEnvVar] {
 // the image before the fork, and perf keys anonymous code by the pid that
 // mapped it.
 jet_cli_perf_map: fn(executable: X64Executable, pid: Int) {
-    if (cli_sys.get("JET_PERF_MAP") ?? "") != "1" -> return
+    if (cli_sys.get(ENV_JET_PERF_MAP) ?? "") != "1" -> return
     jet: cli_process.current_pid()
     // copy: the map reads the whole file's bytes; the parts stay mapped.
     whole := executable.copy()
@@ -2270,22 +2292,22 @@ jet_cli_test_result: fn(file: String, source: String, doctests: [JetCLIDoctestFi
     // runs this jet, not whichever `jet` a PATH lookup finds.
     running: cli_sys.executable()
     if running != "" -> spec = spec.env(JET_CLI_TEST_SUITE_JET_ENV, running)
-    if options.project_root == .Val(project_root) -> spec = spec.env("JET_PROJECT_ROOT", project_root)
-    if options.update_snapshots -> spec = spec.env("JET_UPDATE_SNAPSHOTS", "1")
-    if options.filter == .Val(filter) -> spec = spec.env("JET_TEST_FILTER", filter)
-    if options.shuffle_seed == .Val(seed) -> spec = spec.env("JET_TEST_SHUFFLE_SEED", seed)
-    if options.serial -> spec = spec.env("JET_TEST_SERIAL", "1")
-    if options.trace_tiers -> spec = spec.env("JET_TEST_TRACE_TIERS", "1")
+    if options.project_root == .Val(project_root) -> spec = spec.env(ENV_JET_PROJECT_ROOT, project_root)
+    if options.update_snapshots -> spec = spec.env(ENV_JET_UPDATE_SNAPSHOTS, "1")
+    if options.filter == .Val(filter) -> spec = spec.env(ENV_JET_TEST_FILTER, filter)
+    if options.shuffle_seed == .Val(seed) -> spec = spec.env(ENV_JET_TEST_SHUFFLE_SEED, seed)
+    if options.serial -> spec = spec.env(ENV_JET_TEST_SERIAL, "1")
+    if options.trace_tiers -> spec = spec.env(ENV_JET_TEST_TRACE_TIERS, "1")
     // The generated grade runs each property test's `iterations` cases
     // (default 1000) in place of its default budget, from the base `seed`
     // (default the fixed 0, unless the caller's JET_PROP_SEED names one), so
     // a graded run is reproducible (TestProperty.jet).
     iterations: jet_cli_test_generated_iterations(options.settings)
-    if iterations == .Val(count) -> spec = spec.env("JET_FUZZ_ITERATIONS", count)
-    generated_seed: jet_cli_test_generated_seed(options.settings, cli_sys.get("JET_PROP_SEED") != None)
-    if generated_seed == .Val(seed) -> spec = spec.env("JET_PROP_SEED", seed)
-    spec = spec.env("JET_TEST_CAPTURE", options.capture)
-    if measure != None -> spec = spec.env("JET_TEST_MEASURE", "1")
+    if iterations == .Val(count) -> spec = spec.env(ENV_JET_FUZZ_ITERATIONS, count)
+    generated_seed: jet_cli_test_generated_seed(options.settings, cli_sys.get(ENV_JET_PROP_SEED) != None)
+    if generated_seed == .Val(seed) -> spec = spec.env(ENV_JET_PROP_SEED, seed)
+    spec = spec.env(ENV_JET_TEST_CAPTURE, options.capture)
+    if measure != None -> spec = spec.env(ENV_JET_TEST_MEASURE, "1")
     // Every test process appends the lines it entered to one file.
     coverage_path: "{build_dir}/{stem}.coverage"
     if coverage -> spec = spec.env(JET_CLI_COVERAGE_ENV, coverage_path)
@@ -2718,7 +2740,7 @@ jet_cli_doc_result: fn(file: String, source: String, color: Bool, json: Bool, ch
     if result.internal_problem == .Val(problem) -> return jet_cli_ice(problem)
     // The runtime-library seam (Request.jet jet_cli_compile_prepared) built the checked program as the
     // runtime object and pack; packaging reads those, not pages, so no index or pages are built.
-    if cli_sys.get("JET_FRONT_LIBRARY_OBJECT_OUTPUT") != None -> return JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    if cli_sys.get(ENV_JET_FRONT_LIBRARY_OBJECT_OUTPUT) != None -> return JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     graph: jet_cli_build_doc_graph(result.doc_modules, jet_cli_checked_semindex(result))
     if check {
         if jet_cli_doc_undocumented_public(graph).len() > 0 {
@@ -3816,8 +3838,8 @@ jet_cli_dev_launch: fn(executable: X64Executable, binary: String, file: String, 
     vars := jet_cli_production_receipt_env(file, program_args)
     vars.push(JetCLIEnvVar{name: "JET_DEV", value: "1"})
     if port == .Val(number) {
-        vars.push(JetCLIEnvVar{name: "JET_DEV_PORT", value: "{number}"})
-        cli_term.eprint("jet dev: dev server port {number} (JET_DEV_PORT)")
+        vars.push(JetCLIEnvVar{name: ENV_JET_DEV_PORT, value: "{number}"})
+        cli_term.eprint("jet dev: dev server port {number} ({ENV_JET_DEV_PORT})")
     }
     launch: jet_cli_launch_plan(file, program_args, options, invocation, read_scope, vars)
     loaded: x64_executable_load(executable)

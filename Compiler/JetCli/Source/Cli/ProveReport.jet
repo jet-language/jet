@@ -9,7 +9,7 @@ use {
     cli_sys: core.sys
     prove_crypto: core.crypto
     jet_driver.[JetDriverCompileMode, JetDriverVerbOutput, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR, jet_driver_is_a11y_lint, jet_driver_present_diagnostics, JetDriverRecordLink, JetDriverRunReceiptInput, jet_driver_run_receipt_frame]
-    jet_foundation.[JET_BUILD_DEFAULT_PROFILE]
+    jet_foundation.[ENV_JET_PROP_SEED, JET_BUILD_DEFAULT_PROFILE]
     jet_foundation.[
         CanonicalJSONParser, ContractClause, DerivationDisposition, DerivationMethod, Diagnostic, DiagnosticMoment, Func, Item, Span,
         EvidenceExpectation, EvidenceKind, EvidenceOutcome, EvidenceRecord,
@@ -699,7 +699,7 @@ jet_cli_prove_tests: fn(identity: JetCLIProveIdentity, members: [JetCLIProveMemb
     consumed := [JetDriverRecordLink]{}
     exit_code := JET_DRIVER_EXIT_OK
     errors := ""
-    requested: cli_sys.get("JET_PROP_SEED")
+    requested: cli_sys.get(ENV_JET_PROP_SEED)
     seed: if requested == .Val(text) -> jet_cli_prove_seed(text) ?? 0 else -> jet_cli_prove_input_seed(identity.input_sha256)
     loop group in groups {
         if !group.has_tests -> next
@@ -729,7 +729,7 @@ jet_cli_prove_tests: fn(identity: JetCLIProveIdentity, members: [JetCLIProveMemb
             .env(EVIDENCE_REVISION_ENV, identity.mir_hash)
             .timeout(120s)
             .output_limit(67108864)
-        if requested == None -> spec = spec.env("JET_PROP_SEED", "{seed}")
+        if requested == None -> spec = spec.env(ENV_JET_PROP_SEED, "{seed}")
         if time_ms == .Val(ms) -> spec = spec.env(JET_CLI_REPLAY_TIME_ENV, "{ms}")
         // A capture hands the terminal to the tests, so a stdin read gets
         // what the user types and the journal records it.

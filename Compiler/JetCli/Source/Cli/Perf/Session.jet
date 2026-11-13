@@ -9,7 +9,7 @@ use {
     perf_time: core.time
     jet_driver.[JetDriverVerbOutput, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USAGE]
     jet_foundation.[
-        DEFAULT_EXCLUSIONS, SourceIdentity, TraceHardware, TraceToolchain, artifact_extension, trace_id,
+        DEFAULT_EXCLUSIONS, ENV_JET_OBSERVE, SourceIdentity, TraceHardware, TraceToolchain, artifact_extension, trace_id,
         trace_profile_unsupported, verify_jettrace,
     ]
     jet_pkg_model.[JET_VERSION, WorkspaceDeclarationCache]
@@ -104,7 +104,7 @@ jet_cli_perf_session: fn(action: String, args: [String], quiet: Bool, color: Boo
     }
     spec := perf_process.cmd(argv).stdin(.Inherit).stdout(.Inherit).stderr(.Inherit)
     if observed_run {
-        spec = spec.env_remove("JET_OBSERVE")
+        spec = spec.env_remove(ENV_JET_OBSERVE)
     } else {
         loop field in jet_cli_observe_env(parsed.source ?? "") -> spec = spec.env(field.name, field.value)
     }
