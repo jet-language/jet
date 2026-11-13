@@ -13937,7 +13937,9 @@ __is_subnormal_f32: fn(n: F32) -> Bool Never! {
     magnitude: fabs(Float.from_f32(n))
     magnitude > 0.0 && magnitude < 1.1754943508222875e-38
 }
-is_canonical: fn(n: Float) -> Bool Never! { is_finite(n) || is_nan(n) }
+// C23 iscanonical: every binary64 encoding is canonical, the infinities and
+// the signaling NaNs too.
+is_canonical: fn(n: Float) -> Bool Never! { true }
 is_signed: fn(n: Float) -> Bool Never! { sign_bit(n) }
 is_zero: fn(n: Float) -> Bool Never! { n == 0.0 }
 is_integer: fn(n: Float) -> Bool Never! { is_finite(n) && fract(n) == 0.0 }

@@ -1,0 +1,190 @@
+// Every corpus row is a call of one exact or bit-level core.math function at
+// binary64: its argument words, then the C23 function's result, computed
+// offline. A Float is its 16 hex digit bit pattern, an exponent its 64-bit
+// two's-complement word, a predicate 1 or 0, and "----------------" is none.
+// The program prints one line per function with the rows it checked and how
+// many results differ, plus the first differing rows. Where a NaN result's
+// bits are not the function's to choose (an arithmetic NaN), any NaN matches
+// any NaN; the sign-bit, payload and signaling operations must match bit for
+// bit.
+use {
+    math: core.math
+}
+
+CANONICALIZE: #run embed_file("corpus/canonicalize.txt")
+COPYSIGN: #run embed_file("corpus/copysign.txt")
+FABS: #run embed_file("corpus/fabs.txt")
+GET_PAYLOAD: #run embed_file("corpus/get_payload.txt")
+IS_CANONICAL: #run embed_file("corpus/is_canonical.txt")
+IS_FINITE: #run embed_file("corpus/is_finite.txt")
+IS_INF: #run embed_file("corpus/is_inf.txt")
+IS_NAN: #run embed_file("corpus/is_nan.txt")
+IS_NORMAL: #run embed_file("corpus/is_normal.txt")
+IS_SIGNALING: #run embed_file("corpus/is_signaling.txt")
+IS_SUBNORMAL: #run embed_file("corpus/is_subnormal.txt")
+IS_ZERO: #run embed_file("corpus/is_zero.txt")
+LDEXP: #run embed_file("corpus/ldexp.txt")
+MAXIMUM: #run embed_file("corpus/maximum.txt")
+MAXIMUM_MAG: #run embed_file("corpus/maximum_mag.txt")
+MAXIMUM_MAG_NUM: #run embed_file("corpus/maximum_mag_num.txt")
+MAXIMUM_NUM: #run embed_file("corpus/maximum_num.txt")
+MINIMUM: #run embed_file("corpus/minimum.txt")
+MINIMUM_MAG: #run embed_file("corpus/minimum_mag.txt")
+MINIMUM_MAG_NUM: #run embed_file("corpus/minimum_mag_num.txt")
+MINIMUM_NUM: #run embed_file("corpus/minimum_num.txt")
+NEXT_DOWN: #run embed_file("corpus/next_down.txt")
+NEXT_UP: #run embed_file("corpus/next_up.txt")
+SET_PAYLOAD: #run embed_file("corpus/set_payload.txt")
+SET_PAYLOAD_SIGNALING: #run embed_file("corpus/set_payload_signaling.txt")
+SIGN_BIT: #run embed_file("corpus/sign_bit.txt")
+TOTAL_ORDER: #run embed_file("corpus/total_order.txt")
+TOTAL_ORDER_MAG: #run embed_file("corpus/total_order_mag.txt")
+
+hex_value: fn(b: U8) -> Int {
+    n: Int.from_u8(b)
+    if n >= 48 && n <= 57 -> return n - 48
+    n - 87
+}
+
+// The 16 hex digit word at `at`, as the signed Int math.from_bits takes;
+// None for "----------------".
+word_at: fn(raw: [U8], at: Int) -> Int? {
+    if raw[at] == (U8{45}) -> return None
+    n := 0
+    loop i in 0..<16 -> n = n * 16 + hex_value(raw[at + i])
+    if n > 9223372036854775807 -> n = n - 18446744073709551616
+    Val(n)
+}
+
+hex_word: fn(word: Int?) -> String {
+    known: word ?? return "----------------"
+    digits: "0123456789abcdef".bytes()
+    n := if known < 0 -> known + 18446744073709551616 else -> known
+    out := [U8]{}
+    loop _ in 0..<16 {
+        out.push(digits[n %% 16])
+        n = n /% 16
+    }
+    out.reverse()
+    String.from_bytes(out) ?? ""
+}
+
+is_nan_word: fn(word: Int?) -> Bool {
+    known: word ?? return false
+    magnitude: if known < 0 -> known + 9223372036854775808 else -> known
+    magnitude > 9218868437227405312
+}
+
+bits: fn(x: Float) -> Int? { Val(math.to_bits(x)) }
+flag: fn(b: Bool) -> Int? { Val(if b -> 1 else -> 0) }
+maybe: fn(x: Float?) -> Int? {
+    value: x ?? return None
+    Val(math.to_bits(value))
+}
+
+// The result word of `name` on argument words `w`.
+value: fn(name: String, w: [Int]) -> Int? {
+    a: math.from_bits(w[0])
+    if name == "fabs" -> return bits(math.fabs(a))
+    if name == "canonicalize" -> return bits(math.canonicalize(a))
+    if name == "get_payload" -> return maybe(math.get_payload(a))
+    if name == "set_payload" -> return maybe(math.set_payload(a))
+    if name == "set_payload_signaling" -> return maybe(math.set_payload_signaling(a))
+    if name == "is_signaling" -> return flag(math.is_signaling(a))
+    if name == "is_normal" -> return flag(math.is_normal(a))
+    if name == "is_subnormal" -> return flag(math.is_subnormal(a))
+    if name == "is_canonical" -> return flag(math.is_canonical(a))
+    if name == "is_finite" -> return flag(math.is_finite(a))
+    if name == "is_inf" -> return flag(math.is_inf(a))
+    if name == "is_nan" -> return flag(math.is_nan(a))
+    if name == "is_zero" -> return flag(math.is_zero(a))
+    if name == "sign_bit" -> return flag(math.sign_bit(a))
+    if name == "next_up" -> return bits(math.next_up(a))
+    if name == "next_down" -> return bits(math.next_down(a))
+    if name == "ldexp" -> return bits(math.ldexp(a, w[1]))
+    b: math.from_bits(w[1])
+    if name == "copysign" -> return bits(math.copysign(a, b))
+    if name == "total_order" -> return flag(math.total_order(a, b))
+    if name == "total_order_mag" -> return flag(math.total_order_mag(a, b))
+    if name == "maximum" -> return bits(math.maximum(a, b))
+    if name == "minimum" -> return bits(math.minimum(a, b))
+    if name == "maximum_mag" -> return bits(math.maximum_mag(a, b))
+    if name == "minimum_mag" -> return bits(math.minimum_mag(a, b))
+    if name == "maximum_num" -> return bits(math.maximum_num(a, b))
+    if name == "minimum_num" -> return bits(math.minimum_num(a, b))
+    if name == "maximum_mag_num" -> return bits(math.maximum_mag_num(a, b))
+    if name == "minimum_mag_num" -> return bits(math.minimum_mag_num(a, b))
+    panic("no corpus function {name}")
+}
+
+// Whether `name` chooses its NaN result's bits: a sign-bit, payload or
+// signaling operation.
+exact_nan: fn(name: String) -> Bool {
+    name == "fabs" || name == "copysign" || name == "canonicalize" || name == "get_payload" || name == "set_payload" || name == "set_payload_signaling"
+}
+
+check: fn(name: String, corpus: String) {
+    raw: corpus.bytes()
+    at := 0
+    rows := 0
+    wrong := 0
+    loop at < raw.len() {
+        if raw[at] == (U8{35}) {
+            loop raw[at] != (U8{10}) -> at = at + 1
+            at = at + 1
+            next
+        }
+        // The row's words: its arguments, then the result.
+        row := [Int?]{}
+        loop {
+            row.push(word_at(raw, at))
+            at = at + 17
+            if raw[at - 1] == (U8{10}) -> break
+        }
+        want: row[row.len() - 1]
+        words := [Int]{}
+        loop i in 0..<(row.len() - 1) -> words.push(row[i] ?? panic("an argument word is none"))
+        got: value(name, words)
+        rows = rows + 1
+        if got != want && (exact_nan(name) || !(is_nan_word(got) && is_nan_word(want))) {
+            wrong = wrong + 1
+            if wrong <= 3 {
+                shown := [String]{}
+                loop word in words -> shown.push(hex_word(Val(word)))
+                print("{name}({shown.join(", ")}) = {hex_word(got)}, C23 {hex_word(want)}")
+            }
+        }
+    }
+    print("{name}: {rows} rows, {wrong} differ")
+}
+
+run: fn() {
+    check("fabs", FABS)
+    check("copysign", COPYSIGN)
+    check("canonicalize", CANONICALIZE)
+    check("get_payload", GET_PAYLOAD)
+    check("set_payload", SET_PAYLOAD)
+    check("set_payload_signaling", SET_PAYLOAD_SIGNALING)
+    check("is_signaling", IS_SIGNALING)
+    check("is_normal", IS_NORMAL)
+    check("is_subnormal", IS_SUBNORMAL)
+    check("is_canonical", IS_CANONICAL)
+    check("is_finite", IS_FINITE)
+    check("is_inf", IS_INF)
+    check("is_nan", IS_NAN)
+    check("is_zero", IS_ZERO)
+    check("sign_bit", SIGN_BIT)
+    check("total_order", TOTAL_ORDER)
+    check("total_order_mag", TOTAL_ORDER_MAG)
+    check("maximum", MAXIMUM)
+    check("minimum", MINIMUM)
+    check("maximum_mag", MAXIMUM_MAG)
+    check("minimum_mag", MINIMUM_MAG)
+    check("maximum_num", MAXIMUM_NUM)
+    check("minimum_num", MINIMUM_NUM)
+    check("maximum_mag_num", MAXIMUM_MAG_NUM)
+    check("minimum_mag_num", MINIMUM_MAG_NUM)
+    check("ldexp", LDEXP)
+    check("next_up", NEXT_UP)
+    check("next_down", NEXT_DOWN)
+}
