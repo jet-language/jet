@@ -1,0 +1,72 @@
+// Each lambda writes a captured `:=` variable inside a loop or an `if`, the
+// way `seen += 1` writes one at the top of the body. Every write reaches the
+// variable, so two calls of each lambda print 3, 6 and 2.
+
+in_range_loop: fn() {
+    total := 0
+    seen := 0
+    bump: (n: Int) -> {
+        loop i in 0..<n {
+            total += 1
+        }
+        seen += 1
+    }
+    bump(3)
+    first: total
+    bump(3)
+    print("{first}|{total}|{seen}")
+}
+
+in_branch: fn() {
+    total := 0
+    seen := 0
+    bump: (n: Int) -> {
+        if n > 0 {
+            total += n
+        }
+        seen += 1
+    }
+    bump(3)
+    first: total
+    bump(3)
+    print("{first}|{total}|{seen}")
+}
+
+in_conditional_loop: fn() {
+    total := 0
+    seen := 0
+    bump: () -> {
+        i := 0
+        loop i < 3 {
+            total += 1
+            i += 1
+        }
+        seen += 1
+    }
+    bump()
+    first: total
+    bump()
+    print("{first}|{total}|{seen}")
+}
+
+in_loop_push: fn() {
+    items := [Int]{}
+    seen := 0
+    bump: (n: Int) -> {
+        loop i in 0..<n {
+            items.push(i)
+        }
+        seen += 1
+    }
+    bump(3)
+    first: items.len()
+    bump(3)
+    print("{first}|{items.len()}|{seen}")
+}
+
+run: fn() {
+    in_range_loop()
+    in_branch()
+    in_conditional_loop()
+    in_loop_push()
+}

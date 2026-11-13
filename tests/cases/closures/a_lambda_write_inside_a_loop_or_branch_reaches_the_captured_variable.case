@@ -1,0 +1,17 @@
+# A lambda that writes a captured `:=` variable inside a loop or an `if`
+# changes the variable itself, as a write at the top of its body does: a
+# compound update (`total += 1`) reads and writes its target at one span, and
+# joining the loop or branch path keeps both the read and the write.
+fixture: a_lambda_write_inside_a_loop_or_branch_reaches_the_captured_variable.fixture
+env: NO_COLOR=1
+step check: jet check writes.jet
+exit: 0
+step o0: jet run --optimize=none writes.jet
+exit: 0
+stdout: = "3|6|2\n3|6|2\n3|6|2\n3|6|2\n"
+step o1: jet run --optimize=basic writes.jet
+exit: 0
+stdout: = "3|6|2\n3|6|2\n3|6|2\n3|6|2\n"
+step o2: jet run --optimize=full writes.jet
+exit: 0
+stdout: = "3|6|2\n3|6|2\n3|6|2\n3|6|2\n"

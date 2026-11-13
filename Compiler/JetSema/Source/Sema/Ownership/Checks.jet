@@ -1164,9 +1164,10 @@ sema_ownership_recompute_reference_counts: fn(state: &SemaOwnershipState) Never!
     }
 }
 
-// Exact reference anchor: definition key plus use span. Rows of a reference
-// list bucketed by use-span start, so a lookup compares a few rows instead of
-// formatting and hashing a text key per reference.
+// Exact reference anchor: definition key, use span and kind (a compound
+// update reads and writes its target at one span, and both rows count).
+// Rows of a reference list bucketed by use-span start, so a lookup compares a
+// few rows instead of formatting and hashing a text key per reference.
 SemaOwnershipAnchors: struct {
     slots: [Int:Int]
     rows: [[Int]]
@@ -1187,7 +1188,7 @@ sema_ownership_anchor_held: fn(merged: [SemaOwnershipReference], anchors: SemaOw
     slot: anchors.slots.get(reference.use_span.start) ?? return false
     loop row in anchors.rows[slot] {
         if row >= limit -> return false
-        if merged[row].use_span.end == reference.use_span.end && merged[row].def_key == reference.def_key -> return true
+        if merged[row].use_span.end == reference.use_span.end && merged[row].def_key == reference.def_key && merged[row].kind == reference.kind -> return true
     }
     false
 }
