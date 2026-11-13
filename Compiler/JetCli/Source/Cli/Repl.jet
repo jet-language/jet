@@ -4,6 +4,8 @@
 // behind a per-session marker. It is checked and built here, in one compile,
 // against the session so far (types, problems, denied effects), then run by a
 // private child `jet` (`__jet_repl_run_stdin`) under the session's authority.
+// The session fixes its authority rows and its deep checks when it starts
+// (JetCLIReplOptions); a different selection is a new session.
 use {
     repl_files: core.files
     repl_process: core.process
@@ -23,7 +25,8 @@ use {
         jet_driver_present_diagnostics,
     ]
     jet_foundation.[
-        AccessConvention, BuildOptions, CallArg, Diagnostic, Expr, Item, Stmt, Type, build_options_stock, diagnostic_from_registry,
+        AccessConvention, BuildOptions, CallArg, DeepChecks, Diagnostic, Expr, Item, Stmt, Type, build_options_stock, deep_checks_malformed,
+        deep_checks_read, diagnostic_from_registry,
         diagnostic_render_all, diagnostic_theme_accent, diagnostic_theme_bold, diagnostic_theme_dim, diagnostic_theme_paint,
         type_name, type_unqualified_nominals,
     ]
@@ -54,6 +57,15 @@ JetCLIReplStatus: enum {
     Interrupted
 }
 
+// What a session fixes when it starts: the invocation's authority rows
+// (`-A`, `--allow`, `--deny`) and the deep checks every turn keeps
+// (`--deep-checks`). Nothing in a session changes them, and a session started
+// with other options neither resets nor takes over this one.
+JetCLIReplOptions: struct {
+    invocation: JetCLIInvocationAuthority?{None}
+    deep_checks: DeepChecks{DeepChecks{}}
+}
+
 // `Turn`: one notebook turn of the session.
 JetCLIReplTurn: struct {
     id: Int
@@ -72,6 +84,7 @@ JetCLIReplSession: struct {
     // Where turns run: the project directory, else the working directory.
     base_dir: String
     invocation: JetCLIInvocationAuthority?
+    deep_checks: DeepChecks
     color: Bool
     step: Int
     imports: [String]
@@ -348,10 +361,18 @@ jet_cli_repl_unwritable: fn(session: JetCLIReplSession, error: String) -> String
     jet_cli_report("E2105", "couldn't write the REPL session file `{session.anchor}`: {error}", jet_cli_why("E2105"), "check that the temporary directory is writable", session.color)
 }
 
+// The options every turn compiles under: a run's, keeping the session's deep
+// checks.
+jet_cli_repl_options: fn(session: JetCLIReplSession) -> BuildOptions Never! {
+    options := build_options_stock("run")
+    options.deep_checks = session.deep_checks.copy()
+    options
+}
+
 jet_cli_repl_check: fn(session: JetCLIReplSession, source: String, input_start: Int) -> JetCLIReplChecked {
     repl_files.write(session.anchor, source) ?? return JetCLIReplChecked.Refused{report: jet_cli_repl_unwritable(session, "{err}")}
     prepared: jet_cli_prepare_overlays(session.anchor, session.anchor, [JetCLIOverlay]{JetCLIOverlay{path: session.anchor, source: source}}, session.color, None, JetDriverCompileMode.Program)
-    compiled := jet_cli_compile_executable(prepared, None, build_options_stock("run"), None, None, session.color)
+    compiled := jet_cli_compile_executable(prepared, None, jet_cli_repl_options(session), None, None, session.color)
     checked := JetCLIReplChecked.Failed{diagnostics: [Diagnostic]{}, reports: false}
     if compiled.move() == {
         .Refused(output) -> checked = JetCLIReplChecked.Refused{report: output.stderr}
@@ -377,7 +398,7 @@ jet_cli_repl_checked: fn(session: JetCLIReplSession, result: JetDriverCompileRes
 jet_cli_repl_build: fn(session: &JetCLIReplSession, program: JetCLIReplSource, input_start: Int, gate: Bool) -> JetCLIReplChecked {
     repl_files.write(session.anchor, program.text) ?? return JetCLIReplChecked.Refused{report: jet_cli_repl_unwritable(session, "{err}")}
     prepared: jet_cli_prepare_overlays(session.anchor, session.anchor, [JetCLIOverlay]{JetCLIOverlay{path: session.anchor, source: program.text}}, session.color, None, JetDriverCompileMode.Program)
-    options: build_options_stock("run")
+    options: jet_cli_repl_options(session)
     compiled := jet_cli_compile_executable(prepared, None, options, None, None, session.color)
     built := JetCLIReplChecked.Failed{diagnostics: [Diagnostic]{}, reports: false}
     if compiled.move() == {
@@ -1219,7 +1240,7 @@ jet_cli_repl_preload: fn(file: String) -> String? {
     None
 }
 
-jet_cli_repl_session: fn(project: String?, invocation: JetCLIInvocationAuthority?, color: Bool) -> JetCLIReplSession? {
+jet_cli_repl_session: fn(project: String?, options: JetCLIReplOptions, color: Bool) -> JetCLIReplSession? {
     base_dir: project ?? (repl_files.cwd() ?? ".")
     dir: repl_files.mkdtemp("jet-repl") ?? return None
     anchor: "{dir}/repl.jet"
@@ -1227,7 +1248,7 @@ jet_cli_repl_session: fn(project: String?, invocation: JetCLIInvocationAuthority
     anchor_real: repl_files.realpath(anchor) ?? anchor.copy()
     Val(JetCLIReplSession{
         nonce: jet_cli_repl_nonce(), dir: dir, anchor: anchor, anchor_real: anchor_real, base_dir: base_dir,
-        invocation: jet_cli_repl_rows(invocation), color: color, step: 0, imports: [String]{}, items: [String]{},
+        invocation: jet_cli_repl_rows(options.invocation), deep_checks: options.deep_checks.copy(), color: color, step: 0, imports: [String]{}, items: [String]{},
         statements: [String]{}, bindings: [JetCLIReplBinding]{}, turns: [JetCLIReplTurn]{}, noted_print: false,
         baseline_imports: [String]{}, baseline_items: [String]{}, denied: false, noticed: [String]{},
     })
@@ -1239,13 +1260,13 @@ jet_cli_repl_no_session: fn(color: Bool) -> JetDriverVerbOutput Never! {
 
 // `jet repl [file.jet] [--project <dir>]`: the line-based session. Input that
 // is not a terminal reads the same way.
-jet_cli_repl: fn(project: String?, preload: String?, invocation: JetCLIInvocationAuthority?, color: Bool) -> JetDriverVerbOutput {
+jet_cli_repl: fn(project: String?, preload: String?, options: JetCLIReplOptions, color: Bool) -> JetDriverVerbOutput {
     preload_file := String?{None}
     if preload == .Val(file) {
         preload_file = jet_cli_repl_preload(file)
         if preload_file == None -> return jet_cli_report_output("", "E2105", "can't find the file `{file}`", jet_cli_why("E2105"), "check the spelling, or run jet from the folder that contains it", color, JET_DRIVER_EXIT_USER_ERROR)
     }
-    session := jet_cli_repl_session(project, invocation, color) ?? return jet_cli_repl_no_session(color)
+    session := jet_cli_repl_session(project, options, color) ?? return jet_cli_repl_no_session(color)
     jet_cli_repl_banner(color)
     if project == .Val(dir) {
         loaded := jet_cli_repl_load_dir(session, "{dir}/src")
@@ -1267,7 +1288,7 @@ jet_cli_repl: fn(project: String?, preload: String?, invocation: JetCLIInvocatio
 }
 
 // `jet repl ...`: console forms are not built; the first positional is the
-// preload file.
+// preload file. The authority and deep-check flags hold for the session.
 jet_cli_repl_plan: fn(jet_argv: [String], args: [String], color: Bool) -> JetCLIPlan Never! {
     console := false
     loop argument in jet_argv {
@@ -1280,8 +1301,13 @@ jet_cli_repl_plan: fn(jet_argv: [String], args: [String], color: Bool) -> JetCLI
     if console -> return jet_cli_not_ported("repl --console", color)
     project: jet_cli_option_value(jet_argv, "--project")
     preload: if args.len() > 1 -> Val(args[1]) else -> String?{None}
+    deep_checks := DeepChecks{}
+    if deep_checks_read(jet_argv) == {
+        .Refused(argument) -> return JetCLIPlan.Refused{report: deep_checks_malformed(argument), color: color, exit_code: JET_DRIVER_EXIT_USAGE, notice: ""}
+        .Read(request) -> deep_checks = request.copy()
+    }
     if jet_cli_authority_flags(jet_argv, color) == {
-        .Rows(invocation) -> JetCLIPlan.Repl{project: project, preload: preload, invocation: invocation, color: color}
+        .Rows(invocation) -> JetCLIPlan.Repl{project: project, preload: preload, options: JetCLIReplOptions{invocation: invocation, deep_checks: deep_checks}, color: color}
         .Refused(plan) -> plan
     }
 }
@@ -1305,7 +1331,7 @@ jet_cli_repl_eval_json: fn(shown: String, ty: Type?) -> JetCLIStatusValue {
 // `jet eval <expression>` (`run_eval_expression`, `eval_once`): one REPL turn
 // with no granted authority.
 jet_cli_eval_expression: fn(source: String, color: Bool, json: Bool) -> JetDriverVerbOutput {
-    session := jet_cli_repl_session(None, None, color) ?? return jet_cli_repl_no_session(color)
+    session := jet_cli_repl_session(None, JetCLIReplOptions{}, color) ?? return jet_cli_repl_no_session(color)
     session.step = 1
     trimmed: source.trim()
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}

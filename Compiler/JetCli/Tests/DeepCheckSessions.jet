@@ -1,0 +1,39 @@
+// `jet repl` and `jet debug` take `--deep-checks` as `jet run` does. A REPL
+// session fixes the selection it starts with for every turn, and a malformed
+// scope is E2119 before a session or a debug build starts.
+use {
+    jet_cli.[jet_cli_plan]
+    jet_driver.[JET_DRIVER_EXIT_USAGE]
+}
+
+// The code and exit status `jet argv` is refused with, or "" when it plans.
+deep_sessions_refusal: fn(argv: [String]) -> String {
+    if jet_cli_plan(argv) == .Refused(report, _, code, _) -> return "{report.code} exit {code}"
+    ""
+}
+
+#Test("a_repl_session_starts_with_the_deep_checks_its_flags_select") {
+    if jet_cli_plan([String]{"repl"}) == .Repl(_, _, options, _) {
+        assert(!options.deep_checks.all, "no flag selects no deep check")
+        assert_eq(options.deep_checks.scopes.len(), 0)
+    } else {
+        panic("`jet repl` plans a session")
+    }
+    if jet_cli_plan([String]{"repl", "--deep-checks"}) == .Repl(_, _, options, _) {
+        assert(options.deep_checks.all, "the bare flag selects every deep check")
+        assert_eq(options.deep_checks.scopes.len(), 0)
+    } else {
+        panic("`jet repl --deep-checks` plans a session")
+    }
+    if jet_cli_plan([String]{"repl", "--deep-checks=tree", "--deep-checks=shop", "--deep-checks=tree"}) == .Repl(_, _, options, _) {
+        assert(!options.deep_checks.all, "scopes alone select no other deep check")
+        assert_eq(options.deep_checks.scopes, [String]{"tree", "shop"})
+    } else {
+        panic("`jet repl --deep-checks=tree` plans a session")
+    }
+    assert_eq(deep_sessions_refusal([String]{"repl", "--deep-checks=tree.run"}), "E2119 exit {JET_DRIVER_EXIT_USAGE}")
+}
+
+#Test("a_debug_build_refuses_a_malformed_deep_check_scope_before_it_starts") {
+    assert_eq(deep_sessions_refusal([String]{"debug", "--deep-checks=tree.run", "missing.jet"}), "E2119 exit {JET_DRIVER_EXIT_USAGE}")
+}

@@ -11,7 +11,7 @@ use {
     ]
     jet_cli.[jet_cli_checked_semindex, jet_cli_driver_request]
     jet_sema.[SchemaSnapshot, SemaForeignProviderInput, SnapshotField]
-    jet_foundation.[Diagnostic, Item, Span, TComptimeValue]
+    jet_foundation.[DeepChecks, Diagnostic, Item, Span, TComptimeValue]
     jet_eval.[jet_eval_default_config]
     jet_parser.[parse_source]
 }
@@ -224,4 +224,39 @@ seams_checked_projection: fn() {
     parsed: parse_source("#PublishedSchema Account: struct {{\n    name: String\n    verified: Bool\n}}".bytes())
     pending: jet_driver_schema_pending_breaks([[Item]{parsed.program.items[0]}], [String:SchemaSnapshot]{"Account": baseline})
     seams_require(pending == ([String]{"Account"}), "status reuses advisory sema diff")
+}
+
+// An embedding caller selects deep checks on the request, the field the
+// command line's `--deep-checks` fills, and the compiler resolves that one
+// field the same way for both: off unless asked, every holder for `all`, each
+// holder a scope selects, and a scope that keeps none refused.
+seams_deep_request: fn(deep_checks: DeepChecks) -> JetDriverCompileRequest {
+    request := seams_request("package: {{ name: \"tree\" }}\ncheck: fn(size: Int) {{\n    #On(.Deep) {{\n        assert(size > 0, \"size\")\n    }}\n}}\nleaf: fn() -> Int {{ 1 }}\nrun: fn() {{ check(leaf()) }}", JetDriverCompileMode.Program)
+    request.deep_checks = deep_checks
+    request
+}
+seams_deep_kept: fn(deep_checks: DeepChecks) -> [String] {
+    front: jet_driver_lowering_inputs(seams_deep_request(deep_checks), None)
+    seams_require(front.compile.complete && !jet_driver_has_errors(front.compile.diagnostics) && front.inputs != None, "deep-check compile: {front.compile.diagnostics.map(fn(diagnostic) { "{diagnostic.code} {diagnostic.what}" })}")
+    kept := [String]{}
+    if front.inputs == .Val(checked) -> kept = checked.deep_checks.copy()
+    kept
+}
+seams_deep_refused: fn(scope: String) -> [String] {
+    front: jet_driver_lowering_inputs(seams_deep_request(DeepChecks{scopes: [String]{scope}}), None)
+    seams_require(!front.compile.complete, "`{scope}` keeps no deep check, so the compile stops")
+    codes := [String]{}
+    loop diagnostic in front.compile.diagnostics -> codes.push(diagnostic.code.copy())
+    codes
+}
+#Test("embedded_deep_checks") {
+    stock: seams_request("run: fn() {{ }}", JetDriverCompileMode.Program)
+    seams_require(!stock.deep_checks.all && stock.deep_checks.scopes.len() == 0, "a request no options reach keeps no deep check")
+    seams_require(seams_deep_kept(DeepChecks{}).len() == 0, "off keeps no holder")
+    every: seams_deep_kept(DeepChecks{all: true})
+    seams_require(every.len() == 1, "the bare request keeps the one holder, not {every.len()}")
+    seams_require(seams_deep_kept(DeepChecks{scopes: [String]{"tree"}}) == every, "the package scope keeps its holder")
+    seams_require(seams_deep_kept(DeepChecks{scopes: [String]{"tree::check"}}) == every, "the function scope keeps its holder")
+    seams_require(seams_deep_refused("tree::leaf") == [String]{"E2121"}, "a scope whose declarations hold none is E2121")
+    seams_require(seams_deep_refused("tree::nowhere") == [String]{"E2120"}, "a scope naming no declaration is E2120")
 }

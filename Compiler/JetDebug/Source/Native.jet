@@ -6,7 +6,7 @@
 use {
     native_process: core.process
     native_files: core.files
-    jet_foundation.[Diagnostic, diagnostic_from_registry, diagnostic_registry_row]
+    jet_foundation.[DeepChecks, Diagnostic, deep_checks_flags, diagnostic_from_registry, diagnostic_registry_row]
 }
 
 // The line the session's marker command prints once LLDB has finished every
@@ -357,9 +357,14 @@ NativeSession: struct {
 }
 
 // The command that builds `entry` as the debuggable native image: this `jet`
-// (`jet`), unoptimized, with its DWARF, into `out_dir`.
-native_debug_build_argv: fn(jet: String, entry: String, out_dir: String) -> [String] Never! {
-    [String]{jet, "build", "--optimize=none", "--output-dir={out_dir}", entry}
+// (`jet`), unoptimized, with its DWARF and the deep checks `deep_checks`
+// selects, into `out_dir`.
+native_debug_build_argv: fn(jet: String, entry: String, out_dir: String, deep_checks: DeepChecks) -> [String] Never! {
+    argv := [String]{jet, "build", "--optimize=none"}
+    loop word in deep_checks_flags(deep_checks) -> argv.push(word)
+    argv.push("--output-dir={out_dir}")
+    argv.push(entry.copy()) // copy: the command owns its words.
+    argv
 }
 
 // The image `native_debug_build_argv` writes: the entry's stem in `out_dir`.

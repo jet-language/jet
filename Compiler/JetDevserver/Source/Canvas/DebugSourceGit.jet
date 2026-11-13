@@ -7,7 +7,7 @@ use {
     canvas_sys: core.sys
     jet_canvas.[read_source_without_symlinks, source_revision]
     jet_debug.[DebugSnapshot, NATIVE_DEBUG_BREAKPOINT_HIT, NATIVE_DEBUG_LOCALS_LABEL, NativeDebugError, NativeSession, NativeStop, NativeStopKind, native_debug_build_argv, native_debug_image, native_debug_lldb]
-    jet_foundation.[Diagnostic, Span, diagnostic_render, foundation_json_integer, foundation_json_quote, foundation_parse_protocol_json_with_limit, sha256_bytes, sha256_hex_bytes]
+    jet_foundation.[DeepChecks, Diagnostic, Span, diagnostic_render, foundation_json_integer, foundation_json_quote, foundation_parse_protocol_json_with_limit, sha256_bytes, sha256_hex_bytes]
 }
 
 DEBUG_SCHEMA_VERSION: 1
@@ -104,8 +104,11 @@ DebugExecution: struct {
 // The live Canvas debug sessions. The devserver serves Canvas requests on one
 // task, so the store is plain state mutated through `&self`. `jet` is the
 // compiler that builds each debugged program: the running `jet` itself.
+// `deep_checks` is the deep checks every build keeps, fixed when the store is
+// made, as a `jet debug` session's are.
 DebugSessions: struct {
     jet: String
+    deep_checks: DeepChecks{DeepChecks{}}
     next_id: Int
     sessions: [String: DebugSession]
     pause_on_input_end: Bool
@@ -148,7 +151,7 @@ DebugSessions: struct {
                 serial: self.next_id
                 self.next_id += 1
                 id = "canvas-debug-{serial}"
-                native: native_debug_artifact(self.jet, path, id)
+                native: native_debug_artifact(self.jet, path, id, self.deep_checks)
                 self.sessions[id] = DebugSession{
                     path: path, source_id: source_id, revision: revision, tier: tier, created: serial,
                     breakpoints: breakpoints.copy(), commands: next_commands.copy(), watches: watches.copy(), native: Val(native),
@@ -317,8 +320,8 @@ DebugSessions: struct {
     }
 }
 
-debug_sessions: fn() -> DebugSessions Never! {
-    DebugSessions{jet: canvas_sys.executable(), next_id: 1, sessions: [String: DebugSession]{}, pause_on_input_end: true}
+debug_sessions: fn(deep_checks: DeepChecks) -> DebugSessions Never! {
+    DebugSessions{jet: canvas_sys.executable(), deep_checks: deep_checks, next_id: 1, sessions: [String: DebugSession]{}, pause_on_input_end: true}
 }
 
 debug_identity_text_valid: fn(value: String) -> Bool Never! {
@@ -399,17 +402,17 @@ validate_debug_command: fn(command: String) CanvasDebugError! {
     Err(canvas_debug_error("unsupported", "Canvas debug command is not in the source-level debugger vocabulary"))
 }
 
-// Build the source with this `jet`, as `jet debug` does. A missing LLDB is
-// E2203 before anything is built; a source that does not compile returns the
-// compiler's own diagnostics.
-native_debug_artifact: fn(jet: String, path: String, id: String) -> NativeDebugArtifact CanvasDebugError! {
+// Build the source with this `jet` and `deep_checks`, as `jet debug` does. A
+// missing LLDB is E2203 before anything is built; a source that does not
+// compile returns the compiler's own diagnostics.
+native_debug_artifact: fn(jet: String, path: String, id: String, deep_checks: DeepChecks) -> NativeDebugArtifact CanvasDebugError! {
     jet_source: read_source_without_symlinks(path) ?? return Err(canvas_debug_error("io", "couldn't read debug source: {err.message}"))
     native_debug_lldb() ?? return Err(debug_unavailable(err))
     // The image outlives this call: the session owns the directory, and
     // releasing the session removes it.
     scratch: canvas_files.mkdtemp("jet-canvas-debug-{id}") ?? return Err(canvas_debug_error("io", "couldn't prepare native Canvas debug storage: {err}"))
     out_dir: canvas_files.join(scratch, "out")
-    built: canvas_process.cmd(native_debug_build_argv(jet, path, out_dir)).stdout(.Capture).stderr(.Capture).run()
+    built: canvas_process.cmd(native_debug_build_argv(jet, path, out_dir, deep_checks)).stdout(.Capture).stderr(.Capture).run()
         ?? return Err(canvas_debug_error("io", "couldn't run the native Canvas debug build: {err}"))
     if !built.success {
         if canvas_files.remove_all(scratch) == {

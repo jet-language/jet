@@ -5457,7 +5457,8 @@ in a release image writes `--debug-info=true` or `debug_info: true` in a
 ### Deep checks
 
 Every deep check is off by default, in every profile (D-DEEP-CHECK1). `jet
-run`, `jet dev`, `jet test` and `jet build` take `--deep-checks`: the bare
+run`, `jet dev`, `jet test`, `jet build`, `jet debug` and `jet repl` take
+`--deep-checks`: the bare
 flag keeps every deep check of the program and its Jet libraries, and
 `--deep-checks=<scope>` keeps those of one declaration and everything under
 it. A scope is `<package>` or `<package>::<name>(.<name>)*`: the package's
@@ -5473,6 +5474,14 @@ offers the scopes that do. The selection is part of the compile's identity,
 so a cached image built with one selection never serves another; equal
 selections written in any order share it. Example:
 [`tests/ui/deep_checks_unmatched_scope`](../../tests/ui/deep_checks_unmatched_scope.jet).
+
+A `--deep-checks` after a standalone `--` is the program's argument, never a
+selection. The command line and a caller that embeds the compiler give the
+same typed request, which the compiler resolves once. `jet debug` builds the
+image it debugs with the selection. `jet dev` keeps its launch
+selection across every rebuild, and a `jet repl` session keeps the one it
+started with for every turn: another selection is another session, which
+neither resets nor takes over the first.
 
 A deep check is type-checked in every build, kept or not, and it may only
 look. It reads the state around it but never changes it: a write to, a write

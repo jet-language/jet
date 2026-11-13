@@ -4,8 +4,16 @@
 use {
     native_test_process: core.process
     native_test_files: core.files
-    jet_debug.[NativeDebugError, NativeSession, NativeStopKind, native_debug_parse_frame, native_debug_parse_locals, native_debug_parse_stop]
+    jet_debug.[NativeDebugError, NativeSession, NativeStopKind, native_debug_build_argv, native_debug_parse_frame, native_debug_parse_locals, native_debug_parse_stop]
+    jet_foundation.[DeepChecks]
     jet_testkit.[kit_require_tool]
+}
+
+#Test("the_debug_build_keeps_the_selected_deep_checks") {
+    off: native_debug_build_argv("jet", "prog.jet", "out", DeepChecks{})
+    assert_eq(off, [String]{"jet", "build", "--optimize=none", "--output-dir=out", "prog.jet"})
+    kept: native_debug_build_argv("jet", "prog.jet", "out", DeepChecks{all: true, scopes: [String]{"tree", "tree::run"}})
+    assert_eq(kept, [String]{"jet", "build", "--optimize=none", "--deep-checks", "--deep-checks=tree", "--deep-checks=tree::run", "--output-dir=out", "prog.jet"})
 }
 
 #Test("frames_name_the_jet_function_file_and_line") {

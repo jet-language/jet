@@ -1,8 +1,10 @@
 // `jet debug <file.jet>`: the program's native O0 image, built by this `jet`,
 // run under LLDB behind the `(Jet)` console of Compiler/JetDebug Native.jet.
 // It stops at the start of `run`, then reads one command a line; the end of
-// stdin runs the program to its end, and `quit` ends it early (E2204). With
-// no LLDB the session stops with E2203 before it builds anything.
+// stdin runs the program to its end, and `quit` ends it early (E2204). The
+// image keeps the deep checks `--deep-checks` selects, as a `jet build` with
+// the same flags does. With no LLDB the session stops with E2203 before it
+// builds anything.
 use {
     cli_files: core.files
     cli_process: core.process
@@ -10,7 +12,7 @@ use {
     cli_term: core.term
     jet_debug.[NATIVE_DEBUG_PROMPT, NativeDebugError, NativeDebugStep, NativeSession, NativeStopKind, native_debug_build_argv, native_debug_image, native_debug_lldb]
     jet_driver.[JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USAGE, JET_DRIVER_EXIT_USER_ERROR]
-    jet_foundation.[diagnostic_registry_row]
+    jet_foundation.[DeepChecks, deep_checks_malformed, deep_checks_read, diagnostic_registry_row]
 }
 
 jet_cli_debug: fn(jet_argv: [String], args: [String], color: Bool) -[FS, Env, Exec, IO, Time.Wait]> JetCLIPlan Never! {
@@ -19,11 +21,16 @@ jet_cli_debug: fn(jet_argv: [String], args: [String], color: Bool) -[FS, Env, Ex
     }
     if args.len() < 2 -> return jet_cli_missing_target("debug", false)
     if args.len() > 2 -> return jet_cli_fail("E2104", "`jet debug` takes one source file, but got `{args[2]}` too", jet_cli_why("E2104"), "Run `jet debug <file.jet>`.", color, JET_DRIVER_EXIT_USAGE)
+    deep_checks := DeepChecks{}
+    if deep_checks_read(jet_argv) == {
+        .Refused(argument) -> return JetCLIPlan.Refused{report: deep_checks_malformed(argument), color: color, exit_code: JET_DRIVER_EXIT_USAGE, notice: ""}
+        .Read(request) -> deep_checks = request.copy()
+    }
     entry: args[1]
     source: cli_files.read(entry) ?? return jet_cli_fail("E2105", "couldn't read `{entry}`: {err}", jet_cli_why("E2105"), "check the path, then run the command again", color, JET_DRIVER_EXIT_USER_ERROR)
     _: native_debug_lldb() ?? return jet_cli_debug_unavailable(err, color)
     scratch: cli_files.temp_dir("jet-debug") ?? return jet_cli_fail("E2105", "couldn't create the debug build directory: {err}", jet_cli_why("E2105"), "check that the temporary directory is writable, then run the command again", color, JET_DRIVER_EXIT_USER_ERROR)
-    plan: jet_cli_debug_session(entry, source, scratch.path, color)
+    plan: jet_cli_debug_session(entry, source, scratch.path, deep_checks, color)
     if cli_files.remove_all(scratch.path) == {
         .Err(_) -> {}
         .Ok(_) -> {}
@@ -31,9 +38,9 @@ jet_cli_debug: fn(jet_argv: [String], args: [String], color: Bool) -[FS, Env, Ex
     plan
 }
 
-jet_cli_debug_session: fn(entry: String, source: String, scratch: String, color: Bool) -[FS, Env, Exec, IO, Time.Wait]> JetCLIPlan Never! {
+jet_cli_debug_session: fn(entry: String, source: String, scratch: String, deep_checks: DeepChecks, color: Bool) -[FS, Env, Exec, IO, Time.Wait]> JetCLIPlan Never! {
     out_dir: cli_files.join(scratch, "out")
-    built: cli_process.cmd(native_debug_build_argv(cli_sys.executable(), entry, out_dir)).stdout(.Capture).stderr(.Capture).run() ?? return jet_cli_fail("E2105", "couldn't run the debug build: {err}", jet_cli_why("E2105"), "check that this `jet` can run, then run the command again", color, JET_DRIVER_EXIT_USER_ERROR)
+    built: cli_process.cmd(native_debug_build_argv(cli_sys.executable(), entry, out_dir, deep_checks)).stdout(.Capture).stderr(.Capture).run() ?? return jet_cli_fail("E2105", "couldn't run the debug build: {err}", jet_cli_why("E2105"), "check that this `jet` can run, then run the command again", color, JET_DRIVER_EXIT_USER_ERROR)
     if !built.success -> return jet_cli_done(built.output, built.errors, if built.code == 0 -> JET_DRIVER_EXIT_USER_ERROR else -> built.code)
     session := NativeSession.start(native_debug_image(entry, out_dir), cli_files.join(scratch, "output.txt")) ?? return jet_cli_debug_unavailable(err, color)
     plan: jet_cli_debug_console(session, cli_files.basename(entry), source.split("\n").to_list(), color)
