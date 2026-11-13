@@ -1,0 +1,26 @@
+// A lambda that only reads the list may run beside a live view of it, and a
+// lambda that pushes into the list may run once the view's last use is over.
+reads_beside_a_view: fn() -> Int {
+    items := [1, 2, 3]
+    total: fn() { items.len() }
+    window: items[0..2]
+    seen: total()
+    window[0] + seen
+}
+
+pushes_after_the_view_ends: fn() -> Int {
+    items := [1, 2, 3]
+    count := 0
+    add: fn(n: Int) {
+        count += 1
+        items.push(n)
+    }
+    window: items[0..2]
+    first: window[1]
+    add(4)
+    first + items.len() + count
+}
+
+run: fn() {
+    print("{reads_beside_a_view()}|{pushes_after_the_view_ends()}")
+}

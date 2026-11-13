@@ -3673,6 +3673,24 @@ sema_ownership_closure_writes: fn(state: &SemaOwnershipState, callee: Expr, scop
     [String]{}
 }
 
+// A call of a lambda that writes the captured `name` changes it as a direct
+// write would: not while a live view or window looks into it, since a push
+// or clear through the capture can move or free the storage under the view.
+sema_ownership_check_closure_write_views: fn(state: &SemaOwnershipState, name: String, callee_name: String, span: Span, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) {
+    owner: Expr.Ident{name: name, span: span, id: AST_NODE_GENERATED}
+    action: "be changed by calling `{callee_name}`"
+    loop place in sema_ownership_places_from_expr_in_state(owner, scopes, state) {
+        if sema_ownership_conflicting_view_for_expr(state, place, AccessConvention.Write, owner, scopes) == .Val(fact) {
+            diagnostics.push(sema_ownership_diag_view_change(fact, place, action, span, scopes))
+            return
+        }
+        if sema_ownership_active_loan_conflict_for_expr(state, place, AccessConvention.Write, owner, scopes) == .Val(loan) {
+            diagnostics.push(sema_ownership_diag_loan_change(state, loan, place, action, span, scopes))
+            return
+        }
+    }
+}
+
 // An escaping lambda bound in this scope writes the captured `names`: it
 // holds their write access while the scope lasts, so assigning one of them
 // directly is E0204 (Rust `lambda_mut_borrow_stack`).

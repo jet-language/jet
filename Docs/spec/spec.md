@@ -1878,7 +1878,8 @@ invalidation state. Read views may overlap. A write view is unique and cannot
 overlap any live read or write view. Different known fields are disjoint; ranges
 and indexes overlap unless sema proves otherwise. Moving or replacing an owner,
 writing an overlapping place, or resizing or relocating its storage is E0212
-while a view is live. Arena reset or close invalidates its views; a later read is
+while a view is live; a call of a lambda that writes a captured owner writes
+that owner. Arena reset or close invalidates its views; a later read is
 E0632. Facts end after the last use or at lexical scope, whichever comes first;
 control-flow joins and loops keep invalidation conservatively. Captures and field
 projections preserve the fact. A captured or returned view crossing a task or
