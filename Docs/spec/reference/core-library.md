@@ -5193,7 +5193,9 @@ The event family is a typed Core value with no additional event syntax (`D-EVENT
 
 ### `app` — live bindings
 
-`app` keeps the process-wide live-binding registry. The module source is
+`app` keeps the process-wide live-binding registry; inside `testing.world` it
+keeps the world's own registry instead, starting empty, so a world and its
+tasks never read or change the process registry. The module source is
 [`Core/App/App.jet`](../../../Core/App/App.jet).
 
 | Signature | Result | Description |

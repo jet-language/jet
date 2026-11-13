@@ -23,6 +23,7 @@ use {
     core.reactive.loadable.[Loadable]
     rt: jet.runtime.time
     rt_web: jet.runtime.web
+    world_rt: jet.runtime.testing
 }
 
 #Error
@@ -204,16 +205,22 @@ LIVE_SYNC_SOURCE: "app.sync"
 
 // The encoded registry, in one process-wide cell. A replacement installs only
 // while the cell still holds the bytes its caller read, so a concurrent change
-// makes the caller retry instead of being lost.
+// makes the caller retry instead of being lost. Inside a deterministic world
+// the registry is the World's own cell instead, starting empty, so a world and
+// its tasks never read or change the process registry.
 LiveCell: struct {
     bytes: [U8]
 }
 
 LIVE_CELL: Shared{LiveCell{bytes: [U8]{}}}
 
-live_cell_load: fn() -> [U8] { LIVE_CELL.bytes }
+live_cell_load: fn() -> [U8] {
+    if world_rt.world_store_load("core.web.live") == .Val(bytes) -> return bytes
+    LIVE_CELL.bytes
+}
 
 live_cell_replace: fn(expected: [U8], replacement: &&[U8]) -> Bool {
+    if world_rt.world_store_replace("core.web.live", expected, replacement) == .Val(replaced) -> return replaced
     cell := LIVE_CELL.guard_edit()
     if cell.value.bytes != expected -> return false
     cell.value.bytes = replacement.move()

@@ -1,0 +1,40 @@
+use {
+    application: app
+    core.reactive.loadable.[Loadable]
+    testing: core.testing
+}
+
+#Error
+UserError: enum {
+    Missing
+}
+
+user_name: fn(id: String) -[DB.Read]> String UserError! {
+    if id == "" -> return Err(UserError.Missing)
+    "v1:{id}"
+}
+
+shown: fn(state: Loadable<String, UserError>) -> String {
+    if state == {
+        .Loaded(value) -> value
+        .Failed(_) -> "failed"
+        .Idle | .Loading -> "pending"
+    }
+}
+
+run: fn() {
+    outer: application.live(user_name, "alice")
+    print("process: {shown(application.state(outer))}")
+    print("process: {application.live_stats()}")
+    testing.world(
+    world -> {
+        print("world start: {application.live_stats()}")
+        inner: application.live(user_name, "bob")
+        application.push(user_name, "bob", value: "v2:bob")
+        print("world: {shown(application.state(inner))}")
+        print("world end: {application.live_stats()}")
+    },
+    )
+    print("process: {shown(application.state(outer))}")
+    print("process: {application.live_stats()}")
+}
