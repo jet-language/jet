@@ -1116,7 +1116,7 @@ Whole-file and metadata functions. `read`, `read_bytes`, `write`,
 | `write(path, text)` | `!IOError` | Create or replace a text file. |
 | `write_bytes(path, bytes)` | `!IOError` | Create or replace raw bytes. |
 | `append_all(path, text)` | `!IOError` | Append text in one whole-file call. |
-| `map(path)` | `MappedFile !IOError` | Map a file into the checked byte-view carrier. |
+| `map(path)` | `MappedFile !IOError` | Map a file into the checked byte-view carrier. The view keeps the bytes the file held when it was mapped: no later write or truncation by another process reaches it (`mapped.kind()` tells how). |
 | `read_at(path, offset, count)` | `[U8] !IOError` | Read one bounded byte range; negative offset or count is clamped to zero. |
 | `write_at(path, offset, bytes)` | `!IOError` | Write bytes at an offset; negative offset is clamped to zero. |
 | `write_atomic(path, bytes)` | `!IOError` | Reserve one of 128 same-directory `.jet_tmp_<pid>_<sequence>` names, write and sync it, preserve available target permissions, close, then rename; on Unix, sync the parent after publication. |
@@ -1333,6 +1333,7 @@ count_lines: fn(path: String) -> Int IOError! {
 | `writer.allocate(size)` | `!IOError` | Reserve disk space for the first `size` bytes (posix_fallocate); a shorter file grows to `size` with zero bytes. A file system that cannot reserve is `IOError.Unsupported`. |
 | `reader.advise(advice)` | `!IOError` | Tell the system how the file will be read (posix_fadvise): `Advice.Normal`, `Sequential`, `Random`, `WillNeed`, `DontNeed` or `NoReuse`. It plans caching only; a pipe accepts any advice. |
 | `mapped.advise(advice)` | `!IOError` | Tell the system how a `MappedFile`'s bytes will be read (posix_madvise over the whole map), with the same `Advice` values; `NoReuse` marks the pages cold. It plans paging only; the map holds the same contents whatever it says. |
+| `mapped.kind()` | `MapKind` | How the map keeps its bytes fixed (D-MMAP-STABLE1). `Clone`: it maps a clone of the file that shares its blocks (FICLONE; Btrfs, XFS with reflink, bcachefs). `Held`: it maps the file itself while nothing can change it, either because the file system cannot be written (squashfs, erofs) or because the map holds a read lease. A writer or truncation waits on the lease while the runtime copies the bytes into an unnamed temp file and maps the copy at the same address; from then on the map reports `Copy`. `Copy`: it maps a copy taken at map time. That happens for a file the lease cannot hold (over 4 GiB, open for writing elsewhere, or on a file system without leases) and for an empty file. The temp file lives in the file's own directory, else in the temp directory. |
 
 Readers, writers, temporary resources, and locks own their provider resource
 until lexical scope exit or an explicit `close(handle)` consumes the handle.

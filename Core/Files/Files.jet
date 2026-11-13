@@ -174,6 +174,19 @@ Advice: enum {
     NoReuse
 }
 
+/// How a `MappedFile` keeps its bytes fixed while another process writes or
+/// truncates the file (`MappedFile.kind()`). `Clone` maps a clone of the
+/// file that shares its blocks until either changes. `Held` maps the file
+/// itself while nothing can change it: its file system cannot be written, or
+/// the map holds a read lease, which the first writer breaks; the map then
+/// holds a copy of the bytes it showed and reports `Copy`. `Copy` maps a copy
+/// taken when the file was mapped or when its lease broke.
+MapKind: enum {
+    Clone
+    Held
+    Copy
+}
+
 /// A file's identity, its device plus its file number.
 /// Two paths name the same file exactly when their ids are equal.
 FileID: struct {
@@ -258,6 +271,17 @@ MappedFile: struct {
     /// contents whatever it says, and an empty map accepts any.
     advise: fn(self, advice: Advice) IOError! -[FS.Read]> {
         core.files.__map_advise(self, map_advice_code(advice))
+    }
+
+    /// How this map keeps its bytes fixed while the file changes. Every
+    /// kind shows the bytes the file held when it was mapped; a `Held` map
+    /// becomes `Copy` once a writer breaks its lease.
+    kind: fn(self) -> MapKind Never! {
+        if core.files.__map_kind(self) == {
+            1 -> MapKind.Clone
+            2 -> MapKind.Held
+            else -> MapKind.Copy
+        }
     }
 }
 

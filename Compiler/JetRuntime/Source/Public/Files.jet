@@ -245,6 +245,8 @@ files: module {
     #Import(c) priv writer_allocate: fn(writer: FileWriter, size: Int) -[FS.Write]> IOError! = "jet_std_file_writer_allocate"
     #Import(c) priv reader_advise: fn(reader: FileReader, advice: Int) -[FS.Read]> IOError! = "jet_std_file_reader_advise"
     #Import(c) priv map_advise: fn(map: MappedFile, advice: Int) -[FS.Read]> IOError! = "jet_std_fs_map_advise"
+    // How a mapping keeps its bytes: 1 Clone, 2 Held or 3 Copy.
+    #Import(c) priv map_kind: fn(map: MappedFile) -> Int = "jet_std_fs_map_kind"
 
     // Whether the process may access `path` in `mode`, and the space row of
     // the filesystem holding `path`.

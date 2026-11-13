@@ -1,0 +1,22 @@
+# D-MMAP-STABLE1=A (#6706 c1, c2, c5): a MappedFile keeps the bytes its file held when it was
+# mapped. Another process writes the file in place (dd conv=notrunc) and then truncates it to
+# zero bytes; the file changes both times, the map never does, and reading past the new end of
+# the file still reads the old bytes instead of faulting. The map is a clone of the file where
+# the file system can clone, else the file itself under a read lease: the writer's open breaks
+# the lease, the runtime copies the bytes and maps the copy in place, and `kind()` turns from
+# Held to Copy. An empty file maps as a copy.
+fixture: a_mapped_file_keeps_its_bytes_when_another_process_writes_the_file.fixture
+requires: os-name:linux
+requires: tool:sh
+requires: tool:dd
+step: jet fmt --check main.jet
+exit: 0
+step default: jet run main.jet
+exit: 0
+stdout: = a_mapped_file_keeps_its_bytes_when_another_process_writes_the_file.out
+step o0: jet run --optimize=none main.jet
+exit: 0
+stdout: == default
+step o2: jet run --optimize=full main.jet
+exit: 0
+stdout: == default

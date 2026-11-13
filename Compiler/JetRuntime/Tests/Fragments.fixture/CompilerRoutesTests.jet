@@ -76,6 +76,9 @@ compiler_routes_bytes_drop: fn(data: I64, length: I64) {
     first: rt_text_word(output)
     if (jet_std_files_map(alias, output, error) != I64{1}) -> return I64{25}
     second: rt_text_word(output)
+    // A file with bytes maps as a clone, held or copied; an empty one as a copy.
+    kind: jet_std_fs_map_kind(first)
+    if (kind < I64{1} || kind > I64{3}) -> return I64{35}
     if (jet_std_files_writer_refusal(alias, output) != I64{1}) -> return I64{26}
     refusal: rt_text_word(output)
     if (rt_text_word(refusal) != HOST_IO_KIND_OTHER || rt_text_word(refusal + I64{8}) != HOST_IO_OP_WRITE || !jet_rt_string_eq(rt_text_word(refusal + I64{16}), alias) || !jet_rt_string_eq(rt_text_word(refusal + I64{40}), rt_static_text("file is mapped read-only"))) -> return I64{27}
@@ -90,6 +93,7 @@ compiler_routes_bytes_drop: fn(data: I64, length: I64) {
     if (jet_std_files_map(path, output, error) != I64{1}) -> return I64{31}
     empty: rt_text_word(output)
     if !jet_std_fs_map_is_empty(empty) -> return I64{32}
+    if (jet_std_fs_map_kind(empty) != I64{3}) -> return I64{36}
     if (jet_std_files_writer_refusal(path, output) != I64{1}) -> return I64{33}
     jet_rt_handle_drop_io_error(rt_text_word(output))
     jet_rt_handle_drop_jet_mapped_file(empty)
