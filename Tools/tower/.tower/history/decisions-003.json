@@ -18170,6 +18170,286 @@
       "outcome": "A",
       "ratifiedAt": "2026-11-09",
       "retiredAt": "2026-11-13T17:51:43.600Z"
+    },
+    {
+      "id": "D-THREAD-STACK1",
+      "cardId": "c0ih6z1d",
+      "group": "runtime",
+      "title": "A task group can ask for a larger stack; programs otherwise get the system's stack size",
+      "situation": "Today every task in every Jet program gets a stack of at least 192 MiB, a size chosen for the compiler's own deep recursion. The main thread gets the normal system size, so the same deep call works in a task and stops on the main thread.\n\nThe plan is to give programs the normal size everywhere, while the compiler keeps its large stacks. The open question is how the compiler asks for them: a task-group argument, a process-wide call, a package setting, a private back door, or no change.\n\nWhatever is chosen must not leak into programs the compiler starts, and must not need a privilege other packages lack. We recommend A: a task group can ask for a bigger stack, and one deep function uses the depth mark Jet already ratified.",
+      "gist": "How should the compiler get its large worker stacks once ordinary programs stop getting 192 MiB for every task?",
+      "lesson": "A stack is the memory a thread uses for calls in progress. Today every task gets a very large one because the compiler needs it. This vote decides how the compiler keeps its large stacks while ordinary programs get the normal size.",
+      "explainer": "Words used here. A stack is the memory that holds calls in progress; deep recursion needs a big one. The soft stack limit is the size the operating system offers, usually 8 MiB.\n\nA worker is a thread that runs tasks, and a fiber is a task with its own small stack on a worker. A task group is the task.group block that owns the tasks started in it.",
+      "story": "Mia's program recurses deeply in a task. Today it works, because every task gets 192 MiB, but the same call on the main thread stops. Under A both stop at the same depth. The stop names the fix: mark the function with the depth it needs, and it works in both places on every build level.",
+      "inWild": "// Rust: the thread that needs a big stack asks for it.\nstd::thread::Builder::new().stack_size(192 << 20).spawn(compile)?;",
+      "detail": "What this ballot decides. How the compiler gets the stack size its recursive passes need, once ordinary programs get a stack chosen for programs. The runtime's default and the docs follow from the choice.\n\nToday, with the t6c compiler on dev 76955986d0. Thread.jet's thread_stack_bytes gives each worker and fiber the larger of the soft stack limit and 192 MiB. It is capped at 8 GiB and at a hundredth of a finite address-space limit. The main thread keeps the soft limit, 16 MiB on the probe machine.\n\nProbe t01 recurses 3,000,000 calls deep on the main thread, and jet run stops it with Stop [E3012]: Stack overflow in depth. Probe t02 makes the same call in a task and prints task 3000000, because the task got 192 MiB. On the seed compiler jet run also ran t01 to the end; t6c now runs the program's main thread with every stack default (Host.jet:3383).\n\nProbe t03 writes task.group deep(stack: …) and gets E0003, task-group parameter stack is not supported. Probe t04 calls core.sys.__thread_stack_floor from user code and gets E0067. Probe t06 writes #MaxDepth(3000001) and gets E0927: the ratified depth mark is not built yet.\n\nThe rule under A, for one deep function. D-RESOURCE-LIMIT1=A and D-STACKBOUND1=A already ratified #MaxDepth(n): every build level reserves room for n waiting calls when the entry or task starts. That is the fix A's stop suggests when the overflow repeats one function, as in Mia's program. It gives the same depth on every tier.\n\nThe rule under A, for other deep code. task.group gains a stack argument next to limit. Every task started in that group runs on a stack of at least that many bytes. A group opened inside one of those tasks uses the same size, unless it names its own. The bytes give a depth that depends on the machine, as D-RESOURCE-LIMIT1=A allows for unmarked code.\n\nWithout a mark or a stack argument, a task gets the soft stack limit, at least 8 MiB, the same room the main thread gets. That meets the card's goal, and the runtime docs state both numbers.\n\nNothing outside the group changes. The process's stack limit is never written, so no child process inherits anything: not jet dev's program, not a jet test binary, not a core.process spawn. Other groups in the same program keep the default.\n\nThe compiler. Host.jet already compiles inside task.group compile_stack. Its deep code is many functions calling each other, so one mark cannot size it. Under A that line asks for 192 MiB, and the compiler's internal groups inherit it. D-COMPILE-STACK1=A already says jet::compile runs on a worker with an explicit stack size; A gives that size a public spelling.\n\nA needs no double-underscore exception, no C import and no package field. Any package can do what the compiler does, which is the rule card c0w1wcfc asks for.\n\nLimits and refusals, following D-RESOURCE-LIMIT1=A. A literal size the target can never supply is a build error. A request that the address-space limit cannot cover is cut to a hundredth of it, as today, and the stop report names the request and the cut.\n\nA target whose tasks share one fixed stack, such as web, refuses a stack argument at build time, naming the target. The argument reserves address space without touching memory, as today's 192 MiB does, so resident memory does not grow until the stack is used.\n\nWhat building A takes. The parser and checker accept stack beside limit. The runtime keeps one fiber pool per stack size instead of one size per process. Alloc.jet's arena bands read each thread's real stack size instead of assuming 192 MiB. E3012's fix text names #MaxDepth or the group's stack argument.\n\nBeginner path. Nothing to write. Tasks and the main thread get the same room, so a recursion that works on one works on the other. If one function needs more, the stop writes the #MaxDepth line for it. Expert path. Ask a group for more with stack:, and see the computed worst case with jet inspect memory under D-STACKBOUND1=A.\n\nDownsides of A, and what the design does about them. A program that relied on 192 MiB in its tasks now stops with E3012. The stop names the fix: #MaxDepth on the function that repeats, or the stack argument on the group. Until #MaxDepth is built, it names only the stack argument, so the default should change after #MaxDepth lands.\n\nThe census on dev counts task.group headers outside comments: 195 in 146 files, 24 of them with an argument list such as limit:. Only the compiler's compile_stack group is known to need more than the default. The suite's compiler_stack cases and every example's golden output prove the rest under an 8 MiB limit before the default changes.\n\nWhat remains. Two fiber pools in one process, one per size, keep some idle stacks of each size. That is address space, not resident memory; the cost is bounded by the pool's existing cap.\n\nOther options. B adds a public core.sys call that raises the floor for every worker in the process. C adds a package.jet field fixed at build time. D lets Compiler packages call Core's double-underscore functions. E keeps 192 MiB for every program and retires c6. F makes the compiler's passes iterative so nothing needs more (#5910).\n\nTheir best cases. B is one call and is already drafted. C needs no code in Host.jet. D is the smallest change. E costs nothing and keeps every deep task working. F is the cleanest end state, with no stack request at all.\n\nTheir costs. B and C act on the whole process, not on the code that needs it. D gives one set of packages a privilege, against D-SHAPE-DUNDER2=A and D-CORE-HELPERS1=A. E keeps the compiler's size in every program. F has no date; until then it is E.",
+      "options": [
+        {
+          "key": "A",
+          "name": "A stack size on the task group",
+          "detail": "task.group name(stack: bytes) gives that group's tasks, and groups opened inside them, a stack of at least that size. One deep function uses the ratified #MaxDepth mark instead. Every other task gets the system's stack size, at least 8 MiB. The compiler asks for 192 MiB on its compile group.",
+          "technical": "Parser and checker accept stack beside limit; a literal the target cannot supply is a build error. The runtime keeps a fiber pool per stack size; Thread.jet's default becomes the soft RLIMIT_STACK, minimum 8 MiB. No rlimit write, so children inherit nothing. E3012 suggests #MaxDepth(n) for one repeating function, else stack:. Gives D-COMPILE-STACK1=A's explicit worker stack a public form.",
+          "code": "// The program: with no request, its tasks get the system stack, as main does\n// app/run.jet, the same under every option\ndepth: fn(n: Int) -> Int {\n    if n == 0 -> return 0\n    1 + depth(n - 1)\n}\n\nrun: fn() {\n    t: task depth(3000000)\n    print(\"task {t.join() ?? -1}\")\n}\n// Proposed (A), run with an 8 MiB stack limit: Stop [E3012]: Stack overflow in depth.\n// The fix names the ratified depth mark, which reserves the room when the task starts:\n#MaxDepth(3000001)\ndepth: fn(n: Int) -> Int { … }            // task 3000000, on every tier\n\n// For deep code that is not one function, the fix asks the group for room instead:\n    task.group deep(stack: 256 * 1024 * 1024) {\n        t: task depth(3000000)\n        print(\"task {t.join() ?? -1}\")   // task 3000000\n    }\n\n// The compiler, Compiler/JetCli/Source/Cli/Host.jet (COMPILE_STACK_BYTES is new)\ntask.group compile_stack(stack: COMPILE_STACK_BYTES) {   // 192 MiB\n    compiling: task jet_cli_execute_compiling(plan, trace, recording)\n    steps.push(compiling.join() ?? panic(compiler_threads_failure_text(err)))\n}"
+        },
+        {
+          "key": "B",
+          "name": "A public process-wide floor",
+          "detail": "core.sys gains set_thread_stack_floor(bytes), which raises every worker's stack in this process. The compiler calls it once at start.",
+          "technical": "Core/Sys/Sys.jet beside set_stack_limit. The runtime floor is already on dev as jet_rt_thread_stack_floor_set, with a core.sys.__thread_stack_floor row (Thread.jet:456-468); B gives it a public name. Needs the Env effect; children inherit nothing.",
+          "code": "// core.sys gains a public call for the whole process\n// app/run.jet, the same under every option\ndepth: fn(n: Int) -> Int {\n    if n == 0 -> return 0\n    1 + depth(n - 1)\n}\n\nrun: fn() {\n    t: task depth(3000000)\n    print(\"task {t.join() ?? -1}\")\n}\n// Proposed (B): stops with E3012 unless run first calls\n    sys.set_thread_stack_floor(256 * 1024 * 1024)\n\n// The compiler, before its first task\nsys.set_thread_stack_floor(201326592)"
+        },
+        {
+          "key": "C",
+          "name": "A package.jet field",
+          "detail": "package.jet gains thread_stack:, fixed at build time. The program's entry sets the floor before run starts.",
+          "technical": "A BuildOptions row carried as an IRChecks word; the entry calls the floor as it configures the allocator. Compiler package files set 192 MiB.",
+          "code": "// The package file asks for a worker stack size, fixed at build time\n// app/run.jet, the same under every option\ndepth: fn(n: Int) -> Int {\n    if n == 0 -> return 0\n    1 + depth(n - 1)\n}\n\nrun: fn() {\n    t: task depth(3000000)\n    print(\"task {t.join() ?? -1}\")\n}\n// Proposed (C): stops with E3012 unless package.jet says\npackage app {\n    thread_stack: 268435456\n}\n// Compiler packages' package.jet files say thread_stack: 201326592."
+        },
+        {
+          "key": "D",
+          "name": "Compiler packages may call Core internals",
+          "detail": "The lexer and checker let Compiler packages call Core's double-underscore functions. The compiler calls the floor directly; user code still gets E0067.",
+          "technical": "Payload.jet's identifier_respelling and Sema/Calls/Core.jet:1451 gain a Compiler-package exception. Amends D-SHAPE-DUNDER2=A and D-CORE-HELPERS1=A, and works against card c0w1wcfc's c36.",
+          "code": "// Compiler packages may call Core's internal __ functions\n// app/run.jet, the same under every option\ndepth: fn(n: Int) -> Int {\n    if n == 0 -> return 0\n    1 + depth(n - 1)\n}\n\nrun: fn() {\n    t: task depth(3000000)\n    print(\"task {t.join() ?? -1}\")\n}\n// Proposed (D): stops with E3012; user code still cannot reach the floor (E0067, probe t04).\n// The runtime floor and its core.sys row are on dev (Thread.jet:456-468); only the call is missing.\n\n// The compiler, Host.jet\ncore.sys.__thread_stack_floor(201326592)"
+        },
+        {
+          "key": "E",
+          "name": "Keep 192 MiB for every program",
+          "detail": "Keep today's runtime. The docs state the 192 MiB floor as the program default, and c6 is retired as not a defect.",
+          "technical": "No code change. Thread.jet:442-451 stays. The c6 wording changes.",
+          "code": "// Today: every worker and fiber stack is at least 192 MiB (Thread.jet:444-454)\n// app/run.jet, the same under every option\ndepth: fn(n: Int) -> Int {\n    if n == 0 -> return 0\n    1 + depth(n - 1)\n}\n\nrun: fn() {\n    t: task depth(3000000)\n    print(\"task {t.join() ?? -1}\")\n}\n// Today (E), probe t02 with jet run on t6c: task 3000000.\n// The same call on the main thread (probe t01) stops: Stop [E3012]: Stack overflow in depth."
+        },
+        {
+          "key": "F",
+          "name": "The compiler stops needing deep stacks",
+          "detail": "The compiler's recursive passes become bounded or iterative, so it runs on the default stack. Until then, today's 192 MiB stays.",
+          "technical": "Tracked under #5910. Proof: tests/cases/compiler_stack passes under prlimit --stack=8388608. No public surface.",
+          "code": "// The compiler stops needing deep stacks: its recursive passes become loops\n// app/run.jet, the same under every option\ndepth: fn(n: Int) -> Int {\n    if n == 0 -> return 0\n    1 + depth(n - 1)\n}\n\nrun: fn() {\n    t: task depth(3000000)\n    print(\"task {t.join() ?? -1}\")\n}\n// Proposed (F): today's output until #5910 lands, then Stop [E3012] as in A.\n// Host.jet keeps task.group compile_stack { … } with no stack request.\n// Proof: tests/cases/compiler_stack passes under prlimit --stack=8388608."
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "thread::Builder::stack_size sets one thread's stack; other threads keep the default.",
+          "code": "thread::Builder::new().stack_size(192 << 20).spawn(f)?"
+        },
+        {
+          "lang": "Java",
+          "note": "A Thread constructor takes a stack size for that thread only.",
+          "code": "new Thread(null, task, \"compile\", 192L << 20).start();"
+        },
+        {
+          "lang": "Go",
+          "note": "Goroutine stacks grow on demand; debug.SetMaxStack sets one process-wide cap.",
+          "code": "debug.SetMaxStack(1 << 30)"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "A asks for room only where code needs it. One deep function uses the depth mark Jet already ratified, and other deep code asks its task group, in a form any package can use. Programs get the system's stack, children inherit nothing, and no privilege is added.",
+        "gains": [
+          "Programs get the normal stack size, as c6 asks.",
+          "The compiler uses the same public form as any package.",
+          "No child process inherits a changed limit.",
+          "A deep function marked with #MaxDepth gets the same depth on every tier."
+        ],
+        "losses": [
+          {
+            "loss": "Tasks that relied on 192 MiB now stop with E3012.",
+            "mitigation": "The stop names #MaxDepth or the group's stack argument; goldens under 8 MiB prove the change first."
+          },
+          {
+            "loss": "#MaxDepth is ratified but not built (probe t06, E0927), so the best fix is missing today.",
+            "mitigation": "The default changes after #MaxDepth lands; until then E3012 names the stack argument."
+          },
+          {
+            "loss": "One fiber pool per requested stack size.",
+            "mitigation": "Idle stacks are reserved address space, not resident memory, under the pool's existing cap."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B raises every worker in the process, not just the code that needs it."
+          },
+          {
+            "key": "C",
+            "reason": "C fixes a process-wide size in the package file, far from the code."
+          },
+          {
+            "key": "D",
+            "reason": "D gives Compiler packages a privilege the ratified naming rules forbid."
+          },
+          {
+            "key": "E",
+            "reason": "E keeps the compiler's stack size in every program."
+          },
+          {
+            "key": "F",
+            "reason": "F has no date, and until then it is E."
+          }
+        ],
+        "tradeoff": "A small new argument on task.group, in return for program-sized stacks and no privileged route."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: none. Fresh agent: none. BallotFix (Claude Opus) repaired the board ballot on 2026-11-10, probing each claim with the t6c compiler on dev 76955986d0. No separate adversarial review ran on this repair."
+      },
+      "checkInstructions": "With the t6c compiler (dev 76955986d0) run $JET_SCRATCH_ROOT/lanes/BallotFix/probes/t6c.sh probes/ts run; outputs are in probes/ts/out6, the seed's in probes/ts/out. t05 prints the soft stack limit. Read Compiler/JetRuntime/Source/Thread.jet:444-468 and Host.jet:3376-3394. The census is node $JET_SCRATCH_ROOT/lanes/BallotFix/cg.mjs --code 'task\\.group( [a-z_0-9]+)? *[({]'. Then run Tools/agent/ballots/Validate.jet on this payload.",
+      "surface": {
+        "gist": "How should the compiler get its large worker stacks once ordinary programs stop getting 192 MiB for every task?",
+        "lesson": "A stack holds calls in progress. Today every task gets a huge one because the compiler needs it. This vote decides how the compiler keeps its large stacks while programs get the normal size.",
+        "trio": {
+          "current": {
+            "note": "Every task gets at least 192 MiB.",
+            "code": "t: task depth(3000000)   // task 3000000\ndepth(3000000)            // on main: Stop [E3012]"
+          },
+          "wild": {
+            "lang": "Rust",
+            "note": "The thread that needs it asks.",
+            "code": "thread::Builder::new().stack_size(192 << 20)"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Group stack",
+            "gist": "A task group asks for a bigger stack; one deep function uses #MaxDepth.",
+            "gains": [
+              "Room only where needed.",
+              "No privilege."
+            ],
+            "losses": [
+              "Deep tasks need one mark or argument.",
+              "Waits for #MaxDepth to be built."
+            ],
+            "proposed": {
+              "code": "#MaxDepth(3000001)\ndepth: fn(n: Int) -> Int { … }\n\ntask.group compile_stack(stack: 192 * 1024 * 1024) {\n    t: task compile(plan)\n}"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Process floor",
+            "gist": "A public call raises every worker.",
+            "gains": [
+              "One call."
+            ],
+            "losses": [
+              "Whole process."
+            ],
+            "proposed": {
+              "code": "sys.set_thread_stack_floor(201326592)"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Package field",
+            "gist": "package.jet names the worker stack.",
+            "gains": [
+              "No code change."
+            ],
+            "losses": [
+              "Far from the code."
+            ],
+            "proposed": {
+              "code": "package jet_cli {\n    thread_stack: 201326592\n}"
+            }
+          },
+          {
+            "key": "D",
+            "name": "Internals",
+            "gist": "Compiler packages call Core's __ functions.",
+            "gains": [
+              "Smallest change."
+            ],
+            "losses": [
+              "A naming privilege."
+            ],
+            "proposed": {
+              "code": "core.sys.__thread_stack_floor(201326592)"
+            }
+          },
+          {
+            "key": "E",
+            "name": "Today",
+            "gist": "Every program keeps 192 MiB.",
+            "gains": [
+              "No work."
+            ],
+            "losses": [
+              "Compiler size everywhere."
+            ],
+            "proposed": {
+              "code": "// Thread.jet: max(soft limit, 192 MiB)"
+            }
+          },
+          {
+            "key": "F",
+            "name": "Iterative",
+            "gist": "The compiler stops needing deep stacks.",
+            "gains": [
+              "No request at all."
+            ],
+            "losses": [
+              "No date; E until then."
+            ],
+            "proposed": {
+              "code": "// compiler_stack passes under prlimit --stack=8388608"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A asks for room only where code needs it, with the ratified depth mark or a group argument, and children inherit nothing.",
+          "gains": [
+            "Programs get the normal stack.",
+            "No privilege."
+          ],
+          "losses": [
+            {
+              "loss": "Deep tasks need one mark or argument.",
+              "mitigation": "The stop names #MaxDepth or the group's stack argument."
+            },
+            {
+              "loss": "#MaxDepth is not built yet.",
+              "mitigation": "The default changes after it lands."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Whole process."
+            },
+            {
+              "key": "C",
+              "reason": "Far from the code."
+            },
+            {
+              "key": "D",
+              "reason": "A naming privilege."
+            },
+            {
+              "key": "E",
+              "reason": "Compiler size everywhere."
+            },
+            {
+              "key": "F",
+              "reason": "No date; E until then."
+            }
+          ],
+          "tradeoff": "One new argument, for program-sized stacks."
+        }
+      },
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-11-10T03:48:15.273Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-11-10",
+      "retiredAt": "2026-11-13T21:31:05.765Z"
     }
   ]
 }
