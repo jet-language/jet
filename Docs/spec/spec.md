@@ -6573,8 +6573,13 @@ outputs leave its sandbox, and `.arg` text that names a package file is
 refused with the fix `.input(path)`, so the step can't read an undeclared file.
 An output that would overwrite a file no build made, such as a committed one,
 is refused before anything runs (E3502), as generated sources are: a step
-replaces only what the last build's receipt lists as a step's output. Example:
-[`tests/cases/build_entry/run_steps_refuse_to_overwrite_a_file.case`](../../tests/cases/build_entry/run_steps_refuse_to_overwrite_a_file.case).
+replaces only what the last build's receipt lists as a step's output, or a
+file in a package's build tree (`.jet/build/` of the package root, or of a
+folder in it with its own `package.jet`), which only builds write. A
+`.jet/build/` in a folder that is no package is not a build tree. Examples:
+[`tests/cases/build_entry/run_steps_refuse_to_overwrite_a_file.case`](../../tests/cases/build_entry/run_steps_refuse_to_overwrite_a_file.case),
+[`tests/cases/build_entry/run_steps_replace_an_older_builds_file_in_the_build_tree.case`](../../tests/cases/build_entry/run_steps_replace_an_older_builds_file_in_the_build_tree.case),
+[`tests/cases/build_entry/run_steps_refuse_a_file_in_a_build_tree_that_is_no_packages.case`](../../tests/cases/build_entry/run_steps_refuse_a_file_in_a_build_tree_that_is_no_packages.case).
 `.output` and `.writes` take `kept: true` for a file that stays in git, such
 as a generated table: the step may replace it though no build made it, and
 the build writes it only when the step makes other bytes than it holds. When

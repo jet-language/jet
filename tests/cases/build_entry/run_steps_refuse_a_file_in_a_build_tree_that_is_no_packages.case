@@ -1,0 +1,13 @@
+# Only a package's `.jet/build/` (the root's, or that of a folder with its
+# own package.jet) is a build tree whose older files a step replaces. A
+# `.jet/build/` in a folder that is no package is not one: a step whose
+# output would overwrite a file there is refused before anything runs, and
+# the file stays as written.
+fixture: run_steps_refuse_a_file_in_a_build_tree_that_is_no_packages.fixture
+env: NO_COLOR=1
+write: stray/.jet/build/notes.txt = "written by hand\n"
+step: jet build main.jet --allow=Exec,FS
+exit: 1
+stderr: ~ "E3502" # the plan refusal
+stderr: ~ "Step `stray` would overwrite `stray/.jet/build/notes.txt`, a file no build made" # names the step and the file
+file: stray/.jet/build/notes.txt = "written by hand\n"

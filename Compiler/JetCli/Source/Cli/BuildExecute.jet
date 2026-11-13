@@ -355,17 +355,40 @@ jet_cli_build_last: fn(root: String) -[FS]> JetCLIBuildLast Never! {
 // What refuses the run when a step in `steps` would overwrite a file the
 // build didn't make, such as a committed one, as generated sources are
 // refused (jet_cli_generated_shadow): an output may replace only a file the
-// last build's receipt lists as a step's output (`made`), or one the step
-// keeps in git. None when no step would.
+// last build's receipt lists as a step's output (`made`), one the step
+// keeps in git, or one in a package's build tree (jet_cli_build_tree_output).
+// None when no step would.
 jet_cli_build_overwrite: fn(root: String, graph: BuildPlanExecution, steps: [Int], made: [String]) -[FS]> String? Never! {
     loop step in steps {
         loop output in graph.actions[step].outputs {
             path: jet_cli_entry_join(root, output)
             if made.contains(output) || graph.actions[step].kept.contains(output) || !(cli_files.exists(path) || cli_files.is_symlink(path)) -> next
+            if jet_cli_build_tree_output(root, output) -> next
             return Val("step `{graph.actions[step].name}` would overwrite `{output}`, a file no build made")
         }
     }
     None
+}
+
+// Whether `output` lies in a package's build tree: `.jet/build/` of the root
+// or of a folder in it with its own `package.jet`. Only builds write there,
+// so a file at such an output is an older build's, which the receipt doesn't
+// list when that build made it some other way (a target's image before a
+// step made the path). A `.jet/build/` in a folder that is no package is not
+// a build tree.
+jet_cli_build_tree_output: fn(root: String, output: String) -[FS]> Bool Never! {
+    parts := [String]{}
+    loop part in output.split("/") {
+        if part != "" && part != "." -> parts.push(part.copy())
+    }
+    package := ""
+    loop at in 0..<parts.len() {
+        if at + 2 < parts.len() && parts[at] == ".jet" && parts[at + 1] == "build" {
+            return package == "" || cli_files.exists(jet_cli_entry_join(root, "{package}/package.jet"))
+        }
+        package = if package == "" -> parts[at].copy() else -> "{package}/{parts[at]}"
+    }
+    false
 }
 
 jet_cli_build_step_node: fn(nodes: [JetCLIBuildNode], action: Int) -> Int Never! {

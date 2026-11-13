@@ -1,0 +1,19 @@
+build: fn(b: Build) -[Exec, FS]> {
+    #Impure("declare steps over files an older build left in a build tree") {
+    // `.jet/build/` of the root and of `tool`, a package, are build trees:
+    // the files there came from an older build, which no receipt lists, and
+    // the steps replace them.
+    shell: b.probe("shell", "find_program", "sh")
+    root: b.run("root", b.found(shell), ["Exec", "FS"])
+    root.arg("-c")
+    root.arg("printf made > \"$0\"")
+    root.output(".jet/build/notes.txt")
+    nested: b.run("nested", b.found(shell), ["Exec", "FS"])
+    nested.arg("-c")
+    nested.arg("printf made > \"$0\"")
+    nested.output("tool/.jet/build/notes.txt")
+    app: b.add_executable("app", ["main.jet"], [root, nested])
+    b.default(app)
+    }
+}
+run: fn() {}

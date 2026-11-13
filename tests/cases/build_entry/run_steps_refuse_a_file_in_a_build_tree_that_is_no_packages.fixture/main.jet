@@ -1,0 +1,13 @@
+build: fn(b: Build) -[Exec, FS]> {
+    #Impure("declare a step over a file in a folder that is no package") {
+    // `stray` has no `package.jet`, so its `.jet/build/` is no package's
+    // build tree: the file there is one no build made, and the step that
+    // would write over it is refused before anything runs.
+    notes: b.run("stray", b.jet(), ["Exec", "FS"])
+    notes.arg("run")
+    notes.output("stray/.jet/build/notes.txt")
+    app: b.add_executable("app", ["main.jet"], [notes])
+    b.default(app)
+    }
+}
+run: fn() {}
