@@ -41,6 +41,8 @@ use jet_foundation.[
     TagMarker,
     TextEdit,
     Type,
+    TypeTupleField,
+    type_tuple_fields_canonical,
     CoreCallSymbol,
     core_call,
     core_call_authority_boundary_at,
@@ -875,7 +877,9 @@ sema_call_try_core_math_f32: fn(module_name: String, member: String, type_args: 
 // The result type of an F32-width member whose `__<member>_f32` source takes
 // the F32 arguments themselves: widening one would quiet a signaling NaN,
 // move a payload, or make a subnormal normal, and rem_quo's source rounds
-// only the remainder of its record, whose quotient stays an Int.
+// only the remainder of its record, whose quotient stays an Int. frexp and
+// modf split the binary32 word into F32 parts, the registry's
+// (frac: T, exp: Int) and (fract: T, whole: T).
 sema_call_core_math_f32_kept: fn(member: String) -> Type? Never! {
     if member == {
         "to_bits" -> Val(Type.Int)
@@ -883,6 +887,8 @@ sema_call_core_math_f32_kept: fn(member: String) -> Type? Never! {
         "canonicalize" | "fabs" | "abs_float" | "copysign" -> Val(Type.Float32)
         "get_payload" | "set_payload" | "set_payload_signaling" -> Val(Type.Option{inner: Type.Float32})
         "rem_quo" -> Val(Type.Tuple{fields: [TypeTupleField]{TypeTupleField{name: "rem", ty: Type.Float32}, TypeTupleField{name: "quo", ty: Type.Int}}})
+        "frexp" -> Val(Type.Tuple{fields: type_tuple_fields_canonical([TypeTupleField]{TypeTupleField{name: "exp", ty: Type.Int}, TypeTupleField{name: "frac", ty: Type.Float32}})})
+        "modf" -> Val(Type.Tuple{fields: type_tuple_fields_canonical([TypeTupleField]{TypeTupleField{name: "fract", ty: Type.Float32}, TypeTupleField{name: "whole", ty: Type.Float32}})})
         else -> None
     }
 }

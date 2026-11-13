@@ -3020,11 +3020,13 @@ a double rounding of the Float one (C23's `f` forms such as `rsqrtf` and
 `nextupf` and the rest); the exponent of `ldexp` and `scaleb` stays an
 `Int`. An all-F32 `rem_quo` returns `(rem: F32, quo: Int)` (C23
 `remquof`): its remainder is exact in `F32` and its quotient stays an
-`Int`. The bit-level calls `fabs`, `copysign`, `canonicalize`,
-`is_signaling`, `is_normal`, `is_subnormal`, `total_order`,
-`total_order_mag`, `get_payload`, `set_payload` and `set_payload_signaling`
-read an F32 argument's binary32 bits as they are, so a signaling NaN and its
-payload survive; `is_normal` and `is_subnormal` use the binary32 bound
+`Int`. An all-F32 `frexp` and `modf` split the binary32 word into `F32`
+parts, the exponent an `Int` (C23 `frexpf` and `modff`). The bit-level calls
+`fabs`, `copysign`, `canonicalize`, `is_signaling`, `is_normal`,
+`is_subnormal`, `total_order`, `total_order_mag`, `get_payload`,
+`set_payload` and `set_payload_signaling` read an F32 argument's binary32
+bits as they are, so a signaling NaN and its payload survive (in the `frexp`
+and `modf` parts too); `is_normal` and `is_subnormal` use the binary32 bound
 2^-126, and the payload calls take and return `F32` payloads below 2^22.
 The other spellings `expm1`, `log1p`, `truncate`, `nextafter` and
 `abs_float` give their members' `F32` results (`exp_m1`, `ln_1p`, `trunc`,
@@ -3086,8 +3088,8 @@ The other spellings `expm1`, `log1p`, `truncate`, `nextafter` and
 | `math.round(x)` | `Int` | Round to the nearest integer, with ties away from zero. |
 | `math.to_bits(x)` / `math.from_bits(bits)` | integer bits / `Float` | Convert between a floating value and its bit representation. |
 | `math.sin_cos(x)` | `(cos: Float, sin: Float)` | Compute cosine and sine together, each correctly rounded as `cos` and `sin` give it. |
-| `math.modf(x)` | `(fract: Float, whole: Float)` | Split a value into fractional and whole parts, each with the sign of `x`; an infinity has fraction `±0`. |
-| `math.frexp(x)` | `(exp: Int, frac: Float)` | Split a value into `frac * 2^exp` with `abs(frac)` in [0.5, 1) (C `frexp`); a zero, an infinity or a NaN is its own `frac` with `exp` 0. |
+| `math.modf(x)` | `(fract: Float, whole: Float)`; `F32` parts for an `F32` | Split a value into fractional and whole parts, each with the sign of `x`; an infinity has fraction `±0`. |
+| `math.frexp(x)` | `(exp: Int, frac: Float)`; an `F32` `frac` for an `F32` | Split a value into `frac * 2^exp` with `abs(frac)` in [0.5, 1) (C `frexp`); a zero, an infinity or a NaN is its own `frac` with `exp` 0. |
 | `math.checked_abs(x)`, `checked_neg(x)`, `checked_add(a,b)`, `checked_sub(a,b)`, `checked_mul(a,b)`, `checked_div(a,b)`, `checked_rem(a,b)`, `checked_pow(a,b)` | `?Int` | Return `None` on integer overflow or invalid division/remainder; checked power also rejects a negative exponent. |
 | `math.int_pow(base, exponent)` | `Int` | Exact integer exponentiation through `base ^ exponent`; a negative runtime exponent stops with E3010 instead of returning a sentinel. |
 | `math.saturating_add(a,b)`, `saturating_sub(a,b)`, `saturating_mul(a,b)` | `Int` | Perform integer arithmetic while clamping overflow to the representable endpoint. |

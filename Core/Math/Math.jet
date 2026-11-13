@@ -14127,6 +14127,36 @@ frexp: fn(n: Float) -> (exp: Int, frac: Float) Never! {
     if biased == 2047 -> return (exp: 0, frac: n)
     (exp: biased - 1022, frac: from_bits(bits.bit_and(-9218868437227405313).bit_or(4602678819172646912)))
 }
+// modff.c from musl 1.2.5: modf's F32 form (an all-F32 call), clearing the
+// fraction bits of the binary32 word, so a NaN keeps its bits.
+__modf_f32: fn(n: F32) -> (fract: F32, whole: F32) Never! {
+    bits: __to_bits_f32(n)
+    signed_zero: __from_bits_f32(bits.bit_and(0x8000_0000))
+    e: (bits >> 23).bit_and(255) - 127
+    if e >= 23 {
+        if e == 128 && bits.bit_and(0x7F_FFFF) != 0 -> return (fract: n, whole: n)
+        return (fract: signed_zero, whole: n)
+    }
+    if e < 0 -> return (fract: n, whole: signed_zero)
+    mask: 0x7F_FFFF >> e
+    if bits.bit_and(mask) == 0 -> return (fract: signed_zero, whole: n)
+    whole: __from_bits_f32(bits - bits.bit_and(mask))
+    (fract: n - whole, whole: whole)
+}
+// frexpf.c from musl 1.2.5: frexp's F32 form (an all-F32 call) on the
+// binary32 word; a subnormal scales by 2^64 exactly first, and a zero, an
+// infinity or a NaN is its own frac, bits and all, with exp 0.
+__frexp_f32: fn(n: F32) -> (exp: Int, frac: F32) Never! {
+    bits: __to_bits_f32(n)
+    biased: (bits >> 23).bit_and(255)
+    if biased == 0 {
+        if bits.bit_and(0x7FFF_FFFF) == 0 -> return (exp: 0, frac: n)
+        scaled: __frexp_f32(n * F32{18446744073709551616.0})
+        return (exp: scaled.exp - 64, frac: scaled.frac)
+    }
+    if biased == 255 -> return (exp: 0, frac: n)
+    (exp: biased - 126, frac: __from_bits_f32(bits.bit_and(0x807F_FFFF).bit_or(0x3F00_0000)))
+}
 
 checked_abs: fn(n: Int) -> Int? Never! {
     if n < 0 -> return Val(0 - n)
@@ -14732,6 +14762,18 @@ __payload_bits_f32: fn(payload: F32) -> Int? Never! {
     assert(__total_order_mag_f32(F32{-1.0}, F32{2.0}))
     assert(__is_subnormal_f32(F32{1.0e-40}))
     assert(!__is_normal_f32(F32{1.0e-40}))
+    split: __frexp_f32(F32{6.5})
+    assert_eq(split.exp, 3)
+    assert_eq(split.frac, F32{0.8125})
+    tiny: __frexp_f32(__from_bits_f32(1))
+    assert_eq(tiny.exp, -148)
+    assert_eq(tiny.frac, F32{0.5})
+    assert_eq(__to_bits_f32(__frexp_f32(signaling).frac), 0x7F80_0001)
+    parts: __modf_f32(F32{-6.5})
+    assert_eq(parts.whole, F32{-6.0})
+    assert_eq(parts.fract, F32{-0.5})
+    assert_eq(__to_bits_f32(__modf_f32(F32{-0.25}).whole), 0x8000_0000)
+    assert_eq(__to_bits_f32(__modf_f32(signaling).whole), 0x7F80_0001)
 }
 
 #Test("math scalar composition preserves IEEE boundaries") {

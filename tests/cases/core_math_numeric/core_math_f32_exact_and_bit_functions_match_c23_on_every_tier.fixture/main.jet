@@ -1,12 +1,13 @@
 // Every corpus row is an all-F32 call of one exact or bit-level core.math
-// function: its argument words, then the C23 binary32 function's result
-// (rem_quo's remainder, then its quotient), computed offline. A binary32
-// value is its 8 hex digit bit pattern, an exponent or quotient its 32-bit
-// two's-complement word, a predicate 1 or 0, and "--------" is none. The
-// program prints one line per function with the rows it checked and how many
-// results differ, plus the first differing rows. Where a NaN result's bits
-// are not the function's to choose (an arithmetic NaN), any NaN matches any
-// NaN; the sign-bit, payload and signaling operations must match bit for bit.
+// function: its argument words, then the C23 binary32 function's results
+// (two for frexp, modf and rem_quo, one otherwise), computed offline. A
+// binary32 value is its 8 hex digit bit pattern, an exponent or quotient its
+// 32-bit two's-complement word, a predicate 1 or 0, and "--------" is none.
+// The program prints one line per function with the rows it checked and how
+// many results differ, plus the first differing rows. Where a NaN result's
+// bits are not the function's to choose (an arithmetic NaN), any NaN matches
+// any NaN; the sign-bit, payload and signaling operations and the frexp and
+// modf splits must match bit for bit.
 use {
     math: core.math
 }
@@ -17,6 +18,7 @@ COPYSIGN: #run embed_file("corpus/copysign.txt")
 FABS: #run embed_file("corpus/fabs.txt")
 FDIM: #run embed_file("corpus/fdim.txt")
 FLOOR: #run embed_file("corpus/floor.txt")
+FREXP: #run embed_file("corpus/frexp.txt")
 FMOD: #run embed_file("corpus/fmod.txt")
 GET_PAYLOAD: #run embed_file("corpus/get_payload.txt")
 IS_NORMAL: #run embed_file("corpus/is_normal.txt")
@@ -24,6 +26,7 @@ IS_SIGNALING: #run embed_file("corpus/is_signaling.txt")
 IS_SUBNORMAL: #run embed_file("corpus/is_subnormal.txt")
 LDEXP: #run embed_file("corpus/ldexp.txt")
 LOGB: #run embed_file("corpus/logb.txt")
+MODF: #run embed_file("corpus/modf.txt")
 MAX_FLOAT: #run embed_file("corpus/max_float.txt")
 MAXIMUM: #run embed_file("corpus/maximum.txt")
 MAXIMUM_MAG: #run embed_file("corpus/maximum_mag.txt")
@@ -150,19 +153,28 @@ value: fn(name: String, w: [Int]) -> Int {
 }
 
 // The result words of `name` on argument words `w`: rem_quo's F32
-// remainder and Int quotient, or the one result of any other function.
+// remainder and Int quotient, frexp's frac and its exponent as a 32-bit
+// word, modf's fraction and whole part, or the one result of any other
+// function.
 results: fn(name: String, w: [Int]) -> [Int] {
     if name == "rem_quo" {
         split: math.rem_quo(f32_of(w[0]), f32_of(w[1]))
         return [Int]{bits(split.rem), split.quo.bit_and(0xFFFF_FFFF)}
     }
+    if name == "frexp" {
+        parts: math.frexp(f32_of(w[0]))
+        return [Int]{bits(parts.frac), parts.exp.bit_and(0xFFFF_FFFF)}
+    }
+    if name == "modf" {
+        parts: math.modf(f32_of(w[0]))
+        return [Int]{bits(parts.fract), bits(parts.whole)}
+    }
     [Int]{value(name, w)}
 }
-
 // Whether `name` chooses its NaN result's bits: a sign-bit, payload or
-// signaling operation.
+// signaling operation, or a split that returns its NaN argument.
 exact_nan: fn(name: String) -> Bool {
-    name == "fabs" || name == "abs_float" || name == "copysign" || name == "canonicalize" || name == "get_payload" || name == "set_payload" || name == "set_payload_signaling"
+    name == "fabs" || name == "abs_float" || name == "copysign" || name == "canonicalize" || name == "get_payload" || name == "set_payload" || name == "set_payload_signaling" || name == "frexp" || name == "modf"
 }
 
 // The C spellings expm1 and log1p are exp_m1's and ln_1p's F32 forms: the
@@ -262,6 +274,8 @@ run: fn() {
     check("truncate", TRUNC)
     check("logb", LOGB)
     check("ldexp", LDEXP)
+    check("frexp", FREXP)
+    check("modf", MODF)
     check("next_up", NEXT_UP)
     check("next_down", NEXT_DOWN)
     check("next_after", NEXT_AFTER)
