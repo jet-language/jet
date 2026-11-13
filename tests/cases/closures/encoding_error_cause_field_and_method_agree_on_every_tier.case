@@ -1,0 +1,17 @@
+# Core's EncodingError declares a public `cause` field and a `cause()` method
+# with the same name. A field read selects the stored cause and the call
+# selects the method; both agree on every execution tier.
+fixture: encoding_error_cause_field_and_method_agree_on_every_tier.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step check: jet check cause.jet
+exit: 0
+step o0: jet run --optimize=none cause.jet
+exit: 0
+stdout: = "true|true\nInterrupted 4|Interrupted 4|true\ntrue|interrupted\n"
+step o1: jet run --optimize=basic cause.jet
+exit: 0
+stdout: = "true|true\nInterrupted 4|Interrupted 4|true\ntrue|interrupted\n"
+step o2: jet run --optimize=full cause.jet
+exit: 0
+stdout: = "true|true\nInterrupted 4|Interrupted 4|true\ntrue|interrupted\n"

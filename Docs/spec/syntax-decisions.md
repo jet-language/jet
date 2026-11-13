@@ -558,6 +558,20 @@ diagnostic
 `E-CALL-VALUE` and does not enter sema or the IR. `.call(...)` uses the existing
 function-value binder and one function-value lowering on every execution tier.
 
+**D-MEMBER-NAMESPACE1=A — fields and methods have separate namespaces**
+*(ratified 2026-10-08, card #4905)*: a type may declare a field and a method
+with the same name; two fields or two methods with one name stay E0105. A
+member read without parentheses is the field (`err.cause`); a member call
+selects the method (`err.cause()`), whether inherent, from an `impl`, a trait
+default or an operator hook, and reaches a callable field only when the type
+has no such method. A private method (E0605) or a call whose arguments do not
+fit (E0766 and the other binder errors) reports the method's error and never
+falls back to the field. A callable field that shares a method's name is
+invoked explicitly as `value.field.call(args)`. Visibility, receiver access,
+effects and ownership are checked on the selected member, and every execution
+tier lowers the same checked selection. Core's `EncodingError` keeps both its
+public `cause` field and its `cause()` accessor.
+
 **S61 — Argument labels & parameter contracts** *(D-NARG1, D-NARG2,
 D-APILABEL1=A ratified 2026-08-05, card #1393)*: a written label binds by
 **name**. A call may skip a default and write its labelled arguments in any

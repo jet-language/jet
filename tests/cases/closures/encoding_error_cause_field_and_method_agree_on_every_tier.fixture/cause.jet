@@ -1,0 +1,18 @@
+use core.encoding.[EncodingCause, EncodingError]
+
+// EncodingError keeps both its public `cause` field and its `cause()` method:
+// a field read selects the stored value, and the call selects the method,
+// which returns a copy the caller owns.
+run: fn() {
+    plain: EncodingError.new(.JSON, .Syntax, 4, Val(2), Val(3), "$[0]", "bad token")
+    print("{plain.cause == None}|{plain.cause() == None}")
+    caused: plain.with_cause(EncodingCause{kind: "Interrupted", os_code: Val(4), message: "interrupted"})
+    stored: caused.cause ?? panic("the field holds no cause")
+    owned: caused.cause() ?? panic("the method returned no cause")
+    print("{stored.kind} {stored.os_code ?? -1}|{owned.kind} {owned.os_code ?? -1}|{owned == stored}")
+    built: EncodingError{format: .CSV, kind: .IO, byte_offset: 0, line: None, column: None, path: "", reason: "short write", cause: Val(owned)}
+    if built.cause() == {
+        Val(found) -> { print("{built.cause == built.cause()}|{found.message}") }
+        None -> print("none")
+    }
+}

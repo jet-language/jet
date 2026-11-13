@@ -755,7 +755,35 @@ outside a type body or `impl`, an inline module's included, can't take `self`
 
 Multiple construction shapes use distinctly named no-`self` statics such as
 `Point.cartesian` and `Point.polar`. Overloading is rejected; a duplicate name
-is E0105. Enum `if subject == { … }` tables must be exhaustive, and they name
+is E0105.
+
+Fields and methods have separate namespaces (D-MEMBER-NAMESPACE1=A): a struct
+may declare a field and a method with the same name, while two fields or two
+methods with one name are still E0105. A member read without parentheses,
+`err.cause`, is the field. A member call, `err.cause()`, selects the method,
+whether it is declared in the type, in an `impl`, by a trait or as an operator
+hook; only a type with no such method lets the call reach a callable field.
+A method the caller cannot see (E0605) or a call whose arguments do not fit it
+(E0766 and the other argument errors) reports that method's error; it never
+falls through to the field. Invoke a callable field that shares a method's name
+explicitly as `value.field.call(args)`. Visibility, receiver access, effects
+and ownership are checked on the member the call selects, on every tier.
+
+```jet
+Counter: struct {
+    value: Int
+    step: fn(Int) -> Int
+    step: fn(self, amount: Int) -> Int Never! { self.value + amount }
+}
+
+run: fn() {
+    counter: Counter{value: 10, step: fn(n) { n * 2 }}
+    print(counter.step(4))      // 14: the method
+    print(counter.step.call(4)) // 8: the field
+}
+```
+
+Enum `if subject == { … }` tables must be exhaustive, and they name
 every case: an `else` over a closed set (an enum, `T?`, `T E!`, or a union) is
 E0641, whose edit writes the cases the `else` stood for, or deletes an `else`
 that can never run. A table whose arms are not all pattern tests of the subject
@@ -1303,8 +1331,10 @@ same type does on a binding or a typed literal (#6281 c123).
 Direct named and method calls keep their ordinary syntax. A function-valued
 expression is invoked with `.call(...)`; a struct field or method actually
 named `call` shadows that built-in projection. Direct calls on names, fields,
-indexes, and lambdas remain valid. The adjacent `)(` function-value spelling
-is rejected with **E-CALL-VALUE** (D-CALLVALUE1=B).
+indexes, and lambdas remain valid; a callable field that shares a method's name
+is called as `value.field.call(...)`, since the direct call selects the method.
+The adjacent `)(` function-value spelling is rejected with **E-CALL-VALUE**
+(D-CALLVALUE1=B).
 
 ```jet
 apply: fn(f: fn(Int) -> Int, n: Int) -> Int {
