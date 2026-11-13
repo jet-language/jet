@@ -758,7 +758,7 @@ sema_cli_entry_table: fn(lines: &[String], subject: String, arms: [SemaCLIArm], 
         return
     }
     lines.push("    if {subject} == {{")
-    loop line in table -> lines.push(line.copy())
+    lines.extend(table.move())
     lines.push("    else -> {{")
     loop line in fallback -> lines.push(line.copy())
     lines.push("    }}")

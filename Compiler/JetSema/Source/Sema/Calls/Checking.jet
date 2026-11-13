@@ -972,11 +972,12 @@ sema_crypto_misuse_precedence: fn(diagnostics: &[Diagnostic]) Never! {
         else if diagnostic.severity == DIAGNOSTIC_ERROR -> other = true
     }
     if !misused || !other -> return
-    kept := [Diagnostic]{}
-    loop diagnostic in diagnostics {
-        if diagnostic.code != "E2702" -> kept.push(diagnostic.copy())
+    // Each E2702 leaves in place, from the back, so the rest are never copied.
+    index := diagnostics.len()
+    loop index > 0 {
+        index -= 1
+        if diagnostics[index].code == "E2702" -> _ := diagnostics.remove(index, .Slot)
     }
-    diagnostics = kept
 }
 
 sema_crypto_argument_index: fn(params: [SemaCallParam], slots: [Int], parameter: String) -> Int? Never! {

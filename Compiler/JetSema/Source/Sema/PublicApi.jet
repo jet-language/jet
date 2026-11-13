@@ -355,7 +355,7 @@ sema_public_api_cap: fn(cap: ModuleCap?, name: String, rows: &[PublicAPIItem]) N
         }
         allowed.sort()
         denied.sort()
-        loop entry in denied -> allowed.push(entry.copy())
+        allowed.extend(denied.move())
         rows.push(PublicAPIItem{kind: "cap", name: name.copy(), signature: "cap {name} #FX({allowed.join(", ")})"})
     }
 }

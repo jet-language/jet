@@ -9172,27 +9172,27 @@ sema_failure_settle_obligations: fn(diagnostics: &[Diagnostic], solved: [String:
         if (diagnostic.detail ?? "").starts_with(mark) -> break true
     } ?? false
     if !pending -> return false
-    kept := [Diagnostic]{}
+    // The findings leave or change in place, from the back, so the rest are
+    // never copied.
     survived := false
-    loop diagnostic in diagnostics {
-        detail: diagnostic.detail ?? ""
-        if !detail.starts_with(mark) {
-            kept.push(diagnostic.copy())
-            next
-        }
+    index := diagnostics.len()
+    loop index > 0 {
+        index -= 1
+        detail: diagnostics[index].detail ?? ""
+        if !detail.starts_with(mark) -> next
         lines: detail.split("\n").to_list()
         callee: lines[0].replace(mark, "")
-        if solved.get(callee) != None -> next
+        if solved.get(callee) != None {
+            _ := diagnostics.remove(index, .Slot)
+            next
+        }
         remainder := [String]{}
         loop line_index in 1..<lines.len() -> remainder.push(lines[line_index])
-        emitted := diagnostic
         rest: remainder.join("\n")
-        emitted.detail = None
-        if rest != "" -> emitted.detail = Val(rest)
-        kept.push(emitted)
+        diagnostics[index].detail = None
+        if rest != "" -> diagnostics[index].detail = Val(rest)
         survived = true
     }
-    diagnostics = kept
     survived
 }
 
@@ -9204,19 +9204,22 @@ sema_failure_domain_dedupe: fn(diagnostics: &[Diagnostic], seen: &[String:Bool])
         if diagnostic.code == "E2404" -> break true
     } ?? false
     if !repeated -> return
-    kept := [Diagnostic]{}
-    loop diagnostic in diagnostics {
+    // A repeated root leaves in place, from the back, so the kept findings
+    // are never copied.
+    repeats := [Int]{}
+    loop (index, diagnostic) in diagnostics {
         detail: diagnostic.detail ?? ""
-        if diagnostic.code != "E2404" || !detail.starts_with("failure-domain:") {
-            kept.push(diagnostic.copy())
+        if diagnostic.code != "E2404" || !detail.starts_with("failure-domain:") -> next
+        key: detail.split("\n").to_list()[0]
+        if seen.get(key) != None {
+            repeats.push(index)
             next
         }
-        key: detail.split("\n").to_list()[0]
-        if seen.get(key) != None -> next
         seen[key] = true
-        kept.push(diagnostic.copy())
     }
-    diagnostics = kept
+    loop repeats.pop() == .Val(index) {
+        _ := diagnostics.remove(index, .Slot)
+    }
 }
 
 // #3708 for one comptime function closure: the failure rows, function-value

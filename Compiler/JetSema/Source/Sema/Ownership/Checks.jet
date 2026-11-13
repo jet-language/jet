@@ -1032,11 +1032,23 @@ sema_ownership_release_dead_views: fn(state: &SemaOwnershipState, statement: Stm
         }
         if descendant_live -> next
         state.views[index].active = false
-        remaining: loop loan in state.loans if loan.carrier_fact_seq != fact.seq || loan.carrier_key != fact.carrier_key -> loan
-        state.loans = remaining
+        sema_ownership_release_view_loans(state, fact.seq, fact.carrier_key)
     }
-    unbound: loop loan in state.loans if !loan.statement_window || loan.carrier_fact_seq >= 0 -> loan
-    state.loans = unbound
+    loan_index := state.loans.len()
+    loop loan_index > 0 {
+        loan_index -= 1
+        if state.loans[loan_index].statement_window && state.loans[loan_index].carrier_fact_seq < 0 -> _ := state.loans.remove(loan_index, .Slot)
+    }
+}
+
+// Drops the loans the view `seq` of `carrier_key` holds, in place from the
+// back, so the other loans are never copied.
+sema_ownership_release_view_loans: fn(state: &SemaOwnershipState, seq: Int, carrier_key: String) Never! {
+    index := state.loans.len()
+    loop index > 0 {
+        index -= 1
+        if state.loans[index].carrier_fact_seq == seq && state.loans[index].carrier_key == carrier_key -> _ := state.loans.remove(index, .Slot)
+    }
 }
 
 // Rust checks an assignment's target change (`check_lvalue_change`) before
@@ -1064,8 +1076,7 @@ sema_ownership_release_value_only_views: fn(state: &SemaOwnershipState, target: 
         }
         if descendant_live -> next
         state.views[index].active = false
-        remaining: loop loan in state.loans if loan.carrier_fact_seq != fact.seq || loan.carrier_key != fact.carrier_key -> loan
-        state.loans = remaining
+        sema_ownership_release_view_loans(state, fact.seq, fact.carrier_key)
     }
 }
 
@@ -3021,9 +3032,14 @@ sema_ownership_check_write_as: fn(state: &SemaOwnershipState, expr: Expr, action
 }
 
 sema_ownership_clear_moved: fn(state: &SemaOwnershipState, place: SemaOwnershipPlace) Never! {
-    // Reinitializing a descendant never restores its moved ancestor.
-    remaining: loop moved in state.moved if !sema_ownership_place_extends(place, moved.place) -> moved
-    state.moved = remaining
+    // Reinitializing a descendant never restores its moved ancestor. The
+    // cleared rows leave in place, from the back, so the rest are never
+    // copied.
+    index := state.moved.len()
+    loop index > 0 {
+        index -= 1
+        if sema_ownership_place_extends(place, state.moved[index].place) -> _ := state.moved.remove(index, .Slot)
+    }
 }
 
 // Whether a value of `ty` has its own Close implementation (a nominal Close

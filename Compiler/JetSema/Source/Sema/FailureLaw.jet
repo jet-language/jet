@@ -517,12 +517,14 @@ sema_inject_prelude_error_conversions: fn(module_identity: String, environment: 
     complete
 }
 
+// Drops each non-error finding from `start` on, in place from the back, so
+// the kept findings are never copied.
 sema_failure_keep_errors_since: fn(diagnostics: &[Diagnostic], start: Int) Never! {
-    kept := [Diagnostic]{}
-    loop index in 0..<diagnostics.len() {
-        if index < start || diagnostics[index].severity == DIAGNOSTIC_ERROR -> kept.push(diagnostics[index])
+    index := diagnostics.len()
+    loop index > start && index > 0 {
+        index -= 1
+        if diagnostics[index].severity != DIAGNOSTIC_ERROR -> _ := diagnostics.remove(index, .Slot)
     }
-    diagnostics = kept
 }
 
 // E2417: an explicit `!` domain names `Err`, a Core
