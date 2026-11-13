@@ -108,6 +108,44 @@ web_host_devtools: fn(state: Shared<WebHostState>, request: HTTPRequest, path: S
         if web_host_is_release(state) -> return web_host_text(404, "recording endpoint absent in release builds")
         return web_host_json(200, web_host_recording(state))
     }
+    if path == "/__jet_devtools" || path == "/__jet_devtools/workbench" {
+        if request.method != "GET" -> return web_host_text(405, "method not allowed")
+        placement: if path == "/__jet_devtools" -> BrowserPlacement.InApp else -> BrowserPlacement.Workbench
+        return web_host_html(200, web_host_browser_page(state, placement))
+    }
+    if path == "/__jet_devtools/state" {
+        if request.method != "GET" -> return web_host_text(405, "method not allowed")
+        return web_host_json(200, web_host_browser_view(state))
+    }
+    if path == "/__jet_devtools/reconnect" {
+        if request.method != "GET" -> return web_host_text(405, "method not allowed")
+        cursor := Int?{None}
+        if canvas_host_query(query, "cursor") == .Val(text) {
+            value: Int.parse(text) ?? -1
+            if value < 0 -> return web_host_text(400, "cursor must be a non-negative integer")
+            cursor = Val(value)
+        }
+        body: web_host_browser_reconnect(state, cursor) ?? return web_host_text(409, "{err}")
+        return web_host_json(200, body)
+    }
+    if path == "/__jet_devtools/action" {
+        if request.method != "POST" -> return web_host_text(405, "method not allowed")
+        payload: request.text(MAX_REQUEST_BODY_BYTES) ?? return web_host_text(400, "browser action body is unreadable: {err}")
+        action: browser_web_parse_action(payload.bytes(), .InApp) ?? return web_host_text(400, "{err}")
+        body: web_host_browser_dispatch(state, action) ?? return web_host_text(403, "{err}")
+        return web_host_json(200, body)
+    }
+    if path == "/__jet_devtools/selection" {
+        if request.method != "POST" -> return web_host_text(405, "method not allowed")
+        payload: request.text(MAX_REQUEST_BODY_BYTES) ?? return web_host_text(400, "browser selection body is unreadable: {err}")
+        selection: if browser_web_parse_selection(payload.bytes()) == {
+            .Ok(chosen) -> chosen
+            .Err(error) -> { return web_host_text(400, "{error}") }
+        }
+        answer: web_host_browser_select(state, payload, selection)
+        if answer.status != 200 -> return web_host_text(answer.status, answer.body)
+        return web_host_json(200, answer.body)
+    }
     web_host_unserved(path)
 }
 
@@ -120,14 +158,57 @@ web_host_ingest: fn(state: Shared<WebHostState>, request: HTTPRequest) -> HTTPRe
     web_host_text(202, "accepted")
 }
 
+web_host_browser_page: fn(state: Shared<WebHostState>, placement: BrowserPlacement) -> String {
+    permit: state.guard_read()
+    browser_web_render_page(permit.value.browser, placement)
+}
+
+web_host_browser_view: fn(state: Shared<WebHostState>) -> String {
+    permit: state.guard_read()
+    browser_web_view_json(permit.value.browser, .InApp)
+}
+
+// The retained browser events after `cursor`, with the session's reset and
+// truncation facts.
+web_host_browser_reconnect: fn(state: Shared<WebHostState>, cursor: Int?) -> String Err! {
+    permit: state.guard_read()
+    projection: permit.value.session.devtools_events_since(cursor)
+    browser_web_reconnect_json(permit.value.browser, cursor, projection.reset, projection.truncation)
+}
+
+// A layout or navigation action changes only the browser view, not the
+// session, so the handler applies it.
+web_host_browser_dispatch: fn(state: Shared<WebHostState>, action: BrowserHostAction) -> String BrowserHostError! {
+    permit := state.guard_edit()
+    browser_web_dispatch(permit.value.browser, action)
+}
+
+// The view shows a selection at once; the tick applies it to the session.
+// The panel must be one of the catalog's, and an item the panel no longer
+// holds selects the panel alone.
+web_host_browser_select: fn(state: Shared<WebHostState>, payload: String, selection: DevtoolsSelectionFact?) -> WebHostFrame {
+    permit := state.guard_edit()
+    if permit.value.selections.len() >= WEB_HOST_MAX_QUEUED -> return WebHostFrame{status: 503, body: "devtools selection inbox is full; retry"}
+    if selection == .Val(chosen) {
+        if permit.value.browser.host.panel(chosen.panel_id) == None -> return WebHostFrame{status: 400, body: "browser selection panel_id must match the canonical panel catalog"}
+        node_id := String?{None}
+        if chosen.item_key != "" && permit.value.browser.host.node_exists(chosen.panel_id, Val(chosen.item_key)) -> node_id = Val(chosen.item_key)
+        if permit.value.browser.host.select(chosen.panel_id, node_id) == .Err(error) -> return WebHostFrame{status: 400, body: "{error}"}
+    } else {
+        permit.value.browser.host.clear_selection()
+    }
+    permit.value.selections.push("{payload}")
+    WebHostFrame{status: 200, body: browser_web_view_json(permit.value.browser, .InApp)}
+}
+
 // The release inspect endpoint: absent unless the policy serves it read-only,
 // and then only to its own host and origin with the deployment token.
 web_host_release_inspect: fn(state: Shared<WebHostState>, request: HTTPRequest, path: String) -> HTTPResponse {
     permit: state.guard_read()
-    web_host_release_answer(permit.value.policy, permit.value.facts.port, request, path)
+    web_host_release_answer(permit.value.policy, permit.value.facts.port, permit.value.session, request, path)
 }
 
-web_host_release_answer: fn(policy: JetReleaseDevtoolsPolicy, port: Int, request: HTTPRequest, path: String) -> HTTPResponse {
+web_host_release_answer: fn(policy: JetReleaseDevtoolsPolicy, port: Int, session: ResidentDevSession, request: HTTPRequest, path: String) -> HTTPResponse {
     if path != "/__jet_devtools" || policy.endpoint != .ReadOnly -> return web_host_text(404, "inspect endpoint absent")
     if request.method != "GET" -> return web_host_text(405, "method not allowed")
     if !policy.deployment.enabled -> return web_host_text(404, "inspect endpoint disabled")
@@ -138,7 +219,9 @@ web_host_release_answer: fn(policy: JetReleaseDevtoolsPolicy, port: Int, request
     }
     if !web_host_release_token(request, policy) -> return web_host_json(401, "{{\"error\":\"JET_INSPECT_TOKEN required\"}}")
     if request.header("transfer-encoding") != None || !canvas_host_body_empty(request) -> return web_host_text(400, "inspect endpoint accepts GET without a request body")
-    web_host_unserved(path)
+    projection: session.devtools_events_since(None)
+    panels: session.devtools_panels(.BrowserInApp, JetDevtoolsPanelCapability.all()) ?? return web_host_text(500, "{err}")
+    web_host_json(200, browser_web_release_json(projection, panels))
 }
 
 web_host_release_token: fn(request: HTTPRequest, policy: JetReleaseDevtoolsPolicy) -> Bool Never! {

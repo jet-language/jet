@@ -9,9 +9,10 @@
 // into with guard_edit. web_host_serve runs the listener's serve in a
 // task.group beside the dev clock: every LIVE_RELOAD_POLL_MS the tick
 // (web_host_tick) is the one writer of the resident session. It applies the
-// client leases, devtools envelopes and browser-trace rows the handlers
-// queued, refreshes the recording, command and asset frames the handlers hand
-// out, and draws the terminal. A handler runs with the server's Net and
+// client leases, devtools envelopes, selections and browser-trace rows the
+// handlers queued, syncs the browser devtools view from the session,
+// refreshes the recording, command and asset frames the handlers hand out,
+// and draws the terminal. A handler runs with the server's Net and
 // FS.Read only, so it never reads the clock, writes a file or prints; the
 // tick does. There are no threads, locks or atomics, and a publication
 // (web_host_publish) holds the state's edit guard, so no static read sees a
@@ -164,6 +165,12 @@ WebHostState: struct {
     dropped: [String]
     beacons: [[U8]]
     envelopes: [JetDevtoolsDecodedEnvelope]
+    // Selection bodies the handlers checked, which the tick applies to the
+    // session.
+    selections: [String]
+    // The browser devtools view: the tick syncs it from the session, and the
+    // page, state, reconnect and action routes answer from it.
+    browser: BrowserWebState
     requests: [String]
     // Take-once frames the tick refills.
     commands: WebHostFrame?

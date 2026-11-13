@@ -97,6 +97,10 @@ web_host_json: fn(status: Int, body: String) -> HTTPResponse Never! {
     web_host_bytes(status, WEB_HOST_JSON, body.bytes())
 }
 
+web_host_html: fn(status: Int, body: String) -> HTTPResponse Never! {
+    web_host_bytes(status, "text/html; charset=utf-8", body.bytes())
+}
+
 // Every answer is fresh: the preview never caches.
 web_host_bytes: fn(status: Int, content_type: String, bytes: [U8]) -> HTTPResponse Never! {
     reply := webhost_server.response(status, "")

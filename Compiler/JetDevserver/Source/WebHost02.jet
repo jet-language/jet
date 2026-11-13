@@ -22,13 +22,14 @@ web_host_new: fn(file: String, root: String, verbose: Bool, &&policy: JetRelease
     secret: webhost_random.token_hex(WEB_HOST_SECRET_BYTES) ?? return Err(WebHostError{message: "error: couldn't make the dev session secret: {err}"})
     session: ResidentDevSession.new(file, 0, 0) ?? return Err(WebHostError{message: "error: couldn't start the dev session for `{file}`: {err}"})
     session_id: "{session.session_id}"
+    browser: BrowserWebState.new(session_id) ?? return Err(WebHostError{message: "error: couldn't start the browser devtools view: {err}"})
     tty: webhost_term.stderr().is_tty()
     Ok(Shared{WebHostState{
         facts: web_host_facts(file, 0), session: session, session_id: session_id, root: canonical, secret: secret, policy: policy.move(),
         color: ColorChoice.Auto.resolve(tty), pinned: tty && !verbose, verbose: verbose, trace_enabled: false,
         relays: [BrowserTraceRelay]{}, nonce: "", noted: [String]{}, dropped: [String]{}, beacons: [[U8]]{},
-        envelopes: [JetDevtoolsDecodedEnvelope]{}, requests: [String]{}, commands: None, assets: None, recording: "",
-        recording_ticks: 0, log: [String]{}, dirty: true, block_lines: 0, stopped: None,
+        envelopes: [JetDevtoolsDecodedEnvelope]{}, selections: [String]{}, browser: browser, requests: [String]{},
+        commands: None, assets: None, recording: "", recording_ticks: 0, log: [String]{}, dirty: true, block_lines: 0, stopped: None,
     }})
 }
 
@@ -166,6 +167,11 @@ impl WebHostState {
             if self.session.ingest_devtools_envelope(envelope) == .Err(error) -> self.note_log("{clock}  devtools envelope refused: {error}")
         }
         self.envelopes = [JetDevtoolsDecodedEnvelope]{}
+        loop selection in self.selections {
+            if self.session.set_devtools_selection(selection) == .Err(error) -> self.note_log("{clock}  devtools selection refused: {error}")
+        }
+        self.selections = [String]{}
+        if browser_web_sync_session(self.browser, self.session) == .Err(error) -> self.note_log("{clock}  browser devtools sync failed: {error}")
         if self.relays.len() > 0 {
             // A beacon's row that doesn't fit the trace is dropped, as the
             // page doesn't wait for an answer.
