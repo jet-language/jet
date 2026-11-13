@@ -27,14 +27,6 @@ use {
         Item,
         KernelMarker,
         KernelMode,
-        MARKER_COMMUTATIVE,
-        MARKER_INLINE,
-        MARKER_MUST_USE,
-        MARKER_PUBLISHED_SCHEMA,
-        MARKER_ROOT,
-        MARKER_SINGLE_USE,
-        MARKER_STATIC,
-        MARKER_TARGET,
         Marker,
         MarkerCallArg,
         MarkerHook,
@@ -845,7 +837,7 @@ parser_parse_param: fn(state: &JetParserState, zone: ParamZone) -> Param {
     root := false
     if parser_current_kind(state) == TOKEN_HASH {
         marker: parser_parse_marker(state)
-        root = marker.name == MARKER_ROOT
+        root = parser_marker_is_hook(state, marker, MarkerHook.Root)
         // An unregistered name applies to the parameter site, where sema
         // reports it from the shared applied-rule vocabulary (E0927).
         if !marker_registered(marker.name) {
@@ -1839,8 +1831,8 @@ parser_apply_function_markers: fn(state: &JetParserState, func: &Func, markers: 
                 }
             }
             // `#FFI` and `#Import(c)` shaped the body above; `#Memo` is
-            // sema's, and `#Redact` marks fields.
-            .FFI | .Import | .Memo | .Redact -> {}
+            // sema's, `#Redact` marks fields and `#Root` a parameter.
+            .FFI | .Import | .Memo | .Redact | .Root | .Commutative | .Static | .SingleUse | .PublishedSchema -> {}
         }
     }
     // `#Job` metadata and its `every:` schedule.
@@ -2055,7 +2047,7 @@ parser_parse_struct: fn(state: &JetParserState, modifiers: ParsedItemModifiers) 
 // PublishedSchema facts. They apply once the whole body is read, so a marker
 // line anywhere in the body counts the same as the markers above.
 parser_apply_struct_markers: fn(state: &JetParserState, value: &StructDef, markers: [Marker], grouped: Bool) {
-    parser_apply_struct_type_markers(value, markers)
+    parser_apply_struct_type_markers(state, value, markers)
     value.layout = parser_layout_marker_fact(state, markers, grouped, false)
     value.layout_span = parser_layout_marker_span(markers, grouped, value.layout)
     value.layout_alignment_span = if value.layout != None -> parser_layout_alignment_span(markers) else -> None
@@ -2123,7 +2115,7 @@ parser_parse_enum: fn(state: &JetParserState, modifiers: ParsedItemModifiers) ->
     // markers, the package auto-derive default and SingleUse/MustUse, applied
     // once the body (and every marker line in it) is read.
     markers: parser_merge_inbody_markers(state, modifiers.markers, inside, modifiers.start_span.start, close.span.start, "enum `{value.name}`")
-    parser_apply_enum_type_markers(value, markers)
+    parser_apply_enum_type_markers(state, value, markers)
     value.cap = parser_type_fx_cap(state, markers, value.name, "type")
     _ := parser_layout_marker_fact(state, markers, modifiers.grouped_markers, true)
     value.effect_impl = parser_finish_effect_type(state, value.name, value.name_span, value.effect_impl, value.variants)
@@ -2266,10 +2258,10 @@ parser_parse_trait_impl_block: fn(state: &JetParserState, above: [Marker]) -> Tr
     }
     trait_span: parser_cover(trait_name.span, trait_end)
     operator_rhs: parser_parse_operator_rhs(state, Val(trait_text.copy()))
-    operator_marker := parser_operator_marker(above)
+    operator_marker := parser_operator_marker(state, above)
     loop parser_current_kind(state) == TOKEN_HASH {
         marker: parser_parse_marker(state)
-        if marker.name == MARKER_COMMUTATIVE -> operator_marker = Val(OperatorMarker.Commutative)
+        if parser_marker_is_hook(state, marker, MarkerHook.Commutative) -> operator_marker = Val(OperatorMarker.Commutative)
     }
     using: parser_current(state)
     if using.kind == TOKEN_IDENT && parser_value(state, using) == "using" {
@@ -2315,15 +2307,15 @@ parser_parse_trait_impl_block: fn(state: &JetParserState, above: [Marker]) -> Tr
     }
     close: parser_expect(state, TOKEN_RBRACE, "`}}` to close the trait impl body")
     markers: parser_merge_inbody_markers(state, above, inside, start.span.start, close.span.start, "impl `{trait_text}`")
-    if parser_operator_marker(markers) != None -> operator_marker = parser_operator_marker(markers)
-    TraitImplBlock{trait_name: trait_text, trait_span: trait_span, operator_rhs: operator_rhs, operator_marker: operator_marker, methods: methods, compiler_generated: false, assoc_type_impls: assoc_types, constants: constants, delegation_field: None, markers: markers, os_target: parser_impl_os_target(markers), span: Val(parser_cover(start.span, close.span))}
+    if parser_operator_marker(state, markers) != None -> operator_marker = parser_operator_marker(state, markers)
+    TraitImplBlock{trait_name: trait_text, trait_span: trait_span, operator_rhs: operator_rhs, operator_marker: operator_marker, methods: methods, compiler_generated: false, assoc_type_impls: assoc_types, constants: constants, delegation_field: None, markers: markers, os_target: parser_impl_os_target(state, markers), span: Val(parser_cover(start.span, close.span))}
 }
 
 // `Commutative` among an impl's markers makes it commutative, as the
 // `#Commutative` written after the trait does.
-parser_operator_marker: fn(markers: [Marker]) -> OperatorMarker? Never! {
+parser_operator_marker: fn(state: &JetParserState, markers: [Marker]) -> OperatorMarker? Never! {
     loop marker in markers {
-        if marker.name == MARKER_COMMUTATIVE && !marker.negated -> return Val(OperatorMarker.Commutative)
+        if !marker.negated && parser_marker_is_hook(state, marker, MarkerHook.Commutative) -> return Val(OperatorMarker.Commutative)
     }
     None
 }
@@ -2391,11 +2383,11 @@ parser_parse_const: fn(state: &JetParserState, modifiers: ParsedItemModifiers) -
     marker_index := 0
     loop marker_index < modifiers.markers.len() {
         marker: modifiers.markers[marker_index]
-        if marker.name == MARKER_STATIC {
+        if parser_marker_is_hook(state, marker, MarkerHook.Static) {
             attrs.push(ConstAttr.ForceStatic)
             rust_kind = RustConstKind.Static
         }
-        if marker.name == MARKER_INLINE -> attrs.push(ConstAttr.ForceInline)
+        if parser_marker_is_hook(state, marker, MarkerHook.Inline) -> attrs.push(ConstAttr.ForceInline)
         marker_index += 1
     }
     result := ast_const(binding_name, name_token.span, parser_cover(modifiers.start_span, terminator_span), parsed_value.expr)
@@ -2522,23 +2514,21 @@ parser_parse_function_type_alias: fn(state: &JetParserState, modifiers: ParsedIt
     TypeAliasDef{is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, name: parser_value(state, name), name_span: name.span, type_params: [TypeParam]{}, target: target.ty, target_span: target.span, span: parser_cover(name.span, target.span)}
 }
 
-parser_apply_type_markers: fn(value: &StructDef, markers: [Marker]) Never! {
-    index := 0
-    loop index < markers.len() {
-        marker: markers[index]
-        if marker.name == MARKER_SINGLE_USE {
+parser_apply_type_markers: fn(state: &JetParserState, value: &StructDef, markers: [Marker]) Never! {
+    loop marker in markers {
+        hook: parser_marker_hook(state, marker) ?? next
+        if hook == .SingleUse {
             value.is_single_use = true
             value.single_use_span = Val(marker.span)
         }
-        if marker.name == MARKER_MUST_USE {
+        if hook == .MustUse {
             value.is_must_use = true
             value.must_use_span = Val(marker.span)
         }
-        if marker.name == MARKER_PUBLISHED_SCHEMA {
+        if hook == .PublishedSchema {
             value.is_published_schema = true
             value.published_schema_span = Val(marker.span)
         }
-        index += 1
     }
 }
 
@@ -2806,10 +2796,10 @@ parser_parse_impl: fn(state: &JetParserState, modifiers: ParsedItemModifiers) ->
         return Item.ErrorConv{value: ErrorConvDef{from_ty: type_name, from_span: type_span, to_ty: to_ty, to_span: target.span, body: body.statements, body_span: body.span, markers: modifiers.markers}}
     }
     operator_rhs: parser_parse_operator_rhs(state, trait_name)
-    operator_marker := parser_operator_marker(modifiers.markers)
+    operator_marker := parser_operator_marker(state, modifiers.markers)
     loop parser_current_kind(state) == TOKEN_HASH && !parser_aborting(state) {
         marker: parser_parse_marker(state)
-        if marker.name == MARKER_COMMUTATIVE -> operator_marker = Val(OperatorMarker.Commutative)
+        if parser_marker_is_hook(state, marker, MarkerHook.Commutative) -> operator_marker = Val(OperatorMarker.Commutative)
     }
     // S62: `impl Type.Trait using field_name` delegates the trait to a field.
     using: parser_current(state)
@@ -2858,15 +2848,15 @@ parser_parse_impl: fn(state: &JetParserState, modifiers: ParsedItemModifiers) ->
     written := type_name.copy()
     if trait_name == .Val(text) -> written = "{written}.{text}"
     markers: parser_merge_inbody_markers(state, modifiers.markers, inside, start.span.start, close.span.start, "impl `{written}`")
-    if parser_operator_marker(markers) != None -> operator_marker = parser_operator_marker(markers)
-    Item.Impl{value: ImplDef{span: parser_cover(start.span, close.span), type_name: type_name, type_span: type_span, trait_name: trait_name, trait_span: trait_span, operator_rhs: operator_rhs, operator_marker: operator_marker, methods: methods, delegation_field: None, assoc_type_impls: assoc_types, constants: constants, is_generated_serde: false, os_target: parser_impl_os_target(markers), markers: markers, type_params: type_params}}
+    if parser_operator_marker(state, markers) != None -> operator_marker = parser_operator_marker(state, markers)
+    Item.Impl{value: ImplDef{span: parser_cover(start.span, close.span), type_name: type_name, type_span: type_span, trait_name: trait_name, trait_span: trait_span, operator_rhs: operator_rhs, operator_marker: operator_marker, methods: methods, delegation_field: None, assoc_type_impls: assoc_types, constants: constants, is_generated_serde: false, os_target: parser_impl_os_target(state, markers), markers: markers, type_params: type_params}}
 }
 
 // The native OS an impl is gated to by `#Target(OS.Linux|MacOS|Windows)`
 // among its markers, spelled as sema reads it (`linux`, `macos`, `windows`).
-parser_impl_os_target: fn(markers: [Marker]) -> String? {
+parser_impl_os_target: fn(state: &JetParserState, markers: [Marker]) -> String? {
     loop marker in markers {
-        if marker.name != MARKER_TARGET || marker.args.len() != 1 -> next
+        if !parser_marker_is_hook(state, marker, MarkerHook.Target) || marker.args.len() != 1 -> next
         if marker.args[0] == .Expr(value) {
             if parser_marker_target_path(value) == .Val(path) {
                 if path.starts_with("OS.") && target_os_named(path.slice(3, path.len())) == .Val(os) -> return Val(target_os_key(os))

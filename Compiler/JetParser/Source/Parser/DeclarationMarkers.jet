@@ -14,8 +14,6 @@ use jet_foundation.[
     JobScope,
     JobSkip,
     MARKER_JOB,
-    MARKER_MUST_USE,
-    MARKER_SINGLE_USE,
     Marker,
     MaturityTag,
     MetaAttr,
@@ -55,27 +53,28 @@ parser_split_type_markers: fn(markers: [Marker]) -> (derives: [NamedSpan], serde
     (derives: derives.move(), serde_markers: serde.move())
 }
 
-parser_apply_struct_type_markers: fn(value: &StructDef, markers: [Marker]) Never! {
+parser_apply_struct_type_markers: fn(state: &JetParserState, value: &StructDef, markers: [Marker]) Never! {
     value.type_markers = markers.copy()
     (derives, serde_markers) := parser_split_type_markers(markers)
     value.serde_markers = serde_markers
     value.derives = derives
     value.auto_derive_default = true
-    parser_apply_type_markers(value, markers)
+    parser_apply_type_markers(state, value, markers)
 }
 
-parser_apply_enum_type_markers: fn(value: &EnumDef, markers: [Marker]) Never! {
+parser_apply_enum_type_markers: fn(state: &JetParserState, value: &EnumDef, markers: [Marker]) Never! {
     value.type_markers = markers.copy()
     (derives, serde_markers) := parser_split_type_markers(markers)
     value.serde_markers = serde_markers
     value.derives = derives
     value.auto_derive_default = true
     loop marker in markers {
-        if marker.name == MARKER_SINGLE_USE {
+        hook: parser_marker_hook(state, marker) ?? next
+        if hook == .SingleUse {
             value.is_single_use = true
             value.single_use_span = Val(marker.span)
         }
-        if marker.name == MARKER_MUST_USE {
+        if hook == .MustUse {
             value.is_must_use = true
             value.must_use_span = Val(marker.span)
         }
