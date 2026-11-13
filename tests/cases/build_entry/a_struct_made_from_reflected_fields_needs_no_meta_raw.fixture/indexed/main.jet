@@ -1,0 +1,26 @@
+// The build makes `Twin` from the core.compiler index's definition of
+// `Seed`: the index's CompilerField rows carry each field's `TypeId`, so
+// they pass to `meta.add_struct` as they are.
+Seed: struct {
+    id: I64
+    tags: [String]
+}
+
+build: fn(b: Build) {
+    app: b.add_executable("app", ["main.jet"], [])
+    meta: b.compiler(app)
+    fields := [CompilerField]{}
+    loop definition in b.program.definitions() {
+        if definition.name != "Seed" || definition.kind.kind != "struct" -> next
+        loop field in definition.kind.fields -> fields.push(CompilerField{name: field.name.copy(), type: field.type.copy()})
+    }
+    if fields.len() != 2 -> panic("the index has no struct row for `Seed`")
+    meta.add_struct("Twin", fields, scope: "twin")
+    b.default(app)
+}
+
+run: fn() {
+    twin: Twin{id: I64{7}, tags: [String]{"a", "b"}}
+    print(twin.id)
+    print(twin.tags.len())
+}

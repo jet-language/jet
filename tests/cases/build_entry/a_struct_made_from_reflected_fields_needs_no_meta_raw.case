@@ -8,10 +8,12 @@
 # optimization give the same identity, size, alignment and offsets, and a
 # second build gives them again. A row that denies `Meta.Raw` still builds
 # it; one that denies `Meta.Types` refuses it. `meta.add_struct` returns
-# the new struct's `TypeId`, which a second struct holds as a field.
-# Beside it, the same `Shape` joined into source text under the `Meta.Raw`
-# denial is refused. A computed name that is not one identifier is refused
-# when the build runs.
+# the new struct's `TypeId`, which a second struct holds as a field. The
+# `indexed` build passes the core.compiler index's own CompilerField rows
+# for a struct, each carrying its field's `TypeId`, as they are. Beside
+# it, the same `Shape` joined into source text under the `Meta.Raw` denial
+# is refused. A computed name that is not one identifier is refused when
+# the build runs.
 fixture: a_struct_made_from_reflected_fields_needs_no_meta_raw.fixture
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
@@ -51,6 +53,12 @@ file: returned/.jet/generated/main/pin.jet ~ "    at: Point\n" # the returned Ty
 step: {work}/returned/.jet/build/app
 exit: 0
 stdout: = "point.Point\n9\n"
+step: jet build indexed/main.jet --write-generated=on
+exit: 0
+file: indexed/.jet/generated/main/twin.jet ~ "    id: I64\n    tags: [String]\n" # each index row's TypeId, as the generated module names it
+step: {work}/indexed/.jet/build/app
+exit: 0
+stdout: = "7\n2\n"
 step: jet build types_denied/main.jet
 exit: 1
 stderr: ~ "reaches the `Meta.Types` effect, which it prohibits with `-[!Meta.Types]>`" # the row's denial wins over the typed factory
