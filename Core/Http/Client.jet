@@ -1474,18 +1474,19 @@ C_LIVE_CHUNKED: 1
 C_LIVE_EOF: 2
 C_LIVE_LINE_BYTES: 8192
 
-// A final response body still on its plain TCP connection, read as the
-// program asks for it. `buffer[at..]` holds bytes already read past the
+// A final response body still on its connection, `tcp` or `tls`, read as
+// the program asks for it. `buffer[at..]` holds bytes already read past the
 // head. `framing` is C_LIVE_LENGTH (`left` bytes to go), C_LIVE_CHUNKED
 // (`left` bytes to go in the current chunk, 0 between chunks) or C_LIVE_EOF
-// (to the end of the stream). Each socket read is one deadline-bound Net
-// read of at most `read_ns`; a read that waits longer fails the body with
+// (to the end of the stream). Each socket read or write is one deadline-bound
+// Net operation of at most `read_ns`; one that waits longer fails the body with
 // Timeout. A chunked or to-the-end body past the transport bound
 // (C_CLIENT_BODY_BYTES, counted in `total`) is InvalidFraming. `kept` holds
 // what whole-body reads took, so a later read sees it again; `streamed`
 // marks bytes handed out by chunks and not kept.
 __LiveBody: struct {
     tcp: TCPStream?
+    tls: build_tls.TLSStream?
     buffer: [U8]
     at: Int
     read_ns: Int
@@ -1544,6 +1545,7 @@ __live_take: fn(&live: __LiveBody, max: Int, &out: [U8]) -[Net]> Int HTTPError! 
             if count == 0 {
                 live.done = true
                 live.tcp = None
+                live.tls = None
             }
             Ok(count)
         }
@@ -1551,6 +1553,7 @@ __live_take: fn(&live: __LiveBody, max: Int, &out: [U8]) -[Net]> Int HTTPError! 
             live.failure = Val(error)
             live.done = true
             live.tcp = None
+            live.tls = None
             Err(error)
         }
     }
@@ -1608,15 +1611,22 @@ __live_line: fn(&live: __LiveBody) -[Net]> [U8] HTTPError! {
     }
 }
 
-// The count of buffered bytes, reading the socket once when the buffer is
-// drained; 0 at the end of the stream.
+// The count of buffered bytes, reading the connection once when the buffer
+// is drained; 0 at the end of the stream.
 __live_fill: fn(&live: __LiveBody) -[Net]> Int HTTPError! {
     if live.at < live.buffer.len() -> return Ok(live.buffer.len() - live.at)
     live.buffer.clear()
     live.at = 0
+    wait: Duration{ns: live.read_ns}
+    if live.tls == .Val(stream) {
+        if build_tls.__read_into_each(stream, live.buffer, C_BUILD_READ_BYTES, wait) == {
+            .Ok(count) -> return Ok(count)
+            .Err(error) -> return Err(__live_tls_error(error))
+        }
+    }
     if live.tcp == {
         .Val(stream) -> {
-            if stream.read_into(live.buffer, C_BUILD_READ_BYTES, deadline: Duration{ns: live.read_ns}) == {
+            if stream.read_into(live.buffer, C_BUILD_READ_BYTES, deadline: wait) == {
                 .Ok(count) -> return Ok(count)
                 .Err(error) -> return Err(__live_error(error))
             }
@@ -1632,6 +1642,15 @@ __live_error: fn(error: NetError) -> HTTPError Never! {
         .Timeout(_) -> HTTPError.Timeout{phase: "transport"}
         .Cancelled(_) -> HTTPError.Cancelled
         .PermissionDenied(_) | .AddressInUse(_) | .AddressUnavailable(_) | .ConnectionRefused(_) | .ConnectionReset(_) | .NotConnected(_) | .Closed(_) | .Other(_) | .InvalidInput(_) | .Unsupported(_) | .TLS(_) | .Protocol(_) | .DNS(_) -> HTTPError.IO{operation: "transport"}
+    }
+}
+
+// __live_error for a read through TLS.
+__live_tls_error: fn(error: IOError) -> HTTPError Never! {
+    if error == {
+        .TimedOut(_) -> HTTPError.Timeout{phase: "transport"}
+        .Cancelled(_) -> HTTPError.Cancelled
+        .PermissionDenied(_) | .Closed(_) | .Other(_) | .InvalidInput(_) | .NotFound(_) | .Protocol(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> HTTPError.IO{operation: "transport"}
     }
 }
 
@@ -1652,18 +1671,24 @@ __client_once: fn(method: String, url: __ClientURL, fields: [http.Header], body:
         .Ok(got) -> reply = Val(got)
         .Err(error) -> failure = Val(error)
     }
-    __client_close(wire)
+    // A reply whose body stays on the connection keeps the TLS stream open.
+    keeps: if reply == {
+        .Val(got) -> got.live != None
+        .None -> false
+    }
+    if !keeps -> __client_close(wire)
     if prove == C_CLIENT_PROVE_CAPTURE -> build_tls.__prove_net_record(__client_net_tape(hop, method, url, fields, body, wire, reply))
     if failure == .Val(error) -> return Err(error)
     answered := reply ?? return Err(.IO{operation: "transport"})
-    answered.live = __live_attach(answered.live.move(), wire.tcp.move())
+    answered.live = __live_attach(answered.live.move(), wire.tcp.move(), wire.tls.move())
     Ok(answered)
 }
 
 // A body the exchange left on the connection, given the connection.
-__live_attach: fn(pending: &&__LiveBody?, tcp: &&TCPStream?) -> __LiveBody? Never! {
+__live_attach: fn(pending: &&__LiveBody?, tcp: &&TCPStream?, tls: &&build_tls.TLSStream?) -> __LiveBody? Never! {
     body := pending ?? return None
     body.tcp = tcp
+    body.tls = tls
     Val(body)
 }
 
@@ -1950,21 +1975,21 @@ __client_exchange: fn(&wire: __BuildWire, method: String, url: __ClientURL, fiel
     bodyless: method == "HEAD" || reply.status == 204 || reply.status == 304
     payload := [U8]{}
     failure := HTTPError?{None}
-    // Outside `jet prove`, a plain-TCP body that is not gzip stays on the
-    // connection and is read as the program asks for it, each read bound by
-    // the read phase's timeout.
-    plain: if wire.tcp == {
+    // Outside `jet prove`, a body that is not gzip stays on the connection,
+    // plain or TLS, and is read as the program asks for it, each read bound
+    // by the read phase's timeout.
+    connected: if wire.tcp == {
         .Val(_) -> true
-        .None -> false
+        .None -> wire.tls != None
     }
     read_bound: __build_remaining(wire)
-    if !bodyless && !gzip && plain && wire.prove == 0 && read_bound > 0 {
+    if !bodyless && !gzip && connected && wire.prove == 0 && read_bound > 0 {
         framing: if {
             transfer.len() > 0 -> C_LIVE_CHUNKED
             length == None -> C_LIVE_EOF
             else -> C_LIVE_LENGTH
         }
-        live: __LiveBody{tcp: None, buffer: wire.buffer.copy(), at: wire.at, read_ns: read_bound, framing: framing, left: length ?? 0, total: 0, done: false, failure: None, kept: [U8]{}, streamed: false}
+        live: __LiveBody{tcp: None, tls: None, buffer: wire.buffer.copy(), at: wire.at, read_ns: read_bound, framing: framing, left: length ?? 0, total: 0, done: false, failure: None, kept: [U8]{}, streamed: false}
         return Ok(__ClientReply{status: reply.status, headers: reply.headers, body: [U8]{}, body_error: None, raw_encoding: raw_encoding, live: Val(live)})
     }
     if !bodyless {

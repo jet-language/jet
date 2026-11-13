@@ -1296,6 +1296,109 @@ __read_into: fn(&tls: __TLSState, &buffer: [U8], limit: Int, end_ns: Int) -[Net,
     }
 }
 
+// read_into for a reader that bounds each wait itself: every socket read and
+// write it makes waits at most `wait`, and it never reads the clock. A wait
+// that runs out is NetError.Timeout, as IOError.TimedOut. The HTTP client
+// reads a response body this way, one read timeout per read.
+__read_into_each: fn(stream: TLSStream, &buffer: [U8], limit: Int, wait: Duration) -[Net]> Int IOError! {
+    if limit <= 0 -> return Err(IOError.InvalidInput(__io_context(.Read, "tls read_into limit must be positive")))
+    if wait.ns < 0 -> return Err(__net_to_io(NetError.InvalidInput(__detail("tls read", "network timeout must be non-negative"))))
+    state: __state(stream) ?? return Err(__io_error(.Read, "TLS stream is closed"))
+    guard := state.guard_edit()
+    __read_into_waiting(guard.value, buffer, limit, wait)
+}
+
+// __read_into_each under the stream's lock.
+__read_into_waiting: fn(&tls: __TLSState, &buffer: [U8], limit: Int, wait: Duration) -[Net]> Int IOError! {
+    if tls.closed -> return Err(__io_error(.Read, "TLS stream is closed"))
+    if tls.pending.len() > 0 {
+        count: if limit < tls.pending.len() -> limit else -> tls.pending.len()
+        loop index in 0..<count -> buffer.push(tls.pending[index])
+        tls.pending = __slice(tls.pending, count, tls.pending.len())
+        return Ok(count)
+    }
+    if tls.read_eof -> return Ok(0)
+    loop {
+        size: if limit < C_RECORD_BYTES -> limit else -> C_RECORD_BYTES
+        status := 0
+        if sslmsg.ssl_read(tls.ssl, tls.buffer, size, tls.rng) == {
+            .Ok(count) -> status = count
+            .Err(e) -> status = __code(e)
+        }
+        sent: __flush_each(tls, wait) ?? return Err(__net_to_io(err))
+        if status > 0 {
+            loop index in 0..<status -> buffer.push(tls.buffer[index])
+            return Ok(status)
+        }
+        status = __settle(status, sent)
+        if status == C_PEER_CLOSE_NOTIFY {
+            tls.read_eof = true
+            return Ok(0)
+        }
+        // mbedtls_ssl_read reports a transport EOF without close_notify as 0.
+        if status == 0 -> return Err(__io_error(.Read, C_TRUNCATION))
+        if status == C_NEW_SESSION_TICKET -> next
+        if status == C_WANT_READ || status == C_WANT_WRITE {
+            status = __await_each(tls, status, wait) ?? return Err(__net_to_io(err))
+            if status == 0 -> next
+        }
+        return Err(__io_error(.Read, "TLS read failed: {__mbedtls_text(status)}"))
+    }
+}
+
+// __flush with each socket write bounded by `wait`: 0, or the socket status
+// that failed the send.
+__flush_each: fn(&tls: __TLSState, wait: Duration) -[Net]> Int NetError! {
+    total: tls.ssl.bio.tx.len()
+    at := 0
+    loop at < total {
+        sent: tls.tcp.write(__slice(tls.ssl.bio.tx, at, total), deadline: wait) ?? {
+            tls.ssl.bio.tx.clear()
+            if __timed_out(err) -> return Err(__deadline_error("tls read"))
+            if __stopped(err) -> return Err(err)
+            return Ok(__socket_status(err, C_NET_SEND_FAILED))
+        }
+        if sent == 0 {
+            tls.ssl.bio.tx.clear()
+            return Ok(C_NET_SEND_FAILED)
+        }
+        at += sent
+    }
+    tls.ssl.bio.tx.clear()
+    Ok(0)
+}
+
+// __await with one socket wait bounded by `wait`: 0 when the engine can be
+// called again, or the socket status that ended the wait.
+__await_each: fn(&tls: __TLSState, status: Int, wait: Duration) -[Net]> Int NetError! {
+    if status == C_WANT_WRITE {
+        if tls.tcp.ready(NetReadyInterest.Write, deadline: wait) == .Err(err) {
+            if __timed_out(err) -> return Err(__deadline_error("tls read"))
+            if __stopped(err) -> return Err(err)
+            return Ok(__socket_status(err, C_NET_SEND_FAILED))
+        }
+        return Ok(0)
+    }
+    if tls.tcp.read_into(tls.ssl.bio.rx, C_RECORD_BYTES, deadline: wait) == {
+        .Ok(count) -> {
+            if count == 0 -> tls.ssl.bio.rx_eof = true
+            Ok(0)
+        }
+        .Err(err) -> {
+            if __timed_out(err) -> return Err(__deadline_error("tls read"))
+            if __stopped(err) -> return Err(err)
+            Ok(__socket_status(err, C_NET_RECV_FAILED))
+        }
+    }
+}
+
+__stopped: fn(err: NetError) -> Bool Never! {
+    if err == {
+        .Cancelled(_) -> true
+        .InvalidInput(_) | .PermissionDenied(_) | .AddressInUse(_) | .AddressUnavailable(_) | .ConnectionRefused(_) | .ConnectionReset(_) | .NotConnected(_) | .Closed(_) | .Timeout(_) | .Unsupported(_) | .TLS(_) | .Protocol(_) | .Other(_) | .DNS(_) -> false
+    }
+}
+
 // read_text under the stream's lock: the bytes it takes past the text it
 // returns go back in front of `pending`.
 __read_text: fn(&tls: __TLSState, max_bytes: Int, end_ns: Int) -[Net, Time.Wait]> String IOError! {

@@ -1,0 +1,31 @@
+# An https response body streams from its TLS connection. OpenSSL
+# `s_server`, with the checked-in test chain, answers each of three
+# connections with a response head and three of ten body bytes, then sends
+# nothing more. The response returns, the first piece reads `abc`, and the
+# next read fails with HTTPError.Timeout once the 500 ms read timeout
+# passes, on every optimization level. SSL_CERT_FILE pins the client's
+# default trust to the chain's CA.
+requires: tool:openssl
+requires: os:unix
+fixture: https_client_response_body_streams_from_its_tls_connection_and_times_out_when_stalled.fixture
+copy: {root}/tests/fixtures/tls/custom-root.ca.cert.pem ca.pem
+copy: {root}/tests/fixtures/tls/custom-root.server.cert.pem server.cert.pem
+copy: {root}/tests/fixtures/tls/custom-root.server.key.pem server.key.pem
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: SSL_CERT_FILE={work}/ca.pem
+session tls raw: sh serve.sh {free-port:tls}
+sleep: 250ms
+write: main.jet https_client_response_body_streams_from_its_tls_connection_and_times_out_when_stalled.fixture/main.template
+step none: jet run --optimize=none main.jet
+exit: 0
+stdout: = https_client_response_body_streams_from_its_tls_connection_and_times_out_when_stalled.out
+step basic: jet run --optimize=basic main.jet
+exit: 0
+stdout: = https_client_response_body_streams_from_its_tls_connection_and_times_out_when_stalled.out
+step full: jet run --optimize=full main.jet
+exit: 0
+stdout: = https_client_response_body_streams_from_its_tls_connection_and_times_out_when_stalled.out
+signal tls: KILL
+close tls
+exit: any # the case kills the server loop; its exit status is not part of the contract
