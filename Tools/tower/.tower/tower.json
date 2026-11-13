@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6832,
-    "rev": 101734,
+    "rev": 101737,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -40898,12 +40898,12 @@
         },
         {
           "n": 26,
-          "text": "A refused queued write whose screen is gone, or which is refused after a restart, adds a notice to the app's notice list, kept until dismissed. Edits rebased on it replay, and each is judged on its own checks with its own notice. Proof: `jet test Compiler --profile cases --filter web_app/refused_queued_write_without_a_screen_becomes_a_kept_notice`.",
+          "text": "A refused queued write whose screen is gone, or which is refused after a restart, adds a notice to the app notice list, kept until dismissed. Edits rebased on it replay with the row version each was made against, so one whose row changed since answers Conflict; each is judged on its own checks with its own notice. Proof: `jet test Compiler --profile cases --filter web_app/refused_queued_write_without_a_screen_becomes_a_kept_notice`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T18:17:33.444Z"
+          "at": "2026-11-13T18:26:02.694Z"
         }
       ],
       "refs": [
@@ -40928,7 +40928,7 @@
       "parentId": "c0u5tm84",
       "needsAcceptance": false,
       "created": "2026-09-28T17:35:44.050Z",
-      "updated": "2026-11-13T18:17:33.444Z",
+      "updated": "2026-11-13T18:26:02.694Z",
       "updatedBy": "Main",
       "goals": [
         "G9"
@@ -95575,6 +95575,11 @@
         {
           "at": "2026-11-13",
           "by": "Main",
+          "text": "Review round 4 (G6Meta-4, SUB G6Meta-6792c3-review4): FAILS narrowly on c3 alone; c1, c2, c6, c7 and c8 are met. 23 of the 28 round-3 items are closed; 4, 11, 12, 13 and 15 are partly closed. C3 fails on 3 points: the upload spool comes before the policy check (against #6813 c3), the members policy ignores invitation expiry, and the creator rule is not tied to the project row. CL7 holds except native.background, whose failures reach only a log. 8 gaps go to G12Docs-5 for r5. #6825 c1 now asks for a key per push, and #3709 c26 says a replayed edit keeps its version and can conflict."
+        },
+        {
+          "at": "2026-11-13",
+          "by": "Main",
           "text": "Review round 3 (G6Meta-4, SUB G6Meta-6792c3-review3): FAILS narrowly. c6 met (defect: no native.share example); c7 met (the 87-vs-51 floor is named and left to #6817); c8 partly met (CL2, CL4 and CL7 fail their next tests; no member removal). C3 safety fails: policy write semantics undefined, members can write project rows, webhook key is a UUIDv7. Of the claims, CL1, CL3, CL6 (narrowed), CL8 and CL9 hold; CL5 is not carried. D-BOUND-METHOD1 is not ready to post (wrong rationale, keyed query value, &self, name clashes, no code). The 28 R3-6 gaps go to G12Docs-5 for r4, ahead of #5201 c31."
         },
         {
@@ -95670,7 +95675,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-13T14:36:35.100Z",
-      "updated": "2026-11-13T17:55:39.659Z",
+      "updated": "2026-11-13T18:26:03.696Z",
       "updatedBy": "Main",
       "criteriaLastN": 8
     },
@@ -97577,12 +97582,12 @@
       "criteria": [
         {
           "n": 1,
-          "text": "app.enqueue inside a #App.SignedIn method stores the job call in that method's transaction: a rolled-back write queues nothing, and a committed one runs the job at least once after the commit, retried with backoff up to retries:. Each queued call has a key that app.notify and app.mail pass to the transport (APNs apns-collapse-id, FCM collapse key, mail Message-ID), so a retried send is collapsed. Proof: `jet test Compiler --profile cases --filter web_app/job_runs_after_commit_and_never_after_rollback`.",
+          "text": "app.enqueue inside a #App.SignedIn method stores the job call in that method transaction: a rolled-back write queues nothing, and a committed one runs the job at least once after the commit, retried with backoff up to retries:. Each push or mail a job sends gets its own key, made from the queued call key and that send position in the job, and app.notify and app.mail pass it to the transport (APNs apns-collapse-id, FCM collapse key, mail Message-ID). A retried run repeats each key, so the transport collapses repeats, and two different pushes from one job never share a key. Proof: `jet test Compiler --profile cases --filter web_app/job_runs_after_commit_and_never_after_rollback`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T18:17:36.601Z"
+          "at": "2026-11-13T18:26:01.723Z"
         },
         {
           "n": 2,
@@ -97629,7 +97634,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-13T17:08:07.504Z",
-      "updated": "2026-11-13T18:17:37.554Z",
+      "updated": "2026-11-13T18:26:01.723Z",
       "updatedBy": "Main",
       "criteriaLastN": 5
     },
@@ -204061,6 +204066,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-13T18:26:03.697Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0snkbac",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-13T18:26:02.694Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0ttcd0k",
+      "note": "#26: #6792 review round 4: a replayed rebased edit keeps its version and can conflict; was: A refused queued write whose screen is gone, or which is refused after a restart, adds a notice to the app's notice list, kept until dismissed. Edits rebased on it replay, and each is judged on its ow"
+    },
+    {
+      "at": "2026-11-13T18:26:01.723Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0se7lpr",
+      "note": "#1: #6792 review round 4: the transport key must be per push, not per job call; was: app.enqueue inside a #App.SignedIn method stores the job call in that method's transaction: a rolled-back write queues nothing, and a committed one runs the job at least once after the commit, retried"
+    },
     {
       "at": "2026-11-13T18:17:44.343Z",
       "by": "Main",
