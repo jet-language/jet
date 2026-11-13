@@ -76,7 +76,7 @@ sema_shared_cycle_reaches: fn(owner: String, ty: Type, environment: SemaScopeEnv
 sema_shared_cycle_holds_function: fn(ty: Type) -> Bool Never! {
     if ty == {
         .Fn(_, _, _, _, _, _) -> true
-        .Option(inner) | .List(inner) | .FixedList(inner, _) | .Tagged(_, inner) -> sema_shared_cycle_holds_function(inner)
+        .Option(inner) | .List(inner) | .FixedList(inner, _) | .Tagged(_, inner) | .Case(_, inner) -> sema_shared_cycle_holds_function(inner)
         .Map(_, _, element) -> sema_shared_cycle_holds_function(element)
         .Result(first, second) -> sema_shared_cycle_holds_function(first) || sema_shared_cycle_holds_function(second)
         .Tuple(fields) -> {
