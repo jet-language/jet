@@ -58,7 +58,7 @@ kit_ui_test_run: fn(code: Int, stderr: String) -> KitRun {
 
 #Test("UI directive table preserves argv cwd streams and refuses internal or unknown facts") {
     loop row in kit_ui_directives() {
-        argument: if row.name == "complexity_cli" -> "branches 8" else if row.name == "compiler_extension" -> "Tools/hook.wasm" else -> ""
+        argument: if row.name == "complexity_cli" -> "branches 8" else if row.name == "compiler_extension" -> "Tools/hook.wasm" else if row.name == "org_policy" -> "organization.policy" else -> ""
         call: kit_ui_invocation("// @{row.name} {argument}\nprint(1)\n", "tests/ui/a.jet", false)
         if row.capability != "" {
             assert_eq(call.refused, row.capability)
@@ -80,6 +80,11 @@ kit_ui_test_run: fn(code: Int, stderr: String) -> KitRun {
         if row.name == "complexity_cli" -> assert_eq(call.argv[3], "--max=8")
         if row.name == "repl_deny" -> assert_eq(call.stdin, "print(1)\n:quit")
         if row.name == "compiler_extension" -> assert_eq(call.extension, "Tools/hook.wasm")
+        // The policy file sets the environment only: the entry is still checked.
+        if row.name == "org_policy" {
+            assert_eq(call.org_policy, "organization.policy")
+            assert_eq(call.argv, ["check", "tests/ui/a.jet"])
+        }
     }
     assert(kit_ui_invocation("// @unknown_fact\n", "a.jet", false).refused.contains("unknown_fact"))
     assert(kit_ui_invocation("// @complexity_cli branches\n", "a.jet", false).refused != "")

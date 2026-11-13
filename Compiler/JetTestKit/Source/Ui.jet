@@ -61,6 +61,9 @@ kit_ui_directives: fn() -> [KitUIDirective] {
         {name: "gate", argv: ["check", "--gate", "$arg", "$file"], parent: false, exit: "any", streams: "rendered", capability: ""},
         {name: "compiler_extension", argv: [], parent: false, exit: "any", streams: "", capability: ""},
         {name: "requires", argv: [], parent: false, exit: "any", streams: "", capability: ""},
+        // `@org_policy FILE` runs the invocation under that organization
+        // policy file (JET_ORG_UNSAFE_POLICY), named from the entry's directory.
+        {name: "org_policy", argv: [], parent: false, exit: "any", streams: "", capability: ""},
         // Marks a programmable build entry; an invocation row (`build_grants`)
         // runs it, and one with none is refused (kit_ui_invocation).
         {name: "programmable_build", argv: [], parent: false, exit: "any", streams: "", capability: ""}
@@ -118,7 +121,7 @@ kit_ui_host: fn(source: String, ctx: KitCtx) -> KitVerdict? {
 }
 
 kit_ui_invocation: fn(source: String, file: String, lint: Bool) -> KitUICall {
-    call := KitUICall{argv: if lint -> ["check", "--verbose", file] else -> ["check", file], parent: false, exit: "any", streams: if lint -> "lint" else -> "rendered", stdin: "", extension: kit_ui_arg(source, "compiler_extension") ?? "", refused: ""}
+    call := KitUICall{argv: if lint -> ["check", "--verbose", file] else -> ["check", file], parent: false, exit: "any", streams: if lint -> "lint" else -> "rendered", stdin: "", extension: kit_ui_arg(source, "compiler_extension") ?? "", refused: "", org_policy: kit_ui_arg(source, "org_policy") ?? ""}
     rows: kit_ui_directives()
     loop raw in source.split("\n") {
         line: raw.trim().copy()
@@ -423,6 +426,7 @@ kit_ui_outcomes: fn(entry: KitEntry, ctx: KitCtx) -> [KitOutcome] {
         overlay.push(KitEnvVar{name: "JET_FFI_CACHE_DIR", value: Val(unavailable)})
     }
     if call.extension != "" -> overlay.push(KitEnvVar{name: "JET_COMPILER_EXTENSION", value: Val(files.join(ctx.root, call.extension))})
+    if call.org_policy != "" -> overlay.push(KitEnvVar{name: "JET_ORG_UNSAFE_POLICY", value: Val(files.join(work, call.org_policy))})
     published: "{kit_steps_byte_slice(original, 0, original.count_bytes() - 4)}.published.snapshot"
     if kit_exec_optional(published) == .Val(snapshot) {
         name := "Unknown"
