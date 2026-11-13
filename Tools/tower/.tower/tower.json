@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6832,
-    "rev": 101752,
+    "rev": 101756,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -34,7 +34,7 @@
         "radar:e17"
       ]
     },
-    "completionCursor": "2026-11-13T11:38:54.728Z"
+    "completionCursor": "2026-11-13T20:03:02.809Z"
   },
   "epochs": [
     {
@@ -26458,6 +26458,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-13",
+          "by": "Main",
+          "text": "c5 split (Main decision): part a, where fresh run and each jet dev restart share host registration, is SUB G12Docs-3078c5a. The hot-swap leg depends on in-process hot swap, which #6625 (Live hot-reload that keeps state, c2 and c13) owns. It is written and proved there once #6625 lands, not built under #3078."
+        },
+        {
           "at": "2026-11-06",
           "by": "Main",
           "text": "Deconfliction 2026-11-06: reworded to match I9 tiers O0, O1, O2 and web (D-EXEC1, D-EXEC2=A: no interpreter or JIT); the Rust-free toolchain (Jet suites and tests/cases rows replace cargo tests and .rs sources)."
@@ -26640,7 +26645,7 @@
       "parentId": "c0u5tm84",
       "needsAcceptance": false,
       "created": "2026-09-12T12:53:32.615Z",
-      "updated": "2026-11-13T01:55:49.342Z",
+      "updated": "2026-11-13T20:14:11.098Z",
       "updatedBy": "Main",
       "workOrder": 87,
       "goals": [
@@ -58547,8 +58552,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-23T14:31:32.550Z",
-      "updated": "2026-11-13T17:51:43.424Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-13T20:08:20.206Z",
+      "updatedBy": "owner",
       "goals": [
         "G11"
       ],
@@ -89883,99 +89888,6 @@
       "updatedBy": "Main"
     },
     {
-      "id": "c086wraw",
-      "num": 6686,
-      "title": "Plain jet decides by file extension: `jet run x.c`, `jet build x.c` and `jet x.c` compile C (and C++) instead of parsing it as Jet",
-      "body": "Owner order 2026-11-08: \"Yes obviously we should decide behavior based on extension. That needs to be fixed.\" Probe on seed a0_038: `jet run hello.c`, `jet build hello.c` and `jet hello.c` parse the C file as Jet and print jet.InvalidStatement (\"Expected a call... found <\"). `jet cc hello.c` took 75 s and then failed with E1275 (C/C++ build sandbox unavailable). Plain jet already compiles C inside Jet programs (c@path deps and #FFI(c) bodies, Compiler/JetCli/Source/Cli/ForeignLink.jet) through the toolchain C pack or CC; the entry commands must route a C or C++ source through that same one mechanism (I8), not through a second path.",
-      "kind": "bug",
-      "track": "epoch",
-      "epoch": "e4",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P1",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-08",
-          "by": "Main",
-          "text": "Owner rulings 2026-11-08. Q7: H1, core.crypto.Hasher really streams (new, update and digest stay; the public data field becomes private native SHA state). Q8: ship bwrap in the C toolchain pack for now, until the sandbox is built properly in Jet; the Jet sandbox is a longer-term card, not now (filed separately so bwrap removal is not lost). Q15: all five behaviors confirmed; no C++ standard library now (maybe a stretch goal)."
-        },
-        {
-          "at": "2026-11-08",
-          "by": "Main",
-          "text": "QuickLead landed 775f3b07ae (28 files; unverified by Main, queued for the batch). c1: jet run, jet build and jet x.c, with .cc, .cpp and .cxx as C++, go through ForeignLink jet_cli_native_c_tools; case run_entry/c_and_cpp_files_run_by_extension (cases run_entry PASS 18, FAIL 0). c2: E2116 UnhandledSourceExtension with a UI snapshot; #! scripts stay Jet. c4: golden Examples/Interop/FFI/PlainC.c PASS on O0, O1 and O2. c3 partial: E1275 now names its reason (Bubblewrap not on PATH) and pkg_sha256_hex is native. fetch-toolchain went from 23.2 s to 15.2 s (hyperfine, 3 runs, host load about 33). But jet run hello.c is still 25 to 28 s with no JET_CC_PACK_ROOT, and jet cc with bwrap takes 80.5 s real (13.0 s user); the rest waits on owner choices H and B. jet build hello.c with the pack takes 29.8 ms. Behavior choices built and pending owner confirmation: O0, O1 and O2 mapping; build output to .jet/build/<stem>; check, doc and dev refuse with E2116; no mixing .jet and .c; no C++ stdlib in the pack."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "`jet run x.c`, `jet build x.c` and `jet x.c` (and .cc, .cpp, .cxx for C++) compile the source with the toolchain C path that Jet programs already use for their C, then link and run it; each prints the program output and exit code on this host with no extra flag, case-tested.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Landed in QuickLead's 775f3b07ae, on dev e4096a0f3b. In the Lander's fR3 fullprof run of that tree: tests/cases/run_entry/c_and_cpp_files_run_by_extension.case PASS (jet run, jet build and plain jet on hello.c and shapes.cpp print the output and exit code; notes.txt is refused with E2116, its stderr byte-compared with the snapshot tests/cli/unhandled_extension_e2116.txt; E2116 has registered what/why/fix text in Compiler/Prelude/Diagnostics.jet), and the golden Examples/Interop/FFI/PlainC.c PASS on o0, o1 and o2.",
-          "at": "2026-11-10T01:35:55.353Z"
-        },
-        {
-          "n": 2,
-          "text": "A source whose extension jet does not handle gets a registered diagnostic naming the extension and the extensions jet accepts, with what/why/fix text and a UI snapshot (I4), never a Jet parse error.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Landed in QuickLead's 775f3b07ae, on dev e4096a0f3b. In the Lander's fR3 fullprof run of that tree: tests/cases/run_entry/c_and_cpp_files_run_by_extension.case PASS (jet run, jet build and plain jet on hello.c and shapes.cpp print the output and exit code; notes.txt is refused with E2116, its stderr byte-compared with the snapshot tests/cli/unhandled_extension_e2116.txt; E2116 has registered what/why/fix text in Compiler/Prelude/Diagnostics.jet), and the golden Examples/Interop/FFI/PlainC.c PASS on o0, o1 and o2.",
-          "at": "2026-11-10T01:35:56.419Z"
-        },
-        {
-          "n": 3,
-          "text": "`jet cc hello.c` and `jet run hello.c` work on this development host: the E1275 sandbox refusal seen on 2026-11-08 (Bubblewrap not on PATH) is fixed by shipping bwrap in the C toolchain pack (owner Q8 2026-11-08; #6697 replaces it with a Jet sandbox later), and a fresh C compile finishes in seconds, not 75 s (receipt with times).",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Receipt 2026-11-10 on this development host, with the jet built from landed dev 00a2b37a42 (train t12c, PerfLead-c3) and the jetpack engine built from the same tree (the release hosted_stage path), with Jet's pinned jet-bwrap-x86_64-linux beside them. Conditions: no bwrap on PATH, a fresh HOME, JET_CC_PACK_URL=file:// for the a0.0.43 cc pack (the pack is unchanged: it holds only clang, lld, llvm-ar, the libc and the headers). Times: jet cc hello.c -o hello rc 0 in 51.8 s on first use (a one-time fetch and unpack of the 111 MB toolchain into the Hangar), and ./hello prints 'hello from c' with exit 3. A fresh compile afterwards takes 1.2 s, and jet run hello.c takes 3.4 s (rc 3, the program's exit). The E1275 refusal is gone; with the a0.0.43 jetpack engine it remains, so a0.0.44 ships jetpack rebuilt from this tree, as the release flow does. Script: $JET_SCRATCH_ROOT/lanes/Main/runs/cc-t12c.sh.",
-          "at": "2026-11-10T16:46:53.375Z"
-        },
-        {
-          "n": 4,
-          "text": "An Examples/ entry runs a C file with plain `jet run`, golden-tested (I5).",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Landed in QuickLead's 775f3b07ae, on dev e4096a0f3b. In the Lander's fR3 fullprof run of that tree: tests/cases/run_entry/c_and_cpp_files_run_by_extension.case PASS (jet run, jet build and plain jet on hello.c and shapes.cpp print the output and exit code; notes.txt is refused with E2116, its stderr byte-compared with the snapshot tests/cli/unhandled_extension_e2116.txt; E2116 has registered what/why/fix text in Compiler/Prelude/Diagnostics.jet), and the golden Examples/Interop/FFI/PlainC.c PASS on o0, o1 and o2.",
-          "at": "2026-11-10T01:35:57.574Z"
-        },
-        {
-          "n": 5,
-          "text": "A jet cc whose project input set is over its 512 MiB cap reports a registered error of its own, naming the project root it inferred, the size and the cap, and saying how to narrow it (--project-root). Today it reports E2102 'Invalid arguments for jet cc' (kind UnknownFlag) with only the usage line as the fix. Found on dev 00a2b37a42 when jet cc hello.c ran in a directory that held a Hangar. Proof: a UI snapshot.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Landed on dev 01b86931e7 (train t14a, 53805444ba..01b86931e7), SUB G8Fix-4. Every test line of the SUB passes with the compiler built from the landed tree ($JET_SCRATCH_ROOT/lanes/Main/integ/t14a/REPORT.md: census2 rc=0 after the c42b drop; the integration fixes G6LeadE-1sfixr, G8Fix-2fix and PerfLead-5072c26afix landed with it). An over-cap jet cc project input set is E2118 jet.CcProjectInputsTooLarge, naming the root, the size and the cap, with a UI snapshot; it reruns rc=0 with the built jetpack.",
-          "at": "2026-11-10T19:45:01.526Z"
-        }
-      ],
-      "refs": [],
-      "tags": [
-        "cli",
-        "ffi",
-        "owner-direction"
-      ],
-      "goals": [
-        "G4"
-      ],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-11-08T15:40:30.554Z",
-      "updated": "2026-11-10T19:52:14.609Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 5,
-      "completedAt": "2026-11-10T19:52:14.609Z"
-    },
-    {
       "id": "c0lscvc9",
       "num": 6687,
       "title": "Jet depends on no other language: port every C dependency (musl, libgcc, SQLite, mbedtls) to Jet",
@@ -95680,8 +95592,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-13T14:36:35.100Z",
-      "updated": "2026-11-13T18:56:56.884Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-13T20:13:15.283Z",
+      "updatedBy": "owner",
       "criteriaLastN": 8
     },
     {
@@ -199985,8 +199897,10 @@
         }
       },
       "draft": false,
-      "status": "open",
-      "created": "2026-11-13T15:24:04.364Z"
+      "status": "ratified",
+      "created": "2026-11-13T15:24:04.364Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-11-13"
     },
     {
       "id": "D-SPEED-NOAST1",
@@ -200367,8 +200281,10 @@
         }
       },
       "draft": false,
-      "status": "open",
-      "created": "2026-11-13T15:24:06.473Z"
+      "status": "ratified",
+      "created": "2026-11-13T15:24:06.473Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-11-13"
     },
     {
       "id": "D-SPEED-PGO1",
@@ -200898,8 +200814,10 @@
         }
       },
       "draft": false,
-      "status": "open",
-      "created": "2026-11-13T18:56:10.345Z"
+      "status": "ratified",
+      "created": "2026-11-13T18:56:10.345Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-11-13"
     }
   ],
   "questions": [
@@ -204245,6 +204163,41 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-13T20:14:11.098Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0uasubv",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-13T20:13:15.283Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-WEBAPP-SHAPE1",
+      "note": "A"
+    },
+    {
+      "at": "2026-11-13T20:08:20.206Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-SPEED-OSCOST1",
+      "note": "A"
+    },
+    {
+      "at": "2026-11-13T20:08:20.206Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-SPEED-LINEAR1",
+      "note": "A"
+    },
+    {
+      "at": "2026-11-13T20:03:02.809Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-11-13T20:03:02.809Z"
+    },
     {
       "at": "2026-11-13T18:56:56.884Z",
       "by": "Main",
