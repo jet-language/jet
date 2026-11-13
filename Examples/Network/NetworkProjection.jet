@@ -17,8 +17,7 @@ run: fn() {
     port: net.socket_port(address)
     client: net.tcp_connect_addr(address) ?? return
     server := net.tcp_accept(listener) ?? return
-    timeout_client: net.tcp_connect_timeout(address, 1000) ?? return
-    happy_client: net.tcp_connect_happy("127.0.0.1", port, 1000) ?? return
+    happy_client: net.tcp_connect_happy("127.0.0.1", port) ?? return
     local_address: net.tcp_local_addr(client) ?? return
     peer_address: net.tcp_peer_addr(client) ?? return
     local_socket: net.tcp_local_socket_addr(client) ?? return
@@ -36,8 +35,6 @@ run: fn() {
     ready: net.tcp_ready(server, NetReadyInterest.Read, 1000) ?? return
     print("readable:{net.ready_readable(ready)}")
     _: net.tcp_accept(listener) ?? return
-    _: net.tcp_accept(listener) ?? return
-    timeout_client.close() ?? return
     happy_client.close() ?? return
     client.close() ?? return
     server.close() ?? return
@@ -61,7 +58,7 @@ run: fn() {
 
     // `.test` names never resolve (RFC 6761): the lookup yields no records
     // whether the resolver answers "not found" or cannot be reached.
-    records: net.dns_srv("_jet._tcp.example.test", 1000) ?? [SRVRecord]{}
+    records: net.dns_srv("_jet._tcp.example.test") ?? [SRVRecord]{}
     print("srv-records:{records.len()}")
     loop record in records {
         print("srv:{net.dns_srv_target(record)}:{net.dns_srv_port(record)}:{net.dns_srv_priority(record)}:{net.dns_srv_weight(record)}")

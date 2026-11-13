@@ -11,8 +11,7 @@ serve: fn(listener: net.TCPListener, count: Int) {
     crlf: http_crlf()
     loop _ in 0..<count {
         stream := net.tcp_accept(listener) ?? panic("accept")
-        net.set_read_timeout(stream, 5000) ?? panic("read timeout")
-        request: String.from_bytes(net.tcp_read_bytes(stream, 4096) ?? panic("read request")) ?? panic("request UTF-8")
+        request: String.from_bytes(stream.read(4096, deadline: 5s) ?? panic("read request")) ?? panic("request UTF-8")
         host := ""
         loop line in request.lines() {
             if line.starts_with("host:") || line.starts_with("Host:") -> host = line.slice(5, line.len()).trim()

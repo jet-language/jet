@@ -257,16 +257,12 @@ tcp_connect_addr: fn(addr: SocketAddr) -[Net, Time.Wait]> TCPStream NetError! {
     core.net.__tcp_connect_addr(addr)
 }
 
-tcp_connect_timeout: fn(addr: SocketAddr, timeout_ms: Int) -[Net, Time.Wait]> TCPStream NetError! {
-    if !valid_timeout(timeout_ms) -> return Err(net_err("tcp_connect_timeout", socket_to_string_impl(addr), "timeout must be non-negative"))
-    core.net.__tcp_connect_timeout(addr, timeout_ms)
-}
-
-tcp_connect_happy: fn(host: String, port: Int, timeout_ms: Int) -[Net, Time.Wait]> TCPStream NetError! {
+// The address-family race is bounded by the `#Deadline` in force alone, as
+// `tcp_connect` is.
+tcp_connect_happy: fn(host: String, port: Int) -[Net, Time.Wait]> TCPStream NetError! {
     if !valid_host_text(host) -> return Err(net_err("tcp_connect_happy", host, "connect host is empty or contains invalid bytes"))
     if !valid_port(port) -> return Err(net_err("tcp_connect_happy", host, "port must be in 0..=65535"))
-    if !valid_timeout(timeout_ms) -> return Err(net_err("tcp_connect_happy", host, "timeout must be non-negative"))
-    core.net.__tcp_connect_happy(host, port, timeout_ms)
+    core.net.__tcp_connect_happy(host, port, C_NO_LIMIT_MS)
 }
 
 create_connection: fn(host: String, port: Int) -[Net, Time.Wait]> TCPStream NetError! {
@@ -357,21 +353,6 @@ tcp_reply: fn(stream: &&TCPStream, status: String, body: String) NetError! -[Net
     return conn.shutdown(NetShutdown.Write)
 }
 
-set_timeout: fn(&stream: TCPStream, timeout_ms: Int) NetError! -[Net]> {
-    if !valid_timeout(timeout_ms) -> return Err(net_err("set_timeout", "", "timeout must be non-negative"))
-    core.net.__set_timeout(stream, timeout_ms)
-}
-
-set_read_timeout: fn(&stream: TCPStream, timeout_ms: Int) NetError! -[Net]> {
-    if !valid_timeout(timeout_ms) -> return Err(net_err("set_read_timeout", "", "timeout must be non-negative"))
-    core.net.__set_read_timeout(stream, timeout_ms)
-}
-
-set_write_timeout: fn(&stream: TCPStream, timeout_ms: Int) NetError! -[Net]> {
-    if !valid_timeout(timeout_ms) -> return Err(net_err("set_write_timeout", "", "timeout must be non-negative"))
-    core.net.__set_write_timeout(stream, timeout_ms)
-}
-
 nodelay: fn(stream: TCPStream) -[Net]> Bool NetError! {
     core.net.__nodelay(stream)
 }
@@ -404,11 +385,6 @@ udp_bind_addr: fn(addr: SocketAddr) -[Net]> UDPSocket NetError! {
 
 udp_local_addr: fn(socket: UDPSocket) -[Net]> SocketAddr NetError! {
     core.net.__udp_local_addr(socket)
-}
-
-udp_set_timeout: fn(socket: UDPSocket, timeout_ms: Int) NetError! -[Net]> {
-    if !valid_timeout(timeout_ms) -> return Err(net_err("udp_set_timeout", "", "timeout must be non-negative"))
-    core.net.__udp_set_timeout(socket, timeout_ms)
 }
 
 udp_send_to: fn(socket: UDPSocket, text: String, addr: SocketAddr) -[Net, Time.Wait]> Int NetError! {
@@ -528,86 +504,82 @@ unix_close: fn(&stream: UnixStream) NetError! -[Net]> {
     core.net.__unix_close(stream)
 }
 
-dns_a: fn(name: String, ms: Int) -[Net, Time.Wait]> [IPAddr] NetError! {
+// A lookup waits at most C_DNS_WAIT_MS, or less when the `#Deadline` in force
+// ends sooner.
+C_DNS_WAIT_MS: 5000
+C_NO_LIMIT_MS: 9223372036854775807
+
+dns_a: fn(name: String) -[Net, Time.Wait]> [IPAddr] NetError! {
     if !valid_text(name) -> return Err(net_err("dns_a", name, "DNS name is empty or contains control bytes"))
-    if !valid_timeout(ms) -> return Err(net_err("dns_a", name, "DNS timeout must be non-negative"))
-    if core.net.__dns_a_lookup(name, ms) == {
+    if core.net.__dns_a_lookup(name, C_DNS_WAIT_MS) == {
         .Ok(addresses) -> Ok(addresses)
         .Err(message) -> Err(dns_error(name, message))
     }
 }
 
-dns_aaaa: fn(name: String, ms: Int) -[Net, Time.Wait]> [IPAddr] NetError! {
+dns_aaaa: fn(name: String) -[Net, Time.Wait]> [IPAddr] NetError! {
     if !valid_text(name) -> return Err(net_err("dns_aaaa", name, "DNS name is empty or contains control bytes"))
-    if !valid_timeout(ms) -> return Err(net_err("dns_aaaa", name, "DNS timeout must be non-negative"))
-    if core.net.__dns_aaaa_lookup(name, ms) == {
+    if core.net.__dns_aaaa_lookup(name, C_DNS_WAIT_MS) == {
         .Ok(addresses) -> Ok(addresses)
         .Err(message) -> Err(dns_error(name, message))
     }
 }
 
-dns_a_at: fn(server: String, name: String, ms: Int) -[Net, Time.Wait]> [IPAddr] NetError! {
+dns_a_at: fn(server: String, name: String) -[Net, Time.Wait]> [IPAddr] NetError! {
     if !valid_text(server) || !valid_text(name) -> return Err(net_err("dns_a_at", name, "DNS server/name is empty or contains control bytes"))
-    if !valid_timeout(ms) -> return Err(net_err("dns_a_at", name, "DNS timeout must be non-negative"))
     _: socket_addr_parse(server) ?? return Err(net_err("dns_a_at", server, "DNS server must be an IP socket address"))
-    if core.net.__dns_a_at_lookup(server, name, ms) == {
+    if core.net.__dns_a_at_lookup(server, name, C_DNS_WAIT_MS) == {
         .Ok(addresses) -> Ok(addresses)
         .Err(message) -> Err(dns_error(name, message))
     }
 }
 
-dns_aaaa_at: fn(server: String, name: String, ms: Int) -[Net, Time.Wait]> [IPAddr] NetError! {
+dns_aaaa_at: fn(server: String, name: String) -[Net, Time.Wait]> [IPAddr] NetError! {
     if !valid_text(server) || !valid_text(name) -> return Err(net_err("dns_aaaa_at", name, "DNS server/name is empty or contains control bytes"))
-    if !valid_timeout(ms) -> return Err(net_err("dns_aaaa_at", name, "DNS timeout must be non-negative"))
     _: socket_addr_parse(server) ?? return Err(net_err("dns_aaaa_at", server, "DNS server must be an IP socket address"))
-    if core.net.__dns_aaaa_at_lookup(server, name, ms) == {
+    if core.net.__dns_aaaa_at_lookup(server, name, C_DNS_WAIT_MS) == {
         .Ok(addresses) -> Ok(addresses)
         .Err(message) -> Err(dns_error(name, message))
     }
 }
 
-dns_txt: fn(name: String, ms: Int) -[Net, Time.Wait]> [String] NetError! {
+dns_txt: fn(name: String) -[Net, Time.Wait]> [String] NetError! {
     if !valid_text(name) -> return Err(net_err("dns_txt", name, "DNS name is empty or contains control bytes"))
-    if !valid_timeout(ms) -> return Err(net_err("dns_txt", name, "DNS timeout must be non-negative"))
-    if rt.dns_txt_lookup(name, ms) == {
+    if rt.dns_txt_lookup(name, C_DNS_WAIT_MS) == {
         .Ok(texts) -> Ok(texts)
         .Err(error) -> Err(dns_error(name, error.message))
     }
 }
 
-dns_txt_at: fn(server: String, name: String, ms: Int) -[Net, Time.Wait]> [String] NetError! {
+dns_txt_at: fn(server: String, name: String) -[Net, Time.Wait]> [String] NetError! {
     if !valid_text(server) || !valid_text(name) -> return Err(net_err("dns_txt_at", name, "DNS server/name is empty or contains control bytes"))
-    if !valid_timeout(ms) -> return Err(net_err("dns_txt_at", name, "DNS timeout must be non-negative"))
     _: socket_addr_parse(server) ?? return Err(net_err("dns_txt_at", server, "DNS server must be an IP socket address"))
-    if rt.dns_txt_at_lookup(server, name, ms) == {
+    if rt.dns_txt_at_lookup(server, name, C_DNS_WAIT_MS) == {
         .Ok(texts) -> Ok(texts)
         .Err(error) -> Err(dns_error(name, error.message))
     }
 }
 
-dns_ptr: fn(addr: String, ms: Int) -[Net, Time.Wait]> [String] NetError! {
+dns_ptr: fn(addr: String) -[Net, Time.Wait]> [String] NetError! {
     if !valid_text(addr) -> return Err(net_err("dns_ptr", addr, "DNS address is empty or contains control bytes"))
-    if !valid_timeout(ms) -> return Err(net_err("dns_ptr", addr, "DNS timeout must be non-negative"))
-    if rt.dns_ptr_lookup(addr, ms) == {
+    if rt.dns_ptr_lookup(addr, C_DNS_WAIT_MS) == {
         .Ok(names) -> Ok(names)
         .Err(error) -> Err(dns_error(addr, error.message))
     }
 }
 
-dns_srv: fn(name: String, ms: Int) -[Net, Time.Wait]> [SRVRecord] NetError! {
+dns_srv: fn(name: String) -[Net, Time.Wait]> [SRVRecord] NetError! {
     if !valid_text(name) -> return Err(net_err("dns_srv", name, "DNS name is empty or contains control bytes"))
-    if !valid_timeout(ms) -> return Err(net_err("dns_srv", name, "DNS timeout must be non-negative"))
-    if core.net.__dns_srv_lookup(name, ms) == {
+    if core.net.__dns_srv_lookup(name, C_DNS_WAIT_MS) == {
         .Ok(records) -> Ok(srv_records(records))
         .Err(message) -> Err(dns_error(name, message))
     }
 }
 
-dns_srv_at: fn(server: String, name: String, ms: Int) -[Net, Time.Wait]> [SRVRecord] NetError! {
+dns_srv_at: fn(server: String, name: String) -[Net, Time.Wait]> [SRVRecord] NetError! {
     if !valid_text(server) || !valid_text(name) -> return Err(net_err("dns_srv_at", name, "DNS server/name is empty or contains control bytes"))
-    if !valid_timeout(ms) -> return Err(net_err("dns_srv_at", name, "DNS timeout must be non-negative"))
     _: socket_addr_parse(server) ?? return Err(net_err("dns_srv_at", server, "DNS server must be an IP socket address"))
-    if core.net.__dns_srv_at_lookup(server, name, ms) == {
+    if core.net.__dns_srv_at_lookup(server, name, C_DNS_WAIT_MS) == {
         .Ok(records) -> Ok(srv_records(records))
         .Err(message) -> Err(dns_error(name, message))
     }
@@ -669,13 +641,13 @@ srv_records: fn(raw: [DNSSRV]) -> [SRVRecord] Never! {
 }
 
 gethostbyname: fn(name: String) -[Net, Time.Wait]> String NetError! {
-    hosts: dns_a(name, 5000)
+    hosts: dns_a(name)
     if hosts.len() == 0 -> return Err(net_err("gethostbyname", name, "no address"))
     ip_to_string_impl(hosts[0])
 }
 
 gethostbyaddr: fn(addr: String) -[Net, Time.Wait]> String NetError! {
-    names: dns_ptr(addr, 5000)
+    names: dns_ptr(addr)
     if names.len() == 0 -> return Err(net_err("gethostbyaddr", addr, "no name"))
     names[0]
 }

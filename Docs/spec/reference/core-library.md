@@ -1547,7 +1547,7 @@ one.
 | `with_proxy(client, proxy)` / `timeout_redirects(client, n)` | `Client` | Set proxy or redirect count on a client carrier. |
 | `session()` | `Session` | Create the default session policy. |
 | `session_header` / `session_cookie` | `Session` | Add validated request headers or cookies. |
-| `session_timeout` / `session_retries` / `session_redirects` | `Session` | Set bounded timeout, retry, or redirect policy. |
+| `session_retries` / `session_redirects` | `Session` | Set a bounded retry or redirect policy. A session request waits at most 30 s; a `#Deadline` block bounds it sooner. |
 | `session_auth` / `session_proxy` | `Session` | Set credentials or an explicit proxy URL. |
 | `session_request(session, method, url, body)` | `HTTPResponse !HTTPError` | Apply session headers, retries, redirect checks, and transport. |
 | `Client.new()` | `HTTPClient` | Construct the typed client policy carrier; unset policies use the safe defaults. |
@@ -5744,8 +5744,7 @@ empty. `socket_addr` is the first element of `socket_addrs`. Explicit
 | `tcp_listen(addr: String) -[Net]> TCPListener !NetError` / `tcp_listen_addr(addr: SocketAddr) -[Net]> TCPListener !NetError` | listener | Bind a TCP listener. |
 | `tcp_accept(listener: TCPListener) -[Net, Time.Wait]> TCPStream !NetError` | stream | Accept one connection. |
 | `tcp_connect(addr: String) -[Net, Time.Wait]> TCPStream !NetError` / `tcp_connect_addr(addr: SocketAddr) -[Net, Time.Wait]> TCPStream !NetError` | stream | Connect to a TCP endpoint. |
-| `tcp_connect_timeout(addr: SocketAddr, timeout_ms: Int) -[Net, Time.Wait]> TCPStream !NetError` | stream | Connect with a nonnegative timeout. |
-| `tcp_connect_happy(host: String, port: Int, timeout_ms: Int) -[Net, Time.Wait]> TCPStream !NetError` | stream | Connect through the address-family race. |
+| `tcp_connect_happy(host: String, port: Int) -[Net, Time.Wait]> TCPStream !NetError` | stream | Connect through the address-family race. |
 | `create_connection(host: String, port: Int) -[Net, Time.Wait]> TCPStream !NetError` / `create_server(host, port) -[Net]> TCPListener !NetError` | endpoint | Build host/port TCP endpoints. |
 | `send(stream: &TCPStream, text: String) -[Net, Time.Wait]> Int !NetError` | count | Write text through the caller's exclusive stream window. |
 | `tcp_read(stream: &TCPStream) -[Net, Time.Wait]> String !NetError` / `tcp_read_bytes(stream, n) -[Net, Time.Wait]> [U8] !NetError` | text/bytes | Read from a TCP stream. |
@@ -5759,13 +5758,11 @@ empty. `socket_addr` is the first element of `socket_addrs`. Explicit
 | `ready_readable(ready: NetReady) -> Bool` / `ready_writable(ready) -> Bool` | Boolean | Inspect readiness. |
 | `tcp_local_addr(stream) -[Net]> String !NetError`, `tcp_peer_addr(stream) -[Net]> String !NetError` | text | Read rendered stream endpoints. |
 | `tcp_local_socket_addr(stream) -[Net]> SocketAddr !NetError`, `tcp_peer_socket_addr(stream) -[Net]> SocketAddr !NetError`, `listener_local_socket_addr(listener) -[Net]> SocketAddr !NetError` | address | Read typed stream/listener endpoints. |
-| `set_timeout(stream, timeout_ms: Int) -[Net]> Unit !NetError` | — | Set a nonnegative timeout on the caller's stream, without copying the handle. |
-| `set_read_timeout(stream, timeout_ms: Int) -[Net]> Unit !NetError` / `set_write_timeout(stream, timeout_ms: Int) -[Net]> Unit !NetError` | — | Set read or write timeouts in milliseconds. |
 | `nodelay(stream) -[Net]> Bool !NetError` / `set_nodelay(stream, on: Bool) -[Net]> Unit !NetError` | option | Read or set TCP no-delay. |
 | `ttl(stream) -[Net]> Int !NetError` / `set_ttl(stream, hops: Int) -[Net]> Unit !NetError` | option | Read or set the TTL. |
 | `sendfile(stream, path: String) -[Net, Time.Wait]> Int !NetError` | count | Send file bytes through a TCP stream. |
 | `udp_bind(addr: String) -[Net]> UDPSocket !NetError` / `udp_bind_addr(addr: SocketAddr) -[Net]> UDPSocket !NetError` | socket | Bind a UDP socket. |
-| `udp_local_addr(socket: UDPSocket) -[Net]> SocketAddr !NetError` / `udp_set_timeout(socket, timeout_ms: Int) -[Net]> Unit !NetError` | address/— | Inspect a UDP endpoint or set its timeout. |
+| `udp_local_addr(socket: UDPSocket) -[Net]> SocketAddr !NetError` | address | Inspect a UDP endpoint. |
 | `udp_send_to(socket, text, addr) -[Net, Time.Wait]> Int !NetError` / `udp_send_bytes_to(socket, bytes, addr) -[Net, Time.Wait]> Int !NetError` | count | Send text or bytes to a datagram address. |
 | `udp_recv_from(socket, limit) -[Net, Time.Wait]> UDPPacket !NetError` / `udp_receive(socket, limit) -[Net, Time.Wait]> UDPPacket !NetError` | packet | Receive a bounded datagram. |
 | `udp_packet_data(packet)`, `udp_packet_bytes(packet)`, `udp_packet_addr(packet)` | scalar | Read packet text, bytes, or address. |
@@ -5778,11 +5775,11 @@ empty. `socket_addr` is the first element of `socket_addrs`. Explicit
 | `unix_send(&stream, bytes: [U8], fds: [core.sys.Fd]) -[Net, Time.Wait]> Unit !NetError` | — | Send every byte with `fds` attached (SCM_RIGHTS) to the first byte; at least one byte, at most 253 descriptors. The peer gets its own copies. Partial sends and `EINTR` resume. |
 | `unix_receive(&stream, max: Int) -[Net, Time.Wait]> UnixMessage !NetError` | message | At most `max` bytes (1 B to 16 MiB) of one message and the descriptors that rode with it, each an owned close-on-exec `core.sys.Fd`. A message whose descriptors were cut short (`MSG_CTRUNC`) closes the ones that arrived and fails with `.Protocol`. Empty bytes and no descriptors mean the peer closed. |
 | `unix_wait(&stream, timeout_ns: Int) -[Net, Time.Wait]> Bool !NetError` | ready | Wait on the calling thread until the stream has something to read (true) or `timeout_ns` passes (false); a negative timeout waits without limit. Interrupted waits resume with the time left. |
-| `dns_a(name: String, ms: Int) -[Net, Time.Wait]> [IPAddr] !NetError` / `dns_aaaa(name, ms) -[Net, Time.Wait]> [IPAddr] !NetError` | addresses | Resolve IPv4 or IPv6 records. |
-| `dns_a_at(server: String, name: String, ms: Int) -[Net, Time.Wait]> [IPAddr] !NetError` / `dns_aaaa_at(server, name, ms) -[Net, Time.Wait]> [IPAddr] !NetError` | addresses | Resolve A or AAAA records through an explicit server. |
-| `dns_txt(name: String, ms: Int) -[Net, Time.Wait]> [String] !NetError` / `dns_ptr(addr, ms) -[Net, Time.Wait]> [String] !NetError` | records | Resolve TXT or PTR records. |
-| `dns_txt_at(server: String, name: String, ms: Int) -[Net, Time.Wait]> [String] !NetError` / `dns_srv_at(server, name, ms) -[Net, Time.Wait]> [DNSSRV] !NetError` | records | Resolve TXT or SRV records through an explicit server. |
-| `dns_srv(name: String, ms: Int) -[Net, Time.Wait]> [DNSSRV] !NetError` | records | Resolve SRV records. |
+| `dns_a(name: String) -[Net, Time.Wait]> [IPAddr] !NetError` / `dns_aaaa(name) -[Net, Time.Wait]> [IPAddr] !NetError` | addresses | Resolve IPv4 or IPv6 records. |
+| `dns_a_at(server: String, name: String) -[Net, Time.Wait]> [IPAddr] !NetError` / `dns_aaaa_at(server, name) -[Net, Time.Wait]> [IPAddr] !NetError` | addresses | Resolve A or AAAA records through an explicit server. |
+| `dns_txt(name: String) -[Net, Time.Wait]> [String] !NetError` / `dns_ptr(addr) -[Net, Time.Wait]> [String] !NetError` | records | Resolve TXT or PTR records. |
+| `dns_txt_at(server: String, name: String) -[Net, Time.Wait]> [String] !NetError` / `dns_srv_at(server, name) -[Net, Time.Wait]> [DNSSRV] !NetError` | records | Resolve TXT or SRV records through an explicit server. |
+| `dns_srv(name: String) -[Net, Time.Wait]> [DNSSRV] !NetError` | records | Resolve SRV records. |
 | `dns_srv_target(record: DNSSRV) -> String` / `dns_srv_port(record) -> Int` / `dns_srv_priority(record) -> Int` / `dns_srv_weight(record) -> Int` | fields | Inspect an SRV record. |
 | `gethostbyname(name: String) -[Net, Time.Wait]> String !NetError` / `gethostbyaddr(addr) -[Net, Time.Wait]> String !NetError` | hosts | Read one host name/address result. |
 | `getservbyname(name: String) -[Net, Time.Wait]> Int !NetError` / `getservbyport(port: Int) -[Net, Time.Wait]> String !NetError` | service | Resolve a service name or port. |
@@ -5791,9 +5788,11 @@ empty. `socket_addr` is the first element of `socket_addrs`. Explicit
 
 The `*_at` DNS forms take an explicit server, and `error_operation`,
 `error_message`, `error_address`, `error_name`, and `error_os_code` inspect a
-`NetError`. Ports are checked in `0..=65535`; timeout and deadline values are
+`NetError`. Ports are checked in `0..=65535`; `tcp_ready` deadlines are
 nonnegative milliseconds. A blocking socket call declares `Net` and
-`Time.Wait`, so the suspension boundary remains visible.
+`Time.Wait`, so the suspension boundary remains visible. A `#Deadline` block
+or function bounds every connect, read, write and lookup inside it; a DNS
+lookup waits at most 5 s when no deadline in force ends sooner.
 
 Effects follow the existing per-function Core rows, not a module-wide waiting
 annotation. TCP listen and address getters, socket options, UDP bind/options,

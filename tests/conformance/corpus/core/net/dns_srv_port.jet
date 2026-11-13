@@ -19,7 +19,7 @@ run: fn() {
         }
         net.udp_send_bytes_to(server, response, net.udp_packet_addr(request)) ?? panic("DNS response")
     }
-    records: net.dns_srv_at(address, "example.test", 1000) ?? panic("DNS SRV")
+    records: net.dns_srv_at(address, "example.test") ?? panic("DNS SRV")
     result: net.dns_srv_port(records[0])
     print(result == 443)
     (responder.join() ?? panic("DNS responder")).drop("the responder's sent byte count is not checked")

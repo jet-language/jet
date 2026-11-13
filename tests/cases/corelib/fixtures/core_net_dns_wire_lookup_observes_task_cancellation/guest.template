@@ -9,7 +9,7 @@ run: fn() {
     (ready_tx, ready_rx): channel<Int>()
     lookup: task {
         ready_tx.send(1)
-        if net.dns_a_at("@ADDR@", "service.example.test", 5000) == {
+        if net.dns_a_at("@ADDR@", "service.example.test") == {
             .Ok(_) -> print("unexpected DNS response")
             .Err(error) -> print(net.error_message(error))
         }

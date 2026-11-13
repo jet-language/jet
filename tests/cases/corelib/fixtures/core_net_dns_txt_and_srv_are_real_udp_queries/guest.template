@@ -1,9 +1,11 @@
 
 use net: core.net
 
+// The two lookups wait at most 1 s together.
+#Deadline(1s)
 run: fn() {
-    txts: net.dns_txt_at("@ADDR@", "service.example.test", 1000) ?? panic("txt")
+    txts: net.dns_txt_at("@ADDR@", "service.example.test") ?? panic("txt")
     print(txts[0])
-    srvs: net.dns_srv_at("@ADDR@", "_jet._tcp.example.test", 1000) ?? panic("srv")
+    srvs: net.dns_srv_at("@ADDR@", "_jet._tcp.example.test") ?? panic("srv")
     print("{net.dns_srv_target(srvs[0])}:{net.dns_srv_port(srvs[0])}")
 }

@@ -13,9 +13,9 @@ use {
 }
 
 // An address in TEST-NET-2 (RFC 5737): never routed, so only a sandbox that
-// lets the connect attempt out could see anything but a timeout.
+// lets the connect attempt out could see anything but a timeout. Each probe
+// connect ends within 350 ms.
 EXTERNAL: "198.51.100.1:9"
-CONNECT_TIMEOUT_MS: 350
 
 run: fn() {
     args: process.args()
@@ -54,18 +54,20 @@ network_mode: fn() -[IO, Net, Time.Wait]> {
 }
 
 // A listener on an ephemeral loopback port accepts a connection.
+#Deadline(350ms)
 loopback_reachable: fn() -[Net, Time.Wait]> Bool Never! {
     listener: net.tcp_listen("127.0.0.1:0") ?? return false
     addr: net.listener_local_socket_addr(listener) ?? return false
-    if net.tcp_connect_timeout(addr, CONNECT_TIMEOUT_MS) == {
+    if net.tcp_connect_addr(addr) == {
         .Ok(_) -> true
         .Err(_) -> false
     }
 }
 
+#Deadline(350ms)
 external_reachable: fn() -[Net, Time.Wait]> Bool Never! {
     addr: net.socket_addr_parse(EXTERNAL) ?? return false
-    if net.tcp_connect_timeout(addr, CONNECT_TIMEOUT_MS) == {
+    if net.tcp_connect_addr(addr) == {
         .Ok(_) -> true
         .Err(_) -> false
     }

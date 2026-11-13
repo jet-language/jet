@@ -466,9 +466,11 @@ run: fn() {
         mode == "parked" -> parked()
         else -> {
             loop name in NAMES -> show(name)
-            if net.dns_a("slow.test", 300) == {
-                .Ok(addresses) -> print("slow.test A within 300 ms: {addresses.len()} addresses")
-                .Err(error) -> print("slow.test A within 300 ms: {net.error_message(error)}")
+            #Deadline(300ms) {
+                if net.dns_a("slow.test") == {
+                    .Ok(addresses) -> print("slow.test A within 300 ms: {addresses.len()} addresses")
+                    .Err(error) -> print("slow.test A within 300 ms: {net.error_message(error)}")
+                }
             }
         }
     }

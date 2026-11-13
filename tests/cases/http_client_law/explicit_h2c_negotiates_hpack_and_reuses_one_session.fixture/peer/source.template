@@ -18,7 +18,7 @@ Frame: struct {
 read_exact: fn(stream: TCPStream, size: Int) -> [U8] {
     out := [U8]{}
     loop out.len() < size {
-        chunk: stream.read(size - out.len()) ?? panic("frame read_exact")
+        chunk: stream.read(size - out.len(), deadline: 5s) ?? panic("frame read_exact")
         assert(chunk.len() > 0)
         loop byte in chunk { out.push(byte) }
     }
@@ -42,8 +42,7 @@ first_headers: fn(stream: TCPStream) -> Frame {
         if frame.kind == 1 -> return frame
     }
 }
-preface: fn(stream: &TCPStream, timeout: Int) {
-    net.set_read_timeout(stream, timeout) ?? panic("read timeout")
+preface: fn(stream: &TCPStream) {
     assert_eq(read_exact(stream, 24), "PRI * HTTP/2.0{PEER_CRLF}{PEER_CRLF}SM{PEER_CRLF}{PEER_CRLF}".bytes())
     assert(read_frame(stream).kind == 4)
     write_frame(stream, 4, 0, 0, [U8]{})
@@ -53,7 +52,7 @@ run: fn() {
     listener: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
     publish(listener, "{work}/addr.txt")
     stream := listener.accept() ?? panic("accept")
-    preface(stream, 5000)
+    preface(stream)
     request: first_headers(stream)
     assert(request.id == 1)
     assert(request.flags.bit_and(4) != 0)
@@ -78,7 +77,7 @@ run: fn() {
     stream.close() ?? panic("close stale session")
     // Original bounded5s nonblocking reconnect observer; every non-Timeout error fails.
     again := listener.accept(deadline: 5s) ?? panic("client did not reconnect stale HTTP/2 session")
-    preface(again, 5000)
+    preface(again)
     next_request: first_headers(again)
     assert(next_request.id == 1)
     write_frame(again, 1, 4, 1, response)

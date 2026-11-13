@@ -11,6 +11,8 @@ use {
     os: core.sys
 }
 
+// Every network wait in the example ends within 10 s.
+#Deadline(10s)
 run: fn() (Closed | IOError | NetError | RangeError | TaskFailure)! {
     typed: net.socket_addr("127.0.0.1", 0) ?? panic("address")
     listener: net.tcp_listen_addr(typed) ?? panic("listen")
@@ -27,7 +29,6 @@ run: fn() (Closed | IOError | NetError | RangeError | TaskFailure)! {
     }
     addr: ready_rx.receive() ?? panic("ready")
     client := net.tcp_connect(addr) ?? panic("connect")
-    net.set_timeout(client, 1000) ?? panic("timeout")
     net.set_nodelay(client, true) ?? panic("nodelay")
     nd: net.nodelay(client) ?? panic("nodelay")
     print("nodelay:{nd}")
@@ -48,7 +49,6 @@ run: fn() (Closed | IOError | NetError | RangeError | TaskFailure)! {
     udp_server: net.udp_bind("127.0.0.1:0") ?? panic("udp bind")
     udp_addr: net.udp_local_addr(udp_server) ?? panic("udp address")
     udp_client: net.udp_bind("127.0.0.1:0") ?? panic("udp client")
-    net.udp_set_timeout(udp_client, 1000) ?? panic("udp timeout")
     _sent: net.udp_send_bytes_to(udp_client, "pong".bytes(), udp_addr) ?? panic("udp send")
     packet: net.udp_receive(udp_server, 128) ?? panic("udp receive")
     print("udp:{net.udp_packet_bytes(packet)}:{net.udp_packet_original_len(packet)}:{net.udp_packet_truncated(packet)}")

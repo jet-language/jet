@@ -1,7 +1,9 @@
 
 use net: core.net
 
+// The lookup waits at most 1 s.
+#Deadline(1s)
 run: fn() {
-    ips: net.dns_a_at("@ADDR@", "service.example.test", 1000) ?? panic("dns")
+    ips: net.dns_a_at("@ADDR@", "service.example.test") ?? panic("dns")
     print(net.ip_to_string(ips[0]))
 }

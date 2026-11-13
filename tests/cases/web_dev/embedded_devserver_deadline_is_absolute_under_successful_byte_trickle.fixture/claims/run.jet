@@ -6,7 +6,6 @@ s5_trickle_reset: fn(error: NetError) -> Bool {
     port: s5_web_port()
     s5_web_wait_up(port, 30000)
     client: net.tcp_connect("127.0.0.1:{port}") ?? panic("connect trickle")
-    net.set_read_timeout(client, 12000) ?? panic("original twelve-second read timeout")
     crlf: s5_web_crlf()
     net.tcp_write_all_bytes(client, "GET /__jet_dev_version HTTP/1.1{crlf}Host: localhost".bytes()) ?? panic("incomplete header")
     started: time.start()

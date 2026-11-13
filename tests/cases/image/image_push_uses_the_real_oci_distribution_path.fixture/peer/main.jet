@@ -64,11 +64,10 @@ run: fn() {
                 next
             }
         }
-        net.set_read_timeout(stream, 2000) ?? panic("registry two-second read timeout")
         request := [U8]{}
         header_end := -1
         loop {
-            chunk: net.tcp_read_bytes(stream, 4096) ?? panic("read registry headers")
+            chunk: stream.read(4096, deadline: 2s) ?? panic("read registry headers")
             if chunk.len() == 0 -> break
             loop byte in chunk -> request.push(byte)
             boundary: registry_find(request, [U8]{13, 10, 13, 10})
@@ -96,7 +95,7 @@ run: fn() {
             }
         }
         loop request.len() < header_end + content_length {
-            chunk: net.tcp_read_bytes(stream, 4096) ?? panic("read registry body")
+            chunk: stream.read(4096, deadline: 2s) ?? panic("read registry body")
             if chunk.len() == 0 -> break
             loop byte in chunk -> request.push(byte)
         }

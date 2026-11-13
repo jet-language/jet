@@ -1580,7 +1580,7 @@ wait_for_tcp: fn(port: Int, timeout_ms: Int) Err! {
     address: net.socket_addr_parse("127.0.0.1:{port}") ?? return Err("{err}")
     loop {
         remaining: timeout_ms - started.elapsed_millis()
-        stream := net.tcp_connect_timeout(address, if remaining > 0 -> remaining else -> 0) ?? {
+        stream := connect_within(address, if remaining > 0 -> remaining else -> 0) ?? {
             if started.elapsed_millis() >= timeout_ms -> return Err("TCP port {port} did not open")
             time.sleep(time.duration_ms(PROCESS_POLL_MS))
             next

@@ -6,8 +6,7 @@ use {
 
 run: fn() {
     udp_timeout: net.udp_bind("127.0.0.1:0") ?? panic("udp timeout bind")
-    net.udp_set_timeout(udp_timeout, 20) ?? panic("udp timeout")
-    if net.udp_receive(udp_timeout, 8) == {
+    if udp_timeout.receive(8, deadline: 20ms) == {
         .Ok(_) -> panic("udp timeout returned data")
         .Err(error) -> print(net.error_message(error))
     }

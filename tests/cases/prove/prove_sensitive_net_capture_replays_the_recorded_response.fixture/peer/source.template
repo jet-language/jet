@@ -9,10 +9,9 @@ run: fn() {
     address: listener.local_addr() ?? panic("address")
     files.write_atomic("{work}/addr.txt", address.bytes()) ?? panic("publish address")
     peer := listener.accept() ?? panic("accept")
-    net.set_read_timeout(peer, 5000) ?? panic("request timeout")
     request := [U8]{}
     loop request.len() < 4 || request[request.len() - 4] != (U8{13}) || request[request.len() - 1] != (U8{10}) {
-        block: peer.read(512) ?? panic("request read")
+        block: peer.read(512, deadline: 5s) ?? panic("request read")
         assert(block.len() > 0)
         loop byte in block { request.push(byte) }
         assert(request.len() <= 65536)

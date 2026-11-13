@@ -9,8 +9,7 @@ use {
 
 http_crlf: fn() -> String { String.from_bytes([U8]{13, 10}) ?? panic("CRLF") }
 http_read: fn(stream: &net.TCPStream) -> String {
-    net.set_read_timeout(stream, 1000) ?? panic("read timeout")
-    String.from_bytes(net.tcp_read_bytes(stream, 4096) ?? panic("read request")) ?? panic("request UTF-8")
+    String.from_bytes(stream.read(4096, deadline: 1s) ?? panic("read request")) ?? panic("request UTF-8")
 }
 http_reply: fn(stream: &net.TCPStream, file: String) {
     bytes: files.read_bytes(file) ?? panic("response bytes")

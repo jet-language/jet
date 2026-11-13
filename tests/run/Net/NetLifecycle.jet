@@ -25,10 +25,11 @@ run: fn() {
         .Ok(_) -> print("udp zero-limit:accepted")
         .Err(error) -> print("udp zero-limit:{net.error_operation(error)}:{net.error_message(error)}")
     }
-    net.udp_set_timeout(receiver, 50) ?? panic("udp timeout")
-    if net.udp_recv_from(receiver, 16) == {
-        .Ok(_) -> print("udp deadline:received")
-        .Err(error) -> print("udp deadline:{net.error_operation(error)}:{net.error_name(error) ?? "none"}")
+    #Deadline(50ms) {
+        if net.udp_recv_from(receiver, 16) == {
+            .Ok(_) -> print("udp deadline:received")
+            .Err(error) -> print("udp deadline:{net.error_operation(error)}:{net.error_name(error) ?? "none"}")
+        }
     }
 
     // TCP: half-close the client's write side.

@@ -4,7 +4,7 @@ use {
 }
 
 read_text: fn(stream: &net.TCPStream) -> String {
-    String.from_bytes(net.tcp_read_bytes(stream, 64) ?? panic("read")) ?? panic("UTF-8")
+    String.from_bytes(stream.read(64, deadline: 5s) ?? panic("read")) ?? panic("UTF-8")
 }
 
 // Each read finds nothing buffered, so every one parks on the same
@@ -21,7 +21,6 @@ read_text: fn(stream: &net.TCPStream) -> String {
         net.tcp_close(stream) ?? panic("close peer")
     }
     stream := net.tcp_connect(address) ?? panic("connect")
-    net.set_read_timeout(stream, 5000) ?? panic("read timeout")
     seen := ""
     loop seen.len() < "0;1;2;3;4;".len() { seen = "{seen}{read_text(stream)}" }
     assert(seen == "0;1;2;3;4;", "every chunk arrives through a fresh wait")
@@ -85,7 +84,6 @@ read_text: fn(stream: &net.TCPStream) -> String {
     }
     loop at in 0..<rounds {
         stream := net.tcp_connect(address) ?? panic("connect")
-        net.set_read_timeout(stream, 5000) ?? panic("read timeout")
         assert(read_text(stream) == ("{at}"), "round {at} reads its own peer")
         if at % 2 == 0 -> net.tcp_close(stream) ?? panic("close")
     }

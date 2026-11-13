@@ -20,9 +20,8 @@ run: fn() {
         }
     }
     client := net.tcp_connect(address) ?? panic("connect")
-    net.set_write_timeout(client, 80) ?? panic("timeout")
     started := time.unix_ns() /% 1_000_000
-    if client.write_text("x".repeat(16000000)) == {
+    if client.write_text("x".repeat(16000000), deadline: 80ms) == {
         .Ok(_) -> print("unexpected write")
         .Err(error) -> print(net.error_message(error))
     }

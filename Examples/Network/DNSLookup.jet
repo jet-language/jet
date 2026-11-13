@@ -13,6 +13,8 @@ run: fn() NetError! {
     print("getservbyport:443:{https_name}")
     // Live PTR is network-dependent; prove the call returns a Result without
     // baking answers into the golden.
-    _: net.dns_ptr("1.1.1.1.in-addr.arpa", 2000)
+    #Deadline(2s) {
+        _: net.dns_ptr("1.1.1.1.in-addr.arpa")
+    }
     print("dns_ptr:attempted")
 }

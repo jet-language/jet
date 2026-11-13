@@ -47,7 +47,6 @@ RedirectPolicy: enum {
 Session: struct {
     headers: [String]
     cookies: [String]
-    timeout_ms: Int
     retries: Int
     redirects: Int
     user: String
@@ -111,7 +110,6 @@ session: fn() -> Session Never! {
     Session{
         headers: [String]{},
         cookies: [String]{},
-        timeout_ms: 30000,
         retries: 0,
         redirects: C_MAX_REDIRECTS,
         user: "",
@@ -124,7 +122,6 @@ session_header: fn(s: Session, name: String, value: String) -> Session Never! {
     Session{
         headers: set_header_line(s.headers, name, value),
         cookies: s.cookies.copy(),
-        timeout_ms: s.timeout_ms,
         retries: s.retries,
         redirects: s.redirects,
         user: s.user.copy(),
@@ -133,32 +130,26 @@ session_header: fn(s: Session, name: String, value: String) -> Session Never! {
     }
 }
 
-session_timeout: fn(s: Session, ms: Int) -> Session Never! {
-    t := ms
-    if t < 0 -> t = 0
-    Session{headers: s.headers.copy(), cookies: s.cookies.copy(), timeout_ms: t, retries: s.retries, redirects: s.redirects, user: s.user.copy(), password: s.password.copy(), proxy: s.proxy.copy()}
-}
-
 session_retries: fn(s: Session, n: Int) -> Session Never! {
     r := n
     if r < 0 -> r = 0
     if r > C_MAX_RETRIES -> r = C_MAX_RETRIES
-    Session{headers: s.headers.copy(), cookies: s.cookies.copy(), timeout_ms: s.timeout_ms, retries: r, redirects: s.redirects, user: s.user.copy(), password: s.password.copy(), proxy: s.proxy.copy()}
+    Session{headers: s.headers.copy(), cookies: s.cookies.copy(), retries: r, redirects: s.redirects, user: s.user.copy(), password: s.password.copy(), proxy: s.proxy.copy()}
 }
 
 session_redirects: fn(s: Session, n: Int) -> Session Never! {
     r := n
     if r < 0 -> r = 0
     if r > C_MAX_REDIRECTS -> r = C_MAX_REDIRECTS
-    Session{headers: s.headers.copy(), cookies: s.cookies.copy(), timeout_ms: s.timeout_ms, retries: s.retries, redirects: r, user: s.user.copy(), password: s.password.copy(), proxy: s.proxy.copy()}
+    Session{headers: s.headers.copy(), cookies: s.cookies.copy(), retries: s.retries, redirects: r, user: s.user.copy(), password: s.password.copy(), proxy: s.proxy.copy()}
 }
 
 session_auth: fn(s: Session, user: String, password: String) -> Session Never! {
-    Session{headers: s.headers.copy(), cookies: s.cookies.copy(), timeout_ms: s.timeout_ms, retries: s.retries, redirects: s.redirects, user: user, password: password, proxy: s.proxy.copy()}
+    Session{headers: s.headers.copy(), cookies: s.cookies.copy(), retries: s.retries, redirects: s.redirects, user: user, password: password, proxy: s.proxy.copy()}
 }
 
 session_proxy: fn(s: Session, url: String) -> Session Never! {
-    Session{headers: s.headers.copy(), cookies: s.cookies.copy(), timeout_ms: s.timeout_ms, retries: s.retries, redirects: s.redirects, user: s.user.copy(), password: s.password.copy(), proxy: url}
+    Session{headers: s.headers.copy(), cookies: s.cookies.copy(), retries: s.retries, redirects: s.redirects, user: s.user.copy(), password: s.password.copy(), proxy: url}
 }
 
 session_cookie: fn(s: Session, cookie: String) -> Session Never! {
@@ -176,7 +167,7 @@ session_cookie: fn(s: Session, cookie: String) -> Session Never! {
         }
     }
     if !replaced -> cookies.push(cookie.copy())
-    Session{headers: s.headers.copy(), cookies: cookies, timeout_ms: s.timeout_ms, retries: s.retries, redirects: s.redirects, user: s.user.copy(), password: s.password.copy(), proxy: s.proxy.copy()}
+    Session{headers: s.headers.copy(), cookies: cookies, retries: s.retries, redirects: s.redirects, user: s.user.copy(), password: s.password.copy(), proxy: s.proxy.copy()}
 }
 
 cookie_header: fn(cookies: [String]) -> String Never! {
@@ -291,7 +282,6 @@ session_form: fn(s: Session, url: String, body: String) -[Net, Time.Wait]> HTTPR
 request_once: fn(s: Session, method: String, url: String, body: String, headers: [String]) -[Net, Time.Wait]> HTTPResponse HTTPError! {
     req := provider.request(method, url)
     req = req.redirects(0)
-    req = req.timeout(s.timeout_ms)
     if s.proxy.bytes().len() > 0 -> req = req.proxy(s.proxy)
     loop line in headers {
         name: header_name(line) ?? return Err(.InvalidHeader)
@@ -643,7 +633,7 @@ __build_connect: fn(addresses: [[U8]], port: Int, end_ns: Int, &portable: String
             return Err(__build_fail("timed out"))
         }
         millis: remaining /% 1000000
-        if build_net.tcp_connect_timeout(__build_socket(address, port), if millis == 0 -> 1 else -> millis) == {
+        if core.net.__tcp_connect_timeout(__build_socket(address, port), if millis == 0 -> 1 else -> millis) == {
             .Ok(stream) -> return Ok(stream)
             .Err(error) -> {
                 failure = "{error}"

@@ -1943,7 +1943,7 @@ server_wait_ready: fn(url: String, timeout_ms: Int) BrowserError! -[Net, Time, T
         remaining: timeout_ms - started.elapsed_millis()
         if remaining <= 0 -> return Err(BrowserError{kind: "timeout"})
         probe: if remaining < 100 -> remaining else -> 100
-        if net.tcp_connect_happy(target.host, target.port, probe) == .Ok(_) -> return Ok()
+        if core.net.__tcp_connect_happy(target.host, target.port, probe) == .Ok(_) -> return Ok()
         time.sleep(10ms)
     }
 }

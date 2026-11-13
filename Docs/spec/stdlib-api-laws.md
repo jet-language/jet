@@ -433,8 +433,8 @@ existing option.
 | Door | Bare default | Explicit control |
 | --- | --- | --- |
 | `files.read(path)` / `files.write(path, text)` | Whole-value file operations; normal writes use the safe path. | `open`, `create`, `append_all`, and labeled write modes. |
-| `http.get(url)` | One-shot request through the safe HTTP door; HTTPS-to-HTTP downgrade is refused. | `core.http.client.session()` with `session_timeout`, `session_redirects`, `session_retries`, `session_proxy`, and opt-in `session_cookie`. |
-| `http.client.session()` | 30,000 ms timeout, no retries, at most 10 redirects, no proxy, and an empty cookie jar. | The corresponding `session_*` methods. |
+| `http.get(url)` | One-shot request through the safe HTTP door; HTTPS-to-HTTP downgrade is refused. | `core.http.client.session()` with `session_redirects`, `session_retries`, `session_proxy`, and opt-in `session_cookie`; a `#Deadline` block bounds the requests inside it. |
+| `http.client.session()` | 30,000 ms timeout, no retries, at most 10 redirects, no proxy, and an empty cookie jar. | The corresponding `session_*` methods, and `#Deadline` for a shorter bound. |
 | `app.static_files(prefix, root)` | Normalize the root, refuse escapes, hide dot-files, refuse escaping links, and serve `index.html` for a directory request. | `index`, `dotfiles`, and `follow_links` policy. |
 | `http.server.cors_policy(origins)` | No CORS header exists until a policy is installed; unsafe origin/credential combinations are rejected. | `methods`, `headers`, `credentials`, and `max_age`. |
 | `encoding.*.reader` / `encoding.*.writer` | Use bounded codec limits; JSON writing is non-canonical unless requested. | A `limits` value and JSON `canonical` choice. |

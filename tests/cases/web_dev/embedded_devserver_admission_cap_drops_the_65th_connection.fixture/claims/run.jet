@@ -10,7 +10,7 @@ S5ReadEnd: struct { bytes: Int, closed: Bool }
 s5_read_end: fn(stream: net.TCPStream) -> S5ReadEnd {
     count := 0
     loop {
-        if net.tcp_read_bytes(stream, 8192) == {
+        if stream.read(8192, deadline: 200ms) == {
             .Ok(part) -> {
                 if part.is_empty() -> return S5ReadEnd{bytes: count, closed: true}
                 count = count + part.len()
@@ -32,8 +32,7 @@ s5_probe_write: fn(probe: net.TCPStream) -> Bool {
     holders := [net.TCPStream]{}
     loop index in 0..<64 {
         holder: net.tcp_connect("127.0.0.1:{port}") ?? panic("connect holder")
-        net.set_write_timeout(holder, 1000) ?? panic("holder timeout")
-        net.tcp_write_all_bytes(holder, "G".bytes()) ?? panic("holder write")
+        holder.write_all("G".bytes(), deadline: 1s) ?? panic("holder write")
         holders.push(holder)
     }
     started: time.start()
@@ -41,7 +40,6 @@ s5_probe_write: fn(probe: net.TCPStream) -> Bool {
     loop time.elapsed(started).ns < 5000000000 {
         probe: net.tcp_connect("127.0.0.1:{port}") ?? { dropped = true
             break }
-        net.set_read_timeout(probe, 200) ?? panic("probe timeout")
         if !s5_probe_write(probe) {
             dropped = true
             net.tcp_close(probe).drop("original probe drop ignores close failure")

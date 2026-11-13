@@ -3,7 +3,6 @@
 // and variables as the service: the caller lends its environment, whose
 // cache leases travel into each probe child.
 
-SERVICES_PROBE_CONNECT_MS: 300
 SERVICES_HEALTH_POLL_MS: 300
 SERVICES_NO_PROBE_STABILITY_MS: 300
 
@@ -69,14 +68,21 @@ services_probe_notify: fn(project_dir: String, path: String) -[FS, Env]> Bool Ne
     services_path_starts_with(resolved, project) && files.is_file(resolved)
 }
 
-services_probe_tcp: fn(host: String, port: Int) -[Net, Time.Wait]> Bool Never! {
+// Each network probe runs as its own task under a 300 ms task deadline, so a
+// peer that never answers fails the probe instead of stalling the poll.
+services_probe_tcp: fn(host: String, port: Int) -[Net, Time, Time.Wait]> Bool Never! {
     address: net.socket_addr_parse("{host}:{port}") ?? return false
-    net.tcp_connect_timeout(address, SERVICES_PROBE_CONNECT_MS) ?? return false
-    true
+    probe: task { services_probe_connects(address) }
+    probe.join() ?? false
+}
+
+services_probe_connects: fn(address: net.SocketAddr) -[Net, Time, Time.Wait]> Bool Never! {
+    task.timeout(300ms)
+    net.tcp_connect_addr(address) == .Ok(_)
 }
 
 // A minimal `http://` GET: the status must be the expected one, else 2xx/3xx.
-services_probe_http: fn(url: String, expected_status: Int?) -[Net, Time.Wait]> Bool Never! {
+services_probe_http: fn(url: String, expected_status: Int?) -[Net, Time, Time.Wait]> Bool Never! {
     if !url.starts_with("http://") -> return false
     rest: url.removeprefix("http://")
     authority := rest
@@ -97,21 +103,29 @@ services_probe_http: fn(url: String, expected_status: Int?) -[Net, Time.Wait]> B
     }
     if host == "" || host.contains("[") || host.contains("]") -> return false
     address: net.socket_addr_parse("{host}:{port}") ?? return false
-    stream := net.tcp_connect_timeout(address, SERVICES_PROBE_CONNECT_MS) ?? return false
-    net.set_read_timeout(stream, SERVICES_PROBE_CONNECT_MS).drop("a probe without a read timeout still reads once")
-    net.set_write_timeout(stream, SERVICES_PROBE_CONNECT_MS).drop("a probe without a write timeout still writes once")
-    crlf: "{env_shell_control(13)}\n"
-    request: "GET /{path} HTTP/1.1{crlf}Host: {host}{crlf}Connection: close{crlf}{crlf}"
-    net.tcp_write_all_bytes(stream, request.bytes()) ?? return false
-    bytes: net.tcp_read_bytes(stream, 1024) ?? return false
-    response: String.from_bytes_lossy(bytes)
-    if !response.starts_with("HTTP/") -> return false
-    words: trust_text_words(response.removeprefix("HTTP/"))
-    if words.len() < 2 -> return false
-    status: Int.parse(words[1]) ?? return false
-    if status < 0 || status > 65535 -> return false
+    probe: task { services_probe_http_status(address, host, path) }
+    status: probe.join() ?? return false
+    if status < 0 -> return false
     if expected_status == .Val(expected) -> return status == expected
     status >= 200 && status < 400
+}
+
+// The status of one GET over a fresh connection, or -1 when the exchange
+// fails or the reply is not HTTP.
+services_probe_http_status: fn(address: net.SocketAddr, host: String, path: String) -[Net, Time, Time.Wait]> Int Never! {
+    task.timeout(300ms)
+    stream := net.tcp_connect_addr(address) ?? return -1
+    crlf: "{env_shell_control(13)}\n"
+    request: "GET /{path} HTTP/1.1{crlf}Host: {host}{crlf}Connection: close{crlf}{crlf}"
+    net.tcp_write_all_bytes(stream, request.bytes()) ?? return -1
+    bytes: net.tcp_read_bytes(stream, 1024) ?? return -1
+    response: String.from_bytes_lossy(bytes)
+    if !response.starts_with("HTTP/") -> return -1
+    words: trust_text_words(response.removeprefix("HTTP/"))
+    if words.len() < 2 -> return -1
+    status: Int.parse(words[1]) ?? return -1
+    if status < 0 || status > 65535 -> return -1
+    status
 }
 
 // Poll readiness until it passes or `timeout` elapses; false on timeout

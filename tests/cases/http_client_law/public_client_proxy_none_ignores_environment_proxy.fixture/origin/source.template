@@ -24,11 +24,10 @@ contains_bytes: fn(raw: [U8], want: [U8], ascii_casefold: Bool) -> Bool {
     return false
 }
 request_head: fn(stream: &TCPStream) -> [U8] {
-    // Original request_head10-23: persistent 5s read timeout,512-byte reads, positive read, <=64KiB bound, exact CRLFCRLF terminator.
-    net.set_read_timeout(stream, 5000) ?? panic("request timeout")
+    // Original request_head10-23: 5s per read,512-byte reads, positive read, <=64KiB bound, exact CRLFCRLF terminator.
     request := [U8]{}
     loop !contains_bytes(request, [U8]{13,10,13,10}, false) {
-        block: stream.read(512) ?? panic("request read")
+        block: stream.read(512, deadline: 5s) ?? panic("request read")
         assert(block.len() > 0)
         loop byte in block { request.push(byte) }
         assert(request.len() <= 65536)

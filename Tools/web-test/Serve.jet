@@ -28,7 +28,6 @@ use {
 
 C_MAX_HEAD_BYTES: 32768
 C_READ_BYTES: 65536
-C_READ_TIMEOUT_MS: 5000
 
 ServeRoot: struct {
     path: String
@@ -97,7 +96,6 @@ path_parts: fn(path: String) -> [String] {
 
 serve_one: fn(root: ServeRoot, listener: TCPListener) {
     stream := net.tcp_accept(listener) ?? return
-    net.set_read_timeout(stream, C_READ_TIMEOUT_MS).drop("an unset timeout only lets a silent client wait longer")
     reply: if request_target(stream) == {
         .Val(target) -> answer(root, target)
         None -> refused(400)
@@ -110,7 +108,8 @@ serve_one: fn(root: ServeRoot, listener: TCPListener) {
 request_target: fn(stream: &TCPStream) -> String? {
     head := [U8]{}
     loop head.len() < C_MAX_HEAD_BYTES {
-        chunk: net.tcp_read_bytes(stream, 4096) ?? return None
+        // A silent client is given up on after 5 s.
+        chunk: stream.read(4096, deadline: 5s) ?? return None
         if chunk.len() == 0 -> return None
         loop byte in chunk -> head.push(byte)
         if head_end(head) {

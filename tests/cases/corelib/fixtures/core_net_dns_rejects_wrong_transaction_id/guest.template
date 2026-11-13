@@ -1,6 +1,8 @@
 
 use net: core.net
 
+// The lookup waits at most 1 s.
+#Deadline(1s)
 run: fn() {
-    _: net.dns_txt_at("@ADDR@", "service.example.test", 1000) ?? panic("forged DNS accepted")
+    _: net.dns_txt_at("@ADDR@", "service.example.test") ?? panic("forged DNS accepted")
 }

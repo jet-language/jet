@@ -132,6 +132,12 @@ node_headers: fn(fields: [http.Header]) -> Dyn {
     out
 }
 
+// Connects to `address`, giving up once `timeout_ms` pass.
+#Deadline(time.duration_ms(timeout_ms))
+connect_within: fn(address: SocketAddr, timeout_ms: Int) -[Net, Time.Wait]> TCPStream NetError! {
+    net.tcp_connect_addr(address)
+}
+
 // What one probe of the line service on local `port` answered: `ok` and
 // the first line it sent (all it sent when it closed before a newline), or
 // the error of a probe that failed, and the latency in milliseconds. The
@@ -140,7 +146,7 @@ node_headers: fn(fields: [http.Header]) -> Dyn {
 line_probe: fn(port: Int, probe: Dyn, timeout_ms: Int) -[Net, Time, Time.Wait]> Dyn {
     started: time.instant()
     address: net.socket_addr_parse("127.0.0.1:{port}") ?? return failed_probe("{err}", started)
-    stream := net.tcp_connect_timeout(address, timeout_ms) ?? return failed_probe(line_error(started, timeout_ms, "connect ECONNREFUSED 127.0.0.1:{port}"), started)
+    stream := connect_within(address, timeout_ms) ?? return failed_probe(line_error(started, timeout_ms, "connect ECONNREFUSED 127.0.0.1:{port}"), started)
     sent: if dyn_at(probe, "send") == .Null -> "" else -> js_text(dyn_at(probe, "send"))
     net.tcp_write_text(stream, sent) ?? return closed_probe(stream, failed_probe("{err}", started))
     net.tcp_shutdown(stream, NetShutdown.Write) ?? return closed_probe(stream, failed_probe("{err}", started))

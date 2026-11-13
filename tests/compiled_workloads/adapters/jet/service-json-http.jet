@@ -87,7 +87,7 @@ unknown_status: fn(url: String, body: String) -> Int HTTPError! {
 
 slow_client: fn(address: String, timeout_ms: Int) {
     stream: net.tcp_connect(address) ?? panic("slow client connect failed")
-    _: net.set_timeout(stream, timeout_ms) ?? panic("slow client timeout failed")
+    wait: Duration.milliseconds(timeout_ms) ?? panic("slow client duration failed")
     headers := "".bytes()
     loop line in
         ["POST /sum HTTP/1.1", "Host: loopback", "Content-Type: application/json", "Content-Length: 20", "Connection: close", ""] {
@@ -95,8 +95,7 @@ slow_client: fn(address: String, timeout_ms: Int) {
         headers.push(13)
         headers.push(10)
     }
-    _: stream.write_all(headers) ?? panic("slow client write failed")
-    wait: Duration.milliseconds(timeout_ms) ?? panic("slow client duration failed")
+    _: stream.write_all(headers, deadline: wait) ?? panic("slow client write failed")
     time.sleep(wait)
     _: stream.close() ?? panic("slow client close failed")
 }

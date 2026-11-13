@@ -1,17 +1,24 @@
 
 use net: core.net
 
+// Each lookup waits at most 1 s.
 run: fn() {
-    if net.dns_a_at("@ADDR@", "service.example.test", 1000) == {
-        .Ok(_) -> panic("reserved DNS header accepted")
-        .Err(_) -> print("rejected")
+    #Deadline(1s) {
+        if net.dns_a_at("@ADDR@", "service.example.test") == {
+            .Ok(_) -> panic("reserved DNS header accepted")
+            .Err(_) -> print("rejected")
+        }
     }
-    if net.dns_a_at("@ADDR@", "service.example.test", 1000) == {
-        .Ok(_) -> panic("forward DNS pointer accepted")
-        .Err(_) -> print("rejected")
+    #Deadline(1s) {
+        if net.dns_a_at("@ADDR@", "service.example.test") == {
+            .Ok(_) -> panic("forward DNS pointer accepted")
+            .Err(_) -> print("rejected")
+        }
     }
-    if net.dns_a_at("@ADDR@", "service.example.test", 1000) == {
-        .Ok(_) -> panic("impossible DNS counts accepted")
-        .Err(_) -> print("rejected")
+    #Deadline(1s) {
+        if net.dns_a_at("@ADDR@", "service.example.test") == {
+            .Ok(_) -> panic("impossible DNS counts accepted")
+            .Err(_) -> print("rejected")
+        }
     }
 }

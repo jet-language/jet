@@ -20,10 +20,9 @@ multipart_test: fn() {
     address: net.socket_to_string(net.listener_local_socket_addr(listener) ?? panic("address"))
     peer: task {
         stream := net.tcp_accept(listener) ?? panic("accept")
-        net.set_read_timeout(stream, 5000) ?? panic("timeout")
         request := [U8]{}
         loop {
-            chunk: net.tcp_read_bytes(stream, 4096) ?? panic("read request")
+            chunk: stream.read(4096, deadline: 5s) ?? panic("read request")
             assert(chunk.len() != 0, "multipart request ended before body")
             loop b in chunk -> request.push(b)
             shown: String.from_bytes(request) ?? panic("request UTF-8")

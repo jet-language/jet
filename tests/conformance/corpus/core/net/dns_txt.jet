@@ -2,8 +2,10 @@
 use net: core.net
 
 run: fn() {
-    print(if net.dns_txt("example.test", 0) == {
-        .Ok(ok) -> false
-        .Err(error) -> true
-    })
+    #Deadline(0ms) {
+        print(if net.dns_txt("example.test") == {
+            .Ok(ok) -> false
+            .Err(error) -> true
+        })
+    }
 }

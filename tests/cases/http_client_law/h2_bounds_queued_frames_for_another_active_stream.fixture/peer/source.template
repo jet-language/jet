@@ -24,11 +24,10 @@ contains_bytes: fn(raw: [U8], want: [U8], ascii_casefold: Bool) -> Bool {
     return false
 }
 request_head: fn(stream: &TCPStream) -> [U8] {
-    // Original request_head10-23: persistent 5s read timeout,512-byte reads, positive read, <=64KiB bound, exact CRLFCRLF terminator.
-    net.set_read_timeout(stream, 5000) ?? panic("request timeout")
+    // Original request_head10-23: 5s per read,512-byte reads, positive read, <=64KiB bound, exact CRLFCRLF terminator.
     request := [U8]{}
     loop !contains_bytes(request, [U8]{13,10,13,10}, false) {
-        block: stream.read(512) ?? panic("request read")
+        block: stream.read(512, deadline: 5s) ?? panic("request read")
         assert(block.len() > 0)
         loop byte in block { request.push(byte) }
         assert(request.len() <= 65536)
@@ -49,7 +48,7 @@ Frame: struct {
 read_exact: fn(stream: TCPStream, size: Int) -> [U8] {
     out := [U8]{}
     loop out.len() < size {
-        chunk: stream.read(size - out.len()) ?? panic("frame read_exact")
+        chunk: stream.read(size - out.len(), deadline: 5s) ?? panic("frame read_exact")
         assert(chunk.len() > 0)
         loop byte in chunk { out.push(byte) }
     }
@@ -64,8 +63,8 @@ read_frame: fn(stream: TCPStream) -> Frame {
 write_frame: fn(stream: TCPStream, kind: Int, flags: Int, id: Int, payload: [U8]) {
     size: payload.len()
     head: [U8]{(U8{(size >> 16).bit_and(255)}), (U8{(size >> 8).bit_and(255)}), (U8{size.bit_and(255)}), (U8{kind}), (U8{flags}), (U8{(id >> 24).bit_and(255)}), (U8{(id >> 16).bit_and(255)}), (U8{(id >> 8).bit_and(255)}), (U8{id.bit_and(255)})}
-    stream.write_all(head) ?? panic("frame head write_all")
-    stream.write_all(payload) ?? panic("frame payload write_all")
+    stream.write_all(head, deadline: 2s) ?? panic("frame head write_all")
+    stream.write_all(payload, deadline: 2s) ?? panic("frame payload write_all")
 }
 first_headers: fn(stream: TCPStream) -> Frame {
     loop {
@@ -73,17 +72,15 @@ first_headers: fn(stream: TCPStream) -> Frame {
         if frame.kind == 1 -> return frame
     }
 }
-preface: fn(stream: &TCPStream, timeout: Int) {
-    net.set_read_timeout(stream, timeout) ?? panic("read timeout")
+preface: fn(stream: &TCPStream) {
     assert_eq(read_exact(stream, 24), "PRI * HTTP/2.0{PEER_CRLF}{PEER_CRLF}SM{PEER_CRLF}{PEER_CRLF}".bytes())
     assert(read_frame(stream).kind == 4)
     write_frame(stream, 4, 0, 0, [U8]{})
 }
 observed_closed: fn(stream: &TCPStream) -> Bool {
-    net.set_read_timeout(stream, 50) ?? panic("close observer timeout")
     deadline: time.instant() + 500ms
     loop {
-        if stream.read(1) == {
+        if stream.read(1, deadline: 50ms) == {
             .Ok(bytes) -> { if bytes.len() == 0 -> return true }
             .Err(error) -> {
                 if error == {
@@ -99,8 +96,7 @@ run: fn() {
     listener: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
     publish(listener, "{work}/addr.txt")
     stream := listener.accept() ?? panic("accept")
-    net.set_write_timeout(stream, 2000) ?? panic("write timeout")
-    preface(stream, 5000)
+    preface(stream)
     first: first_headers(stream)
     assert_eq(first.id, 1)
     write_frame(stream, 1, 4, 1, [U8]{136})
@@ -112,11 +108,11 @@ run: fn() {
     head: [U8]{1,0,0,0,0,0,0,0,3}
     loop i in 0..<1024 {
         // Original send bool: first failed header/payload stops flood, not a test failure.
-        if stream.write_all(head) == {
+        if stream.write_all(head, deadline: 2s) == {
             .Err(_) -> break
             .Ok(_) -> {}
         }
-        if stream.write_all(chunk) == {
+        if stream.write_all(chunk, deadline: 2s) == {
             .Err(_) -> break
             .Ok(_) -> {}
         }

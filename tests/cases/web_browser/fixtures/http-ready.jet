@@ -8,7 +8,6 @@ use {
 run: fn() {
     args: process.args()
     stream := net.tcp_connect(args[0]) ?? return
-    net.set_read_timeout(stream, 250) ?? return
     crlf: String.from_bytes([U8]{13, 10}) ?? panic("CRLF")
     auth := ""
     if args[2] != "-" -> auth = "Authorization: Bearer {args[2]}{crlf}"
@@ -17,7 +16,7 @@ run: fn() {
     if args[3] == "write" -> net.tcp_shutdown(stream, .Write) ?? return
     response := ""
     loop {
-        text: stream.read_text(8192) ?? break
+        text: stream.read_text(8192, deadline: 250ms) ?? break
         if text.len() == 0 -> break
         response = "{response}{text}"
     }

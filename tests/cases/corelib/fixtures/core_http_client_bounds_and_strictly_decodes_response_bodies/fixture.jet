@@ -29,8 +29,7 @@ http_bounds_original: fn() {
     peer: task {
         loop i in 0..<10 {
             stream := net.tcp_accept(listener) ?? panic("accept")
-            net.set_read_timeout(stream, 5000) ?? panic("timeout")
-            _request: net.tcp_read_bytes(stream, 4096) ?? panic("read")
+            _request: stream.read(4096, deadline: 5s) ?? panic("read")
             if i >= 8 {
                 bytes: files.read_bytes("case-{i}.response") ?? panic("response")
                 net.tcp_write_all_bytes(stream, bytes) ?? panic("write response")
