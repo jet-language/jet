@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6788,
-    "rev": 101450,
+    "rev": 101460,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -29675,6 +29675,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-13T01:54:17.183Z"
+        },
+        {
+          "n": 85,
+          "text": "D-SEND-ERROR1=A is built (ratified 2026-11-13). sender.send(v) returns nothing on success and fails with SendError<T> when no receiver remains; err.value moves the unsent value back. Core declares conversions from SendError and Closed into Err, and from SendError into Closed, so a bare send in run, a task block or a function naming no error type passes the failure up with a message naming the send, and inside a function failing with Closed it passes up as Closed. Freeing queued values runs each value's drop. Depends on #6787 (generic conversions into Err). Proof: cases for a bare send, send ?? handler recovering err.value, and a send inside a Closed function, on O0, O1 and O2; every in-repo send caller is migrated in the same cutover.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T12:16:08.982Z"
         }
       ],
       "refs": [
@@ -29696,13 +29705,13 @@
       "parentId": "c0j2afiq",
       "needsAcceptance": false,
       "created": "2026-09-12T14:30:16.660Z",
-      "updated": "2026-11-13T12:03:30.279Z",
+      "updated": "2026-11-13T12:16:08.982Z",
       "updatedBy": "Main",
       "workOrder": 94,
       "goals": [
         "G10"
       ],
-      "criteriaLastN": 84
+      "criteriaLastN": 85
     },
     {
       "id": "c0ym70o1",
@@ -72050,6 +72059,24 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-09T19:03:08.340Z"
+        },
+        {
+          "n": 6,
+          "text": "D-ROUND-EVEN1=A is built (ratified 2026-11-13). math.trunc, floor, ceil, round and round_even take any number through a Roundable trait and return the same type: Float, F32, Decimal and Fraction give a whole value of their own type, and Int and every sized integer come back unchanged. round ties away from zero, and round_even ties to even. x.rounded(mode) takes a run-time mode, and impl MyFixed.Roundable makes a user number round like the built-in ones. Proof: a golden over every number type and both tie rules on O0, O1 and O2, and a case with a user Roundable type.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T12:16:04.299Z"
+        },
+        {
+          "n": 7,
+          "text": "D-ROUND-EVEN1=A conversion half (ratified 2026-11-13). Int{} converts a whole Float, F32, Decimal or Fraction exactly, and stops on NaN, an infinity, a fraction part or a value out of range with a registered error naming math.trunc, floor, ceil, round and round_even; checked(Int{...}) gives None instead. This covers Int{Decimal} and Int{Fraction}, which are refused with E0108 today. Every in-repo caller that relied on round returning Int is migrated to Int{math.round(x)} in the same cutover. Proof: cases for each source type and each stop, ui snapshots for the stops, and the golden suite on O0, O1 and O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T12:16:05.222Z"
         }
       ],
       "refs": [],
@@ -72060,9 +72087,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T13:32:14.611Z",
-      "updated": "2026-11-13T12:03:25.843Z",
+      "updated": "2026-11-13T12:16:05.222Z",
       "updatedBy": "Main",
-      "criteriaLastN": 5
+      "criteriaLastN": 7
     },
     {
       "id": "c0ct4a0i",
@@ -83581,6 +83608,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-13T11:16:42.106Z"
+        },
+        {
+          "n": 9,
+          "text": "D-RETAIN-BOUND1=A is built (ratified 2026-11-13). The no-leak promise covers memory nothing can reach; data a live global, cache or task still reaches is the program's own. jet audit retention (also jet inspect audit retention, with --json) lists every store that can grow without a bound: #Memo(bound: none) caches and module Shared globals holding growable data, both exact, and loops that never end by themselves and keep appending, marked \"may grow\". Each row gives place, kind, name and type. help, man, completions and cli.md list it. Proof: a golden on the ballot program showing exactly its 2 rows, a --json golden, and a program with only bounded stores printing no rows.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T12:16:06.127Z"
         }
       ],
       "refs": [],
@@ -83591,9 +83627,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-05T13:14:14.496Z",
-      "updated": "2026-11-13T12:03:27.080Z",
+      "updated": "2026-11-13T12:16:06.127Z",
       "updatedBy": "Main",
-      "criteriaLastN": 8
+      "criteriaLastN": 9
     },
     {
       "id": "c0xuffg1",
@@ -90674,6 +90710,15 @@
           "verifiedBy": null,
           "evidence": "dev 6cea1699f9: git grep -nE 'Math\\.(sin|cos|tan|exp|log|pow|sqrt|atan2|hypot)' -- Compiler/JetWasm Compiler/JetWeb Compiler/JetRuntime -> no match",
           "at": "2026-11-13T02:23:51.064Z"
+        },
+        {
+          "n": 9,
+          "text": "D-F32-RECORDS1=A is built (ratified 2026-11-13). math.rem_quo, math.remainder and math.fmod given two F32 arguments return an F32 (rem_quo's quotient stays an Int), computed in Float and rounded once, which gives the exact F32 result; Float arguments keep their Float results, and no public name is added. The sema rule lives with the other F32 math rules (sema_call_try_core_math_f32). Proof: a golden over edge inputs (signed zeros, subnormals, huge quotients) comparing with the C library's remainderf, fmodf and remquof on O0, O1 and O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T12:16:09.961Z"
         }
       ],
       "refs": [
@@ -90689,9 +90734,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-08T19:41:56.680Z",
-      "updated": "2026-11-13T12:03:18.570Z",
+      "updated": "2026-11-13T12:16:09.961Z",
       "updatedBy": "Main",
-      "criteriaLastN": 8
+      "criteriaLastN": 9
     },
     {
       "id": "c0l39twq",
@@ -91190,6 +91235,15 @@
           "verifiedBy": null,
           "evidence": "dev fbd660ba2f (G9Web-6706c4): Examples Systems/Files/FilesMapViews returns mapped windows through Option, Result, a named pair, a list and a Shared carrier (guard_read gives View<U8>? from SharedGuard<MappedFile>, read by a task through a handle copy), each rooted in the receiver map, through the one mmap Prelude kernel. The web target returns a typed IOError (ENOSYS). Lander ran on seed-b14: golden FilesMapViews PASS 3 (o0, o1, o2), golden FilesMapAdvise PASS 3, ui mapped_window_outlives_its_map PASS 1 (E2305), and DiagnosticRows --check rc 0 after the E2305 page regeneration.",
           "at": "2026-11-13T06:49:09.966Z"
+        },
+        {
+          "n": 5,
+          "text": "D-MMAP-STABLE1=A is built (ratified 2026-11-13). files.map gives zero-copy views that another process cannot change: it maps a private file-system clone where the file system can (btrfs, xfs, APFS, ReFS); otherwise it holds the file with a lease on Linux or deny-write sharing on Windows and copies only when a writer arrives; otherwise it copies into an unnamed temp file. Only file systems that cannot be written at all (squashfs, erofs) map directly. mapped.kind() reports Clone, Held or Copy, and an #Unsafe raw map remains for shared live bytes. Proof: c1 and c2's cases on a clone-capable and a non-clone file system, plus a case printing kind() for each path.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T12:16:07.978Z"
         }
       ],
       "refs": [],
@@ -91200,9 +91254,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-08T21:18:50.483Z",
-      "updated": "2026-11-13T12:03:29.260Z",
+      "updated": "2026-11-13T12:16:07.978Z",
       "updatedBy": "Main",
-      "criteriaLastN": 4
+      "criteriaLastN": 5
     },
     {
       "id": "c0ku1nvb",
@@ -93482,6 +93536,15 @@
           "verifiedBy": null,
           "evidence": "Lander5 loop on seed-b10 (jet@a0.0.45#c089d4d3), 2026-11-12 01:5x. G5DevX-deny-only-wait landed e3c3c99d7b with its line passing: jet test Compiler --profile cases tests/cases/effects/explain_effects_reaches_deny_only.case gives PASS. jet explain effects lists every deny-only effect a site reaches, Time.Wait included, pinned byte for byte with its call site: reaches: Panic via deny_only.nap (deny_only.jet:13), Time.Wait via deny_only.nap (deny_only.jet:13). Earlier steps pin Panic and Mem (Mem via deny_only.make, Panic via deny_only.stop), and the JSON reaches carry \"effect\":\"Time.Wait\" and \"effect\":\"Panic\".",
           "at": "2026-11-12T06:56:00.610Z"
+        },
+        {
+          "n": 9,
+          "text": "D-HOST-NONCE2=A is built (ratified 2026-11-13). Reading the /proc entry of a child the operation started counts as Exec, so the typed memory and open-file limit errors stay. The vault lock becomes a kernel-released flock (HostFileLock), so no vault call reads another process's entry, a crashed writer's lock is free at once, and the ten-minute stale wait and the pid check are gone. The lock file is deleted on release, and its identity is rechecked after locking. host-reads.md lists the one remaining read, and --deny=FS.Read states what it does not cover. Proof: a case where a writer is killed mid-write and the next write proceeds at once, a case for two concurrent writers, and the child-limit cases still reporting which limit stopped the child.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T12:16:07.072Z"
         }
       ],
       "refs": [],
@@ -93492,9 +93555,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-12T01:52:19.959Z",
-      "updated": "2026-11-13T12:03:28.260Z",
+      "updated": "2026-11-13T12:16:07.072Z",
       "updatedBy": "Main",
-      "criteriaLastN": 8
+      "criteriaLastN": 9
     },
     {
       "id": "c0ef6eb1",
@@ -93887,6 +93950,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-13T00:47:31.472Z"
+        },
+        {
+          "n": 11,
+          "text": "D-CORE-FILE-ADAPTERS1=A is built (ratified 2026-11-13). The json reader, jsonl, cbor, csv and xml readers and writers take any value whose type implements the Prelude Reader or Writer trait; FileReader and FileWriter implement both (two thin wrapper methods over the compiler routes), and user code can name Reader and Writer as bounds. Crypto moves up beside files, and data, encoding.csv and net.ws move up to services, so no public path changes and json.parse no longer loads the file code. The Reader name clash with core.term's binary cursor is resolved as the ballot states (amending D-NETIO-CONTRACT1). Proof: a case passing a file, term.stdin() and a user impl MySource.Reader to json and csv readers on O0, O1 and O2; the layer census shows the file-adapter upward names gone; jet check Core clean with E1012 on.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T12:16:03.379Z"
         }
       ],
       "refs": [],
@@ -93897,9 +93969,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-12T04:08:18.925Z",
-      "updated": "2026-11-13T12:03:24.816Z",
+      "updated": "2026-11-13T12:16:03.379Z",
       "updatedBy": "Main",
-      "criteriaLastN": 10
+      "criteriaLastN": 11
     },
     {
       "id": "c0on083p",
@@ -194381,8 +194453,10 @@
         }
       },
       "draft": false,
-      "status": "open",
-      "created": "2026-11-13T03:41:03.966Z"
+      "status": "ratified",
+      "created": "2026-11-13T03:41:03.966Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-11-13"
     },
     {
       "id": "D-ROUND-EVEN1",
@@ -194640,8 +194714,10 @@
         }
       },
       "draft": false,
-      "status": "open",
-      "created": "2026-11-13T03:42:39.334Z"
+      "status": "ratified",
+      "created": "2026-11-13T03:42:39.334Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-11-13"
     },
     {
       "id": "D-RETAIN-BOUND1",
@@ -194833,8 +194909,10 @@
         }
       },
       "draft": false,
-      "status": "open",
-      "created": "2026-11-13T03:51:29.536Z"
+      "status": "ratified",
+      "created": "2026-11-13T03:51:29.536Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-11-13"
     },
     {
       "id": "D-EXIT-TASKS1",
@@ -195282,8 +195360,10 @@
         }
       },
       "draft": false,
-      "status": "open",
-      "created": "2026-11-13T04:02:24.146Z"
+      "status": "ratified",
+      "created": "2026-11-13T04:02:24.146Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-11-13"
     },
     {
       "id": "D-GUARD-LINT1",
@@ -195973,8 +196053,10 @@
         }
       },
       "draft": false,
-      "status": "open",
-      "created": "2026-11-13T07:09:44.859Z"
+      "status": "ratified",
+      "created": "2026-11-13T07:09:44.859Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-11-13"
     },
     {
       "id": "D-GROUP-CANCEL1",
@@ -196394,8 +196476,10 @@
         }
       },
       "draft": false,
-      "status": "open",
-      "created": "2026-11-13T08:49:54.799Z"
+      "status": "ratified",
+      "created": "2026-11-13T08:49:54.799Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-11-13"
     },
     {
       "id": "D-F32-RECORDS1",
@@ -196575,8 +196659,10 @@
         }
       },
       "draft": false,
-      "status": "open",
-      "created": "2026-11-13T12:03:18.570Z"
+      "status": "ratified",
+      "created": "2026-11-13T12:03:18.570Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-11-13"
     }
   ],
   "questions": [
@@ -199922,6 +200008,111 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-13T12:16:09.961Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c028lxdd",
+      "note": "#9 D-F32-RECORDS1=A is built (ratified 2026-11-13). math.rem_qu"
+    },
+    {
+      "at": "2026-11-13T12:16:08.982Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c06l1r0z",
+      "note": "#85 D-SEND-ERROR1=A is built (ratified 2026-11-13). sender.send("
+    },
+    {
+      "at": "2026-11-13T12:16:07.978Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0vwlomv",
+      "note": "#5 D-MMAP-STABLE1=A is built (ratified 2026-11-13). files.map g"
+    },
+    {
+      "at": "2026-11-13T12:16:07.072Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0mf9ybj",
+      "note": "#9 D-HOST-NONCE2=A is built (ratified 2026-11-13). Reading the "
+    },
+    {
+      "at": "2026-11-13T12:16:06.128Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0q4s6en",
+      "note": "#9 D-RETAIN-BOUND1=A is built (ratified 2026-11-13). The no-lea"
+    },
+    {
+      "at": "2026-11-13T12:16:05.222Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0vhdiiv",
+      "note": "#7 D-ROUND-EVEN1=A conversion half (ratified 2026-11-13). Int{}"
+    },
+    {
+      "at": "2026-11-13T12:16:04.299Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0vhdiiv",
+      "note": "#6 D-ROUND-EVEN1=A is built (ratified 2026-11-13). math.trunc, "
+    },
+    {
+      "at": "2026-11-13T12:16:03.379Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0ssy5wy",
+      "note": "#11 D-CORE-FILE-ADAPTERS1=A is built (ratified 2026-11-13). The "
+    },
+    {
+      "at": "2026-11-13T12:14:32.856Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-F32-RECORDS1",
+      "note": "A"
+    },
+    {
+      "at": "2026-11-13T12:14:32.856Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-HOST-NONCE2",
+      "note": "A"
+    },
+    {
+      "at": "2026-11-13T12:14:32.856Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-MMAP-STABLE1",
+      "note": "A"
+    },
+    {
+      "at": "2026-11-13T12:14:32.856Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-SEND-ERROR1",
+      "note": "A"
+    },
+    {
+      "at": "2026-11-13T12:14:32.856Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-RETAIN-BOUND1",
+      "note": "A"
+    },
+    {
+      "at": "2026-11-13T12:12:25.220Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-ROUND-EVEN1",
+      "note": "A"
+    },
+    {
+      "at": "2026-11-13T12:12:25.220Z",
+      "by": "owner",
+      "action": "decision.ratify",
+      "ref": "D-CORE-FILE-ADAPTERS1",
+      "note": "A"
+    },
     {
       "at": "2026-11-13T12:04:13.527Z",
       "by": "Main",
