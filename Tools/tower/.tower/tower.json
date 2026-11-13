@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6777,
-    "rev": 100175,
+    "rev": 100178,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -57136,15 +57136,6 @@
           "at": "2026-11-08T06:12:43.711Z"
         },
         {
-          "n": 3,
-          "text": "(was #5833) Core gap for #5072 script ports, under ratified D-BROWSER-AUTO1=A (BiDi portable layer; checked expert CDP via browser.protocol(\"cdp\").send(\"Domain.command\", params), gated on goog:cdp; architecture.md:1253-1328): Browser.launch() starts the engine pinned in .jet/lock (today only locked(engine) and connect(endpoint) exist); protocol(\"cdp\") delivers CDP events through subscribe/next_event on the same queue, redaction and slot limits as BiDi; and Tools/canvas-test/scenario.mjs, Tools/canvas-test/driver-lifecycle.mjs and Tools/web-test/sourcemap.mjs are Jet programs on those routes with identical results (gauntlet tool entries whose parity cases pass; the switch and the deletion of the .mjs versions are #6759 c6, G11).",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-12T10:47:03.620Z"
-        },
-        {
           "n": 4,
           "text": "(was #5834) Core gap for #5072 script ports: Locale / collation: `Core/Text` exposes a compare consistent with `LC_COLLATE=C` for ASCII, and the en_US order (UCA over the CLDR root, D-TEXT-COLLATE1=A) through text.collate / text.collation_key; `weighted-shards` uses the byte order.",
           "status": "met",
@@ -57264,12 +57255,12 @@
         },
         {
           "n": 20,
-          "text": "Owner scope 2026-11-09: G4 ports every non-Tower tool, runner, gate and generator under Tools/ to Jet, each as a gauntlet tool entry whose parity cases pass for the original and the twin: Tools/perf runners, the gauntlet harness and optimization drivers, Tools/agent, agent-eval, packaging, editors, jetpack-infra, adoption, cli-census, foreign-build-hosts, jet-nix-eval, the compiler-modules codemods, and the fixture generators. Peer comparison programs and browser-executed assets stay in their own languages. The Tower app's own Node sources are outside G4. Switching to the twins is #6759 c6 (G11).",
+          "text": "Owner scope 2026-11-12 night: G4 ports the repository management tools to Jet: the landing, chain, census, lane-check, release, CI and board-adjacent gates and generators the repository runs to build, check, land and release itself (Tools/agent, Tools/release, Tools/ci, and the generators and gates they call). Each port is a gauntlet tool entry whose parity cases pass for the original and the twin, with reasoning no harder than the original. Everything else stays in its own language and is out of G4: editor extensions (Zed needs Rust, VS Code and tree-sitter need JS), Tools/perf, Tools/gauntlet, agent-eval, peer comparison programs, benchmark subjects, browser-executed assets, and the Tower app. Scripts with no live caller are deleted, not ported. Switching to the twins is #6759 c6 (G11). Proof: ScriptPairing --census lists no unpaired script under the in-scope directories.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-12T10:46:47.812Z"
+          "at": "2026-11-13T01:24:51.425Z"
         },
         {
           "n": 21,
@@ -57660,7 +57651,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-20T14:41:14.806Z",
-      "updated": "2026-11-13T01:24:47.570Z",
+      "updated": "2026-11-13T01:24:51.425Z",
       "updatedBy": "Main",
       "goals": [
         "G4"
@@ -200925,6 +200916,27 @@
   ],
   "events": [
     {
+      "at": "2026-11-13T01:24:53.128Z",
+      "by": "Main",
+      "action": "goal.log",
+      "ref": "G4",
+      "note": "Owner 2026-11-12 night: \"not literally everything in the rep"
+    },
+    {
+      "at": "2026-11-13T01:24:51.425Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0qe89cl",
+      "note": "#20: Owner 2026-11-12 night: \"not literally everything in the repo should be moved off of other languages, the zed extension needs rust, vscode needs js etc. this should be focused on repo management tools. the rest are ignored, especially things like gauntlet and perf.\"; was: Owner scope 2026-11-09: G4 ports every non-Tower tool, runner, gate and generator under Tools/ to Jet, each as a gauntlet tool entry whose parity cases pass for the original and the twin: Tools/perf r"
+    },
+    {
+      "at": "2026-11-13T01:24:49.684Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0qe89cl",
+      "note": "#3: Owner 2026-11-12 night: \"not literally everything in the repo should be moved off of other languages, the zed extension needs rust, vscode needs js etc. this should be focused on repo management tools. the rest are ignored, especially things like gauntlet and perf.\" The canvas-test and web-test drivers are test tooling, not repo management; the Core parts (Browser.launch 40b6a16571, CDP events 9050e8c223) already landed, and the page-scoped CDP question stays on its ballot D-BROWSER-CDP-PAGE1.; was [open]: (was #5833) Core gap for #5072 script ports, under ratified D-BROWSER-AUTO1=A (BiDi portable layer; checked expert CDP via browser.protocol(\"cdp\").send(\"Domain.command\", params), gated on goog:cdp; ar"
+    },
+    {
       "at": "2026-11-13T01:24:47.570Z",
       "by": "Main",
       "action": "card.criteria-remove",
@@ -206923,6 +206935,11 @@
         {
           "at": "2026-11-13",
           "by": "Main",
+          "text": "Owner 2026-11-12 night: \"not literally everything in the repo should be moved off of other languages, the zed extension needs rust, vscode needs js etc. this should be focused on repo management tools. the rest are ignored, especially things like gauntlet and perf.\" #5072 c3, c7 and c8 removed; c20 rewritten to repository management tools only (Tools/agent, Tools/release, Tools/ci and the gates and generators they call)."
+        },
+        {
+          "at": "2026-11-13",
+          "by": "Main",
           "text": "Staffing 2026-11-12 evening: G4 gets two agents. Census on dev ab2d2ab82b (ScriptPairing --census, seed-b14): 44 unpaired scripts under Tools/ outside Tools/tower (agent-eval 22, compiler-modules 5, editors 4, packaging 4, adoption 2, gauntlet 2, perf 2, plus datetime_accuracy.py, foreign-build-hosts, jet-nix-eval). G4Ports-1 takes the 22 outside agent-eval plus c63. G5DevX-1, moved from G5 because G4 ranks higher, takes c3 (Browser.launch, CDP events, sourcemap.mjs), the 22 agent-eval scripts and c28."
         },
         {
@@ -206957,7 +206974,7 @@
         }
       ],
       "created": "2026-11-04T18:09:52.919Z",
-      "updated": "2026-11-13T00:58:52.793Z",
+      "updated": "2026-11-13T01:24:53.128Z",
       "updatedBy": "Main"
     },
     {
