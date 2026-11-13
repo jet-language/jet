@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6777,
-    "rev": 101223,
+    "rev": 101224,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -93361,6 +93361,11 @@
         {
           "at": "2026-11-13",
           "by": "Main",
+          "text": "c2 amended (Main, 2026-11-13). G10Safe-runtime-reads2 gave the live cell IO, and IO then spread into every Db write signature (Core/Db/Db.jet execute and rollback), which broke corelib. An effect row is the wrong tool for a read whose effect is invisible to the caller. Such reads are now run-time-only (RUNTIME_ONLY_READS), which already exists and is consulted by the same never-fold rule, so this adds no second mechanism. Bindings whose effect is real to the caller (watcher poll IO, task_cpu_ns Time) still carry rows. A keep-going sweep over Core, Compiler, Jetpack, Tools, Examples and tests found 0 IO and 0 Time violations."
+        },
+        {
+          "at": "2026-11-13",
+          "by": "Main",
           "text": "Main ruling 2026-11-12 (c2 scope): the goal is that no ambient read is baked into the image; an effect row is one means. task_identity keeps an empty row (context is an implicit input, D-CONTEXT-EFFECT1=F) but joins a sema run-time-only set (the c3 never-computed-while-compiling rule), avoiding a Context row cascade into Compiler trace functions. os_family may stay reviewed-pure only if a case shows a cross-target fold yields the target family; otherwise it joins the run-time-only set. The census names each reviewed entry with its reason."
         }
       ],
@@ -93401,7 +93406,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-12T03:48:27.281Z",
-      "updated": "2026-11-13T02:32:01.037Z",
+      "updated": "2026-11-13T05:22:05.711Z",
       "updatedBy": "Main",
       "criteriaLastN": 3
     },
@@ -197650,6 +197655,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-13T05:22:05.711Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0d72itt",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-13T05:15:55.895Z",
       "by": "Main",
