@@ -16,7 +16,7 @@ panel_availability: fn(host: JetDevtoolsHostKind, grants: [JetDevtoolsPanelCapab
     panel_catalog.available_for(host, grants)
 }
 terminal_panel_availability: fn(access: TerminalHostAccess) -> [JetDevtoolsPanelAvailability] {
-    grants: if access.local_details_enabled() -> JetDevtoolsPanelCapability.ALL else -> [JetDevtoolsPanelCapability]{}
+    grants: if access.local_details_enabled() -> JetDevtoolsPanelCapability.all() else -> [JetDevtoolsPanelCapability]{}
     panel_availability(.Terminal, grants)
 }
 
@@ -146,10 +146,10 @@ TerminalHostEvent: struct {
     source: String
     kind: String
     entity: String
-    panel_id: JetDevtoolsPanelId
+    panel_id: JetDevtoolsPanelID
     facts: [TerminalHostFact]
 
-    from_devtools_event: fn(event: JetDevtoolsEvent, protocol: String, session_id: String, revision: String, panel_id: JetDevtoolsPanelId) -> TerminalHostEvent {
+    from_devtools_event: fn(event: JetDevtoolsEvent, protocol: String, session_id: String, revision: String, panel_id: JetDevtoolsPanelID) -> TerminalHostEvent {
         facts := [TerminalHostFact]{}
         facts.push(TerminalHostFact.text_bounded("fields", event.fields_json()))
         if event.payload_json() == .Val(payload) -> facts.push(TerminalHostFact.text_bounded("payload", payload))
@@ -433,7 +433,7 @@ TerminalHost: struct {
         self.keyboard.last_action = Val(TerminalAction.FocusPanel(panel_id: self.focus.panel_id ?? panel_id))
     }
     // `panel_ids` maps each event sequence to the panel that owns it.
-    sync_projection: fn(&self, projection: DevtoolsProjection, panel_ids: [Int: JetDevtoolsPanelId]) -> TerminalFrame TerminalHostError! {
+    sync_projection: fn(&self, projection: DevtoolsProjection, panel_ids: [Int: JetDevtoolsPanelID]) -> TerminalFrame TerminalHostError! {
         terminal_validate_projection(projection)
         session_changed := false
         if self.session_id == .Val(id) -> session_changed = id != projection.session_id
@@ -474,9 +474,9 @@ TerminalHost: struct {
     }
     sync_session: fn(&self, session: ResidentDevSession) -> TerminalFrame TerminalHostError! {
         projection: session.devtools_events_since(self.cursor)
-        grants: if self.config.capabilities.access.local_details_enabled() -> JetDevtoolsPanelCapability.ALL else -> [JetDevtoolsPanelCapability]{}
+        grants: if self.config.capabilities.access.local_details_enabled() -> JetDevtoolsPanelCapability.all() else -> [JetDevtoolsPanelCapability]{}
         panels: session.devtools_panels(.Terminal, grants) ?? return Err(TerminalHostError{message: "{err}"})
-        panel_ids := [Int: JetDevtoolsPanelId]{}
+        panel_ids := [Int: JetDevtoolsPanelID]{}
         loop panel in panels {
             panel_id: panel.availability.descriptor.id
             loop event in panel.events {

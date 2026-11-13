@@ -1,12 +1,12 @@
-terminal_test_event: fn(sequence: Int, panel_id: JetDevtoolsPanelId, kind: String, entity: String) -> TerminalHostEvent {
+terminal_test_event: fn(sequence: Int, panel_id: JetDevtoolsPanelID, kind: String, entity: String) -> TerminalHostEvent {
     TerminalHostEvent{
         protocol: JET_DEVTOOLS_PROTOCOL, session_id: "session", revision: "revision-a", sequence: sequence, observed_at: sequence * 10,
         source: "src/main.jet", kind: kind, entity: entity, panel_id: panel_id, facts: [TerminalHostFact]{TerminalHostFact.redacted("value")},
     }
 }
-terminal_test_panel_ids: fn() -> [Int: JetDevtoolsPanelId] {
-    ids := [Int: JetDevtoolsPanelId]{}
-    ids[1] = JetDevtoolsPanelId.Build
+terminal_test_panel_ids: fn() -> [Int: JetDevtoolsPanelID] {
+    ids := [Int: JetDevtoolsPanelID]{}
+    ids[1] = JetDevtoolsPanelID.Build
     ids
 }
 terminal_test_projection: fn() -> DevtoolsProjection {
@@ -77,8 +77,8 @@ terminal_test_diff_id: fn(operation: TerminalDiffOperation) -> String {
 #Test("same_facts_keep_nodes_stable_across_capabilities") {
     plain := TerminalHost.new(TerminalHostConfig.new(TerminalViewport.new(80, 24), TerminalHostCapabilities.plain()))
     color := TerminalHost.new(TerminalHostConfig.new(TerminalViewport.new(80, 24), TerminalHostCapabilities.color()))
-    plain.append_event(terminal_test_event(1, JetDevtoolsPanelId.Build, "Build", "build")) ?? panic("plain event")
-    color.append_event(terminal_test_event(1, JetDevtoolsPanelId.Build, "Build", "build")) ?? panic("color event")
+    plain.append_event(terminal_test_event(1, JetDevtoolsPanelID.Build, "Build", "build")) ?? panic("plain event")
+    color.append_event(terminal_test_event(1, JetDevtoolsPanelID.Build, "Build", "build")) ?? panic("color event")
     plain_frame: plain.render()
     color_frame: color.render()
     assert_eq(plain_frame.tree, color_frame.tree)
@@ -88,16 +88,16 @@ terminal_test_diff_id: fn(operation: TerminalDiffOperation) -> String {
 }
 #Test("keyboard_paths_update_explicit_focus_and_return_actions") {
     host := TerminalHost.new(TerminalHostConfig.standard())
-    host.append_event(terminal_test_event(1, JetDevtoolsPanelId.Tests, "Tests", "fails")) ?? panic("event")
+    host.append_event(terminal_test_event(1, JetDevtoolsPanelID.Tests, "Tests", "fails")) ?? panic("event")
     assert_eq(host.handle_key(TerminalKey.Enter), TerminalAction.Inspect(panel_id: "tests", item_key: "event:revision-a:1:Tests:fails"))
     assert_eq(host.handle_key(TerminalKey.Escape), TerminalAction.ReturnToPanel)
     assert(host.focus.item_key == None)
 }
 #Test("diff_operations_are_ordered_and_bounded") {
     host := TerminalHost.new(TerminalHostConfig.standard())
-    host.append_event(terminal_test_event(1, JetDevtoolsPanelId.Build, "Build", "one")) ?? panic("first event")
+    host.append_event(terminal_test_event(1, JetDevtoolsPanelID.Build, "Build", "one")) ?? panic("first event")
     first: host.render()
-    host.append_event(terminal_test_event(2, JetDevtoolsPanelId.Jobs, "Jobs", "two")) ?? panic("second event")
+    host.append_event(terminal_test_event(2, JetDevtoolsPanelID.Jobs, "Jobs", "two")) ?? panic("second event")
     second: host.render()
     diff: second.diff(first)
     assert(!diff.is_empty())

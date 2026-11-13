@@ -368,7 +368,7 @@ EditorHostTransport: struct {
     panel_catalog: fn(self) -> [JetDevtoolsPanelDescriptor] Never! { descriptors() }
     panel_availability: fn(self) -> [JetDevtoolsPanelAvailability] Never! {
         grants := [JetDevtoolsPanelCapability]{}
-        loop capability in JetDevtoolsPanelCapability.ALL {
+        loop capability in JetDevtoolsPanelCapability.all() {
             if self.grant_set.has_key(capability.grant()) -> grants.push(capability)
         }
         panel_availability(JetDevtoolsHostKind.Editor, grants)
