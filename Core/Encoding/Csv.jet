@@ -154,16 +154,14 @@ TypedCSV: struct {
     close_field: fn(&self) Never! {
         text := ""
         #Unsafe("input is a String; original complete UTF-8 scalars and ASCII quote escapes entered the field") {
-            text = rt.bytes_into_text(self.field)
+            text = rt.bytes_into_text(mem.replace(self.field, [U8]{}))
         }
-        self.field = [U8]{}
         self.fields.push(text)
     }
 
     close_record: fn(&self) Never! {
         self.close_field()
-        self.rows.push(self.fields.move())
-        self.fields = [String]{}
+        self.rows.push(mem.replace(self.fields, [String]{}))
         self.record += 1
         self.ended_record = true
     }
@@ -895,9 +893,8 @@ CSVReader: struct {
         self.fields_heap += mem.__list_capacity<U8>(self.field)
         text := ""
         #Unsafe("each completed UTF-8 scalar was validated before its original bytes entered this field") {
-            text = rt.bytes_into_text(self.field)
+            text = rt.bytes_into_text(mem.replace(self.field, [U8]{}))
         }
-        self.field = [U8]{}
         self.fields.push(text)
     }
 
@@ -923,8 +920,7 @@ CSVReader: struct {
             return Ok(None)
         }
         heap: mem.__list_capacity<String>(self.fields) * mem.__type_size<String>() + self.fields_heap
-        row: __csv_row(line, self.fields.move())
-        self.fields = [String]{}
+        row: __csv_row(line, mem.replace(self.fields, [String]{}))
         self.fields_heap = 0
         self.allocation.release(heap)
         Ok(Val(row))
