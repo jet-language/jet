@@ -1,0 +1,16 @@
+use shelf: "shelf"
+
+#Codable
+Event: struct {
+    service: String
+    ms: Float
+}
+
+#Codable
+Box: struct<T> { value: T }
+
+run: fn() {
+    local: Box<Event>{ value: Event{ service: "cache", ms: 2.0 } }
+    event: shelf.open(local)
+    print(event.service)
+}

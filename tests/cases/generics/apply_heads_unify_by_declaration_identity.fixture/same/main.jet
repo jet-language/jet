@@ -1,0 +1,13 @@
+use shelf: "shelf"
+
+#Codable
+Event: struct {
+    service: String
+    ms: Float
+}
+
+run: fn() {
+    boxed: shelf.load<Event>(`{"value":{"service":"cache","ms":2.0}}`) ?? panic("decode")
+    event: shelf.open(boxed)
+    print("{event.service}:{event.ms}")
+}
