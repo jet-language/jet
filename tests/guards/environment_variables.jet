@@ -1,0 +1,135 @@
+use environment_files: core.files
+
+// Every `JET_*` or `JETPACK_*` variable the compiler names has its one row in
+// JET_ENVIRONMENT_VARIABLES, or is a compiler control's variable
+// (CLIControls.jet); every row's reader still names it. A name is a whole
+// string literal of a compiler source outside its Tests directories, or of the
+// runtime generators. A literal ending in `_` is a prefix the code matches
+// names by; a row starting with it covers it. A row ending in `*` is a family
+// and covers every name starting with the text before the `*`.
+ENVIRONMENT_REGISTRY: "Compiler/JetFoundation/Source/Registry/EnvironmentVariables.jet"
+ENVIRONMENT_ROOTS: [String]{"Compiler", "Tools/agent/RuntimeGenerators.jet"}
+
+// The literals in the scanned code that name no environment variable.
+ENVIRONMENT_NOT_VARIABLES: [(prefix: String, why: String)]{
+    (prefix: "JET_HIGHLIGHT_", why: "the tree-sitter capture names of the editor grammars (EditorGrammars.jet)"),
+    (prefix: "JET_TESTKIT_NO_NIX_SETUP_FAILED", why: "the line the no-Nix setup script prints when it fails (JetTestKit no_nix.jet)"),
+}
+
+// Each row of JET_ENVIRONMENT_VARIABLES: its name, and its reader.
+environment_rows: fn() -> [(name: String, reader: String)] {
+    text: environment_files.read(ENVIRONMENT_REGISTRY) ?? panic("read {ENVIRONMENT_REGISTRY}: {err}")
+    rows := [(name: String, reader: String)]{}
+    loop line in text.lines() {
+        if !line.starts_with("    {{name: \"") -> next
+        name: line.removeprefix("    {{name: \"").partition("\"").head
+        reader: line.partition(", reader: \"").tail.partition("\"").head
+        assert(name != "" && reader != "", "{ENVIRONMENT_REGISTRY}: `{line}` names no variable or no reader")
+        rows.push((name: name, reader: reader))
+    }
+    rows
+}
+
+// Whether `code` is an uppercase ASCII letter, a digit or an underscore.
+environment_name_byte: fn(code: Int) -> Bool {
+    (code >= 65 && code <= 90) || (code >= 48 && code <= 57) || code == 95
+}
+
+// Each whole `"JET_…"` or `"JETPACK_…"` string literal of `text`, as `path name`.
+environment_literals: fn(path: String, text: String, out: &[String]) {
+    bytes: text.bytes()
+    at := 0
+    loop {
+        if at >= bytes.len() -> return
+        if Int.from_u8(bytes[at]) != 34 {
+            at += 1
+            next
+        }
+        name := [U8]{}
+        end := at + 1
+        loop {
+            if end >= bytes.len() || !environment_name_byte(Int.from_u8(bytes[end])) -> break
+            name.push(bytes[end])
+            end += 1
+        }
+        if end < bytes.len() && Int.from_u8(bytes[end]) == 34 {
+            spelled: String.from_bytes(name) ?? ""
+            if spelled.starts_with("JET_") || spelled.starts_with("JETPACK_") -> out.push("{path} {spelled}")
+            at = end + 1
+        } else {
+            at = end
+        }
+    }
+}
+
+// The literals of every source file under `path`. Hidden entries and Tests
+// directories are not scanned.
+environment_scan: fn(path: String, out: &[String]) {
+    if environment_files.is_dir(path) {
+        loop child in (environment_files.list_dir(path) ?? panic("list {path}: {err}")) {
+            if child.name.starts_with(".") || child.name == "Tests" -> next
+            environment_scan(environment_files.join(path, child.name), out)
+        }
+        return
+    }
+    if !path.ends_with(".jet") -> return
+    text: environment_files.read(path) ?? panic("read {path}: {err}")
+    if text.contains("\"JET") -> environment_literals(path, text, out)
+}
+
+// Whether `name` (from `rows`, the controls' `variables` and the exclusions)
+// is covered.
+environment_covered: fn(name: String, rows: [(name: String, reader: String)], variables: [String]) -> Bool {
+    loop row in ENVIRONMENT_NOT_VARIABLES {
+        if name.starts_with(row.prefix) -> return true
+    }
+    if variables.contains(name) -> return true
+    prefix: name.ends_with("_")
+    loop row in rows {
+        family: row.name.removesuffix("*")
+        if row.name == name -> return true
+        if family != row.name && name.starts_with(family) -> return true
+        if prefix && family.starts_with(name) -> return true
+    }
+    false
+}
+
+#Test("every environment variable the compiler names has one registry row, and every row's reader names it") {
+    guards_enter_root()
+    rows: environment_rows()
+    assert(rows.len() > 50, "{ENVIRONMENT_REGISTRY} lists only {rows.len()} variables")
+    variables: control_variable_names()
+    seen := [String]{}
+    problems := [String]{}
+    loop row in rows {
+        if seen.contains(row.name) -> problems.push("{row.name}: two rows")
+        seen.push(row.name.copy())
+        text: environment_files.read(row.reader) ?? ""
+        if !text.contains(row.name.removesuffix("*")) -> problems.push("{row.name}: its reader {row.reader} does not name it")
+    }
+    found := [String]{}
+    loop root in ENVIRONMENT_ROOTS {
+        assert(environment_files.is_dir(root) || environment_files.is_file(root), "the scanned root {root} must exist")
+        environment_scan(root, found)
+    }
+    assert(found.len() > 100, "the scan found only {found.len()} variable literals")
+    loop entry in found {
+        name: entry.partition(" ").tail
+        if !environment_covered(name, rows, variables) -> problems.push("{entry}: no row in {ENVIRONMENT_REGISTRY}")
+    }
+    problems.sort()
+    assert_eq(problems.join("\n"), "")
+    loop row in ENVIRONMENT_NOT_VARIABLES -> assert(row.why != "", "{row.prefix} needs a reason")
+    // A family covers its members, a prefix literal a row it starts, and an
+    // exact row only its own name.
+    sample: [(name: String, reader: String)]{(name: "JET_A_*", reader: ""), (name: "JET_B", reader: "")}
+    assert(environment_covered("JET_A_X", sample, [String]{}))
+    assert(environment_covered("JET_B", sample, [String]{}))
+    assert(environment_covered("JET_", sample, [String]{}))
+    assert(!environment_covered("JET_BX", sample, [String]{}))
+    assert(!environment_covered("JET_C", sample, [String]{}))
+    assert(environment_covered("JET_C", sample, [String]{"JET_C"}))
+    lits := [String]{}
+    environment_literals("f", "a(\"JET_X\") b(\"JET_Y: {{v}}\") \"JETPACK_Z\" \"JETX\"", lits)
+    assert_eq(lits.join(","), "f JET_X,f JETPACK_Z")
+}

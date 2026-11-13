@@ -1,0 +1,225 @@
+#!/usr/bin/env jet
+// Render the variable tables of Docs/spec/reference/environment.md from
+// JET_ENVIRONMENT_VARIABLES, the one hand-written home of the environment
+// variables Jet reads (Compiler/JetFoundation/Source/Registry/EnvironmentVariables.jet).
+// Each section of the registry is one table between its generated marker
+// lines; the prose around the tables is the page's own.
+// Usage: jet Tools/agent/EnvironmentRows.jet [--check|--write]
+// --check fails when a table differs from what the registry gives it;
+// --write rewrites the tables.
+use {
+    files: core.files
+    process: core.process
+}
+
+REGISTRY_PATH: "Compiler/JetFoundation/Source/Registry/EnvironmentVariables.jet"
+PAGE_PATH: "Docs/spec/reference/environment.md"
+ROW_OPEN: "    {{name: \""
+SECTION_FIELD: ", section: JetEnvironmentSection."
+READER_FIELD: ", reader: \""
+VALUE_FIELD: ", value: \""
+MEANING_FIELD: ", meaning: \""
+// The registry's section enum opens on this line; its one line of cases is
+// the page's sections, in page order.
+SECTION_ENUM_OPEN: "\nJetEnvironmentSection: enum {{\n"
+
+#Error
+EnvironmentRowsError: struct {
+    message: String
+}
+
+rows_fail: fn(message: String) -> EnvironmentRowsError Never! {
+    EnvironmentRowsError{message: "environment rows: {message}"}
+}
+
+// One row of JET_ENVIRONMENT_VARIABLES, its strings as they read.
+EnvironmentRow: struct {
+    name: String
+    section: String
+    reader: String
+    value: String
+    meaning: String
+}
+
+// A string literal read off the front of a row: its text, and the row after
+// its closing quote.
+Taken: struct {
+    text: String
+    rest: String
+}
+
+// The Jet string literal `text` opens with (its opening quote already gone),
+// or None when it never closes.
+take_literal: fn(text: String) -> Taken? Never! {
+    literal := [U8]{}
+    rest := [U8]{}
+    escaped := false
+    closed := false
+    loop byte in text.bytes() {
+        if closed {
+            rest.push(byte)
+            next
+        }
+        code: Int.from_u8(byte)
+        if escaped {
+            literal.push(byte)
+            escaped = false
+            next
+        }
+        if code == 92 {
+            escaped = true
+            next
+        }
+        if code == 34 {
+            closed = true
+            next
+        }
+        literal.push(byte)
+    }
+    if !closed -> return None
+    raw: String.from_bytes(literal) ?? return None
+    Val(Taken{text: raw.replace("{{{{", "{{").replace("}}}}", "}}"), rest: String.from_bytes(rest) ?? ""})
+}
+
+// The text after `field` at the front of `line`, or None.
+after_field: fn(line: String, field: String) -> String? Never! {
+    if !line.starts_with(field) -> return None
+    Val(line.removeprefix(field))
+}
+
+// The row on `line`, or None when it does not spell one in the registry's shape.
+read_row: fn(line: String) -> EnvironmentRow? Never! {
+    rest := after_field(line, ROW_OPEN) ?? return None
+    name: take_literal(rest) ?? return None
+    rest = after_field(name.rest, SECTION_FIELD) ?? return None
+    section: rest.partition(",").head
+    rest = after_field(rest.removeprefix(section), READER_FIELD) ?? return None
+    reader: take_literal(rest) ?? return None
+    rest = after_field(reader.rest, VALUE_FIELD) ?? return None
+    value: take_literal(rest) ?? return None
+    rest = after_field(value.rest, MEANING_FIELD) ?? return None
+    meaning: take_literal(rest) ?? return None
+    if meaning.rest != "}}," -> return None
+    Val(EnvironmentRow{name: name.text, section: section, reader: reader.text, value: value.text, meaning: meaning.text})
+}
+
+// The cases of the registry's section enum, in order.
+read_sections: fn(registry: String) -> [String] EnvironmentRowsError! {
+    opened: registry.partition(SECTION_ENUM_OPEN)
+    if opened.sep == "" -> return Err(rows_fail("{REGISTRY_PATH} declares no JetEnvironmentSection enum"))
+    sections := [String]{}
+    loop word in opened.tail.partition("\n").head.split(" ") {
+        if word != "" -> sections.push(word.copy())
+    }
+    if sections.len() == 0 -> return Err(rows_fail("{REGISTRY_PATH}: JetEnvironmentSection lists no cases on its first line"))
+    Ok(sections)
+}
+
+// The rows of JET_ENVIRONMENT_VARIABLES in `registry`, in order.
+read_rows: fn(registry: String, sections: [String]) -> [EnvironmentRow] EnvironmentRowsError! {
+    opened: registry.partition("\nJET_ENVIRONMENT_VARIABLES: [JetEnvironmentVariable]{{\n")
+    if opened.sep == "" -> return Err(rows_fail("{REGISTRY_PATH} declares no JET_ENVIRONMENT_VARIABLES list"))
+    rows := [EnvironmentRow]{}
+    loop line in opened.tail.lines() {
+        if line == "}}" -> return Ok(rows)
+        row: read_row(line) ?? return Err(rows_fail("{REGISTRY_PATH}: `{line}` is not a one-line row"))
+        if !sections.contains(row.section) -> return Err(rows_fail("{row.name} names the section {row.section}, which the page has no table for"))
+        rows.push(row)
+    }
+    Err(rows_fail("{REGISTRY_PATH}: JET_ENVIRONMENT_VARIABLES never closes"))
+}
+
+block_open: fn(section: String) -> String Never! {
+    "<!-- BEGIN GENERATED ENVIRONMENT VARIABLES: {section} (Tools/agent/EnvironmentRows.jet; edit {REGISTRY_PATH}) -->"
+}
+
+block_close: fn(section: String) -> String Never! {
+    "<!-- END GENERATED ENVIRONMENT VARIABLES: {section} -->"
+}
+
+// The table of `section`'s rows.
+render_table: fn(rows: [EnvironmentRow], section: String) -> String Never! {
+    internal: section == "Internal"
+    table := if internal -> "| Variable | Read by | Purpose |\n| --- | --- | --- |\n" else -> "| Variable | Accepted value | Effect |\n| --- | --- | --- |\n"
+    loop row in rows {
+        if row.section != section -> next
+        middle: if internal -> "`{row.reader}`" else -> row.value
+        table = "{table}| `{row.name}` | {middle} | {row.meaning} |\n"
+    }
+    table
+}
+
+// `page` with each section's table rendered from `registry`.
+render_page: fn(registry: String, page: String) -> String EnvironmentRowsError! {
+    sections: read_sections(registry) ?? return Err(err)
+    rows: read_rows(registry, sections) ?? return Err(err)
+    out := page.copy()
+    loop section in sections {
+        open: block_open(section)
+        close: block_close(section)
+        before: out.partition("{open}\n")
+        if before.sep == "" -> return Err(rows_fail("{PAGE_PATH} has no `{open}` line"))
+        after: before.tail.partition("{close}\n")
+        if after.sep == "" -> return Err(rows_fail("{PAGE_PATH} has no `{close}` line"))
+        if after.tail.contains(open) -> return Err(rows_fail("{PAGE_PATH} has two {section} tables"))
+        out = "{before.head}{open}\n{render_table(rows, section)}{close}\n{after.tail}"
+    }
+    Ok(out)
+}
+
+read_text: fn(path: String) -[FS]> String EnvironmentRowsError! {
+    files.read(path) ?? return Err(rows_fail("cannot read {path}: {err}"))
+}
+
+environment_rows_main: fn(args: [String]) -[FS]> String EnvironmentRowsError! {
+    mode: if args.len() == 0 -> "--check" else -> args[0]
+    if args.len() > 1 || (mode != "--check" && mode != "--write") -> return Err(rows_fail("usage: EnvironmentRows.jet [--check|--write]"))
+    current: read_text(PAGE_PATH) ?? return Err(err)
+    generated: render_page(read_text(REGISTRY_PATH) ?? return Err(err), current) ?? return Err(err)
+    if current == generated -> return Ok("environment rows check passed: {PAGE_PATH} matches")
+    if mode == "--write" {
+        files.write(PAGE_PATH, generated) ?? return Err(rows_fail("cannot write {PAGE_PATH}: {err}"))
+        return Ok("environment rows written: {PAGE_PATH}")
+    }
+    Err(rows_fail("{PAGE_PATH} differs from {REGISTRY_PATH}; run jet Tools/agent/EnvironmentRows.jet --write"))
+}
+
+run: fn() { print(environment_rows_main(process.args()) ?? process.fail(1, err.message)) }
+
+MINIMAL_REGISTRY: "// rows\nJetEnvironmentSection: enum {{\n    User Maintainer Internal\n}}\n\nJET_ENVIRONMENT_VARIABLES: [JetEnvironmentVariable]{{\n    {{name: \"JET_A\", section: JetEnvironmentSection.User, reader: \"a.jet\", value: \"`1`\", meaning: \"Says \\\"a\\\" in `{{{{a}}}}`.\"}},\n    {{name: \"JET_B_*\", section: JetEnvironmentSection.Internal, reader: \"b.jet\", value: \"\", meaning: \"Hands b on.\"}},\n}}\n"
+
+minimal_page: fn() -> String Never! {
+    blocks := "# Page\n"
+    loop section in read_sections(MINIMAL_REGISTRY) ?? panic(err.message) -> blocks = "{blocks}\n{block_open(section)}\nstale\n{block_close(section)}\n"
+    blocks
+}
+
+// The error text render_page reports, or "" when it renders.
+render_error: fn(registry: String, page: String) -> String Never! {
+    if render_page(registry, page) == {
+        .Ok(_) -> ""
+        .Err(error) -> error.message
+    }
+}
+
+#Test("the page's variable tables match JET_ENVIRONMENT_VARIABLES") {
+    if environment_rows_main([String]{"--check"}) == .Err(error) -> panic(error.message)
+}
+
+#Test("each section renders its own table, and rendering twice changes nothing") {
+    rendered: render_page(MINIMAL_REGISTRY, minimal_page()) ?? panic(err.message)
+    user: "{block_open("User")}\n| Variable | Accepted value | Effect |\n| --- | --- | --- |\n| `JET_A` | `1` | Says \"a\" in `{{a}}`. |\n{block_close("User")}\n"
+    assert(rendered.contains(user), rendered)
+    assert(rendered.contains("{block_open("Maintainer")}\n| Variable | Accepted value | Effect |\n| --- | --- | --- |\n{block_close("Maintainer")}\n"), rendered)
+    assert(rendered.contains("| `JET_B_*` | `b.jet` | Hands b on. |\n{block_close("Internal")}"), rendered)
+    assert(!rendered.contains("stale"), rendered)
+    assert_eq(render_page(MINIMAL_REGISTRY, rendered) ?? panic(err.message), rendered)
+}
+
+#Test("a registry or page the tables cannot come from is refused") {
+    assert(render_error(MINIMAL_REGISTRY.replace("Section.Internal", "Section.Other"), minimal_page()).contains("names the section Other"))
+    assert(render_error(MINIMAL_REGISTRY.replace(", meaning:", ", purpose:"), minimal_page()).contains("is not a one-line row"))
+    assert(render_error(MINIMAL_REGISTRY.replace("JET_ENVIRONMENT_VARIABLES", "OTHER"), minimal_page()).contains("declares no JET_ENVIRONMENT_VARIABLES list"))
+    assert(render_error(MINIMAL_REGISTRY.replace("JetEnvironmentSection: enum", "Sections: enum"), minimal_page()).contains("declares no JetEnvironmentSection enum"))
+    assert(render_error(MINIMAL_REGISTRY, minimal_page().replace("{block_close("Internal")}\n", "")).contains("has no `<!-- END GENERATED ENVIRONMENT VARIABLES: Internal -->` line"))
+}
