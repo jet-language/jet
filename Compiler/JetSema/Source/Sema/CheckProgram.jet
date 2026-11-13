@@ -9743,7 +9743,8 @@ sema_comptime_function_diagnostics: fn(comptime_functions: [SemaComptimeFunction
 // declaration.
 sema_check_script_entries: fn(graph: SemaRegistrationGraph, diagnostics: &[Diagnostic]) -> Bool {
     found := false
-    loop source_module_index in 0..<graph.modules.len() {
+    // A seeded module's script body was refused when it was finalized.
+    loop source_module_index in graph.seeded..<graph.modules.len() {
         statements: graph.modules[source_module_index].program.script_body
         if statements.len() == 0 -> next
         span: Span{start: sema_compiler_index_stmt_span(statements[0]).start, end: sema_compiler_index_stmt_span(statements[statements.len() - 1]).end}
@@ -10094,9 +10095,12 @@ sema_finalize_program: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrail
     // Each `#FX(…)` module cap names known effects, checked once where it is
     // written; a file module's caps reach its file through the module graph,
     // and an erased generic-module template leaves its cap behind. A capped
-    // type's function-typed fields fit its cap where they are declared.
+    // type's function-typed fields fit its cap where they are declared. A
+    // seeded module's caps and fields were checked when it was finalized;
+    // its capped types still bound the fields that name them.
     field_caps: sema_effect_type_caps(final_graph.modules)
-    loop graph_module in final_graph.modules {
+    loop module_index in final_graph.seeded..<final_graph.modules.len() {
+        graph_module: final_graph.modules[module_index]
         cap_diagnostics := [Diagnostic]{}
         if graph_module.program.file_cap == .Val(head) -> sema_effect_cap_entry_names(head, cap_diagnostics)
         loop cap in graph_module.template_caps -> sema_effect_cap_entry_names(cap, cap_diagnostics)
@@ -10197,9 +10201,11 @@ sema_finalize_program: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrail
     if !sema_target_check_socket_surfaces(final_graph, core_usage.used_core, diagnostics) -> complete = false
     // A Core import above the package's runtime ceiling is reported on the
     // import; a module whose imports already fail is not reported again for
-    // the helpers those imports reach.
+    // the helpers those imports reach. A seeded module's imports were held
+    // to its package's ceiling when it was finalized.
     import_blocked := [String:Bool]{}
-    loop source_module in final_graph.modules {
+    loop module_index in final_graph.seeded..<final_graph.modules.len() {
+        source_module: final_graph.modules[module_index]
         policy: sema_comptime_policy_for_package(stage.package_policies, source_module.package_identity) ?? next
         ceiling: policy.runtime_ceiling ?? next
         diagnostic_start := diagnostics.len()
@@ -10298,8 +10304,10 @@ sema_finalize_program: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrail
     // program honest, but Core is library source: its lints are not the
     // user's to act on and never reach user output. A lint inside a site
     // `#Allow` for it is the author's recorded decision (LintAllowances.jet).
+    // A seeded module is Core, whose lints never reach output, so its
+    // allowances would cover nothing.
     allowances := [SemaLintAllowance]{}
-    loop source_module in final_graph.modules -> sema_lint_allowances(source_module.program, source_module.source_segments, allowances)
+    loop module_index in final_graph.seeded..<final_graph.modules.len() -> sema_lint_allowances(final_graph.modules[module_index].program, final_graph.modules[module_index].source_segments, allowances)
     reported := [Diagnostic]{}
     loop diagnostic in diagnostics {
         if !sema_core_source_lint(diagnostic) && !sema_lint_allowed(diagnostic, allowances) -> reported.push(diagnostic)
