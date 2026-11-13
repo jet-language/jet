@@ -9988,9 +9988,10 @@ sema_script_entry: fn(program: &Program) {
 }
 
 // Whether the file-scope binding `definition` of an entry file of
-// top-level statements is a local of its entry (sema_script_entry).
+// top-level statements is a local of its entry (sema_script_entry). A
+// `#ContextKey` stays the module's: its identity is the constant's.
 sema_script_entry_local: fn(definition: ConstDef) -> Bool Never! {
-    if definition.is_persist || definition.is_comptime -> return false
+    if definition.is_persist || definition.is_comptime || sema_context_key_declared(definition) -> return false
     if definition.ty == (Val(Type.Named{name: "__OutputDefaults"})) -> return false
     definition.mutable || sema_casing_has_case(definition.name, SemaNameCase.Snake)
 }

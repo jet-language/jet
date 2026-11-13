@@ -885,8 +885,12 @@ parser_parse_program: fn(state: &JetParserState) -> Program {
                 if parser_error_since(state, errors_before) {
                     parser_sync_top(state)
                 } else if definition_option == .Val(definition) {
-                    loop marker in markers -> state.statement_rules.push(AppliedRuleApplication{marker: marker, target: Val(start), site: Val(RuleSite.Declaration)})
-                    program.items.push(Item.Const{value: definition})
+                    declared := definition.copy()
+                    loop marker in markers {
+                        declared.markers.push(marker.copy())
+                        state.statement_rules.push(AppliedRuleApplication{marker: marker, target: Val(start), site: Val(RuleSite.Declaration)})
+                    }
+                    program.items.push(Item.Const{value: declared})
                 } else {
                     parser_sync_top(state)
                 }
@@ -1006,7 +1010,8 @@ parser_marker_head_end: fn(state: &JetParserState, start: Int) -> Int Never! {
 // `#Rule name: value` at file scope: rules before a lowercase module
 // binding. A marked constant (`NAME: …`) and a type (`Name: …`) take the
 // item route. The binding is the rules' Declaration site, which sema checks
-// against each rule's row.
+// against each rule's row, and it carries them as its own markers (a
+// `#ContextKey request_id: 0` is a key by its marker).
 parser_marked_module_binding_ahead: fn(state: &JetParserState) -> Bool Never! {
     offset := parser_marker_head_end(state, 0)
     if offset < 0 -> return false

@@ -57,12 +57,14 @@ run: fn() {
     print("shrink b to 16: {pool.resize(b, 16)}, b is {b.size()} bytes")
     print("trait call reuses a free block at {scratch_offset(pool, base)}")
 
-    pool.allocate(8192, 16) ? huge -> {
-        print("unexpected block of {huge.size()} bytes")
-        pool.release(huge)
-    }
-    ! error -> {
-        print("refused {error.requested_bytes} bytes from {error.allocator}")
+    if pool.allocate(8192, 16) == {
+        .Ok(huge) -> {
+            print("unexpected block of {huge.size()} bytes")
+            pool.release(huge)
+        }
+        .Err(error) -> {
+            print("refused {error.requested_bytes} bytes from {error.allocator}")
+        }
     }
 
     pool.release(b)
