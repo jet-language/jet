@@ -1,0 +1,19 @@
+// C calls a callback on a thread it chooses, where no Jet task runs: a
+// function or lambda passed as a C callback that reads the task context is
+// E3218, naming the read and the callback.
+use c: c.cb
+
+stamp: fn(x: I32) -[]> I32 {
+    _: context.thread
+    return x
+}
+
+#Import c.cb: module {
+    call: fn(cb: fn(I32) -[]> I32, x: I32) -> I32 = "call"
+    check: fn(cb: fn(I32) -[]> Bool, x: I32) -> I32 = "check"
+}
+
+run: fn() {
+    print(c.call(stamp, 1))
+    print(c.check(fn(x) { context.thread == 0 }, 2))
+}

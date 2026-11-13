@@ -1,0 +1,17 @@
+Error [jet.CallbackReadsContext]: The C callback `stamp` reads `context.thread`.
+  --> tests/ui/cffi_callback_context_read.jet:17:18
+    |
+ 17 |     print(c.call(stamp, 1))
+    |                  ^^^^^
+ Why: C calls a callback on a thread it chooses, where no Jet task runs, so there is no task context to read.
+ Fix: Read the value before the foreign call and pass it to the callback through C, or drop the read.
+More: jet-lang.dev/e/E3218
+
+Error [jet.CallbackReadsContext]: The C callback lambda reads `context.thread`.
+  --> tests/ui/cffi_callback_context_read.jet:18:19
+    |
+ 18 |     print(c.check(fn(x) { context.thread == 0 }, 2))
+    |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ Why: C calls a callback on a thread it chooses, where no Jet task runs, so there is no task context to read.
+ Fix: Read the value before the foreign call and pass it to the callback through C, or drop the read.
+More: jet-lang.dev/e/E3218

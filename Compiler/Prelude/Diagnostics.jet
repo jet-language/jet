@@ -7952,6 +7952,26 @@ CBindingMemberMissing: struct {
     }
 }
 
+CallbackReadsContext: struct {
+    callback: String
+    member: String
+
+    impl Diagnostic {
+        code: "E3218"
+        safety_class: .Soundness
+        safety_reason: "C calls the callback on a thread it chooses, where no Jet task runs, so the read would find no task context."
+        expert_path: "none: pass the value to the callback through C"
+        stage: [.Sema]
+        meaning: "A function or lambda passed as a C callback reads the task context"
+        detail: true
+        no_fix: .Behavior
+        fix_next: "Read the value before the foreign call and pass it to the callback through C, or drop the read."
+        what: fn(self) -> String { "The C callback {self.callback} reads `context.{self.member}`." }
+        why: fn(self) -> String { "C calls a callback on a thread it chooses, where no Jet task runs, so there is no task context to read." }
+        fix: fn(self) -> String { "Read the value before the foreign call and pass it to the callback through C, or drop the read." }
+    }
+}
+
 UnsupportedForeignLanguage: struct {
     impl Diagnostic {
         code: "E3220"

@@ -3898,6 +3898,13 @@ the bare name reads the task context only where nothing in scope is named
 way. A local that takes the import's name hides it by the ordinary scoping
 rule.
 
+A C callback reads no context. C calls it on a thread it chooses, where no
+Jet task runs and there is no context record. A `context.<field>` or
+`context.get(key)` read in the body of a function or lambda passed as a C
+callback is **E3218**, which names the read and the callback. A call is
+already outside the callback subset (**E3203**, D-CABI-CALLBACK1), so no
+callback reaches a read through a function it calls.
+
 A package declares its own context values with `#ContextKey` on a module
 constant: `#ContextKey request_id: 0`. The key is snake_case, and its value
 is the default. `#Context(request_id: 7) { ... }` sets the key for the

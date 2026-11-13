@@ -30,6 +30,7 @@ use {
         ast_empty_call_arg_flags,
         ast_lambda_single_expr_span,
         ast_visit_expr,
+        ast_visit_statement,
         diagnostic_registry_row,
         expr_source_span,
         expr_span,
@@ -370,6 +371,59 @@ sema_call_c_callback_unsafe: fn(argument: Expr, environment: SemaScopeEnvironmen
     }
 }
 
+// The first task-context read in a C callback argument's body, as written
+// after `context.` (`thread`, or `get(key)` for a key read). C calls the
+// callback on a thread it chooses, where no task runs, so there is no context
+// to read. A call in the body is already outside the callback subset (E3203),
+// so a read through a callee never gets this far.
+sema_call_c_callback_context_read: fn(argument: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable) -> String? {
+    inner := [String]{}
+    reads := [SemaCallContextReadSite]{}
+    if argument == .Ident(name, _, _) {
+        function: sema_http_route_find_function(environment, program, scopes, name) ?? return None
+        loop parameter in function.declaration.params -> inner.push(parameter.name)
+        loop statement in function.declaration.body -> ast_visit_statement(statement, fn(expression: Expr) { sema_call_note_context_read(reads, expression) }, false)
+    } else if argument == .Lambda(lambda, _) {
+        loop parameter in lambda.params -> inner.push(parameter.name)
+        if lambda.body == {
+            .Expr(value) -> ast_visit_expr(value, fn(expression: Expr) { sema_call_note_context_read(reads, expression) })
+            .Block(body) -> loop statement in body -> ast_visit_statement(statement, fn(expression: Expr) { sema_call_note_context_read(reads, expression) }, false)
+        }
+    }
+    loop read in reads {
+        if inner.contains(read.root) -> next
+        if sema_scope_resolve_index(scopes, read.root) == .Val(found) {
+            if scopes.bindings[found].symbol.kind != SymbolKind.Import -> next
+            imported: sema_call_core_import_target(environment, program, read.root) ?? next
+            if imported.module_name == "core.context" -> return Val(read.member)
+        } else if read.root == "context" && sema_expression_type_symbol(scopes, environment, program, read.root) == None {
+            return Val(read.member)
+        }
+    }
+    None
+}
+
+// A `root.member` or `root.get(key)` the callback body writes, before it is
+// known whether `root` names the task context.
+SemaCallContextReadSite: struct {
+    root: String
+    member: String
+}
+
+sema_call_note_context_read: fn(reads: &[SemaCallContextReadSite], expression: Expr) {
+    if expression == .Field(base, member, _, _) {
+        if base == .Ident(root, _, _) -> reads.push(SemaCallContextReadSite{root: root, member: member})
+    } else if expression == .MethodCall(receiver, method, _, _, _, args, _) {
+        if method == "get" && args.len() == 1 && receiver == .Ident(root, _, _) && args[0].expr == .Ident(key, _, _) -> reads.push(SemaCallContextReadSite{root: root, member: "get({key})"})
+    }
+}
+
+// E3218 at a C callback argument whose body reads the task context.
+sema_call_c_callback_context_error: fn(member: String, argument: Expr) -> Diagnostic {
+    callback: if argument == .Ident(name, _, _) -> "`{name}`" else -> "lambda"
+    sema_error("E3218", expr_span(argument), "The C callback {callback} reads `context.{member}`.", "C calls a callback on a thread it chooses, where no Jet task runs, so there is no task context to read.", "Read the value before the foreign call and pass it to the callback through C, or drop the read.")
+}
+
 // A C callback lambda is capture-free: no name it reads, other than its own
 // parameters and bindings, may be a local of the enclosing function.
 sema_call_lambda_captures_local: fn(lambda: Lambda, scopes: SemaScopeTable) -> Bool {
@@ -555,10 +609,16 @@ sema_call_typecheck_bound_arguments: fn(callee: String, params: [SemaCallParam],
         if !self_typed && !borrowed_trait && !unit_parameter && !owned_bound_variadic -> argument_expected = Val(required)
         // A C callback is a pure, monomorphic function or a capture-free
         // lambda whose body is safe on a foreign thread; anything else is
-        // E3203, reported before the argument's own type check.
+        // E3203, reported before the argument's own type check. One that
+        // reads the task context is E3218, which names the read.
         if !default_in_owner && abi == .Val(callable_abi) {
             if sema_registration_callback_boundary_param(callable_abi, required_declared) {
-                if sema_call_c_callback_unsafe(args[index].expr, environment, program, scopes) -> diagnostics.push(sema_checked_foreign_type_error(required_declared, expr_span(args[index].expr), true))
+                context_read: if callable_abi.is_c_abi -> sema_call_c_callback_context_read(args[index].expr, environment, program, scopes) else -> String?{None}
+                if context_read == .Val(member) {
+                    diagnostics.push(sema_call_c_callback_context_error(member, args[index].expr))
+                } else if sema_call_c_callback_unsafe(args[index].expr, environment, program, scopes) {
+                    diagnostics.push(sema_checked_foreign_type_error(required_declared, expr_span(args[index].expr), true))
+                }
                 if callable_abi.is_c_abi && c_callback == None -> c_callback = Val(expr_span(args[index].expr))
             }
         }
