@@ -62,6 +62,10 @@ loader-error conversion, just as successful parses do.
 Every active row, and every message builder that fills one, reads in plain
 words for the learner who hit it:
 
+- **Meaning** says in the learner's words what situation the code names,
+  apart from any one message: "a function that can end without returning its
+  value". Every active row writes its own; a meaning that repeats the row's
+  What says nothing more.
 - **What** names the specific problem with the names from the learner's code:
   "when `n` is `0`, `sign` reaches the end without a value", not a restatement
   of the rule's internal meaning.
@@ -75,8 +79,9 @@ words for the learner who hit it:
 
 `Tools/agent/DiagnosticRows.jet` enforces the mechanical half of this rubric
 on every row of `Compiler/Prelude/Diagnostics.jet`: it refuses a placeholder
-Why and a decision ID in a written meaning, What, Why or Fix, and names each
-offending code.
+Why, a decision ID in a written meaning, What, Why or Fix, and an active row
+with no written meaning or one equal to its What, and names each offending
+code.
 
 ## Human rendering
 

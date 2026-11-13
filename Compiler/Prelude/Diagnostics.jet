@@ -2505,6 +2505,7 @@ InvalidReceiverFootprint: struct {
 SharedAutoClone: struct {
     impl Diagnostic {
         code: "L0202"
+        meaning: "A `Shared` handle cloned on every loop pass"
         severity: .Lint
         lint_name: "shared_auto_clone"
         no_fix: .Behavior
@@ -2587,6 +2588,7 @@ SharedGuardLongScope: struct {
 SharedBusyWait: struct {
     impl Diagnostic {
         code: "L0207"
+        meaning: "A loop that polls `Shared` state without waiting"
         severity: .Lint
         lint_name: "shared_busy_wait"
         detail: true
@@ -3767,6 +3769,7 @@ TypeAliasCycle: struct {
 UnreachableDispatchArm: struct {
     impl Diagnostic {
         code: "L0301"
+        meaning: "A dispatch arm an earlier arm already covers"
         severity: .Lint
         lint_name: "unreachable_dispatch_arm"
         no_fix: .Ambiguous
@@ -3779,6 +3782,7 @@ UnreachableDispatchArm: struct {
 SameEnumGuardTable: struct {
     impl Diagnostic {
         code: "L0302"
+        meaning: "A closed-enum arm table without a named subject"
         severity: .Lint
         lint_name: "same_enum_guard_table"
         no_fix: .Behavior
@@ -4360,6 +4364,7 @@ ExpiringForce: struct {
 SliceCopyInLoop: struct {
     impl Diagnostic {
         code: "L0501"
+        meaning: "A slice copied on every loop pass"
         severity: .Lint
         lint_name: "slice_copy_in_loop"
         no_fix: .Behavior
@@ -4372,6 +4377,7 @@ SliceCopyInLoop: struct {
 FloatComparison: struct {
     impl Diagnostic {
         code: "L0502"
+        meaning: "An exact `==` or `!=` on floats"
         severity: .Lint
         lint_name: "float_comparison"
         no_fix: .Behavior
@@ -4402,6 +4408,7 @@ CompoundAssignment: struct {
 FloatMoney: struct {
     impl Diagnostic {
         code: "L0504"
+        meaning: "A money-like value held in a `Float`"
         severity: .Lint
         lint_name: "float_money"
         no_fix: .Behavior
@@ -4414,6 +4421,7 @@ FloatMoney: struct {
 HeapGrowthInLoop: struct {
     impl Diagnostic {
         code: "L0505"
+        meaning: "Heap growth in a loop where an arena would serve"
         severity: .Lint
         lint_name: "heap_growth_in_loop"
         no_fix: .Behavior
@@ -4426,6 +4434,7 @@ HeapGrowthInLoop: struct {
 HiddenContextAllocation: struct {
     impl Diagnostic {
         code: "L0506"
+        meaning: "An allocation inside `#Context` without an allocator"
         severity: .Lint
         lint_name: "hidden_context_allocation"
         no_fix: .Behavior
@@ -4480,6 +4489,7 @@ AutoDerive: struct {
 PreludeAliasShadow: struct {
     impl Diagnostic {
         code: "L0510"
+        meaning: "A declaration that replaces a Core prelude alias"
         severity: .Lint
         lint_name: "prelude_alias_shadow"
         detail: true
@@ -4493,6 +4503,7 @@ PreludeAliasShadow: struct {
 ErrFallbackShadow: struct {
     impl Diagnostic {
         code: "L0511"
+        meaning: "A binding named `err` inside a fallback"
         severity: .Lint
         lint_name: "err_fallback_shadow"
         detail: true
@@ -4506,6 +4517,7 @@ ErrFallbackShadow: struct {
 SubjectShorthandNesting: struct {
     impl Diagnostic {
         code: "L0512"
+        meaning: "Nested subject shorthands"
         severity: .Lint
         lint_name: "subject_shorthand_nesting"
         detail: true
@@ -4565,6 +4577,7 @@ ProcessArgsView: struct {
 MessageText: struct {
     impl Diagnostic {
         code: "L0516"
+        meaning: "The default body limit passed by hand through a lower-level call"
         severity: .Lint
         lint_name: "message_text"
         detail: true
@@ -4580,6 +4593,7 @@ MessageText: struct {
 PathContainmentStringPrefix: struct {
     impl Diagnostic {
         code: "L0517"
+        meaning: "A path containment check done with a string prefix"
         severity: .Lint
         lint_name: "path_containment_string_prefix"
         detail: true
@@ -4646,6 +4660,7 @@ DisplayMigration: struct {
 CompleteAsciiCaseLadder: struct {
     impl Diagnostic {
         code: "L0521"
+        meaning: "A full ASCII case ladder instead of a case conversion"
         severity: .Lint
         lint_name: "complete_ascii_case_ladder"
         detail: true
@@ -4661,6 +4676,7 @@ CompleteAsciiCaseLadder: struct {
 WalkFilesFilter: struct {
     impl Diagnostic {
         code: "L0522"
+        meaning: "A hand-written directory filter over `fs.walk`"
         severity: .Lint
         lint_name: "walk_files_filter"
         detail: true
@@ -4873,6 +4889,7 @@ BoundaryRule: struct {
 InlineAutodiff: struct {
     impl Diagnostic {
         code: "L1141"
+        meaning: "An autodiff transform called inline"
         severity: .Lint
         lint_name: "inline_autodiff"
         no_fix: .Behavior
@@ -6821,6 +6838,7 @@ VariadicCallingConvention: struct {
 InlineForeignOutsideUnsafe: struct {
     impl Diagnostic {
         code: "E3215"
+        meaning: "An inline C, C++ or assembly function outside `#Unsafe`"
         what: fn(self) -> String { "`#FFI(<lang>)` inline foreign fn in an unsafe language (`c`/`cpp`/`asm`) lacks the enclosing `#Unsafe(\"reason\")` gate" }
         why: fn(self) -> String { "C, C++ and assembly can break memory safety, so an inline body in one of them must state why it is sound inside `#Unsafe`" }
         fix: fn(self) -> String { "Wrap inline foreign code in an enclosing `#Unsafe(\"reason\")` gate." }
@@ -6862,6 +6880,7 @@ CBindingMemberMissing: struct {
 UnsupportedForeignLanguage: struct {
     impl Diagnostic {
         code: "E3220"
+        meaning: "An inline foreign function in a language with no inline binder"
         what: fn(self) -> String { "`#FFI(<lang>)` names a language with no inline foreign binder yet (the inline foreign tier ships `c`, `cpp` and `asm`)" }
         why: fn(self) -> String { "Inline foreign code is bound only for the languages with an inline binder: `c`, `cpp` and `asm`" }
         fix: fn(self) -> String { "Use an inline foreign binder for `c`, `cpp`, or `asm`, or remove the unsupported language." }
@@ -6883,6 +6902,7 @@ InlineForeignBuildFailed: struct {
 AsmOperandMismatch: struct {
     impl Diagnostic {
         code: "E3223"
+        meaning: "Inline assembly operands that don't match the Jet signature"
         no_fix: .Ambiguous
         what: fn(self) -> String { "Inline asm operands do not match the Jet signature: missing/unknown named input, duplicate or missing `; -> return`, or unaudited clobber/target register" }
         why: fn(self) -> String { "The Jet signature is the asm body's contract, so its inputs, return anchor and registers must match it exactly" }
@@ -11683,6 +11703,7 @@ ReactiveFunctionValue: struct {
 ReactiveFunctionReturns: struct {
     impl Diagnostic {
         code: "E2914"
+        meaning: "A `#Reactive fn` that returns a value"
         what: fn(self) -> String { "`#Reactive fn` must not return a value" }
         why: fn(self) -> String { "A `#Reactive fn` reruns whenever its inputs change, and nothing receives a value it returns" }
         fix: fn(self) -> String { "Remove the value return from the `#Reactive fn`." }
@@ -12305,6 +12326,7 @@ InferredNeverReturn: struct {
 
     impl Diagnostic {
         code: "L2421"
+        meaning: "A public function that always diverges without declaring `Never`"
         severity: .Lint
         lint_name: "inferred_never_return"
         stage: [.Compile]
@@ -12323,6 +12345,7 @@ PositionalBoolParameter: struct {
 
     impl Diagnostic {
         code: "L2401"
+        meaning: "A public function with a positional `Bool` parameter"
         severity: .Lint
         lint_name: "positional_bool_parameter"
         stage: [.Compile]
@@ -12342,6 +12365,7 @@ FileHandleDirectionMismatch: struct {
     impl Diagnostic {
         code: "E2501"
         stage: [.Compile]
+        meaning: "A read method on a write handle, or a write method on a read handle"
         detail: true
         what: fn(self) -> String { "`{self.method}` is not available on a {self.direction} file handle." }
         why: fn(self) -> String { "`files.open` returns a read-only handle; `files.create`/`files.append` return a write-only handle. Calling a write method on a reader (or a read method on a writer) is a type error." }
@@ -12353,6 +12377,7 @@ LineStreamOutsideLoop: struct {
     impl Diagnostic {
         code: "E2502"
         stage: [.Compile]
+        meaning: "A line stream used outside a loop header"
         detail: true
         what: fn(self) -> String { "A line stream can only be used directly in a loop." }
         why: fn(self) -> String { "`.lines()` hands back a lazy line reader meant to be iterated in place; storing it in a name would let it leave the loop, where it has no use. (The boundary is enforced in sema so codegen never has to lower a stray line stream.)" }
@@ -12395,6 +12420,7 @@ UndefinedOperator: struct {
     impl Diagnostic {
         code: "E2511"
         stage: [.Compile]
+        meaning: "An operator between types it isn't defined for"
         detail: true
         what: fn(self) -> String { "Operator `{self.op}` isn't defined between `{self.lhs}` and `{self.rhs}`." }
         why: fn(self) -> String { "Built-in lane and linalg operators keep fixed shapes: one lane/vector type on both sides, or a matrix and its matching vector; any other pair needs an operator hook." }
@@ -12411,6 +12437,7 @@ MatrixShapeMismatch: struct {
     impl Diagnostic {
         code: "E2512"
         stage: [.Compile]
+        meaning: "A matrix product whose inner sides differ"
         detail: true
         fix_next: "Use matrix operands whose inner dimensions are equal."
         what: fn(self) -> String { "Matrix multiplication needs equal inner sides, but these are {self.left_inner} and {self.right_inner}" }
@@ -12429,6 +12456,7 @@ BreakingRelease: struct {
     impl Diagnostic {
         code: "E2601"
         stage: [.Compile]
+        meaning: "A non-major release that removes or breaks public API"
         detail: true
         fix_next: "Bump to the next major version or restore the removed public item."
         what: fn(self) -> String { "This release is tagged `{self.version}` but removes (or changes incompatibly) the public API item `{self.item}`." }
@@ -12447,6 +12475,7 @@ DependencyVersionConflict: struct {
     impl Diagnostic {
         code: "E2602"
         stage: [.Compile]
+        meaning: "Dependency requirements no single version satisfies"
         detail: true
         no_fix: .Ambiguous
         fix_next: "Align the conflicting dependency constraints or ask for a compatible release."
@@ -12467,6 +12496,7 @@ SecurityAdvisoryMatch: struct {
     impl Diagnostic {
         code: "E2603"
         stage: [.Compile]
+        meaning: "A dependency version with a security advisory"
         detail: true
         fix_next: "Upgrade to the fixed version named by the advisory and inspect its details."
         what: fn(self) -> String { "`[{self.severity}]` advisory `{self.advisory_id}` matches `{self.package}` `{self.version}`: {self.title}." }
@@ -12484,6 +12514,7 @@ IntegrityCheckFailed: struct {
     impl Diagnostic {
         code: "E2604"
         stage: [.Compile]
+        meaning: "A fetched artifact whose hash differs from the lockfile"
         detail: true
         what: fn(self) -> String { "Integrity check failed for `{self.package}` `{self.version}` — expected `{self.expected}`, got `{self.actual}`." }
         why: fn(self) -> String { "A fetched artifact's content hash differs from what the lockfile recorded. This means the artifact changed after it was locked — accidental or deliberate tampering. A `jet fetch` run reports this integrity failure." }
@@ -12498,6 +12529,7 @@ DirtyTreePublish: struct {
     impl Diagnostic {
         code: "E2605"
         stage: [.Compile]
+        meaning: "A publish from a working tree with uncommitted changes"
         detail: true
         what: fn(self) -> String { "`{self.name}` v{self.version} cannot be published from a dirty working tree." }
         why: fn(self) -> String { "The registry records the exact source revision that was published. A dirty tree means uncommitted changes would be silently excluded, making the published package unreproducible." }
@@ -12509,6 +12541,7 @@ MissingYankVersion: struct {
     impl Diagnostic {
         code: "E2606"
         stage: [.Compile]
+        meaning: "A registry yank without a version"
         detail: true
         what: fn(self) -> String { "`jet registry yank` requires a version argument." }
         why: fn(self) -> String { "A yank marks one specific published version as deprecated; without a version the command doesn't know which one to yank." }
@@ -12523,6 +12556,7 @@ MalformedSource: struct {
     impl Diagnostic {
         code: "E2607"
         stage: [.Compile]
+        meaning: "Malformed supply-chain metadata"
         detail: true
         no_fix: .Ambiguous
         what: fn(self) -> String { "`{self.source}` is malformed: `{self.detail}`." }
@@ -12539,6 +12573,7 @@ BlockedPackageName: struct {
     impl Diagnostic {
         code: "E2608"
         stage: [.Jet]
+        meaning: "A registry package name that is blocked as a lookalike"
         detail: true
         no_fix: .Behavior
         fix_next: "Choose a distinct package name and remove any reserved suffix before publishing."
@@ -12556,6 +12591,7 @@ ImmaturePackage: struct {
     impl Diagnostic {
         code: "E2609"
         stage: [.Compile]
+        meaning: "A package release younger than the advisory maturity window"
         detail: true
         fix_next: "Wait for the maturity window or add a reviewed exact-version exception."
         what: fn(self) -> String { "`{self.package}#{self.version}` is not mature under the advisory policy." }
@@ -12571,6 +12607,7 @@ RejectedSource: struct {
     impl Diagnostic {
         code: "E2610"
         stage: [.Compile]
+        meaning: "Advisory evidence that is unsigned, stale or downgraded"
         detail: true
         what: fn(self) -> String { "`{self.source}` was rejected: `{self.detail}`." }
         why: fn(self) -> String { "Advisory policy is security-sensitive; Jet will not use unsigned, stale, rolled-back, forked, or downgraded evidence." }
@@ -12584,6 +12621,7 @@ MissingAuditInput: struct {
     impl Diagnostic {
         code: "E2611"
         stage: [.Compile]
+        meaning: "An audit without its lock or advisory database"
         detail: true
         fix_next: "Provide the lock file and advisory database required by `jet inspect audit`, then rerun."
         what: fn(self) -> String { "`jet inspect audit` needs `{self.input}`." }
@@ -12599,6 +12637,7 @@ RegistryNameLookalike: struct {
 
     impl Diagnostic {
         code: "L2608"
+        meaning: "A registry package name close to an existing one"
         severity: .Lint
         lint_name: "registry_name_lookalike"
         stage: [.Jet]
@@ -12630,6 +12669,7 @@ CheckedTextRejected: struct {
     impl Diagnostic {
         code: "E2712"
         stage: [.Compile]
+        meaning: "A checked text literal its type's checker rejected"
         detail: true
         what: fn(self) -> String { "This checked text type rejected its body" }
         why: fn(self) -> String { "A library's `CheckedText.check` function rejected the complete literal body." }
@@ -12658,6 +12698,7 @@ AmbiguousRoute: struct {
     impl Diagnostic {
         code: "E2804"
         stage: [.Compile]
+        meaning: "Two routes that match the same method and path"
         detail: true
         no_fix: .Ambiguous
         what: fn(self) -> String { "Two routes both match `{self.method} {self.pattern}`." }
@@ -12673,6 +12714,7 @@ InvalidRoute: struct {
     impl Diagnostic {
         code: "E2805"
         stage: [.Compile]
+        meaning: "An invalid HTTP route pattern or input"
         detail: true
         fix_next: "Fix the path or handler signature before registration."
         what: fn(self) -> String { "Invalid HTTP route `{self.pattern}`: {self.reason}." }
@@ -12687,6 +12729,7 @@ MissingPageFunction: struct {
     impl Diagnostic {
         code: "E2806"
         stage: [.Compile]
+        meaning: "A route convention file without `page: fn`"
         detail: true
         what: fn(self) -> String { "Convention file `{self.path}` has no `page: fn`." }
         why: fn(self) -> String { "Files under a `.routes(from:)` root must declare `page: fn` or start with `_` to opt out. A file without a page would register an endpoint the compiler cannot analyze." }
@@ -12702,6 +12745,7 @@ DuplicateRoute: struct {
     impl Diagnostic {
         code: "E2807"
         stage: [.Compile]
+        meaning: "A path claimed by both a builder route and a convention file"
         detail: true
         what: fn(self) -> String { "Route `{self.path}` is registered both by `{self.a}` and `{self.b}`." }
         why: fn(self) -> String { "Explicit builder entries and `.routes(from:)` conventions must not claim the same path." }
@@ -12716,6 +12760,7 @@ RouteMethodTokenRefused: struct {
     impl Diagnostic {
         code: "E2808"
         stage: [.Compile]
+        meaning: "A refused custom HTTP route method"
         detail: true
         what: fn(self) -> String { "HTTP route method `{self.method}` is refused: {self.reason}." }
         why: fn(self) -> String { "A custom route method is an RFC 9110 token, kept in the exact case it is sent. A standard method spelled exactly registers with its own verb, so `custom` refuses it; one check runs on a static method while building and on a run-time method when its mux registers it." }
@@ -12730,6 +12775,7 @@ UnknownHandler: struct {
     impl Diagnostic {
         code: "E2810"
         stage: [.Compile]
+        meaning: "A route or action handler that isn't statically known"
         detail: true
         what: fn(self) -> String { "`{self.kind}` `{self.name}` is not a statically known handler." }
         why: fn(self) -> String { "Jet records every route and action on the typed application graph; a runtime-built handler outside `.mount` is an unanalyzed edge." }
@@ -12743,6 +12789,7 @@ UnmountedHttpRoutes: struct {
 
     impl Diagnostic {
         code: "E2818"
+        meaning: "HTTP routes on a struct that is never mounted"
         severity: .Lint
         lint_name: "unmounted_http_routes"
         detail: true
@@ -12776,6 +12823,7 @@ DoctestMismatch: struct {
     impl Diagnostic {
         code: "E2901"
         stage: [.Compile]
+        meaning: "A doc example whose output differs from its claim"
         detail: true
         no_fix: .Ambiguous
         what: fn(self) -> String { "Doctest output mismatch. Expected: `{self.expected}` Got: `{self.actual}`" }
@@ -12790,6 +12838,7 @@ UnknownProofLens: struct {
     impl Diagnostic {
         code: "E2941"
         stage: [.Compile]
+        meaning: "An unknown `jet prove` lens"
         detail: true
         no_fix: .Ambiguous
         what: fn(self) -> String { "Unknown proof lens `{self.value}`" }
@@ -12805,6 +12854,7 @@ ClaimBelowFloor: struct {
     impl Diagnostic {
         code: "E2942"
         stage: [.Compile]
+        meaning: "Claims evidence below the package's floor"
         detail: true
         what: fn(self) -> String { "Claims grade `{self.grade}` is below the package floor `{self.floor}`" }
         why: fn(self) -> String { "`policy.claims.min` in `package.jet` asks for `{self.floor}`, and this run's evidence reaches `{self.grade}`." }
@@ -12818,6 +12868,7 @@ SolverCounterexample: struct {
     impl Diagnostic {
         code: "E2950"
         stage: [.Compile]
+        meaning: "A solver counterexample to a claim"
         detail: true
         what: fn(self) -> String { "Solver found a counterexample to `{self.obligation}`" }
         why: fn(self) -> String { "The assignment satisfies every assumption but makes the claim false." }
@@ -12859,6 +12910,7 @@ CorruptProofArtifact: struct {
     impl Diagnostic {
         code: "E3611"
         stage: [.Compile]
+        meaning: "A proof artifact whose hash or bytes don't verify"
         detail: true
         what: fn(self) -> String { "Proof artifact is corrupt" }
         why: fn(self) -> String { "Report hash or canonical bytes do not match" }
@@ -12894,6 +12946,7 @@ UnsafeProofArtifactPath: struct {
     impl Diagnostic {
         code: "E3614"
         stage: [.Compile]
+        meaning: "A proof artifact path through a symlink or other unsafe file"
         detail: true
         what: fn(self) -> String { "Proof artifact path is unsafe" }
         why: fn(self) -> String { "A parent or final path is a symlink or otherwise unsafe" }
@@ -12905,6 +12958,7 @@ ReplaySchemaMismatch: struct {
     impl Diagnostic {
         code: "E3620"
         stage: [.Compile]
+        meaning: "A replay artifact with an unsupported schema version"
         detail: true
         what: fn(self) -> String { "Replay schema version is incompatible" }
         why: fn(self) -> String { "The `.jetproof-replay` schema major/minor is unsupported by this `jet prove`." }
@@ -12916,6 +12970,7 @@ ReplayIdentityMismatch: struct {
     impl Diagnostic {
         code: "E3621"
         stage: [.Compile]
+        meaning: "A replay artifact for another source, toolchain or adapter"
         detail: true
         what: fn(self) -> String { "Replay semantic identity does not match" }
         why: fn(self) -> String { "Source, toolchain, or adapter identity in the artifact does not match the current target. A `jet prove` run reports this replay-identity failure." }
@@ -12927,6 +12982,7 @@ CorruptReplay: struct {
     impl Diagnostic {
         code: "E3622"
         stage: [.Compile]
+        meaning: "A replay artifact whose framing doesn't verify"
         detail: true
         what: fn(self) -> String { "Replay artifact is corrupt" }
         why: fn(self) -> String { "Magic, header, frame hash, or footer verification failed." }
@@ -12938,6 +12994,7 @@ ReplayDiverged: struct {
     impl Diagnostic {
         code: "E3623"
         stage: [.Compile]
+        meaning: "A replay run that departed from its captured authority"
         detail: true
         what: fn(self) -> String { "Replay diverged from captured authority" }
         why: fn(self) -> String { "The next recorded authority, consumed-record count, or captured run outcome does not match the current producer run." }
@@ -12949,6 +13006,7 @@ ReplayTargetNotUnique: struct {
     impl Diagnostic {
         code: "E3624"
         stage: [.Compile]
+        meaning: "A replay that selected zero or several targets"
         detail: true
         no_fix: .Ambiguous
         what: fn(self) -> String { "Replay target cardinality is not one" }
@@ -12963,6 +13021,7 @@ UnmodeledReplayOperation: struct {
     impl Diagnostic {
         code: "E3625"
         stage: [.Compile]
+        meaning: "A replay capture that reaches an operation it can't record"
         detail: true
         what: fn(self) -> String { "Replay capture cannot model `{self.operation}`" }
         why: fn(self) -> String { "The reachable operation has no bounded replay adapter, including opaque, native, task, or unsupported effect boundaries." }
@@ -12974,6 +13033,7 @@ ReplaySensitiveData: struct {
     impl Diagnostic {
         code: "E3627"
         stage: [.Compile]
+        meaning: "A replay capture that would record sensitive data"
         detail: true
         what: fn(self) -> String { "Replay capture refused sensitive data" }
         why: fn(self) -> String { "Safe capture refuses reachable Rand/IO/Net; sensitive capture needs TTY consent." }
@@ -12985,6 +13045,7 @@ ReplayTooLarge: struct {
     impl Diagnostic {
         code: "E3628"
         stage: [.Compile]
+        meaning: "A replay capture over its size limit"
         detail: true
         what: fn(self) -> String { "Replay capture exceeded its artifact limit" }
         why: fn(self) -> String { "The replay contained no usable authority or exceeded the bounded frame/payload/record budget." }
@@ -12996,6 +13057,7 @@ ReplayFinalizeFailed: struct {
     impl Diagnostic {
         code: "E3629"
         stage: [.Compile]
+        meaning: "A replay artifact that couldn't be written safely"
         detail: true
         what: fn(self) -> String { "Replay artifact could not be finalized" }
         why: fn(self) -> String { "Destination path, rename, or durability checks refused the write." }
@@ -13006,6 +13068,7 @@ ReplayFinalizeFailed: struct {
 EmptyTest: struct {
     impl Diagnostic {
         code: "L2901"
+        meaning: "A `#Test` with no assertions"
         severity: .Lint
         lint_name: "empty_test"
         stage: [.Compile]

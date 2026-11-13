@@ -16,8 +16,9 @@
 // read every spec page under Docs/spec too: each `E####` or `L####` code a
 // page cites must name a row (a retired or reserved row keeps an old code
 // explainable). Every row's texts follow the plain-words rubric of
-// Docs/spec/diagnostics.md: a Why gives a reason, not a placeholder, and no
-// meaning, What, Why or Fix names a decision ID.
+// Docs/spec/diagnostics.md: a Why gives a reason, not a placeholder, no
+// meaning, What, Why or Fix names a decision ID, and an active row states a
+// meaning of its own words, not its What again.
 // Usage: jet Tools/agent/DiagnosticRows.jet [--check|--write]
 // --check fails when any copy differs from what the rows give it; --write
 // rewrites the copies and removes pages no row owns.
@@ -320,8 +321,15 @@ render_row: fn(source: DiagnosticSource) -> RenderedRow DiagnosticRowsError! {
         stages = list.groups[0].replace(", .", "/").remove_prefix(".").lower()
     }
     meaning: constant_literal(source, "meaning", texts[0]) ?? return Err(err)
-    if entry(source.constants, "meaning") != None {
+    written_meaning: entry(source.constants, "meaning") != None
+    if written_meaning {
         if DECISION_ID.find(meaning) == .Val(id) -> rubric.push("{code_text} meaning names decision {id}")
+    }
+    // The What is one message; an active row's meaning names the failure
+    // apart from any message, so a missing one or a copy of the What fails.
+    if {
+        status == "Active" && !written_meaning -> rubric.push("{code_text} states no meaning")
+        status == "Active" && meaning == texts[0] -> rubric.push("{code_text} meaning repeats its what")
     }
     detail: entry(source.constants, "detail") ?? "false"
     if detail != "true" && detail != "false" -> return Err(rows_fail("{context}: `detail` is `true` or `false`"))
@@ -402,7 +410,7 @@ render_rows: fn(source: String) -> RenderedRows DiagnosticRowsError! {
         facts.push(one.facts)
         loop problem in one.rubric -> rubric.push(problem.copy())
     }
-    if rubric.len() > 0 -> return Err(rows_fail("{rubric.len()} row texts break the plain-words rubric of Docs/spec/diagnostics.md (a Why gives a reason; no human text names a decision ID): {rubric.join("; ")}"))
+    if rubric.len() > 0 -> return Err(rows_fail("{rubric.len()} row texts break the plain-words rubric of Docs/spec/diagnostics.md (a Why gives a reason; no human text names a decision ID; an active row's meaning is its own words): {rubric.join("; ")}"))
     Ok(RenderedRows{text: "{GENERATED_BY}\nDIAGNOSTIC_ROWS: #run {{ [DiagnosticRegistryRow]{{\n{rendered.join("\n")}\n}} }}\n", facts: facts})
 }
 
@@ -1047,8 +1055,9 @@ baseline_error: fn(source: String, committed: String) -> String Never! {
     }
 }
 
-MINIMAL_ROW: "BadPath: struct {{\n    path: String\n\n    impl Diagnostic {{\n        code: \"E9999\"\n        what: fn(self) -> String {{ \"route `{{self.path}}` must start with /\" }}\n        why: fn(self) -> String {{ \"routes are matched from the \\\"site\\\" root\" }}\n        fix: fn(self) -> String {{ \"write {{{{/path}}}}\" }}\n    }}\n}}\n"
+MINIMAL_ROW: "BadPath: struct {{\n    path: String\n\n    impl Diagnostic {{\n        code: \"E9999\"\n        meaning: \"A route that doesn't start at the root\"\n        what: fn(self) -> String {{ \"route `{{self.path}}` must start with /\" }}\n        why: fn(self) -> String {{ \"routes are matched from the \\\"site\\\" root\" }}\n        fix: fn(self) -> String {{ \"write {{{{/path}}}}\" }}\n    }}\n}}\n"
 MINIMAL_CODE: "        code: \"E9999\"\n"
+MINIMAL_MEANING: "        meaning: \"A route that doesn't start at the root\"\n"
 
 #Test("every generated copy matches its Prelude row") {
     if diagnostic_rows_main([String]{"--check"}) == .Err(error) -> panic(error.message)
@@ -1077,7 +1086,7 @@ MINIMAL_CODE: "        code: \"E9999\"\n"
 #Test("a placeholder Why or a decision ID in a row's text is refused, naming every code") {
     row: MINIMAL_ROW
     placeholder: row.replace("routes are matched from the \\\"site\\\" root", "The registered sema rule applies here").replace("must start with /", "must start with / (S12)")
-    decision: row.replace(MINIMAL_CODE, "{MINIMAL_CODE}        meaning: \"Routes start at the root (S9)\"\n").replace("E9999", "E9998").replace("write {{{{/path}}}}", "see D-ROUTE-1")
+    decision: row.replace("doesn't start at the root\"", "doesn't start at the root (S9)\"").replace("E9999", "E9998").replace("write {{{{/path}}}}", "see D-ROUTE-1")
     error: diagnostic_rows_error("{placeholder}{decision}")
     assert(error.contains("4 row texts break the plain-words rubric"))
     assert(error.contains("E9999 why is a placeholder"))
@@ -1085,6 +1094,20 @@ MINIMAL_CODE: "        code: \"E9999\"\n"
     assert(error.contains("E9998 meaning names decision S9"))
     assert(error.contains("E9998 fix names decision D-ROUTE-1"))
     assert_eq(diagnostic_rows_error(row.replace("start with /", "start with /S")), "")
+}
+
+#Test("an active row with no written meaning, or one that repeats its What, is refused, naming every code") {
+    row: MINIMAL_ROW
+    missing: row.replace(MINIMAL_MEANING, "")
+    repeated: row.replace(MINIMAL_MEANING, "        meaning: \"route `x` must start with /\"\n").replace("E9999", "E9998").replace("{{self.path}}", "x").replace("    path: String\n\n", "")
+    error: diagnostic_rows_error("{missing}{repeated}")
+    assert(error.contains("2 row texts break the plain-words rubric"), error)
+    assert(error.contains("E9999 states no meaning"), error)
+    assert(error.contains("E9998 meaning repeats its what"), error)
+    statuses: [String]{"Retired", "Reserved"}
+    loop status in statuses {
+        assert_eq(diagnostic_rows_error(missing.replace(MINIMAL_CODE, "{MINIMAL_CODE}        status: .{status}\n")), "")
+    }
 }
 
 #Test("every Prelude row's Why gives a reason and no human text names a decision ID") {
