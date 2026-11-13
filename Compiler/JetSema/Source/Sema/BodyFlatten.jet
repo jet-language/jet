@@ -441,6 +441,7 @@ body_flat_stmt_kind: fn(value: TStmt, flat: &BodyFlat) -> StmtKind Never! {
         .ForIn(f_label, f_variable, f_variable_two, f_source, f_collection, f_step, f_method_kind, f_columnar, f_by_value, f_source_stable, f_body, f_span) -> StmtKind.ForIn{label: f_label, variable: f_variable, variable_two: f_variable_two, source: body_flat_expr(f_source, flat), collection: body_flat_expr(f_collection, flat), step: body_flat_opt_expr(f_step, flat), method_kind: f_method_kind, columnar: f_columnar, by_value: f_by_value, source_stable: f_source_stable, body: body_flat_list_stmt(f_body, flat), span: f_span}
         .Inline(f_body, f_span) -> StmtKind.Inline{body: body_flat_list_stmt(f_body, flat), span: f_span}
         .DebugOnly(f_body, f_span) -> StmtKind.DebugOnly{body: body_flat_list_stmt(f_body, flat), span: f_span}
+        .DeepCheck(f_body, f_span) -> StmtKind.DeepCheck{body: body_flat_list_stmt(f_body, flat), span: f_span}
         .MixedSwitch(f_subject, f_class, f_arms, f_else_body, f_span) -> StmtKind.MixedSwitch{subject: body_flat_expr(f_subject, flat), class: f_class, arms: body_flat_list_mixed_arm(f_arms, flat), else_body: body_flat_opt_list_stmt(f_else_body, flat), span: f_span}
         .Unsafe(f_gate, f_body) -> StmtKind.Unsafe{gate: f_gate, body: body_flat_list_stmt(f_body, flat)}
         .UnsafeBlock(f_gate, f_body, f_span) -> StmtKind.UnsafeBlock{gate: f_gate, body: body_flat_list_stmt(f_body, flat), span: f_span}
@@ -1298,6 +1299,7 @@ body_copy_stmt_kind: fn(value: StmtKind, flat: &BodyFlat) -> StmtKind Never! {
         .ForIn(f_label, f_variable, f_variable_two, f_source, f_collection, f_step, f_method_kind, f_columnar, f_by_value, f_source_stable, f_body, f_span) -> StmtKind.ForIn{label: f_label, variable: f_variable, variable_two: f_variable_two, source: body_copy_expr(f_source, flat), collection: body_copy_expr(f_collection, flat), step: body_copy_opt_expr(f_step, flat), method_kind: f_method_kind, columnar: f_columnar, by_value: f_by_value, source_stable: f_source_stable, body: body_copy_list_stmt(f_body, flat), span: f_span}
         .Inline(f_body, f_span) -> StmtKind.Inline{body: body_copy_list_stmt(f_body, flat), span: f_span}
         .DebugOnly(f_body, f_span) -> StmtKind.DebugOnly{body: body_copy_list_stmt(f_body, flat), span: f_span}
+        .DeepCheck(f_body, f_span) -> StmtKind.DeepCheck{body: body_copy_list_stmt(f_body, flat), span: f_span}
         .MixedSwitch(f_subject, f_class, f_arms, f_else_body, f_span) -> StmtKind.MixedSwitch{subject: body_copy_expr(f_subject, flat), class: f_class, arms: body_copy_list_mixed_arm(f_arms, flat), else_body: body_copy_opt_list_stmt(f_else_body, flat), span: f_span}
         .Unsafe(f_gate, f_body) -> StmtKind.Unsafe{gate: f_gate, body: body_copy_list_stmt(f_body, flat)}
         .UnsafeBlock(f_gate, f_body, f_span) -> StmtKind.UnsafeBlock{gate: f_gate, body: body_copy_list_stmt(f_body, flat), span: f_span}

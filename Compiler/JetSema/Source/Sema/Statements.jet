@@ -25,6 +25,7 @@ use jet_foundation.[
     BodyTree,
     MARKER_META,
     MARKER_OFF,
+    MARKER_ON,
     MARKER_TRACK,
     Marker,
     NodeKind,
@@ -168,7 +169,7 @@ sema_stmt_tree_loop_body_has_break: fn(statements: [TStmt], label: String?, allo
             .RefutableBind(_, _, fallback, _) -> {
                 if sema_stmt_tree_loop_body_has_break(fallback, label, allow_unlabeled) -> return true
             }
-            .Inline(body, _) | .DebugOnly(body, _) | .UnsafeBlock(_, body, _) | .SentryPolicy(_, body, _) | .Impure(body, _) | .Region(body, _) | .Live(body, _) | .Shield(body, _) | .Defer(body, _) | .ScopeMember(_, body, _) -> {
+            .Inline(body, _) | .DebugOnly(body, _) | .DeepCheck(body, _) | .UnsafeBlock(_, body, _) | .SentryPolicy(_, body, _) | .Impure(body, _) | .Region(body, _) | .Live(body, _) | .Shield(body, _) | .Defer(body, _) | .ScopeMember(_, body, _) -> {
                 if sema_stmt_tree_loop_body_has_break(body, label, allow_unlabeled) -> return true
             }
             .Unsafe(_, body) | .TaskGroup(_, _, body, _) | .Layout(_, _, body, _) | .ContextBlock(_, body, _) | .Transact(_, _, _, body, _) | .ContractScope(_, body, _, _, _) -> {
@@ -204,7 +205,7 @@ sema_stmt_tree_block_can_fall_through: fn(statements: [TStmt]) -> Bool Never! {
             .Loop(label, body, _) -> return sema_stmt_tree_loop_body_has_break(body, label, true)
             // Rust flow facts: a wrapper block's own exit leaves the block.
             .Inline(body, _) | .Unsafe(_, body) | .UnsafeBlock(_, body, _) | .Impure(body, _) | .Shield(body, _) | .Region(body, _) -> return sema_stmt_tree_block_can_fall_through(body)
-            .Contract(_) | .ContractScope(_, _, _, _, _) | .Let(_, _, _, _, _, _) | .RefutableBind(_, _, _, _) | .TupleDestructure(_, _, _, _, _) | .StructDestructure(_, _, _, _, _) | .ListDestructure(_, _, _, _, _, _) | .Assign(_, _, _, _, _) | .CountedLoop(_, _, _, _, _, _, _) | .ForRange(_, _, _, _, _, _, _, _, _) | .Range(_, _, _, _, _, _, _, _, _, _) | .TaskGroup(_, _, _, _) | .DeferClose(_, _, _) | .While(_, _, _, _) | .EnumMatch(_, _, _, _, _) | .RangeSwitch(_, _, _, _) | .ForIn(_, _, _, _, _, _, _, _, _, _, _, _) | .DebugOnly(_, _) | .MixedSwitch(_, _, _, _, _) | .SentryPolicy(_, _, _) | .Reactive(_, _) | .Layout(_, _, _, _) | .ContextBlock(_, _, _) | .Live(_, _) | .ScopeMember(_, _, _) | .Transact(_, _, _, _, _) | .GCEdit(_, _, _, _, _, _, _) | .Defer(_, _) -> return true
+            .Contract(_) | .ContractScope(_, _, _, _, _) | .Let(_, _, _, _, _, _) | .RefutableBind(_, _, _, _) | .TupleDestructure(_, _, _, _, _) | .StructDestructure(_, _, _, _, _) | .ListDestructure(_, _, _, _, _, _) | .Assign(_, _, _, _, _) | .CountedLoop(_, _, _, _, _, _, _) | .ForRange(_, _, _, _, _, _, _, _, _) | .Range(_, _, _, _, _, _, _, _, _, _) | .TaskGroup(_, _, _, _) | .DeferClose(_, _, _) | .While(_, _, _, _) | .EnumMatch(_, _, _, _, _) | .RangeSwitch(_, _, _, _) | .ForIn(_, _, _, _, _, _, _, _, _, _, _, _) | .DebugOnly(_, _) | .DeepCheck(_, _) | .MixedSwitch(_, _, _, _, _) | .SentryPolicy(_, _, _) | .Reactive(_, _) | .Layout(_, _, _, _) | .ContextBlock(_, _, _) | .Live(_, _) | .ScopeMember(_, _, _) | .Transact(_, _, _, _, _) | .GCEdit(_, _, _, _, _, _, _) | .Defer(_, _) -> return true
         }
     }
     true
@@ -2540,7 +2541,7 @@ sema_stmt_for_in_tree_assigns: fn(statements: [TStmt], key: SymbolID) -> Bool Ne
                     if sema_stmt_for_in_tree_local_is(local, key) -> return true
                 }
             }
-            .ContractScope(_, body, _, _, _) | .TaskGroup(_, _, body, _) | .Loop(_, body, _) | .While(_, _, body, _) | .ForRange(_, _, _, _, _, _, body, _, _) | .Range(_, _, _, _, _, _, _, _, body, _) | .ForIn(_, _, _, _, _, _, _, _, _, _, body, _) | .Inline(body, _) | .DebugOnly(body, _) | .Impure(body, _) | .Region(body, _) | .Live(body, _) | .Shield(body, _) | .Defer(body, _) | .Unsafe(_, body) | .UnsafeBlock(_, body, _) | .SentryPolicy(_, body, _) | .Layout(_, _, body, _) | .ContextBlock(_, body, _) | .ScopeMember(_, body, _) | .Transact(_, _, _, body, _) -> {
+            .ContractScope(_, body, _, _, _) | .TaskGroup(_, _, body, _) | .Loop(_, body, _) | .While(_, _, body, _) | .ForRange(_, _, _, _, _, _, body, _, _) | .Range(_, _, _, _, _, _, _, _, body, _) | .ForIn(_, _, _, _, _, _, _, _, _, _, body, _) | .Inline(body, _) | .DebugOnly(body, _) | .DeepCheck(body, _) | .Impure(body, _) | .Region(body, _) | .Live(body, _) | .Shield(body, _) | .Defer(body, _) | .Unsafe(_, body) | .UnsafeBlock(_, body, _) | .SentryPolicy(_, body, _) | .Layout(_, _, body, _) | .ContextBlock(_, body, _) | .ScopeMember(_, body, _) | .Transact(_, _, _, body, _) -> {
                 if sema_stmt_for_in_tree_assigns(body, key) -> return true
             }
             .RefutableBind(_, _, fallback, _) -> {
@@ -2606,7 +2607,7 @@ sema_stmt_for_in_row_stmt_assigns: fn(tree: BodyTree, item: Int, key: SymbolID) 
             if place == .Local(local) -> return sema_stmt_for_in_tree_local_is(local, key)
             false
         }
-        .ContractScope(_, body, _, _, _) | .TaskGroup(_, _, body, _) | .Loop(_, body, _) | .While(_, _, body, _) | .ForRange(_, _, _, _, _, _, body, _, _) | .Range(_, _, _, _, _, _, _, _, body, _) | .ForIn(_, _, _, _, _, _, _, _, _, _, body, _) | .Inline(body, _) | .DebugOnly(body, _) | .Impure(body, _) | .Region(body, _) | .Live(body, _) | .Shield(body, _) | .Defer(body, _) | .Unsafe(_, body) | .UnsafeBlock(_, body, _) | .SentryPolicy(_, body, _) | .Layout(_, _, body, _) | .ContextBlock(_, body, _) | .ScopeMember(_, body, _) | .Transact(_, _, _, body, _) -> sema_stmt_for_in_row_assigns(tree, body, key)
+        .ContractScope(_, body, _, _, _) | .TaskGroup(_, _, body, _) | .Loop(_, body, _) | .While(_, _, body, _) | .ForRange(_, _, _, _, _, _, body, _, _) | .Range(_, _, _, _, _, _, _, _, body, _) | .ForIn(_, _, _, _, _, _, _, _, _, _, body, _) | .Inline(body, _) | .DebugOnly(body, _) | .DeepCheck(body, _) | .Impure(body, _) | .Region(body, _) | .Live(body, _) | .Shield(body, _) | .Defer(body, _) | .Unsafe(_, body) | .UnsafeBlock(_, body, _) | .SentryPolicy(_, body, _) | .Layout(_, _, body, _) | .ContextBlock(_, body, _) | .ScopeMember(_, body, _) | .Transact(_, _, _, body, _) -> sema_stmt_for_in_row_assigns(tree, body, key)
         .RefutableBind(_, _, fallback, _) -> sema_stmt_for_in_row_assigns(tree, fallback, key)
         .CountedLoop(_, init, _, step, _, body, _) -> {
             if sema_stmt_for_in_row_stmt_assigns(tree, init, key) || sema_stmt_for_in_row_assigns(tree, body, key) -> return true
@@ -2679,7 +2680,7 @@ sema_stmt_for_in_tree_stays: fn(statements: [TStmt], key: SymbolID, arena: BodyT
             .ExprStmt(value, _) -> {
                 if value.ty == (Type.Named{name: "Never"}) -> return false
             }
-            .ContractScope(_, body, _, _, _) | .TaskGroup(_, _, body, _) | .Loop(_, body, _) | .While(_, _, body, _) | .ForRange(_, _, _, _, _, _, body, _, _) | .Range(_, _, _, _, _, _, _, _, body, _) | .ForIn(_, _, _, _, _, _, _, _, _, _, body, _) | .Inline(body, _) | .DebugOnly(body, _) | .Impure(body, _) | .Region(body, _) | .Live(body, _) | .Shield(body, _) | .Defer(body, _) | .Unsafe(_, body) | .UnsafeBlock(_, body, _) | .SentryPolicy(_, body, _) | .Layout(_, _, body, _) | .ContextBlock(_, body, _) | .ScopeMember(_, body, _) | .Transact(_, _, _, body, _) -> {
+            .ContractScope(_, body, _, _, _) | .TaskGroup(_, _, body, _) | .Loop(_, body, _) | .While(_, _, body, _) | .ForRange(_, _, _, _, _, _, body, _, _) | .Range(_, _, _, _, _, _, _, _, body, _) | .ForIn(_, _, _, _, _, _, _, _, _, _, body, _) | .Inline(body, _) | .DebugOnly(body, _) | .DeepCheck(body, _) | .Impure(body, _) | .Region(body, _) | .Live(body, _) | .Shield(body, _) | .Defer(body, _) | .Unsafe(_, body) | .UnsafeBlock(_, body, _) | .SentryPolicy(_, body, _) | .Layout(_, _, body, _) | .ContextBlock(_, body, _) | .ScopeMember(_, body, _) | .Transact(_, _, _, body, _) -> {
                 if !sema_stmt_for_in_tree_stays(body, key, arena) -> return false
             }
             .RefutableBind(_, _, fallback, _) -> {
@@ -2786,7 +2787,7 @@ sema_stmt_for_in_row_stmt_stays: fn(tree: BodyTree, item: Int, key: SymbolID) ->
         .ExprStmt(value, _) -> {
             if sema_stmt_row_is_never(tree, value) -> return false
         }
-        .ContractScope(_, body, _, _, _) | .TaskGroup(_, _, body, _) | .Loop(_, body, _) | .While(_, _, body, _) | .ForRange(_, _, _, _, _, _, body, _, _) | .Range(_, _, _, _, _, _, _, _, body, _) | .ForIn(_, _, _, _, _, _, _, _, _, _, body, _) | .Inline(body, _) | .DebugOnly(body, _) | .Impure(body, _) | .Region(body, _) | .Live(body, _) | .Shield(body, _) | .Defer(body, _) | .Unsafe(_, body) | .UnsafeBlock(_, body, _) | .SentryPolicy(_, body, _) | .Layout(_, _, body, _) | .ContextBlock(_, body, _) | .ScopeMember(_, body, _) | .Transact(_, _, _, body, _) -> {
+        .ContractScope(_, body, _, _, _) | .TaskGroup(_, _, body, _) | .Loop(_, body, _) | .While(_, _, body, _) | .ForRange(_, _, _, _, _, _, body, _, _) | .Range(_, _, _, _, _, _, _, _, body, _) | .ForIn(_, _, _, _, _, _, _, _, _, _, body, _) | .Inline(body, _) | .DebugOnly(body, _) | .DeepCheck(body, _) | .Impure(body, _) | .Region(body, _) | .Live(body, _) | .Shield(body, _) | .Defer(body, _) | .Unsafe(_, body) | .UnsafeBlock(_, body, _) | .SentryPolicy(_, body, _) | .Layout(_, _, body, _) | .ContextBlock(_, body, _) | .ScopeMember(_, body, _) | .Transact(_, _, _, body, _) -> {
             if !sema_stmt_for_in_row_stays(tree, body, key) -> return false
         }
         .RefutableBind(_, _, fallback, _) -> {
@@ -4916,7 +4917,7 @@ sema_stmt_refutable_tree_block_has_never_expr: fn(statements: [TStmt]) -> Bool N
             .ExprStmt(value, _) -> {
                 if value.ty == (Type.Named{name: "Never"}) -> return true
             }
-            .Contract(_) | .ContractScope(_, _, _, _, _) | .Let(_, _, _, _, _, _) | .RefutableBind(_, _, _, _) | .TupleDestructure(_, _, _, _, _) | .StructDestructure(_, _, _, _, _) | .ListDestructure(_, _, _, _, _, _) | .Assign(_, _, _, _, _) | .CountedLoop(_, _, _, _, _, _, _) | .ForRange(_, _, _, _, _, _, _, _, _) | .Range(_, _, _, _, _, _, _, _, _, _) | .Return(_, _) | .TaskGroup(_, _, _, _) | .DeferClose(_, _, _) | .If(_, _, _, _, _) | .Loop(_, _, _) | .While(_, _, _, _) | .Break(_, _) | .BreakValue(_, _, _) | .Continue(_, _) | .Match(_, _, _, _) | .EnumMatch(_, _, _, _, _) | .RangeSwitch(_, _, _, _) | .ForIn(_, _, _, _, _, _, _, _, _, _, _, _) | .Inline(_, _) | .DebugOnly(_, _) | .MixedSwitch(_, _, _, _, _) | .Unsafe(_, _) | .UnsafeBlock(_, _, _) | .SentryPolicy(_, _, _) | .Impure(_, _) | .Reactive(_, _) | .Region(_, _) | .Layout(_, _, _, _) | .ContextBlock(_, _, _) | .Live(_, _) | .Shield(_, _) | .Defer(_, _) | .ScopeMember(_, _, _) | .Transact(_, _, _, _, _) | .GCEdit(_, _, _, _, _, _, _) -> {}
+            .Contract(_) | .ContractScope(_, _, _, _, _) | .Let(_, _, _, _, _, _) | .RefutableBind(_, _, _, _) | .TupleDestructure(_, _, _, _, _) | .StructDestructure(_, _, _, _, _) | .ListDestructure(_, _, _, _, _, _) | .Assign(_, _, _, _, _) | .CountedLoop(_, _, _, _, _, _, _) | .ForRange(_, _, _, _, _, _, _, _, _) | .Range(_, _, _, _, _, _, _, _, _, _) | .Return(_, _) | .TaskGroup(_, _, _, _) | .DeferClose(_, _, _) | .If(_, _, _, _, _) | .Loop(_, _, _) | .While(_, _, _, _) | .Break(_, _) | .BreakValue(_, _, _) | .Continue(_, _) | .Match(_, _, _, _) | .EnumMatch(_, _, _, _, _) | .RangeSwitch(_, _, _, _) | .ForIn(_, _, _, _, _, _, _, _, _, _, _, _) | .Inline(_, _) | .DebugOnly(_, _) | .DeepCheck(_, _) | .MixedSwitch(_, _, _, _, _) | .Unsafe(_, _) | .UnsafeBlock(_, _, _) | .SentryPolicy(_, _, _) | .Impure(_, _) | .Reactive(_, _) | .Region(_, _) | .Layout(_, _, _, _) | .ContextBlock(_, _, _) | .Live(_, _) | .Shield(_, _) | .Defer(_, _) | .ScopeMember(_, _, _) | .Transact(_, _, _, _, _) | .GCEdit(_, _, _, _, _, _, _) -> {}
         }
     }
     false
@@ -6874,7 +6875,7 @@ sema_stmt_tree_statement_touches_shared: fn(statement: TStmt, arena: BodyTree) -
             }
             sema_stmt_tree_statements_touch_shared(body, arena)
         }
-        .Inline(body, _) | .DebugOnly(body, _) | .Impure(body, _) | .Region(body, _) | .Live(body, _) | .Shield(body, _) | .Defer(body, _) -> sema_stmt_tree_statements_touch_shared(body, arena)
+        .Inline(body, _) | .DebugOnly(body, _) | .DeepCheck(body, _) | .Impure(body, _) | .Region(body, _) | .Live(body, _) | .Shield(body, _) | .Defer(body, _) -> sema_stmt_tree_statements_touch_shared(body, arena)
         .MixedSwitch(subject, _, arms, else_body, _) -> {
             if sema_stmt_tree_expr_touches_shared(subject, arena) -> return true
             loop arm in arms {
@@ -7054,7 +7055,7 @@ sema_stmt_row_statement_touches_shared: fn(tree: BodyTree, item: Int) -> Bool Ne
             if step == .Val(nested) && sema_stmt_row_touches_shared(tree, nested) -> return true
             return sema_stmt_rows_touch_shared(tree, body)
         }
-        .Loop(_, body, _) | .Inline(body, _) | .DebugOnly(body, _) | .Impure(body, _) | .Region(body, _) | .Live(body, _) | .Shield(body, _) | .Defer(body, _) | .Unsafe(_, body) | .UnsafeBlock(_, body, _) | .SentryPolicy(_, body, _) | .Layout(_, _, body, _) -> return sema_stmt_rows_touch_shared(tree, body)
+        .Loop(_, body, _) | .Inline(body, _) | .DebugOnly(body, _) | .DeepCheck(body, _) | .Impure(body, _) | .Region(body, _) | .Live(body, _) | .Shield(body, _) | .Defer(body, _) | .Unsafe(_, body) | .UnsafeBlock(_, body, _) | .SentryPolicy(_, body, _) | .Layout(_, _, body, _) -> return sema_stmt_rows_touch_shared(tree, body)
         .MixedSwitch(subject, _, arms, else_body, _) -> {
             if sema_stmt_row_touches_shared(tree, subject) -> return true
             loop arm in arms {
@@ -10276,8 +10277,17 @@ sema_stmt_check_scoped_statement: fn(statement: Stmt, return_type: Type?, enviro
         }
         .Switched(marker, body, span) -> {
             if {
-                marker.name == MARKER_OFF -> {
-                    release_only: sema_switch_off_release_only(marker)
+                marker.name == MARKER_OFF || marker.name == MARKER_ON -> {
+                    condition: sema_switch_condition(marker)
+                    // `#Off` takes `.Release` and `#On` takes `.Deep`; a bare
+                    // `#Off` erases its body and a bare `#On` is a missing
+                    // argument the marker registry reports.
+                    wrong: (marker.name == MARKER_OFF && condition == "Deep") || (marker.name == MARKER_ON && condition == "Release")
+                    if wrong {
+                        pairing: if condition == "Deep" -> MARKER_ON else -> MARKER_OFF
+                        diagnostics.push(sema_error("E0397", marker.span, "`#{marker.name}(.{condition})` is not a switch attribute.", "`#Off` takes `.Release` and `#On` takes `.Deep`: each build condition belongs to one marker.", "Write `#{pairing}(.{condition})`."))
+                    }
+                    kept: !wrong && condition != ""
                     erased_scope_mark: sema_scope_mark(scopes)
                     erased_state := sema_ownership_state_snapshot(state)
                     erased_mark: sema_check_context_mark(context)
@@ -10285,16 +10295,15 @@ sema_stmt_check_scoped_statement: fn(statement: Stmt, return_type: Type?, enviro
                     sema_ownership_keep_mutations(state, erased_state)
                     erased_reasons := [String]{}
                     loop reason_index in erased_mark.incomplete_reasons..<context.incomplete_reasons.len() -> erased_reasons.push(context.incomplete_reasons[reason_index])
-                    if release_only -> sema_check_context_rollback_keep_expr_ids(context, erased_mark.move()) else -> sema_check_context_rollback(context, erased_mark.move())
+                    if kept -> sema_check_context_rollback_keep_expr_ids(context, erased_mark.move()) else -> sema_check_context_rollback(context, erased_mark.move())
                     sema_scope_rollback(scopes, erased_scope_mark)
                     if {
                         !checked.complete -> {
                             complete = false
                             loop reason in erased_reasons -> sema_check_unsupported(context, reason)
                         }
-                        release_only -> {
-                            output.push(TStmt.DebugOnly{body: checked.value, span: span})
-                        }
+                        kept && marker.name == MARKER_OFF -> output.push(TStmt.DebugOnly{body: checked.value, span: span})
+                        kept -> output.push(TStmt.DeepCheck{body: checked.value, span: span})
                     }
                 }
                 // Rust checks any other switched marker's body as a plain
@@ -10402,19 +10411,21 @@ sema_stmt_check_scoped_statement: fn(statement: Stmt, return_type: Type?, enviro
     complete
 }
 
-// `#Off(.Release)` names the one entry of the closed build
-// condition menu, so its body runs in every build but a release build; a bare
-// `#Off` erases its body from every build. The marker registry has already
-// checked the argument against `BuildCondition` (Prelude Markers.jet).
-sema_switch_off_release_only: fn(marker: Marker) -> Bool Never! {
-    if marker.args.len() != 1 -> return false
+// The build condition a switch attribute names: "Release" for
+// `#Off(.Release)`, whose body runs in every build but a release build;
+// "Deep" for `#On(.Deep)`, whose body runs where `--deep-checks` selects it;
+// "" for a bare `#Off`, which erases its body from every build. The marker
+// registry has already checked the argument against `BuildCondition`
+// (Prelude Markers.jet).
+sema_switch_condition: fn(marker: Marker) -> String Never! {
+    if marker.args.len() != 1 -> return ""
     if marker.args[0] == .Expr(value) {
         if value == {
-            .EnumLit(_, variant, _, _, _, _, _) -> return variant == "Release"
-            .Field(_, member, _, _) -> return member == "Release"
-            .Ident(name, _, _) -> return name == "Release"
+            .EnumLit(_, variant, _, _, _, _, _) -> return variant.copy()
+            .Field(_, member, _, _) -> return member.copy()
+            .Ident(name, _, _) -> return name.copy()
             .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .TypeValue(_, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) -> {}
         }
     }
-    false
+    ""
 }

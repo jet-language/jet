@@ -28,59 +28,67 @@ deep_checks_test_refused: fn(argv: [String]) -> String Never! {
 }
 
 #Test("bare and scoped deep-check flags keep every scope once, in argv order") {
-    request: deep_checks_test_read(["run", "--deep-checks=tree.run", "--deep-checks", "--deep-checks=my-lib.io", "--deep-checks=tree.run", "app.jet"])
+    request: deep_checks_test_read(["run", "--deep-checks=tree::run", "--deep-checks", "--deep-checks=my-lib::io", "--deep-checks=tree::run", "app.jet"])
     assert(request.all)
-    assert_eq(request.scopes, ["tree.run", "my-lib.io"])
-    assert_eq(deep_checks_flags(request), ["--deep-checks", "--deep-checks=tree.run", "--deep-checks=my-lib.io"])
+    assert_eq(request.scopes, ["tree::run", "my-lib::io"])
+    assert_eq(deep_checks_flags(request), ["--deep-checks", "--deep-checks=tree::run", "--deep-checks=my-lib::io"])
 }
 
 #Test("one selection written in any order has one cache key") {
-    one: deep_checks_test_read(["--deep-checks=tree.run", "--deep-checks=tree.balance"])
-    other: deep_checks_test_read(["--deep-checks=tree.balance", "--deep-checks=tree.run", "--deep-checks=tree.run"])
-    assert_eq(deep_checks_key(one), "tree.balance,tree.run")
+    one: deep_checks_test_read(["--deep-checks=tree::run", "--deep-checks=tree::balance"])
+    other: deep_checks_test_read(["--deep-checks=tree::balance", "--deep-checks=tree::run", "--deep-checks=tree::run"])
+    assert_eq(deep_checks_key(one), "tree::balance,tree::run")
     assert_eq(deep_checks_key(one), deep_checks_key(other))
     assert_eq(deep_checks_key(deep_checks_test_read(["--deep-checks", "--deep-checks=tree"])), "all,tree")
     options := build_options_stock("run")
     options.deep_checks = one
-    assert(build_options_key(options).ends_with(";deep=tree.balance,tree.run"))
+    assert(build_options_key(options).ends_with(";deep=tree::balance,tree::run"))
+}
+
+#Test("a scope is a package name, alone or then `::` and dotted names") {
+    loop scope in ["tree", "my-lib", "tree::run", "tree::balance.rebuild", "tree::balance.Tree.rebalance", "my-lib::io_2.read"] {
+        assert_eq(deep_checks_test_read(["--deep-checks={scope}"]).scopes, [scope])
+    }
 }
 
 #Test("an empty or malformed deep-check scope is refused with E2119") {
-    loop scope in ["", "tree..run", ".tree", "tree.", "tree::run", "tree run", "tree/run"] {
+    loop scope in ["", "tree.run", "tree.balance.rebuild", "tree::", "::run", "tree::run::size", "tree::balance..rebuild", "tree::.run", "tree::run.", "tree::my-fn", "tree run", "tree/run", "tree:run"] {
         assert_eq(deep_checks_test_refused(["--deep-checks={scope}"]), "--deep-checks={scope}")
     }
-    report: deep_checks_malformed("--deep-checks=tree::run")
+    report: deep_checks_malformed("--deep-checks=tree.run")
     assert_eq(report.code, "E2119")
-    assert_eq(report.what, "`--deep-checks=tree::run` isn't a deep-check scope.")
-    assert_eq(report.fix, "Write `--deep-checks` for every deep check, or name a scope, such as `--deep-checks=tree.run`.")
+    assert_eq(report.what, "`--deep-checks=tree.run` isn't a deep-check scope.")
+    assert_eq(report.fix, "Write `--deep-checks` for every deep check, or name a scope, such as `--deep-checks=tree::run`.")
 }
 
-#Test("a scope selects its declaration and every one under it at a dot") {
-    assert(deep_checks_selects("tree", "tree"))
-    assert(deep_checks_selects("tree", "tree.balance.Tree.fix"))
-    assert(deep_checks_selects("tree.run", "tree.run"))
-    assert(!deep_checks_selects("tree.run", "tree.runner"))
-    assert(!deep_checks_selects("tree", "treehouse.run"))
+#Test("a scope selects its declaration and every one under it, at `::` under a package and at a dot under a name") {
+    assert(deep_checks_selects("tree", "tree::run"))
+    assert(deep_checks_selects("tree", "tree::balance.Tree.fix"))
+    assert(deep_checks_selects("tree::balance", "tree::balance.Tree.fix"))
+    assert(deep_checks_selects("tree::run", "tree::run"))
+    assert(!deep_checks_selects("tree::run", "tree::runner"))
+    assert(!deep_checks_selects("tree", "treehouse::run"))
+    assert(!deep_checks_selects("tree::balance", "tree::balanced.fix"))
 }
 
 #Test("every scope that keeps no deep check is reported, even beside a bare flag") {
-    paths: [String]{"tree.run", "tree.size", "tree.balance.Tree.fix", "tree.balance.Tree.fix", "tree.balance.rotate", "tree.balance.grow"}
-    holders: [String]{"tree.balance.Tree.fix"}
-    request: deep_checks_test_read(["--deep-checks", "--deep-checks=tree.balance", "--deep-checks=tree.run", "--deep-checks=tree.nowhere"])
+    paths: [String]{"tree::run", "tree::size", "tree::balance.Tree.fix", "tree::balance.Tree.fix", "tree::balance.rotate", "tree::balance.grow"}
+    holders: [String]{"tree::balance.Tree.fix"}
+    request: deep_checks_test_read(["--deep-checks", "--deep-checks=tree::balance", "--deep-checks=tree::run", "--deep-checks=tree::nowhere"])
     found: deep_checks_unselected(request, paths, holders)
     assert_eq(found.len(), 2)
-    assert_eq(found[0].scope, "tree.run")
-    assert_eq(found[0].selected, ["tree.run"])
+    assert_eq(found[0].scope, "tree::run")
+    assert_eq(found[0].selected, ["tree::run"])
     selected: deep_checks_unselected_report(found[0], holders)
     assert_eq(selected.code, "E2121")
-    assert_eq(selected.what, "`--deep-checks=tree.run` selects `tree.run`, and none of them holds a deep check.")
-    assert_eq(selected.fix, "Drop it, or name a scope that holds a deep check: `--deep-checks=tree.balance.Tree.fix`.")
-    assert_eq(found[1].scope, "tree.nowhere")
+    assert_eq(selected.what, "`--deep-checks=tree::run` selects `tree::run`, and none of them holds a deep check.")
+    assert_eq(selected.fix, "Drop it, or name a scope that holds a deep check: `--deep-checks=tree::balance.Tree.fix`.")
+    assert_eq(found[1].scope, "tree::nowhere")
     assert_eq(found[1].selected.len(), 0)
     unknown: deep_checks_unselected_report(found[1], [String]{})
     assert_eq(unknown.code, "E2120")
-    assert_eq(unknown.what, "`--deep-checks=tree.nowhere` names no package, module, type or function of this program.")
+    assert_eq(unknown.what, "`--deep-checks=tree::nowhere` names no package, module, type or function of this program.")
     assert_eq(unknown.fix, "Drop it, or name a scope that holds a deep check: no declaration of this program holds one.")
-    many: DeepChecksUnselected{scope: "tree", selected: ["tree.a", "tree.b", "tree.c", "tree.d", "tree.e"]}
-    assert_eq(deep_checks_unselected_report(many, holders).what, "`--deep-checks=tree` selects `tree.a`, `tree.b`, `tree.c` and 2 more, and none of them holds a deep check.")
+    many: DeepChecksUnselected{scope: "tree", selected: ["tree::a", "tree::b", "tree::c", "tree::d", "tree::e"]}
+    assert_eq(deep_checks_unselected_report(many, holders).what, "`--deep-checks=tree` selects `tree::a`, `tree::b`, `tree::c` and 2 more, and none of them holds a deep check.")
 }

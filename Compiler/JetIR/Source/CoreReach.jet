@@ -318,7 +318,7 @@ ir_core_reach_one_stmt_keys: fn(tree: BodyTree, statement: Int, functions: [FnBo
                 ir_core_reach_stmt_keys(tree, body, functions, keys)
             }
             .ContractScope(_, body, _, _, _) | .TaskGroup(_, _, body, _) | .Loop(_, body, _) | .While(_, _, body, _) | .ForRange(_, _, _, _, _, _, body, _, _) | .Range(_, _, _, _, _, _, _, _, body, _) -> ir_core_reach_stmt_keys(tree, body, functions, keys)
-            .Inline(body, _) | .DebugOnly(body, _) | .Impure(body, _) | .Region(body, _) | .Live(body, _) | .Shield(body, _) | .Defer(body, _) | .UnsafeBlock(_, body, _) | .SentryPolicy(_, body, _) | .Layout(_, _, body, _) | .ScopeMember(_, body, _) | .Transact(_, _, _, body, _) | .Unsafe(_, body) -> ir_core_reach_stmt_keys(tree, body, functions, keys)
+            .Inline(body, _) | .DebugOnly(body, _) | .DeepCheck(body, _) | .Impure(body, _) | .Region(body, _) | .Live(body, _) | .Shield(body, _) | .Defer(body, _) | .UnsafeBlock(_, body, _) | .SentryPolicy(_, body, _) | .Layout(_, _, body, _) | .ScopeMember(_, body, _) | .Transact(_, _, _, body, _) | .Unsafe(_, body) -> ir_core_reach_stmt_keys(tree, body, functions, keys)
             .ContextBlock(guards, body, _) -> {
                 loop guard in guards {
                     if guard.field == "print" -> ir_print_style_keys(functions, keys)

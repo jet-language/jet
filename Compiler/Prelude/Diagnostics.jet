@@ -3648,14 +3648,33 @@ DuplicateSwitchOff: struct {
     impl Diagnostic {
         code: "E0344"
         safety_class: .Soundness
-        safety_reason: "Two switch-off markers give one statement two conditions for emitting code, so builds could disagree on which one applies."
+        safety_reason: "Two switch markers give one statement two conditions for emitting code, so builds could disagree on which one applies."
         expert_path: "none: one statement has one switch"
         stage: [.Parse]
-        meaning: "Doubled statement switch-off attributes"
+        meaning: "Doubled statement switch attributes"
         detail: true
-        what: fn(self) -> String { "Only one switch-off attribute can be written on a statement." }
-        why: fn(self) -> String { "Two `#Off` markers both control whether the same statement emits code." }
-        fix: fn(self) -> String { "Keep one marker: `#Off <statement>` or `#Off(.Release) <statement>`." }
+        what: fn(self) -> String { "Only one switch attribute can be written on a statement." }
+        why: fn(self) -> String { "`#Off` and `#On` markers each control whether the same statement emits code." }
+        fix: fn(self) -> String { "Keep one marker: `#Off <statement>`, `#Off(.Release) <statement>` or `#On(.Deep) <statement>`." }
+    }
+}
+
+SwitchConditionMismatch: struct {
+    written: String
+    condition: String
+    pairing: String
+
+    impl Diagnostic {
+        code: "E0397"
+        safety_class: .Soundness
+        safety_reason: "Each build condition belongs to one marker, so a mismatched pairing would leave the reader to guess whether the body runs."
+        expert_path: "none: `#Off` takes `.Release` and `#On` takes `.Deep`"
+        stage: [.Sema]
+        meaning: "A switch attribute written with the other marker's build condition"
+        detail: true
+        what: fn(self) -> String { "`#{self.written}(.{self.condition})` is not a switch attribute." }
+        why: fn(self) -> String { "`#Off` takes `.Release` and `#On` takes `.Deep`: each build condition belongs to one marker." }
+        fix: fn(self) -> String { "Write `#{self.pairing}(.{self.condition})`." }
     }
 }
 
@@ -13434,14 +13453,14 @@ DeepCheckScopeMalformed: struct {
         code: "E2119"
         safety_class: .Soundness
         safety_reason: "The text is no scope, so it selects nothing."
-        expert_path: "none: the scope is dotted names"
+        expert_path: "none: the scope is a package name, then `::` and dotted names"
         stage: [.Jet]
-        meaning: "A `--deep-checks=<scope>` flag names no scope, or one that isn't names joined by `.`"
+        meaning: "A `--deep-checks=<scope>` flag names no scope, or one that isn't a package name, alone or then `::` and names joined by `.`"
         detail: true
         no_fix: .Ambiguous
         what: fn(self) -> String { "`{self.argument}` isn't a deep-check scope." }
-        why: fn(self) -> String { "A deep-check scope is a package name, then module, type and function names, joined by `.`; each name is letters, digits, `_` and `-`." }
-        fix: fn(self) -> String { "Write `--deep-checks` for every deep check, or name a scope, such as `--deep-checks=tree.run`." }
+        why: fn(self) -> String { "A deep-check scope is a package name, alone or then `::` and module, type and function names joined by `.`; a package name is letters, digits, `_` and `-`, and every other name letters, digits and `_`." }
+        fix: fn(self) -> String { "Write `--deep-checks` for every deep check, or name a scope, such as `--deep-checks=tree::run`." }
     }
 }
 

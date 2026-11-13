@@ -1,0 +1,24 @@
+package: {
+    name: "sizes"
+}
+
+Tree: struct { children: [Tree], cached_size: Int }
+
+deep_consistent: fn(tree: Tree) -> Bool {
+    count := 1
+    loop child in tree.children {
+        if !deep_consistent(child) -> return false
+        count += child.cached_size
+    }
+    tree.cached_size == count
+}
+
+leaf: fn() -> Tree { Tree{children: [Tree]{}, cached_size: 1} }
+
+run: fn() {
+    tree: Tree{children: [Tree]{leaf(), leaf()}, cached_size: 4}
+    #On(.Deep) {
+        assert(deep_consistent(tree), "tree size is wrong")
+    }
+    print(tree.cached_size)
+}

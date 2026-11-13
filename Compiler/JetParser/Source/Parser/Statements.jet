@@ -16,6 +16,7 @@ use {
         LValue,
         MARKER_FX,
         MARKER_OFF,
+        MARKER_ON,
         MARKER_TRANSACT,
         MARKER_UNSAFE,
         Marker,
@@ -2168,14 +2169,15 @@ parser_parse_marked_statement: fn(state: &JetParserState) -> Stmt {
             }
         }
     }
-    // A switch-off attribute (`#Off` or `#Off(.Release)`) governs a block or
-    // the one statement after it; two on one statement is E0344.
-    if word == MARKER_OFF {
+    // A switch attribute (`#Off`, `#Off(.Release)` or `#On(.Deep)`) governs
+    // a block or the one statement after it; two on one statement is E0344.
+    if word == MARKER_OFF || word == MARKER_ON {
         if parser_current_kind(state) == TOKEN_HASH {
             second_hash: parser_current(state)
             second: parser_lookahead(state, 1)
-            if second.kind == TOKEN_IDENT && parser_value(state, second) == MARKER_OFF {
-                parser_add_error_code(state, "E0344", Span{start: second_hash.span.start, end: second.span.end}, "only one switch-off attribute can be written on a statement", "two `#Off` markers both control whether the same statement emits code", "keep one marker: `#Off <statement>` or `#Off(.Release) <statement>`")
+            second_word: if second.kind == TOKEN_IDENT -> parser_value(state, second) else -> ""
+            if second_word == MARKER_OFF || second_word == MARKER_ON {
+                parser_add_error_code(state, "E0344", Span{start: second_hash.span.start, end: second.span.end}, "only one switch attribute can be written on a statement", "`#Off` and `#On` markers each control whether the same statement emits code", "keep one marker: `#Off <statement>`, `#Off(.Release) <statement>` or `#On(.Deep) <statement>`")
             }
         }
         if parser_current_kind(state) != TOKEN_LBRACE {
@@ -2239,7 +2241,7 @@ parser_parse_marked_statement: fn(state: &JetParserState) -> Stmt {
         }
         "Reactive" -> Stmt.Reactive{body: body.statements, span: span}
         "Shield" -> Stmt.Shield{body: body.statements, span: span}
-        "Off" -> Stmt.Switched{marker: marker, body: body.statements, span: span}
+        "Off" | "On" -> Stmt.Switched{marker: marker, body: body.statements, span: span}
         "FX" -> parser_authority_scope_stmt(state, marker, args, body.statements, span) ?? Stmt.Expr{expr: Expr.Unit{span: hash.span, id: parser_node_id(state)}}
         "Policy" -> parser_policy_block_stmt(state, marker, body.statements, span) ?? Stmt.Expr{expr: Expr.Unit{span: hash.span, id: parser_node_id(state)}}
         "Overflow" -> parser_overflow_block_stmt(state, marker, body.statements, span)

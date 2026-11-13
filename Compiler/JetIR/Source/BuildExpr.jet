@@ -362,7 +362,7 @@ ir_poison_binders: fn(p: IRProgram, b: &IRBuilder, statement: Int) Never! {
         .RefutableBind(pattern, _, _, _) -> {
             loop binding in pattern.bindings -> b.poisoned.push(binding.name)
         }
-        .Contract(_) | .ContractScope(_, _, _, _, _) | .Assign(_, _, _, _, _) | .CountedLoop(_, _, _, _, _, _, _) | .ForRange(_, _, _, _, _, _, _, _, _) | .Range(_, _, _, _, _, _, _, _, _, _) | .ExprStmt(_, _) | .Return(_, _) | .TaskGroup(_, _, _, _) | .DeferClose(_, _, _) | .If(_, _, _, _, _) | .Loop(_, _, _) | .While(_, _, _, _) | .Break(_, _) | .BreakValue(_, _, _) | .Continue(_, _) | .Match(_, _, _, _) | .EnumMatch(_, _, _, _, _) | .RangeSwitch(_, _, _, _) | .ForIn(_, _, _, _, _, _, _, _, _, _, _, _) | .Inline(_, _) | .DebugOnly(_, _) | .MixedSwitch(_, _, _, _, _) | .Unsafe(_, _) | .UnsafeBlock(_, _, _) | .SentryPolicy(_, _, _) | .Impure(_, _) | .Reactive(_, _) | .Region(_, _) | .Layout(_, _, _, _) | .ContextBlock(_, _, _) | .Live(_, _) | .Shield(_, _) | .Defer(_, _) | .ScopeMember(_, _, _) | .Transact(_, _, _, _, _) | .GCEdit(_, _, _, _, _, _, _) -> {}
+        .Contract(_) | .ContractScope(_, _, _, _, _) | .Assign(_, _, _, _, _) | .CountedLoop(_, _, _, _, _, _, _) | .ForRange(_, _, _, _, _, _, _, _, _) | .Range(_, _, _, _, _, _, _, _, _, _) | .ExprStmt(_, _) | .Return(_, _) | .TaskGroup(_, _, _, _) | .DeferClose(_, _, _) | .If(_, _, _, _, _) | .Loop(_, _, _) | .While(_, _, _, _) | .Break(_, _) | .BreakValue(_, _, _) | .Continue(_, _) | .Match(_, _, _, _) | .EnumMatch(_, _, _, _, _) | .RangeSwitch(_, _, _, _) | .ForIn(_, _, _, _, _, _, _, _, _, _, _, _) | .Inline(_, _) | .DebugOnly(_, _) | .DeepCheck(_, _) | .MixedSwitch(_, _, _, _, _) | .Unsafe(_, _) | .UnsafeBlock(_, _, _) | .SentryPolicy(_, _, _) | .Impure(_, _) | .Reactive(_, _) | .Region(_, _) | .Layout(_, _, _, _) | .ContextBlock(_, _, _) | .Live(_, _) | .Shield(_, _) | .Defer(_, _) | .ScopeMember(_, _, _) | .Transact(_, _, _, _, _) | .GCEdit(_, _, _, _, _, _, _) -> {}
     }
 }
 
@@ -373,7 +373,7 @@ ir_stmts_leave: fn(p: IRProgram, b: IRBuilder, body: [Int]) -> Bool Never! {
         if ir_body_stmt(p, b, body[index]) == {
             .Return(_, _) | .Break(_, _) | .BreakValue(_, _, _) | .Continue(_, _) -> return true
             .ExprStmt(value, _) -> return ir_never_type(ir_ty(p, b, value))
-            .Contract(_) | .ContractScope(_, _, _, _, _) | .Let(_, _, _, _, _, _) | .RefutableBind(_, _, _, _) | .TupleDestructure(_, _, _, _, _) | .StructDestructure(_, _, _, _, _) | .ListDestructure(_, _, _, _, _, _) | .Assign(_, _, _, _, _) | .CountedLoop(_, _, _, _, _, _, _) | .ForRange(_, _, _, _, _, _, _, _, _) | .Range(_, _, _, _, _, _, _, _, _, _) | .TaskGroup(_, _, _, _) | .DeferClose(_, _, _) | .If(_, _, _, _, _) | .Loop(_, _, _) | .While(_, _, _, _) | .Match(_, _, _, _) | .EnumMatch(_, _, _, _, _) | .RangeSwitch(_, _, _, _) | .ForIn(_, _, _, _, _, _, _, _, _, _, _, _) | .Inline(_, _) | .DebugOnly(_, _) | .MixedSwitch(_, _, _, _, _) | .Unsafe(_, _) | .UnsafeBlock(_, _, _) | .SentryPolicy(_, _, _) | .Impure(_, _) | .Reactive(_, _) | .Region(_, _) | .Layout(_, _, _, _) | .ContextBlock(_, _, _) | .Live(_, _) | .Shield(_, _) | .Defer(_, _) | .ScopeMember(_, _, _) | .Transact(_, _, _, _, _) | .GCEdit(_, _, _, _, _, _, _) -> return false
+            .Contract(_) | .ContractScope(_, _, _, _, _) | .Let(_, _, _, _, _, _) | .RefutableBind(_, _, _, _) | .TupleDestructure(_, _, _, _, _) | .StructDestructure(_, _, _, _, _) | .ListDestructure(_, _, _, _, _, _) | .Assign(_, _, _, _, _) | .CountedLoop(_, _, _, _, _, _, _) | .ForRange(_, _, _, _, _, _, _, _, _) | .Range(_, _, _, _, _, _, _, _, _, _) | .TaskGroup(_, _, _, _) | .DeferClose(_, _, _) | .If(_, _, _, _, _) | .Loop(_, _, _) | .While(_, _, _, _) | .Match(_, _, _, _) | .EnumMatch(_, _, _, _, _) | .RangeSwitch(_, _, _, _) | .ForIn(_, _, _, _, _, _, _, _, _, _, _, _) | .Inline(_, _) | .DebugOnly(_, _) | .DeepCheck(_, _) | .MixedSwitch(_, _, _, _, _) | .Unsafe(_, _) | .UnsafeBlock(_, _, _) | .SentryPolicy(_, _, _) | .Impure(_, _) | .Reactive(_, _) | .Region(_, _) | .Layout(_, _, _, _) | .ContextBlock(_, _, _) | .Live(_, _) | .Shield(_, _) | .Defer(_, _) | .ScopeMember(_, _, _) | .Transact(_, _, _, _, _) | .GCEdit(_, _, _, _, _, _, _) -> return false
         }
     }
     false
@@ -777,6 +777,12 @@ ir_stmt_body: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: Int) Neve
         // a release build, which emits no code for it.
         .DebugOnly(body, _) -> {
             if !p.checks.release -> ir_stmts(m, p, b, body)
+        }
+        // An `#On(.Deep)` body runs as a plain scope in a function the
+        // `--deep-checks` request selects, in every profile; any other
+        // function emits no code for it.
+        .DeepCheck(body, _) -> {
+            if ir_deep_checks_on(p, b.row) -> ir_stmts(m, p, b, body)
         }
         .Live(body, _) -> ir_live(m, p, b, body)
         .Unsafe(gate, body) -> ir_unsafe_scope(m, p, b, gate, body)

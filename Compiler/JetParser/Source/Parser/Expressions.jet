@@ -1102,6 +1102,10 @@ parser_parse_marker_value: fn(state: &JetParserState, depth: Int, allow_struct_l
             parser_add_fatal_code(state, "E0343", head_span, "`#Off` does not produce a value", "statement switch attributes control a whole statement; expressions must still produce values in every build", "put it before the statement: `#Off <statement>` or `#Off(.Release) <statement>`")
             return ParsedExpr{expr: Expr.Unit{span: head_span, id: parser_node_id(state)}, span: head_span}
         }
+        "On" -> {
+            parser_add_fatal_code(state, "E0343", head_span, "`#On` does not produce a value", "statement switch attributes control a whole statement; expressions must still produce values in every build", "put it before the statement: `#On(.Deep) <statement>`")
+            return ParsedExpr{expr: Expr.Unit{span: head_span, id: parser_node_id(state)}, span: head_span}
+        }
         "Todo" -> return ParsedExpr{expr: Expr.Todo{span: head_span, expected_type: None, id: parser_node_id(state)}, span: head_span}
         else -> {}
     }

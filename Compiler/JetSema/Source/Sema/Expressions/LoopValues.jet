@@ -223,12 +223,13 @@ sema_loop_value_rewrite_collecting_statements: fn(statements: &[TStmt], local: T
                 if !sema_loop_value_rewrite_collecting_statements(updated_body, local, item_type, environment, program, diagnostics) -> return false
                 statements[index] = TStmt.Unsafe{gate: gate, body: updated_body}
             }
-            .Inline(body, span) | .DebugOnly(body, span) | .UnsafeBlock(_, body, span) | .SentryPolicy(_, body, span) | .Impure(body, span) | .Region(body, span) | .Live(body, span) | .Shield(body, span) | .Defer(body, span) | .ScopeMember(_, body, span) -> {
+            .Inline(body, span) | .DebugOnly(body, span) | .DeepCheck(body, span) | .UnsafeBlock(_, body, span) | .SentryPolicy(_, body, span) | .Impure(body, span) | .Region(body, span) | .Live(body, span) | .Shield(body, span) | .Defer(body, span) | .ScopeMember(_, body, span) -> {
                 updated_body := body
                 if !sema_loop_value_rewrite_collecting_statements(updated_body, local, item_type, environment, program, diagnostics) -> return false
                 if statement == {
                     .Inline(_, _) -> statements[index] = TStmt.Inline{body: updated_body, span: span}
                     .DebugOnly(_, _) -> statements[index] = TStmt.DebugOnly{body: updated_body, span: span}
+                    .DeepCheck(_, _) -> statements[index] = TStmt.DeepCheck{body: updated_body, span: span}
                     .UnsafeBlock(gate, _, _) -> statements[index] = TStmt.UnsafeBlock{gate: gate, body: updated_body, span: span}
                     .SentryPolicy(enabled, _, _) -> statements[index] = TStmt.SentryPolicy{enabled: enabled, body: updated_body, span: span}
                     .Impure(_, _) -> statements[index] = TStmt.Impure{body: updated_body, span: span}
@@ -406,12 +407,13 @@ sema_loop_value_widen_result_breaks_in: fn(statements: &[TStmt], root_label: Str
                 if !sema_loop_value_widen_result_breaks_in(nested_body, root_label, result_type, allow_unlabeled, environment, program, diagnostics) -> return false
                 statements[index] = TStmt.GCEdit{root: root, slot: slot, edges: edges, replace_all: replace_all, index_temp: index_temp, statement: nested_body[0], span: span}
             }
-            .Inline(body, span) | .DebugOnly(body, span) | .UnsafeBlock(_, body, span) | .SentryPolicy(_, body, span) | .Impure(body, span) | .Region(body, span) | .Live(body, span) | .Shield(body, span) | .Defer(body, span) | .ScopeMember(_, body, span) -> {
+            .Inline(body, span) | .DebugOnly(body, span) | .DeepCheck(body, span) | .UnsafeBlock(_, body, span) | .SentryPolicy(_, body, span) | .Impure(body, span) | .Region(body, span) | .Live(body, span) | .Shield(body, span) | .Defer(body, span) | .ScopeMember(_, body, span) -> {
                 updated_body := body
                 if !sema_loop_value_widen_result_breaks_in(updated_body, root_label, result_type, allow_unlabeled, environment, program, diagnostics) -> return false
                 if statement == {
                     .Inline(_, _) -> statements[index] = TStmt.Inline{body: updated_body, span: span}
                     .DebugOnly(_, _) -> statements[index] = TStmt.DebugOnly{body: updated_body, span: span}
+                    .DeepCheck(_, _) -> statements[index] = TStmt.DeepCheck{body: updated_body, span: span}
                     .UnsafeBlock(gate, _, _) -> statements[index] = TStmt.UnsafeBlock{gate: gate, body: updated_body, span: span}
                     .SentryPolicy(enabled, _, _) -> statements[index] = TStmt.SentryPolicy{enabled: enabled, body: updated_body, span: span}
                     .Impure(_, _) -> statements[index] = TStmt.Impure{body: updated_body, span: span}

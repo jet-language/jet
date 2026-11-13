@@ -253,19 +253,31 @@ deep_checks_read: fn(argv: [String]) -> DeepChecksRead Never! {
     DeepChecksRead.Read{request: request}
 }
 
-// A scope is names joined by `.`, each of ASCII letters, digits, `_` and `-`
-// (a package name may hold `-`).
+// A scope is a package name, alone or then `::` and the names of a module,
+// type or function under it joined by `.` (`tree`, `tree::run`,
+// `tree::balance.Tree.fix`). A package name is ASCII letters, digits, `_`
+// and `-`; each name after `::` is letters, digits and `_`.
 deep_checks_scope_valid: fn(scope: String) -> Bool Never! {
-    if scope == "" -> return false
-    loop segment in scope.split(".") {
-        bytes: segment.bytes()
-        if bytes.len() == 0 -> return false
-        loop byte in bytes {
-            n: Int{byte}
-            letter: (n >= 65 && n <= 90) || (n >= 97 && n <= 122)
-            digit: n >= 48 && n <= 57
-            if !letter && !digit && n != 95 && n != 45 -> return false
+    if scope.split_once("::") == .Val(parts) {
+        if !deep_checks_name_valid(parts.before, true) -> return false
+        loop name in parts.after.split(".") {
+            if !deep_checks_name_valid(name, false) -> return false
         }
+        return true
+    }
+    deep_checks_name_valid(scope, true)
+}
+
+// One name of a scope: ASCII letters, digits and `_`, and `-` in a package
+// name (`dashed`).
+deep_checks_name_valid: fn(name: String, dashed: Bool) -> Bool Never! {
+    bytes: name.bytes()
+    if bytes.len() == 0 -> return false
+    loop byte in bytes {
+        n: Int{byte}
+        letter: (n >= 65 && n <= 90) || (n >= 97 && n <= 122)
+        digit: n >= 48 && n <= 57
+        if !letter && !digit && n != 95 && !(dashed && n == 45) -> return false
     }
     true
 }
@@ -294,10 +306,14 @@ deep_checks_flags: fn(request: DeepChecks) -> [String] Never! {
     words
 }
 
-// Does `scope` select the declaration at the dotted `path`: the path itself,
-// or one under it (`tree` selects `tree.run` and `tree.balance.Tree.fix`).
+// Does `scope` select the declaration at `path` (`<package>::<names>`): the
+// path itself, or one under it, at `::` under a package and at `.` under a
+// name (`tree` selects `tree::run` and `tree::balance.Tree.fix`;
+// `tree::balance` selects the latter).
 deep_checks_selects: fn(scope: String, path: String) -> Bool Never! {
-    path == scope || path.starts_with("{scope}.")
+    if path == scope -> return true
+    separator: if scope.contains("::") -> "." else -> "::"
+    path.starts_with("{scope}{separator}")
 }
 
 // A scope that keeps no deep check. `selected` are the declarations it
@@ -308,8 +324,8 @@ DeepChecksUnselected: struct {
 }
 
 // Every scope of `request` that keeps no deep check, in argv order, given the
-// dotted path of each declaration (`paths`) and of each that holds a deep
-// check (`holders`). A bare flag beside a scope excuses none.
+// path of each declaration (`paths`) and of each that holds a deep check
+// (`holders`). A bare flag beside a scope excuses none.
 deep_checks_unselected: fn(request: DeepChecks, paths: [String], holders: [String]) -> [DeepChecksUnselected] Never! {
     found := [DeepChecksUnselected]{}
     loop scope in request.scopes {

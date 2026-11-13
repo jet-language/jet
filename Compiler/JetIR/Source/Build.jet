@@ -323,6 +323,9 @@ IRChecks: struct {
     // A release build (the `release` or `hardened` profile): an
     // `#Off(.Release)` body emits no code (ir_stmt).
     release: Bool{false}
+    // `--deep-checks`: the checked functions, by key, whose `#On(.Deep)`
+    // bodies emit code (ir_deep_checks_on); every other one emits none.
+    deep: [String:Bool]{[String:Bool]{}}
 }
 
 // An argv-selectable job: the checked function `key` that the program word
@@ -367,6 +370,12 @@ ir_bounds_mode: fn(p: IRProgram, row: Int) -> IRBoundsMode Never! {
     if row < 0 || p.checks.bounds == .Fatal -> return IRBoundsMode.Fatal
     if p.checks.modules.get(p.functions[row].module_identity.id) == None -> return IRBoundsMode.Fatal
     p.checks.bounds
+}
+
+// Do the `#On(.Deep)` bodies of checked function `row` emit code: the
+// compile's `--deep-checks` request selects it (-1: glue, none).
+ir_deep_checks_on: fn(p: IRProgram, row: Int) -> Bool Never! {
+    row >= 0 && p.checks.deep.get(p.functions[row].key) != None
 }
 
 // The checked program the builder reads: the checked functions every IR

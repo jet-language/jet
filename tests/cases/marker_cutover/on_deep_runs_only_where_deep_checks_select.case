@@ -1,0 +1,102 @@
+# `#On(.Deep)` marks a deep check: its body is type-checked in every build and
+# runs only where `--deep-checks` selects it, bare for every deep check or
+# `=<scope>` for those of one package (`tree`) or of one module, type or
+# function in it (`tree::balance`, `tree::Tree.check`), and repeated flags keep
+# the union of their scopes. Selection is independent of `--release`. A scope
+# that selects no deep check is refused before the run (E2121), as is one that
+# names no declaration (E2120) and one that is no scope (E2119).
+# `#Off(.Deep)` and `#On(.Release)` pair a build condition with the other
+# marker (E0397), and `#Off` with `#On` on one statement is E0344.
+fixture: on_deep_runs_only_where_deep_checks_select.fixture
+env: NO_COLOR=1
+step plain: jet run main.jet
+exit: 0
+stdout: = "4\n"
+stderr: empty
+step all: jet run --deep-checks main.jet
+exit: 70
+stdout: empty
+stderr: ~ "panic: tree size is wrong" # the selected deep check runs and fails
+stderr: ~ "jet-lang.dev/e/E3001" # the program-side stop
+step function: jet run --deep-checks=sizes::run main.jet
+exit: 70
+stdout: empty
+stderr: ~ "panic: tree size is wrong" # `run` holds the deep check, so its scope keeps it
+step release: jet run --release --deep-checks main.jet
+exit: 70
+stdout: empty
+stderr: ~ "panic: tree size is wrong" # a release build keeps a selected deep check
+step unselected: jet run --deep-checks=sizes::leaf main.jet
+exit: 1
+stdout: empty
+stderr: ~ "`--deep-checks=sizes::leaf` selects `sizes::leaf`, and none of them holds a deep check" # refused before the run
+stderr: ~ "jet-lang.dev/e/E2121"
+step package_off: jet run tree/run.jet -- --bad tree
+exit: 0
+stdout: = "done\n" # no flag, so no deep check runs
+step package: jet run --deep-checks=tree tree/run.jet -- --bad balance
+exit: 70
+stdout: empty
+stderr: ~ "panic: balance check failed" # the package scope keeps its module's deep check
+step module: jet run --deep-checks=tree::balance tree/run.jet -- --bad balance
+exit: 70
+stdout: empty
+stderr: ~ "panic: balance check failed" # the module scope keeps the module's deep check
+step module_only: jet run --deep-checks=tree::balance tree/run.jet -- --bad tree
+exit: 0
+stdout: = "done\n" # `Tree.check` is outside the module, so its deep check is off
+step type: jet run --deep-checks=tree::Tree tree/run.jet -- --bad tree
+exit: 70
+stdout: empty
+stderr: ~ "panic: tree check failed" # the type scope keeps its method's deep check
+step same_name: jet run --deep-checks=tree::Tree.check tree/run.jet -- --bad forest
+exit: 0
+stdout: = "done\n" # `Forest.check` has the same name on another type and stays off
+step union_first: jet run --deep-checks=tree::Tree.check --deep-checks=tree::balance tree/run.jet -- --bad tree
+exit: 70
+stdout: empty
+stderr: ~ "panic: tree check failed" # the first scope of the union is kept
+step union_second: jet run --deep-checks=tree::Tree.check --deep-checks=tree::balance tree/run.jet -- --bad balance
+exit: 70
+stdout: empty
+stderr: ~ "panic: balance check failed" # the second scope of the union is kept
+step union_outside: jet run --deep-checks=tree::Tree.check --deep-checks=tree::balance tree/run.jet -- --bad forest
+exit: 0
+stdout: = "done\n" # a deep check neither scope selects stays off
+step repeated: jet run --deep-checks=tree::Forest.check --deep-checks=tree::Forest.check tree/run.jet -- --bad forest
+exit: 70
+stdout: empty
+stderr: ~ "panic: forest check failed" # a repeated scope is kept once
+step package_unselected: jet run --deep-checks=tree::run tree/run.jet -- --bad tree
+exit: 1
+stdout: empty
+stderr: ~ "`--deep-checks=tree::run` selects `tree::run`, and none of them holds a deep check"
+stderr: ~ "jet-lang.dev/e/E2121"
+step unknown: jet run --deep-checks=tree::nowhere tree/run.jet -- --bad tree
+exit: 1
+stdout: empty
+stderr: ~ "`--deep-checks=tree::nowhere` names no package, module, type or function of this program"
+stderr: ~ "jet-lang.dev/e/E2120"
+step dotted: jet run --deep-checks=tree.run tree/run.jet -- --bad tree
+exit: 2
+stdout: empty
+stderr: ~ "`--deep-checks=tree.run` isn't a deep-check scope" # the package is followed by `::`, not `.`
+stderr: ~ "jet-lang.dev/e/E2119"
+step checked: jet check checked/main.jet
+exit: 1
+stderr: ~ "Nothing named `missing_name` exists here" # a deep check's body is type-checked without the flag
+stderr: ~ "--> main.jet:2:23" # located inside the deep check
+stderr: ~ "jet-lang.dev/e/E0107" # the ordinary unknown-name code
+step pairing: jet check pairing/main.jet
+exit: 1
+stderr: ~ "`#Off(.Deep)` is not a switch attribute" # `.Deep` belongs to `#On`
+stderr: ~ "Write `#On(.Deep)`"
+stderr: ~ "`#On(.Release)` is not a switch attribute" # `.Release` belongs to `#Off`
+stderr: ~ "Write `#Off(.Release)`"
+stderr: ~ "jet-lang.dev/e/E0397" # the switch-condition code
+stderr: ~ "2 problems found" # one report per mismatched marker
+step doubled: jet check doubled/main.jet
+exit: 1
+stderr: ~ "Only one switch attribute can be written on a statement" # `#Off` and `#On` on one statement
+stderr: ~ "--> main.jet:2:10" # located at the second marker
+stderr: ~ "jet-lang.dev/e/E0344" # the duplicate switch code

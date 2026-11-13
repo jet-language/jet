@@ -121,6 +121,8 @@ use {
         body_fixed_timing,
         BuildSettingOverride,
         DeepChecks,
+        deep_checks_off,
+        deep_checks_selects,
         deep_checks_unselected,
         deep_checks_unselected_report,
         PolicyKey,
@@ -2680,7 +2682,7 @@ jet_driver_comptime_reach_stmt: fn(reach: &JetDriverComptimeReach, tree: BodyTre
             jet_driver_comptime_reach_expr(reach, tree, init)
         }
         .ExprStmt(value, _) -> jet_driver_comptime_reach_expr(reach, tree, value)
-        .Contract(_) | .ContractScope(_, _, _, _, _) | .RefutableBind(_, _, _, _) | .TupleDestructure(_, _, _, _, _) | .StructDestructure(_, _, _, _, _) | .ListDestructure(_, _, _, _, _, _) | .Assign(_, _, _, _, _) | .CountedLoop(_, _, _, _, _, _, _) | .ForRange(_, _, _, _, _, _, _, _, _) | .Range(_, _, _, _, _, _, _, _, _, _) | .Return(_, _) | .TaskGroup(_, _, _, _) | .DeferClose(_, _, _) | .If(_, _, _, _, _) | .Loop(_, _, _) | .While(_, _, _, _) | .Break(_, _) | .BreakValue(_, _, _) | .Continue(_, _) | .Match(_, _, _, _) | .EnumMatch(_, _, _, _, _) | .RangeSwitch(_, _, _, _) | .ForIn(_, _, _, _, _, _, _, _, _, _, _, _) | .Inline(_, _) | .DebugOnly(_, _) | .MixedSwitch(_, _, _, _, _) | .Unsafe(_, _) | .UnsafeBlock(_, _, _) | .SentryPolicy(_, _, _) | .Impure(_, _) | .Reactive(_, _) | .Region(_, _) | .Layout(_, _, _, _) | .ContextBlock(_, _, _) | .Live(_, _) | .Shield(_, _) | .Defer(_, _) | .ScopeMember(_, _, _) | .Transact(_, _, _, _, _) | .GCEdit(_, _, _, _, _, _, _) -> reach.everything = true
+        .Contract(_) | .ContractScope(_, _, _, _, _) | .RefutableBind(_, _, _, _) | .TupleDestructure(_, _, _, _, _) | .StructDestructure(_, _, _, _, _) | .ListDestructure(_, _, _, _, _, _) | .Assign(_, _, _, _, _) | .CountedLoop(_, _, _, _, _, _, _) | .ForRange(_, _, _, _, _, _, _, _, _) | .Range(_, _, _, _, _, _, _, _, _, _) | .Return(_, _) | .TaskGroup(_, _, _, _) | .DeferClose(_, _, _) | .If(_, _, _, _, _) | .Loop(_, _, _) | .While(_, _, _, _) | .Break(_, _) | .BreakValue(_, _, _) | .Continue(_, _) | .Match(_, _, _, _) | .EnumMatch(_, _, _, _, _) | .RangeSwitch(_, _, _, _) | .ForIn(_, _, _, _, _, _, _, _, _, _, _, _) | .Inline(_, _) | .DebugOnly(_, _) | .DeepCheck(_, _) | .MixedSwitch(_, _, _, _, _) | .Unsafe(_, _) | .UnsafeBlock(_, _, _) | .SentryPolicy(_, _, _) | .Impure(_, _) | .Reactive(_, _) | .Region(_, _) | .Layout(_, _, _, _) | .ContextBlock(_, _, _) | .Live(_, _) | .Shield(_, _) | .Defer(_, _) | .ScopeMember(_, _, _) | .Transact(_, _, _, _, _) | .GCEdit(_, _, _, _, _, _, _) -> reach.everything = true
     }
 }
 
@@ -2968,15 +2970,26 @@ jet_driver_test_modules: fn(load: JetDriverLoadResult, core_tests: String) -> [U
     members
 }
 
-// `--deep-checks` (JetDriverCompileRequest.deep_checks): an E2120 or E2121
-// for each scope that keeps no deep check (deep_checks_unselected), over the
-// dotted path of every checked function outside Core: its package name, file
-// module, inline module, owner type and name (`tree.balance.Tree.fix`). No
-// statement marks a deep check yet, so no function holds one and every scope
-// is refused.
-jet_driver_deep_check_scopes: fn(load: JetDriverLoadResult, functions: [FnBody], request: DeepChecks) -> [Diagnostic] Never! {
-    diagnostics := [Diagnostic]{}
-    if request.scopes.len() == 0 -> return diagnostics
+// What a compile's `--deep-checks` request keeps: the keys of the checked
+// functions whose `#On(.Deep)` bodies it emits (IRChecks.deep), and an E2120
+// or E2121 for each scope that keeps none.
+JetDriverDeepChecks: struct {
+    selected: [String]
+    diagnostics: [Diagnostic]
+}
+
+// `--deep-checks` (JetDriverCompileRequest.deep_checks) over the checked
+// functions. A function holds a deep check when a statement of its body tree,
+// its lambdas' included, is an `#On(.Deep)` body. A bare flag keeps every
+// holder; a scope keeps each holder whose path it selects
+// (deep_checks_selects): outside Core, its declared package name, `::`, then
+// its file module, inline module, owner type and name joined by `.`
+// (`tree::balance.Tree.fix`). A function outside a named package has no path,
+// so only a bare flag keeps its deep checks. A scope that keeps no holder is
+// reported (deep_checks_unselected).
+jet_driver_deep_checks: fn(load: JetDriverLoadResult, functions: [FnBody], request: DeepChecks) -> JetDriverDeepChecks Never! {
+    found := JetDriverDeepChecks{selected: [String]{}, diagnostics: [Diagnostic]{}}
+    if deep_checks_off(request) -> return found
     packages := [String:String]{}
     loop package in load.packages -> packages[package.identity] = package.name.copy() // copy: the load keeps its package rows.
     modules := [U32:Int]{}
@@ -2984,28 +2997,46 @@ jet_driver_deep_check_scopes: fn(load: JetDriverLoadResult, functions: [FnBody],
         if !jet_driver_unit_is_core(load.source_units[loaded.source_unit_index]) -> modules[loaded.module_identity.id] = index
     }
     paths := [String]{}
+    holders := [String]{}
     loop function in functions {
+        held := false
+        loop statement in function.tree.stmts {
+            if statement == .DeepCheck(_, _) -> held = true
+        }
+        if held && request.all -> found.selected.push(function.key.copy()) // copy: the selection outlives the checked rows.
         if function.synthetic -> next
         at: modules.get(function.module_identity.id) ?? next
         loaded: load.modules[at]
+        package: packages.get(loaded.package_identity) ?? ""
+        if package == "" -> next
         // The key is `fn:<module>:<owner>:<name>`; the module may hold `:`.
         parts: function.key.split(":").to_list()
         if parts.len() < 4 -> next
         name: parts[parts.len() - 1]
         owner: parts[parts.len() - 2]
         lifted: if owner == "" -> name else -> owner
+        prefix: [String]{loaded.declared_module.copy(), sema_inline_member_module(lifted)}
         words := [String]{}
-        prefix: [String]{packages.get(loaded.package_identity) ?? "", loaded.declared_module.copy(), sema_inline_member_module(lifted)}
         loop word in prefix {
             if word != "" -> words.push(word.copy()) // copy: the path owns its words.
         }
         if owner != "" -> words.push(sema_inline_member_source_name(owner))
         words.push(if owner == "" -> sema_inline_member_source_name(name) else -> name.copy())
-        paths.push(words.join("."))
+        path: "{package}::{words.join(".")}"
+        if held {
+            if !request.all {
+                kept := false
+                loop scope in request.scopes {
+                    if deep_checks_selects(scope, path) -> kept = true
+                }
+                if kept -> found.selected.push(function.key.copy()) // copy: the selection outlives the checked rows.
+            }
+            holders.push(path.copy()) // copy: the path is also a declaration row.
+        }
+        paths.push(path)
     }
-    holders := [String]{}
-    loop row in deep_checks_unselected(request, paths, holders) -> diagnostics.push(deep_checks_unselected_report(row, holders))
-    diagnostics
+    loop row in deep_checks_unselected(request, paths, holders) -> found.diagnostics.push(deep_checks_unselected_report(row, holders))
+    found
 }
 
 // The native Test harness plan over the checked functions `functions`: the
@@ -3589,6 +3620,9 @@ JetDriverLoweringInputs: struct {
     c_exports: [JetDriverCExportRow]{[JetDriverCExportRow]{}}
     // The entry module's jobs (jet_driver_job_rows).
     jobs: [JetDriverJobRow]{[JetDriverJobRow]{}}
+    // The checked functions whose `#On(.Deep)` bodies the build emits, by
+    // key (jet_driver_deep_checks).
+    deep_checks: [String]{[String]{}}
     registration_modules: [SemaRegistrationModule]{[SemaRegistrationModule]{}}
     comptime_values: [SemaComptimeItemValue]{[SemaComptimeItemValue]{}}
 }
@@ -4560,7 +4594,8 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
     if request.mode == JetDriverCompileMode.Test && !request.tests_optional && jet_driver_runnable_test_count(registration_graph) == 0 {
         load.diagnostics.push(jet_driver_diagnostic_without_span("E0601", "no `#Test` blocks found to run", "add at least one top-level block: #Test(\"describes what this checks\") {{ ... }}", "use `assert` and `assert_eq` inside the block to check results"))
     }
-    loop diagnostic in jet_driver_deep_check_scopes(load, checked_functions, request.deep_checks) -> load.diagnostics.push(diagnostic)
+    deep_kept: jet_driver_deep_checks(load, checked_functions, request.deep_checks)
+    loop diagnostic in deep_kept.diagnostics -> load.diagnostics.push(diagnostic.copy()) // copy: the selection row keeps its reports.
     if jet_driver_has_errors(load.diagnostics) -> failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Check)
     if failed_stage != None && !kg.enabled -> return jet_driver_doc_failure(jet_driver_compile_result(load, load.diagnostics, failed_stage, false, trace), request.mode, Val(checked_graph.names.structure_facts))
     // `jet check` stops before lowering: no C export rows, no Core
@@ -4745,7 +4780,7 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
         loop file in load.source_files {
             if sources.get(file.path) == None -> sources[file.path] = file.source
         }
-        capture.lowering_inputs = Val(JetDriverLoweringInputs{functions: sema_functions.move(), modules: runtime_semantic_modules.move(), decls: decls.move(), symbols: symbols.move(), sources: sources.move(), entry_module_identity: load.entry_module_identity, module_table: load.module_table.copy(), entry_key: entry_key, tests: tests.move(), output_checks: output_checks.move(), c_exports: c_export_rows.copy(), jobs: job_rows.copy()})
+        capture.lowering_inputs = Val(JetDriverLoweringInputs{functions: sema_functions.move(), modules: runtime_semantic_modules.move(), decls: decls.move(), symbols: symbols.move(), sources: sources.move(), entry_module_identity: load.entry_module_identity, module_table: load.module_table.copy(), entry_key: entry_key, tests: tests.move(), output_checks: output_checks.move(), c_exports: c_export_rows.copy(), jobs: job_rows.copy(), deep_checks: deep_kept.selected.copy()})
     }
     result := jet_driver_compile_result(load, load.diagnostics, None, true, trace)
     result.entry_effects = entry_effects.move()

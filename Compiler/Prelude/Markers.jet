@@ -628,6 +628,17 @@ Off: struct {
     }
 }
 
+// `#On(.Deep)` keeps a statement or block out of every build unless the
+// compile's `--deep-checks` request selects its function. The body is
+// type-checked in every build.
+On: struct {
+    build: BuildCondition
+
+    impl Marker {
+        sites: [.Statement, .Block]
+    }
+}
+
 // Test-only effect substitution is configured by one typed
 // marker argument; the harness owns fail-nth scheduling.
 // `.expect_fail([E30xx,] message: "text")` checks a

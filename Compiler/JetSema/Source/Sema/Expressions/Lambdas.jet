@@ -1296,7 +1296,7 @@ sema_expression_lambda_collect_tree_statements: fn(statements: [TStmt], frame: I
                 sema_expression_lambda_collect_tree_optional_expr(args.stack, frame, scopes, keys)
                 sema_expression_lambda_collect_tree_statements(body, frame, scopes, keys)
             }
-            .Inline(body, _) | .DebugOnly(body, _) | .Region(body, _) | .Live(body, _) | .Shield(body, _) | .Defer(body, _) -> sema_expression_lambda_collect_tree_statements(body, frame, scopes, keys)
+            .Inline(body, _) | .DebugOnly(body, _) | .DeepCheck(body, _) | .Region(body, _) | .Live(body, _) | .Shield(body, _) | .Defer(body, _) -> sema_expression_lambda_collect_tree_statements(body, frame, scopes, keys)
             .Unsafe(_, body) | .UnsafeBlock(_, body, _) | .SentryPolicy(_, body, _) | .Impure(body, _) | .ScopeMember(_, body, _) -> sema_expression_lambda_collect_tree_statements(body, frame, scopes, keys)
             .Reactive(executable, _) -> sema_expression_lambda_collect_tree_lambda(executable, frame, scopes, keys)
             .Layout(_, _, body, _) | .ContextBlock(_, body, _) | .Transact(_, _, _, body, _) -> sema_expression_lambda_collect_tree_statements(body, frame, scopes, keys)
@@ -1373,7 +1373,7 @@ sema_expression_lambda_block_value_type: fn(statements: [TStmt], fallback: Type)
                 }
             }
             .ExprStmt(value, _) -> return value.ty
-            .Contract(_) | .ContractScope(_, _, _, _, _) | .Let(_, _, _, _, _, _) | .RefutableBind(_, _, _, _) | .TupleDestructure(_, _, _, _, _) | .StructDestructure(_, _, _, _, _) | .ListDestructure(_, _, _, _, _, _) | .Assign(_, _, _, _, _) | .CountedLoop(_, _, _, _, _, _, _) | .ForRange(_, _, _, _, _, _, _, _, _) | .Range(_, _, _, _, _, _, _, _, _, _) | .TaskGroup(_, _, _, _) | .DeferClose(_, _, _) | .If(_, _, _, _, _) | .Loop(_, _, _) | .While(_, _, _, _) | .Break(_, _) | .BreakValue(_, _, _) | .Continue(_, _) | .Match(_, _, _, _) | .EnumMatch(_, _, _, _, _) | .RangeSwitch(_, _, _, _) | .ForIn(_, _, _, _, _, _, _, _, _, _, _, _) | .Inline(_, _) | .DebugOnly(_, _) | .MixedSwitch(_, _, _, _, _) | .Unsafe(_, _) | .UnsafeBlock(_, _, _) | .SentryPolicy(_, _, _) | .Impure(_, _) | .Reactive(_, _) | .Region(_, _) | .Layout(_, _, _, _) | .ContextBlock(_, _, _) | .Live(_, _) | .Shield(_, _) | .Defer(_, _) | .ScopeMember(_, _, _) | .Transact(_, _, _, _, _) | .GCEdit(_, _, _, _, _, _, _) -> {}
+            .Contract(_) | .ContractScope(_, _, _, _, _) | .Let(_, _, _, _, _, _) | .RefutableBind(_, _, _, _) | .TupleDestructure(_, _, _, _, _) | .StructDestructure(_, _, _, _, _) | .ListDestructure(_, _, _, _, _, _) | .Assign(_, _, _, _, _) | .CountedLoop(_, _, _, _, _, _, _) | .ForRange(_, _, _, _, _, _, _, _, _) | .Range(_, _, _, _, _, _, _, _, _, _) | .TaskGroup(_, _, _, _) | .DeferClose(_, _, _) | .If(_, _, _, _, _) | .Loop(_, _, _) | .While(_, _, _, _) | .Break(_, _) | .BreakValue(_, _, _) | .Continue(_, _) | .Match(_, _, _, _) | .EnumMatch(_, _, _, _, _) | .RangeSwitch(_, _, _, _) | .ForIn(_, _, _, _, _, _, _, _, _, _, _, _) | .Inline(_, _) | .DebugOnly(_, _) | .DeepCheck(_, _) | .MixedSwitch(_, _, _, _, _) | .Unsafe(_, _) | .UnsafeBlock(_, _, _) | .SentryPolicy(_, _, _) | .Impure(_, _) | .Reactive(_, _) | .Region(_, _) | .Layout(_, _, _, _) | .ContextBlock(_, _, _) | .Live(_, _) | .Shield(_, _) | .Defer(_, _) | .ScopeMember(_, _, _) | .Transact(_, _, _, _, _) | .GCEdit(_, _, _, _, _, _, _) -> {}
         }
         index -= 1
     }
@@ -2790,12 +2790,13 @@ sema_expression_lambda_lift_block: fn(statements: &[TStmt], carrier: Type) Never
                 sema_expression_lambda_lift_block(updated, carrier)
                 statements[index] = TStmt.Unsafe{gate: gate, body: updated}
             }
-            .Inline(body, span) | .DebugOnly(body, span) | .UnsafeBlock(_, body, span) | .SentryPolicy(_, body, span) | .Impure(body, span) | .Region(body, span) | .Live(body, span) | .Shield(body, span) | .Defer(body, span) | .ScopeMember(_, body, span) -> {
+            .Inline(body, span) | .DebugOnly(body, span) | .DeepCheck(body, span) | .UnsafeBlock(_, body, span) | .SentryPolicy(_, body, span) | .Impure(body, span) | .Region(body, span) | .Live(body, span) | .Shield(body, span) | .Defer(body, span) | .ScopeMember(_, body, span) -> {
                 updated := body
                 sema_expression_lambda_lift_block(updated, carrier)
                 if statement == {
                     .Inline(_, _) -> statements[index] = TStmt.Inline{body: updated, span: span}
                     .DebugOnly(_, _) -> statements[index] = TStmt.DebugOnly{body: updated, span: span}
+                    .DeepCheck(_, _) -> statements[index] = TStmt.DeepCheck{body: updated, span: span}
                     .UnsafeBlock(gate, _, _) -> statements[index] = TStmt.UnsafeBlock{gate: gate, body: updated, span: span}
                     .SentryPolicy(enabled, _, _) -> statements[index] = TStmt.SentryPolicy{enabled: enabled, body: updated, span: span}
                     .Impure(_, _) -> statements[index] = TStmt.Impure{body: updated, span: span}

@@ -253,6 +253,9 @@ TStmt: enum {
     ForIn(label: String?, variable: TLocal, variable_two: TLocal?, source: TExpr, collection: TExpr, step: TExpr?, method_kind: TForInMethod?, columnar: Bool, by_value: Bool, source_stable: Bool, body: [TStmt], span: Span)
     Inline(body: [TStmt], span: Span)
     DebugOnly(body: [TStmt], span: Span)
+    // An `#On(.Deep)` body: emitted only in a function the compile's
+    // `--deep-checks` request selects.
+    DeepCheck(body: [TStmt], span: Span)
     MixedSwitch(subject: TExpr, class: TBranchClass, arms: [TMixedArm], else_body: [TStmt]?, span: Span)
     Unsafe(gate: TUnsafeGate, body: [TStmt])
     UnsafeBlock(gate: TUnsafeGate, body: [TStmt], span: Span)
@@ -1054,7 +1057,7 @@ tree_each_stmt_child: fn(statement: TStmt, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc,
             if step == Val(nested) -> visit(nested)
             tree_each_stmt_list_child(body, visit)
         }
-        .Inline(body, _) | .DebugOnly(body, _) | .Impure(body, _) | .Region(body, _) | .Live(body, _) | .Shield(body, _) | .Defer(body, _) -> tree_each_stmt_list_child(body, visit)
+        .Inline(body, _) | .DebugOnly(body, _) | .DeepCheck(body, _) | .Impure(body, _) | .Region(body, _) | .Live(body, _) | .Shield(body, _) | .Defer(body, _) -> tree_each_stmt_list_child(body, visit)
         .MixedSwitch(subject, _, arms, else_body, _) -> {
             visit(subject)
             loop arm in arms {
