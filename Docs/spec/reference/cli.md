@@ -1451,8 +1451,12 @@ also writes the `jet.core/v4` record of that check to the file, reads it back
 and encodes every row again, which must give the bytes it was read from.
 `--embed <image> <out>` writes the executable `image` to `out` with the
 record added as its `jet.core` part; the compiler build runs it with the jet it
-just linked. `--embedded` reads that part from the running jet's mapped
-image, with no file read, and checks it as `--write` does.
+just linked. The record names the compiler `JET_COMPILER_IDENTITY` names;
+unset, it names this jet by the sha256 of its own executable
+(`jet@<release>#<sha256>`), never by an `IDENTITY` file beside it, because
+the jet the build just linked has no identity yet. `--embedded` reads that
+part from the running jet's mapped image, with no file read, and checks it as
+`--write` does.
 
 `jet inspect gates [<entry.jet>] [--kind <kind>] [--scope <scope>]`
 uses the canonical load-only gate query, not semantic body checking or emission.

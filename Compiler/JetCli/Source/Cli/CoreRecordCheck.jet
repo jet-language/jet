@@ -16,11 +16,13 @@
 // and checks it as `--write` checks the file.
 use {
     record_files: core.files
+    record_sys: core.sys
     record_runtime: jet.runtime.sys
     record_time: core.time
     jet_backend.[x64_executable_add_part]
     jet_driver.[JetDriverCompileMode, JetDriverCoreRecord, JetDriverCoreRecordCounts, JetDriverLoweringInputs, JetDriverVerbOutput, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USAGE, JET_DRIVER_EXIT_USER_ERROR, jet_driver_check_outcome, jet_driver_core_record_open, jet_driver_core_record_round_trip, jet_driver_core_record_write, jet_driver_lowering_inputs, jet_driver_present_diagnostics]
     jet_foundation.[sha256_bytes, sha256_hex_bytes]
+    jet_pkg_model.[JET_VERSION]
 }
 
 JET_CLI_CORE_RECORD_USAGE: "usage: jet self devtools core-record --check | --write <file> | --embed <image> <out> | --embedded\n"
@@ -78,6 +80,18 @@ JetCLICoreChecked: enum {
 }
 
 jet_cli_core_checked: fn(color: Bool, json: Bool) -> JetCLICoreChecked {
+    // The compiler build's `core-record` step runs the `jet-bare` it just
+    // linked, which has no identity yet: a made tool's step is given no
+    // `JET_COMPILER_IDENTITY`, and the `runtime` step writes IDENTITY only
+    // after this one. Unset, this jet is named by its own bytes, as
+    // BuildExecute names a `b.jet()` without an identity, and an IDENTITY
+    // file beside it is never read: one an earlier build left behind would
+    // name another compiler and make the record, and so jet, differ by tree.
+    if record_sys.get(JET_CLI_COMPILER_IDENTITY_ENV) == None {
+        executable: record_sys.executable()
+        image: record_files.read_bytes(executable) ?? return JetCLICoreChecked.Stopped{output: jet_cli_maintenance_error("E2105", "couldn't read this jet `{executable}` to name the compiler the record is for: {jet_cli_io_error_text(err)}", None, color, json)}
+        record_sys.set(JET_CLI_COMPILER_IDENTITY_ENV, "jet@{JET_VERSION}#{jet_cli_core_record_digest(image)}")
+    }
     scratch: record_files.temp_dir("jet-core-record") ?? return JetCLICoreChecked.Stopped{output: jet_cli_maintenance_error("E2105", "couldn't create a scratch directory for the Core entry: {jet_cli_io_error_text(err)}", None, color, json)}
     entry: "{scratch.path}/core.jet"
     source: jet_cli_core_check_source()
