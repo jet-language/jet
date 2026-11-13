@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6790,
-    "rev": 101469,
+    "nextNum": 6791,
+    "rev": 101473,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -95228,7 +95228,7 @@
       "track": "sidequest",
       "epoch": null,
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -95236,16 +95236,22 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-13",
+          "by": "Main",
+          "text": "c1 met by e90053e60e."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
           "text": "A program whose own code has a user error that leaves the registration graph incomplete (such as E0956) gets that user diagnostic, with exit code 1 and no ICE, when a build: fn reflects over the program. A real internal failure of the build still reports as an ICE with exit 101, as d19cdb77fd intended. Proof: a ui snapshot of the 20-line repro, the Reflect.jet golden at O1 and O2 matching its O0 output, and the InspectBuild test from d19cdb77fd still passing.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-13T11:55:28.554Z"
+          "evidence": "dev e90053e60e (G6Meta-6785a), landed by Lander5 on 2026-11-13 on top of b047dd8c4b. With the g6-cut3b jet: Reflect at o1/o2 exits 1 with jet.ComptimeConstructNotSupported (More: E0956), no ICE; the 6785a ui case passes; jet check of JetDriver rc 0. The other g6-cut3b reds match bare dev 78d3db56d8 or belong to l0503.",
+          "at": "2026-11-13T12:55:52.854Z"
         }
       ],
       "refs": [],
@@ -95256,9 +95262,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-13T11:55:27.408Z",
-      "updated": "2026-11-13T11:55:28.554Z",
+      "updated": "2026-11-13T12:55:56.906Z",
       "updatedBy": "Main",
-      "criteriaLastN": 1
+      "criteriaLastN": 1,
+      "completedAt": "2026-11-13T12:55:56.906Z"
     },
     {
       "id": "c0tg9tcf",
@@ -95432,6 +95439,47 @@
       "updated": "2026-11-13T12:35:43.748Z",
       "updatedBy": "Main",
       "criteriaLastN": 2
+    },
+    {
+      "id": "c0awq7vy",
+      "num": 6790,
+      "title": "FmtCorpus red on dev: 11,959 of 18,883 sources are not in jet fmt form",
+      "body": "Found 2026-11-13 by Lander5 (bare-dev baseline on 78d3db56d8 with the g6-cut3b jet, which is built from 78d3db56d8 plus a few unrelated SUBs): `jet Tools/agent/FmtCorpus.jet --check` gives rc 1 with 11959 of 18883 sources not in fmt form, and the guard fmt_is_lossless_on_supported_source_corpus FAILs. Most likely root: the lambda-shape1 cutover 78d3db56d8 wrote a lambda spelling the formatter prints differently. The cutover commit message and a fmt diff of a few files will tell.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "FmtCorpus --check rc 0 and the fmt_is_lossless_on_supported_source_corpus guard passes on dev with the batch jet. The root (formatter or source) is fixed once: either jet fmt prints the ratified lambda form, or the sources are reformatted by `jet fmt` in one cutover commit.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T12:56:01.617Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G6"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-13T12:55:59.987Z",
+      "updated": "2026-11-13T12:56:01.617Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1
     }
   ],
   "decisions": [
@@ -200099,6 +200147,34 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-13T12:56:01.617Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0awq7vy",
+      "note": "#1 FmtCorpus --check rc 0 and the fmt_is_lossless_on_supported_"
+    },
+    {
+      "at": "2026-11-13T12:55:59.988Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0awq7vy",
+      "note": "FmtCorpus red on dev: 11,959 of 18,883 sources are not in jet fmt form"
+    },
+    {
+      "at": "2026-11-13T12:55:56.906Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0ipht83",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-13T12:55:52.854Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0ipht83",
+      "note": "#1"
+    },
     {
       "at": "2026-11-13T12:54:57.710Z",
       "by": "Main",
