@@ -1,0 +1,12 @@
+// A statement parse error before an #Unsafe block inside a function is the
+// only problem reported: the block after it draws no attachment-site error.
+use core.mem
+
+run: fn() {
+    p: mem.Ptr<Int>.null()
+    target := 42
+    #Unsafe("target outlives the read in this frame") {
+        address: *target
+        print(address.*)
+    }
+}
