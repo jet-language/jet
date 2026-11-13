@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6777,
-    "rev": 100977,
+    "rev": 100980,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -27060,7 +27060,7 @@
       "track": "epoch",
       "epoch": "e3",
       "milestoneId": "e3-m23-core-cli-text",
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": "## Goal\nComplete the explicit-entry cutover under D-ENTRY-EXPLICIT2=A (ratified). An ordinary executable `.jet` file runs only through an explicit `fn run` (or an existing checked metadata-selected callable). Loose statements and runtime top-level initializers are rejected with registered diagnostics and safe wrapping fixes. Libraries, test-only files and build/dev/test override-only files need no dummy run. REPL/notebook cells keep implicit host wrapping.\n\n## Current state\n- Archived Rust already enforces the law: `crates/jet-sema/src/Sema/Bundle.rs:1917-1936` (E0620 imported script with executable statements, E0621 top-level statements need `fn run`). Snapshots: `tests/ui/script_explicit_run.stderr`, `tests/ui/script_imported/stderr`.\n- Self-hosted: the parser still collects loose statements, `Compiler/JetParser/Source/Parser/Entry.jet:68` (`&program.script_body.push(...)`). `Compiler/JetSema/Source/Sema/CheckProgram.jet:831` only folds `program.script_body.len() == 0` into `complete`; it emits neither E0620 nor E0621. Rows exist at `DiagnosticRows.jet:6327,6343`.\n- Rust fixes are prose-only (\"move the statements into `fn run`\"). No structured wrap edit exists.\n\n## Changes\n1. JetSema `CheckProgram.jet`: for the entry module, a non-empty `script_body` reports E0621 at the first statement. For an imported module it reports E0620 naming the module. A runtime-valued top-level initializer is rejected, while compile-time-valued declarations stay valid. Test-only, library and override-only (`@build.jet`, `@dev.jet`) roles never require `run`.\n2. Safe fix (JetSema, through `diagnostic_with_edit`): wrap the loose statements in `fn run() { … }` only when that preserves scope, order, comments and captures and does not change entry selection or multiplicity. Refuse the fix, with an explanation, for imported, library or test-only sources and when a `fn run` already exists (mixed export).\n3. Host (retained boundary): REPL and notebook cells keep implicit wrapping through the same entry model (`crates/jet-repl`, `Source/CmdNotebook.rs`). Notebook export writes an explicit `fn run` for executable cells, refuses a mixed existing-run export without mutating anything, and gives consolidation guidance. Cross-submission bindings, move state, failures and reruns keep session semantics.\n4. Rust mirror: add the same structured wrap edit to the E0620/E0621 sites in `Bundle.rs`.\n5. Migrate any remaining in-repo loose-code callers (Examples/, fixtures, Core/, Jetpack/, formatter/LSP projections). Remove the obsolete file-script lowering and stale law wording. Record the cutover in `Docs/spec/syntax-decisions.md` and the Syntax.rs entry, and regenerate `jet devtools` grammars.\n\n## Proof\n- `Tools/agent/jet-env bash Compiler/Bootstrap/check.sh` exits 0.\n- `jet test Compiler --profile ui script_` passes, including the new `tests/ui/script_runtime_initializer.jet` and `tests/ui/script_wrap_refused/` and their `.fixed.jet` wrap round trip.\n- `Tools/agent/jet-env cargo test --test cli_commands -- notebook_export_explicit_run repl_cross_submission_bindings` passes (new focused tests).\n- `jet test Compiler --profile golden script_mode/` passes on O0, O1 and O2.\n\n## Batch\nbatch-jetc-sema: the missing piece is the JetSema entry-role check. The host REPL/notebook items and the Rust wrap edit ride the same build.\n\n## Dependencies\nNone; D-ENTRY-EXPLICIT2=A is ratified.\n",
       "checkSteps": "After rebuilding, exercise the focused entry and diagnostic fixtures plus actual CLI commands for explicit hello, a declaration-only library, a test-only source, imported loose statements, and compile-time versus runtime initialization. Run jet fix on a safe wrapper case and an ambiguous refusal case and compare resulting meaning. Exercise REPL/cell execution and exported source without changing notebook UI. Prove applicable AOT/run/dev/interpreter/web output and refresh only affected goldens/UI snapshots. Cover override-only files, metadata-selected callables, imported-helper fix refusal, stateful interactive submissions, mixed-entry export refusal, and observed JIT identity using existing run_jit_once/dev_iteration paths.\n\nExisting focused regression starting points (future commands, not executed; they do not alone cover the new criteria):\n- `scripts/agent/jet-env cargo test --test run_entry bare_run_stays_valid -- --exact`\n- `scripts/agent/jet-env cargo test --test run_entry imported_scripts_are_rejected_before_their_body_can_run -- --exact`\n- `scripts/agent/jet-env cargo test -p jet-pkg-model --lib output_entry_override_resolves_one_package_function`\nRebuild through jet-env before compiler smoke work. Add only missing behavioral boundary proof; do not count source inspection, test-name presence, or interpreter fallback as runtime/tier evidence.",
@@ -27069,6 +27069,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-13",
+          "by": "Main",
+          "text": "Closed by board audit: every criterion met, retired or moved."
+        },
         {
           "at": "2026-11-06",
           "by": "Main",
@@ -27240,6 +27245,16 @@
           "evidence": "Owner ruling 2026-11-09 (#6281 c128, met): a file of top-level statements just runs as a program, a file with `run: fn` is a program, and a file with both is an error. Owner order 2026-11-11 (#6281 c180) refuses mixing across a whole program scope. The explicit-entry law of #3122 (D-ENTRY-EXPLICIT2)",
           "at": "2026-11-13T02:11:05.441Z",
           "closure": "obsolete"
+        },
+        {
+          "n": 18,
+          "text": "Retired: Owner ruling 2026-11-09 (#6281 c128, met): a file of top-level statements just runs as a program, a file with `run: fn` is a program, and a file with both is an error. Owner order 2026-11-11 (#6281 c180) refuses mixing across a whole program scope. The explicit-entry law of #3122 (D-ENTRY-EXPLICIT2)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Owner ruling 2026-11-09 (#6281 c128, met): a file of top-level statements just runs as a program, a file with `run: fn` is a program, and a file with both is an error. Owner order 2026-11-11 (#6281 c180) refuses mixing across a whole program scope. The explicit-entry law of #3122 (D-ENTRY-EXPLICIT2)",
+          "at": "2026-11-13T02:19:24.716Z",
+          "closure": "obsolete"
         }
       ],
       "refs": [
@@ -27272,13 +27287,14 @@
       "parentId": "c0svnelx",
       "needsAcceptance": false,
       "created": "2026-09-12T12:54:29.620Z",
-      "updated": "2026-11-13T02:11:05.441Z",
+      "updated": "2026-11-13T02:19:26.352Z",
       "updatedBy": "Main",
       "workOrder": 230,
       "goals": [
         "G6"
       ],
-      "criteriaLastN": 17
+      "criteriaLastN": 18,
+      "completedAt": "2026-11-13T02:19:26.352Z"
     },
     {
       "id": "c0xb6zik",
@@ -197991,6 +198007,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-13T02:19:26.352Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c01231wx",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-13T02:19:24.716Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c01231wx",
+      "note": "#18"
+    },
+    {
+      "at": "2026-11-13T02:19:23.774Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c01231wx",
+      "note": "#18 Retired: Owner ruling 2026-11-09 (#6281 c128, met): a file o"
+    },
     {
       "at": "2026-11-13T02:11:05.441Z",
       "by": "Main",
