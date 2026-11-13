@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6795,
-    "rev": 101535,
+    "nextNum": 6799,
+    "rev": 101550,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -95872,6 +95872,233 @@
       "updated": "2026-11-13T14:47:42.236Z",
       "updatedBy": "Main",
       "criteriaLastN": 3
+    },
+    {
+      "id": "c00g7rk8",
+      "num": 6795,
+      "title": "Copy-and-patch machine code for the O0 tier (jet run, jet dev, comptime)",
+      "body": "Owner order (2026-11-13): idea 1 of Docs/research/2026-11-13-compile-speed-beyond-the-plan.md is planned. At O0, each IR operation is emitted by copying a pre-built machine-code template (stencil) and patching its holes (constants, frame offsets, jump and call targets), with no instruction selection or register allocation at O0. The stencils are built once with the toolchain, like precompiled Core, so they are toolchain, not a cache (D-EXEC2=A holds). Prior art: Xu and Kjolstad, \"Copy-and-Patch Compilation\", OOPSLA 2021; the CPython 3.13 JIT (PEP 744). O1 and O2 keep the optimizing backend. Sequenced after the data-oriented core (#6793) lands its IR ids (S6), because stencils are keyed by flat IR opcodes. Unstaffed today (speed ranks below goals).",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A design note and a passing adversarial review in Docs/audits (per AGENTS.md \"Adversarial design review\") cover this card before any build SUB. The review names the strongest existing implementations and checks the claimed gain against a runnable probe.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T15:03:09.919Z"
+        },
+        {
+          "n": 2,
+          "text": "O0 code generation emits every IR opcode by copying and patching a toolchain-built stencil, with no instruction selection or register allocation at O0. The stencil set is built by Compiler/build.jet and embedded in the jet binary, with no file I/O per compile.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T15:03:13.726Z"
+        },
+        {
+          "n": 3,
+          "text": "Output is identical before and after: chain fixed point plus goldens, ui and cases on every tier.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T15:03:14.700Z"
+        },
+        {
+          "n": 4,
+          "text": "Measured: O0 backend CPU time per function falls at least 10× on the #5479 c1 cell, and a second program (jetc-trace) shows the same gain. Run-time speed of O0 code is reported beside it and stays within 1.5× of the current O0 backend.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T15:03:15.751Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G11"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-13T15:02:53.739Z",
+      "updated": "2026-11-13T15:03:15.751Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 4
+    },
+    {
+      "id": "c0okfgjw",
+      "num": 6796,
+      "title": "Parallel lexing and parsing inside one file",
+      "body": "Owner order (2026-11-13): idea 3 of Docs/research/2026-11-13-compile-speed-beyond-the-plan.md is planned. A SIMD pre-scan finds top-level declaration boundaries in a file, and chunks are lexed and parsed on separate threads, then joined in source order. This matters because the compiler itself is essentially one large module, so module-level parallelism (#6794) cannot split it. It requires that lexing can restart at a top-level boundary. If that needs a language rule (for example, no raw newline inside a string literal), the rule goes on a ballot before the build. Sequenced with #6793 S4 (flat AST) and #6794. Unstaffed today.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A design note and a passing adversarial review in Docs/audits (per AGENTS.md \"Adversarial design review\") cover this card before any build SUB. The review names the strongest existing implementations and checks the claimed gain against a runnable probe.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T15:03:10.850Z"
+        },
+        {
+          "n": 2,
+          "text": "A file is lexed and parsed in parallel chunks split at top-level declaration boundaries found by a SIMD pre-scan, and joined in source order. Any language rule this needs is ratified on a ballot first.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T15:03:16.803Z"
+        },
+        {
+          "n": 3,
+          "text": "Output is identical before and after: chain fixed point plus goldens, ui and cases on every tier.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T15:03:17.913Z"
+        },
+        {
+          "n": 4,
+          "text": "Measured: front-end wall time on the largest single module of the #5479 c1 cell scales with threads (16 threads at least 8× faster than 1), and a second large file shows the same scaling.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T15:03:19.012Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G11"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-13T15:02:55.197Z",
+      "updated": "2026-11-13T15:03:19.012Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 4
+    },
+    {
+      "id": "c0b3gyq2",
+      "num": 6797,
+      "title": "Shared generic code at O0: one compiled body per generic function, types passed as a hidden argument",
+      "body": "Owner order (2026-11-13): idea 4 of Docs/research/2026-11-13-compile-speed-beyond-the-plan.md is planned. At O0, a generic function is compiled once and takes its type information (size, alignment, trait method tables) as a hidden argument, as Swift does for unspecialized generics and Go does with GC-shape stenciling and dictionaries (Go 1.18). O1 and O2 keep per-type specialization. Meaning is identical on every tier (I9): only the implementation strategy differs, and the proof is identical goldens, ui and cases on o0, o1 and o2. Per-type copies are the main compile-time cost of generics in Rust and C++. Sequenced after #6793 S5 (TypeId). Unstaffed today.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A design note and a passing adversarial review in Docs/audits (per AGENTS.md \"Adversarial design review\") cover this card before any build SUB. The review names the strongest existing implementations and checks the claimed gain against a runnable probe.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T15:03:11.797Z"
+        },
+        {
+          "n": 2,
+          "text": "At O0, each generic function is compiled once and receives its type information (size, alignment, trait method tables) as a hidden argument. O1 and O2 keep per-type specialization.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T15:03:19.939Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G11"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-13T15:02:56.559Z",
+      "updated": "2026-11-13T15:03:19.939Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 2
+    },
+    {
+      "id": "c0zupuj4",
+      "num": 6798,
+      "title": "Cheaper compile-time execution: one warm child per compile, fast O0 code, shared-memory values",
+      "body": "Owner order (2026-11-13): idea 6 of Docs/research/2026-11-13-compile-speed-beyond-the-plan.md is planned. Compile-time code runs natively in a child of the compiler (I9). Today that costs process start-up, an O0 compile and value serialization per batch. The plan: start one child per compile and keep it warm for that compile only (nothing survives the compile, so D-EXEC2=A holds); compile compile-time functions with the copy-and-patch O0 path (its own card); and pass values through a shared-memory region instead of serializing them. Related: #6759 c1 (one comptime child per compile) and the re-finalize cost measured 2026-11-13 (1.19 s of the 2.86 s RunColdContext check). Unstaffed today.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A design note and a passing adversarial review in Docs/audits (per AGENTS.md \"Adversarial design review\") cover this card before any build SUB. The review names the strongest existing implementations and checks the claimed gain against a runnable probe.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T15:03:12.736Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G11"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-13T15:02:58.056Z",
+      "updated": "2026-11-13T15:03:12.736Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1
     }
   ],
   "decisions": [
@@ -201080,6 +201307,111 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-13T15:03:19.940Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0b3gyq2",
+      "note": "#2 At O0, each generic function is compiled once and receives i"
+    },
+    {
+      "at": "2026-11-13T15:03:19.012Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0okfgjw",
+      "note": "#4 Measured: front-end wall time on the largest single module o"
+    },
+    {
+      "at": "2026-11-13T15:03:17.913Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0okfgjw",
+      "note": "#3 Output is identical before and after: chain fixed point plus"
+    },
+    {
+      "at": "2026-11-13T15:03:16.803Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0okfgjw",
+      "note": "#2 A file is lexed and parsed in parallel chunks split at top-l"
+    },
+    {
+      "at": "2026-11-13T15:03:15.751Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c00g7rk8",
+      "note": "#4 Measured: O0 backend CPU time per function falls at least 10"
+    },
+    {
+      "at": "2026-11-13T15:03:14.700Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c00g7rk8",
+      "note": "#3 Output is identical before and after: chain fixed point plus"
+    },
+    {
+      "at": "2026-11-13T15:03:13.726Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c00g7rk8",
+      "note": "#2 O0 code generation emits every IR opcode by copying and patc"
+    },
+    {
+      "at": "2026-11-13T15:03:12.736Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0zupuj4",
+      "note": "#1 A design note and a passing adversarial review in Docs/audit"
+    },
+    {
+      "at": "2026-11-13T15:03:11.797Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0b3gyq2",
+      "note": "#1 A design note and a passing adversarial review in Docs/audit"
+    },
+    {
+      "at": "2026-11-13T15:03:10.850Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0okfgjw",
+      "note": "#1 A design note and a passing adversarial review in Docs/audit"
+    },
+    {
+      "at": "2026-11-13T15:03:09.919Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c00g7rk8",
+      "note": "#1 A design note and a passing adversarial review in Docs/audit"
+    },
+    {
+      "at": "2026-11-13T15:02:58.057Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0zupuj4",
+      "note": "Cheaper compile-time execution: one warm child per compile, fast O0 code, shared-memory values"
+    },
+    {
+      "at": "2026-11-13T15:02:56.559Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0b3gyq2",
+      "note": "Shared generic code at O0: one compiled body per generic function, types passed as a hidden argument"
+    },
+    {
+      "at": "2026-11-13T15:02:55.197Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0okfgjw",
+      "note": "Parallel lexing and parsing inside one file"
+    },
+    {
+      "at": "2026-11-13T15:02:53.739Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c00g7rk8",
+      "note": "Copy-and-patch machine code for the O0 tier (jet run, jet dev, comptime)"
+    },
     {
       "at": "2026-11-13T14:59:17.321Z",
       "by": "Main",
