@@ -21,6 +21,14 @@ pkg_fetch_toolchain_root: fn(start: String) -[FS, Env]> String? Never! {
     }
 }
 
+// The canonical batteries directory of the toolchain found from `start`, or
+// None without one: the last root a loose script's inline `use name#version`
+// resolves against (pkg_inline_deps_resolve).
+pkg_fetch_batteries_dir: fn(start: String) -[FS, Env]> String? Never! {
+    toolchain: pkg_fetch_toolchain_root(start) ?? return None
+    Val(files.canonicalize(files.join(toolchain, PKG_FETCH_BATTERIES_DIR)) ?? return None)
+}
+
 // The canonical directory of the battery a version dependency `name` with
 // `requirement` names, or None when the toolchain found from `root` ships no
 // battery of that name at a version the requirement matches.

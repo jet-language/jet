@@ -45,9 +45,10 @@ jet_cli_script_dependency_fetch: fn(file: String, source: String, color: Bool, j
     if inline == .Val(_) -> return None
     program: jet_cli_parsed_program(source) ?? return None
     missing := false
+    batteries: jet_cli_batteries_dir(entry_path)
     loop dep in pkg_inline_deps_collect(program) {
         if !pkg_inline_deps_valid_package_name(dep.name) || pkg_inline_deps_numeric_version(dep.selector) == None -> next
-        if pkg_inline_deps_resolve(dep, script_dir) == .Err(reason) {
+        if pkg_inline_deps_resolve(dep, script_dir, batteries) == .Err(reason) {
             if reason == {
                 .UnknownPackage -> { missing = true }
                 .InvalidName | .InvalidSelector | .NoMatch | .InvalidTree(_) -> {}
@@ -104,6 +105,7 @@ jet_cli_script_dependency_roots: fn(roots: &[JetDriverAuthorizedSourceRoot], ent
     if !lex_may_pin_inline_version(entry.source.bytes()) -> return None
     program: jet_cli_parsed_program(entry.source) ?? return None
     script_dir: jet_cli_parent(entry_path) ?? "/"
+    batteries: jet_cli_batteries_dir(entry_path)
     loop dep in pkg_inline_deps_collect(program) {
         // Name/selector validation belongs to the shared resolver. Do not
         // interpret an invalid import as a pathname even for a preflight.
@@ -126,7 +128,7 @@ jet_cli_script_dependency_roots: fn(roots: &[JetDriverAuthorizedSourceRoot], ent
                 .Err(error) -> { return Val(jet_cli_script_dependency_error(entry_path, entry.source, dep, error, color)) }
             }
         }
-        resolved: pkg_inline_deps_resolve(dep, script_dir) ?? return Val(jet_cli_script_dependency_error(entry_path, entry.source, dep, err, color))
+        resolved: pkg_inline_deps_resolve(dep, script_dir, batteries) ?? return Val(jet_cli_script_dependency_error(entry_path, entry.source, dep, err, color))
         if authority == .Val(held) {
             held.revalidate() ?? return Val(jet_cli_script_dependency_error(entry_path, entry.source, dep, .InvalidTree(TreeHashError.IO{path: resolved.dir, detail: "{err}"}), color))
         }

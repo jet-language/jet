@@ -22,8 +22,12 @@ pkg_inline_deps_test_candidates: fn(pairs: [String]) -> [(version: String, dir: 
 }
 
 pkg_inline_deps_test_unresolved: fn(dep: InlineDep, script_dir: String) -[FS, Env]> InlineDepUnresolved Never! {
-    if pkg_inline_deps_resolve(dep, script_dir) == {
-        .Ok(_) -> panic("hostile inline dependency must not resolve")
+    pkg_inline_deps_test_unresolved_from(dep, script_dir, None)
+}
+
+pkg_inline_deps_test_unresolved_from: fn(dep: InlineDep, script_dir: String, batteries: String?) -[FS, Env]> InlineDepUnresolved Never! {
+    if pkg_inline_deps_resolve(dep, script_dir, batteries) == {
+        .Ok(_) -> panic("inline dependency must not resolve")
         .Err(error) -> error
     }
 }
@@ -147,4 +151,37 @@ pkg_inline_deps_test_unresolved: fn(dep: InlineDep, script_dir: String) -[FS, En
     assert_eq(hostile_diagnostic.code, "E1253")
     assert(hostile_diagnostic.why.contains("cannot be hashed safely"), "the hostile failure must explain that the source cannot be hashed safely")
     assert(!files.exists(files.join(hostile.path, "standalone.jet.lock")), "a hostile dependency must not write a lock")
+}
+
+// A loose script's inline dependency reaches the toolchain's first-party
+// battery last: the battery resolves when its package.jet declares the name
+// and a version the selector matches, and a local copy stays authoritative.
+#Test("resolve reaches a first-party battery after every local root") {
+    batteries: files.temp_dir("jet-script-deps-batteries") ?? panic("scratch")
+    battery: files.join(batteries.path, "web")
+    files.create_dir_all(battery) ?? panic("battery tree")
+    files.write(files.join(battery, "package.jet"), "name: \"web\"\nversion: \"0.1.0\"\nedition: \"2026\"\npackages: {{\n    web: library,\n}}\n") ?? panic("battery manifest")
+    files.write(files.join(battery, "web.jet"), "greet: fn() -> String {{ \"hi\" }}\n") ?? panic("battery source")
+    script: files.temp_dir("jet-script-deps-battery-script") ?? panic("scratch")
+    exact: InlineDep{name: "web", selector: "0.1.0", span: Span{start: 0, end: 0}}
+    resolved: pkg_inline_deps_resolve(exact, script.path, Val(batteries.path)) ?? panic("the battery must resolve: {err.message()}")
+    assert_eq(resolved.resolved_version, "0.1.0")
+    assert_eq(resolved.dir, battery)
+    assert(resolved.content_hash.starts_with("sha256-"))
+    if pkg_inline_deps_test_unresolved_from(exact, script.path, None) == {
+        .UnknownPackage -> {}
+        .InvalidName | .InvalidSelector | .NoMatch | .InvalidTree(_) -> panic("without a batteries directory the battery is unknown")
+    }
+    wrong: InlineDep{name: "web", selector: "2", span: Span{start: 0, end: 0}}
+    if pkg_inline_deps_test_unresolved_from(wrong, script.path, Val(batteries.path)) == {
+        .NoMatch -> {}
+        .InvalidName | .InvalidSelector | .UnknownPackage | .InvalidTree(_) -> panic("a battery at another version must not resolve")
+    }
+    local: files.join(script.path, ".jet/inline-deps/web/0.2.0")
+    files.create_dir_all(local) ?? panic("local copy")
+    files.write(files.join(local, "web.jet"), "greet: fn() -> String {{ \"local\" }}\n") ?? panic("local source")
+    if pkg_inline_deps_test_unresolved_from(exact, script.path, Val(batteries.path)) == {
+        .NoMatch -> {}
+        .InvalidName | .InvalidSelector | .UnknownPackage | .InvalidTree(_) -> panic("a local copy without the version keeps the battery out")
+    }
 }

@@ -5823,7 +5823,11 @@ to a single-segment package name. `core.files#1.0` is not a package dependency.
 
 `jet run stats.jet` collects inline references from the entry file and resolves
 them into the module search from a matching copy under
-`.jet/inline-deps/<name>/<version>/` or the documented fixture override. On
+`.jet/inline-deps/<name>/<version>/` or the documented fixture override, and
+last from the toolchain's first-party battery of that name
+(`Jetpack/Provider/Batteries/<name>`), when its package.jet declares a
+version the selector matches, as a version dependency in package.jet resolves.
+A loose file therefore uses a battery with `use web#0.1.0`. On
 its first run, a reference to a package no local copy knows is fetched through
 the configured package registry on the same path as `jet fetch --lock`: the
 artifact is verified, ingested into the Hangar, copied to

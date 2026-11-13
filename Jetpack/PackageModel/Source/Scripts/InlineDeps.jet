@@ -9,7 +9,10 @@
 //      copy (committed, or written by `jet fetch --lock`).
 //   2. `JET_INLINE_DEPS_FIXTURES=<dir>`, an offline test/dev override with
 //      the same `<name>/<version>/` shape, checked only when set.
-// A package neither knows is fetched only by `jet run` (its first run) and
+//   3. The toolchain's first-party battery `<batteries>/<name>/`, whose
+//      package.jet declares that name and a version the selector matches,
+//      the rule a version dependency in package.jet follows.
+// A package none knows is fetched only by `jet run` (its first run) and
 // `jet fetch --lock`, through the configured package registry;
 // anywhere else it is E1253. A local package stays
 // authoritative: an unmatched selector is E1253, never a fetch.
@@ -162,10 +165,11 @@ InlineDepUnresolved: enum {
 }
 
 // Resolve one inline dependency against the script's `.jet/inline-deps/`
-// copy, then (when set) `JET_INLINE_DEPS_FIXTURES`, hashing the selected
-// tree. The project-local source is authoritative: when it has the package
-// but not a matching version, no later root is consulted.
-pkg_inline_deps_resolve: fn(dep: InlineDep, script_dir: String) -[FS, Env]> InlineDepResolved InlineDepUnresolved! {
+// copy, then (when set) `JET_INLINE_DEPS_FIXTURES`, then the toolchain's
+// `batteries` directory (when known), hashing the selected tree. The
+// project-local source is authoritative: when it has the package but not a
+// matching version, no later root is consulted.
+pkg_inline_deps_resolve: fn(dep: InlineDep, script_dir: String, batteries: String?) -[FS, Env]> InlineDepResolved InlineDepUnresolved! {
     if !pkg_inline_deps_valid_package_name(dep.name) -> return Err(InlineDepUnresolved.InvalidName)
     if pkg_inline_deps_numeric_version(dep.selector) == None -> return Err(InlineDepUnresolved.InvalidSelector)
     roots := [String]{files.join(files.join(script_dir, ".jet"), "inline-deps")}
@@ -184,7 +188,24 @@ pkg_inline_deps_resolve: fn(dep: InlineDep, script_dir: String) -[FS, Env]> Inli
         }
         return Ok(InlineDepResolved{name: dep.name, selector: dep.selector, resolved_version: chosen.version, dir: chosen.dir, content_hash: content_hash})
     }
-    Err(InlineDepUnresolved.UnknownPackage)
+    battery: pkg_inline_deps_battery(batteries ?? return Err(InlineDepUnresolved.UnknownPackage), dep.name) ?? return Err(InlineDepUnresolved.UnknownPackage)
+    if !pkg_inline_deps_version_matches(dep.selector, battery.version) -> return Err(InlineDepUnresolved.NoMatch)
+    content_hash: if foundation_try_tree_hash(battery.dir) == {
+        .Ok(hash) -> hash
+        .Err(error) -> { return Err(InlineDepUnresolved.InvalidTree(error)) }
+    }
+    Ok(InlineDepResolved{name: dep.name, selector: dep.selector, resolved_version: battery.version, dir: battery.dir, content_hash: content_hash})
+}
+
+// The first-party battery `<batteries>/<name>` and the version its
+// package.jet declares, or None when no battery there declares that name.
+pkg_inline_deps_battery: fn(batteries: String, name: String) -[FS]> (version: String, dir: String)? Never! {
+    dir: files.join(batteries, name)
+    manifest_path: files.join(dir, "package.jet")
+    text: files.read(manifest_path) ?? return None
+    manifest: pkg_manifest_parse(manifest_path, text) ?? return None
+    if manifest.package.name != name -> return None
+    Val((version: manifest.package.version, dir: dir))
 }
 
 // Every version directory under `<root>/<name>`, or None when `<name>` does

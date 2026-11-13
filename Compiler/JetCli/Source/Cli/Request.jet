@@ -832,19 +832,27 @@ jet_cli_locked_git_root: fn(project_root: String, name: String) -[FS, Env]> Stri
 // The toolchain directory of the first-party batteries.
 JET_CLI_BATTERIES_DIR: "Jetpack/Provider/Batteries"
 
-// The canonical root of the first-party battery a version dependency `name`
-// (`source`, its selector) names, or None. Like the Rust jetpack's embedded
-// batteries registry (generated from crates/jetpack/batteries/*), the toolchain
-// ships the batteries: `<toolchain root>/Jetpack/Provider/Batteries/<name>`
-// (jet_cli_toolchain_root of `entry`, the entry root) resolves only when its
-// package.jet declares that name and a version the selector matches.
-jet_cli_first_party_battery: fn(name: String, source: String, entry: String) -[FS, Env]> String? Never! {
-    selector: jet_driver_dependency_selector(source, name) ?? return None
+// The canonical first-party batteries directory of the toolchain
+// (jet_cli_toolchain_root of `entry`), or None without a toolchain root.
+jet_cli_batteries_dir: fn(entry: String) -[FS, Env]> String? Never! {
     toolchain: if jet_cli_toolchain_root(entry) == {
         .Found(root) -> root
         .Missing(_, _) -> { return None }
     }
-    directory: jet_cli_authority_path(toolchain, "{JET_CLI_BATTERIES_DIR}/{name}")
+    Val(cli_files.realpath(jet_cli_authority_path(toolchain, JET_CLI_BATTERIES_DIR)) ?? return None)
+}
+
+// The canonical root of the first-party battery a version dependency `name`
+// (`source`, its selector) names, or None. Like the Rust jetpack's embedded
+// batteries registry (generated from crates/jetpack/batteries/*), the toolchain
+// ships the batteries: `<toolchain root>/Jetpack/Provider/Batteries/<name>`
+// (jet_cli_batteries_dir of `entry`, the entry root) resolves only when its
+// package.jet declares that name and a version the selector matches. A loose
+// script's inline `use name#version` reaches the same batteries
+// (pkg_inline_deps_resolve).
+jet_cli_first_party_battery: fn(name: String, source: String, entry: String) -[FS, Env]> String? Never! {
+    selector: jet_driver_dependency_selector(source, name) ?? return None
+    directory: jet_cli_authority_path(jet_cli_batteries_dir(entry) ?? return None, name)
     manifest_path: jet_cli_authority_path(directory, "package.jet")
     text: cli_files.read(manifest_path) ?? return None
     manifest: pkg_manifest_parse(manifest_path, text) ?? return None

@@ -103,9 +103,11 @@ unchanged. Ordinary Jet source uses the compiler formatter.
 A script without a Package carrier or `package.jet` may declare a top-level
 single-package import such as `use textkit#1.4.2`. The native CLI admits its
 sources from `<script-directory>/.jet/inline-deps/textkit/<version>/`, then
-`JET_INLINE_DEPS_FIXTURES/textkit/<version>/` when that override is set. A local
+`JET_INLINE_DEPS_FIXTURES/textkit/<version>/` when that override is set, then
+the toolchain's first-party battery `Jetpack/Provider/Batteries/textkit/` when
+its package.jet declares that name and a matching version. A local
 package is authoritative even if none of its versions matches, and admission
-never runs Cargo or another compiler. A package neither root knows is fetched
+never runs Cargo or another compiler. A package no root knows is fetched
 once, before admission, by `jet run` through `jet fetch --lock <script>`: the
 configured registry's verified artifact is ingested into the Hangar, copied to
 `.jet/inline-deps/textkit/<version>/` and locked in `<script>.lock`; later runs

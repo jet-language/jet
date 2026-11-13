@@ -296,7 +296,7 @@ jet_cli_remote_run_registry: fn(name: String, selector: String, locked: Bool, co
         wanted = jet_cli_remote_run_highest(name, launcher) ?? return jet_cli_remote_run_refused("`{name}` isn't a local path, and this machine knows no version of it", "A bare package name runs the highest version this machine already has; fetching from the registry needs a version.", "check the path, or name a version: `jet run {name}#<version>`", color)
     }
     dep: InlineDep{name: name.copy(), selector: wanted, span: Span{start: 0, end: 0}}
-    found: pkg_inline_deps_resolve(dep, launcher) ?? {
+    found: pkg_inline_deps_resolve(dep, launcher, None) ?? {
         fetchable: if err == {
             .UnknownPackage -> true
             .NoMatch -> true
@@ -365,7 +365,7 @@ jet_cli_remote_run_engine_fetch: fn(launcher: String, dep: InlineDep, color: Boo
 // `dep` resolved against the launcher's managed folder and the fixtures, or
 // None when no local root holds a matching, hashable copy.
 jet_cli_remote_run_resolved: fn(dep: InlineDep, launcher: String) -> InlineDepResolved? {
-    found: pkg_inline_deps_resolve(dep, launcher) ?? return None
+    found: pkg_inline_deps_resolve(dep, launcher, None) ?? return None
     Val(found)
 }
 
