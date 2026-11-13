@@ -15,10 +15,15 @@
 //   4 body keys: one map per checked Core function (module identity, key),
 //     sorted by module identity, then key
 //   5 body rows: the checked body of each body key
+//   6 registration rows: the finalized registration module of each module
+//     key (declarations, symbols, impls, imports and exports, its source
+//     tree with every edit applied)
+//   7 declaration rows: the check's declaration table, one row per DeclID
+//     in row order, so a body's DeclID names the row it was checked against
 use {
     core_record_cbor: core.encoding.cbor
-    jet_foundation.[FnBody, RecordField, RecordReader, RecordSection, RecordValue, record_element, record_encode, record_key_digest, record_open_schema, record_section_elements, record_section_index, record_value_as_str, record_value_field]
-    jet_sema.[SemaGraphModuleResult]
+    jet_foundation.[DeclRow, DeclTable, FnBody, RecordField, RecordReader, RecordSection, RecordValue, decl_table_add_row, decl_table_index, record_element, record_encode, record_key_digest, record_open_schema, record_section_elements, record_section_index, record_value_as_str, record_value_field]
+    jet_sema.[SemaGraphModuleResult, SemaRegistrationModule]
 }
 
 JET_CORE_RECORD_SCHEMA: "jet.core/v1"
@@ -27,6 +32,8 @@ JET_CORE_RECORD_MODULE_KEYS: 2
 JET_CORE_RECORD_MODULE_ROWS: 3
 JET_CORE_RECORD_BODY_KEYS: 4
 JET_CORE_RECORD_BODY_ROWS: 5
+JET_CORE_RECORD_REGISTRATION_ROWS: 6
+JET_CORE_RECORD_DECL_ROWS: 7
 
 // The reader's limits are core.encoding.cbor's ceilings (parse refuses a
 // depth past 4096 or a byte bound past 1073741824): a row is read whole.
@@ -50,13 +57,17 @@ JetDriverCoreRecord: struct {
 JetDriverCoreRecordCounts: struct {
     modules: Int
     bodies: Int
+    registrations: Int
+    decls: Int
     bytes: Int
 }
 
 // The record of the closed Core program `inputs` (the Core check stopped
-// before lowering), for the compiler `compiler` and the target `target`.
-// The check's own entry module (one import of each public Core module) is
-// left out. Two writes of the same inputs give the same bytes.
+// before lowering, under `every_core_body`, so its registration modules are
+// kept), for the compiler `compiler` and the target `target`. The check's own
+// entry module (one import of each public Core module) is left out, but for
+// its rows of the declaration table, which keeps its row order. Two writes of
+// the same inputs give the same bytes.
 jet_driver_core_record_write: fn(inputs: JetDriverLoweringInputs, compiler: String, target: String) -> [U8] Err! {
     entry_file := ""
     module_order := [String]{}
@@ -80,6 +91,28 @@ jet_driver_core_record_write: fn(inputs: JetDriverLoweringInputs, compiler: Stri
         bytes: core_record_cbor.to_bytes_canonical(row) ?? return Err("Core module `{row.module_name}` has no record encoding: {err}")
         module_keys.push(RecordValue.Map{fields: [RecordField]{RecordField{name: "name", value: RecordValue.Str{value: row.module_name.copy()}}, RecordField{name: "identity", value: RecordValue.Str{value: row.module_identity.copy()}}}})
         module_rows.push(RecordValue.Bytes{value: bytes})
+    }
+    registration_at := [String:Int]{}
+    loop (index, registration) in inputs.registration_modules {
+        if registration.module_identity == inputs.entry_module_identity -> next
+        if registration_at.get(registration.module_identity) != None -> return Err("Core module `{registration.module_name}` ({registration.module_identity}) is registered twice")
+        registration_at[registration.module_identity.copy()] = index
+    }
+    if registration_at.len() != module_order.len() -> return Err("the Core check registered {registration_at.len()} modules but checked {module_order.len()}")
+    registration_rows := [RecordValue]{}
+    loop order in module_order {
+        identity: inputs.modules[module_at[order]].module_identity
+        index: registration_at.get(identity) ?? return Err("Core module {identity} is checked but has no registration module")
+        registration: inputs.registration_modules[index]
+        bytes: core_record_cbor.to_bytes_canonical(registration) ?? return Err("Core module `{registration.module_name}` has no registration record encoding: {err}")
+        registration_rows.push(RecordValue.Bytes{value: bytes})
+    }
+    decl_rows := [RecordValue]{}
+    decl_keys: inputs.decls.rows.key
+    decl_kinds: inputs.decls.rows.kind
+    loop (index, key) in decl_keys {
+        bytes: core_record_cbor.to_bytes_canonical(DeclRow{key: key.copy(), kind: decl_kinds[index]}) ?? return Err("the declaration `{key}` has no record encoding: {err}")
+        decl_rows.push(RecordValue.Bytes{value: bytes})
     }
     body_order := [String]{}
     body_at := [String:Int]{}
@@ -105,6 +138,7 @@ jet_driver_core_record_write: fn(inputs: JetDriverLoweringInputs, compiler: Stri
         RecordField{name: "core_digest", value: RecordValue.Str{value: jet_driver_core_record_digest(inputs.sources, entry_file)}},
         RecordField{name: "modules", value: RecordValue.Int{value: module_order.len()}},
         RecordField{name: "bodies", value: RecordValue.Int{value: body_order.len()}},
+        RecordField{name: "decls", value: RecordValue.Int{value: decl_rows.len()}},
     }}
     sections: [RecordSection]{
         RecordSection{id: JET_CORE_RECORD_HEADER, elements: [RecordValue]{header}},
@@ -112,6 +146,8 @@ jet_driver_core_record_write: fn(inputs: JetDriverLoweringInputs, compiler: Stri
         RecordSection{id: JET_CORE_RECORD_MODULE_ROWS, elements: module_rows.move()},
         RecordSection{id: JET_CORE_RECORD_BODY_KEYS, elements: body_keys.move()},
         RecordSection{id: JET_CORE_RECORD_BODY_ROWS, elements: body_rows.move()},
+        RecordSection{id: JET_CORE_RECORD_REGISTRATION_ROWS, elements: registration_rows.move()},
+        RecordSection{id: JET_CORE_RECORD_DECL_ROWS, elements: decl_rows.move()},
     }
     encoded: record_encode(JET_CORE_RECORD_SCHEMA, sections)
     bytes: encoded.bytes ?? return Err(encoded.problem ?? "the Core record has no byte form")
@@ -159,6 +195,7 @@ jet_driver_core_record_open: fn(bytes: [U8]) -> JetDriverCoreRecord Err! {
         record.body_keys.push(jet_driver_core_record_text(key, "key") ?? return Err(err))
     }
     if jet_driver_core_record_count(record.reader, JET_CORE_RECORD_MODULE_ROWS) != record.module_names.len() -> return Err("the Core record has {record.module_names.len()} module keys but a different number of module rows")
+    if jet_driver_core_record_count(record.reader, JET_CORE_RECORD_REGISTRATION_ROWS) != record.module_names.len() -> return Err("the Core record has {record.module_names.len()} module keys but a different number of registration rows")
     if jet_driver_core_record_count(record.reader, JET_CORE_RECORD_BODY_ROWS) != record.body_keys.len() -> return Err("the Core record has {record.body_keys.len()} body keys but a different number of body rows")
     Ok(record)
 }
@@ -175,6 +212,32 @@ jet_driver_core_record_body: fn(record: JetDriverCoreRecord, index: Int) -> FnBo
     bytes: jet_driver_core_record_row(record.reader, JET_CORE_RECORD_BODY_ROWS, index) ?? return Err(err)
     body: core_record_cbor.decode<FnBody>(bytes, JET_CORE_RECORD_CBOR) ?? return Err("Core function `{record.body_keys[index]}` doesn't decode: {jet_driver_core_record_field_errors(err)}")
     Ok(body)
+}
+
+// The finalized registration module of the record's module `index` (in
+// module key order).
+jet_driver_core_record_registration: fn(record: JetDriverCoreRecord, index: Int) -> SemaRegistrationModule Err! {
+    bytes: jet_driver_core_record_row(record.reader, JET_CORE_RECORD_REGISTRATION_ROWS, index) ?? return Err(err)
+    registration: core_record_cbor.decode<SemaRegistrationModule>(bytes, JET_CORE_RECORD_CBOR) ?? return Err("Core module `{record.module_names[index]}` has a registration row that doesn't decode: {jet_driver_core_record_field_errors(err)}")
+    Ok(registration)
+}
+
+// The record's declaration table, keyed: row `i` is the row the record's
+// bodies name as DeclID `i`.
+jet_driver_core_record_decls: fn(record: JetDriverCoreRecord) -> DeclTable Err! {
+    table := DeclTable{}
+    loop index in 0..<jet_driver_core_record_count(record.reader, JET_CORE_RECORD_DECL_ROWS) {
+        row: jet_driver_core_record_decl(record, index) ?? return Err(err)
+        _: decl_table_add_row(table, row.key, row.kind)
+    }
+    decl_table_index(table)
+    Ok(table)
+}
+
+jet_driver_core_record_decl: fn(record: JetDriverCoreRecord, index: Int) -> DeclRow Err! {
+    bytes: jet_driver_core_record_row(record.reader, JET_CORE_RECORD_DECL_ROWS, index) ?? return Err(err)
+    row: core_record_cbor.decode<DeclRow>(bytes, JET_CORE_RECORD_CBOR) ?? return Err("the Core record's declaration row {index} doesn't decode: {jet_driver_core_record_field_errors(err)}")
+    Ok(row)
 }
 
 // Reads every row of `bytes` back and encodes it again: each must give the
@@ -195,7 +258,23 @@ jet_driver_core_record_round_trip: fn(bytes: [U8]) -> JetDriverCoreRecordCounts 
         again: core_record_cbor.to_bytes_canonical(body) ?? return Err("Core function `{body.key}` doesn't encode again: {err}")
         if again != stored -> return Err("Core function `{body.key}` encodes to other bytes after a read")
     }
-    Ok(JetDriverCoreRecordCounts{modules: record.module_names.len(), bodies: record.body_keys.len(), bytes: bytes.len()})
+    loop index in 0..<record.module_names.len() {
+        registration: jet_driver_core_record_registration(record, index) ?? return Err(err)
+        if registration.module_name != record.module_names[index] || registration.module_identity != record.module_identities[index] -> return Err("Core module key {index} names `{record.module_names[index]}` but its registration row is `{registration.module_name}`")
+        stored: jet_driver_core_record_row(record.reader, JET_CORE_RECORD_REGISTRATION_ROWS, index) ?? return Err(err)
+        again: core_record_cbor.to_bytes_canonical(registration) ?? return Err("Core module `{registration.module_name}`'s registration row doesn't encode again: {err}")
+        if again != stored -> return Err("Core module `{registration.module_name}`'s registration row encodes to other bytes after a read")
+    }
+    decls: jet_driver_core_record_count(record.reader, JET_CORE_RECORD_DECL_ROWS)
+    loop index in 0..<decls {
+        row: jet_driver_core_record_decl(record, index) ?? return Err(err)
+        stored: jet_driver_core_record_row(record.reader, JET_CORE_RECORD_DECL_ROWS, index) ?? return Err(err)
+        again: core_record_cbor.to_bytes_canonical(row) ?? return Err("the declaration `{row.key}` doesn't encode again: {err}")
+        if again != stored -> return Err("the declaration `{row.key}` encodes to other bytes after a read")
+    }
+    table: jet_driver_core_record_decls(record) ?? return Err(err)
+    if table.rows.len() != decls -> return Err("the Core record's declaration table keeps {table.rows.len()} of its {decls} rows")
+    Ok(JetDriverCoreRecordCounts{modules: record.module_names.len(), bodies: record.body_keys.len(), registrations: record.module_names.len(), decls: decls, bytes: bytes.len()})
 }
 
 jet_driver_core_record_count: fn(reader: RecordReader, id: Int) -> Int Never! {

@@ -32,6 +32,7 @@ use {
         SemaRegistrationForeignHandleFacts,
         SemaRegistrationGraph,
         SemaRegistrationImport,
+        SemaRegistrationModule,
         SemaRegistrationModuleInput,
         SemaRegistrationPackagePolicy,
         SemaProgramTables,
@@ -3531,7 +3532,10 @@ JetDriverCheckedProjectionCapture: struct {
 // module's `#Export(c)` rows (jet_driver_c_export_rows), the exports of a
 // library, and its jobs (jet_driver_job_rows). A Test
 // compile has no entry: it carries the tests and Check
-// Outputs its harness runs (jet_driver_test_plan) instead.
+// Outputs its harness runs (jet_driver_test_plan) instead. A check under
+// `every_core_body` (the Core record's check) also keeps the finalized
+// registration modules, declarations and source included, which the Core
+// record writes beside the checked ones.
 JetDriverLoweringInputs: struct {
     functions: [FnBody]
     modules: [SemaGraphModuleResult]
@@ -3545,6 +3549,7 @@ JetDriverLoweringInputs: struct {
     c_exports: [JetDriverCExportRow]{[JetDriverCExportRow]{}}
     // The entry module's jobs (jet_driver_job_rows).
     jobs: [JetDriverJobRow]{[JetDriverJobRow]{}}
+    registration_modules: [SemaRegistrationModule]{[SemaRegistrationModule]{}}
 }
 
 JetDriverLoweringInputsResult: struct {
@@ -4524,7 +4529,8 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
         result.rust_foreign = if jet_driver_rust_foreign_present(registration_graph) -> jet_driver_rust_foreign_facts(registration_graph) else -> jet_driver_rust_foreign_empty()
         result.foreign_link = jet_driver_foreign_link_facts(runtime_semantic_modules, load.source_files)
         // `jet prove --lens solver` reads every checked function, unpruned,
-        // with the declaration table their direct calls name.
+        // with the declaration table their direct calls name; the Core
+        // record also writes the finalized registration modules.
         if capture.stop_before_lowering {
             sources := [String:String]{}
             loop file in load.source_files {
@@ -4532,7 +4538,12 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
             }
             decls := registration_graph.decls.move()
             registration_graph.decls = DeclTable{}
-            capture.lowering_inputs = Val(JetDriverLoweringInputs{functions: checked_functions.move(), modules: runtime_semantic_modules.move(), decls: decls.move(), sources: sources.move(), entry_module_identity: load.entry_module_identity, entry_key: check_entry.copy()})
+            registration_modules := [SemaRegistrationModule]{}
+            if request.every_core_body {
+                registration_modules = registration_graph.modules.move()
+                registration_graph.modules = [SemaRegistrationModule]{}
+            }
+            capture.lowering_inputs = Val(JetDriverLoweringInputs{functions: checked_functions.move(), modules: runtime_semantic_modules.move(), decls: decls.move(), sources: sources.move(), entry_module_identity: load.entry_module_identity, entry_key: check_entry.copy(), registration_modules: registration_modules.move()})
         }
         return result
     }

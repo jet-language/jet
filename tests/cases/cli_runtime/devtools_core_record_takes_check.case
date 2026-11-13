@@ -2,7 +2,9 @@
 # Prelude alone (JetCli CoreRecordCheck.jet); it runs only as `--check`, as
 # `--write <file>`, which also writes the record to the file, as
 # `--embed <image> <out>`, which adds it to an executable, or as `--embedded`,
-# which reads the record the build added to this jet.
+# which reads the record the build added to this jet. The record holds each
+# Core module's checked and registration rows, its checked bodies and the
+# check's declaration table, and every row reads back to the same bytes.
 env: NO_COLOR=1
 step: jet self devtools core-record
 exit: 2
@@ -23,4 +25,6 @@ stderr: = "usage: jet self devtools core-record --check | --write <file> | --emb
 step: jet self devtools core-record --embedded
 exit: 0
 stdout: ~ "every row read back and encoded to the same bytes" # the line also carries row counts, a sha256 and the wall time, which change with Core
+stdout: ~ " registration rows, " # section 6 is counted; the count follows Core
+stdout: ~ " declaration rows, " # section 7 is counted; the count follows Core
 stderr: empty

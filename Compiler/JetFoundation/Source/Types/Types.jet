@@ -486,8 +486,14 @@ DeclTableEntry: struct {
 
 // Appends `symbol`'s row; `decl_table_index` keys it.
 decl_table_add: fn(table: &DeclTable, symbol: Symbol) -> DeclID Never! {
-    id: DeclID{row: table.rows.add(DeclRow{key: symbol.id.key.copy(), kind: symbol.kind})}
-    table.pending.push(DeclTableEntry{key: symbol.id.key.copy(), id: id})
+    decl_table_add_row(table, symbol.id.key, symbol.kind)
+}
+
+// Appends the row of declaration `key` of kind `kind`; `decl_table_index`
+// keys it.
+decl_table_add_row: fn(table: &DeclTable, key: String, kind: SymbolKind) -> DeclID Never! {
+    id: DeclID{row: table.rows.add(DeclRow{key: key.copy(), kind: kind})}
+    table.pending.push(DeclTableEntry{key: key.copy(), id: id})
     id
 }
 
