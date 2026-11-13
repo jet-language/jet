@@ -3636,12 +3636,13 @@ ir_note_binder_mention: fn(p: IRProgram, b: IRBuilder, expression: Int, id: Symb
 // stdout: a terminal's flushes at each line end, a pipe's or file's when its
 // buffer fills, before stderr, any read of stdin, a child and the
 // process stop. A value whose type selects a Display implementation prints
-// that rendering: an explicit Display before the Printable show.
+// that rendering: an explicit Display before the Printable show. Any other
+// value renders under the task's print style (IRRender.Print).
 ir_print: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, span: Span) Never! {
     value_ty: ir_ty(p, b, value)
     slot: ir_expr(m, p, b, value)
     if ir_failed(b) -> return
-    mode: if ir_render_has_display(m, p, b, value_ty, slot) -> IRRender.Display else -> IRRender.Show
+    mode: if ir_render_has_display(m, p, b, value_ty, slot) -> IRRender.Display else -> IRRender.Print
     text: ir_render(m, p, b, value_ty, slot, mode, span)
     if ir_failed(b) -> return
     bool_row: ir_type_row(m, Type.Bool) ?? 0

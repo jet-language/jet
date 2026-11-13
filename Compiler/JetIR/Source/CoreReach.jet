@@ -80,6 +80,21 @@ ir_string_format_source: fn(module_identity: String, source_file: String, kind: 
     module_identity.starts_with("<corelib>/") && ir_core_source_path(source_file, "Core/Text/Fmt.jet") && ir_core_reach_is_top_level(kind)
 }
 
+// Whether a function with these header fields is one of the core.term
+// print-style helpers `print` calls by name (BuildTypes.jet
+// ir_print_style_row): a top-level `__print_` function of Core/Term/Term.jet.
+ir_print_style_source: fn(module_identity: String, source_file: String, kind: TFuncKind, name: String) -> Bool Never! {
+    module_identity.starts_with("<corelib>/") && ir_core_source_path(source_file, "Core/Term/Term.jet") && ir_core_reach_is_top_level(kind) && name.starts_with("__print_")
+}
+
+// A `#Context(print: …)` block roots the print-style helpers: only a program
+// that sets a style prints through them, and any other prints as Show.
+ir_print_style_keys: fn(functions: [FnBody], keys: &[String]) Never! {
+    loop function in functions {
+        if ir_print_style_source(function.module_identity, function.source_file, function.kind, function.name) -> ir_core_reach_add(keys, function.key)
+    }
+}
+
 // The Core/Encoding/Encoding.jet decode helpers Dyn decode and
 // `FieldError.under` call by name (BuildDyn.jet ir_dyn_decode,
 // ir_decode_under).
@@ -179,13 +194,13 @@ ir_precise_source_function: fn(module_identity: String, source_file: String, nam
 // Whether a top-level Core function with these header fields is one lowering
 // keeps by name, with no keyed call in a kept caller's checked body: a
 // Fmt.jet selector helper, an Encoding.jet decode helper, an Args.jet
-// helper, a precise-operation source helper or a core.process line reader
-// (ir_process_line_reader). A compile that lowers
-// checks each up front under Core demand (driver
+// helper, a core.term print-style helper, a precise-operation source helper
+// or a core.process line reader (ir_process_line_reader). A compile that
+// lowers checks each up front under Core demand (driver
 // jet_driver_core_lowering_roots), since no checked body names it.
 ir_core_lowered_by_name: fn(module_identity: String, source_file: String, name: String) -> Bool Never! {
     top: TFuncKind.TopLevel
-    if ir_string_format_source(module_identity, source_file, top) || ir_codec_decode_source(module_identity, source_file, top, name) || ir_args_source(module_identity, source_file, top, name) || ir_precise_source_function(module_identity, source_file, name) -> return true
+    if ir_string_format_source(module_identity, source_file, top) || ir_codec_decode_source(module_identity, source_file, top, name) || ir_args_source(module_identity, source_file, top, name) || ir_print_style_source(module_identity, source_file, top, name) || ir_precise_source_function(module_identity, source_file, name) -> return true
     core_identity_in_module(module_identity, "core.process") && (name == ir_process_line_reader("ProcessStdoutStream") || name == ir_process_line_reader("ProcessStderrStream"))
 }
 
@@ -296,7 +311,13 @@ ir_core_reach_one_stmt_keys: fn(tree: BodyTree, statement: Int, functions: [FnBo
                 ir_core_reach_stmt_keys(tree, body, functions, keys)
             }
             .ContractScope(_, body, _, _, _) | .TaskGroup(_, _, body, _) | .Loop(_, body, _) | .While(_, _, body, _) | .ForRange(_, _, _, _, _, _, body, _, _) | .Range(_, _, _, _, _, _, _, _, body, _) -> ir_core_reach_stmt_keys(tree, body, functions, keys)
-            .Inline(body, _) | .DebugOnly(body, _) | .Impure(body, _) | .Region(body, _) | .Live(body, _) | .Shield(body, _) | .Defer(body, _) | .UnsafeBlock(_, body, _) | .SentryPolicy(_, body, _) | .Layout(_, _, body, _) | .ContextBlock(_, body, _) | .ScopeMember(_, body, _) | .Transact(_, _, _, body, _) | .Unsafe(_, body) -> ir_core_reach_stmt_keys(tree, body, functions, keys)
+            .Inline(body, _) | .DebugOnly(body, _) | .Impure(body, _) | .Region(body, _) | .Live(body, _) | .Shield(body, _) | .Defer(body, _) | .UnsafeBlock(_, body, _) | .SentryPolicy(_, body, _) | .Layout(_, _, body, _) | .ScopeMember(_, body, _) | .Transact(_, _, _, body, _) | .Unsafe(_, body) -> ir_core_reach_stmt_keys(tree, body, functions, keys)
+            .ContextBlock(guards, body, _) -> {
+                loop guard in guards {
+                    if guard.field == "print" -> ir_print_style_keys(functions, keys)
+                }
+                ir_core_reach_stmt_keys(tree, body, functions, keys)
+            }
             .RefutableBind(_, _, body, _) -> ir_core_reach_stmt_keys(tree, body, functions, keys)
             .If(_, then_body, else_body, _, _) -> {
                 ir_core_reach_stmt_keys(tree, then_body, functions, keys)

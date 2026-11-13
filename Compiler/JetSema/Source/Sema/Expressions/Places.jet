@@ -762,9 +762,10 @@ sema_expression_field: fn(field: Expr, base: Expr, member: String, span: Span, e
 // 0 on the main thread), `logger` core.log's `logger` key (a
 // `log.Handler`), read as `context.get(logger)` is, `on_stop` the stop
 // handler (a `fn(debug.Stop)`, core.debug's `__stop_ignore` where no block
-// set one) (ContextKeys.jet sema_context_field_key), and `trace` the
-// calling frames (sema_expression_context_trace). IR BuildTransact.jet
-// ir_context_read and ir_context_get lower them.
+// set one), `print` core.term's print style (a `term.PrintStyle`, its
+// defaults where no block set one) (ContextKeys.jet sema_context_field_key),
+// and `trace` the calling frames (sema_expression_context_trace). IR
+// BuildTransact.jet ir_context_read and ir_context_get lower them.
 sema_expression_context_read: fn(member: String, member_span: Span, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     if member == "trace" -> return sema_expression_context_trace(span, expected, environment, program, scopes, context, diagnostics)
     keyed: if sema_context_field_module(member) != None -> sema_context_field_key(member, program) else -> SemaContextFieldKey?{None}
@@ -774,7 +775,7 @@ sema_expression_context_read: fn(member: String, member_span: Span, span: Span, 
             "deadline" -> Type.Option{inner: Type.Int}
             "thread" -> Type.Int
             else -> {
-                diagnostics.push(sema_error("E0302", member_span, "`context` has no readable field `{member}`", "the task context reads `deadline` (`Int?`, absolute wall milliseconds), `thread` (`Int`, the running thread's index), `logger` (a `log.Handler`), `on_stop` (a `fn(debug.Stop)`) and `trace` (`[SourceLocation]`, the calling frames)", "write `context.deadline`, `context.thread`, `context.logger`, `context.on_stop` or `context.trace`"))
+                diagnostics.push(sema_error("E0302", member_span, "`context` has no readable field `{member}`", "the task context reads `deadline` (`Int?`, absolute wall milliseconds), `thread` (`Int`, the running thread's index), `logger` (a `log.Handler`), `on_stop` (a `fn(debug.Stop)`), `print` (a `term.PrintStyle`) and `trace` (`[SourceLocation]`, the calling frames)", "write `context.deadline`, `context.thread`, `context.logger`, `context.on_stop`, `context.print` or `context.trace`"))
                 return None
             }
         }

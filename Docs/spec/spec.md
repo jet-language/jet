@@ -3990,6 +3990,26 @@ not set it. As with every context field, a `#Memo` function that can read
 and a call from other frames misses. A program that spells it loads
 core.debug.
 
+`context.print` is the task's print style, a `term.PrintStyle` from
+core.term with these fields and defaults: `int_base: PrintBase` (`Binary`,
+`Octal`, `Decimal` or `Hex`; `.Decimal`), `int_min_digits: Int` (0),
+`float_digits: Int?` (`None`), `list_separator: String` (`", "`) and
+`field_names: Bool` (`true`). `#Context(print: term.PrintStyle{int_base:
+.Hex, int_min_digits: 4}) { ... }` sets it for the block and the tasks
+spawned there, and nested blocks shadow it and restore it. Under the style,
+`print` shows an Int or fixed-width integer (other than a `U64`) in
+`int_base` with its digits zero-padded to `int_min_digits` after the sign,
+a Float with `float_digits` decimals rounded half away from zero (its
+ordinary text when `None`), list and tuple elements joined by
+`list_separator`, and a generated struct or variant rendering without its
+labels when `field_names` is false: `Point { 3, 4 }`. Core.text.fmt's radix
+and decimal formatting makes the text, so `print(255)` shows `00ff` where
+`fmt.hex(255, 4)` gives it. A String argument is already text and prints
+unchanged, so `print("x = {255}")` shows `x = 255`; interpolation, Debug,
+`to_string`, `eprint` and the text of a Display or Printable implementation
+do not read the style. The defaults print as a program without a block
+does. A program that spells either form loads core.term.
+
 ### Parallel collection adapters
 
 Lists expose `para_map`, `para_filter`, `para_partition`, and `para_fold`.

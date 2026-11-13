@@ -1553,7 +1553,12 @@ ir_unit_type: fn(ty: Type) -> Bool Never! {
     }
 }
 
-IRRender: enum { Display Show Debug }
+// How a value renders: as `{value}` (Display), as `show` (Show), as
+// `{value:Debug}` (Debug), or as `print` shows it (Print): Show under the
+// task's print style (ir_print_style_row), which sets the Int and Float
+// text, the list and tuple separator and whether struct and variant labels
+// show.
+IRRender: enum { Display Show Debug Print }
 
 // The String showing `slot`: a String renders as itself (not fresh); scalars
 // through their runtime formatter (fresh).
@@ -1575,7 +1580,7 @@ ir_render: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, slot: Int, mo
         if ir_dyn_def(p, ty) == .Val(dyn_row) {
             tree: ir_dyn_to_runtime(m, p, b, dyn_row, slot, span)
             if tree < 0 -> return -1
-            text: ir_runtime(m, b, if mode == .Show -> "jet_rt_handle_show_dyn" else -> "jet_rt_handle_display_dyn", [Int]{tree}, string_row)
+            text: ir_runtime(m, b, if mode == .Show || mode == .Print -> "jet_rt_handle_show_dyn" else -> "jet_rt_handle_display_dyn", [Int]{tree}, string_row)
             _: ir_runtime(m, b, "jet_rt_handle_drop_dyn", [Int]{tree}, -1)
             return text
         }
@@ -1584,7 +1589,7 @@ ir_render: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, slot: Int, mo
         // its Float magnitude, so the implementation is found by the checked
         // unit type, not the slot's row.
         if ir_kind_of(m, b, slot) == .Float {
-            trait_short: if mode == .Show -> "Printable" else -> "Display"
+            trait_short: if mode == .Show || mode == .Print -> "Printable" else -> "Display"
             if p.render_impls.get("{trait_short}|{ir_render_type_key(p.type_rows, p.types, ty)}") == .Val(row) -> return ir_render_impl_call(m, p, b, slot, row, trait_short)
             text: ir_unit_text(m, p, b, ty, slot)
             if text >= 0 -> return text
@@ -1605,6 +1610,10 @@ ir_render: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, slot: Int, mo
         builder: ir_text_builder(m, b)
         ir_render_push(m, p, b, builder, slot, mode, false, span)
         return ir_runtime(m, b, "jet_rt_string_builder_finish", [Int]{builder}, string_row)
+    }
+    if mode == .Print {
+        styled: ir_print_style_scalar(m, p, b, slot, span)
+        if styled != -2 -> return styled
     }
     row: m.types[b.f.slot_type[slot]]
     symbol: if kind == {
@@ -1676,7 +1685,7 @@ ir_render_value: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, slot: I
 // selected.
 ir_render_impl: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, mode: IRRender) -> Int Never! {
     if mode == .Debug || p.render_impls.len() == 0 -> return -1
-    trait_short: if mode == .Show -> "Printable" else -> "Display"
+    trait_short: if mode == .Show || mode == .Print -> "Printable" else -> "Display"
     receiver_ty: m.types[b.f.slot_type[slot]].ty
     row: p.render_impls.get("{trait_short}|{ir_render_type_key(p.type_rows, p.types, receiver_ty)}") ?? return -1
     ir_render_impl_call(m, p, b, slot, row, trait_short)
@@ -1756,13 +1765,13 @@ ir_render_handle_symbol: fn(p: IRProgram, ty: Type, mode: IRRender) -> String? N
     handle: ir_handle_runtime(p, name) ?? return None
     rendered: if mode == {
         .Display -> handle.display
-        .Show -> handle.show
+        .Show | .Print -> handle.show
         .Debug -> handle.debug
     }
     if !rendered -> return None
     verb: if mode == {
         .Display -> "display"
-        .Show -> "show"
+        .Show | .Print -> "show"
         .Debug -> "debug"
     }
     Val("jet_rt_handle_{verb}_{runtime_abi_atom(handle.runtime)}")
@@ -1849,7 +1858,7 @@ ir_render_push: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, builder: Int, slot
         }
         ir_push_static(m, b, builder, "(")
         loop (index, field) in members {
-            if index > 0 -> ir_push_static(m, b, builder, ", ")
+            if index > 0 -> ir_render_push_separator(m, p, b, builder, mode, span)
             value: ir_member_read(m, b, slot, field)
             ir_render_push_value_member(m, p, b, builder, value, mode, span)
         }
@@ -1897,6 +1906,7 @@ ir_render_helper: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, builde
         .Display -> "display"
         .Show -> "show"
         .Debug -> "debug"
+        .Print -> "print"
     }
     helper_key: "#render.{mode_name}<{ir_row_key(m, row)}>"
     known: name_rows_value(m.function_rows, helper_key) ?? -1
@@ -3608,11 +3618,24 @@ ir_render_push_value_member: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, build
     ir_render_push(m, p, b, builder, value, mode, mode == .Debug, span)
 }
 
-// `Name { a: 1, b: "x" }` (Debug redacts).
+// `Name { a: 1, b: "x" }` (Debug redacts; under Print the print style
+// decides whether the labels show: `Name { 1, "x" }`).
 ir_render_record: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, builder: Int, base: Int, name: String, members: [IRMember], mode: IRRender, span: Span) Never! {
     ir_push_static(m, b, builder, "{ir_render_name(name)} {{")
+    style_row: if mode == .Print && members.len() > 0 -> ir_print_style_row(p, "__print_field_names") else -> -1
+    bool_row: ir_type_row(m, Type.Bool) ?? 0
+    names: if style_row >= 0 -> ir_print_style_call(m, p, b, style_row, [Int]{}, bool_row, span) else -> -1
+    if ir_failed(b) -> return
     loop (index, member) in members {
-        ir_push_static(m, b, builder, "{if index == 0 -> " " else -> ", "}{ir_render_name(member.name)}: ")
+        separator: if index == 0 -> " " else -> ", "
+        if names < 0 {
+            ir_push_static(m, b, builder, "{separator}{ir_render_name(member.name)}: ")
+        } else {
+            ir_push_static(m, b, builder, separator)
+            ir_open_if(b.f, names, b.line)
+            ir_push_static(m, b, builder, "{ir_render_name(member.name)}: ")
+            ir_end(b.f, b.line)
+        }
         if mode == .Debug && member.redact {
             ir_push_static(m, b, builder, "[redacted]")
             next
@@ -3709,11 +3732,73 @@ ir_render_list: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, builder: Int, slot
     zero: ir_word_const(m, b, 0)
     later: ir_bool_op(m, b, IROp.Ne, walk.index, zero)
     ir_open_if(b.f, later, b.line)
-    ir_push_static(m, b, builder, ", ")
+    ir_render_push_separator(m, p, b, builder, mode, span)
     ir_end(b.f, b.line)
     ir_render_push_value(m, p, b, builder, walk.item, mode, span)
     ir_walk_close(m, b, walk)
     ir_push_static(m, b, builder, "]")
+}
+
+// The text between two list or tuple elements: under Print the print
+// style's (Term.jet __print_separator), else ", ".
+ir_render_push_separator: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, builder: Int, mode: IRRender, span: Span) Never! {
+    row: if mode == .Print -> ir_print_style_row(p, "__print_separator") else -> -1
+    if row < 0 -> return ir_push_static(m, b, builder, ", ")
+    string_row: ir_string_row(m)
+    text: ir_print_style_call(m, p, b, row, [Int]{}, string_row, span)
+    if ir_failed(b) || text < 0 -> return
+    _: ir_runtime(m, b, "jet_rt_string_builder_push", [Int]{builder, text}, -1)
+    ir_release(m, b, text)
+}
+
+// The text `print` shows for the Int, fixed-width integer or Float in
+// `slot` under the task's print style (Term.jet __print_int /
+// __print_float); an integer other than a U64 widens to Int first. -2 when
+// the value is none of those or the program holds no print-style helper.
+ir_print_style_scalar: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, span: Span) -> Int Never! {
+    kind: ir_kind_of(m, b, slot)
+    type_row: m.types[b.f.slot_type[slot]]
+    helper: if kind == {
+        .Int -> "__print_int"
+        .Word -> if type_row.signed || type_row.size < 8 -> "__print_int" else -> ""
+        .Float -> "__print_float"
+        .Char | .Bool | .Float32 | .Unit | .String | .Pointer | .Aggregate -> ""
+    }
+    if helper == "" -> return -2
+    row: ir_print_style_row(p, helper)
+    if row < 0 -> return -2
+    argument := slot
+    if kind == .Word {
+        int_row: ir_type_row(m, Type.Int) ?? return -2
+        argument = ir_numeric_cast(m, p, b, slot, int_row, span)
+        if ir_failed(b) || argument < 0 -> return -1
+    }
+    string_row: ir_string_row(m)
+    text: ir_print_style_call(m, p, b, row, [Int]{argument}, string_row, span)
+    if argument != slot -> ir_release(m, b, argument)
+    text
+}
+
+// The function row of the Core/Term/Term.jet print-style helper `name`
+// (`__print_int`, `__print_float`, `__print_separator`,
+// `__print_field_names`), or -1 when the program holds none: without
+// core.term no block set a style, and Print renders as Show.
+ir_print_style_row: fn(p: IRProgram, name: String) -> Int Never! {
+    loop (index, function) in p.functions {
+        if function.name == name && ir_print_style_source(function.module_identity, function.source_file, function.kind, name) && ir_function_row(p, function.key) == (Val(index)) -> return index
+    }
+    -1
+}
+
+// The call of print-style helper row `row` with `args`, its result typed
+// `result_row`: a fresh String, or the Bool of `__print_field_names`.
+ir_print_style_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, args: [Int], result_row: Int, span: Span) -> Int Never! {
+    callee: ir_function_id(m, p, p.functions[row].key, [Type]{}) ?? return ir_fail_slot(b, span, "call of {p.functions[row].name}")
+    result: if result_row == ir_string_row(m) -> ir_fresh_temp(m, b, result_row) else -> ir_temp(m, b, result_row)
+    start: ir_args(b.f, args)
+    ir_emit(b.f, IROp.Call, result, callee, start, args.len(), b.line)
+    ir_stop_check(m, b)
+    result
 }
 
 // ---------------------------------------------------------------------------

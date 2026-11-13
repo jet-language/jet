@@ -11,6 +11,7 @@ package: {
 use {
     core: core
     rt: jet.runtime.term
+    fmt: core.text.fmt
     core.files.[FileReader]
 }
 // core.term — the connected terminal.
@@ -178,6 +179,63 @@ Key: enum {
     Ctrl(Char)
     Unknown
 }
+
+// How `print` shows the values it formats, set for a block by
+// `#Context(print: term.PrintStyle{…})` and read as `context.print`: an
+// Int in `int_base`, zero-padded to `int_min_digits` digits after its
+// sign; a Float with `float_digits` decimals rounded half away from zero,
+// or in its ordinary form when None; list and tuple elements joined by
+// `list_separator`; and the labels of a generated struct or variant
+// rendering shown when `field_names`. Core/Text/Fmt.jet's radix and decimal
+// formatting makes the text. A prepared String, interpolation, Debug,
+// `to_string` and `eprint` are unchanged, and the text of a Display or
+// Printable implementation is its own.
+PrintBase: enum {
+    Binary
+    Octal
+    Decimal
+    Hex
+}
+
+PrintStyle: struct {
+    int_base: PrintBase = .Decimal
+    int_min_digits: Int = 0
+    float_digits: Int? = None
+    list_separator: String = ", "
+    field_names: Bool = true
+}
+
+// The style `context.print` reads where no `#Context(print: …)` block set
+// one, and the key such a block sets (sema ContextKeys.jet
+// sema_context_field_key).
+__print_style: PrintStyle{}
+
+// The text `print` shows for an Int under the task's print style (JetIR
+// BuildTypes.jet ir_print_style_scalar calls it by name).
+__print_int: fn(n: Int) -> String Never! {
+    style: context.print
+    base: if style.int_base == {
+        .Binary -> 2
+        .Octal -> 8
+        .Decimal -> 10
+        .Hex -> 16
+    }
+    if base == 10 && style.int_min_digits <= 0 -> return "{n}"
+    fmt.__radix_signed_width(n, base, style.int_min_digits)
+}
+
+// The text `print` shows for a Float under the task's print style.
+__print_float: fn(n: Float) -> String Never! {
+    digits: context.print.float_digits ?? return "{n}"
+    fmt.decimal(n, digits)
+}
+
+// The text between the elements of a list or tuple `print` shows.
+__print_separator: fn() -> String Never! { context.print.list_separator }
+
+// Whether `print` shows the labels of a struct or variant it renders.
+__print_field_names: fn() -> Bool Never! { context.print.field_names }
+
 print: fn(text: String) Never! -[IO, Time.Wait]> {
     out := stdout()
     out.write_line(text).drop("stdout write")

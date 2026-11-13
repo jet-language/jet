@@ -1,0 +1,33 @@
+package: {
+    name: "context_print_style"
+    authority: { allow: [IO] }
+}
+
+use term: core.term
+
+// `context.print` is the task's print style, a `term.PrintStyle`. Inside a
+// `#Context(print: …)` block `print` shows an Int in the style's base,
+// zero-padded to its digits, and joins list and tuple elements with its
+// separator; a Float keeps `float_digits` decimals, and `field_names: false`
+// drops a struct's labels. A String is already text, so interpolation keeps
+// its own spelling. After the block `print` is as before.
+
+Point: struct {
+    x: Int
+    y: Int
+}
+
+run: fn() {
+    #Context(print: term.PrintStyle{int_base: .Hex, int_min_digits: 4}) {
+        print(255)
+        print([1, 2, 3])
+        print("x = {255}")
+    }
+    print(255)
+    #Context(print: term.PrintStyle{float_digits: Val(2), list_separator: " | ", field_names: false}) {
+        print([1.5, 2.25])
+        print(Point{x: 3, y: 4})
+        print("separator \"{context.print.list_separator}\"")
+    }
+    print(Point{x: 3, y: 4})
+}

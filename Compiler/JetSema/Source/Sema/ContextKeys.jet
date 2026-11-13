@@ -47,17 +47,19 @@ sema_context_field_settable: fn(name: String) -> Bool Never! { SEMA_CONTEXT_SET_
 // The context fields a Core module carries (sema_context_field_module). The
 // loader loads that module wherever the field is spelled (Loader.jet
 // jet_driver_context_field_spelled).
-SEMA_CONTEXT_CORE_FIELDS: [String]{"logger", "on_stop", "trace"}
+SEMA_CONTEXT_CORE_FIELDS: [String]{"logger", "on_stop", "print", "trace"}
 
 // The Core module that carries the context field `name`: `logger` is
 // core.log's `logger` key, a `log.Handler`; `on_stop` is a
-// `fn(debug.Stop)`, whose default is core.debug's `__stop_ignore`; `trace`
-// is read through core.debug's `__trace_records` (Places.jet
+// `fn(debug.Stop)`, whose default is core.debug's `__stop_ignore`; `print`
+// is a `term.PrintStyle`, whose default is core.term's `__print_style`;
+// `trace` is read through core.debug's `__trace_records` (Places.jet
 // sema_expression_context_trace) and has no key, so no block sets it.
 sema_context_field_module: fn(name: String) -> String? Never! {
     if name == {
         "logger" -> Val("core.log")
         "on_stop" | "trace" -> Val("core.debug")
+        "print" -> Val("core.term")
         else -> None
     }
 }
@@ -77,7 +79,9 @@ SemaContextFieldKey: struct {
 }
 
 // The key behind the context field `name`, when the program loaded its Core
-// module: `logger` is the `#ContextKey` constant of that name, and
+// module: `logger` is its `#ContextKey` constant; `print` is keyed and
+// defaults by core.term's constant `__print_style` (core.term's `print` is
+// its function, and the constant is no key a program may name); and
 // `on_stop` is CONTEXT_ON_STOP_KEY, typed as core.debug's `__stop_ignore`
 // and defaulting to it.
 sema_context_field_key: fn(name: String, program: SemaProgramTables) -> SemaContextFieldKey? {
@@ -95,7 +99,8 @@ sema_context_field_key: fn(name: String, program: SemaProgramTables) -> SemaCont
             return None
         }
         loop constant in graph.modules[module_index].constants {
-            if constant.symbol.name != name || !sema_context_key_declared(constant.declaration) -> next
+            found: if name == "print" -> constant.symbol.name == "__print_style" else -> constant.symbol.name == name && sema_context_key_declared(constant.declaration)
+            if !found -> next
             declared: constant.symbol.ty ?? constant.ty ?? return None
             ty: sema_type_resolve_declared(graph, declared, constant.symbol.module_name)
             return Val(SemaContextFieldKey{key: SemaContextKey{key: constant.symbol.id.key, ty: ty}, default: SemaContextDefault.Constant{symbol: constant.symbol.id.copy()}})
