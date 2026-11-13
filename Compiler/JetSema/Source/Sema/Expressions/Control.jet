@@ -2584,10 +2584,10 @@ sema_expression_if: fn(condition: Expr, then_body: [Stmt], then_value: Expr, els
     }
     // The single-use check reads the state before the `if`, which the
     // rollback left live; the join and share notes report nothing.
-    single_use_paths := [SemaOwnershipPath]{}
-    if then_reaches_merge -> single_use_paths.push(then_path.copy())
-    if else_reaches_merge -> single_use_paths.push(else_path.copy())
-    sema_single_use_check_paths(state, single_use_paths, diagnostics)
+    single_use_moves := [[Bool]]{}
+    if then_reaches_merge -> single_use_moves.push(sema_single_use_path_moves(state, then_path))
+    if else_reaches_merge -> single_use_moves.push(sema_single_use_path_moves(state, else_path))
+    sema_single_use_check_paths(state, single_use_moves, diagnostics)
     base: sema_ownership_fork_base(fork)
     joined: if {
         then_reaches_merge && else_reaches_merge -> sema_ownership_path_join(state, fork, then_path, else_path, true, state.share_found)
@@ -2707,7 +2707,8 @@ sema_expression_type_table: fn(param: String, condition: Expr, then_body: [Stmt]
     arm_bodies := [[TStmt]]{}
     arm_values := [TExpr]{}
     paths := [SemaOwnershipPath]{}
-    reaching := [SemaOwnershipPath]{}
+    // The arms that reach the merge, by their index in `paths`.
+    reaching := [Int]{}
     complete := true
     // The type arms, then `else` (index heads.len()), which sees only
     // `T`'s bounds.
@@ -2753,7 +2754,7 @@ sema_expression_type_table: fn(param: String, condition: Expr, then_body: [Stmt]
             next
         }
         never: Type.Named{name: "Never"}
-        if !sema_stmt_block_has_no_fallthrough(arm_body) && checked.ty != never -> reaching.push(path.copy())
+        if !sema_stmt_block_has_no_fallthrough(arm_body) && checked.ty != never -> reaching.push(paths.len())
         paths.push(path)
         body_value := body.value.move()
         body.value = [TStmt]{}
@@ -2761,13 +2762,15 @@ sema_expression_type_table: fn(param: String, condition: Expr, then_body: [Stmt]
         arm_values.push(checked)
     }
     sema_ownership_fork_rollback(state, fork)
-    sema_single_use_check_paths(state, reaching, diagnostics)
+    single_use_moves := [[Bool]]{}
+    loop path_index in reaching -> single_use_moves.push(sema_single_use_path_moves(state, paths[path_index]))
+    sema_single_use_check_paths(state, single_use_moves, diagnostics)
     joined := sema_ownership_fork_base(fork)
     if reaching.len() == 0 {
         joined = sema_ownership_path_join(state, fork, joined, joined, false, state.share_found)
     } else {
-        joined = reaching[0].copy()
-        loop index in 1..<reaching.len() -> joined = sema_ownership_path_join(state, fork, joined, reaching[index], true, joined.share_found)
+        joined = paths[reaching[0]].copy()
+        loop index in 1..<reaching.len() -> joined = sema_ownership_path_join(state, fork, joined, paths[reaching[index]], true, joined.share_found)
         joined = sema_ownership_path_join(state, fork, joined, joined, true, state.share_found)
     }
     sema_ownership_fork_apply(state, joined)

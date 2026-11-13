@@ -1275,10 +1275,10 @@ sema_stmt_check_unit_if_parts: fn(condition: Expr, then_body: [Stmt], then_value
     else_reaches_merge: sema_stmt_tree_block_can_fall_through(else_result.value)
     // The single-use check reads the state before the branch, which the
     // rollback left live; the join reports nothing, so the order holds.
-    single_use_paths := [SemaOwnershipPath]{}
-    if then_reaches_merge -> single_use_paths.push(then_path.copy())
-    if else_reaches_merge -> single_use_paths.push(else_path.copy())
-    sema_single_use_check_paths(state, single_use_paths, diagnostics)
+    single_use_moves := [[Bool]]{}
+    if then_reaches_merge -> single_use_moves.push(sema_single_use_path_moves(state, then_path))
+    if else_reaches_merge -> single_use_moves.push(sema_single_use_path_moves(state, else_path))
+    sema_single_use_check_paths(state, single_use_moves, diagnostics)
     base: sema_ownership_fork_base(fork)
     joined: if {
         then_reaches_merge && else_reaches_merge -> sema_ownership_path_join(state, fork, then_path, else_path, true, state.share_found)
@@ -1513,8 +1513,10 @@ sema_stmt_check_switch: fn(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?,
     // table again, which the single-use check reads; the join reports
     // nothing, so the order holds.
     sema_ownership_fork_rollback(state, fork)
-    if else_reaches_merge -> single_use_paths.push(else_path.copy())
-    sema_single_use_check_paths(state, single_use_paths, diagnostics)
+    single_use_moves := [[Bool]]{}
+    loop path in single_use_paths -> single_use_moves.push(sema_single_use_path_moves(state, path))
+    if else_reaches_merge -> single_use_moves.push(sema_single_use_path_moves(state, else_path))
+    sema_single_use_check_paths(state, single_use_moves, diagnostics)
     base: sema_ownership_fork_base(fork)
     joined: if {
         has_branch && else_reaches_merge -> sema_ownership_path_join(state, fork, merged_path, else_path, true, state.share_found)
@@ -1643,19 +1645,23 @@ sema_stmt_through_note_read: fn(scan: &SemaStmtThroughScan, value: Expr) Never! 
 }
 
 // A `#Through` run-on body is checked twice, after the arm before it and in
-// its own arm; each finding from `from` on is kept once.
+// its own arm; each finding from `from` on is kept once. The repeats leave in
+// place, from the back, so the kept findings are never copied.
 sema_stmt_through_dedupe: fn(diagnostics: &[Diagnostic], from: Int) Never! {
     seen := [String:Bool]{}
-    kept := [Diagnostic]{}
+    repeated := [Int]{}
     loop (index, diagnostic) in diagnostics {
-        if index >= from {
-            key: if diagnostic.span == .Val(at) -> "{diagnostic.code}@{at.start}:{at.end}:{diagnostic.what}" else -> "{diagnostic.code}@:{diagnostic.what}"
-            if seen.get(key) != None -> next
-            seen[key] = true
+        if index < from -> next
+        key: if diagnostic.span == .Val(at) -> "{diagnostic.code}@{at.start}:{at.end}:{diagnostic.what}" else -> "{diagnostic.code}@:{diagnostic.what}"
+        if seen.get(key) != None {
+            repeated.push(index)
+            next
         }
-        kept.push(diagnostic.copy())
+        seen[key] = true
     }
-    diagnostics = kept
+    loop repeated.pop() == .Val(index) {
+        _ := diagnostics.remove(index, .Slot)
+    }
 }
 
 // The subject of `if T == { … }` when it names a type
@@ -3555,10 +3561,11 @@ sema_stmt_whole_list_window: fn(value: Expr, environment: SemaScopeEnvironment, 
     span: expr_span(value)
     // copy: the full range reads the place twice, as its base and as the receiver of its length
     length: Expr.MethodCall{receiver: value.copy(), method: "len", method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: [CallArg]{}, id: AST_NODE_GENERATED}
-    start: Expr.Int{value: 0, span: span, width: None, raw: None, id: AST_NODE_GENERATED}
-    // copy: the slice keeps its bounds both as `start`/`end` and inside its range, as the parser writes `xs[a..<b]`
-    whole: Expr.Range{start: start.copy(), end: length.copy(), exclusive: true, span: span, id: AST_NODE_GENERATED}
-    Val(Expr.Slice{base: value, start: start, end: length, range: Val(whole), span: span, id: AST_NODE_GENERATED})
+    // The slice keeps its bounds both as `start`/`end` and inside its range,
+    // as the parser writes `xs[a..<b]`: the zero start is written for each,
+    // and the length is copied.
+    whole: Expr.Range{start: Expr.Int{value: 0, span: span, width: None, raw: None, id: AST_NODE_GENERATED}, end: length.copy(), exclusive: true, span: span, id: AST_NODE_GENERATED}
+    Val(Expr.Slice{base: value, start: Expr.Int{value: 0, span: span, width: None, raw: None, id: AST_NODE_GENERATED}, end: length, range: Val(whole), span: span, id: AST_NODE_GENERATED})
 }
 
 sema_stmt_record_binding_views: fn(binding: Binding, init_ty: Type, scopes: SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
@@ -4956,15 +4963,13 @@ sema_stmt_check_refutable_binding: fn(binding: Binding, pattern: Pattern, fallba
             .Val(value) -> value.ty
             .None -> Type.Int
         }
-        local := sema_stmt_destructure_local(name, ty, binding.mutable, environment, program, scopes, state, diagnostics)
-        if local == None -> next
-        installed: local ?? next
-        locals.push(installed.copy())
+        installed := sema_stmt_destructure_local(name, ty, binding.mutable, environment, program, scopes, state, diagnostics) ?? next
         if checked_pattern_tree != None {
             typed := checked_pattern_tree ?? next
             sema_stmt_refutable_assign_capture_identity(typed.pattern, name, installed)
             checked_pattern_tree = Val(typed)
         }
+        locals.push(installed.move())
     }
     if diagnostics.len() != before || !checked_pattern.complete || !move_valid || !checked_fallback.complete || locals.len() != names.len() -> return None
     typed: checked_pattern_tree ?? return None
@@ -6177,11 +6182,11 @@ sema_stmt_transaction_lvalue_root: fn(target: LValue) -> String? {
     }
 }
 
-sema_stmt_transaction_add_root: fn(name: String, roots: &[String]) Never! {
+sema_stmt_transaction_add_root: fn(name: &&String, roots: &[String]) Never! {
     loop existing in roots {
         if existing == name -> return
     }
-    roots.push(name.copy())
+    roots.push(name.move())
 }
 
 sema_stmt_transaction_collect_roots: fn(statements: [Stmt], roots: &[String]) Never! {
@@ -6189,7 +6194,7 @@ sema_stmt_transaction_collect_roots: fn(statements: [Stmt], roots: &[String]) Ne
         if statement == {
             .Assign(target, _, _, _) -> {
                 root := sema_stmt_transaction_lvalue_root(target)
-                if root != None -> sema_stmt_transaction_add_root(root ?? "", roots)
+                if root != None -> sema_stmt_transaction_add_root(root.move() ?? "", roots)
             }
             .While(_, body, _, _, _)
             | .Loop(body, _, _, _)
@@ -7204,7 +7209,7 @@ sema_stmt_check_place_assignment: fn(target: LValue, checked_place: &&TExpr, op:
         }
         keys := [Bool]{}
         steps := [TExpr]{}
-        span: place.span.copy()
+        span: place.span
         site: if operation == {
             .DynIndexKey(text, _) | .DynIndexAt(text, _) -> text
             .Hardware(_) | .DurationNew(_, _) | .FileReaderReadLine | .FileReaderRead(_) | .FileReaderSeek | .FileReaderPath | .MappedFileWindow | .MappedFileWindowLen | .MappedFileLines | .LinesIter | .MappedFileLen | .MappedFileIsEmpty | .FileWriterWriteLine | .FileWriterFlush | .FileWriterWriteAll | .FileWriterFsync | .FileWriterPath | .JSONReaderNext | .JSONWriterWrite | .JSONWriterFlush | .JSONWriterFinish | .JSONLReaderNext | .JSONLWriterWrite | .JSONLWriterFlush | .JSONLWriterFinish | .DataStreamNext | .XMLReaderNext | .XMLWriterWrite | .XMLWriterFlush | .XMLWriterFinish | .CBORReaderNext | .CBORWriterWrite | .CBORWriterFlush | .CBORWriterFinish | .StdinReadLine | .StdoutWrite | .StdoutWriteLine | .StdoutWriteBytes | .StdoutFlush | .StdoutIsTTY | .StderrWrite | .StderrWriteLine | .StderrWriteBytes | .StderrFlush | .StderrIsTTY | .WorldNow | .WorldAdvance | .WorldWaitIdle | .WorldHistory | .RealtimeNextDeadline | .RealtimeReceipt | .RealtimeCancel | .RealtimeIsCancelled | .GameSceneNew | .GameReplayRecord | .GameBackendHeadless | .GameBackendShouldContinue | .GameBackendPresent | .GameSceneOnFrame(_, _) | .GameSceneComponent | .GameSceneQuery | .GameAssetsImage | .GameAssetsSound | .GameInputBind | .GameInputPressed | .RNGInt | .RNGFloat | .RNGFloatRange | .RNGBool | .RNGBoolP | .RNGNormal | .RNGExponential | .RNGBytes | .RNGSplit | .RNGPick | .RNGWeightedPick | .RNGSample | .RNGShuffle | .DurationIn | .DurationIsZero | .DurationTotalSeconds | .DurationDifference | .TestSuiteRun | .TestSetting | .DurationAbs | .DurationNegated | .DurationSign | .DurationTotalIn | .DurationRound | .DurationNsValue | .DurationScale | .DurationDivide | .AllocAlloc | .AllocTryAlloc | .AllocReset | .PreciseMethod(_, _) | .TCPListenerAccept | .TCPListenerAcceptDeadline | .TCPListenerLocalAddr | .TCPStreamRead | .TCPStreamPeerAddr | .TCPStreamLocalAddr | .TCPStreamClose | .TCPStreamReadBytes(_) | .TCPStreamReadBytesDeadline(_) | .TCPStreamReadText | .TCPStreamReadTextDeadline | .TCPStreamWriteBytes | .TCPStreamWriteBytesDeadline | .TCPStreamWriteAllBytes | .TCPStreamWriteAllBytesDeadline | .TCPStreamWriteText | .TCPStreamWriteTextDeadline | .TCPStreamShutdown | .TCPStreamReady | .UDPSocketReady | .UDPSocketClose | .UDPSocketReceiveDeadline | .UDPSocketSendToDeadline | .UnixListenerAcceptDeadline | .UnixStreamReadDeadline(_) | .UnixStreamWriteAllDeadline | .UnixStreamReady | .UnixStreamClose | .UnixStreamSetTimeout | .HTTPClientNew | .ArgsSpecFlag | .ArgsSpecFlagShort | .ArgsSpecOption | .ArgsSpecOptionShort | .ArgsSpecOptionDefault | .ArgsSpecOptionEnv | .ArgsSpecOptionInt | .ArgsSpecOptionFloat | .ArgsSpecOptionChoice | .ArgsSpecRepeat | .ArgsSpecRequiredOption | .ArgsSpecPositional | .ArgsSpecDescription | .ArgsSpecSubcommand | .ArgsSpecVersion | .ArgsSpecCompletion | .ArgsSpecHelp | .ArgsSpecParse | .ArgsSpecParseOrExit | .ParsedArgsFlag | .ParsedArgsOption | .ParsedArgsOptionInt | .ParsedArgsOptionFloat | .ParsedArgsOptions | .ParsedArgsSubcommand | .ParsedArgsPositional | .ProcessSpecMethod(_, _) | .ProcessChildMethod(_) | .TerminalSessionResize | .ProcessStdinWrite | .ProcessStdinWriteText | .ProcessStdinClose | .ProcessStdinWriteAll | .ProcessStdoutRead | .ProcessStderrRead | .ReflectValueTypeName | .ReflectValuePath | .ReflectValueDisplay | .ReflectValueFields | .ReflectFieldName | .ReflectFieldValue | .TaskJoin | .TaskDetach | .TaskPause | .TaskResume | .TaskCancel | .ChannelReceive | .ChannelTryReceive | .ChannelIsTimer | .ChannelIsInterval | .ChannelIsCancelled | .ChannelIsReady | .ChannelDelayMs | .ChannelClose | .SenderSend | .MathMethod(_, _) | .ReactiveGet | .ReactiveSet | .ReactiveEffectMethod | .EventMethod(_) | .LayoutMethod(_) | .LoadableMethod(_) | .CivilTimeMethod(_, _) | .HTTPClientMethod(_, _) | .HTTPServerMethod(_, _) | .DynField | .DynAt | .DynInt | .DynText | .DynBool | .DynFloat | .DynToText | .DynEqualUnordered | .DynDecode(_) | .DynGetKey | .DynGetAt | .DynHas | .DynKeys | .DynLen(_, _) | .DynRemove | .DynBinary(_, _, _) | .DynCompare(_, _, _) | .DynSetPath(_, _, _) | .SerdeEncode | .JSONField | .JSONAt | .JSONInt | .JSONText | .JSONBool | .JSONFloat | .JSONToText | .JSONEqualUnordered | .PathFrom | .PathHome | .PathJoin | .PathParent | .PathExtension | .PathStem | .PathNormalize | .PathIsWithin | .PathToString | .PathWalk | .PluginInvoke(_, _) | .ReaderOver(_) | .ReaderReadU8 | .ReaderReadI8 | .ReaderReadU16Le | .ReaderReadU16Be | .ReaderReadI16Le | .ReaderReadI16Be | .ReaderReadU32Le | .ReaderReadU32Be | .ReaderReadI32Le | .ReaderReadI32Be | .ReaderReadU64Le | .ReaderReadU64Be | .ReaderReadI64Le | .ReaderReadI64Be | .ReaderReadF32Le | .ReaderReadF32Be | .ReaderReadF64Le | .ReaderReadF64Be | .ReaderPeek | .ReaderSeek | .ReaderSkip | .ReaderTake | .ReaderRemaining | .ReaderAtEnd | .CursorOver | .CursorTakeUntil | .CursorSkipWs | .CursorTakePattern(_, _) | .ReaderTakePattern(_, _) | .ProcessLines -> "…"
@@ -9654,7 +9659,7 @@ sema_stmt_check_scoped_statement: fn(statement: Stmt, return_type: Type?, enviro
             }
         }
         .Reactive(body, span) -> {
-            state.reactive_bodies.push(span.copy())
+            state.reactive_bodies.push(span)
             checked := sema_stmt_check_reactive(body, span, environment, program, scopes, state, tail_store, context, diagnostics)
             if checked == {
                 .Val(value) -> output.push(TStmt.Reactive{executable: value, span: span})

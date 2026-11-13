@@ -224,21 +224,31 @@ SemaSingleUseDrain: struct {
     }
 }
 
+// Which single-use rows of `before` (sema_ownership_single_use_rows, in
+// order) `path` moves. A branch's path is read in place, so the check below
+// never copies a path to list it.
+sema_single_use_path_moves: fn(before: SemaOwnershipState, path: SemaOwnershipPath) -> [Bool] Never! {
+    moves := [Bool]{}
+    loop row in sema_ownership_single_use_rows(before) -> moves.push(sema_single_use_moved_in(path.moved, before.declarations[row].key))
+    moves
+}
+
 // E0141. The merged move store is a union, so a value
 // consumed on only one path would look consumed after the branch. Compare
 // the paths that reach the merge directly, over the bindings of the current
 // scope that were unconsumed before the branch. `before` is the state of the
-// branch's fork (rolled back), `paths` the paths that reach the merge.
-sema_single_use_check_paths: fn(before: SemaOwnershipState, paths: [SemaOwnershipPath], diagnostics: &[Diagnostic]) {
-    loop row in sema_ownership_single_use_rows(before) {
+// branch's fork (rolled back); `paths` holds sema_single_use_path_moves of
+// each path that reaches the merge, taken over that same state.
+sema_single_use_check_paths: fn(before: SemaOwnershipState, paths: [[Bool]], diagnostics: &[Diagnostic]) {
+    loop (index, row) in sema_ownership_single_use_rows(before) {
         fact: before.declarations[row]
         if !fact.active || fact.scope_depth != before.scope_depth -> next
         if sema_single_use_moved(before, fact.key) -> next
         consumed := false
         kept := false
-        loop path in paths {
+        loop moves in paths {
             if {
-                sema_single_use_moved_in(path.moved, fact.key) -> consumed = true
+                moves[index] -> consumed = true
                 else -> kept = true
             }
         }
