@@ -27,9 +27,14 @@
 // Usage: jet Tools/agent/DiagnosticRows.jet [--check|--write]
 // --check fails when any copy differs from what the rows give it; --write
 // rewrites the copies and removes pages no row owns.
+// The rows also give the dated safety audit under Docs/research: each active
+// error row's `safety_class`, its reason and its expert path, and the sealed
+// floors with the first place the compiler reports each. Both modes refuse an
+// active error row in SAFETY_RANGES that states no `safety_class`.
 use {
     files: core.files
     process: core.process
+    time: core.time
 }
 
 SOURCE_PATH: "Compiler/Prelude/Diagnostics.jet"
@@ -58,6 +63,18 @@ SPEC_DIR: "Docs/spec"
 // shrinks: a code whose letter matches again, or whose row is gone, fails the
 // check until it is removed here, and a new mismatch can't be added.
 LETTER_LAW_EXCEPTIONS: [String]{"E2818", "E2930", "E2931", "E2934", "JT0101", "L1101", "W0410"}
+
+// The dated safety audit: the date --write wrote it, then AUDIT_NAME, in
+// AUDIT_DIR as its research notes are named.
+AUDIT_DIR: "Docs/research"
+AUDIT_NAME: "-diagnostic-safety-audit.md"
+// The code ranges, as a code's first three characters, whose active error
+// rows must state a `safety_class`. The list grows until it holds every code.
+SAFETY_RANGES: [String]{"E00", "E01", "E02", "E03", "E04", "E05", "E06", "E07", "E08", "E09", "E10", "E11", "E12", "E13", "E14", "E18", "E20", "E21", "E22", "E23", "E24", "E25", "E26", "E27", "E28", "E29", "E30", "E31", "E32", "E33", "E34", "E35", "E36", "E42", "E-A", "E-C", "E-E", "E-F", "E-M", "E-O", "E-S", "E-T", "E-W", "JT0", "L11", "R08"}
+// Where a sealed floor's report site is looked for first.
+SEMA_ROOT: "Compiler/JetSema/"
+// A quoted diagnostic code in compiler source, as `sema_error("E0212", …)` passes it.
+QUOTED_CODE: Regex{"\x22(E[0-9]{{4}})\x22"}
 
 STRUCT_OPEN: Regex{"^(\w+): struct \x7B$"}
 STRUCT_FIELD: Regex{"^    ([a-z][a-z0-9_]*): String$"}
@@ -108,12 +125,14 @@ TextFile: struct {
     text: String
 }
 
-// What one row gives the coverage baseline and its explain page.
+// What one row gives the coverage baseline, its explain page and the safety audit.
 RowFacts: struct {
     code: String
     // The type path a report's header prints: `jet.` and the impl's type.
     name: String
     active: Bool
+    // A `.Error` row, not a `.Lint`.
+    error: Bool
     // `severity: .Lint`; the letter law reads it against the code.
     lint: Bool
     plane: String
@@ -124,6 +143,11 @@ RowFacts: struct {
     what: String
     why: String
     fix: String
+    // `Soundness`, `Opinion`, or "" when the row states no `safety_class`;
+    // its `safety_reason` and `expert_path` as a reader sees them.
+    safety_class: String
+    safety_reason: String
+    expert_path: String
 }
 
 RenderedRow: struct {
@@ -294,7 +318,7 @@ constant_literal: fn(source: DiagnosticSource, name: String, fallback: String) -
 
 render_row: fn(source: DiagnosticSource) -> RenderedRow DiagnosticRowsError! {
     context: "{source.name}: struct"
-    known: [String]{"code", "severity", "lint_name", "stage", "moment", "status", "meaning", "detail", "structured_fix", "no_fix", "fix_next", "fix_safety"}
+    known: [String]{"code", "severity", "lint_name", "stage", "moment", "status", "meaning", "detail", "structured_fix", "no_fix", "fix_next", "fix_safety", "safety_class", "safety_reason", "expert_path"}
     loop constant in source.constants {
         if !known.contains(constant.name) -> return Err(rows_fail("{context}: unknown constant `{constant.name}`"))
     }
@@ -378,6 +402,19 @@ render_row: fn(source: DiagnosticSource) -> RenderedRow DiagnosticRowsError! {
         grade: constant_case(written_safety, "{context}.fix_safety") ?? return Err(err)
         safety = "Val(DiagnosticFixSafety.{grade})"
     }
+    class := ""
+    if entry(source.constants, "safety_class") == .Val(written_class) {
+        class = constant_case(written_class, "{context}.safety_class") ?? return Err(err)
+        if class != "Soundness" && class != "Opinion" -> return Err(rows_fail("{context}: a `safety_class` is `.Soundness` or `.Opinion`, not `.{class}`"))
+        if status != "Active" || severity != "Error" -> return Err(rows_fail("{context}: only an active `.Error` row states a `safety_class`"))
+    }
+    has_safety_reason: entry(source.constants, "safety_reason") != None
+    has_expert: entry(source.constants, "expert_path") != None
+    if class == "" && status == "Active" && severity == "Error" && in_safety_ranges(code_text) -> return Err(rows_fail("{context}: `{code_text}` is an active error row in a classified range, so it states a `safety_class` and its `safety_reason`"))
+    if (class != "") != has_safety_reason -> return Err(rows_fail("{context}: a `safety_class` and a `safety_reason` come together"))
+    if (class == "Soundness") != has_expert -> return Err(rows_fail("{context}: a `.Soundness` row, and only one, states its `expert_path`"))
+    safety_reason: display_text(constant_literal(source, "safety_reason", "") ?? return Err(err), "{context}.safety_reason") ?? return Err(err)
+    expert_path: display_text(constant_literal(source, "expert_path", "") ?? return Err(err), "{context}.expert_path") ?? return Err(err)
     text: [String]{
         "    {{",
         "        code: \"{code_text}\",",
@@ -403,6 +440,7 @@ render_row: fn(source: DiagnosticSource) -> RenderedRow DiagnosticRowsError! {
         code: code_text,
         name: "{NAME_PATH}{source.name}",
         active: status == "Active",
+        error: severity == "Error",
         lint: severity == "Lint",
         plane: stages,
         edit: edit != "" && edit != "CryptoMisuse",
@@ -410,7 +448,18 @@ render_row: fn(source: DiagnosticSource) -> RenderedRow DiagnosticRowsError! {
         what: shown[0],
         why: shown[1],
         fix: shown[2],
+        safety_class: class,
+        safety_reason: safety_reason,
+        expert_path: expert_path,
     }})
+}
+
+// Whether `code` is in SAFETY_RANGES, whose active error rows state a `safety_class`.
+in_safety_ranges: fn(code: String) -> Bool Never! {
+    loop range in SAFETY_RANGES {
+        if code.starts_with(range) -> return true
+    }
+    false
 }
 
 render_rows: fn(source: String) -> RenderedRows DiagnosticRowsError! {
@@ -1016,11 +1065,15 @@ REPORT_LINK: "jet-lang.dev/e/"
 COPY_HEADING: Regex{"\[([A-Z][A-Z]?[0-9][0-9][0-9][0-9])\]: "}
 COPY_LINK: Regex{"More: jet-lang\.dev/e/([A-Z][A-Z]?[0-9][0-9][0-9][0-9])"}
 
-// What the report-site check read and found.
+// What the report-site check read and found. `code_sites` maps a code to
+// the `path:line` that best shows where the compiler reports it, and
+// `site_ranks` to that line's site_rank.
 ReportSites: struct {
     files: Int
     copies: Int
     problems: [String]
+    code_sites: [String:String]
+    site_ranks: [String:Int]
 }
 
 // The `.jet` and `.S` files under `directory`, outside test, fixture and
@@ -1110,7 +1163,7 @@ file_report_problems: fn(rows: [RowFacts], path: String, text: String) -> Report
     lines: text.split("\n").to_list()
     assembly: path.ends_with(".S")
     copied: assembly || (lines.len() > 0 && lines[0].lower().contains("generated by"))
-    found := ReportSites{files: 1, copies: 0, problems: [String]{}}
+    found := ReportSites{files: 1, copies: 0, problems: [String]{}, code_sites: [String:String]{}, site_ranks: [String:Int]{}}
     loop (index, line) in lines {
         loop literal in line_literals(line, !assembly) {
             at: "{path}:{index + 1}"
@@ -1129,9 +1182,10 @@ file_report_problems: fn(rows: [RowFacts], path: String, text: String) -> Report
     found
 }
 
-// Every source file a report may be printed from, checked against the rows.
+// Every source file a report may be printed from, checked against the rows,
+// and the line that best shows where each quoted code is reported.
 report_sites: fn(rows: [RowFacts]) -[FS]> ReportSites DiagnosticRowsError! {
-    sites := ReportSites{files: 0, copies: 0, problems: [String]{}}
+    sites := ReportSites{files: 0, copies: 0, problems: [String]{}, code_sites: [String:String]{}, site_ranks: [String:Int]{}}
     loop root in REPORT_ROOTS {
         loop path in (report_sources(root) ?? return Err(err)) {
             if REPORT_HOMES.contains(path) -> next
@@ -1140,9 +1194,116 @@ report_sites: fn(rows: [RowFacts]) -[FS]> ReportSites DiagnosticRowsError! {
             sites.files += 1
             sites.copies += one.copies
             loop problem in one.problems -> sites.problems.push(problem)
+            if !text.contains("\"E") -> next
+            loop (index, line) in text.split("\n").to_list() {
+                if !line.contains("\"E") -> next
+                loop quoted in QUOTED_CODE.matches(line) {
+                    code: quoted.groups[0]
+                    rank: site_rank(path, line, code)
+                    if (sites.site_ranks.get(code) ?? 4) <= rank -> next
+                    sites.site_ranks[code.copy()] = rank
+                    sites.code_sites[code.copy()] = "{path}:{index + 1}"
+                }
+            }
         }
     }
     Ok(sites)
+}
+
+// How well a line that quotes `code` shows where the compiler reports it:
+// 0, a sema call that passes the code first; 1, such a call elsewhere; 2,
+// another sema line; 3, any other line. The first line of the lowest rank wins.
+site_rank: fn(path: String, line: String, code: String) -> Int Never! {
+    called: line.contains("(\"{code}\"")
+    sema: path.starts_with(SEMA_ROOT)
+    if called && sema -> return 0
+    if called -> return 1
+    if sema -> return 2
+    3
+}
+
+// A table cell: a `|` would end it.
+audit_cell: fn(text: String) -> String Never! { text.replace("|", "\\|") }
+
+// The safety audit the rows give: every classified active error row, the
+// soundness rows an expert opt-in lifts, and the sealed floors, each floor
+// with the first place the compiler reports it.
+render_audit: fn(facts: [RowFacts], sites: ReportSites) -> String Never! {
+    soundness := 0
+    opinion := 0
+    pending := 0
+    floors := [String]{}
+    lifted := [String]{}
+    classified := [String]{}
+    loop row in facts {
+        if !row.active || !row.error -> next
+        if row.safety_class == "" {
+            pending += 1
+            next
+        }
+        type_name: row.name.remove_prefix(NAME_PATH)
+        classified.push("| {row.code} | {type_name} | {row.safety_class.lower()} | {audit_cell(row.safety_reason)} |")
+        if row.safety_class == "Opinion" {
+            opinion += 1
+            next
+        }
+        soundness += 1
+        if !row.expert_path.starts_with("none: ") {
+            lifted.push("| {row.code} | {type_name} | {audit_cell(row.expert_path)} |")
+            next
+        }
+        at := "no source quotes the code"
+        if sites.code_sites.get(row.code) == .Val(site) -> at = site.copy()
+        floors.push("| {row.code} | {type_name} | {at} | {audit_cell(row.expert_path.remove_prefix("none: "))} |")
+    }
+    floors.sort()
+    lifted.sort()
+    classified.sort()
+    ranges := [String]{}
+    loop range in SAFETY_RANGES -> ranges.push("{range}xx")
+    [String]{
+        "# Diagnostic safety audit",
+        "",
+        "<!-- Generated by Tools/agent/DiagnosticRows.jet from {SOURCE_PATH}; do not edit. -->",
+        "",
+        "An error refuses a program for one of two reasons. A soundness error stops a memory, type, aliasing or resource fault, or the loss of a guarantee such as a capability or what a reviewer reads. An opinion error refuses a program that would run safely, for clarity or style. A reason that begins `Finding:` records a row whose code or name does not match one meaning.",
+        "",
+        "Each row states its class in `safety_class` and why in `safety_reason`. A soundness row also states its `expert_path`: the opt-in that reaches the same program, or `none:` and why nothing can.",
+        "",
+        "Classified ranges: {ranges.join(", ")}. They hold {soundness + opinion} active error rows: {soundness} soundness and {opinion} opinion. The other ranges hold {pending} active error rows with no class yet.",
+        "",
+        "## Sealed floors",
+        "",
+        "A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lifts. Its site is the first compiler call that passes the code to a report, in sema when sema has one. A code no call passes shows the first line that quotes it.",
+        "",
+        "| Code | Type | Reported at | Why no expert path reaches the program |",
+        "|---|---|---|---|",
+        floors.join("\n"),
+        "",
+        "## Soundness errors an expert can lift",
+        "",
+        "| Code | Type | Expert path |",
+        "|---|---|---|",
+        lifted.join("\n"),
+        "",
+        "## Every classified row",
+        "",
+        "| Code | Type | Class | Reason |",
+        "|---|---|---|---|",
+        classified.join("\n"),
+        "",
+    }.join("\n")
+}
+
+// The committed safety audit's path, or "" when there is none.
+committed_audit: fn() -[FS]> String DiagnosticRowsError! {
+    found := ""
+    loop child in (files.list_dir(AUDIT_DIR) ?? return Err(rows_fail("cannot list {AUDIT_DIR}: {err}"))) {
+        if child.is_dir || !child.name.ends_with(AUDIT_NAME) -> next
+        if found != "" -> return Err(rows_fail("two safety audits, {found} and {child.path}; remove the older"))
+        found = child.path.copy()
+    }
+    Ok(found)
 }
 
 // What the spec-citation check read and found.
@@ -1220,7 +1381,7 @@ spec_citations: fn(rows: [RowFacts]) -[FS]> SpecCitations DiagnosticRowsError! {
     Ok(found)
 }
 
-diagnostic_rows_main: fn(args: [String]) -[FS]> String DiagnosticRowsError! {
+diagnostic_rows_main: fn(args: [String]) -[FS, Time]> String DiagnosticRowsError! {
     mode: if args.len() == 0 -> "--check" else -> args[0]
     if args.len() > 1 || (mode != "--check" && mode != "--write") -> return Err(rows_fail("usage: DiagnosticRows.jet [--check|--write]"))
     source: files.read(SOURCE_PATH) ?? return Err(rows_fail("cannot read {SOURCE_PATH}: {err}"))
@@ -1242,11 +1403,21 @@ diagnostic_rows_main: fn(args: [String]) -[FS]> String DiagnosticRowsError! {
         if file.path.starts_with("{PAGES_DIR}/") -> files.create_dir_all(file.path.remove_suffix("/index.html")) ?? return Err(rows_fail("cannot create the directory of {file.path}: {err}"))
         files.write(file.path, file.text) ?? return Err(rows_fail("cannot write {file.path}: {err}"))
     }
+    audit: render_audit(rows.facts, sites)
+    audit_at: committed_audit() ?? return Err(err)
+    audit_current: if audit_at == "" -> "" else -> files.read(audit_at) ?? return Err(rows_fail("cannot read {audit_at}: {err}"))
+    audit_differs: audit_current != audit
+    if audit_differs -> differing.push(if audit_at == "" -> "{AUDIT_DIR}/<date>{AUDIT_NAME}" else -> audit_at.copy())
     if mode == "--write" {
+        if audit_differs {
+            dated: "{AUDIT_DIR}/{time.isoformat_date(time.today())}{AUDIT_NAME}"
+            files.write(dated, audit) ?? return Err(rows_fail("cannot write {dated}: {err}"))
+            if audit_at != "" && audit_at != dated -> files.remove(audit_at) ?? return Err(rows_fail("cannot remove {audit_at}: {err}"))
+        }
         loop path in stale -> files.remove(path) ?? return Err(rows_fail("cannot remove {path}: {err}"))
         if sites.problems.len() > 0 -> return Err(rows_fail(sites_failure))
         if citations.problems.len() > 0 -> return Err(rows_fail(citations_failure))
-        return Ok("diagnostic copies written: {differing.len()} rewritten, {stale.len()} stale pages removed, {generated.len()} in all")
+        return Ok("diagnostic copies written: {differing.len()} rewritten, {stale.len()} stale pages removed, {generated.len() + 1} in all")
     }
     loop path in stale -> differing.push("{path} (no diagnostic row owns this page)")
     failures := [String]{}
@@ -1261,7 +1432,7 @@ diagnostic_rows_main: fn(args: [String]) -[FS]> String DiagnosticRowsError! {
     if sites.problems.len() > 0 -> failures.push(sites_failure)
     if citations.problems.len() > 0 -> failures.push(citations_failure)
     if failures.len() > 0 -> return Err(rows_fail(failures.join("\n")))
-    Ok("diagnostic rows check passed: {generated.len()} copies match; {sites.files} source files read, none builds a report by hand, and {sites.copies} runtime report copies match their rows; {citations.cited} codes cited in {citations.pages} spec pages each name a row")
+    Ok("diagnostic rows check passed: {generated.len() + 1} copies match, the safety audit among them; {sites.files} source files read, none builds a report by hand, {sites.copies} runtime report copies match their rows, and {citations.cited} codes cited in {citations.pages} spec pages each name a row")
 }
 
 run: fn() { print(diagnostic_rows_main(process.args()) ?? process.fail(1, err.message)) }
@@ -1404,6 +1575,35 @@ MINIMAL_MEANING: "        meaning: \"A route that doesn't start at the root\"\n"
         staged: row.replace(code, "{code}        status: .{status}\n        stage: [.Sema]\n")
         assert(diagnostic_rows_error(staged).contains("a `.{status}` row runs in no stage"))
     }
+}
+
+#Test("an active error row in a classified range states its safety class, and the audit lists it") {
+    row: MINIMAL_ROW.replace("E9999", "E0299")
+    code: "        code: \"E0299\"\n"
+    unclassified: diagnostic_rows_error(row)
+    assert(unclassified.contains("is an active error row in a classified range"), unclassified)
+    opinion: "{code}        safety_class: .Opinion\n        safety_reason: \"it would run safely\"\n"
+    assert(diagnostic_rows_error(row.replace(code, opinion)) == "")
+    assert(diagnostic_rows_error(row.replace(code, "{code}        safety_class: .Opinion\n")).contains("come together"))
+    assert(diagnostic_rows_error(row.replace(code, "{opinion}        expert_path: \"an `#Unsafe` block\"\n")).contains("only one, states its `expert_path`"))
+    sound: "{code}        safety_class: .Soundness\n        safety_reason: \"a | b\"\n"
+    assert(diagnostic_rows_error(row.replace(code, sound)).contains("only one, states its `expert_path`"))
+    assert(diagnostic_rows_error(row.replace(code, "{code}        safety_class: .Maybe\n        safety_reason: \"x\"\n")).contains("`.Soundness` or `.Opinion`"))
+    assert(diagnostic_rows_error(row.replace(code, "{opinion}        status: .Retired\n")).contains("only an active `.Error` row"))
+    sites := ReportSites{files: 0, copies: 0, problems: [String]{}, code_sites: [String:String]{}, site_ranks: [String:Int]{}}
+    floor: (render_rows(row.replace(code, "{sound}        expert_path: \"none: nothing reaches it\"\n")) ?? panic(err.message)).facts
+    assert(render_audit(floor, sites).contains("| E0299 | BadPath | no source quotes the code | nothing reaches it |"))
+    sites.code_sites["E0299"] = "Compiler/JetSema/b.jet:7"
+    audit: render_audit(floor, sites)
+    assert(audit.contains("| E0299 | BadPath | Compiler/JetSema/b.jet:7 | nothing reaches it |"))
+    assert_eq(site_rank("Compiler/JetSema/b.jet", "    sema_error(\"E0299\", span)", "E0299"), 0)
+    assert_eq(site_rank("Compiler/JetParser/a.jet", "    parse_error(\"E0299\", span)", "E0299"), 1)
+    assert_eq(site_rank("Compiler/JetSema/b.jet", "    codes: [\"E0298\", \"E0299\"]", "E0299"), 2)
+    assert_eq(site_rank("Compiler/JetCli/c.jet", "    codes: [\"E0298\", \"E0299\"]", "E0299"), 3)
+    assert(audit.contains("| E0299 | BadPath | soundness | a \\| b |"))
+    lifted: (render_rows(row.replace(code, "{sound}        expert_path: \"an `#Unsafe` block\"\n")) ?? panic(err.message)).facts
+    assert(render_audit(lifted, sites).contains("| E0299 | BadPath | an `#Unsafe` block |"))
+    assert(render_audit((render_rows(row.replace("E0299", "E9999")) ?? panic(err.message)).facts, sites).contains("hold 1 active error rows with no class yet"))
 }
 
 #Test("a literal reads as the program prints it") {

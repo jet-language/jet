@@ -141,6 +141,15 @@ Diagnostic: trait {
     // The next step without a machine edit. None: the `fix` text.
     fix_next: String?{None}
     fix_safety: DiagnosticFixSafety?{None}
+    // Why an error refuses the program: `.Soundness` or `.Opinion`. None:
+    // not yet classified.
+    safety_class: DiagnosticSafetyClass?{None}
+    // One line: the fault accepting the program could cause, or why it would
+    // run safely.
+    safety_reason: String?{None}
+    // A `.Soundness` error's way out for an expert: the opt-in that reaches
+    // the same program, or `none: ` and why nothing can.
+    expert_path: String?{None}
     what: fn(self) -> String
     why: fn(self) -> String
     fix: fn(self) -> String
@@ -196,6 +205,14 @@ DiagnosticStatus: enum {
     Active
     Reserved
     Retired
+}
+
+// Why an error refuses a program. `.Soundness`: accepting it could cause a
+// memory, type, aliasing or resource fault. `.Opinion`: it would run safely,
+// and Jet refuses it for clarity or style.
+DiagnosticSafetyClass: enum {
+    Soundness
+    Opinion
 }
 
 // The machine edit `jet fix` applies for a diagnostic. `.Replace` writes `to`
