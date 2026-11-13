@@ -4903,7 +4903,6 @@ sema_registration_prepare_graph: fn(inputs: &&[SemaRegistrationModuleInput], see
         symbols := symbol_keys_empty()
         if slot >= 0 {
             symbols = symbol_keys(reserved[slot].base, reserved[slot].bound)
-            taken[slot] = true
         } else {
             bound: symbols_share * sema_registration_symbol_weight(input, templates.len()) /% symbols_weight
             symbols = symbol_keys(symbols_cursor, bound)
@@ -4925,27 +4924,30 @@ sema_registration_prepare_graph: fn(inputs: &&[SemaRegistrationModuleInput], see
         modules.push(seed)
     }
     seeded: modules.len()
-    // The reserved ranges no module prepared into (the seeded modules' and
-    // the serial one), then each prepared module's.
+    // Each prepared module's range, then the reserved ranges no module
+    // prepared into (the seeded modules' and the serial one). A duplicate
+    // keeps no range: its keys are its first row's, which the graph holds, and
+    // a seeded module's input duplicate leaves the seed its reserved range.
     symbol_ranges := [SymbolKeys]{}
-    loop reserved.len() > 0 {
-        range := reserved.pop() ?? break
-        if !taken[reserved.len()] -> symbol_ranges.push(range)
-    }
     loop prepared.len() > 0 {
         row := prepared.pop() ?? break
         loop diagnostic in row.diagnostics -> diagnostics.push(diagnostic)
         module_row := row.module_row.move()
-        duplicate: module_rows[module_index(module_row.module_identity)] >= 0
-        if !duplicate -> module_rows[module_index(module_row.module_identity)] = modules.len()
+        identity: module_index(module_row.module_identity)
+        duplicate: module_rows[identity] >= 0
         if {
-            // A duplicate's keys are its first row's, which the graph holds.
             duplicate -> diagnostics.push(sema_defined_twice_optional(module_text(table, module_row.module_identity), "module identities must be unique in one declaration graph", None))
             else -> {
+                module_rows[identity] = modules.len()
+                if reserved_slots[identity] >= 0 -> taken[reserved_slots[identity]] = true
                 modules.push(module_row)
                 symbol_ranges.push(row.symbols.move())
             }
         }
+    }
+    loop reserved.len() > 0 {
+        range := reserved.pop() ?? break
+        if !taken[reserved.len()] -> symbol_ranges.push(range)
     }
     if package_identity == "" || module_is_none(entry_module_identity) {
         diagnostics.push(sema_error_optional("E0003", None, "the declaration graph is missing its package or entry identity", "cross-module lookup must use one exact graph identity", "provide the loader's canonical package and entry module identities"))

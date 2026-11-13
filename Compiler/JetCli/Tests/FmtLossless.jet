@@ -10,11 +10,11 @@
 // alias in the `name: path` and `name: "file"` use forms; a one-member import
 // list; import grouping; a leading parameter sigil riding the type; `Unit` as
 // `()`; `Result<T, E>` as `T E!`; empty marker parentheses; dropped positional
-// names in a function type; named tuple type member order; the `,` ending a
-// wrapped loop header; the choice between `-> statement` and a braced
-// control body; and `->` before a foreign declaration's return type.
+// names in a function type; the `,` ending a wrapped loop header; the choice
+// between `-> statement` and a braced control body; and `->` before a foreign
+// declaration's return type.
 // No rule can reorder or drop an expression operand, operator, marker payload,
-// comment or string interpolation. Not ported: the `=>` arrow rules
+// named tuple member, comment or string interpolation. Not ported: the `=>` arrow rules
 // (`retired_result_arrow_removal`, the LambdaArrow half of
 // `canonical_arrow_rewrite`). The Jet lexer has no `=>` token, so neither
 // rewrite can occur. The pinned parse-invalid UI list is the set the Jet parser
@@ -1716,7 +1716,6 @@ fl_is_generated_projection: fn(path: String, src: String) -> Bool {
         {"leading parameter sigil", "f: fn(&&s: String) {{}}\n", "f: fn(s: &&String) {{}}\n"},
         {"unit type name", "f: fn() -> Unit {{}}\n", "f: fn() -> () {{}}\n"},
         {"import grouping", "use core.files\nuse core.term\nrun: fn() {{}}\n", "use {{\n    core.files\n    core.term\n}}\nrun: fn() {{}}\n"},
-        {"named tuple type order", "f: fn(p: (x: Int, y: Int)) {{}}\n", "f: fn(p: (y: Int, x: Int)) {{}}\n"},
         {"wrapped loop header comma", "run: fn() {{\n    loop x in [1, 2] {{\n        print(x)\n    }}\n}}\n", "run: fn() {{\n    loop x in\n        [1, 2], {{\n        print(x)\n    }}\n}}\n"},
         {"empty marker parentheses", "#Inline()\nf: fn() {{}}\n", "#Inline\nf: fn() {{}}\n"},
         {"function type parameter names", "S: struct {{ f: fn(line: String) -> View<str> from line }}\n", "S: struct {{ f: fn(String) -> View<str> from _0 }}\n"},
@@ -1774,7 +1773,7 @@ fl_is_generated_projection: fn(path: String, src: String) -> Bool {
         {"sigil rule keeps the sigil", "f: fn(&&s: String) {{}}\n", "f: fn(s: String) {{}}\n"},
         {"unit rule leaves a Unit value path", "run: fn() {{ x: Unit.default() }}\n", "run: fn() {{ x: ().default() }}\n"},
         {"import grouping keeps import order", "use core.files\nuse core.term\nrun: fn() {{}}\n", "use {{\n    core.term\n    core.files\n}}\nrun: fn() {{}}\n"},
-        {"named tuple rule keeps member types", "f: fn(p: (x: Int, y: Int)) {{}}\n", "f: fn(p: (y: Int, x: Float)) {{}}\n"},
+        {"named tuple member order is part of the type", "f: fn(p: (x: Int, y: Int)) {{}}\n", "f: fn(p: (y: Int, x: Int)) {{}}\n"},
         {"loop comma rule requires a loop header", "run: fn() {{\n    if ok {{\n        print(1)\n    }}\n}}\n", "run: fn() {{\n    if ok, {{\n        print(1)\n    }}\n}}\n"},
         {"empty-paren rule keeps marker arguments", "#Inline(always)\nf: fn() {{}}\n", "#Inline\nf: fn() {{}}\n"},
         {"function-type rule keeps declaration parameter names", "f: fn(line: String) {{}}\n", "f: fn(String) {{}}\n"},
@@ -1838,7 +1837,6 @@ fl_ui_parse_invalid: fn() -> [String] {
         "tests/ui/computed_fixed_list_noninteger.jet",
         "tests/ui/computed_fixed_list_range.jet",
         "tests/ui/context_eq_rejected.jet",
-        "tests/ui/context_unknown_field.jet",
         "tests/ui/core_crypto_jetc_user_reserved.jet",
         "tests/ui/core_crypto_private_jetc.jet",
         "tests/ui/core_shared_sites_reserved.jet",
@@ -1853,6 +1851,7 @@ fl_ui_parse_invalid: fn() -> [String] {
         "tests/ui/e0063_at_applied_rule.jet",
         "tests/ui/e0158_state_section_on_trait.jet",
         "tests/ui/e0391_comptime_block_as_value.jet",
+        "tests/ui/e0391_run_operand_inside_value.jet",
         "tests/ui/effect_scope_interpolated_argument.jet",
         "tests/ui/effects/effect_family_case_with_payload.jet",
         "tests/ui/effects/effect_irreversible_body_is_not_a_fact.jet",
@@ -1948,6 +1947,7 @@ fl_ui_parse_invalid: fn() -> [String] {
         "tests/ui/run_entry/script_top_level_recovery_always_consumes_a_token.jet",
         "tests/ui/shebang_not_at_file_start.jet",
         "tests/ui/shield_arguments.jet",
+        "tests/ui/sigil_compound_update_retired.jet",
         "tests/ui/source_nesting_limit.jet",
         "tests/ui/string_lone_brace.jet",
         "tests/ui/subjectless_guard_direct_nesting.jet",
@@ -1981,8 +1981,11 @@ fl_ui_parse_invalid: fn() -> [String] {
         "tests/ui/type_double_optional.jet",
         "tests/ui/typed_literal_in_condition.jet",
         "tests/ui/typed_text_hole_malformed.jet",
+        "tests/ui/typestate/qualified_state_markers_seed_leaf_states.jet",
         "tests/ui/typestate/retired_top_level_state_companion_teaches_nested_owner.jet",
+        "tests/ui/typestate/state_marker_is_retired.jet",
         "tests/ui/typestate/state_section_shape_diagnostics_are_distinct_2.jet",
+        "tests/ui/typestate/state_section_shape_diagnostics_are_distinct_5.jet",
         "tests/ui/typestate_top_level_state.jet",
         "tests/ui/unclosed_brace_block.jet",
         "tests/ui/unclosed_brace_interpolation.jet",

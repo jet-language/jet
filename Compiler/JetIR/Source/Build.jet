@@ -630,8 +630,6 @@ ir_program_new: fn(functions: &&[FnBody], decls: DeclTable, symbols: &&SymbolTab
 // entries' `at` are distinct): the first row of a key in `at` order. The
 // entries are sorted by (key, at), so the map fills in ascending key order
 // and every insert appends (a map put in row order shifts every later key).
-// The order is explicit: a named tuple's fields order by name, so a plain
-// `sort()` would order by `at` first.
 ir_first_rows: fn(entries: &&[(key: String, at: Int, row: Int)]) -> [String:Int] Never! {
     order := entries.move()
     order.sort_by(fn(left: (key: String, at: Int, row: Int), right: (key: String, at: Int, row: Int)) { (left.key <=> right.key).then(left.at <=> right.at) })

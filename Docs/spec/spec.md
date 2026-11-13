@@ -1425,13 +1425,15 @@ shows each capture mode with its output.
 
 A lambda whose body moves a captured owner (`name.move()`, or an argument to
 a `&&T` parameter) gives that owner away when it runs, so it may run only
-once. A `task` body, a lambda called where it is written, and a lambda bound
-to a local that only direct calls reach run once per evaluation, and a second
-direct call of that binding is **E0121**. Any other such lambda—passed to a
-call, stored, or returned—may be called again, so the move is **E0121** at
-the move: pass a copy (`name.copy()`), or take the value as a parameter of the
-lambda instead of capturing it. An unmarked move of a clonable name there
-copies instead, as it does in a loop body.
+once. A `task` body, a lambda called where it is written, the callback a
+`Cell` `read` or `edit` runs, a `Shared` field read or update outside a
+transaction, and a lambda bound to a local that only direct calls reach run
+once per evaluation, and a second direct call of that binding is **E0121**.
+Any other such lambda—passed to a call, stored, or returned—may be called
+again, so the move is **E0121** at the move: pass a copy (`name.copy()`), or
+take the value as a parameter of the lambda instead of capturing it. An
+unmarked move of a clonable name there copies instead, as it does in a loop
+body.
 
 Function values expose only read parameters when coerced from a named
 function. This rule prevents the value conversion from erasing a write or

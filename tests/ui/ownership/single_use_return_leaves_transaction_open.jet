@@ -1,14 +1,14 @@
 // A function that can return while its transaction is still open is rejected:
 // a `return` that leaves a `#SingleUse` DBTransaction neither committed nor
-// rolled back is E0140. A failure exit (`?`, `return Err(…)`) is not this
-// `return`.
+// rolled back is E0140. A failure exit (a propagated failure, `return Err(…)`)
+// is not this `return`.
 use db: core.db
 
 archive: fn(scope: DBScope, keep: Bool) DBError! {
-    tx: scope.begin()?
-    _: scope.execute(SQL{"DELETE FROM item"})?
+    tx: scope.begin()
+    _: scope.execute(SQL{"DELETE FROM item"})
     if keep -> return
-    tx.commit()?
+    tx.commit()
 }
 
 run: fn() {
