@@ -346,6 +346,8 @@ kit_ui_test_run: fn(code: Int, stderr: String) -> KitRun {
     assert_eq(kit_ui_set_coverage([row], ["E0109"], [], "E0109\tleft-only\tTower #2093\n", kept).status, "PASS")
     assert_eq(kit_ui_set_coverage([row], ["E0109"], ["E0109"], "E0109\tleft-only\tTower #2093\n", kept).status, "FAIL")
     assert_eq(kit_ui_set_coverage([row], ["E0109"], ["E0109"], "", kept).status, "PASS")
+    assert_eq(kit_ui_set_coverage([row], [], ["FFI01"], "FFI01\tright-only\tTower #6752\n", kept).status, "PASS")
+    assert_eq(kit_ui_set_coverage([row], ["FFI01"], [], "FFI01\tleft-only\tTower #6752\n", kept).status, "FAIL")
     over := ""
     loop i in 0..<153 -> over = "{over}E0109\tleft-only\tTower #2093\n"
     assert(kit_ui_set_coverage([row], ["E0109"], [], over, kept).detail.contains("ceiling 152"))

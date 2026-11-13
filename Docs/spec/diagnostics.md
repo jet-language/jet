@@ -294,11 +294,16 @@ snapshots; a positional filter (`jet test Compiler --profile ui <repo-relative-n
 focuses the selection, and `JET_CI_EVIDENCE_DIR=<dir>` writes machine-readable
 verdicts to `<dir>/ui.json`. `jet test Compiler --profile ui --diagnostic-coverage`
 runs the suite's coverage entry instead of its rows: it checks
-independently derived emitted and rendered code sets against the owned
-exclusions in `tests/diagnostics_coverage_allowlist.tsv` (lowering-only ceiling: 152).
+independently derived emitted and rendered code sets against the exceptions in
+`tests/diagnostics_coverage_allowlist.tsv` (lowering-only ceiling: 152).
 Blessing that entry (the same command with `-u`)
 rewrites the allowlist without its stale rows; it never adds one. The emission
-scan reads the `.jet` sources under `Compiler/`, `Jetpack/` and `Core/`.
+scan reads the `.jet` sources under `Compiler/`, `Jetpack/` and `Core/`. The
+allowlist is generated: `jet Tools/agent/DiagnosticRows.jet --write` derives
+it from the registry rows, the codes those sources name and the reports the
+snapshots render, drops each code that gained coverage and refuses to add a
+newly uncovered one. Its `--check`, a precommit ratchet, fails when the
+checked-in list differs, in either direction.
 
 Plain fixtures run `jet check` and record rendered stderr on failure, or
 exactly `(no errors)` on success, even when advisory lints exist. Lint fixtures
