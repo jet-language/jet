@@ -307,10 +307,10 @@ stdin_utf8_error: fn(error: I64) -> I64 {
 // jet_env_value_raw(name).is_some(): logical presence, whatever the value's
 // encoding.
 #Export(c) jet_terminal8_env_has: fn(name: I64) -> Bool {
-    jet_rt_logical_env_seed()
-    shared_acquire(logical_env_root, false)
-    entry: logical_environment_find(rt_text_data(name), rt_text_len(name))
-    shared_release(logical_env_root, false)
+    root: logical_environment_current()
+    shared_acquire(root, false)
+    entry: logical_environment_find(root, rt_text_data(name), rt_text_len(name))
+    shared_release(root, false)
     entry != I64{0}
 }
 

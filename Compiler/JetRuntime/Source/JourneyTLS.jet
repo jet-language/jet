@@ -62,12 +62,12 @@ journey_env_word: fn(word: I64, length: I64) -> I64 {
     value
 }
 journey_env_present: fn(key: I64) -> Bool {
-    jet_rt_logical_env_seed()
-    shared_acquire(logical_env_root, false)
+    root: logical_environment_current()
+    shared_acquire(root, false)
     // The get_os cell's raw lookup preserves presence even for non-UTF8
     // values. Presence needs no payload copy or temporary allocation.
-    present: logical_environment_find(rt_text_data(key), rt_text_len(key)) != I64{0}
-    shared_release(logical_env_root, false)
+    present: logical_environment_find(root, rt_text_data(key), rt_text_len(key)) != I64{0}
+    shared_release(root, false)
     present
 }
 journey_auto_color: fn(tty: Bool) -> Bool {

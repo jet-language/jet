@@ -194,10 +194,10 @@ env_dotenv_load: fn(text: I64, allow: I64, values: I64) -> I64 {
 // The logical environment snapshot: pairs whose name and value are both UTF-8,
 // valid and allowed, in stored order.
 env_process_load: fn(allow: I64, values: I64) {
-    jet_rt_logical_env_seed()
+    root: logical_environment_current()
     snapshot: csv_words_new()
-    shared_acquire(logical_env_root, false)
-    entry := rt_text_word(wrapping(logical_env_root + I64{56}))
+    shared_acquire(root, false)
+    entry := rt_text_word(wrapping(root + I64{56}))
     loop entry != (I64{0}) {
         key: rt_text_word(wrapping(entry + I64{8}))
         key_length: rt_text_word(wrapping(entry + I64{16}))
@@ -209,7 +209,7 @@ env_process_load: fn(allow: I64, values: I64) {
         }
         entry = rt_text_word(entry)
     }
-    shared_release(logical_env_root, false)
+    shared_release(root, false)
     at := I64{0}
     loop at < trap_word(snapshot) {
         name: csv_words_get(snapshot, at)

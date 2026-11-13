@@ -52,11 +52,11 @@ process_execution_env_set: fn(env: I64, key: I64, value: I64) {
 process_execution_environment: fn(spec: I64, err: I64) -> I64 {
     env: data_sequence_new(I64{0}, I64{16})
     if (fd_word(spec, PROCESS_SPEC_ENV_CLEAR).bit_and(I64{255}) == I64{0}) {
-        jet_rt_logical_env_seed()
-        shared_acquire(logical_env_root, false)
+        root: logical_environment_current()
+        shared_acquire(root, false)
         // The logical environment holds each key once (logical_environment_append
         // drops an earlier match), so its rows move in as they are: no lookup.
-        entry := fd_word(logical_env_root, I64{56})
+        entry := fd_word(root, I64{56})
         loop entry != (I64{0}) {
             row: data_sequence_reserve(env, I64{16})
             fd_put(row, I64{0}, rt_text_copy(fd_word(entry, I64{8}), fd_word(entry, I64{16})))
@@ -64,7 +64,7 @@ process_execution_environment: fn(spec: I64, err: I64) -> I64 {
             fd_put(env, I64{0}, fd_word(env, I64{0}) + I64{1})
             entry = fd_word(entry, I64{0})
         }
-        shared_release(logical_env_root, false)
+        shared_release(root, false)
     }
     sets: fd_word(spec, PROCESS_SPEC_ENV_SET)
     removes: fd_word(spec, PROCESS_SPEC_ENV_REMOVE)
@@ -91,11 +91,11 @@ process_execution_environment: fn(spec: I64, err: I64) -> I64 {
 // This process's inherited PATH as an owned text, or 0 when it is unset. The
 // receipt resolves against it without building a whole child environment.
 process_execution_inherited_path: fn() -> I64 {
-    jet_rt_logical_env_seed()
-    shared_acquire(logical_env_root, false)
-    entry: logical_environment_find(rt_text_data(rt_static_text("PATH")), I64{4})
+    root: logical_environment_current()
+    shared_acquire(root, false)
+    entry: logical_environment_find(root, rt_text_data(rt_static_text("PATH")), I64{4})
     path: if (entry == I64{0}) -> I64{0} else -> rt_text_copy(fd_word(entry, I64{24}), fd_word(entry, I64{32}))
-    shared_release(logical_env_root, false)
+    shared_release(root, false)
     path
 }
 process_execution_env_get: fn(env: I64, key: I64) -> I64 {

@@ -14,16 +14,16 @@ compiler_env_columns_storage: fn(pairs: I64, output: I64) -> I64 {
 
 #Export(c) jet_rt_logical_env_columns: fn(output: I64) {
     rt_test_reads_text(I64{65}, I64{0})
-    jet_rt_logical_env_seed()
-    shared_acquire(logical_env_root, false)
+    root: logical_environment_current()
+    shared_acquire(root, false)
     pairs := I64{0}
-    entry := rt_text_word(wrapping(logical_env_root + I64{56}))
+    entry := rt_text_word(wrapping(root + I64{56}))
     loop entry != (I64{0}) {
         pairs += I64{1}
         entry = rt_text_word(entry)
     }
     data: compiler_env_columns_storage(pairs, output)
-    entry = rt_text_word(wrapping(logical_env_root + I64{56}))
+    entry = rt_text_word(wrapping(root + I64{56}))
     at := I64{0}
     loop entry != (I64{0}) {
         host_startup_list(rt_text_word(wrapping(entry + I64{8})), rt_text_word(wrapping(entry + I64{16})), wrapping(data + at * I64{48}))
@@ -31,7 +31,7 @@ compiler_env_columns_storage: fn(pairs: I64, output: I64) -> I64 {
         entry = rt_text_word(entry)
         at += I64{1}
     }
-    shared_release(logical_env_root, false)
+    shared_release(root, false)
 }
 
 #Export(c) jet_rt_startup_env_columns: fn(output: I64) {

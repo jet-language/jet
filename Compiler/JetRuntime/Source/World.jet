@@ -1,12 +1,15 @@
-// One World-lifetime state, shared by controlled descendants. World128: refs0
+// One World-lifetime state, shared by controlled descendants. World136: refs0
 // mutex8 condSeq16 monotonicNs24 wallOriginMs32 rng40 nextSequence48 live56
 // runnable64 budget72 timers [I64]@80 (triples deadlineNs, sequence, OWNED
-// ParkSlot), history [owned E4]@104. TCB104 borrows active World;112 flags
-// (active1/waiting2);120 owns parked slot. Task edges never reset clocks, RNG,
-// timers, history or the execution budget. Ordering reference (the Rust
-// scheduler): it releases one due timer then waits idle, finishes waiting tasks
-// before provider/world restoration, and restores provider first, then the
-// previous World.
+// ParkSlot), history [owned E4]@104, OWNED logical environment cell@128 (0
+// until first use; LogicalEnvironment.jet). TCB104 borrows active World;112
+// flags (active1/waiting2);120 owns parked slot. Task edges never reset clocks,
+// RNG, timers, history, environment or the execution budget. Ordering reference
+// (the Rust scheduler): it releases one due timer then waits idle, finishes
+// waiting tasks before provider/world restoration, and restores provider
+// first, then the previous World.
+
+WORLD_BYTES: I64{136}
 
 world_require: fn(world: I64) {
     if (world == I64{0}) -> jet_rt_unreachable(I64{0}, I64{0})
@@ -16,8 +19,8 @@ world_require: fn(world: I64) {
 world_current: fn() -> I64 { jet_rt_world_current() }
 
 #Export(c) jet_rt_world_new: fn() -> I64 {
-    world: jet_rt_alloc(I64{128}, I64{8})
-    thread_zero(world, I64{128})
+    world: jet_rt_alloc(WORLD_BYTES, I64{8})
+    thread_zero(world, WORLD_BYTES)
     sync_store(world, I64{1})
     sync_store(wrapping(world + I64{40}), I64{5573589319906701683})
     sync_store(wrapping(world + I64{72}), I64{100000})
@@ -28,6 +31,19 @@ world_current: fn() -> I64 { jet_rt_world_current() }
     world_require(world)
     _ := sync_add(world, I64{1})
     world
+}
+
+// The World's own logical environment cell, created from the startup pairs on
+// first use. The World mutex serializes creation; the cell has its own lock.
+world_environment: fn(world: I64) -> I64 {
+    sync_mutex_lock(wrapping(world + I64{8}))
+    root := sync_load(wrapping(world + I64{128}))
+    if (root == I64{0}) {
+        root = logical_environment_new()
+        sync_store(wrapping(world + I64{128}), root)
+    }
+    sync_mutex_unlock(wrapping(world + I64{8}))
+    root
 }
 
 world_wall_locked: fn(world: I64) -> I64 {
@@ -160,7 +176,9 @@ world_increment: fn(address: I64) {
         at += I64{1}
     }
     if (sync_load(wrapping(history + I64{8})) != I64{0}) -> jet_rt_free(rows, sync_load(wrapping(history + I64{8})) * I64{8}, I64{8})
-    jet_rt_free(world, I64{128}, I64{8})
+    environment: sync_load(wrapping(world + I64{128}))
+    if (environment != I64{0}) -> logical_environment_drop(environment)
+    jet_rt_free(world, WORLD_BYTES, I64{8})
 }
 // Save32: previous World, previous provider, flags, owned parked slot.
 // Enter borrows world from a live caller/worker lease for the whole scope.

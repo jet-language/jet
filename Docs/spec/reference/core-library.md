@@ -2422,7 +2422,11 @@ non-Unicode value, while `unset` rejects invalid names and `vars` rejects
 non-Unicode names or values. Names use the platform's environment-key order.
 Mutation changes only Jet's process-lifetime logical overlay, never the host
 environment block. Child overlays snapshot once, apply sets in order, then
-apply removals; an explicitly empty value is not an absent value.
+apply removals; an explicitly empty value is not an absent value. Inside
+`testing.world`, the world and its tasks read and change the world's own
+logical environment. It starts from the startup environment and ends with the
+world. The process overlay never sees its sets or removals, and the world
+never reads the process overlay.
 
 ```jet
 use sys: core.sys
