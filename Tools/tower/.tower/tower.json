@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6777,
-    "rev": 101193,
+    "rev": 101197,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -48962,6 +48962,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-13",
+          "by": "Main",
+          "text": "c1 split, without WebP (G9Web-1-2, 2026-11-12). Items of about an hour each, in order, starting after the #6445 move (D-WEB-RUNTIME-API1): (1) the core.image home and records (Image, ImageError, decode limits), with the Ui/Draw PNG decoder moved behind it; (2-3) a baseline JPEG decoder, refusing progressive with a typed error; (4) a PNG encoder over the shared Core/Archive deflater; (5) a baseline JPEG encoder within a PSNR bound; (6) an area-average downscaler; (7) web.image asset-graph nodes plus their diagnostic; (8) a variant cache keyed on 5 identity inputs; (9) picture markup; (10) jet dev serving variants with hashes equal to jet build; (11) images settings and their snapshots; (12) an example with goldens on O0/O1/O2, plus docs. Gate: any public core.image name beyond what D-WEB-IMAGE1 ratifies goes on a ballot before item 1. Deferred tonight for G10 (a 05:30 target)."
+        },
+        {
           "at": "2026-10-07",
           "by": "Pip",
           "text": "D-WEB-IMAGE1=A, D-IMAGE-ENCODE1=A ratified; application contract updated. No implementation/build/test or closure receipt claimed. Owners: unowned (WebGolden1 parked owns route/marker goldens, not image pipeline; JetpackHost1 explicitly excludes this feature); unowned (same #4695 pipeline+encoder owner). Latest owner #29 permits only minimal port seams both halves, dies at cutover; #31 requires actual Jet ports."
@@ -48988,7 +48993,7 @@
       "parentId": "c0u5tm84",
       "needsAcceptance": false,
       "created": "2026-10-06T01:21:52.615Z",
-      "updated": "2026-11-09T20:17:10.719Z",
+      "updated": "2026-11-13T03:28:09.341Z",
       "updatedBy": "Main",
       "goals": [
         "G9"
@@ -53049,6 +53054,11 @@
         {
           "at": "2026-11-13",
           "by": "Main",
+          "text": "c2 allocator field: no ballot needed (Main, 2026-11-12). Ratified D-CONTEXT1 types the field as `allocator: mem.Allocator`, and D-ALLOC-TRAIT1=A makes mem.Allocator a trait whose calls go through one trait-value slot with no box. So context.allocator reads as a borrowed mem.Allocator trait value. Arena, Bump, Pool and Fixed implement the trait, and #Context(allocator:) accepts any implementer, user allocators included, in place of the hard-coded four-name list. G12Docs-4 builds it as G3Core-c2-ctxalloc on G3Core-c2-ctxreads."
+        },
+        {
+          "at": "2026-11-13",
+          "by": "Main",
           "text": "Main 2026-11-12 (c2): context.scratch reads as a borrow of the task arena, which is a mem.Arena view. Dropping it frees nothing, escaping it is E0631 and use after reset is a located stop, as D-JAI-CONTEXT1/D-CONTEXT1 state; no new type. context.allocator has no ratified value form for the current allocator: mem.Allocator is a trait, and only mem.Heap, mem.System and mem.Counting are named as package.jet allocators. That one field goes to ballot D-CONTEXT-ALLOCATOR1 (Main drafting). G12Docs-4 builds c2 for the other seven fields with goldens at O0/O1/O2."
         },
         {
@@ -53301,7 +53311,7 @@
       "parentId": "c02y3vkg",
       "needsAcceptance": false,
       "created": "2026-10-16T10:54:43.172Z",
-      "updated": "2026-11-13T03:06:32.086Z",
+      "updated": "2026-11-13T03:40:07.250Z",
       "updatedBy": "Main",
       "goals": [
         "G3"
@@ -72845,6 +72855,11 @@
         {
           "at": "2026-11-13",
           "by": "Main",
+          "text": "c22 S5 split (G11Speed-4, 2026-11-12). Route: rebase rows on load, not identity-keyed rows everywhere (those are #5479 c7). The record keeps its own module indexes and DeclTable; each reached Core module is appended to the graph and its RowRefs and DeclIDs are rebased. Items of about an hour each, stacked in order: S5.1 the record adds Core registration modules and the DeclTable as sections 6 and 7, with a round trip. S5.2 a rebase of one record module (RowRef and DeclID maps; FnBody Call, FnValue, GlobalShared), unit-tested. S5.3 a graph seed of rebased Core modules, which registration passes skip. S5.4 loader cutover: CoreReach reads the record and does no Core parse. S5.5 finalize skips seeded modules. S5.6 delete CoreDemand.jet; a demanded key takes its record body and side facts. S5.7-S5.9 the 225 whole-graph walks in three area batches. S5.10 Core spans come from the locations section. S5.11 proof: goldens, ui and cases byte-identical, plus the c03 trace and the hello strace (joins S8). Risk: pk1 at a17e showed `Program` isnt `Decode`; S3 and S5.1 need the AST to derive Decode."
+        },
+        {
+          "at": "2026-11-13",
+          "by": "Main",
           "text": "Owner 2026-11-12, restating the 2026-11-08 ruling: Core and Prelude ship precompiled and checked inside the jet binary (c22). This is part of the toolchain, not a compile cache (owner chose option B of the exec-tiers comparison: keep native O0 for jet run, make the front end fast, plus precompiled Core). The owner believed it already shipped; it has not: on dev the loader still parses and checks embedded Core text for every compile (Compiler/JetDriver/Source/Driver/Loader.jet, the <corelib>/ units). c22 is now G11Speed-4 top item."
         },
         {
@@ -73314,7 +73329,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T16:05:34.496Z",
-      "updated": "2026-11-13T00:47:40.078Z",
+      "updated": "2026-11-13T03:14:42.258Z",
       "updatedBy": "Main",
       "criteriaLastN": 30
     },
@@ -93682,7 +93697,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-12T04:08:18.925Z",
-      "updated": "2026-11-13T03:04:09.265Z",
+      "updated": "2026-11-13T03:41:03.966Z",
       "updatedBy": "Main",
       "criteriaLastN": 10
     },
@@ -193478,6 +193493,197 @@
       "draft": false,
       "status": "open",
       "created": "2026-11-13T02:32:34.715Z"
+    },
+    {
+      "id": "D-CORE-FILE-ADAPTERS1",
+      "cardId": "c0ssy5wy",
+      "group": "library",
+      "title": "Core's file readers and writers for JSON, CBOR, CSV, XML and sealed files keep their paths under a six-group layer table",
+      "situation": "D-CORE-LAYERS1=A puts Core in four checked layers and says file adapters move to files. It also says neither rule changes an import or an API.\n\nOn dev a17e4f4491 those two promises conflict. The census counts source lines that name a higher module. Under the ratified table, 63 such lines remain once the staged moves land. Forty-nine are in public file adapters, such as json.reader over a FileReader. They can't move to files without new import paths.",
+      "gist": "How should Core keep its file readers and writers when the ratified layer table and the no-API-change promise conflict?",
+      "lesson": "Jet's core library is being sorted into layers, where lower parts may not use higher ones. Readers that turn a file into JSON or CBOR events sit in a low layer but use files, which sit higher. This vote picks a fix: reorder the layers, move the readers to new names, or add a new interface.",
+      "explainer": "Words used here. Core is Jet's built-in library. A layer is a group of Core modules that may use only its own or lower groups. An adapter is a function that connects a format, like JSON, to a file. A path is the import name, like core.encoding.json.",
+      "story": "Ana streams a large catalog.json with json.reader over an open file. Under A her program is unchanged. Under B she imports core.files.json instead. Under C her call is unchanged, but Core gains two new public traits.",
+      "inWild": "// Go: json.NewDecoder takes an io.Reader, and *os.File implements io.Reader.\n// https://pkg.go.dev/encoding/json#NewDecoder\ndec := json.NewDecoder(file)\n\n// Rust: serde_json::from_reader takes any R: io::Read, std::fs::File included.\n// https://docs.rs/serde_json/latest/serde_json/fn.from_reader.html\nlet value: Value = serde_json::from_reader(File::open(path)?)?;\n\n// Python: json.load takes any object with a read method.\n// https://docs.python.org/3/library/json.html#json.load\nvalue = json.load(open(\"catalog.json\"))",
+      "detail": "What this ballot decides. How the Core layer check of D-CORE-LAYERS1=A turns on without breaking its promise of no import or API change.\n\nThe census. Every Core .jet line naming another Core module was counted by module, with comment lines skipped. Private parts count as their owner. It counts lines, not names. On dev a17e4f4491, the ratified table gives 67 upward lines in 20 module pairs. A staged change clears 4 of them: sync, rt, meta and the TLS test vectors. That leaves 63.\n\nThe counts in one sentence: the 63 upward lines sit in 30 public names and the private code beside them, and 49 of the lines are in file adapters. This census has no count of 58. The table below splits the 63 by kind, with what each option does.\n\n```text\nkind                                  lines  public  A        B                   C\nencoding codecs naming files             27      21  reorder  core.files.<codec>  traits, no move\ncrypto sealed files naming files         20       3  reorder  core.files.crypto   moves as in B\ndata's file readers                       2       2  reorder  core.files.data     traits, no move\ndata and CSV naming db's SQL type         7       1  reorder  core.db.csv_query   moves as in B\ndata reading PATH through sys             2       2  reorder  core.process        moves as in B\nHex and ETF naming archive                2       0  reorder  private move        private move\nWebSocket upgrade naming HTTPRequest      2       1  reorder  core.http           moves as in B\ncrypto naming tasks                       1       0  reorder  with sealed files   with sealed files\ntotal                                    63      30  0 move   30 move             7 move\n```\n\nWhy they can't simply move. The adapters are public: json.reader, cbor.writer, csv.reader, crypto.file_seal and others take a FileReader, FileWriter or Path. Moving them to files changes their import path.\n\nThe SQL type lives in core.db, which names core.web, so db can't sit low. WebSocket's public upgrade takes an HTTPRequest.\n\nOption A reorders the table into six groups. Files, sys, process, tasks and term sit just above the data layer. The codecs, crypto, compute and archive sit above them, and data with CSV join services. Core.encoding's root, which holds Dyn, stays in the data layer beside time and math.\n\nUnder A, 3 upward lines remain, and none is public. Sys's hostname uses net. Two private encoding parts hold the JSON and CBOR file engines. Hostname's read moves into sys. The engines move into parts owned by the json and cbor modules.\n\nOption B keeps the ratified table and moves 30 public names to new paths under core.files, core.db, core.http and core.process.\n\nOption C keeps the table and adds public ByteSource and ByteSink traits that FileReader and FileWriter implement. C still moves 7 names that are not byte streams. They are crypto's file_seal, file_open and FileCryptoError, data's status and require_bridge, csv.query and ws.upgrade.\n\nC's routing work, measured with git grep on a17e4f4491. 75 compiler lines in 20 files name FileReader or FileWriter beside a stream or codec. The largest are StreamHandles.jet 21, RuntimeRoutes.jet 9 codec handle fields, CoreHostSignatures.jet 6, Statements.jet 5, the runtime's Encoding.jet 5, RuntimeInterface.jet 5 and CoreValueSignatures.jet 4. In Core, 36 lines in 8 Encoding and Data files change. Those routes become trait-dispatched.\n\nThe load cost of A. A program loads a Core module with every module it names. Under A, json, jsonl, cbor, csv, xml and crypto still name core.files. So any program that imports one loads files, sys, process and term. Under B or C, json names no files, and json.parse loads none of them.\n\nMeasured today, with seed b13 on a17e4f4491, before any layer move. A 5-line json.parse program loads 29 Core units, 1.95 MB of Core source, at a 252 MB peak. base64.encode loads 28 units, 1.86 MB, at 240 MB. files.exists loads 28 units, 1.86 MB, at 234 MB. All three load files today, because core.encoding's own Stream and CborStream parts name it.\n\nThe files chain is files, its path kernel, sys, process and term: 5 Core units and 0.29 MB of the 1.95 MB. Under B or C, json.parse skips them. Under A it keeps them, about 15% of its Core source. Probe g11-adapt1 measures the same three programs on the build with A's staged moves.\n\nWhy A still wins. It keeps the no-API-change promise, and it leaves C open. FileReader would implement ByteSource, so making json.reader generic later breaks no caller. B's 30 path changes can't be undone that way. The 0.29 MB is source the compiler parses and checks today; precompiled Core, now in progress, removes that per-compile work.\n\nDecode chain. Under every option, time and math keep their decode implementations beside Dyn. The chain from tasks to files is cut, which is what D-CORE-LAYERS1 set out to do.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Six groups; adapters stay",
+          "detail": "Amend the ratified table to six groups. Files and the system basics sit below the codecs, crypto and archive; data and CSV join services. No public path changes.",
+          "technical": "The layers in Core/package.jet, lowest first, one line each.\n\nPrelude: prelude, mem, rt, reflect, meta, sync.\nData: text, math, collections, time, regex, units, log, event, encoding.\nOS: sys, files, process, tasks, term.\nFormats: encoding.base32, encoding.base64, encoding.binary, encoding.cbor, encoding.eetf, encoding.hex, encoding.ini, encoding.json, encoding.jsonl, encoding.toml, encoding.validate, encoding.xml, encoding.yaml, crypto, compute, archive.\nSystem: net, watcher, args, perf, testing, plugin, mod, font, vendor, git.\nServices: http, net.ws, db, data, encoding.csv, ui, web, app, auth, service, jobs, game, reactive, tui, devtools, build, compiler, target.\n\nThe longest listed name decides a module's layer. The census on a17e4f4491 finds 7 upward names, and the staged moves clear 4 of them. Three private moves remain. sys.hostname owns the hostname read, and net.gethostname calls it. The CborStream part is re-owned by core.encoding.cbor. The JSON and JSONL FileReader engines leave Stream.jet for a part owned by core.encoding.json.",
+          "code": "use {\n    files: core.files\n    json: core.encoding.json\n}\n\nrun: fn() (EncodingError | IOError)! {\n    input: files.open(\"catalog.json\") ?? return\n    reader: json.reader(input) ?? return\n    loop event in reader {\n        if event == .Key(\"item\") { print(\"item\") }\n    }\n}\n// Proposed (A): unchanged; the six-group table holds json above files."
+        },
+        {
+          "key": "B",
+          "name": "Adapters move to new paths",
+          "detail": "Keep the ratified four layers. The file adapters move under core.files, and the other upward public names move up beside what they use. Thirty public names change path.",
+          "technical": "Public moves, old path to new path. core.encoding.json.{reader, reader_allow_duplicates, writer, JSONReader, JSONWriter} go to core.files.json. core.encoding.jsonl.{reader, writer, JSONLReader, JSONLWriter} go to core.files.jsonl. core.encoding.cbor.{reader, writer, CBORReader, CBORWriter} go to core.files.cbor.\n\ncore.encoding.csv.{reader, writer, CSVReader, CSVWriter} go to core.files.csv. core.encoding.xml.{reader, writer, XMLReader, XMLWriter} go to core.files.xml. core.crypto.{file_seal, file_open, FileCryptoError} go to core.files.crypto. core.data.{csv_reader, json_reader} go to core.files.data.\n\ncore.data.{status, require_bridge} go to core.process. core.encoding.csv.query becomes core.db.csv_query. core.net.ws.upgrade becomes core.http.ws_upgrade. Private moves: data's SQL query goes to core.db with its compiler route. Hex's CRC-32 and ETF's inflate kernels move into the data layer. Docs, examples and tests follow each path.",
+          "code": "use {\n    files: core.files\n    file_json: core.files.json\n}\n\nrun: fn() (EncodingError | IOError)! {\n    input: files.open(\"catalog.json\") ?? return\n    reader: file_json.reader(input) ?? return\n    loop event in reader {\n        if event == .Key(\"item\") { print(\"item\") }\n    }\n}\n// Proposed (B): the reader's import path changes to core.files.json."
+        },
+        {
+          "key": "C",
+          "name": "Byte stream traits",
+          "detail": "Keep the ratified four layers. Add public ByteSource and ByteSink traits in the data layer; FileReader and FileWriter implement them in files. The stream adapters take any source or sink, as in Go's encoding/json and Rust's serde_json.",
+          "technical": "core.encoding gains ByteSource (read_into, read_byte) and ByteSink (write_bytes, write_text, flush). The 11 codec constructors, data's 2 readers and the 10 reader and writer types become generic over them. Their paths stay.\n\nToday the compiler routes FileReader and FileWriter by name. git grep on a17e4f4491 finds 75 such lines in 20 compiler files beside a stream or codec. They include StreamHandles.jet 21, RuntimeRoutes.jet 9 and the runtime's Encoding.jet 5. Those become trait-dispatched routes, and 36 Core lines in 8 files change.\n\nCrypto's sealed files need atomic temp files, hard links and removal, which a byte sink doesn't cover. They still move, as do csv.query, ws.upgrade, data.status and require_bridge: 7 public names, as in B.",
+          "code": "use {\n    files: core.files\n    json: core.encoding.json\n}\n\nrun: fn() (EncodingError | IOError)! {\n    input: files.open(\"catalog.json\") ?? return\n    reader: json.reader(input) ?? return\n    loop event in reader {\n        if event == .Key(\"item\") { print(\"item\") }\n    }\n}\n// Proposed (C): unchanged call; json.reader now takes any ByteSource,\n// and FileReader is one."
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Go",
+          "note": "Codecs take io.Reader; os.File implements it. Source: https://pkg.go.dev/encoding/json#NewDecoder",
+          "code": "dec := json.NewDecoder(file)"
+        },
+        {
+          "lang": "Rust",
+          "note": "serde_json reads any io::Read, including std::fs::File. Source: https://docs.rs/serde_json/latest/serde_json/fn.from_reader.html",
+          "code": "serde_json::from_reader(File::open(path)?)"
+        },
+        {
+          "lang": "Python",
+          "note": "json.load takes any object with a read method. Source: https://docs.python.org/3/library/json.html#json.load",
+          "code": "json.load(open(\"catalog.json\"))"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "A keeps the promise of no import or API change and cuts the same decode chain. It costs an amended table and three private moves. Codec users still load the files chain, about 0.29 MB of Core source. B breaks 30 public paths. C, the Go and Rust design, adds public API and 75 compiler routing lines and still moves 7 names. A leaves C open later with no break.",
+        "gains": [
+          "No public path or signature changes.",
+          "Three private moves, then the check turns on.",
+          "Time and math still never load files."
+        ],
+        "losses": [
+          {
+            "loss": "Amends the ratified four-layer table to six groups.",
+            "mitigation": "Each group is still one reviewed row in Core's package.jet."
+          },
+          {
+            "loss": "Data and CSV sit with services, above files.",
+            "mitigation": "Both already use SQL from core.db, which is a service."
+          },
+          {
+            "loss": "Any json, jsonl, cbor, csv, xml or crypto import still loads files, sys, process and term: 5 Core units, 0.29 MB of source.",
+            "mitigation": "Precompiled Core removes their parse and check; C can still come later without breaking a caller."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B moves 30 public names, breaking every program and doc that imports them."
+          },
+          {
+            "key": "C",
+            "reason": "C is the mainstream design, but it adds two public traits and 75 compiler routing lines, and still moves 7 names. It can follow A later without breaking a caller."
+          }
+        ],
+        "tradeoff": "Six table groups instead of four, for no change to any public import."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: Main. The first draft hid that A keeps codec users loading core.files, and it was unfair to C, which is the Go and Rust design. The revision measures that load and states both as losses."
+      },
+      "checkInstructions": "In the Jet repository, run node $JET_SCRATCH_ROOT/lanes/G11Speed/work/gen/tmp/mods.mjs a17e4f4491 TABLE.json from that directory. Use mR.json (the ratified table) and mA6.json (option A) as TABLE.json. Each run prints the upward lines by module pair.\n\nThe load figures come from $JET_SCRATCH_ROOT/lanes/G11Speed/work/gen/jsonprobe. Run jet run --trace on p1, p2 and p3 there, each with a fresh JET_STORE_DIR. Then sum each trace with awk -f summary.awk.\n\nFor C's routing count, run git grep -n -E 'FileReader|FileWriter' a17e4f4491 -- Compiler. Keep the lines that also name a stream or codec.\n\nValidate this payload with Tools/agent/ballots/Validate.jet.",
+      "surface": {
+        "gist": "Core's file readers clash with the ratified layers. Reorder the layers, rename the readers, or add traits?",
+        "lesson": "Jet's core library is being sorted into layers, where lower parts may not use higher ones. File readers for JSON and CBOR sit low but use files, which sit higher. This vote picks a fix.",
+        "trio": {
+          "current": {
+            "note": "json.reader takes an open file; files sits above json in the ratified table.",
+            "code": "reader: json.reader(input) ?? return"
+          },
+          "wild": {
+            "lang": "Go",
+            "note": "Codecs take io.Reader; files implement it.",
+            "code": "dec := json.NewDecoder(file)"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Reorder layers",
+            "gist": "Six groups; files below the codecs. No path changes.",
+            "gains": [
+              "No API change.",
+              "Three private moves."
+            ],
+            "losses": [
+              "Amends the ratified table.",
+              "Codec imports still load files."
+            ],
+            "proposed": {
+              "code": "reader: json.reader(input) ?? return   // unchanged"
+            }
+          },
+          {
+            "key": "B",
+            "name": "New paths",
+            "gist": "Ratified table; 30 public names move.",
+            "gains": [
+              "Table as ratified."
+            ],
+            "losses": [
+              "30 import paths change."
+            ],
+            "proposed": {
+              "code": "reader: file_json.reader(input) ?? return   // core.files.json"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Byte traits",
+            "gist": "Ratified table; new ByteSource and ByteSink traits.",
+            "gains": [
+              "Readers take any byte source."
+            ],
+            "losses": [
+              "New public API.",
+              "75 compiler routing lines.",
+              "7 names still move."
+            ],
+            "proposed": {
+              "code": "reader: json.reader(input) ?? return   // any ByteSource"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "No import or API changes, as D-CORE-LAYERS1 promised, for an amended table.",
+          "gains": [
+            "No API change.",
+            "Three private moves."
+          ],
+          "losses": [
+            {
+              "loss": "Six groups instead of four.",
+              "mitigation": "Still one reviewed table in package.jet."
+            },
+            {
+              "loss": "Codec imports still load files, 0.29 MB.",
+              "mitigation": "Precompiled Core; C can follow later."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "30 public paths break."
+            },
+            {
+              "key": "C",
+              "reason": "New public traits and compiler routes, and 7 names still move."
+            }
+          ],
+          "tradeoff": "Six groups instead of four, for no public change."
+        }
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-13T03:41:03.966Z"
     }
   ],
   "questions": [
@@ -196745,6 +196951,34 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-13T03:41:03.966Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-CORE-FILE-ADAPTERS1",
+      "note": "Core's file readers and writers for JSON, CBOR, CSV, XML and sealed files keep their paths under a six-group layer table"
+    },
+    {
+      "at": "2026-11-13T03:40:07.250Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0dhc7rh",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-13T03:28:09.341Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0q6gm05",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-13T03:14:42.258Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c08r6ogl",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-13T03:09:13.282Z",
       "by": "Main",
