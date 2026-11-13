@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6832,
-    "rev": 101750,
+    "rev": 101751,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -95680,7 +95680,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-13T14:36:35.100Z",
-      "updated": "2026-11-13T18:51:06.680Z",
+      "updated": "2026-11-13T18:56:10.345Z",
       "updatedBy": "Main",
       "criteriaLastN": 8
     },
@@ -200726,6 +200726,180 @@
       "draft": false,
       "status": "open",
       "created": "2026-11-13T15:24:08.372Z"
+    },
+    {
+      "id": "D-WEBAPP-SHAPE1",
+      "cardId": "c0snkbac",
+      "group": "other",
+      "title": "Web and app framework shape: business logic once, for native apps and the browser",
+      "situation": "This is the plan for how a Jet program becomes an app: one set of business rules that runs as a web site, a desktop app and a phone app. Today Jet has a web toolkit with string routes and form handlers, and no native app story. A team that also wants a phone app writes a second program and keeps the two in step by hand. That costs beginners twice the work, and it costs safety, because each copy must check sign-in and permissions on its own. You are asked to adopt one shape as the target the build cards follow. We recommend the shape in the proposal: a server function is reachable from the app only when marked, and every table read and write passes the table's access rule.",
+      "gist": "Adopt one app shape: business logic in one package, one screen tree for web, desktop and phones, and server methods reachable only when marked.",
+      "lesson": "An app framework decides what one program means: where code runs, which functions a stranger on the internet can call, and how screens find their data. Deciding this once, before the build, keeps every later card pointing the same way.",
+      "explainer": "A service is an ordinary struct whose fields are server things such as tables and keys. A screen gets the service as a typed handle and calls its methods. On the server the call is direct. In the browser or on a phone the same call becomes a typed request, checked by the compiler on both ends.\n\nThe risk in every such framework is a method that becomes public by accident. In the recommended option a method is public only when it carries a marker that says who may call it: signed-in users or anyone. A method without a marker stays on the server, and calling it from a screen is a compile error that names the marker to add.\n\nThe second risk is a query that forgets to check who is asking. Each table has an access rule, called a policy, that the server asks on every read and write. A query cannot skip it, because the table only answers rows the rule allows.",
+      "story": "Ana builds Crewboard, a small task board for her team. She writes the rules once: who may move a card, and what a valid task is. The web site, the desktop app and the phone app all show the same board. When she forgets to mark a helper, the app does not quietly expose it; the build stops and tells her which marker to add.",
+      "inWild": "Next.js server functions are public endpoints once exported, and their documentation warns to check the caller inside each one.\nConvex makes every server function explicit as a query, mutation or action, and internal functions are not reachable from clients.\nFlutter and SwiftUI share one screen tree across devices but leave the server to the developer.\nThe proposal, section 8, compares the shape with the strongest system in each area, with sources.",
+      "detail": "The proposal is Docs/proposals/2026-11-13-web-app-framework-shape.md (revision 5). Sections 1 and 3 to 6 are the shape. Section 7 holds the open choices O2 to O10 and S1, each with alternatives and a recommendation. Section 10 is the proposed public surface.\n\nVoting A adopts the shape and the recommended answer to each item in the table of section 7.12. That includes S1, typed styles from tokens, and native builds that carry their server address as a build fact. Any single choice can be reopened later through its build card.\n\nA amends one ratified decision. D-DX-SERVERFN1 moves registration from .action, .form and .data to a mounted service whose marked methods are endpoints. The typed client, plain form posts, same-origin request checks, retries and wire checks stay. D-LIVEQUERY1 is unchanged: its closure form, app.live(fn() { crew.board(view.project) }), is the target form, keyed by the one call it makes.\n\nThe 48 example Jet files are checked by the seed compiler (seed-b15) against stubs of the proposed API. Every Crewboard file is clean. The only errors are six style bugs seeded on purpose, one probe that proves an unmarked method cannot be called from a screen, and one example that needs closure-parameter inference (#6819 c4).\n\nA second probe prints a secret and is accepted today; the rule that keeps secrets off the client is proposed separately (#6557, D-SECRETEDGE1). Nothing in the shape is built yet. Section 9 lists the cost and the build cards.",
+      "options": [
+        {
+          "key": "A",
+          "name": "One app, explicit endpoint markers",
+          "gist": "One logic package and one screen tree; only marked methods are endpoints.",
+          "detail": "The shape in the proposal. A service method is an endpoint only when it is marked #App.SignedIn or #App.Public. An unmarked method is server-only, and a client call to it fails to compile with an error that names the marker. The same screens build for web, desktop and phones.",
+          "code": "// Logic package: one service; only marked methods are endpoints.\nCrew: struct {\n    tasks: db.Table<TaskID, Task>\n\n    #App.SignedIn\n    move_task: fn(self, id: TaskID, version: Int, to: Status) -[DB.Read, DB.Write]> Task TaskError! {\n        self.apply_move(id, version, to)\n    }\n\n    // Unmarked: server-only. A client call to it does not compile.\n    apply_move: fn(self, id: TaskID, version: Int, to: Status) -[DB.Read, DB.Write]> Task TaskError! {\n        Err(TaskError.NotFound)\n    }\n}\n\n// One screen for web, desktop and phones. The call is typed:\n// direct on the server, a checked remote call elsewhere.\ncard: fn(crew: app.Remote<Crew>, task: Task) -> ui.Node {\n    kit.button(\"Move to Done\", on_click: fn() { _: crew.move_task(task.id, task.version, Status.Done) })\n}"
+        },
+        {
+          "key": "B",
+          "name": "One app, signed-in by default",
+          "gist": "The same shape, but every non-priv method is a signed-in endpoint.",
+          "detail": "The same shape with the opposite default. Every method not marked priv is reachable by any signed-in user. A helper is private only when its author remembers priv, so a forgotten word opens a method to every account.",
+          "code": "// Logic package: every non-priv method is a signed-in endpoint.\nCrew: struct {\n    tasks: db.Table<TaskID, Task>\n\n    // An endpoint for signed-in callers, with no marker.\n    move_task: fn(self, id: TaskID, version: Int, to: Status) -[DB.Read, DB.Write]> Task TaskError! {\n        self.apply_move(id, version, to)\n    }\n\n    // Must be priv, or signed-in callers can reach it too.\n    priv apply_move: fn(self, id: TaskID, version: Int, to: Status) -[DB.Read, DB.Write]> Task TaskError! {\n        Err(TaskError.NotFound)\n    }\n}\n\n// One screen for web, desktop and phones. The call is typed:\n// direct on the server, a checked remote call elsewhere.\ncard: fn(crew: app.Remote<Crew>, task: Task) -> ui.Node {\n    kit.button(\"Move to Done\", on_click: fn() { _: crew.move_task(task.id, task.version, Status.Done) })\n}"
+        },
+        {
+          "key": "C",
+          "name": "Web first, today's toolkit",
+          "gist": "Keep the web toolkit's string routes; native apps come later as separate programs.",
+          "detail": "No new shape. The web toolkit keeps string routes, form handlers and its own data helpers. Each handler checks the signed-in user itself. A desktop or phone app is a second program that calls the same URLs, written and kept in step by hand.",
+          "code": "// Web battery today: a string route and a handler per action.\n// A desktop or phone app is a second program that calls these URLs.\nroutes: fn() -> WebRouter WebRouterError! {\n    fields: [WebRouterField]{WebRouterField{name: \"id\", value: \"Int\"}}\n    search: [WebRouterField]{}\n    // The handler checks the signed-in user itself.\n    router.route(router.new(), \"/tasks/:id/move\", fields, search, move_task)\n}"
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "A gives one program for every target and fails closed: a forgotten marker keeps a method on the server, and the compile error says what to add. B fails open on a forgotten word, and C keeps two programs in step by hand.",
+        "gains": [
+          "Business rules written once run on web, desktop and phones",
+          "A forgotten marker cannot expose a method",
+          "Every table read and write passes the table's access rule",
+          "Screens call services with checked types on both ends"
+        ],
+        "losses": [
+          {
+            "loss": "One marker line per endpoint; Crewboard has nineteen.",
+            "mitigation": "The compile error names the marker to add, and new-project templates include it."
+          },
+          {
+            "loss": "One ratified decision changes its spelling.",
+            "mitigation": "Its checked behavior stays; only how code registers endpoints changes."
+          },
+          {
+            "loss": "Little of the shape is built yet.",
+            "mitigation": "The build is split into hour-sized cards, with Crewboard as the acceptance example."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "A forgotten priv opens a method to every signed-in account, and nothing warns."
+          },
+          {
+            "key": "C",
+            "reason": "A phone or desktop app means a second program, and each copy must repeat its own sign-in checks."
+          }
+        ],
+        "tradeoff": "A asks for one marker line per endpoint in exchange for a default that cannot leak."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: G6Meta-4. Rounds 1 to 4 failed c3 (round 1 also c5 and c6, round 2 also c8, round 4 narrowly on eight gaps). Round 5 passes (G6Meta-6792c3-review5, 2026-11-13); the five R5-4 text fixes landed in webshape-r5-fix."
+      },
+      "checkInstructions": "Read the proposal, Docs/proposals/2026-11-13-web-app-framework-shape.md, sections 0, 1, 3 to 7, 9 and 10. Rerun its example checks with the kit Appendix A.7 names, on seed-b15; Appendix A.4 lists every expected error with its card. Validate this payload with Tools/agent/ballots/Validate.jet.",
+      "surface": {
+        "gist": "Should Jet adopt one app shape where business logic is written once and only marked server methods are reachable?",
+        "lesson": "An app framework decides where code runs and which functions a stranger can call. Deciding this once keeps every build card pointing the same way.",
+        "trio": {
+          "current": {
+            "note": "Today the web toolkit uses string routes, and each handler checks sign-in itself.",
+            "code": "// Web battery today: a string route and a handler per action.\n// A desktop or phone app is a second program that calls these URLs.\nroutes: fn() -> WebRouter WebRouterError! {\n    fields: [WebRouterField]{WebRouterField{name: \"id\", value: \"Int\"}}\n    search: [WebRouterField]{}\n    // The handler checks the signed-in user itself.\n    router.route(router.new(), \"/tasks/:id/move\", fields, search, move_task)\n}"
+          },
+          "wild": {
+            "lang": "TypeScript (Next.js)",
+            "note": "An exported server function is a public endpoint; the author must check the caller.",
+            "code": "'use server'\n\n// Public once exported: any client can call it.\nexport async function moveTask(id: string, to: Status) {\n  const user = await auth()\n  if (!user) throw new Error('Signed out')\n  return db.task.update({ where: { id }, data: { status: to } })\n}"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "One app, explicit markers",
+            "gist": "Only marked methods are endpoints.",
+            "gains": [
+              "Logic written once for every target",
+              "A forgotten marker stays private"
+            ],
+            "losses": [
+              "One marker line per endpoint"
+            ],
+            "proposed": {
+              "code": "// Logic package: one service; only marked methods are endpoints.\nCrew: struct {\n    tasks: db.Table<TaskID, Task>\n\n    #App.SignedIn\n    move_task: fn(self, id: TaskID, version: Int, to: Status) -[DB.Read, DB.Write]> Task TaskError! {\n        self.apply_move(id, version, to)\n    }\n\n    // Unmarked: server-only. A client call to it does not compile.\n    apply_move: fn(self, id: TaskID, version: Int, to: Status) -[DB.Read, DB.Write]> Task TaskError! {\n        Err(TaskError.NotFound)\n    }\n}"
+            }
+          },
+          {
+            "key": "B",
+            "name": "One app, signed-in by default",
+            "gist": "Every non-priv method is a signed-in endpoint.",
+            "gains": [
+              "No marker on most methods"
+            ],
+            "losses": [
+              "A forgotten priv exposes a helper"
+            ],
+            "proposed": {
+              "code": "// Logic package: every non-priv method is a signed-in endpoint.\nCrew: struct {\n    tasks: db.Table<TaskID, Task>\n\n    // An endpoint for signed-in callers, with no marker.\n    move_task: fn(self, id: TaskID, version: Int, to: Status) -[DB.Read, DB.Write]> Task TaskError! {\n        self.apply_move(id, version, to)\n    }\n\n    // Must be priv, or signed-in callers can reach it too.\n    priv apply_move: fn(self, id: TaskID, version: Int, to: Status) -[DB.Read, DB.Write]> Task TaskError! {\n        Err(TaskError.NotFound)\n    }\n}"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Web first, today's toolkit",
+            "gist": "Keep string routes; native apps are separate programs.",
+            "gains": [
+              "Nothing new to build now"
+            ],
+            "losses": [
+              "Two programs kept in step by hand",
+              "Each handler repeats its sign-in check"
+            ],
+            "proposed": {
+              "code": "// Web battery today: a string route and a handler per action.\n// A desktop or phone app is a second program that calls these URLs.\nroutes: fn() -> WebRouter WebRouterError! {\n    fields: [WebRouterField]{WebRouterField{name: \"id\", value: \"Int\"}}\n    search: [WebRouterField]{}\n    // The handler checks the signed-in user itself.\n    router.route(router.new(), \"/tasks/:id/move\", fields, search, move_task)\n}"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "One program runs everywhere, and a forgotten marker fails closed with an error that names the fix.",
+          "gains": [
+            "One program for web, desktop and phones",
+            "Private unless marked"
+          ],
+          "losses": [
+            {
+              "loss": "One marker line per endpoint.",
+              "mitigation": "The compile error names the marker to add."
+            },
+            {
+              "loss": "One ratified decision changes spelling.",
+              "mitigation": "Its checked behavior stays the same."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "A forgotten priv opens a method to every account."
+            },
+            {
+              "key": "C",
+              "reason": "Native apps become second programs with repeated checks."
+            }
+          ],
+          "tradeoff": "One marker line per endpoint buys a default that cannot leak."
+        }
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-13T18:56:10.345Z"
     }
   ],
   "questions": [
@@ -204071,6 +204245,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-13T18:56:10.345Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-WEBAPP-SHAPE1",
+      "note": "Web and app framework shape: business logic once, for native apps and the browser"
+    },
     {
       "at": "2026-11-13T18:51:06.680Z",
       "by": "Main",
