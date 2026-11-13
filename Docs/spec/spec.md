@@ -3952,6 +3952,16 @@ with a scratch arena of its own.
 Inside a `#Context` block that names no allocator, a growing call (`push`,
 `append`, `insert`, `add` or `add_new`) is lint **L0506**.
 
+Reading `context.scratch` as a value borrows the task's scratch arena. The
+read is a view of a `mem.Arena`: `context.scratch.alloc(v)` and a variable
+bound to the read (`s: context.scratch`, then `s.alloc(v)`) allocate from
+the task's arena, and `alloc` answers a view into it, as it does for any
+`Arena`. Dropping the read value, or a value `alloc` answered, frees
+nothing; the task frees its arena when it ends. The read and the views it
+answers may not leave the region: returning one, or binding a second name
+to a variable that holds one, is **E0631**, and a reset of the arena ends
+every view into it (**E0632** at a later use).
+
 `context.logger` is the task's `log.Handler`. It is core.log's own
 `#ContextKey logger`, so `#Context(logger: h)` sets it like any key and
 `context.logger` reads it as `context.get(logger)` does. A program that

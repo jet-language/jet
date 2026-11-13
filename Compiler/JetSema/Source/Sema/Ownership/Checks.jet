@@ -2642,6 +2642,67 @@ sema_ownership_is_allocator_view: fn(ty: Type?) -> Bool Never! {
     false
 }
 
+// Whether `expr`, of an allocator view type, reads `context.scratch`, the
+// task's scratch arena: the field `scratch` of a root no local declares,
+// the bare `context` or an import (Expressions/Places.jet
+// sema_expression_context_read types the read: no other field read is a
+// view).
+sema_ownership_scratch_read: fn(expr: Expr, scopes: SemaScopeTable) -> Bool {
+    if expr == .Field(base, member, _, _) && member == "scratch" && base == .Ident(root, _, _) {
+        found: sema_scope_resolve_index(scopes, root) ?? return root == "context"
+        return scopes.bindings[found].symbol.kind == SymbolKind.Import
+    }
+    false
+}
+
+// The task's scratch arena as the owner of the values its `alloc` made:
+// the task's, never a local's, so `context.scratch` names it, and a reset
+// of the arena invalidates what it owns.
+sema_ownership_scratch_place: fn(span: Span) -> SemaOwnershipPlace Never! {
+    SemaOwnershipPlace{root: "context.scratch", root_key: "context.scratch", root_span: span, projections: [String]{}, typed_projections: [SemaOwnershipProjection]{}}
+}
+
+// The owner of a variable bound to `context.scratch` itself: the same arena
+// under a key of its own, since a reset leaves the arena, and so the view
+// of it, usable.
+SEMA_OWNERSHIP_SCRATCH_ARENA_KEY: "context.scratch arena"
+
+// Whether `expr` names the task's scratch arena: a read of
+// `context.scratch`, or a variable bound to one.
+sema_ownership_scratch_arena: fn(state: &SemaOwnershipState, expr: Expr, scopes: SemaScopeTable) -> Bool {
+    if sema_ownership_scratch_read(expr, scopes) -> return true
+    if expr == .Ident(name, span, _) {
+        key: sema_ownership_carrier_key(scopes, name, span) ?? return false
+        loop fact in state.views {
+            if fact.active && fact.carrier_key == key && fact.source.root_key == SEMA_OWNERSHIP_SCRATCH_ARENA_KEY -> return true
+        }
+    }
+    false
+}
+
+// `name` (at `name_span`) holds a view into the task's scratch arena:
+// `context.scratch` itself (`arena` true) or a value its `alloc` made. The
+// view may not leave the region (E0631), as a view into a local arena may
+// not, and a reset of the arena invalidates the values it made (E0632).
+sema_ownership_record_scratch_view_fact: fn(state: &SemaOwnershipState, name: String, name_span: Span, arena: Bool, scopes: SemaScopeTable) -> Bool {
+    key: sema_ownership_carrier_key(scopes, name, name_span) ?? return false
+    loop index in 0..<state.views.len() {
+        if state.views[index].carrier_key == key && state.views[index].active -> state.views[index].active = false
+    }
+    place := sema_ownership_scratch_place(name_span)
+    if arena -> place.root_key = SEMA_OWNERSHIP_SCRATCH_ARENA_KEY
+    place.projections.push("[fresh]")
+    place.typed_projections.push(SemaOwnershipProjection.Fresh{span: name_span})
+    sema_ownership_record_view_fact_inner(state, name, name_span, place, [String]{}, AccessConvention.Write, scopes, -1)
+}
+
+// E0631 at `span` when `context.scratch` itself would leave the reading
+// function (`what`): the read borrows the task's arena, which the caller
+// can't keep.
+sema_ownership_diag_scratch_escape: fn(span: Span, what: String) -> Diagnostic {
+    sema_error("E0631", span, "`context.scratch` cannot be shared — it does not live long enough to {what}", "`context.scratch` is a view into the task's scratch arena; sharing it outside the region would let it outlive the borrow and point into freed memory", "keep `context.scratch` inside the function that reads it, or copy what you need out of the values stored in it")
+}
+
 sema_ownership_report_invalidated_view: fn(state: &SemaOwnershipState, expr: Expr, scopes: SemaScopeTable, span: Span, diagnostics: &[Diagnostic]) -> Bool {
     output_path := [String]{}
     root: sema_ownership_named_view_root(expr, output_path) ?? return false

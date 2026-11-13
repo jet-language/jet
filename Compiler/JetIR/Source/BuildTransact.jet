@@ -499,10 +499,21 @@ ir_context_lookup: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, key: 
 // `#Context(deadline:)` or `task.timeout` installed one; `trace` is the
 // text of the calling frames (Runtime Fault.jet jet_rt_context_trace),
 // which sema hands to core.debug's `__trace_records`. The call is built in
-// the reading function, so the walk starts at its frame.
+// the reading function, so the walk starts at its frame. `scratch` is a
+// view of the task's scratch arena (BuildAllocators.jet ir_allocator_view),
+// whose handle the task's record keeps at the address jet_ctx_scratch
+// answers: the view owns nothing, and a variable bound to it aliases that
+// word.
 ir_context_read: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, field: String, span: Span) -> Int Never! {
     row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
     if field == "trace" -> return ir_runtime(m, b, "jet_rt_context_trace", [Int]{}, row)
+    if field == "scratch" {
+        pointer_row: ir_pointer_row(m)
+        address: ir_runtime(m, b, "jet_ctx_scratch", [Int]{}, pointer_row)
+        view: ir_allocator_view(m, b, address, row)
+        if view >= 0 -> b.fresh[view] = false
+        return view
+    }
     int_row: ir_type_row(m, Type.Int) ?? return ir_type_fail(b, span, Type.Int)
     word_row: ir_word_row(m)
     if field == "thread" {

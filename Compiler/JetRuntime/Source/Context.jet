@@ -10,15 +10,18 @@
 // allocates. Codegen may later pass the record pointer as a hidden argument
 // without changing meaning. `context.<field>` reads (IR BuildTransact.jet
 // ir_context_read) call jet_ctx_deadline_present and jet_ctx_deadline_ms
-// (Deadline.jet) and jet_ctx_thread (Thread.jet): the thread index is the
-// running thread's, kept in its TCB at THREAD_TCB_INDEX, not in the record.
+// (Deadline.jet), jet_ctx_thread (Thread.jet) and jet_ctx_scratch: the
+// thread index is the running thread's, kept in its TCB at
+// THREAD_TCB_INDEX, not in the record.
 // Record, append-only (`logger` is core.log's key on the value chain):
 // deadline present@0, deadline ms@8 (Deadline.jet), effect scope@16 (the
 // innermost effect-scope frame node, 0 for none: Authority.jet),
 // allocator@24 (the carrier of the innermost `#Context(allocator:)` block,
 // 0 for the program heap: Alloc.jet's user allocators), values@32,
-// scratch@40 (the record of the arena reservation behind
-// `context.scratch`, 0 until its first block: Alloc.jet's arena blocks).
+// scratch@40 (the `mem.Arena` handle of `context.scratch`, the task's
+// scratch arena, 0 until its first use: context_scratch_arena; its
+// reservation, at the handle's ARENA_BLOCKS, serves the
+// `#Context(allocator: context.scratch)` blocks: Alloc.jet's arena blocks).
 // The allocator slot owns one reference to its carrier, and a TCB's cache
 // rows are blocked while its record names one (Alloc.jet alloc_cache_sync).
 //
@@ -51,9 +54,39 @@ context_tcb_bytes: fn() -> I64 { CONTEXT_TCB_ROOT + CONTEXT_RECORD_BYTES }
 // A zeroed root record is the empty root context.
 context_tcb_install_root: fn(tcb: I64) { sync_store(wrapping(tcb + CONTEXT_TCB_SLOT), tcb + CONTEXT_TCB_ROOT) }
 
-// Ends the scratch reservation of a TCB's root record: a thread's detach
-// and a fiber's teardown (Thread.jet, Fiber.jet).
-context_tcb_release: fn(tcb: I64) { alloc_arena_release(wrapping(tcb + wrapping(CONTEXT_TCB_ROOT + CONTEXT_SCRATCH))) }
+// Drops the scratch arena of a TCB's root record: a thread's detach and a
+// fiber's teardown (Thread.jet, Fiber.jet).
+context_tcb_release: fn(tcb: I64) { context_scratch_drop(wrapping(tcb + CONTEXT_TCB_ROOT)) }
+
+// The scratch arena of `record`, the `mem.Arena` handle at its scratch
+// word, made at the first use.
+context_scratch_arena: fn(record: I64) -> I64 {
+    slot: wrapping(record + CONTEXT_SCRATCH)
+    kept: sync_load(slot)
+    if (kept != I64{0}) -> return kept
+    arena: jet_arena_new()
+    sync_store(slot, arena)
+    arena
+}
+
+// Drops the scratch arena of `record` (none: nothing), with every value
+// stored in it and its reservation. No block over it is open.
+context_scratch_drop: fn(record: I64) {
+    slot: wrapping(record + CONTEXT_SCRATCH)
+    arena: sync_load(slot)
+    if (arena == I64{0}) -> return
+    sync_store(slot, I64{0})
+    jet_rt_handle_drop_jet_arena(arena)
+}
+
+// `context.scratch` (IR BuildTransact.jet ir_context_read): the address of
+// the current record's scratch word, holding the task's scratch arena. The
+// read is a view of that arena, which the task owns.
+#Export(c) jet_ctx_scratch: fn() -> I64 {
+    current: context_current()
+    _ := context_scratch_arena(current)
+    wrapping(current + CONTEXT_SCRATCH)
+}
 
 // Copies the current record into `record`, which then shares its value
 // chain (one more owner of the head node). A task starts on the program
@@ -73,10 +106,10 @@ context_inherit: fn(record: I64) {
 }
 
 // Ends a task's record (Task.jet task_drop): its reference to its chain and
-// its scratch reservation.
+// its scratch arena.
 context_release: fn(record: I64) {
     context_values_release(sync_load(wrapping(record + CONTEXT_VALUES)))
-    alloc_arena_release(wrapping(record + CONTEXT_SCRATCH))
+    context_scratch_drop(record)
 }
 
 // Drops one reference to `node` (0: none); a last owner's release helper
@@ -166,12 +199,14 @@ context_values_release: fn(node: I64) {
 // `#Context(allocator: a)` entry over a `mem.Arena` handle `arena`, or
 // over `context.scratch` when `arena` is 0, as jet_ctx_push_allocator's:
 // the new carrier is an arena block's (Alloc.jet alloc_arena_carrier_new)
-// over the arena's reservation, at the handle's word ARENA_BLOCKS or the
-// record's scratch word, mapped at its first block. `held` 1 hands the
-// block the arena, a value it made itself, to drop at its end.
+// over the arena's reservation, at the handle's word ARENA_BLOCKS (the
+// task's scratch arena's for `context.scratch`), mapped at its first
+// block. `held` 1 hands the block the arena, a value it made itself, to
+// drop at its end.
 #Export(c) jet_ctx_push_arena: fn(arena: I64, held: I64, save: I64, mark: I64) {
     current: context_current()
-    reservation: if (arena == I64{0}) -> wrapping(current + CONTEXT_SCRATCH) else -> wrapping(arena + ARENA_BLOCKS)
+    served: if (arena == I64{0}) -> context_scratch_arena(current) else -> arena
+    reservation: wrapping(served + ARENA_BLOCKS)
     slot: wrapping(current + CONTEXT_ALLOCATOR)
     outer: sync_load(slot)
     handle: if (held != I64{0}) -> arena else -> I64{0}

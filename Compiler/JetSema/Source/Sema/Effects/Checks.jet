@@ -1204,8 +1204,9 @@ sema_effect_record_comptime_input: fn(nodes: &[SemaEffectNode], node_index: Int,
 // (`context.<field>`) or key (`context.get(key)`), or a call through a
 // function value that is not a lambda this body writes
 // (sema_effect_local_lambda_call), whose callee's reads the graph can't
-// follow. `context.scratch` is no read: as an allocator guard it names
-// where values are made, not what they are.
+// follow. `context.scratch` is no read: as an allocator guard, or as the
+// view of the task's arena a call allocates from, it names where values
+// are made, not what they are.
 sema_effect_record_context: fn(nodes: &[SemaEffectNode], node_index: Int, tree: BodyTree, node: BodyNode) Never! {
     if node.kind == .HostCall(call) {
         if call == {

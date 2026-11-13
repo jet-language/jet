@@ -3772,9 +3772,15 @@ sema_stmt_record_binding_views: fn(binding: Binding, init_ty: Type, scopes: Sema
     if binding.name == "_" -> return true
     // `x: arena.alloc(v)`
     // makes `x` a scope-bound view into `arena`; a reset invalidates it
-    // (E0632) and it may not leave the region (E0631).
-    if sema_ownership_is_allocator_view(Val(init_ty)) && binding.init == .MethodCall(arena, method, _, _, _, _, _) && method == "alloc" {
-        if arena == .Ident(_, _, _) -> return sema_ownership_record_fresh_view_fact(state, binding.name, binding.name_span, arena, [String]{}, AccessConvention.Write, scopes, binding.name_span)
+    // (E0632) and it may not leave the region (E0631). So do
+    // `s: context.scratch`, a view of the task's scratch arena, and
+    // `x: s.alloc(v)` or `x: context.scratch.alloc(v)`, views into it.
+    if sema_ownership_is_allocator_view(Val(init_ty)) {
+        if sema_ownership_scratch_read(binding.init, scopes) -> return sema_ownership_record_scratch_view_fact(state, binding.name, binding.name_span, true, scopes)
+        if binding.init == .MethodCall(arena, method, _, _, _, _, _) && method == "alloc" {
+            if sema_ownership_scratch_arena(state, arena, scopes) -> return sema_ownership_record_scratch_view_fact(state, binding.name, binding.name_span, false, scopes)
+            if arena == .Ident(_, _, _) -> return sema_ownership_record_fresh_view_fact(state, binding.name, binding.name_span, arena, [String]{}, AccessConvention.Write, scopes, binding.name_span)
+        }
     }
     call_facts := sema_stmt_call_return_views_for_expr(binding.init, context)
     // A copy of a value holding views carries the same views into the
@@ -8213,8 +8219,13 @@ sema_stmt_check_returned_value: fn(value: Expr, return_type: Type?, environment:
         return None
     }
     // A returned arena view would outlive the
-    // arena, which drops at scope end.
+    // arena, which drops at scope end; `context.scratch` would outlive the
+    // borrow of the task's arena.
     if sema_ownership_report_arena_view_escape(state, value, "be returned", scopes, diagnostics) -> return None
+    if sema_stmt_context_scratch(value, environment, program, scopes, context) {
+        diagnostics.push(sema_ownership_diag_scratch_escape(expr_span(value), "be returned"))
+        return None
+    }
     // (Rust `check_return`): a bare range place is a read
     // window at a named `View<T>` return boundary, acquired explicitly so
     // the returned type stays a view instead of a materialized list.

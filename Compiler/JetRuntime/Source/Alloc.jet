@@ -1356,9 +1356,10 @@ alloc_user_drop: fn(carrier: I64) {
     }
 }
 
-// The record of the arena reservation kept at `slot` (a `mem.Arena`'s or a
-// task context's word, 0 until its first block), mapped on first use; 0
-// when the system refuses, and the blocks then take the program heap.
+// The record of the arena reservation kept at `slot` (a `mem.Arena`'s
+// word ARENA_BLOCKS, 0 until its first block; `context.scratch` is the
+// task's own `mem.Arena`), mapped on first use; 0 when the system refuses,
+// and the blocks then take the program heap.
 alloc_arena_record: fn(slot: I64) -> I64 {
     kept: sync_load(slot)
     if (kept != I64{0}) -> return kept
@@ -1370,8 +1371,9 @@ alloc_arena_record: fn(slot: I64) -> I64 {
     record
 }
 
-// Ends the arena reservation kept at `slot` (0: none): an arena's drop, a
-// task's end and a thread's detach. No block over it is open.
+// Ends the arena reservation kept at `slot` (0: none) at its arena's drop
+// (a task's scratch arena drops at the task's end or its thread's
+// detach). No block over it is open.
 alloc_arena_release: fn(slot: I64) {
     record: sync_load(slot)
     if (record == I64{0}) -> return

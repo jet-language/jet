@@ -764,7 +764,12 @@ sema_expression_field: fn(field: Expr, base: Expr, member: String, span: Span, e
 // handler (a `fn(debug.Stop)`, core.debug's `__stop_ignore` where no block
 // set one), `print` core.term's print style (a `term.PrintStyle`, its
 // defaults where no block set one) (ContextKeys.jet sema_context_field_key),
-// and `trace` the calling frames (sema_expression_context_trace). IR
+// `scratch` the task's scratch arena and `trace` the calling frames
+// (sema_expression_context_trace). The task owns its scratch arena, so a
+// read of it is a borrow, as a read of a field of a value the reader
+// doesn't own is: an allocator view of the `mem.Arena` (the view
+// `arena.alloc(v)` answers), which owns nothing and may not leave the
+// region (Ownership/Checks.jet sema_ownership_scratch_read). IR
 // BuildTransact.jet ir_context_read and ir_context_get lower them.
 sema_expression_context_read: fn(member: String, member_span: Span, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     if member == "trace" -> return sema_expression_context_trace(span, expected, environment, program, scopes, context, diagnostics)
@@ -774,8 +779,9 @@ sema_expression_context_read: fn(member: String, member_span: Span, span: Span, 
         .None -> if member == {
             "deadline" -> Type.Option{inner: Type.Int}
             "thread" -> Type.Int
+            "scratch" -> Type.Tagged{marker: TagMarker.Internal{internal_tag: InternalTag.AllocatorView}, inner: Type.Named{name: "Arena"}}
             else -> {
-                diagnostics.push(sema_error("E0302", member_span, "`context` has no readable field `{member}`", "the task context reads `deadline` (`Int?`, absolute wall milliseconds), `thread` (`Int`, the running thread's index), `logger` (a `log.Handler`), `on_stop` (a `fn(debug.Stop)`), `print` (a `term.PrintStyle`) and `trace` (`[SourceLocation]`, the calling frames)", "write `context.deadline`, `context.thread`, `context.logger`, `context.on_stop`, `context.print` or `context.trace`"))
+                diagnostics.push(sema_error("E0302", member_span, "`context` has no readable field `{member}`", "the task context reads `deadline` (`Int?`, absolute wall milliseconds), `thread` (`Int`, the running thread's index), `logger` (a `log.Handler`), `on_stop` (a `fn(debug.Stop)`), `print` (a `term.PrintStyle`), `scratch` (the task's `mem.Arena`) and `trace` (`[SourceLocation]`, the calling frames)", "write `context.deadline`, `context.thread`, `context.logger`, `context.on_stop`, `context.print`, `context.scratch` or `context.trace`"))
                 return None
             }
         }
@@ -786,6 +792,7 @@ sema_expression_context_read: fn(member: String, member_span: Span, span: Span, 
         .None -> THostCall.ContextRead{field: member}
     }
     read: sema_tree_node(ty, TExprKind.HostCall{call: call}, span)
+    if member == "scratch" -> return sema_expr_expected(read, expected, environment, program, diagnostics)
     sema_expr_expected_owned(read, expected, environment, program, diagnostics)
 }
 

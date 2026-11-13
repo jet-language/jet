@@ -1,0 +1,79 @@
+package: {
+    name: "context_pure_reads"
+    authority: { allow: [IO] }
+}
+
+use dbg: core.debug
+use log: core.log
+use term: core.term
+
+// Every function reads the task context, a pure (`-[]>`) one too: a read of
+// `context.<field>` is an implicit input, not an effect, so it adds nothing
+// to the function's row and needs no grant. Each pure reader below answers
+// one field, and `run` calls it outside and inside a block that sets the
+// field. `context.scratch` is the task's scratch arena, read as a view of a
+// `mem.Arena`: `alloc` makes values in it, dropping them frees nothing, and
+// neither the view nor a value made in it may leave the reading function
+// (E0631).
+
+FAR: 4102444800000
+
+read_deadline: fn() -[]> Int { context.deadline ?? -1 }
+
+read_thread: fn() -[]> Int { context.thread }
+
+logger_level: fn() -[]> String {
+    if context.logger.minimum == {
+        .Debug -> "debug"
+        .Info -> "info"
+        .Warn -> "warn"
+        else -> "error or above"
+    }
+}
+
+read_on_stop: fn() -[]> fn(dbg.Stop) { context.on_stop }
+
+read_separator: fn() -[]> String { context.print.list_separator }
+
+read_trace_line: fn() -[]> Int { context.trace[0].line }
+
+show_stop: fn(stop: dbg.Stop) {
+    print("on_stop: {stop.message}")
+}
+
+// `s` borrows the task's scratch arena; a reset through it ends the views
+// made so far, and a later `alloc` reuses the arena.
+fill_scratch: fn() {
+    s: context.scratch
+    loop i in 1..<4 {
+        square: s.alloc(i * i)
+        print(square)
+    }
+    word: context.scratch.alloc("borrowed")
+    print(word)
+    s.reset()
+    again: s.alloc(7)
+    print(again)
+}
+
+run: fn() {
+    print("deadline {read_deadline()}, thread {read_thread()}")
+    #Context(deadline: FAR) {
+        print("deadline {read_deadline()}")
+    }
+    print("logger {logger_level()}")
+    #Context(logger: log.handler(.Warn)) {
+        print("logger {logger_level()}")
+    }
+    #Context(on_stop: show_stop) {
+        handler: read_on_stop()
+        handler(dbg.Stop{message: "read by pure code", kind: .Panic})
+    }
+    print("separator \"{read_separator()}\"")
+    #Context(print: term.PrintStyle{list_separator: " | "}) {
+        print("separator \"{read_separator()}\"")
+    }
+    print("trace line {read_trace_line()}")
+    fill_scratch()
+    fill_scratch()
+}
