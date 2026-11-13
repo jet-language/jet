@@ -178,6 +178,12 @@ timing_of: fn(timing: Timing, name: String) -> Int Never! {
     }
 }
 
+// The high median of timing `name` over `trials`. The lambda captures the
+// parameter, which it only reads, so the caller's `name` stays its own.
+median_timing: fn(trials: [Trial], name: String) -> Int? Never! {
+    stats.median_high_int(trials.map(row -> timing_of(row.timing, name)))
+}
+
 check_identity: fn(rows: [Trial]) MeasureError! {
     first: rows[0].receipt.compiler_identity
     if ([String]{"", "unavailable"}).contains(first ?? "") -> return Err(measure_error("compiler identity unavailable"))
@@ -205,8 +211,8 @@ compare_startup: fn(plain: [Trial], optimized: [Trial]) -> [(key: String, value:
     metrics := [(key: String, value: Dyn)]{}
     wins := true
     loop name in METRICS {
-        base: stats.median_high_int(plain.map(row -> timing_of(row.timing, name))) ?? return Err(measure_error("no startup trials"))
-        candidate: stats.median_high_int(optimized.map(row -> timing_of(row.timing, name))) ?? return Err(measure_error("no startup trials"))
+        base: median_timing(plain, name) ?? return Err(measure_error("no startup trials"))
+        candidate: median_timing(optimized, name) ?? return Err(measure_error("no startup trials"))
         verdict: if candidate < base -> "win" else -> "loss"
         if candidate >= base -> wins = false
         row := [(key: String, value: Dyn)]{}
