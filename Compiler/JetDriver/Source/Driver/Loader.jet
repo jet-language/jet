@@ -5657,6 +5657,8 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
     }
     // Each package's denied edges (E0619) and unused rules (L0619).
     jet_driver_check_import_boundaries(catalog.packages, source_units, modules, resolved_imports, diagnostics)
+    // Under `jet check Core`, each Core name of a higher layer's module (E1012).
+    jet_driver_check_core_layers(request, source_units, diagnostics)
     if !jet_driver_has_errors(diagnostics) && !jet_driver_bind_package_namespaces(modules, source_units, catalog.packages, request, diagnostics) {
         failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Load)
     }

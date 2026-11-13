@@ -5987,6 +5987,11 @@ the modules under it (`core.net` covers `core.net.tls`); the longest listed name
 decides a module's layer, and a module is listed in at most one layer. A Core
 module names only modules of its own layer or a lower one.
 
+`jet check Core` reports each name of a higher layer's module where it is
+written (E1012): a `core.<area>` path, in a `use` or in code, or a private part
+of a higher area's module. Comments and quoted text name nothing. A program's
+check reads no layer table.
+
 ## Inline script dependencies
 
 A manifest-less `.jet` script may begin with an inline dependency:

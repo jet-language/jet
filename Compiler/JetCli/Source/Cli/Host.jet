@@ -286,10 +286,17 @@ jet_cli_compile_prelude_check: fn(file: String, source: String, color: Bool, qui
 // `jet check Core`: one Check compile of an entry that imports every public
 // module of the Core library `core` (jet_cli_core_check_source), written to a
 // scratch directory, with every declaration of each module loaded and every
-// body checked whether a program calls it or not; reported as `jet check`
-// reports `core`.
+// body checked whether a program calls it or not, and each name of a higher
+// layer's module under `core`'s `layers:` table (E1012); reported as `jet
+// check` reports `core`.
 jet_cli_compile_core_check: fn(core: String, color: Bool, quiet: Bool, threads: Int?, json: Bool, trace_sink: JetCLITraceSink?) -> JetDriverVerbOutput {
     watch: cli_time.start()
+    manifest: "{core}/package.jet"
+    manifest_text: cli_files.read(manifest) ?? return JetDriverVerbOutput{stdout: "", stderr: "jet check: couldn't read the Core manifest `{manifest}`: {err}\n", exit_code: JET_DRIVER_EXIT_USER_ERROR}
+    facts: if PackageFacts.parse(manifest_text, manifest) == {
+        .Ok(parsed) -> parsed
+        .Err(error) -> return jet_driver_check_outcome(manifest, manifest_text, [Diagnostic]{pkg_manifest_parse_diagnostic(manifest, error)}, color, quiet)
+    }
     scratch: cli_files.temp_dir("jet-check-core") ?? return JetDriverVerbOutput{stdout: "", stderr: "jet check: couldn't create a scratch directory for the Core entry: {err}\n", exit_code: JET_DRIVER_EXIT_USER_ERROR}
     entry: "{scratch.path}/core.jet"
     source: jet_cli_core_check_source()
@@ -298,7 +305,7 @@ jet_cli_compile_core_check: fn(core: String, color: Bool, quiet: Bool, threads: 
         .Refused(refusal) -> JetCLIPrepared.Refused{output: refusal}
         .Held(snapshot) -> jet_cli_prepare_request(snapshot, color, threads, JetDriverCompileMode.Check, Val(core))
     }
-    compiled: jet_cli_compile_prepared(prepared, None, trace_sink, [BuildSettingOverride]{}, "", false, true)
+    compiled: jet_cli_compile_prepared(prepared, None, trace_sink, [BuildSettingOverride]{}, "", false, true, facts.layers)
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     if compiled == {
         .Refused(refusal) -> output = refusal.move()

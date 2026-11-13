@@ -45,7 +45,7 @@ use {
         record_decode,
         record_encode,
     ]
-    jet_foundation.[TComptimeValue]
+    jet_foundation.[ModuleLayer, TComptimeValue]
     jet_sema.[
         SemaCallSiteFact,
         SemaNameReferenceFact,
@@ -296,6 +296,10 @@ JetDriverCompileRequest: struct {
     // `jet check Core`: every declaration of each loaded Core module loads
     // and every Core body is checked, called or not, as under JET_KEEP_GOING.
     every_core_body: Bool{false}
+    // `jet check Core`: Core's `layers:` table (Core/package.jet), lowest
+    // first; each loaded Core module's name of a higher layer's module is an
+    // E1012 (CoreLayers.jet). Empty: no layer check.
+    core_layers: [ModuleLayer]{[ModuleLayer]{}}
     // JET_RECHECK_VERIFY=1, a compiler test's switch: each body comptime
     // pass that splices its local values (JetSema Comptime/LocalSplice.jet)
     // also finalizes again, and any difference between the two results is an

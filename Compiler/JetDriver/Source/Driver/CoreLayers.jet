@@ -1,0 +1,140 @@
+// Core's `layers:` table (Core/package.jet, jet_foundation ModuleLayers.jet)
+// orders Core's modules lowest first, and a Core module names only modules of
+// its own layer or a lower one, so a program that reaches a low layer never
+// loads a higher one. `jet check Core` reports each name of a higher layer's
+// module (E1012) where it is written: a `core.<area>` path, in a `use` or in
+// code, or a private part (`__core_<area>_<part>`) of a higher area. The scan
+// reads tokens, not import edges, so a qualified path with no `use` counts
+// too. Comments and quoted text name nothing; an interpolation's code does.
+use {
+    jet_foundation.[Diagnostic, ModuleLayer, Span]
+    jet_lexer.[STRING_PART_INTERPOLATION, TOKEN_COLON, TOKEN_DOT, TOKEN_IDENT, TOKEN_LBRACKET, TOKEN_QUESTION_DOT, TOKEN_RBRACKET, Token, TokenTables, lex_generated, token_decoded, token_string_parts]
+}
+
+// One Core module name a source writes, and where.
+JetDriverCoreLayerName: struct {
+    module_name: String
+    span: Span
+}
+
+// Each loaded Core unit's names of a higher layer's modules (E1012), under
+// `request.core_layers`; an empty table checks nothing.
+jet_driver_check_core_layers: fn(request: JetDriverCompileRequest, source_units: [JetDriverSourceUnit], diagnostics: &[Diagnostic]) {
+    if request.core_layers.len() == 0 -> return
+    // A private part's layer is its owner's.
+    owners := [String:String]{}
+    loop row in request.core_sources {
+        if row.owner != "" -> owners[row.module_name] = row.owner
+    }
+    loop unit in source_units {
+        if !jet_driver_unit_is_core(unit) || unit.file_index < 0 || unit.file_index >= request.core_sources.len() -> next
+        row: request.core_sources[unit.file_index]
+        from: if row.owner == "" -> row.module_name else -> row.owner
+        from_layer: jet_driver_core_layer_of(request.core_layers, from).layer
+        if from_layer < 0 -> next
+        lexed: lex_generated(row.source().bytes())
+        names := [JetDriverCoreLayerName]{}
+        jet_driver_core_layer_names(lexed.tokens, lexed.tables, owners, names)
+        loop name in names {
+            to: jet_driver_core_layer_of(request.core_layers, name.module_name)
+            if to.layer <= from_layer -> next
+            low: request.core_layers[from_layer].name
+            high: request.core_layers[to.layer].name
+            what: "`{from}` in Core layer `{low}` names `{to.module_name}` of the higher layer `{high}`"
+            why: "Core's `layers:` table in `Core/package.jet` orders Core's modules lowest first, and a module names only modules of its own layer or a lower one, so a program that reaches a low layer never loads a higher one"
+            fix: "Move the code that names `{to.module_name}` up to layer `{high}`, or move what it names down to layer `{low}` or lower"
+            diagnostics.push(jet_driver_diagnostic_at_source("E1012", Val(name.span), unit.path, 0, what, why, fix))
+        }
+    }
+}
+
+// The layer that holds a module name, and the listed name that places it.
+JetDriverCoreLayerSlot: struct {
+    // Index in the table, or -1 when no listed name covers the name.
+    layer: Int
+    module_name: String
+}
+
+// Where `layers` puts `module_name`: the layer of the longest listed name it
+// equals or sits under.
+jet_driver_core_layer_of: fn(layers: [ModuleLayer], module_name: String) -> JetDriverCoreLayerSlot Never! {
+    found := JetDriverCoreLayerSlot{layer: -1, module_name: ""}
+    longest := -1
+    loop (index, layer) in layers {
+        loop listed in layer.modules {
+            size: listed.count_bytes()
+            if size <= longest || !module_name.starts_with(listed) -> next
+            if module_name.count_bytes() == size || module_name.starts_with("{listed}.") {
+                found = JetDriverCoreLayerSlot{layer: index, module_name: listed.copy()}
+                longest = size
+            }
+        }
+    }
+    found
+}
+
+// The Core module names `tokens` write: each `core.a.b` path (the longest),
+// each path of a `core.[a, b.c]` selection, and each private part `owners`
+// maps to its owner, with the names in interpolations.
+jet_driver_core_layer_names: fn(tokens: [Token], tables: TokenTables, owners: [String:String], names: &[JetDriverCoreLayerName]) Never! {
+    index := 0
+    loop index < tokens.len() {
+        token: tokens[index]
+        if token.kind == TOKEN_IDENT && (index == 0 || (tokens[index - 1].kind != TOKEN_DOT && tokens[index - 1].kind != TOKEN_QUESTION_DOT)) {
+            word: token_decoded(tables, token)
+            if word == "core" && index + 2 < tokens.len() && tokens[index + 1].kind == TOKEN_DOT {
+                if tokens[index + 2].kind == TOKEN_IDENT {
+                    index = jet_driver_core_layer_path(tokens, tables, index, "", names)
+                    next
+                }
+                if tokens[index + 2].kind == TOKEN_LBRACKET {
+                    index = jet_driver_core_layer_selection(tokens, tables, index + 3, names)
+                    next
+                }
+            }
+            if owners.get(word) == .Val(owner) -> names.push(JetDriverCoreLayerName{module_name: owner.copy(), span: token.span})
+        }
+        if token.literal >= 0 {
+            loop part in token_string_parts(tables, token) {
+                if part.kind == STRING_PART_INTERPOLATION -> jet_driver_core_layer_names(part.tokens, tables, owners, names)
+            }
+        }
+        index += 1
+    }
+}
+
+// The dotted path that starts at the identifier `tokens[start]`, under
+// `prefix` ("" for none), pushed to `names`; the index after its last
+// identifier.
+jet_driver_core_layer_path: fn(tokens: [Token], tables: TokenTables, start: Int, prefix: String, names: &[JetDriverCoreLayerName]) -> Int Never! {
+    head: token_decoded(tables, tokens[start])
+    path := if prefix == "" -> head.copy() else -> "{prefix}.{head}"
+    last := start
+    loop last + 2 < tokens.len() && tokens[last + 1].kind == TOKEN_DOT && tokens[last + 2].kind == TOKEN_IDENT {
+        path = "{path}.{token_decoded(tables, tokens[last + 2])}"
+        last += 2
+    }
+    names.push(JetDriverCoreLayerName{module_name: path.move(), span: Span{start: tokens[start].span.start, end: tokens[last].span.end}})
+    last + 1
+}
+
+// The paths of a `core.[...]` selection whose first item starts at
+// `tokens[start]`: each item at the selection's own depth that isn't an
+// alias (`name:`); the index after its `]`.
+jet_driver_core_layer_selection: fn(tokens: [Token], tables: TokenTables, start: Int, names: &[JetDriverCoreLayerName]) -> Int Never! {
+    index := start
+    depth := 1
+    loop index < tokens.len() && depth > 0 {
+        kind: tokens[index].kind
+        if {
+            kind == TOKEN_LBRACKET -> depth += 1
+            kind == TOKEN_RBRACKET -> depth -= 1
+            kind == TOKEN_IDENT && depth == 1 && tokens[index - 1].kind != TOKEN_DOT && (index + 1 >= tokens.len() || tokens[index + 1].kind != TOKEN_COLON) -> {
+                index = jet_driver_core_layer_path(tokens, tables, index, "core", names)
+                next
+            }
+        }
+        index += 1
+    }
+    index
+}

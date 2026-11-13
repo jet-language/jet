@@ -26,6 +26,7 @@ use {
         compiler_take_rows,
         compiler_transfer_rows,
         foundation_json_quote,
+        ModuleLayer,
         Program,
         RuntimeInterfaceRow,
         build_options_value,
@@ -1619,8 +1620,9 @@ jet_cli_prepared_file_count: fn(prepared: JetCLIPrepared) -> Int Never! {
 // `embed_bytes`, `find`); `settings` are the `--set` writers; a non-empty
 // `profile` is the selected `--profile`; `prelude` checks the entry as a
 // Compiler/Prelude source (`jet check --prelude`); `every_core_body` checks
-// every Core body, called or not (`jet check Core`).
-jet_cli_compile_prepared: fn(prepared: &&JetCLIPrepared, input_log: Shared<JetDriverComptimeInputLog>?, trace_sink: JetCLITraceSink?, settings: [BuildSettingOverride]{[BuildSettingOverride]{}}, profile: String{""}, prelude: Bool{false}, every_core_body: Bool{false}) -> JetCLICompiled {
+// every Core body, called or not, and `core_layers` is Core's layer table
+// whose upward names it reports (`jet check Core`).
+jet_cli_compile_prepared: fn(prepared: &&JetCLIPrepared, input_log: Shared<JetDriverComptimeInputLog>?, trace_sink: JetCLITraceSink?, settings: [BuildSettingOverride]{[BuildSettingOverride]{}}, profile: String{""}, prelude: Bool{false}, every_core_body: Bool{false}, core_layers: [ModuleLayer]{[ModuleLayer]{}}) -> JetCLICompiled {
     if prepared.move() == {
         .Refused(output) -> JetCLICompiled.Refused{output: output}
         .Prepared(request, snapshot) -> {
@@ -1632,6 +1634,7 @@ jet_cli_compile_prepared: fn(prepared: &&JetCLIPrepared, input_log: Shared<JetDr
             if profile != "" -> selected.profile = profile
             selected.prelude_entry = prelude
             selected.every_core_body = every_core_body
+            selected.core_layers = core_layers
             // The runtime-library seam is `jet doc`'s (Host.jet jet_cli_doc_result):
             // a check, test or build under a stray JET_FRONT_LIBRARY_OBJECT_OUTPUT
             // stays that verb's compile.
