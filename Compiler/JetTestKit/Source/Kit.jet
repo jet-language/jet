@@ -812,7 +812,7 @@ kit_scratch_root: fn() -> String? {
 // (<XDG_CACHE_HOME>/jet/testkit, else ~/.cache/jet/testkit). None when not
 // even HOME is set.
 kit_disk_root: fn() -> String? {
-    if sys.get("JET_SCRATCH_ROOT") == .Val(root) -> return Val(files.join(root, "testkit"))
+    if sys.get(ENV_JET_SCRATCH_ROOT) == .Val(root) -> return Val(files.join(root, "testkit"))
     if sys.get("XDG_CACHE_HOME") == .Val(cache) -> return Val(files.join(cache, "jet/testkit"))
     home: sys.get("HOME") ?? return None
     Val(files.join(home, ".cache/jet/testkit"))
@@ -851,7 +851,7 @@ kit_execute_suites: fn(options: KitOptions, root: String, selected_suites: [Stri
     canonical: kit_execute_scratch_dir(base, root) ?? return kit_execution_refused("ERROR\tselection\t\tscratch: {err}")
     // What outlives a run: each suite's measurements, and the FFI cache when
     // the rows stage on disk.
-    state_base: sys.get("JET_TEST_STATE_DIR") ?? files.join(kit_disk_root() ?? return kit_execution_refused("ERROR\tselection\t\tstate: set JET_TEST_STATE_DIR, JET_SCRATCH_ROOT or HOME"), "state")
+    state_base: sys.get(ENV_JET_TEST_STATE_DIR) ?? files.join(kit_disk_root() ?? return kit_execution_refused("ERROR\tselection\t\tstate: set {ENV_JET_TEST_STATE_DIR}, {ENV_JET_SCRATCH_ROOT} or HOME"), "state")
     state: kit_execute_disk_dir(state_base, root) ?? return kit_execution_refused("ERROR\tselection\t\tstate: {err}")
     run_scratch: files.join(canonical, "testkit-{process.current_pid()}-{selected_suites.join("-")}")
     if files.exists(run_scratch) -> return kit_execution_refused("ERROR\tselection\t\tscratch already exists: {run_scratch}")
@@ -901,7 +901,7 @@ kit_execute_suites: fn(options: KitOptions, root: String, selected_suites: [Stri
 // `state` (unpacked on a run's first use, re-proved on later runs), or ""
 // when it can't, which leaves each row's jet to its jetpack.
 kit_cc_pack_root: fn(jetpack: String, state: String) -> String {
-    receipt: process.cmd([jetpack, "env", "fetch-toolchain", "--json"]).env("JETPACK_ROOT", files.join(state, "jetpack")).run() ?? return ""
+    receipt: process.cmd([jetpack, "env", "fetch-toolchain", "--json"]).env(ENV_JETPACK_ROOT, files.join(state, "jetpack")).run() ?? return ""
     if !receipt.success -> return ""
     tree: json.parse(receipt.output) ?? return ""
     if tree == .Object(fields) {
@@ -980,7 +980,7 @@ kit_execute_jobs: fn(requested: Int, entries: Int, workers: Int) -> Int {
 // This program's scheduler workers: the runtime's JET_SCHEDULER_THREADS override when it
 // is a positive count, else one per core.
 kit_execute_workers: fn() -> Int {
-    set: Int.parse(sys.get("JET_SCHEDULER_THREADS") ?? "") ?? 0
+    set: Int.parse(sys.get(ENV_JET_SCHEDULER_THREADS) ?? "") ?? 0
     if set > 0 -> set else -> sys.cpu_count()
 }
 

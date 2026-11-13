@@ -10,7 +10,9 @@ has one row in
 below are generated from it by `jet Tools/agent/EnvironmentRows.jet --write`.
 The same command writes the names the readers spell a variable by: one
 `ENV_<VARIABLE>` constant per row for the compiler
-([`EnvironmentNames.jet`](../../../Compiler/JetFoundation/Source/Registry/EnvironmentNames.jet))
+([`EnvironmentNames.jet`](../../../Compiler/JetFoundation/Source/Registry/EnvironmentNames.jet)),
+the same constants for the test kit, which depends on no package
+([`EnvironmentNames.jet`](../../../Compiler/JetTestKit/Source/EnvironmentNames.jet)),
 and one `env_name_<variable>()` accessor per row for the runtime
 ([`EnvironmentNames.jet`](../../../Compiler/JetRuntime/Source/EnvironmentNames.jet)).
 [`tests/guards/environment_variables.jet`](../../../tests/guards/environment_variables.jet)

@@ -13,7 +13,11 @@ use {
     process: core.process
     sys: core.sys
     time: core.time
-    jet_testkit.[kit_claim_jobs, kit_exec_available_memory, kit_execute_budget]
+    jet_testkit.[
+        ENV_JETPACK_BIN, ENV_JETPACK_TEST_REPO_ROOT, ENV_JET_BIN, ENV_JET_COMPILER_IDENTITY, ENV_JET_TEST_SUITE_MEMORY,
+        ENV_JET_TEST_SUITE_ROOT, ENV_JET_TOOLCHAIN_ROOT, ENV_PREFIX_JETPACK_BOOTSTRAP, kit_claim_jobs, kit_exec_available_memory,
+        kit_execute_budget,
+    ]
     jet_testkit.[KIT_EXIT_ICE]
 }
 
@@ -94,12 +98,12 @@ SuiteSetup: struct {
 
 suite_setup: fn(rows: TestRows) -> SuiteSetup? {
     jet: sys.get("JET") ?? ""
-    root: sys.get("JET_TEST_SUITE_ROOT") ?? ""
+    root: sys.get(ENV_JET_TEST_SUITE_ROOT) ?? ""
     if jet == "" || root == "" {
         rows.fail("setup", "JET or JET_TEST_SUITE_ROOT is unset: run the suite through `jet test Compiler --profile <profile>`")
         return None
     }
-    identity: sys.get("JET_COMPILER_IDENTITY") ?? ""
+    identity: sys.get(ENV_JET_COMPILER_IDENTITY) ?? ""
     version: identity.split("#").to_list()[0].copy()
     if !version.contains("@") {
         rows.fail("setup", "JET_COMPILER_IDENTITY `{identity}` names no `name@version`: set the jet under test's identity")
@@ -115,14 +119,14 @@ suite_setup: fn(rows: TestRows) -> SuiteSetup? {
 // A child jet in the checkout, without the profile run's own settings, so a
 // child `jet test` runs its own tests and writes its own evidence.
 jet_command: fn(setup: SuiteSetup, jet: String, args: [String]) -> ProcessSpec {
-    jet_child(setup, jet, args).env("JET_TOOLCHAIN_ROOT", setup.checkout)
+    jet_child(setup, jet, args).env(ENV_JET_TOOLCHAIN_ROOT, setup.checkout)
 }
 
 // A child jet on the engine unit in `project`: it reads the toolchain tree
 // Assemble.jet staged beside the project, so it runs without
 // JET_TOOLCHAIN_ROOT.
 jetpack_unit_command: fn(setup: SuiteSetup, args: [String], project: String) -> ProcessSpec {
-    jet_child(setup, setup.jet, args).cwd(project).env_remove("JET_TOOLCHAIN_ROOT")
+    jet_child(setup, setup.jet, args).cwd(project).env_remove(ENV_JET_TOOLCHAIN_ROOT)
 }
 
 // The child jet of both: the profile run's own settings removed, and the
@@ -131,7 +135,7 @@ jetpack_unit_command: fn(setup: SuiteSetup, args: [String], project: String) -> 
 jet_child: fn(setup: SuiteSetup, jet: String, args: [String]) -> ProcessSpec {
     argv := [String]{jet}
     loop arg in args -> argv.push(arg.copy())
-    spec := process.cmd(argv).cwd(setup.checkout).env("JETPACK_TEST_REPO_ROOT", setup.checkout)
+    spec := process.cmd(argv).cwd(setup.checkout).env(ENV_JETPACK_TEST_REPO_ROOT, setup.checkout)
     names: sys.vars() ?? [String]{}
     loop name in names {
         if name.starts_with("JET_TEST_") || name.starts_with("JET_NATIVE_TEST_") || name.starts_with("JET_EVIDENCE_") {
@@ -217,7 +221,7 @@ package_suite_rows: fn(rows: TestRows) {
             args.push("--filter")
             args.push(filter)
         }
-        specs.push(jet_command(setup, setup.jet, args).env("JET_BIN", setup.jet))
+        specs.push(jet_command(setup, setup.jet, args).env(ENV_JET_BIN, setup.jet))
     }
     results: process.run_all(specs, package_jobs(specs.len())) ?? {
         rows.fail("packages", "couldn't start the package runs: {err}")
@@ -320,7 +324,7 @@ engine_selected: fn(rows: TestRows, sources: [TestSource]) -> Bool {
 // still claim under its cgroup's memory.high and memory.max and the host's
 // (kit_exec_available_memory).
 package_jobs: fn(runs: Int) -[Env, FS]> Int {
-    requested: Int.parse(sys.get("JET_TEST_SUITE_MEMORY") ?? "") ?? 0
+    requested: Int.parse(sys.get(ENV_JET_TEST_SUITE_MEMORY) ?? "") ?? 0
     kit_claim_jobs(kit_execute_budget(requested, kit_exec_available_memory()), PACKAGE_MEMORY, sys.cpu_count(), PACKAGE_JOBS, PACKAGE_JOBS_MAX, runs)
 }
 
@@ -344,7 +348,7 @@ JetpackPrep: struct {
 // needs no engine.
 jetpack_prepare: fn(rows: TestRows, setup: SuiteSetup) -> JetpackPrep {
     scratch: files.join(setup.checkout, JETPACK_ENGINE_SCRATCH)
-    prep := JetpackPrep{assembled: "", map: JetpackMap{claims: [JetpackClaim]{}, files: [String]{}}, engine: sys.get("JETPACK_BIN") ?? "", build: None, error: ""}
+    prep := JetpackPrep{assembled: "", map: JetpackMap{claims: [JetpackClaim]{}, files: [String]{}}, engine: sys.get(ENV_JETPACK_BIN) ?? "", build: None, error: ""}
     assembled: jetpack_assemble(setup, scratch, "aot") ?? {
         prep.error = err.message.copy()
         return prep
@@ -391,7 +395,7 @@ jetpack_engine_rows: fn(rows: TestRows, setup: SuiteSetup, prep: JetpackPrep, bu
         args.push("--filter")
         args.push(rows.filter.copy())
     }
-    receipt: jetpack_unit_command(setup, args, files.join(prep.assembled, "project")).env("JET_BIN", setup.jet).env("JETPACK_BIN", prep.engine).run() ?? {
+    receipt: jetpack_unit_command(setup, args, files.join(prep.assembled, "project")).env(ENV_JET_BIN, setup.jet).env(ENV_JETPACK_BIN, prep.engine).run() ?? {
         rows.fail(unit, "couldn't run `jet test` on the engine unit: {err}")
         return none
     }
@@ -447,7 +451,8 @@ jetpack_claim_id: fn(claim: JetpackClaim) -> String {
 // (JET_BIN) runs the assembler and its Jet tool.
 jetpack_assemble: fn(setup: SuiteSetup, scratch: String, mode: String) -> String Err! {
     script: files.join(setup.checkout, "Jetpack/Bootstrap/Assemble.jet")
-    ran: jet_command(setup, setup.jet, [String]{script, mode}).env("JET_BIN", setup.jet).env("JETPACK_BOOTSTRAP_SCRATCH", scratch).env("JETPACK_BOOTSTRAP_TEST_AREAS", JETPACK_ENGINE_SECTIONS).env_remove("JETPACK_BOOTSTRAP_SOURCE_ROOT").env_remove("JETPACK_BOOTSTRAP_AREAS").env_remove("JETPACK_BOOTSTRAP_OWN_AREA").run() ?? return Err("couldn't run `{setup.jet} {script} {mode}`: {err}")
+    bootstrap: ENV_PREFIX_JETPACK_BOOTSTRAP
+    ran: jet_command(setup, setup.jet, [String]{script, mode}).env(ENV_JET_BIN, setup.jet).env("{bootstrap}SCRATCH", scratch).env("{bootstrap}TEST_AREAS", JETPACK_ENGINE_SECTIONS).env_remove("{bootstrap}SOURCE_ROOT").env_remove("{bootstrap}AREAS").env_remove("{bootstrap}OWN_AREA").run() ?? return Err("couldn't run `{setup.jet} {script} {mode}`: {err}")
     if !ran.success -> return Err("`Assemble.jet {mode}` exited {ran.code}: {failure_line(ran.errors)}")
     Ok(files.join(scratch, mode))
 }
@@ -961,7 +966,7 @@ fuzz_pins: fn(directory: String) -> [String: String] {
 // How many fuzz checks or runs go at once: the packages suite's sizing, with
 // a FUZZ_MEMORY claim each.
 fuzz_jobs: fn(count: Int) -> Int {
-    requested: Int.parse(sys.get("JET_TEST_SUITE_MEMORY") ?? "") ?? 0
+    requested: Int.parse(sys.get(ENV_JET_TEST_SUITE_MEMORY) ?? "") ?? 0
     kit_claim_jobs(kit_execute_budget(requested, kit_exec_available_memory()), FUZZ_MEMORY, sys.cpu_count(), PACKAGE_JOBS, PACKAGE_JOBS_MAX, count)
 }
 
@@ -1100,7 +1105,7 @@ compiler_build: fn(setup: SuiteSetup, builder: String, output: String, trace: St
     }
     current: sys.stack_limit() ?? return Err("couldn't read the stack limit: {err}")
     sys.set_stack_limit(Val(BUILD_STACK), current.hard) ?? return Err("couldn't raise the stack limit: {err}")
-    spec := jet_command(setup, builder, [String]{"build", "--profile", "ship", "Compiler"}).env("JET_COMPILER_IDENTITY", "{setup.version}#{crypto.sha256(bytes).hex()}")
+    spec := jet_command(setup, builder, [String]{"build", "--profile", "ship", "Compiler"}).env(ENV_JET_COMPILER_IDENTITY, "{setup.version}#{crypto.sha256(bytes).hex()}")
     if trace == .Val(path) -> spec = spec.env("JET_TRACE_FILE", path)
     receipt: spec.run() ?? return Err("couldn't run `{builder} build --profile ship Compiler`: {err}")
     Ok(receipt)

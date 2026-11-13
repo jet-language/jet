@@ -428,17 +428,17 @@ kit_ui_outcomes: fn(entry: KitEntry, ctx: KitCtx) -> [KitOutcome] {
         kit_exec_write(files.join(source, "package.jet"), "name: \"e1250_fixture\"\nversion: \"1\"\njet: \"a0.9\"\n")
         kit_exec_copy_file(original, files.join(source, "main.jet"))
     }
-    overlay := [KitEnvVar]{KitEnvVar{name: "JET_SCHEMA_CACHE_DIR", value: None}}
+    overlay := [KitEnvVar]{KitEnvVar{name: ENV_JET_SCHEMA_CACHE_DIR, value: None}}
     if entry.path == "tests/ui/ffi_no_cargo.jet" {
         // Invoke absolute Jet/trace executables with no Cargo or rustup shims.
         unavailable: files.join(ctx.scratch, "no-cargo-path")
         if files.exists(unavailable) -> files.remove_all(unavailable) ?? panic("reset no-Cargo case: {err}")
         kit_exec_write(files.join(unavailable, ".case"), "ffi_no_cargo\n")
         overlay.push(KitEnvVar{name: "PATH", value: Val(unavailable)})
-        overlay.push(KitEnvVar{name: "JET_FFI_CACHE_DIR", value: Val(unavailable)})
+        overlay.push(KitEnvVar{name: ENV_JET_FFI_CACHE_DIR, value: Val(unavailable)})
     }
-    if call.extension != "" -> overlay.push(KitEnvVar{name: "JET_COMPILER_EXTENSION", value: Val(files.join(ctx.root, call.extension))})
-    if call.org_policy != "" -> overlay.push(KitEnvVar{name: "JET_ORG_UNSAFE_POLICY", value: Val(files.join(work, call.org_policy))})
+    if call.extension != "" -> overlay.push(KitEnvVar{name: ENV_JET_COMPILER_EXTENSION, value: Val(files.join(ctx.root, call.extension))})
+    if call.org_policy != "" -> overlay.push(KitEnvVar{name: ENV_JET_ORG_UNSAFE_POLICY, value: Val(files.join(work, call.org_policy))})
     published: "{kit_steps_byte_slice(original, 0, original.count_bytes() - 4)}.published.snapshot"
     if kit_exec_optional(published) == .Val(snapshot) {
         name := "Unknown"
@@ -450,7 +450,7 @@ kit_ui_outcomes: fn(entry: KitEntry, ctx: KitCtx) -> [KitOutcome] {
         }
         schema: files.join(ctx.scratch, "schema")
         kit_exec_write(files.join(schema, "{name}.snapshot"), snapshot)
-        overlay.push(KitEnvVar{name: "JET_SCHEMA_CACHE_DIR", value: Val(schema)})
+        overlay.push(KitEnvVar{name: ENV_JET_SCHEMA_CACHE_DIR, value: Val(schema)})
     }
     args := [String]{if call.hangar_tamper -> ctx.env.jetpack else -> ctx.env.jet}
     loop arg in call.argv -> args.push(arg)
