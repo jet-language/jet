@@ -70,6 +70,7 @@ Do not hand-edit these rows. Add or change a spelling in Spellings.jet, then rer
 | `<>` | the value of the nearest enclosing `\|>` step; legal only inside a step, which must read it at least once |
 | `x.move()` | an early take: a compiler-owned method that moves a named place out before its last use; a call that takes is written plain because its signature declares `&&T` or `&&self` |
 | `&&T / &&self` | take mark in a signature, and `task &&name` for a task capture; `&T` / `&self` is the write mark; calls stay unmarked |
+| `fn(&T) / fn(&&T)` | a function type marks a written input `&` and a taken one `&&`, as a declaration does (`action: fn(&Mobj)`); a function or lambda fits it only when its marks match (E0227), and a stored one is called plainly (`st.action(m)`) |
 | `&self.field / &self.[a, b]` | stated receiver field footprint: the record fields a method may read or change, checked against its body (E0231) and published in the API snapshot; reuses member spread `.[` |
 | `T{expr}` | field default |
 | `Name{"…"}` | checked text head |
