@@ -1,0 +1,66 @@
+use dr_files: core.files
+
+// No diagnostic path teaches a retired binding or type spelling. The active
+// registry rows (read from the generated DiagnosticRows.jet) and the code of
+// the parser, sema, fix engine, CLI and LSP never advise `mut name`, `let`,
+// `var`, `val`, `:: distinct` or `struct(BaseType)`. A retired row keeps its
+// `*Retired* (was: …)` label, so retired rows are not scanned.
+
+// The retired spellings, as diagnostic text would teach them.
+DR_RETIRED_SPELLINGS: [String]{"`mut ", "`mut`", "`let ", "`let`", "let mut", "`var ", "`var`", "`val ", ":: distinct", "struct(BaseType)", "`struct` for a distinct"}
+
+// The sources that write diagnostic text or rewrite source.
+DR_SOURCE_ROOTS: [String]{"Compiler/JetParser/Source", "Compiler/JetSema/Source", "Compiler/JetDriver/Source", "Compiler/JetCli/Source", "Compiler/JetLSP/Source"}
+
+DR_ROWS_PATH: "Compiler/JetFoundation/Source/Registry/DiagnosticRows.jet"
+
+// Every retired spelling `text` teaches, reported at `place`.
+dr_report: fn(place: String, text: String, violations: &[String]) {
+    loop spelling in DR_RETIRED_SPELLINGS {
+        if text.contains(spelling) -> violations.push("{place}: teaches the retired {spelling}")
+    }
+}
+
+// The text fields of the registry rows whose status is not Retired.
+dr_registry_violations: fn(violations: &[String]) {
+    text: dr_files.read(DR_ROWS_PATH) ?? panic("read {DR_ROWS_PATH}: {err}")
+    keys: [String]{"meaning", "what", "why", "fix", "next"}
+    retired := false
+    loop (index, line) in text.lines() {
+        trimmed: line.trim()
+        if trimmed.starts_with("status: ") -> retired = trimmed.contains(".Retired")
+        value: dt_row_value(line, keys)
+        if !retired && value != "" -> dr_report("{DR_ROWS_PATH}:{index + 1}", value, violations)
+    }
+}
+
+// Every line of the diagnostic-writing sources that is not a comment.
+dr_source_violations: fn(violations: &[String]) {
+    loop root in DR_SOURCE_ROOTS {
+        loop path in s2_syntax_paths(root) {
+            if !path.ends_with(".jet") -> next
+            source: dr_files.read(path) ?? panic("read {path}: {err}")
+            loop (index, line) in source.lines() {
+                if !line.trim().starts_with("//") -> dr_report("{path}:{index + 1}", line, violations)
+            }
+        }
+    }
+}
+
+#Test("retired_spelling_scanner_finds_each_spelling") {
+    guards_enter_root()
+    found := [String]{}
+    dr_report("row", "fill it via `mut cells`, or declare it with `:: distinct`", found)
+    assert_eq(found, [String]{"row: teaches the retired `mut ", "row: teaches the retired :: distinct"})
+    quiet := [String]{}
+    dr_report("row", "assign `cells` on every path, or declare `Name: distinct Int`", quiet)
+    assert(quiet.is_empty(), "the current spellings read as retired: {quiet.join(", ")}")
+}
+
+#Test("diagnostic_paths_teach_no_retired_spelling") {
+    guards_enter_root()
+    violations := [String]{}
+    dr_registry_violations(violations)
+    dr_source_violations(violations)
+    assert(violations.is_empty(), "a diagnostic path teaches a retired spelling; write the current form and regenerate the rows (jet Tools/agent/DiagnosticRows.jet --write):\n{violations.join("\n")}")
+}
