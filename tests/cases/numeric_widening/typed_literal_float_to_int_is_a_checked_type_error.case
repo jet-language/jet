@@ -8,14 +8,14 @@ env: NO_COLOR=1
 
 step: jet check int.jet
 exit: 1
-stderr: ~ "Error [jet.ValueTypeMismatch]: `1.5` isn't a whole number, so `Int` can't hold it exactly"
+stderr: ~ "Error [jet.ValueTypeMismatch]: `1.5` isn't a whole number, so `Int` can't hold it exactly" # the report goes on with the source excerpt
 stderr: ~ "`Int{math.trunc(value)}`" # the fix names the explicit roundings
-stderr: ~ "`math.round_even`"
-stderr: ~ "1 problem found"
+stderr: ~ "`math.round_even`" # the fix also names the even rounding
+stderr: ~ "1 problem found" # exactly one problem; the hint line follows
 
 step: jet check i64.jet
 exit: 1
-stderr: ~ "Error [jet.IntegerOutOfRange]: `"
-stderr: ~ "is outside the range of `I64`"
-stderr: ~ "`saturating(I64{value})`"
-stderr: ~ "1 problem found"
+stderr: ~ "Error [jet.IntegerOutOfRange]: `" # the literal is spelled as written
+stderr: ~ "is outside the range of `I64`" # the headline names the head type
+stderr: ~ "`saturating(I64{value})`" # the fix names the explicit clamp
+stderr: ~ "1 problem found" # exactly one problem; the hint line follows
