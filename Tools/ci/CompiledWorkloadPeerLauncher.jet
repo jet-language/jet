@@ -324,12 +324,11 @@ capability_check: fn() LaunchError! -[FS, Env, Exec, Time, Time.Wait]> {
         return Err(launch_error("unsupported host `{sys.name()}`: native peer isolation is unavailable; it is implemented only on Linux (the Jet runtime's process boundary is Linux-only)"))
     }
     bwrap: find_on_path("bwrap") ?? return Err(launch_error("Linux peer isolation unavailable: bubblewrap (`bwrap`) is not available on PATH"))
-    shell: find_on_path("sh") ?? return Err(launch_error("Linux peer isolation unavailable: POSIX `sh` is not available on PATH"))
     ip: find_on_path("ip") ?? return Err(launch_error("Linux peer isolation unavailable: `ip` is required to enable loopback-only networking"))
     launcher: launcher_path()
     filter: socket_filter()
     root: probe_root()
-    if probe_policies(bwrap, shell, ip, launcher, filter, root) == .Err(error) {
+    if probe_policies(bwrap, ip, launcher, filter, root) == .Err(error) {
         files.remove_all(root).drop("the capability probe root is scratch")
         return Err(error)
     }
@@ -337,7 +336,7 @@ capability_check: fn() LaunchError! -[FS, Env, Exec, Time, Time.Wait]> {
     Ok()
 }
 
-probe_policies: fn(bwrap: String, shell: String, ip: String, launcher: String, filter: [U8], root: String) LaunchError! -[FS, Env, Exec, Time, Time.Wait]> {
+probe_policies: fn(bwrap: String, ip: String, launcher: String, filter: [U8], root: String) LaunchError! -[FS, Env, Exec, Time, Time.Wait]> {
     filter_path: "{root}/.compiled-workload-peer-seccomp"
     files.write_bytes(filter_path, filter) ?? return Err(launch_error("Linux peer isolation unavailable: seccomp socket filter cannot be staged at `{filter_path}`: {err}"))
     loop choice in ([NetworkPolicy]{NetworkPolicy.Disabled, NetworkPolicy.LoopbackOnly}) {
@@ -347,9 +346,9 @@ probe_policies: fn(bwrap: String, shell: String, ip: String, launcher: String, f
         // The probe workload is the launcher itself: `--version` exits 0.
         inner.push(launcher.copy())
         inner.push("--version")
-        argv: sandbox_argv(bwrap, shell, filter_path, root, root, choice, inner)
+        spec: sandbox_spec(bwrap, filter_path, root, root, choice, inner) ?? return Err(err)
         named: if choice == .LoopbackOnly -> "LoopbackOnly" else -> "Disabled"
-        receipt: process.cmd(argv).stdin(.Capture).stdout(.Capture).stderr(.Capture).run() ?? return Err(launch_error("Linux peer isolation unavailable: bubblewrap {named} probe failed: {err}"))
+        receipt: spec.stdin(.Capture).stdout(.Capture).stderr(.Capture).run() ?? return Err(launch_error("Linux peer isolation unavailable: bubblewrap {named} probe failed: {err}"))
         if !receipt.success {
             return Err(launch_error("Linux peer isolation unavailable: bubblewrap {named} probe exited {status_text(child_end(receipt))}{clean_probe_stderr(receipt.errors)}"))
         }
@@ -418,18 +417,11 @@ linux_base_args: fn(root: String, cwd: String, network: NetworkPolicy) -> [Strin
     args
 }
 
-// The full command line for one sandboxed run. Disabled networking runs
-// bwrap through `sh` only to open the seccomp program as descriptor 3 for
-// `--seccomp 3`; `exec` keeps one process, so bwrap is the launcher's direct
-// child and its `--die-with-parent` parent is the launcher. That `sh` is a
-// named exclusion from the no-shell rule: Core's process spawn hands a child
-// descriptors 0-2 only, so no Jet spawn can give bwrap descriptor 3.
-sandbox_argv: fn(bwrap: String, shell: String, filter_path: String, root: String, cwd: String, network: NetworkPolicy, inner: [String]) -> [String] Never! {
-    argv := [String]{}
-    if network == .Disabled {
-        loop word in ([String]{shell.copy(), "-c", "exec 3<\"$1\" || exit {EXIT_UNSUPPORTED}; shift; exec \"$@\"", LAUNCHER_NAME, filter_path.copy()}) -> argv.push(word)
-    }
-    argv.push(bwrap.copy())
+// The command for one sandboxed run. Disabled networking keeps the seccomp
+// program open in bwrap as descriptor 3 for `--seccomp 3`; bwrap is the
+// launcher's direct child, so its `--die-with-parent` parent is the launcher.
+sandbox_spec: fn(bwrap: String, filter_path: String, root: String, cwd: String, network: NetworkPolicy, inner: [String]) -[FS, Exec]> ProcessSpec LaunchError! {
+    argv := [String]{bwrap.copy()}
     loop word in linux_base_args(root, cwd, network) -> argv.push(word)
     if network == .Disabled {
         argv.push("--seccomp")
@@ -437,12 +429,14 @@ sandbox_argv: fn(bwrap: String, shell: String, filter_path: String, root: String
     }
     argv.push("--")
     loop word in inner -> argv.push(word.copy())
-    argv
+    spec: process.cmd(argv)
+    if network == .LoopbackOnly -> return Ok(spec)
+    filter: files.open(filter_path) ?? return Err(launch_error("Linux peer isolation seccomp socket filter cannot be opened at `{filter_path}`: {err}"))
+    Ok(spec.keep_open(filter, at: 3))
 }
 
 run_linux: fn(invocation: Invocation) -[FS, Env, Exec, IO, Time, Time.Wait]> ChildEnd LaunchError! {
     bwrap: find_on_path("bwrap") ?? return Err(launch_error("Linux peer isolation unavailable: bubblewrap disappeared from PATH"))
-    shell: find_on_path("sh") ?? return Err(launch_error("Linux peer isolation unavailable: POSIX `sh` disappeared from PATH"))
     ip: find_on_path("ip") ?? return Err(launch_error("Linux peer isolation unavailable: `ip` disappeared from PATH"))
     launcher: launcher_path()
     command: resolve_program(invocation.command)
@@ -474,8 +468,13 @@ run_linux: fn(invocation: Invocation) -[FS, Env, Exec, IO, Time, Time.Wait]> Chi
     loop item in invocation.args -> inner.push(item.copy())
     result := ChildEnd{code: 0, signal: 0}
     failure := ""
-    if run_child(sandbox_argv(bwrap, shell, filter_path, invocation.root, invocation.cwd, invocation.network, inner)) == {
-        .Ok(end) -> result = end
+    if sandbox_spec(bwrap, filter_path, invocation.root, invocation.cwd, invocation.network, inner) == {
+        .Ok(spec) -> {
+            if run_child(spec) == {
+                .Ok(end) -> result = end
+                .Err(error) -> failure = error.message
+            }
+        }
         .Err(error) -> failure = error.message
     }
     if invocation.network == .Disabled {
@@ -508,11 +507,11 @@ read_linux_signal: fn(path: String) -[FS]> Int LaunchError! {
 
 // ---- Supervision ----
 
-// Runs `argv` on this process's stdin, stdout and stderr. Core spawns the
+// Runs `spec` on this process's stdin, stdout and stderr. Core spawns the
 // child as the leader of its own process group and, once the leader exits,
 // kills whatever is left in that group.
-run_child: fn(argv: [String]) -[Exec, Time.Wait]> ChildEnd LaunchError! {
-    receipt: process.cmd(argv).stdin(.Inherit).stdout(.Inherit).stderr(.Inherit).run() ?? return Err(launch_error("native peer isolation child could not start: {err}"))
+run_child: fn(spec: ProcessSpec) -[Exec, Time.Wait]> ChildEnd LaunchError! {
+    receipt: spec.stdin(.Inherit).stdout(.Inherit).stderr(.Inherit).run() ?? return Err(launch_error("native peer isolation child could not start: {err}"))
     Ok(child_end(receipt))
 }
 
@@ -537,7 +536,7 @@ internal_main: fn(args: [String], loopback: Bool) -[FS, Env, Exec, IO, Time, Tim
     // refuse to supervise anything without it.
     if !loopback -> require_socket_filter() ?? fail(err.message)
     if rest.len() == 0 -> fail("internal runner received no command")
-    end: run_child(rest) ?? fail(err.message)
+    end: run_child(process.cmd(rest)) ?? fail(err.message)
     // A leader may leave a background descendant outside its process group.
     // Every other process in the private PID namespace is closed before the
     // status is reported.
