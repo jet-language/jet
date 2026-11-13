@@ -57,6 +57,29 @@ authority_grantable_roots: fn() -> [String] Never! {
     roots
 }
 
+// One grant the native process boundary can enforce: the runtime's name for
+// it, its spelling, whether `Authority.workspace()` holds it, and whether the
+// root also enforces one program, `Exec("/usr/bin/git")`.
+AuthorityProcessGrant: struct {
+    name: String
+    right: String
+    workspace: Bool
+    program: Bool
+}
+
+// The grants an authority-bound process may hold; it refuses any other before
+// spawn. Tools/agent/RuntimeGenerators.jet generates the runtime's grant
+// check, its program scope and the workspace rights from these rows, one row
+// per line.
+AUTHORITY_PROCESS_GRANTS: [AuthorityProcessGrant]{
+    AuthorityProcessGrant{name: "workspace_read", right: "FS.Read(\"repo\")", workspace: true, program: false},
+    AuthorityProcessGrant{name: "workspace_write", right: "FS.Write(\".jet/build\")", workspace: true, program: false},
+    AuthorityProcessGrant{name: "net", right: "Net", workspace: false, program: false},
+    AuthorityProcessGrant{name: "exec", right: "Exec", workspace: false, program: true},
+    AuthorityProcessGrant{name: "io", right: "IO", workspace: false, program: false},
+    AuthorityProcessGrant{name: "time_wait", right: "Time.Wait", workspace: false, program: false},
+}
+
 // The one verdict every checkpoint answers.
 AuthorityVerdict: enum {
     Allowed

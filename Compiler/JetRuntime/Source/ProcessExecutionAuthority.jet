@@ -101,19 +101,20 @@ process_authority_receipt_rights: fn(spec: I64, secrets: I64) -> I64 {
 }
 process_authority_network: fn(spec: I64) -> Bool {
     rights: process_authority_rights(spec)
-    shared: process_authority_has(rights, rt_static_text("Net"))
+    shared: process_authority_has(rights, process_grant_net())
     process_text_list_drop(rights, false)
     shared
 }
 process_authority_refuse: fn(spec: I64, cause: I64, err: I64) -> I64 { process_execution_error(spec, HOST_IO_OP_RESOLVE, jet_rt_string_clone(cause), err) }
-// A grant the boundary would only record, never enforce, is refused, and so is
-// any live or inherited output that would bypass receipt redaction.
+// A grant the boundary would only record, never enforce (one outside
+// AUTHORITY_PROCESS_GRANTS), is refused, and so is any live or inherited
+// output that would bypass receipt redaction.
 process_authority_check: fn(spec: I64, err: I64) -> Bool {
     rights: process_authority_rights(spec)
     at := I64{0}
     loop at < fd_word(rights, I64{0}) {
         right: process_authority_at(rights, at)
-        supported: jet_rt_string_eq(right, rt_static_text("FS.Read(\"repo\")")) || jet_rt_string_eq(right, rt_static_text("FS.Write(\".jet/build\")")) || jet_rt_string_eq(right, rt_static_text("Net")) || jet_rt_string_eq(right, rt_static_text("Exec")) || jet_rt_string_eq(right, rt_static_text("IO")) || jet_rt_string_eq(right, rt_static_text("Time.Wait")) || (authority_scope_open(right) == I64{4} && jet_string_starts_with(right, rt_static_text("Exec(\"")) && rt_text_len(right) > I64{8})
+        supported: process_grant_enforceable(right)
         if !supported {
             name := I64{0}
             loop name < rt_text_len(right) && rt_text_byte(wrapping(rt_text_data(right) + name)) != (I64{40}) && rt_text_byte(wrapping(rt_text_data(right) + name)) != (I64{61}) { name += I64{1} }
@@ -200,9 +201,9 @@ process_authority_check_executable: fn(spec: I64, identity: I64, err: I64) -> Bo
     at := I64{0}
     loop at < fd_word(rights, I64{0}) {
         right: process_authority_at(rights, at)
-        if (authority_scope_open(right) == I64{4} && jet_string_starts_with(right, rt_static_text("Exec(\""))) {
+        if process_grant_names_program(right) {
             named = true
-            if (rt_text_len(right) == rt_text_len(identity) + I64{8} && rt_text_equal_bytes(wrapping(rt_text_data(right) + I64{6}), rt_text_data(identity), rt_text_len(identity))) -> granted = true
+            if (rt_text_len(right) == rt_text_len(identity) + PROCESS_GRANT_PROGRAM_FRAME && rt_text_equal_bytes(wrapping(rt_text_data(right) + PROCESS_GRANT_PROGRAM_START), rt_text_data(identity), rt_text_len(identity))) -> granted = true
         }
         at += I64{1}
     }
@@ -506,9 +507,9 @@ process_authority_sandbox: fn(spec: I64, err: I64) -> I64 {
     jet_rt_free(slot, I64{8}, I64{8})
     if (plan == I64{0}) -> return I64{0}
     rights: process_authority_rights(spec)
-    readable: process_authority_has(rights, rt_static_text("FS.Read(\"repo\")"))
-    writable: process_authority_has(rights, rt_static_text("FS.Write(\".jet/build\")"))
-    shared: process_authority_has(rights, rt_static_text("Net"))
+    readable: process_authority_has(rights, process_grant_workspace_read())
+    writable: process_authority_has(rights, process_grant_workspace_write())
+    shared: process_authority_has(rights, process_grant_net())
     process_text_list_drop(rights, false)
     source: process_authority_real_directory(spec, process_authority_cwd(spec, err), err)
     output := I64{0}

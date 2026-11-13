@@ -142,6 +142,10 @@ runtime_generators_main: fn(args: [String]) -[Exec, FS, IO]> String GeneratorErr
         }
         .Err(error) -> problems.push(error.message)
     }
+    if read_process_grants() == {
+        .Ok(text) -> outputs.push(GeneratedFile{path: PROCESS_GRANTS_RUNTIME_PATH, text: text})
+        .Err(error) -> problems.push(error.message)
+    }
     loop output in outputs {
         current: output_current(output.path, output.text) ?? return Err(err)
         if current -> next
@@ -3324,4 +3328,158 @@ exit_guard: fn() -[FS]> [String] GeneratorError! {
     assert(found[5].starts_with("p:8: a bare 101 fills an exit position"))
     fine: "a: fn() {{\n    rt_text_push_word(target, I64{{101}}, I64{{1}})\n    if (rt_text_byte(base) == I64{{70}}) -> x()\n    scheduler_text_new(I64{{70}})\n    trap_exit(EXIT_RUNTIME_PANIC)\n    // exit 101\n    say(\"exit 70\")\n    say(``exit(101) ` and exit(70)``)\n    trap_exit(I64{{1701}})\n    (code == I64{{101}}) -> rt_static_text(\"NetworkUnreachable\")\n    out.push(if code == 69 -> U8{{101}} else -> byte)\n    hex: (code >= 65 && code <= 70) || (code >= 97 && code <= 102)\n    if reply.status == 101 -> x()\n}}\n{EXIT_CODES_BEGIN}\nEXIT_ICE: 101\n{EXIT_CODES_END}\n"
     assert_eq(exit_literal_problems("p", fine) ?? panic(err.message), [String]{})
+}
+
+// The process grants the native boundary can enforce. Their one home is
+// AUTHORITY_PROCESS_GRANTS in JetFoundation's authority policy; the runtime,
+// which imports no package, gets a generated copy: one accessor per grant,
+// the enforceable-grant check, the program scope's spelling, and the rights
+// `Authority.workspace()` holds.
+
+PROCESS_GRANTS_SOURCE_PATH: "Compiler/JetFoundation/Source/Policy/Authority.jet"
+PROCESS_GRANTS_RUNTIME_PATH: "Compiler/JetRuntime/Source/ProcessGrants.jet"
+PROCESS_GRANTS_OPEN: "AUTHORITY_PROCESS_GRANTS: [AuthorityProcessGrant]{{"
+PROCESS_GRANT_ROW: "AuthorityProcessGrant{{"
+
+// One AUTHORITY_PROCESS_GRANTS row; `right` keeps its source escapes.
+ProcessGrant: struct {
+    name: String
+    right: String
+    workspace: Bool
+    program: Bool
+}
+
+// The text of `row`'s `key: "..."` field with its escapes kept, if any.
+grant_text_field: fn(row: String, key: String) -> String? Never! {
+    at: row.find("{key}: \"")
+    if at < 0 -> return None
+    bytes: row.bytes()
+    start: at + byte_len(key) + 3
+    end := start
+    loop end < bytes.len() && Int.from_u8(bytes[end]) != 34 {
+        if Int.from_u8(bytes[end]) == 92 {
+            end += 2
+        } else {
+            end += 1
+        }
+    }
+    if end >= bytes.len() -> return None
+    Val(byte_slice(row, start, end))
+}
+
+// `row`'s `key: true` or `key: false` field, if any.
+grant_bool_field: fn(row: String, key: String) -> Bool? Never! {
+    if row.contains("{key}: true") -> return Val(true)
+    if row.contains("{key}: false") -> return Val(false)
+    None
+}
+
+unsupported_grant_row: fn(row: String) -> GeneratorError Never! {
+    generator_fail("{PROCESS_GRANTS_SOURCE_PATH}: unsupported grant row `{row}`")
+}
+
+// The AUTHORITY_PROCESS_GRANTS rows of `source`, one per line. Exactly one
+// row grants a program, a bare root, and at least one is a workspace right.
+process_grant_rows: fn(source: String) -> [ProcessGrant] GeneratorError! {
+    rows := [ProcessGrant]{}
+    inside := false
+    closed := false
+    loop line in source.split("\n") {
+        trimmed: line.trim()
+        if !inside {
+            inside = trimmed == PROCESS_GRANTS_OPEN
+            next
+        }
+        if trimmed == "}}" {
+            closed = true
+            break
+        }
+        if !trimmed.starts_with(PROCESS_GRANT_ROW) -> return Err(unsupported_grant_row(trimmed))
+        name: grant_text_field(trimmed, "name") ?? return Err(unsupported_grant_row(trimmed))
+        right: grant_text_field(trimmed, "right") ?? return Err(unsupported_grant_row(trimmed))
+        workspace: grant_bool_field(trimmed, "workspace") ?? return Err(unsupported_grant_row(trimmed))
+        program: grant_bool_field(trimmed, "program") ?? return Err(unsupported_grant_row(trimmed))
+        if name == "" || leading_name(name) != name || right == "" -> return Err(unsupported_grant_row(trimmed))
+        if program && leading_name(right) != right -> return Err(generator_fail("{PROCESS_GRANTS_SOURCE_PATH}: the program grant `{right}` must be a bare root"))
+        rows.push(ProcessGrant{name: name, right: right, workspace: workspace, program: program})
+    }
+    if !closed || rows.len() == 0 -> return Err(generator_fail("{PROCESS_GRANTS_SOURCE_PATH} has no AUTHORITY_PROCESS_GRANTS rows"))
+    programs := 0
+    loop row in rows {
+        if row.program -> programs += 1
+    }
+    if programs != 1 -> return Err(generator_fail("{PROCESS_GRANTS_SOURCE_PATH}: exactly one AUTHORITY_PROCESS_GRANTS row grants a program"))
+    if !rows.any(row -> row.workspace) -> return Err(generator_fail("{PROCESS_GRANTS_SOURCE_PATH}: no AUTHORITY_PROCESS_GRANTS row is a workspace right"))
+    Ok(rows)
+}
+
+// The runtime's generated grant source for `rows`.
+render_process_grants: fn(rows: [ProcessGrant]) -> String Never! {
+    lines := [String]{"// Generated by Tools/agent/RuntimeGenerators.jet from {PROCESS_GRANTS_SOURCE_PATH}; do not edit."}
+    lines.push("// The grants the native process boundary can enforce (AUTHORITY_PROCESS_GRANTS).")
+    checks := [String]{}
+    workspace := [String]{}
+    program := ""
+    loop row in rows {
+        shown: row.right.replace("\\\"", "\"")
+        lines.push("// `{shown}`")
+        lines.push("process_grant_{row.name}: fn() -> I64 {{ rt_static_text(\"{row.right}\") }}")
+        checks.push("jet_rt_string_eq(right, process_grant_{row.name}())")
+        if row.workspace -> workspace.push("process_grant_{row.name}()")
+        if row.program -> program = row.right.copy()
+    }
+    root: byte_len(program)
+    lines.push("// Where the program's path starts in an `{program}(\"...\")` grant, and the")
+    lines.push("// grant's length beyond the path.")
+    lines.push("PROCESS_GRANT_PROGRAM_START: I64{{{root + 2}}}")
+    lines.push("PROCESS_GRANT_PROGRAM_FRAME: I64{{{root + 4}}}")
+    lines.push("// Whether `right` grants one program, `{program}(\"...\")`.")
+    lines.push("process_grant_names_program: fn(right: I64) -> Bool {{ authority_scope_open(right) == I64{{{root}}} && jet_string_starts_with(right, rt_static_text(\"{program}(\\\"\")) }}")
+    checks.push("(process_grant_names_program(right) && rt_text_len(right) > PROCESS_GRANT_PROGRAM_FRAME)")
+    lines.push("// Whether the native process boundary can enforce `right`.")
+    lines.push("process_grant_enforceable: fn(right: I64) -> Bool {{")
+    lines.push("    {checks.join(" || ")}")
+    lines.push("}}")
+    lines.push("// How many rights `Authority.workspace()` holds, and the one at `index`, in")
+    lines.push("// row order.")
+    lines.push("PROCESS_GRANT_WORKSPACE_COUNT: I64{{{workspace.len()}}}")
+    lines.push("process_grant_workspace: fn(index: I64) -> I64 {{")
+    loop (index, accessor) in workspace {
+        if index + 1 < workspace.len() -> lines.push("    if (index == I64{{{index}}}) -> return {accessor}")
+    }
+    lines.push("    {workspace[workspace.len() - 1]}")
+    lines.push("}}")
+    "{lines.join("\n")}\n"
+}
+
+read_process_grants: fn() -[FS]> String GeneratorError! {
+    source: files.read(PROCESS_GRANTS_SOURCE_PATH) ?? return Err(generator_fail("cannot read {PROCESS_GRANTS_SOURCE_PATH}: {err}"))
+    rows: process_grant_rows(source) ?? return Err(err)
+    Ok(render_process_grants(rows))
+}
+
+#Test("process grant rows render the runtime's accessors, check, program scope and workspace rights") {
+    source: "x\n{PROCESS_GRANTS_OPEN}\n    AuthorityProcessGrant{{name: \"read\", right: \"FS.Read(\\\"repo\\\")\", workspace: true, program: false}},\n    AuthorityProcessGrant{{name: \"exec\", right: \"Exec\", workspace: false, program: true}},\n}}\n"
+    rows: process_grant_rows(source) ?? panic(err.message)
+    assert_eq(rows.len(), 2)
+    assert_eq(rows[0].right, "FS.Read(\\\"repo\\\")")
+    text: render_process_grants(rows)
+    assert(text.contains("process_grant_read: fn() -> I64 {{ rt_static_text(\"FS.Read(\\\"repo\\\")\") }}\n"))
+    assert(text.contains("PROCESS_GRANT_PROGRAM_START: I64{{6}}\nPROCESS_GRANT_PROGRAM_FRAME: I64{{8}}\n"))
+    assert(text.contains("authority_scope_open(right) == I64{{4}} && jet_string_starts_with(right, rt_static_text(\"Exec(\\\"\"))"))
+    assert(text.contains("    jet_rt_string_eq(right, process_grant_read()) || jet_rt_string_eq(right, process_grant_exec()) || (process_grant_names_program(right) && rt_text_len(right) > PROCESS_GRANT_PROGRAM_FRAME)\n"))
+    assert(text.contains("PROCESS_GRANT_WORKSPACE_COUNT: I64{{1}}\nprocess_grant_workspace: fn(index: I64) -> I64 {{\n    process_grant_read()\n}}\n"))
+}
+
+#Test("a process grant row the generator can't read, or a second program row, is refused") {
+    odd: "{PROCESS_GRANTS_OPEN}\n    AuthorityProcessGrant{{name: \"read\", right: SOME_RIGHT, workspace: true, program: false}},\n}}\n"
+    if process_grant_rows(odd) == {
+        .Ok(_) -> assert(false)
+        .Err(error) -> assert(error.message.contains("unsupported grant row"))
+    }
+    two: "{PROCESS_GRANTS_OPEN}\n    AuthorityProcessGrant{{name: \"a\", right: \"Exec\", workspace: true, program: true}},\n    AuthorityProcessGrant{{name: \"b\", right: \"Net\", workspace: false, program: true}},\n}}\n"
+    if process_grant_rows(two) == {
+        .Ok(_) -> assert(false)
+        .Err(error) -> assert(error.message.contains("exactly one"))
+    }
 }

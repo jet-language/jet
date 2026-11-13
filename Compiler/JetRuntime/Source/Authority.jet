@@ -270,18 +270,23 @@ authority_narrow_failure: fn(requested: I64) -> I64 {
     }
     result
 }
-// The seed workspace rights are defined once, directly in the final owners.
-authority_workspace_right: fn(write: Bool) -> I64 {
-    text: rt_text_builder_with_capacity(if write -> I64{22} else -> I64{15})
-    jet_rt_string_builder_push(text, if write -> rt_static_text("FS.Write(\".jet/build\")") else -> rt_static_text("FS.Read(\"repo\")"))
+// The workspace rights are AUTHORITY_PROCESS_GRANTS' workspace rows
+// (ProcessGrants.jet), each an owned copy.
+authority_workspace_right: fn(index: I64) -> I64 {
+    right: process_grant_workspace(index)
+    text: rt_text_builder_with_capacity(rt_text_len(right))
+    jet_rt_string_builder_push(text, right)
     text
 }
 #Export(c) jet_authority_workspace: fn() -> I64 {
-    result: data_sequence_new(I64{2}, I64{8})
+    result: data_sequence_new(PROCESS_GRANT_WORKSPACE_COUNT, I64{8})
     data: rt_text_word(wrapping(result + DATA_SEQUENCE_DATA))
-    rt_text_store(data, authority_workspace_right(false))
-    rt_text_store(wrapping(data + I64{8}), authority_workspace_right(true))
-    rt_text_store(wrapping(result + DATA_SEQUENCE_LENGTH), I64{2})
+    at := I64{0}
+    loop at < PROCESS_GRANT_WORKSPACE_COUNT {
+        rt_text_store(wrapping(data + at * I64{8}), authority_workspace_right(at))
+        at += I64{1}
+    }
+    rt_text_store(wrapping(result + DATA_SEQUENCE_LENGTH), PROCESS_GRANT_WORKSPACE_COUNT)
     result
 }
 
