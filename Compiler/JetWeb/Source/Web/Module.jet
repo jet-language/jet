@@ -48,6 +48,9 @@ WebModule: struct {
     // `name\tsig` rows.
     imports: [String]
     exports: [String]
+    // The program's line rows: triples of the module byte offset the code
+    // starts at, its IR function row and source line, in offset order.
+    lines: [Int]
 }
 
 // Lowers `m` as every backend's selection reads it (JetIR X64Module.jet
@@ -369,15 +372,25 @@ web_module: fn(m: IRModule, app: Bool, layout: WebLayout, runtime: [String:Strin
         loop callee in slot_callees -> wasm_put_unsigned(section, defined_base + callee)
         wat_put_vec_section(out, WEB_SECTION_ELEMENT, 1, section)
     }
-    // Code, every call's index patched.
+    // Code, every call's index patched. Each IR function's line rows move to
+    // module offsets: its code's place in the section, then the section's in
+    // the module.
     section = [U8]{}
-    loop body in bodies {
+    lines := [Int]{}
+    loop (row, body) in bodies {
         code := body.code.copy()
         loop pair in 0..<(body.fixups.len() /% 2) -> web_patch_padded(code, body.fixups[2 * pair], web_function_index(body.fixups[2 * pair + 1], defined_base, ref_index))
         wasm_put_unsigned(section, code.len())
+        loop pair in 0..<(body.lines.len() /% 2) {
+            lines.push(section.len() + body.lines[2 * pair])
+            lines.push(row)
+            lines.push(body.lines[2 * pair + 1])
+        }
         section.extend(code)
     }
     wat_put_vec_section(out, WEB_SECTION_CODE, bodies.len(), section)
+    code_at: out.len() - section.len()
+    loop pair in 0..<(lines.len() /% 3) -> lines[3 * pair] = lines[3 * pair] + code_at
     // Data: one active segment per row, its address words resolved.
     section = [U8]{}
     segments := 0
@@ -412,7 +425,7 @@ web_module: fn(m: IRModule, app: Bool, layout: WebLayout, runtime: [String:Strin
     wasm_put_unsigned(section, names_body.len())
     section.extend(names_body)
     wat_put_section(out, WEB_SECTION_CUSTOM, section)
-    WebModule{bytes: out.move(), errors: st.errors.move(), data_end: data_end, slots: st.slot_rows.len(), data_at: st.data_at.move(), imports: imports.move(), exports: export_rows.move()}
+    WebModule{bytes: out.move(), errors: st.errors.move(), data_end: data_end, slots: st.slot_rows.len(), data_at: st.data_at.move(), imports: imports.move(), exports: export_rows.move(), lines: lines.move()}
 }
 
 // A function's name as the native object names it.

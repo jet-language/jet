@@ -5,9 +5,14 @@
 
 use {
     jet_backend.[X64DataExport]
-    jet_foundation.[CHECKED_ALLOC_RUNTIME_EXPORTS]
+    jet_foundation.[CHECKED_ALLOC_RUNTIME_EXPORTS, foundation_json_escape]
     jet_ir.[IRLibraryExport, IRModule, IR_X64_CHECKS_ARMED_SYMBOL]
+    jet_wasm.[wat_put_name, wat_put_section]
 }
+
+// The program module's source map, which its `sourceMappingURL` custom
+// section names (web_source_map).
+WEB_SOURCE_MAP_FILE: "app.wasm.map"
 
 WebRuntime: struct {
     bytes: [U8]
@@ -46,15 +51,22 @@ web_runtime_partition: fn(m: IRModule, exports: [IRLibraryExport], data: [X64Dat
     WebRuntime{bytes: built.bytes.move(), receipt: lines.join("\n"), errors: built.errors.move()}
 }
 
+// `sources`: the IR source files (IRFunction.source_file) the program's line
+// rows name, in the order they are first named. `lines`: triples of the
+// module byte offset the code starts at, its source's index in `sources` and
+// its source line, in offset order.
 WebProgram: struct {
     bytes: [U8]
     manifest: String
     errors: [String]
+    sources: [String]
+    lines: [Int]
 }
 
 // The program partition of built module `program` (its entry `program.entry`)
 // against the runtime partition's receipt `receipt`, and the manifest of the
-// two.
+// two. The module's last section is `sourceMappingURL`, naming
+// WEB_SOURCE_MAP_FILE.
 web_program: fn(program: &&IRModule, receipt: String) -> WebProgram Never! {
     runtime_end := -1
     runtime_slots := -1
@@ -72,14 +84,117 @@ web_program: fn(program: &&IRModule, receipt: String) -> WebProgram Never! {
         }
     }
     if runtime_end < 0 || runtime_slots < 0 {
-        return WebProgram{bytes: [U8]{}, manifest: "", errors: [String]{"the runtime partition's receipt has no layout row"}}
+        return WebProgram{bytes: [U8]{}, manifest: "", errors: [String]{"the runtime partition's receipt has no layout row"}, sources: [String]{}, lines: [Int]{}}
     }
     m := program.move()
     web_lower(m)
     base: web_align_up(runtime_end, 16)
     built := web_module(m, true, WebLayout{data_base: base, table_base: runtime_slots}, runtime, armed, web_host_functions(), [String:Int]{}, [WebHook]{})
     manifest: web_manifest(runtime_end, runtime_slots, base, built.data_end, built.slots)
-    WebProgram{bytes: built.bytes.move(), manifest: manifest, errors: built.errors.move()}
+    sources := [String]{}
+    source_rows := [String:Int]{}
+    lines := [Int]{}
+    loop pair in 0..<(built.lines.len() /% 3) {
+        file: m.functions[built.lines[3 * pair + 1]].source_file
+        if file == "" -> next
+        source := source_rows.get(file) ?? -1
+        if source < 0 {
+            source = sources.len()
+            sources.push(file.copy())
+            source_rows[file.copy()] = source
+        }
+        lines.push(built.lines[3 * pair])
+        lines.push(source)
+        lines.push(built.lines[3 * pair + 2])
+    }
+    bytes := built.bytes.move()
+    section := [U8]{}
+    wat_put_name(section, "sourceMappingURL")
+    wat_put_name(section, WEB_SOURCE_MAP_FILE)
+    wat_put_section(bytes, WEB_SECTION_CUSTOM, section)
+    WebProgram{bytes: bytes.move(), manifest: manifest, errors: built.errors.move(), sources: sources.move(), lines: lines.move()}
+}
+
+// The version 3 source map of the program module (WebProgram): `names[k]`
+// is how the map names `sources[k]` ("": the map leaves it and its rows
+// out) and `contents[k]` its text. Its one generated line's columns are
+// module byte offsets, as WebAssembly source maps are read; each segment
+// is a byte offset, a source, a 0-based line and column 0, or only a byte
+// offset where code from a left-out source (or with no line) begins.
+web_source_map: fn(names: [String], contents: [String], lines: [Int]) -> String Never! {
+    kept := [Int]{}
+    sources := [String]{}
+    texts := [String]{}
+    loop (k, name) in names {
+        if name == "" {
+            kept.push(-1)
+            next
+        }
+        kept.push(sources.len())
+        sources.push("\"{foundation_json_escape(name)}\"")
+        texts.push("\"{foundation_json_escape(contents[k])}\"")
+    }
+    mappings := [U8]{}
+    at := 0
+    source := 0
+    line := 0
+    mapped := false
+    loop pair in 0..<(lines.len() /% 3) {
+        to: kept[lines[3 * pair + 1]]
+        row: lines[3 * pair + 2] - 1
+        if to < 0 || row < 0 {
+            if mapped {
+                mappings.push(U8{44})
+                web_vlq(mappings, lines[3 * pair] - at)
+                at = lines[3 * pair]
+                mapped = false
+            }
+            next
+        }
+        if mapped && to == source && row == line -> next
+        if mappings.len() > 0 -> mappings.push(U8{44})
+        web_vlq(mappings, lines[3 * pair] - at)
+        web_vlq(mappings, to - source)
+        web_vlq(mappings, row - line)
+        web_vlq(mappings, 0)
+        at = lines[3 * pair]
+        source = to
+        line = row
+        mapped = true
+    }
+    encoded: String.from_bytes(mappings) ?? panic("VLQ digits are ASCII")
+    "{{\"version\":3,\"file\":\"app.wasm\",\"sources\":[{sources.join(",")}],\"sourcesContent\":[{texts.join(",")}],\"names\":[],\"mappings\":\"{encoded}\"}}\n"
+}
+
+WEB_VLQ_DIGITS: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+
+// `value` as a source map base64 VLQ: the sign in the low bit, five bits a
+// digit, low digits first, bit 5 set on every digit but the last.
+web_vlq: fn(out: &[U8], value: Int) Never! {
+    digits: WEB_VLQ_DIGITS.bytes()
+    rest := if value < 0 -> ((0 - value) << 1) + 1 else -> value << 1
+    loop {
+        digit := rest.bit_and(31)
+        rest >>= 5
+        if rest > 0 -> digit += 32
+        out.push(digits[digit])
+        if rest == 0 -> break
+    }
+}
+
+// How the source map names source `source` (a path in the entry root) for
+// a program whose entry is `entry` there: relative to the entry's
+// directory, so the map names no host path.
+web_source_name: fn(source: String, entry: String) -> String Never! {
+    from := entry.split("/").to_list()
+    _ := from.pop()
+    to := source.split("/").to_list()
+    common := 0
+    loop common < from.len() && common + 1 < to.len() && from[common] == to[common] -> common += 1
+    parts := [String]{}
+    loop _ in common..<from.len() -> parts.push("..")
+    loop part in to[common..<to.len()] -> parts.push(part.copy())
+    parts.join("/")
 }
 
 // The generated host files of a web build: `app.js`, `jet_dom_runtime.js`,

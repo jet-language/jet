@@ -63,10 +63,13 @@ WebState: struct {
 
 // One function's code (locals, instructions, `end`) and its function-index
 // fields to patch: pairs of byte offset and callee (an IR function row, or
-// -1 - k for refs[k]).
+// -1 - k for refs[k]). `lines`: pairs of byte offset and the source line the
+// code from there was selected for (a program's selected bodies only; the
+// source map, Build.jet web_source_map).
 WebBody: struct {
     code: [U8]
     fixups: [Int]
+    lines: [Int]{[Int]{}}
 }
 
 WebEmitter: struct {
@@ -102,6 +105,8 @@ WebEmitter: struct {
     trap_next: Bool
     // The last instruction selected has a stop path that set `flag`.
     wired: Bool
+    // Pairs of byte offset in `code` and source line (web_line).
+    lines: [Int]{[Int]{}}
 }
 
 web_type_index: fn(st: &WebState, key: String) -> Int Never! {
@@ -290,7 +295,30 @@ web_finish: fn(e: WebEmitter) -> WebBody Never! {
         fixups.push(e.fixups[2 * index] + shift)
         fixups.push(e.fixups[2 * index + 1])
     }
-    WebBody{code: code, fixups: fixups}
+    lines := [Int]{}
+    loop index in 0..<(e.lines.len() /% 2) {
+        lines.push(e.lines[2 * index] + shift)
+        lines.push(e.lines[2 * index + 1])
+    }
+    WebBody{code: code, fixups: fixups, lines: lines}
+}
+
+// The line row for the code from here on: a new row when the line changes,
+// replacing a row at the same offset that no code followed (as JetIR
+// X64Select.jet ir_x64_debug_line does for the native image's rows).
+web_line: fn(e: &WebEmitter, line: Int) Never! {
+    if line <= 0 -> return
+    at: e.code.len()
+    count: e.lines.len() /% 2
+    if count > 0 {
+        if e.lines[2 * count - 1] == line -> return
+        if e.lines[2 * count - 2] == at {
+            e.lines[2 * count - 1] = line
+            return
+        }
+    }
+    e.lines.push(at)
+    e.lines.push(line)
 }
 
 web_op: fn(e: &WebEmitter, byte: Int) Never! {

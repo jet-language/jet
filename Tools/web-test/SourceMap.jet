@@ -3,13 +3,13 @@
 //
 //   jet run --allow=Env,Exec,IO,Net,Time Tools/web-test/SourceMap.jet -- --port <port> [--prefix /click] [--wasm-prefix /compute]
 //
-// app.js names `app.js.map` in a trailing sourceMappingURL comment; app.js.map
-// is a version 3 map whose sources are relative and each carry their text;
-// its mappings decode, and the first one that lands on a Jet statement
-// (a `name: ` binding, a `backend: ` line or a `print(` call) names a `.jet`
-// source and a non-empty line. app.wasm.map has the version 3 header, its
-// sources' text and a mappings string; the wasm prefix's map carries
+// app.wasm.map is a version 3 map whose sources are relative and each carry
+// their text; its mappings decode, and the first one that lands on a Jet
+// statement (a `name: ` binding, a `backend: ` line or a `print(` call)
+// names a `.jet` source and a non-empty line. The wasm prefix's map carries
 // mappings; app.wasm's `sourceMappingURL` custom section is `app.wasm.map`.
+// When app.js names `app.js.map` in a trailing sourceMappingURL comment (a
+// build with a JS partition), app.js.map passes the same checks.
 // It prints `PASS web source-map Jet mapping + wasm map` and the mapped
 // location, or names the failed check and exits 1.
 use {
@@ -57,46 +57,23 @@ run: fn() {
     print(found)
 }
 
-// Every static check; the mapped Jet location as a JSON line.
+// Every static check; the mapped Jet location as a JSON line, from app.js.map
+// when the build writes one, else from app.wasm.map.
 check_maps: fn(origin: String, prefix: String, wasm_prefix: String) -> String Failure! {
     script: fetch_text(origin, "{prefix}/app.js")
     named := false
     loop line in script.split("\n").to_list() {
         if SOURCE_MAPPING_URL.is_match(line) -> named = true
     }
-    check(named, "app.js missing relative sourceMappingURL=app.js.map")
-
-    js_map: parse(fetch_text(origin, "{prefix}/app.js.map"), "app.js.map")
-    check(field(js_map, "version") == .Int(3), "app.js.map version")
-    sources: items(field(js_map, "sources"))
-    check(sources.len() > 0, "app.js.map sources")
-    contents: items(field(js_map, "sourcesContent"))
-    check(field(js_map, "sourcesContent") != Dyn.Null && contents.len() == sources.len(), "app.js.map sourcesContent")
-    loop name in sources {
-        path: text(name)
-        check(!path.starts_with("/") && !DRIVE_PATH.is_match(path), "host path in js map: {path}")
+    js_found := ""
+    if named {
+        js_map: parse(fetch_text(origin, "{prefix}/app.js.map"), "app.js.map")
+        js_found = locate(js_map, "app.js.map")
     }
-
-    mappings: decode_mappings(text(field(js_map, "mappings")))
-    check(mappings.len() > 0, "app.js.map has no mappings")
-    hit := mappings[0].copy()
-    loop mapping in mappings {
-        line: source_line(contents, mapping.source, mapping.original_line)
-        if line.contains("backend: ") || JET_STATEMENT.is_match(line) || line.contains("print(") {
-            hit = mapping.copy()
-            break
-        }
-    }
-    check(hit.source >= 0 && hit.source < sources.len(), "app.js.map mapping source {hit.source} is outside its {sources.len()} sources")
-    jet_file: text(sources[hit.source])
-    check(jet_file.ends_with(".jet"), "mapped source is not a Jet file: {jet_file}")
-    jet_line: source_line(contents, hit.source, hit.original_line)
-    check(jet_line.trim() != "", "{jet_file}:{hit.original_line + 1} is empty")
 
     wasm_map: parse(fetch_text(origin, "{prefix}/app.wasm.map"), "app.wasm.map")
-    check(field(wasm_map, "version") == .Int(3) && text(field(wasm_map, "file")) == "app.wasm", "app.wasm.map header")
-    check(items(field(wasm_map, "sourcesContent")).len() > 0, "wasm sourcesContent")
-    check(field(wasm_map, "mappings") == .Text(_), "wasm mappings field")
+    check(text(field(wasm_map, "file")) == "app.wasm", "app.wasm.map file")
+    wasm_found: locate(wasm_map, "app.wasm.map")
 
     if wasm_prefix != "" {
         heavy: parse(fetch_text(origin, "{wasm_prefix}/app.wasm.map"), "{wasm_prefix}/app.wasm.map")
@@ -105,10 +82,41 @@ check_maps: fn(origin: String, prefix: String, wasm_prefix: String) -> String Fa
 
     wasm: fetch_bytes(origin, "{prefix}/app.wasm")
     check((wasm_source_mapping_url(wasm) ?? "") == "app.wasm.map", "wasm sourceMappingURL custom section")
+    Ok(if js_found != "" -> js_found else -> wasm_found)
+}
+
+// The checks one version 3 map (`label`) must pass; the location of its first
+// mapping that lands on a Jet statement, as a JSON line.
+locate: fn(map: Dyn, label: String) -> String Failure! {
+    check(field(map, "version") == .Int(3), "{label} version")
+    sources: items(field(map, "sources"))
+    check(sources.len() > 0, "{label} sources")
+    contents: items(field(map, "sourcesContent"))
+    check(field(map, "sourcesContent") != Dyn.Null && contents.len() == sources.len(), "{label} sourcesContent")
+    loop name in sources {
+        path: text(name)
+        check(!path.starts_with("/") && !DRIVE_PATH.is_match(path), "host path in {label}: {path}")
+    }
+
+    mappings: decode_mappings(text(field(map, "mappings")))
+    check(mappings.len() > 0, "{label} has no mappings")
+    hit := mappings[0].copy()
+    loop mapping in mappings {
+        line: source_line(contents, mapping.source, mapping.original_line)
+        if line.contains("backend: ") || JET_STATEMENT.is_match(line) || line.contains("print(") {
+            hit = mapping.copy()
+            break
+        }
+    }
+    check(hit.source >= 0 && hit.source < sources.len(), "{label} mapping source {hit.source} is outside its {sources.len()} sources")
+    jet_file: text(sources[hit.source])
+    check(jet_file.ends_with(".jet"), "{label}: mapped source is not a Jet file: {jet_file}")
+    jet_line: source_line(contents, hit.source, hit.original_line)
+    check(jet_line.trim() != "", "{label}: {jet_file}:{hit.original_line + 1} is empty")
 
     file_json: json.to_string(Dyn.Text(jet_file.copy())) ?? "\"\""
     line_json: json.to_string(Dyn.Text(jet_line.trim().copy())) ?? "\"\""
-    Ok("{{\"generatedLine\":{hit.generated_line},\"generatedColumn\":{hit.generated_column},\"jetFile\":{file_json},\"jetLine\":{hit.original_line},\"jetText\":{line_json}}}")
+    Ok("{{\"map\":\"{label}\",\"generatedLine\":{hit.generated_line},\"generatedColumn\":{hit.generated_column},\"jetFile\":{file_json},\"jetLine\":{hit.original_line},\"jetText\":{line_json}}}")
 }
 
 // Line `line` (0-based) of source `source`'s embedded text, or "".
@@ -173,7 +181,8 @@ vlq_digit: fn(code: Int) -> Int {
     0 - 1
 }
 
-// The payload of the wasm module's `sourceMappingURL` custom section, if any.
+// The URL in the wasm module's `sourceMappingURL` custom section, if any:
+// the section's payload is a length-prefixed string.
 wasm_source_mapping_url: fn(bytes: [U8]) -> String? {
     offset := 8
     payload := (start: 0, end: 0 - 1)
@@ -194,7 +203,9 @@ wasm_source_mapping_url: fn(bytes: [U8]) -> String? {
         offset = end
     }
     if payload.end < 0 -> return None
-    Val(String.from_bytes_lossy(bytes[payload.start..<payload.end]))
+    url: leb(bytes, payload.start)
+    if url.next + url.value != payload.end -> return None
+    Val(String.from_bytes_lossy(bytes[url.next..<payload.end]))
 }
 
 // Whether bytes `start..<end` are exactly `word`'s bytes.

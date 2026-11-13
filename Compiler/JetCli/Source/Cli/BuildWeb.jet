@@ -2,8 +2,9 @@
 // partition of the checked program (JetWeb Build.jet), linked against the
 // runtime partition packaged beside jet, and the host files that load the
 // two, written to the output directory (jet_cli_output_dir_path): app.wasm,
-// rt.wasm, web.manifest.json, app.js, jet_dom_runtime.js and index.html.
-// `node app.js` runs the program, and so does index.html, the default page.
+// its source map app.wasm.map, rt.wasm, web.manifest.json, app.js,
+// jet_dom_runtime.js and index.html. `node app.js` runs the program, and so
+// does index.html, the default page.
 use {
     cli_files: core.files
     cli_web: core.web
@@ -21,7 +22,7 @@ use {
         jet_driver_ice_record,
     ]
     jet_foundation.[BuildOptions, FnBody, cli_schema_embed_wasm_record, module_is_core]
-    jet_web.[web_app_js, web_dom_runtime_js, web_index_html, web_program]
+    jet_web.[WEB_SOURCE_MAP_FILE, web_app_js, web_dom_runtime_js, web_index_html, web_program, web_source_map, web_source_name]
 }
 
 // The runtime partition and its receipt beside the runtime pack
@@ -51,6 +52,8 @@ jet_cli_build_web: fn(file: String, color: Bool, options: BuildOptions, result: 
     census := [JetDriverIceRow]{}
     built := jet_cli_native_program(result, checked, None, options, runtime, census, file, jet_driver_entry_root_path(snapshot))
     if built.failure == .Val(failure) -> return jet_cli_native_report(file, "build", failure, color)
+    entry: built.program.entry
+    entry_source: if entry >= 0 && entry < built.program.functions.len() -> built.program.functions[entry].source_file.copy() else -> ""
     if result.trace_sink == .Val(sink) -> sink.begin("web.module", "", -1, -1)
     web := web_program(built.program.move(), receipt)
     if result.trace_sink == .Val(sink) -> sink.end("web.module", web.bytes.len())
@@ -65,6 +68,7 @@ jet_cli_build_web: fn(file: String, color: Bool, options: BuildOptions, result: 
         cli_schema_embed_wasm_record(app, result.command_record, U64{4294967295}) ?? return jet_cli_ice("the web program module of `{file}` is not a well-framed Wasm module: {err.display()}")
     }
     if jet_cli_web_write(file, color, "{build_dir}/app.wasm", app) == .Val(failure) -> return failure
+    if jet_cli_web_write_text(file, color, "{build_dir}/{WEB_SOURCE_MAP_FILE}", jet_cli_web_source_map(snapshot, entry_source, web.sources, web.lines)) == .Val(failure) -> return failure
     if jet_cli_web_write(file, color, "{build_dir}/rt.wasm", partition) == .Val(failure) -> return failure
     if jet_cli_web_write_text(file, color, "{build_dir}/web.manifest.json", web.manifest) == .Val(failure) -> return failure
     if jet_cli_web_write_text(file, color, "{build_dir}/app.js", web_app_js()) == .Val(failure) -> return failure
@@ -111,6 +115,25 @@ jet_cli_web_partition_report: fn(functions: [FnBody]) -> String Never! {
         text = "{text}{shown}\n"
     }
     text
+}
+
+// The program module's source map (JetWeb Build.jet web_source_map) over the
+// entry root's sources, as the checked snapshot holds them; a source outside
+// the entry root (Core's) is left out, so the map names no host path.
+jet_cli_web_source_map: fn(snapshot: JetDriverAuthorizedSourceSnapshot, entry_source: String, sources: [String], lines: [Int]) -> String Never! {
+    wanted := [String:Int]{}
+    loop (k, source) in sources -> wanted[source.copy()] = k
+    names := loop _ in sources -> ""
+    contents := loop _ in sources -> ""
+    loop root in snapshot.roots {
+        if root.identity != snapshot.entry_root_identity -> next
+        loop row in root.files {
+            k: wanted.get(row.relative_path) ?? next
+            names[k] = web_source_name(row.relative_path, entry_source)
+            contents[k] = row.source.copy()
+        }
+    }
+    web_source_map(names, contents, lines)
 }
 
 // Write one file of a web build, or the report of why it can't be.

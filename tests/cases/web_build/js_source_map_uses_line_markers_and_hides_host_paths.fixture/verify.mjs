@@ -1,7 +1,99 @@
-import assert from 'node:assert/strict';import{readFileSync}from'node:fs';
-const app=readFileSync('.jet/build/app.js','utf8'),map=readFileSync('.jet/build/app.js.map','utf8');assert.equal(app,readFileSync('first-app.js','utf8'));assert.equal(map,readFileSync('first-map.json','utf8'));
-assert.ok(map.startsWith('{"version":3,"file":"app.js","sources":["main.jet"],"sourcesContent":['));const src=readFileSync('private/build-host/project/main.jet','utf8');assert.ok(map.includes(JSON.stringify(src)));assert.ok(!map.includes('/private/build-host'));assert.ok(app.includes('//# __jet_source_map line 999'));
-// Exact original VLQ decoder, including four-field segment, zero continuation shift and nonnegative usize checks.
-const alphabet='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';function segment(encoded){const values=[];let value=0n,shift=0n;for(const byte of encoded){const digit=alphabet.indexOf(byte);assert.ok(digit>=0);value|=BigInt(digit&31)<<shift;if(!(digit&32)){const negative=(value&1n)===1n,magnitude=value>>1n;values.push(Number(negative?-magnitude:magnitude));value=0n;shift=0n;}else shift+=5n;}assert.equal(shift,0n);return values;}
-const mappings=[];let source=0,originalLine=0,originalColumn=0;for(const[generatedLine,line]of JSON.parse(map).mappings.split(';').entries()){let generatedColumn=0;for(const encoded of line.split(',').filter(s=>s.length)){const values=segment(encoded);assert.equal(values.length,4);generatedColumn+=values[0];source+=values[1];originalLine+=values[2];originalColumn+=values[3];for(const n of [generatedColumn,source,originalLine,originalColumn])assert.ok(Number.isSafeInteger(n)&&n>=0);mappings.push([generatedLine,generatedColumn,source,originalLine,originalColumn]);}}
-assert.deepEqual(mappings.map(([, ,s,l,c])=>[s,l,c]),[[0,4,0],[0,5,0]]);for(const[l,c]of mappings){const line=app.split(/\r?\n/)[l];assert.notEqual(line,undefined);const first=line.search(/\S/);assert.ok(first>=0);assert.equal(c,line.slice(0,first).length);assert.ok(line.slice(first).startsWith('let first =')||line.slice(first).startsWith('jetDom.print(`left ${first}'));}
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+
+// A second build writes the same module and the same map.
+const wasm = readFileSync('.jet/build/app.wasm');
+const map = readFileSync('.jet/build/app.wasm.map', 'utf8');
+assert.ok(wasm.equals(readFileSync('first-app.wasm')));
+assert.equal(map, readFileSync('first-map.json', 'utf8'));
+
+// The map names the entry relative to its directory, carries its text, and
+// names no host path.
+const parsed = JSON.parse(map);
+assert.equal(parsed.version, 3);
+assert.equal(parsed.file, 'app.wasm');
+assert.deepEqual(parsed.sources, ['main.jet']);
+const src = readFileSync('private/build-host/project/main.jet', 'utf8');
+assert.deepEqual(parsed.sourcesContent, [src]);
+assert.ok(!map.includes('/private/build-host'));
+assert.ok(!map.includes(process.cwd()));
+
+// The user's string that looks like a source-map marker stays verbatim data.
+assert.ok(wasm.includes('//# __jet_source_map line 999'));
+
+// Sections: the code section's bounds, and the last section is the
+// `sourceMappingURL` custom section whose payload is the length-prefixed
+// name of the map.
+function leb(at) {
+  let value = 0, shift = 0, byte;
+  do {
+    byte = wasm[at++];
+    value += (byte & 127) * 2 ** shift;
+    shift += 7;
+  } while (byte & 128);
+  return [value, at];
+}
+let at = 8, code = null, last = null;
+while (at < wasm.length) {
+  const id = wasm[at];
+  const [size, start] = leb(at + 1);
+  if (id === 10) code = [start, start + size];
+  last = [id, start, start + size];
+  at = start + size;
+}
+assert.equal(at, wasm.length);
+assert.ok(code);
+assert.equal(last[0], 0);
+const [nameLen, nameAt] = leb(last[1]);
+assert.equal(wasm.subarray(nameAt, nameAt + nameLen).toString(), 'sourceMappingURL');
+const [urlLen, urlAt] = leb(nameAt + nameLen);
+assert.equal(urlAt + urlLen, last[2]);
+assert.equal(wasm.subarray(urlAt, urlAt + urlLen).toString(), 'app.wasm.map');
+
+// Mappings: one generated line whose columns are module byte offsets inside
+// the code section. A four-field segment lands on a non-blank line of
+// main.jet; a one-field segment starts code the map leaves out (Core's).
+// Both statements are mapped, and nothing maps to the marker's "line 999".
+const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+function segment(encoded) {
+  const values = [];
+  let value = 0n, shift = 0n;
+  for (const char of encoded) {
+    const digit = alphabet.indexOf(char);
+    assert.ok(digit >= 0);
+    value |= BigInt(digit & 31) << shift;
+    if (digit & 32) shift += 5n;
+    else {
+      const magnitude = value >> 1n;
+      values.push(Number(value & 1n ? -magnitude : magnitude));
+      value = 0n;
+      shift = 0n;
+    }
+  }
+  assert.equal(shift, 0n);
+  return values;
+}
+const generatedLines = parsed.mappings.split(';');
+assert.equal(generatedLines.length, 1);
+const lines = src.split('\n');
+const mapped = new Set();
+let column = 0, source = 0, line = 0, original = 0;
+for (const encoded of generatedLines[0].split(',').filter((s) => s.length)) {
+  const values = segment(encoded);
+  assert.ok(values.length === 1 || values.length === 4, encoded);
+  column += values[0];
+  assert.ok(column >= code[0] && column < code[1]);
+  if (values.length === 1) continue;
+  source += values[1];
+  line += values[2];
+  original += values[3];
+  assert.equal(source, 0);
+  assert.equal(original, 0);
+  assert.ok(line >= 0 && line < lines.length && lines[line].trim() !== '');
+  mapped.add(line);
+}
+const first = lines.findIndex((l) => l.trim() === 'first: 1');
+const print = lines.findIndex((l) => l.trim().startsWith('print('));
+assert.ok(first >= 0 && print >= 0);
+assert.ok(mapped.has(first), `line ${first + 1} is not mapped`);
+assert.ok(mapped.has(print), `line ${print + 1} is not mapped`);

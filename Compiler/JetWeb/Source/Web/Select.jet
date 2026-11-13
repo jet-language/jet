@@ -111,14 +111,18 @@ web_select_function: fn(st: &WebState, m: IRModule, tables: IRX64Tables, row: In
 
 // A function with a fixed slot (JetIR Timing.jet ir_timing_marked) records
 // where each instruction's code starts, for the fixed-timing check
-// (Timing.jet web_timing_check).
+// (Timing.jet web_timing_check). A program's body records its line rows
+// (WebBody.lines): the function's line for the prologue, then each
+// instruction's.
 web_select_body: fn(st: &WebState, m: IRModule, f: IRFunction, tables: IRX64Tables) -> WebBody Never! {
     e := web_emitter(m, f)
     web_layout_frame(e, m, f)
     frame_size: e.frame_size
     frame: e.frame
     checked: ir_timing_marked(f)
+    lined: st.app
     marks := [Int]{}
+    if lined -> web_line(e, f.line)
     if frame_size > 0 {
         web_global_get(e, WEB_GLOBAL_SP)
         web_i64(e, frame_size)
@@ -132,6 +136,7 @@ web_select_body: fn(st: &WebState, m: IRModule, f: IRFunction, tables: IRX64Tabl
             marks.push(e.code.len())
             marks.push(at)
         }
+        if lined -> web_line(e, ir_code_line_source(f.code_line[at]))
         if st.stop_points && e.pad_ends.len() == 0 {
             resume: web_stop_point(e, st, m, f, at)
             if resume >= 0 {
