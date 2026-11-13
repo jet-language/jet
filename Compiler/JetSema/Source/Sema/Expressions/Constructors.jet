@@ -2073,9 +2073,9 @@ sema_expression_field_is_shorthand: fn(field: ExprField) -> Bool Never! {
 }
 
 // The written head of `Celsius{x}` when the declared type it names has a
-// conversion impl (`impl Celsius.From(Float)`), so the literal is
-// `Celsius.from(x)`; a field shorthand (`shorthand`) that names one of the
-// type's fields stays a struct literal.
+// conversion impl (`impl From(Float)` in its body, or `impl Celsius.From(Float)`
+// elsewhere), so the literal is `Celsius.from(x)`; a field shorthand
+// (`shorthand`) that names one of the type's fields stays a struct literal.
 sema_expression_conversion_head: fn(head: Type?, shorthand: String?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable) -> String? {
     written: head ?? return None
     if sema_expr_unwrap_tag(written) == .Named(written_name) {
@@ -2088,6 +2088,9 @@ sema_expression_conversion_head: fn(head: Type?, shorthand: String?, environment
                     if field.symbol.name == field_name -> return None
                 }
             }
+            if nominal.source == .SourceAST(item) {
+                if sema_expression_item_has_conversion_block(item) -> return Val(written_name.copy())
+            }
             loop impl_row in sema_registration_impl_rows_named(graph, nominal.symbol.name) {
                 implementation: graph.modules[impl_row.module_index].impls[impl_row.row]
                 trait_name: implementation.trait_name ?? next
@@ -2097,6 +2100,16 @@ sema_expression_conversion_head: fn(head: Type?, shorthand: String?, environment
         }
     }
     None
+}
+
+// Whether a struct or enum declaration holds a From impl in its body.
+sema_expression_item_has_conversion_block: fn(item: Item) -> Bool Never! {
+    if item == {
+        .Struct(definition) -> return definition.trait_impls.any(fn(block) { owned_trait_conversion(block.trait_name) })
+        .Enum(definition) -> return definition.trait_impls.any(fn(block) { owned_trait_conversion(block.trait_name) })
+        .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .ErrorConv(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+    }
+    false
 }
 
 // `Celsius{x}` through a conversion is the static call `Celsius.from(x)`,

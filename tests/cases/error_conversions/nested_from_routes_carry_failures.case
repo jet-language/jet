@@ -1,0 +1,13 @@
+# `impl From(ReadErr)` and `impl From(ParseErr)` written inside AppErr's body
+# are conversion routes like their top-level forms: `?` converts both
+# failures, and `AppErr{failure}` converts through the block's hook.
+fixture: nested_from_routes_carry_failures.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet run --optimize=none run.jet
+exit: 0
+stdout: = "ok 4\nfailed 7 read\nfailed 12 parse\nbuilt 5 read\n"
+step: jet run --optimize=full run.jet
+exit: 0
+stdout: = "ok 4\nfailed 7 read\nfailed 12 parse\nbuilt 5 read\n"

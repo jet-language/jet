@@ -42,9 +42,10 @@ check_schema_migrations: fn(items: [Item], snapshots: [String:SchemaSnapshot], e
     diagnostics := [Diagnostic]{}
     migrations := [String:[MigrationOp]]{}
     conversions := [(from_ty: String, to_ty: String)]{}
-    // A checked program holds each accepted conversion into a failure domain
-    // as its lowered routine (sema_error_conversion_items); a parsed one, and
-    // every value conversion (`impl Label.From(String)`), still holds the item.
+    // A checked program holds each accepted top-level conversion into a
+    // failure domain as its lowered routine (sema_error_conversion_items); a
+    // parsed one, a nested one and every value conversion
+    // (`impl Label.From(String)`) still hold the item.
     functions := [String]{}
     loop item in items {
         if item == {
@@ -60,7 +61,17 @@ check_schema_migrations: fn(items: [Item], snapshots: [String:SchemaSnapshot], e
                 }
             }
             .Func(function) -> functions.push(function.name)
-            .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+            .Struct(definition) -> {
+                loop block in definition.trait_impls {
+                    if owned_trait_conversion(block.trait_name) && block.operator_rhs == .Val(source) -> conversions.push((from_ty: type_name(source), to_ty: definition.name))
+                }
+            }
+            .Enum(definition) -> {
+                loop block in definition.trait_impls {
+                    if owned_trait_conversion(block.trait_name) && block.operator_rhs == .Val(source) -> conversions.push((from_ty: type_name(source), to_ty: definition.name))
+                }
+            }
+            .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
     loop item in items {

@@ -1271,7 +1271,28 @@ sema_call_try_static_method: fn(receiver: Expr, method: String, method_span: Spa
 // The checked call of the one target among `targets` the arguments select,
 // rewritten to its registered method.
 sema_call_static_selected: fn(type_name: String, method: String, targets: [SemaStaticMethodTarget], type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
-    direct_targets: loop target in targets -> target.target
+    direct_targets := loop target in targets -> target.target
+    // One owner's statics of one name that share a shape (each
+    // `impl AppErr.From(Source)` declares one `AppErr.from`, one per source)
+    // are told apart by the types of the arguments.
+    if targets.len() > 1 {
+        picked: sema_call_static_by_argument_types(targets, args, environment, program, scopes, state, tail_store, context)
+        if picked.len() > 0 {
+            // Popped from the end into `all`, then back, so the kept targets
+            // stay in order.
+            all := [SemaCallDirectTarget]{}
+            loop direct_targets.len() > 0 {
+                candidate := direct_targets.pop() ?? break
+                all.push(candidate)
+            }
+            index := 0
+            loop all.len() > 0 {
+                candidate := all.pop() ?? break
+                if picked.contains(index) -> direct_targets.push(candidate)
+                index += 1
+            }
+        }
+    }
     selected: sema_call_resolve_direct_candidates("{type_name}.{method}", args, direct_targets, span, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     target := targets[0]
     loop candidate in targets {
@@ -1300,6 +1321,43 @@ sema_call_static_selected: fn(type_name: String, method: String, targets: [SemaS
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     SemaMethodSpecialCheck{handled: true, value: Val(value)}
+}
+
+// The indices of the targets among `targets` whose parameters take the
+// probed types of `args`: those that take each type exactly, else those each
+// type is assignable to. Labeled arguments, an argument that does not probe,
+// or no target taking them picks none, leaving every target to the shape check.
+sema_call_static_by_argument_types: fn(targets: [SemaStaticMethodTarget], args: [CallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext) -> [Int] {
+    argument_types := [Type]{}
+    probe_diagnostics := [Diagnostic]{}
+    loop arg in args {
+        if arg.label != None || arg.spread -> return [Int]{}
+        probed: sema_probe_expression(arg.expr, None, environment, program, scopes, state, tail_store, context, probe_diagnostics) ?? return [Int]{}
+        argument_types.push(sema_call_resolved_type(probed.ty, environment, program))
+    }
+    exact := [Int]{}
+    assignable := [Int]{}
+    loop target_index in 0..<targets.len() {
+        params: sema_call_params_from_type(targets[target_index].target.signature) ?? next
+        if params.len() != argument_types.len() -> next
+        same := true
+        accepts := true
+        loop index in 0..<params.len() {
+            declared: params[index].ty ?? {
+                accepts = false
+                break
+            }
+            required: sema_call_resolved_type(declared, environment, program)
+            if required != argument_types[index] -> same = false
+            if sema_call_type_assignable(required, argument_types[index], environment, program) != .Val(true) {
+                accepts = false
+                break
+            }
+        }
+        if accepts && same -> exact.push(target_index)
+        if accepts && !same -> assignable.push(target_index)
+    }
+    if exact.len() > 0 -> exact else -> assignable
 }
 
 // `ExpiringSecret.new` owns only the closed secret family (E0112 at the value)

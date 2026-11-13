@@ -1,0 +1,62 @@
+// Two conversions into one failure domain this file declares: each `?`
+// route calls the `AppErr.from` of its own source, and so does a direct
+// `AppErr.from(value)` whose argument is a variable.
+#Error
+ReadErr: struct {
+    code: Int
+}
+
+#Error
+ParseErr: struct {
+    line: Int
+}
+
+#Error
+AppErr: struct {
+    code: Int
+    origin: String
+}
+
+impl AppErr.From(ReadErr) {
+    from: fn(error: ReadErr) -> AppErr {
+        AppErr{code: error.code, origin: "read"}
+    }
+}
+
+impl AppErr.From(ParseErr) {
+    from: fn(error: ParseErr) -> AppErr {
+        AppErr{code: error.line, origin: "parse"}
+    }
+}
+
+read: fn(n: Int) -> Int ReadErr! {
+    if n < 0 -> return Err(ReadErr{code: 7})
+    Ok(n)
+}
+
+parse: fn(n: Int) -> Int ParseErr! {
+    if n > 9 -> return Err(ParseErr{line: n})
+    Ok(n)
+}
+
+load: fn(n: Int) -> Int AppErr! {
+    value: read(n)
+    checked: parse(value)
+    Ok(checked)
+}
+
+show: fn(n: Int) {
+    if load(n) == {
+        .Ok(ok) -> print("ok {ok}")
+        .Err(failure) -> print("failed {failure.code} {failure.origin}")
+    }
+}
+
+run: fn() {
+    show(4)
+    show(-1)
+    show(12)
+    failure: ParseErr{line: 3}
+    direct: AppErr.from(failure)
+    print("direct {direct.code} {direct.origin}")
+}

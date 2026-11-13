@@ -260,7 +260,7 @@ sema_is_error_conversion_function: fn(func: Func) -> Bool {
 sema_error_conversion_items: fn(items: &[Item], facts: &[AppliedRuleApplication], package_types: [String], diagnostics: &[Diagnostic]) {
     plain_types: sema_error_conversion_plain_types(items)
     has_conversion: loop index in 0..<items.len() {
-        if items[index] == .ErrorConv(_) || sema_error_conversion_from_route(plain_types, items[index]) != None -> break true
+        if items[index] == .ErrorConv(_) || sema_error_conversion_from_route(plain_types, items[index]) != None || sema_error_conversion_nested_routes(plain_types, items[index]).len() > 0 -> break true
     } ?? false
     if !has_conversion -> return
     local_types := sema_error_conversion_local_types(items)
@@ -268,11 +268,12 @@ sema_error_conversion_items: fn(items: &[Item], facts: &[AppliedRuleApplication]
     loop name in package_types -> local_types.push(name.copy())
     // A conversion from a generic type this file declares is generic over
     // that type's own parameters, so it converts every instantiation; one
-    // entry per conversion, in file order.
+    // entry per conversion, in file order, a type's nested ones after it.
     conversion_params := [[TypeParam]]{}
     loop item in items {
         if item == .ErrorConv(definition) -> conversion_params.push(sema_error_conversion_type_params(items, definition.from_ty))
         if sema_error_conversion_from_route(plain_types, item) == .Val(route) -> conversion_params.push(sema_error_conversion_type_params(items, route.from_ty))
+        loop nested in sema_error_conversion_nested_routes(plain_types, item) -> conversion_params.push(sema_error_conversion_type_params(items, nested.route.from_ty))
     }
     edges := [SemaErrorConversionEdge]{}
     output := [Item]{}
@@ -312,9 +313,62 @@ sema_error_conversion_items: fn(items: &[Item], facts: &[AppliedRuleApplication]
             }
             next
         }
-        output.push(item)
+        // A From impl nested in its target's body keeps its block, as a kept
+        // top-level one keeps its impl; a rejected route drops its block.
+        routines := [Item]{}
+        dropped := [Int]{}
+        loop nested in sema_error_conversion_nested_routes(plain_types, item) {
+            type_params: conversion_params[converted].copy()
+            converted += 1
+            routed := nested.route
+            routed.body = [Stmt]{Stmt.Expr{expr: sema_error_conversion_hook_call(nested.route.to_ty, nested.param_name, nested.route.to_span)}}
+            routine: sema_error_conversion_routine(routed, nested.param_name, type_params, local_types, edges, diagnostics) ?? {
+                dropped.push(nested.index)
+                next
+            }
+            routines.push(routine)
+        }
+        if dropped.len() > 0 {
+            if item == .Struct(definition) {
+                updated := definition
+                sema_error_conversion_drop_blocks(updated.trait_impls, dropped)
+                output.push(Item.Struct{value: updated})
+            } else if item == .Enum(definition) {
+                updated := definition
+                sema_error_conversion_drop_blocks(updated.trait_impls, dropped)
+                output.push(Item.Enum{value: updated})
+            }
+        } else {
+            output.push(item)
+        }
+        loop routine in routines -> output.push(routine)
     }
     items = output.move()
+}
+
+// Drops the blocks at the `dropped` indices from `blocks`, keeping the rest
+// in order.
+sema_error_conversion_drop_blocks: fn(blocks: &[TraitImplBlock], dropped: [Int]) {
+    // Popped from the end, so `kept` holds the remaining blocks in reverse.
+    kept := [TraitImplBlock]{}
+    index := blocks.len()
+    loop blocks.len() > 0 {
+        block := blocks.pop() ?? break
+        index -= 1
+        if !dropped.contains(index) -> kept.push(block)
+    }
+    loop kept.len() > 0 {
+        block := kept.pop() ?? break
+        blocks.push(block)
+    }
+}
+
+// A route a From impl nested in a struct's or enum's body declares: its
+// block's index in the body and its hook's source parameter.
+SemaErrorConversionNestedRoute: struct {
+    index: Int
+    param_name: String
+    route: ErrorConvDef
 }
 
 // A From impl that converts failures reads as one conversion route: the
@@ -325,23 +379,50 @@ sema_error_conversion_items: fn(items: &[Item], facts: &[AppliedRuleApplication]
 sema_error_conversion_from_route: fn(plain_types: [String], item: Item) -> ErrorConvDef? {
     if item == .Impl(definition) {
         trait_name: definition.trait_name ?? return None
-        if !owned_trait_conversion(trait_name) || definition.methods.len() != 1 -> return None
-        source: definition.operator_rhs ?? return None
-        hook: definition.methods[0]
-        if hook.params.len() == 0 || hook.params[0].name == "self" -> return None
-        if hook.return_type == .Val(returned) {
-            if returned == .Result(_, failure) {
-                if failure != (Type.Named{name: "Never"}) -> return None
-            }
-        }
-        if plain_types.contains(definition.type_name) || !(foundation_named_type(definition.type_name) == .Named(_)) || sema_registration_builtin_scalar(definition.type_name) != None -> return None
-        written: type_name(source)
-        open: written.find("<")
-        from_ty: if open > 0 -> written.slice(0, open) else -> written
-        source_span: definition.trait_span ?? definition.type_span
-        return Val(ErrorConvDef{from_ty: from_ty, from_span: source_span, to_ty: definition.type_name, to_span: definition.type_span, body: hook.body, body_span: hook.span, markers: definition.markers})
+        return sema_error_conversion_hook_route(plain_types, definition.type_name, definition.type_span, trait_name, definition.trait_span, definition.operator_rhs, definition.methods, definition.markers)
     }
     None
+}
+
+// The routes of the From impls nested in a struct's or enum's body, in
+// order: `AppErr: enum { … impl From(IOError) { … } }` routes as
+// `impl AppErr.From(IOError)` does.
+sema_error_conversion_nested_routes: fn(plain_types: [String], item: Item) -> [SemaErrorConversionNestedRoute] {
+    routes := [SemaErrorConversionNestedRoute]{}
+    if item == .Struct(definition) {
+        loop index in 0..<definition.trait_impls.len() {
+            block: definition.trait_impls[index]
+            if sema_error_conversion_hook_route(plain_types, definition.name, definition.name_span, block.trait_name, Val(block.trait_span), block.operator_rhs, block.methods, block.markers) == .Val(route) -> routes.push(SemaErrorConversionNestedRoute{index: index, param_name: block.methods[0].params[0].name, route: route})
+        }
+    }
+    if item == .Enum(definition) {
+        loop index in 0..<definition.trait_impls.len() {
+            block: definition.trait_impls[index]
+            if sema_error_conversion_hook_route(plain_types, definition.name, definition.name_span, block.trait_name, Val(block.trait_span), block.operator_rhs, block.methods, block.markers) == .Val(route) -> routes.push(SemaErrorConversionNestedRoute{index: index, param_name: block.methods[0].params[0].name, route: route})
+        }
+    }
+    routes
+}
+
+// The route of one From impl on `target`, written at top level or nested in
+// the target's body: `trait_span` is the trait name's, and `methods` the
+// impl's members.
+sema_error_conversion_hook_route: fn(plain_types: [String], target: String, target_span: Span, trait_name: String, trait_span: Span?, operator_rhs: Type?, methods: [Func], markers: [Marker]) -> ErrorConvDef? {
+    if !owned_trait_conversion(trait_name) || methods.len() != 1 -> return None
+    source: operator_rhs ?? return None
+    hook: methods[0]
+    if hook.params.len() == 0 || hook.params[0].name == "self" -> return None
+    if hook.return_type == .Val(returned) {
+        if returned == .Result(_, failure) {
+            if failure != (Type.Named{name: "Never"}) -> return None
+        }
+    }
+    if plain_types.contains(target) || !(foundation_named_type(target) == .Named(_)) || sema_registration_builtin_scalar(target) != None -> return None
+    written: type_name(source)
+    open: written.find("<")
+    from_ty: if open > 0 -> written.slice(0, open) else -> written
+    source_span: trait_span ?? target_span
+    Val(ErrorConvDef{from_ty: from_ty, from_span: source_span, to_ty: target, to_span: target_span, body: hook.body, body_span: hook.span, markers: markers})
 }
 
 // The types this file declares that a conversion into converts no failure:

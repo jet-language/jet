@@ -1,0 +1,14 @@
+# `impl AppErr.From(ReadErr)` and `impl AppErr.From(ParseErr)` route both
+# failures into AppErr, which this file declares. Each route calls its own
+# source's `AppErr.from`, and a direct `AppErr.from(failure)` on a variable
+# picks the impl by the argument's type instead of matching both.
+fixture: from_routes_into_one_target_pick_by_source_type.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet run --optimize=none run.jet
+exit: 0
+stdout: = "ok 4\nfailed 7 read\nfailed 12 parse\ndirect 3 parse\n"
+step: jet run --optimize=full run.jet
+exit: 0
+stdout: = "ok 4\nfailed 7 read\nfailed 12 parse\ndirect 3 parse\n"
