@@ -2921,7 +2921,7 @@ priv scope_reads: module {
         loop index in 0..<(parts.len() - 1) {
             directories.push(directories[directories.len() - 1].open_directory(parts[index]))
         }
-        reader: directories[directories.len() - 1].open(parts[parts.len() - 1])
+        reader := directories[directories.len() - 1].open(parts[parts.len() - 1])
         opened: reader.stat()
         if !opened.is_file -> return Err(scope_input_error(requested, "file authority input is not a regular file"))
         if opened.links != 1 -> return Err(scope_input_error(requested, "file authority input has multiple hard links"))

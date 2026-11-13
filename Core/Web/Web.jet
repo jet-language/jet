@@ -415,9 +415,9 @@ App: struct {
     // Serve on 127.0.0.1 until the process stops: on `JET_APP_PORT` when it
     // holds a port, else on `port` (8080 for `serve()`). One ready line names
     // the address once the socket listens.
-    serve: fn(self, port: Int{8080}) Never! -[Env, Net, FS.Read, Time]> { __app_serve(self, __app_port(port)) }
+    serve: fn(self, port: Int{8080}) Never! -[Env, IO, Net, FS.Read, Time]> { __app_serve(self, __app_port(port)) }
 
-    serve_on: fn(self, port: Int) Never! -[Env, Net, FS.Read, Time]> { __app_serve(self, __app_port(port)) }
+    serve_on: fn(self, port: Int) Never! -[Env, IO, Net, FS.Read, Time]> { __app_serve(self, __app_port(port)) }
 
     // A server over the table on `address`; the labelled `tls:` option
     // serves HTTPS and `deadline:` bounds each connection's reads and writes.
@@ -487,13 +487,13 @@ __app_dev: fn() -> Bool Never! {
 // Under `jet dev` the table gains the live-reload row and layer. Every GET
 // no row answers renders the not-found page, unless a catch-all row of the
 // program's own answers it.
-__app_serve: fn(app: App, port: Int) Never! -[Env, Net, FS.Read, Time]> {
+__app_serve: fn(app: App, port: Int) Never! -[Env, IO, Net, FS.Read, Time]> {
     dev: __app_dev()
     table: __app_table(app)
     if dev -> __app_dev_reload(table)
     if !__app_has_root_catch_all(table) {
         fallback: app.copy()
-        http_server.__route_add(table, "GET", "/*jet_app_unmatched", http_server.__handler(fn(request: HTTPRequest) { Ok(__app_not_found_response(fallback, request)) }), "", #caller)
+        http_server.__route_add(table, "GET", "/*jet_app_unmatched", http_server.__handler(fn(request: HTTPRequest) { Ok(__app_not_found_response(fallback, request)) }), "", #here)
     }
     server: __app_listen(table, port, dev)
     _: server.serve() ?? panic("web app server failed: {err}")
@@ -513,7 +513,7 @@ C_APP_DEV_PORT_TRIES: 100
 // print the ready line (`serving http://127.0.0.1:8080`, and ` (live reload)`
 // under `jet dev`). A port another program holds stops `jet run` with E2809;
 // `jet dev` moves on to the next free port and names it in the line.
-__app_listen: fn(mux: HTTPMux, port: Int, dev: Bool) -[Net]> HTTPServer Never! {
+__app_listen: fn(mux: HTTPMux, port: Int, dev: Bool) -[Net, IO, Time.Wait]> HTTPServer Never! {
     if port < 1 || port > 65535 -> core.rt.__coded_stop("E2809", "The web app can't listen on 127.0.0.1:{port}: a TCP port is a number from 1 to 65535.")
     candidate := port
     loop {
@@ -552,7 +552,7 @@ __app_port_busy: fn(error: NetError) -> Bool Never! {
 // with another.
 __app_dev_reload: fn(table: HTTPMux) Never! {
     boot: "{rt.clock_mono_ns()}"
-    http_server.__route_add(table, "GET", "/__jet/reload", http_server.__handler(fn(_request: HTTPRequest) { Ok(__app_dev_reload_response(boot)) }), "", #caller)
+    http_server.__route_add(table, "GET", "/__jet/reload", http_server.__handler(fn(_request: HTTPRequest) { Ok(__app_dev_reload_response(boot)) }), "", #here)
     http_server.__layer_add(table, fn(next: HTTPHandler) { __app_dev_layer(next) })
 }
 
@@ -574,8 +574,9 @@ __app_dev_page: fn(next: HTTPHandler, request: HTTPRequest) -[Net, FS.Read]> HTT
     answered := next.handle(request) ?? return Err(err)
     kind: answered.header("content-type") ?? return Ok(answered)
     if !kind.starts_with("text/html") -> return Ok(answered)
-    document := ""
-    if answered.body == .Text(text) -> document = text.copy()
+    // A response built in the program holds its body, so reading it takes
+    // nothing from the page it is spliced back into.
+    document: answered.body.text(1073741824) ?? return Ok(answered)
     if document == "" -> return Ok(answered)
     closing: "</body></html>"
     injected: if document.ends_with(closing) -> "{document.removesuffix(closing)}{C_APP_DEV_RELOAD_SCRIPT}{closing}" else -> "{document}{C_APP_DEV_RELOAD_SCRIPT}"

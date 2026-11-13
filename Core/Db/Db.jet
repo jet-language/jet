@@ -797,7 +797,7 @@ __db_commit: fn(state: Shared<__DBState>) DBError! {
         return Ok()
     }
     _: __driver_rollback(guard.value.driver)
-    loop table in guard.value.written -> web.__live_invalidate_all(__live_source(table))
+    loop table in guard.value.written -> app.__live_invalidate_all(__live_source(table))
     guard.value.written = [String]{}
     Err(__db_error("could not commit, so the transaction was rolled back"))
 }

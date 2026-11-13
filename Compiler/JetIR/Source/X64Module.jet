@@ -689,16 +689,18 @@ ir_x64_hot_order: fn(compiled: &IRX64Result, hot: [String]) -> Int Never! {
 // on): its functions with no `main`, each of `exports` (ir_build_library)
 // a global symbol of its IR function and, with a priority, a constructor or
 // destructor hook, and each of `data_exports` a global symbol of its data
-// object. `debug_info` as ir_x64_object. Every function and data object is
-// in a section of its own, so a link keeps only what it reaches.
-ir_x64_library_object: fn(compiled: &&IRX64Result, exports: [IRLibraryExport], data_exports: [X64DataExport], debug_info: Bool) -> X64ExecutableResult Never! {
+// object. `debug_info` as ir_x64_object. With `own_sections` every function
+// and data object is in a section of its own, so a link keeps only what it
+// reaches; the Core library, whose functions outnumber the section indices
+// ELF leaves, keeps them in the shared sections, linked whole.
+ir_x64_library_object: fn(compiled: &&IRX64Result, exports: [IRLibraryExport], data_exports: [X64DataExport], debug_info: Bool, own_sections: Bool) -> X64ExecutableResult Never! {
     owned := compiled.move()
     if owned.errors.len() > 0 -> return X64ExecutableResult{bytes: [U8]{}, errors: owned.errors.move()}
     program := ir_x64_object_module(owned)
     debug := compiler_take_rows<X64FunctionDebug>(owned.debug)
     functions := compiler_take_rows<X64CompiledFunction>(owned.functions)
     globals: loop row in exports -> X64RuntimeExport{function: X64FunctionID{value: row.function}, symbol: row.symbol, init_priority: row.init_priority, fini_priority: row.fini_priority, guards: row.guards.copy()}
-    x64_object_functions_threads(program, functions, debug, globals, data_exports, owned.threads, debug_info, true)
+    x64_object_functions_threads(program, functions, debug, globals, data_exports, owned.threads, debug_info, own_sections)
 }
 
 // The object writer's module of `owned`: its data, debug files and types

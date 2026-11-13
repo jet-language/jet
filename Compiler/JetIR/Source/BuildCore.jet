@@ -31,6 +31,8 @@ IRCoreExport: struct { symbol: String, key: String, signature: String }
 // `failures` are the Core functions the builder could not build, `errors`
 // the export problems (symbol clashes); `exports` the object's function
 // globals, `data` its data globals, `rows` both, sorted by symbol.
+// `skipped` holds the failures of the roots left out of the library
+// (ir_core_library_from): a program that calls one builds it itself.
 IRCoreLibrary: struct {
     program: IRModule
     failures: [IRBuildFailure]
@@ -38,6 +40,7 @@ IRCoreLibrary: struct {
     exports: [IRLibraryExport]
     data: [X64DataExport]
     rows: [IRCoreExport]
+    skipped: [IRBuildFailure]
 }
 
 IR_CORE_FUNCTION_PREFIX: "jet_core_fn_"
@@ -101,16 +104,43 @@ ir_build_core_library: fn(functions: &&[FnBody], decls: DeclTable, type_defs: &&
     p := ir_program_new(functions, decls, type_defs, impls, sources, constants)
     p.sentries = true
     ir_foreign_index(p, foreign, decls)
+    ir_core_library_from(p, entry_module, [IRBuildFailure]{}, threads)
+}
+
+// Builds the library's roots in `program` but the `skipped` ones. A root
+// whose own body the builder cannot build stays out of the library, and the
+// build runs again over the same program without it: a body a program never
+// builds by itself, such as the derived Equatable of a runtime-handle type,
+// whose value is a handle and not an aggregate, or a Core body a runtime
+// call stands in for. Each round skips at least one more root, so the
+// rounds end. A failure in a function no root is (one a root reaches)
+// fails the library.
+ir_core_library_from: fn(program: &&IRProgram, entry_module: ModuleID, skipped: [IRBuildFailure], threads: CompilerThreads) -> IRCoreLibrary Never! {
+    p := program.move()
+    left_out := [String: Bool]{}
+    loop failure in skipped -> left_out[failure.key.copy()] = true
     roots := [IRWaveJob]{}
     keys := [String]{}
+    rooted := [String: Bool]{}
     loop row in 0..<p.functions.len() {
         function: p.functions[row]
         if function.module_identity == entry_module -> next
         if function.generic_params.len() > 0 || ir_owner_binders(p, function).len() > 0 || p.intrinsics.get(function.key) != None -> next
+        if left_out.get(function.key) != None -> next
         roots.push(IRWaveJob{key: function.key.copy(), row: row, args: [Type]{}, lambda: -1, part: -1, local: -1})
         keys.push(function.key.copy())
+        rooted[function.key.copy()] = true
     }
-    built := ir_build_waves(p, roots, false, threads)
+    kept := ir_build_waves_kept(p, roots, false, threads)
+    built := kept.result.move()
+    if built.failures.len() > 0 {
+        if built.failures.any(fn(failure) { rooted.get(failure.key) == None }) {
+            return IRCoreLibrary{program: built.program.move(), failures: built.failures.move(), errors: [String]{}, exports: [IRLibraryExport]{}, data: [X64DataExport]{}, rows: [IRCoreExport]{}, skipped: skipped}
+        }
+        more := skipped.copy()
+        loop failure in built.failures -> more.push(failure.copy())
+        return ir_core_library_from(kept.program.move(), entry_module, more, threads)
+    }
     m := built.program.move()
     exports := [IRLibraryExport]{}
     rows := [IRCoreExport]{}
@@ -135,7 +165,7 @@ ir_build_core_library: fn(functions: &&[FnBody], decls: DeclTable, type_defs: &&
     loop at in 1..<rows.len() {
         if rows[at].symbol == rows[at - 1].symbol -> errors.push("Core symbol {rows[at].symbol} names both {rows[at - 1].key} and {rows[at].key}")
     }
-    IRCoreLibrary{program: m, failures: built.failures.move(), errors: errors, exports: exports, data: data, rows: rows}
+    IRCoreLibrary{program: m, failures: [IRBuildFailure]{}, errors: errors, exports: exports, data: data, rows: rows, skipped: skipped}
 }
 
 // The Core export list (`<prefix>.exports`, JetCli CoreLibrary.jet): one

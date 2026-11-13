@@ -11,7 +11,6 @@
 use {
     cli_files: core.files
     cli_process: core.process
-    cli_server: core.http.server
     cli_sys: core.sys
     cli_term: core.term
     cli_time: core.time
@@ -21,13 +20,13 @@ use {
         CanvasHostState,
         CanvasProjectFile,
         canvas_graph_projection,
+        canvas_host_app,
         canvas_host_bound,
         canvas_host_edit_accept,
         canvas_host_edit_admit,
         canvas_host_edit_refuse,
         canvas_host_edit_refuse_check,
         canvas_host_edit_write,
-        canvas_host_mux,
         canvas_host_new,
         canvas_host_publish_failure,
         canvas_host_publish_graph,
@@ -110,7 +109,7 @@ jet_cli_dev_canvas_loop: fn(file: String, color: Bool, host: String, port: Int) 
     jet_cli_dev_canvas_project(state, file, source_id)
     listen: "{canvas_host_url_host(host)}:{port}"
     { sender: edits, receiver: taken }: channel<CanvasHostEdit>()
-    bound: cli_server.bind(listen, canvas_host_mux(state, edits)) ?? return JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2105", "couldn't listen for Canvas on {listen}: {err}", jet_cli_why("E2105"), fix, color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
+    bound: canvas_host_app(state, edits).bind(listen) ?? return JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2105", "couldn't listen for Canvas on {listen}: {err}", jet_cli_why("E2105"), fix, color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
     address: bound.local_addr() ?? listen
     parts: address.split(":").to_list()
     canvas_host_bound(state, Int.parse(parts[parts.len() - 1]) ?? port)

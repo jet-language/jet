@@ -4342,7 +4342,10 @@ sema_effect_stack_lambda: fn(node_index: Int, value: BodyLambda, node_by_key: Na
 // build, the function values it makes. A lambda written in the same body
 // is a known body (sema_effect_local_lambda_call), not a dynamic call.
 sema_effect_stack_dynamic: fn(tree: BodyTree, node_index: Int, nodes: [SemaEffectNode], facts: SemaEffectCallIndex, closed: Bool, values: &SemaStackValues) Never! {
-    loop (id, node) in tree.nodes {
+    // A row's index is not its node id: ids run from the checker's own
+    // (TEXPR_FIRST_LOCAL_ID and below), so each row names its node.
+    loop node in tree.nodes {
+        id: node.id
         if node.kind == .IndirectCall(callee, _, args, _) {
             if !sema_effect_written_lambda(tree, callee) -> values.calls.push(SemaStackDynamicCall{node: node_index, arity: args.len(), span: node.span})
         } else if node.kind == .Lambda(value) {

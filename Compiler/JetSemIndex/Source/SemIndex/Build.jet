@@ -387,7 +387,7 @@ semindex_scoped_ref: fn(name: String, span: Span, ctx: SemWalk) -> SemRef {
     target := SemAnchor?{None}
     loop reference in ctx.references {
         if reference.span.start != span.start || reference.span.end != span.end -> next
-        module_path: ctx.module_paths.get(Int.from_u32(reference.symbol.module_identity.id)) ?? break
+        module_path: ctx.module_paths.get(Int{reference.symbol.module_identity.id}) ?? break
         target = Val(SemAnchor{module_path: module_path, kind: reference.kind, def_span: reference.symbol.span, semantic_identity: None})
         break
     }
@@ -2408,7 +2408,7 @@ semindex_build: fn(modules: [JetDriverDocModule], effect_projection: SemEffectPr
     loop doc_module in modules -> named_paths[doc_module.module_name] = doc_module.path
     module_paths := [Int: String]{}
     loop doc_module in modules {
-        if named_paths.get(doc_module.module_identity) == .Val(path) -> module_paths[Int.from_u32(doc_module.module_id.id)] = path
+        if named_paths.get(doc_module.module_identity) == .Val(path) -> module_paths[Int{doc_module.module_id.id}] = path
     }
     summaries: semindex_summaries(modules)
     loop doc_module in modules {

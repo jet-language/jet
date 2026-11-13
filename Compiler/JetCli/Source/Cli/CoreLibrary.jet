@@ -17,7 +17,9 @@ use {
 }
 
 // The Core object's bytes, else the problem that stopped it; each build,
-// lint or object finding is a row of `{prefix}.issues`.
+// lint or object finding is a row of `{prefix}.issues`. The roots left out
+// of the library (JetIR BuildCore.jet ir_core_library_from) are the rows of
+// `{prefix}.skipped`, one per failure that left its root out.
 JetCLICoreLibrary: struct { bytes: [U8], problem: String }
 
 jet_cli_core_library: fn(prefix: String, runtime_threads: [String], compiler_threads: CompilerThreads) -> JetCLICoreLibrary {
@@ -42,11 +44,16 @@ jet_cli_core_library: fn(prefix: String, runtime_threads: [String], compiler_thr
     if issues.len() == 0 {
         thread_exports: ir_thread_exports(library.program, library.exports, runtime_threads)
         compiled := ir_x64_compile_module(library.program.move(), threads)
-        object := ir_x64_library_object(compiled, library.exports, library.data, true)
+        // One shared section per kind: Core's functions outnumber the section
+        // indices an object without extended numbering has, and the image
+        // links the object whole.
+        object := ir_x64_library_object(compiled, library.exports, library.data, true, false)
         if object.errors.len() == 0 {
             core_library_files.write_bytes("{prefix}.o", object.bytes) ?? return JetCLICoreLibrary{bytes: [U8]{}, problem: "cannot write the Core object: {err}"}
             core_library_files.write("{prefix}.exports", ir_core_exports_text(library.rows)) ?? return JetCLICoreLibrary{bytes: [U8]{}, problem: "cannot write the Core exports: {err}"}
             core_library_files.write("{prefix}.threads", thread_exports.join("\n")) ?? return JetCLICoreLibrary{bytes: [U8]{}, problem: "cannot write the Core thread receipt: {err}"}
+            skipped: loop failure in library.skipped -> "{failure.name} [{failure.key}]: {failure.message} at {failure.source_file}:{failure.span.start}..{failure.span.end}"
+            core_library_files.write("{prefix}.skipped", skipped.join("\n")) ?? return JetCLICoreLibrary{bytes: [U8]{}, problem: "cannot write the skipped Core roots: {err}"}
             return JetCLICoreLibrary{bytes: object.bytes.move(), problem: ""}
         }
         compiler_transfer_rows<String>(issues, object.errors)

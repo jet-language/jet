@@ -213,7 +213,7 @@ jet_cli_runtime_library: fn(front: &&JetDriverLoweringInputsResult, prefix: Stri
             cli_files.write_bytes("{web_prefix}.wasm", web.bytes) ?? return jet_driver_compile_escaped_failure("cannot write the runtime's web partition: {err}")
             cli_files.write("{web_prefix}.wasm.tsv", web.receipt) ?? return jet_driver_compile_escaped_failure("cannot write the runtime's web receipt: {err}")
         }
-        object := ir_x64_library_object(compiled, library.exports, library.data, true)
+        object := ir_x64_library_object(compiled, library.exports, library.data, true, true)
         if object.errors.len() == 0 {
             cli_files.write_bytes("{prefix}.o", object.bytes) ?? return jet_driver_compile_escaped_failure("cannot write runtime object: {err}")
             // Sorted: `jet run` binary-searches it (Host.jet jet_cli_runtime_exports_mark).

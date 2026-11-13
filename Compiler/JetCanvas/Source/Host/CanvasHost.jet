@@ -11,6 +11,8 @@ use {
     host_http: core.http
     host_random: core.crypto.random
     host_server: core.http.server
+    host_web: core.web
+    core.web.[App]
     host_sys: core.sys
 }
 
@@ -160,14 +162,14 @@ canvas_host_tick: fn(state: Shared<CanvasHostState>) {
 // The listener's routes: every GET and POST goes through canvas_host_answer,
 // which checks the session before it routes. A POST transaction goes to the
 // dev loop through `edits`.
-canvas_host_mux: fn(state: Shared<CanvasHostState>, edits: Sender<CanvasHostEdit>) -[Net, FS.Read, Time.Wait]> HTTPMux {
-    mux: host_server.mux()
+canvas_host_app: fn(state: Shared<CanvasHostState>, edits: Sender<CanvasHostEdit>) -[Net, FS.Read, Time.Wait]> App {
+    mux: host_web.app()
     reads: state.copy() // copy: each route's handler holds its own handle on the one session
     posts: state.copy() // copy: each route's handler holds its own handle on the one session
     // The handlers route on the request's own path; `rest` only satisfies
-    // the catch-all's one typed input.
-    mux.get("/*rest", fn(request: HTTPRequest, rest: String) { Ok(canvas_host_answer(reads, request, None)) })
-    mux.post("/*rest", fn(request: HTTPRequest, rest: String) { Ok(canvas_host_answer(posts, request, Val(edits))) })
+    // the catch-all's one typed input. A failed answer is a 500 naming why.
+    mux.get("/*rest", fn(request: HTTPRequest, rest: String) { Ok(canvas_host_answer(reads, request, None) ?? host_server.response(500, "{err}")) })
+    mux.post("/*rest", fn(request: HTTPRequest, rest: String) { Ok(canvas_host_answer(posts, request, Val(edits)) ?? host_server.response(500, "{err}")) })
     mux
 }
 

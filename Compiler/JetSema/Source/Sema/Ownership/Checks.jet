@@ -15,6 +15,7 @@ use jet_foundation.[
     AccessConvention,
     Binding,
     CallArg,
+    DIAGNOSTIC_LINT,
     Diagnostic,
     DiagnosticFixApplicability,
     DiagnosticFixSafety,
@@ -2484,7 +2485,10 @@ sema_ownership_keep_mutations: fn(state: &SemaOwnershipState, branch: SemaOwners
 }
 
 // L0528: a `:=` binding nothing in its scope writes. Any checked write counts,
-// whether or not it can run; the edit swaps ` :=` for `:`.
+// whether or not it can run; the edit swaps ` :=` for `:`. It reports as a
+// lint until the repo-wide `:=` -> `:` sweep lands: as an error it stops the
+// build's own Core compile (the runtime step), which still has those sites,
+// and a lint in Core is dropped (sema_core_source_lint).
 sema_ownership_report_never_written: fn(state: SemaOwnershipState, diagnostics: &[Diagnostic]) {
     row: diagnostic_registry_row("L0528") ?? panic("L0528 has no registry row")
     loop binding in state.mutable_bindings {
@@ -2493,7 +2497,8 @@ sema_ownership_report_never_written: fn(state: SemaOwnershipState, diagnostics: 
             if state.mutated_starts.get(start) != None -> written = true
         }
         if written -> next
-        diagnostic: sema_error("L0528", binding.name_span, row.what.replace("{{name}}", binding.name), row.why, row.fix.replace("{{name}}", binding.name))
+        diagnostic := sema_error("L0528", binding.name_span, row.what.replace("{{name}}", binding.name), row.why, row.fix.replace("{{name}}", binding.name))
+        diagnostic.severity = DIAGNOSTIC_LINT
         diagnostics.push(diagnostic_with_edit_grade(diagnostic, TextEdit{span: binding.sigil, new_text: ":"}, DiagnosticFixApplicability.Safe, DiagnosticFixSafety.BehaviorPreserving))
     }
 }
