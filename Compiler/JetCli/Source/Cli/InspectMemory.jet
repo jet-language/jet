@@ -4,22 +4,44 @@
 // x86-64 selection's per-function stack and the call graph (JetIR
 // X64Stack.jet). A recursive chain or a call through a function value has no
 // bound and says which; the runtime's own frames are not counted, and each
-// entry names the runtime symbols it reaches. The program's entry also
-// gets its worst-case heap (FnBody.heap): the arena bytes every call path
-// from it may reserve, by the proof `!Mem.Alloc(above: N)` checks, or why
-// no bound holds.
+// entry names the runtime symbols it reaches. Beside each entry's stack
+// stands the bound sema proved for it (FnBody.stack), by the frame model
+// `!Mem.Stack(above: N)` checks, which selection holds every frame to. The
+// program's entry also gets its worst-case heap (FnBody.heap): the arena
+// bytes every call path from it may reserve, by the proof
+// `!Mem.Alloc(above: N)` checks, or why no bound holds.
 use {
     jet_driver.[JetDriverCompileMode, JetDriverIceRow, JetDriverVerbOutput, JET_DRIVER_EXIT_OK, jet_driver_entry_root_path, jet_driver_ice_record, jet_driver_present_diagnostics]
     jet_foundation.[CompilerThreads, FnBody, build_options_stock]
     jet_ir.[IRX64StackBound, ir_x64_compile_module, ir_x64_stack_bounds]
 }
 
-// The heap text sema stamped on the entry function `key`.
-jet_cli_memory_entry_heap: fn(functions: [FnBody], key: String) -> String Never! {
+// What sema proved of function `key`: its stack bound when no function
+// calls it, its heap bound when it is the program's entry ("": none).
+JetCLIMemorySema: struct {
+    key: String
+    stack: String
+    heap: String
+}
+
+// The bounds sema stamped on the functions no function calls
+// (FnBody.stack), and on the program's entry `entry_key` its heap
+// (FnBody.heap).
+jet_cli_memory_sema: fn(functions: [FnBody], entry_key: String) -> [JetCLIMemorySema] Never! {
+    rows := [JetCLIMemorySema]{}
     loop function in functions {
-        if function.key == key -> return function.heap.copy()
+        heap: if function.key == entry_key -> function.heap.copy() else -> ""
+        if function.stack != "" || heap != "" -> rows.push(JetCLIMemorySema{key: function.key.copy(), stack: function.stack.copy(), heap: heap})
     }
-    ""
+    rows
+}
+
+// The row of `sema` for function `key`, else -1.
+jet_cli_memory_sema_row: fn(sema: [JetCLIMemorySema], key: String) -> Int Never! {
+    loop (row, proved) in sema {
+        if proved.key == key -> return row
+    }
+    -1
 }
 
 // One entry's stack line: its bytes and deepest chain, or why it has none.
@@ -30,25 +52,32 @@ jet_cli_memory_stack_text: fn(bound: IRX64StackBound) -> String Never! {
     "stack: {bound.bytes} B via {chain}"
 }
 
-jet_cli_memory_report: fn(bounds: [IRX64StackBound], entry: Int, heap: String, scope: String, file: String, profile: String, level: Int, json: Bool) -> String Never! {
+// The report of each entry's `bounds` row, `keys` its function's key.
+jet_cli_memory_report: fn(bounds: [IRX64StackBound], keys: [String], sema: [JetCLIMemorySema], scope: String, file: String, profile: String, level: Int, json: Bool) -> String Never! {
     if !json {
         text := "memory: scope={scope} source={file} profile={profile} level=O{level}\n"
-        loop bound in bounds {
+        loop (index, bound) in bounds {
             name: bound.path[0]
             text = "{text}entry {name}\n  {jet_cli_memory_stack_text(bound)}\n"
-            if bound.entry == entry && heap != "" -> text = "{text}  heap: {heap}\n"
+            row: jet_cli_memory_sema_row(sema, keys[index])
+            if row >= 0 && sema[row].stack != "" -> text = "{text}  stack bound: {sema[row].stack}\n"
+            if row >= 0 && sema[row].heap != "" -> text = "{text}  heap: {sema[row].heap}\n"
             if bound.runtime.len() > 0 -> text = "{text}  runtime frames not counted: {bound.runtime.join(", ")}\n"
         }
         return text
     }
     entries := [JetCLIStatusValue]{}
-    loop bound in bounds {
+    loop (index, bound) in bounds {
+        row: jet_cli_memory_sema_row(sema, keys[index])
+        stack: if row >= 0 && sema[row].stack != "" -> jet_cli_status_text(sema[row].stack) else -> JetCLIStatusValue.Null
+        heap: if row >= 0 && sema[row].heap != "" -> jet_cli_status_text(sema[row].heap) else -> JetCLIStatusValue.Null
         entries.push(jet_cli_status_object([
             jet_cli_status_field("name", jet_cli_status_text(bound.path[0])),
             jet_cli_status_field("stack_bytes", if bound.bytes >= 0 -> jet_cli_status_int(bound.bytes) else -> JetCLIStatusValue.Null),
             jet_cli_status_field("unbounded", jet_cli_status_text(bound.open)),
             jet_cli_status_field("path", jet_cli_status_texts(bound.path)),
-            jet_cli_status_field("heap", if bound.entry == entry && heap != "" -> jet_cli_status_text(heap) else -> JetCLIStatusValue.Null),
+            jet_cli_status_field("stack_bound", stack),
+            jet_cli_status_field("heap", heap),
             jet_cli_status_field("runtime_not_counted", jet_cli_status_texts(bound.runtime)),
         ]))
     }
@@ -80,7 +109,7 @@ jet_cli_inspect_memory_host: fn(job: JetCLIInspectJob, source: String) -> JetDri
             if front.compile.internal_problem == .Val(problem) -> jet_cli_inspect_finish(job, jet_cli_ice(problem))
             inputs := front.inputs.move() ?? jet_cli_inspect_finish(job, jet_cli_ice("the checked compile of `{job.file}` has no lowering inputs"))
             entry_key: inputs.entry_key ?? jet_cli_inspect_finish(job, jet_cli_native_report(job.file, "inspect memory", JetCLINativeFailure.NoEntry, job.color))
-            heap: jet_cli_memory_entry_heap(inputs.functions, entry_key)
+            sema: jet_cli_memory_sema(inputs.functions, entry_key)
             build := build_options_stock("build")
             if job.build == .Val(given) -> build = given.copy()
             runtime: jet_cli_runtime_exports(jet_cli_runtime_dir())
@@ -92,7 +121,9 @@ jet_cli_inspect_memory_host: fn(job: JetCLIInspectJob, source: String) -> JetDri
             compiled := ir_x64_compile_module(built.program.move(), threads)
             loop error in compiled.errors -> jet_driver_ice_record(census, "-", "ir.x64", "select", error)
             if census.len() > 0 -> jet_cli_inspect_finish(job, jet_cli_ice_census(job.file, census))
-            report: jet_cli_memory_report(ir_x64_stack_bounds(compiled), compiled.program.entry, heap, job.scope, job.file, job.profile, jet_cli_native_level(build), job.json)
+            bounds: ir_x64_stack_bounds(compiled)
+            keys: loop bound in bounds -> compiled.program.functions[bound.entry].key.copy()
+            report: jet_cli_memory_report(bounds, keys, sema, job.scope, job.file, job.profile, jet_cli_native_level(build), job.json)
             jet_cli_inspect_finish(job, JetDriverVerbOutput{stdout: report, stderr: "", exit_code: JET_DRIVER_EXIT_OK})
         }
     }

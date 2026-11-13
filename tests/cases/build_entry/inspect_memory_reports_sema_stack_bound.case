@@ -1,0 +1,25 @@
+# `jet inspect memory` prints, under each entry's stack from the backend's
+# frames, the bound sema proved for it by the frame model
+# `!Mem.Stack(above: N)` checks: bytes and the deepest call path, each step
+# with its own frame's bound, or why no bound holds. `run` in direct.jet
+# denies Mem.Stack, so selection holds each frame it reaches to sema's bound
+# and the report builds without an ICE. JSON carries the bound as
+# `stack_bound`.
+fixture: inspect_memory_reports_sema_stack_bound.fixture
+env: NO_COLOR=1
+step direct: jet inspect memory --optimize=none direct.jet
+exit: 0
+stdout: ~ "entry run" # the program entry
+stdout: ~ "stack bound: " # sema's bound under the backend's stack
+stdout: ~ "leaf (" # the deepest path reaches leaf with its frame's bound
+stdout: !~ "stack bound: unbounded" # every call is direct and every value sized
+step inlined: jet inspect memory direct.jet
+exit: 0
+stdout: ~ "stack bound: " # inlining adds each inlined body's bound to its caller's frame
+step recursive: jet inspect memory --optimize=none recursive.jet
+exit: 0
+stdout: ~ "stack bound: unbounded, recursion through " # depth calls itself
+step json: jet inspect memory --optimize=none recursive.jet --json
+exit: 0
+json: stdout doc $.action = "inspect.memory"
+stdout: ~ "unbounded, recursion through " # the same bound as `stack_bound`

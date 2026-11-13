@@ -1,0 +1,14 @@
+// Every call is direct and every value has a known size, so sema bounds
+// `run`'s stack: its frame plus its deepest callee chain. The denial makes
+// selection hold each of these frames to its bound.
+leaf: fn(value: Int) -> Int {
+    value + 1
+}
+
+step: fn(value: Int) -> Int {
+    leaf(value) * 2
+}
+
+run: fn() -[!Mem.Stack(above: 65536)]> {
+    _ := step(20)
+}

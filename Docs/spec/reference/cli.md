@@ -1461,15 +1461,21 @@ saved registers, locals, and the largest outgoing argument area. A call cycle
 reports `stack: unbounded, recursion via ...` and asks for `#MaxDepth(n)`; a
 call through a function value reports `stack: unbounded, a call through a
 function value via ...` until its targets are sealed. Runtime frames are not
-counted; they are named on a `runtime frames not counted:` line. The program
+counted; they are named on a `runtime frames not counted:` line. Under the
+stack line, `stack bound:` gives the bound sema proved for the entry by the
+frame model `!Mem.Stack(above: N)` checks; the backend holds every frame a
+stack denial reaches to it: `stack bound: <n> B via run (<n> B) -> step
+(<n> B)`, each step with its own frame's bound, or `stack bound: unbounded,
+<why> via <path>`. The program
 entry also gets its worst-case heap, by the proof `!Mem.Alloc(above: N)`
-checks: `heap: 8 B` is the arena bytes every call path from it may reserve,
-and `heap: unbounded, <why> via <path>` names what stops the bound (an
+checks: `heap: 8 B`
+is the arena bytes every call path from it may reserve, and
+`heap: unbounded, <why> via <path>` names what stops the bound (an
 allocation with no proven size, a call in a loop with no bound, recursion,
 or an open dispatch) and the call path to it. JSON uses the `inspect.memory`
 status with one `entries` row per entry point (`stack_bytes` is null when
-unbounded; `heap` is null except on the program entry). This is a different
-report from
+unbounded; `stack_bound` is null when sema stamped none; `heap` is null
+except on the program entry). This is a different report from
 `jet inspect audit memory`, which reads exercised memory witnesses.
 
 `jet inspect choices [<entry.jet>]` lists the automatic choices the compiler
