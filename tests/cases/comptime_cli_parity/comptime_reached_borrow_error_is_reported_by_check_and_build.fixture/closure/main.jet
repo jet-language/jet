@@ -1,0 +1,20 @@
+// The same conflict inside a lambda that a `#run` body calls: E0204, from
+// check and build alike.
+fill: fn(into: &[Int], from: [Int]) {
+    into.push(from.len())
+}
+
+count: fn() -> Int {
+    xs := [Int]{1}
+    twice: fn() {
+        fill(xs, xs)
+    }
+    twice()
+    xs.len()
+}
+
+N: #run count()
+
+run: fn() {
+    print(N)
+}

@@ -1,0 +1,17 @@
+// A function only a constant's `#run` reaches passes `xs` to a write
+// parameter and reads it in the same call: E0204, from check and build alike.
+fill: fn(into: &[Int], from: [Int]) {
+    into.push(from.len())
+}
+
+count: fn() -> Int {
+    xs := [Int]{1}
+    fill(xs, xs)
+    xs.len()
+}
+
+N: #run count()
+
+run: fn() {
+    print(N)
+}

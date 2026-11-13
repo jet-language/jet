@@ -1,0 +1,35 @@
+# A borrow conflict (E0204) in code that only a constant's `#run` reaches is
+# reported by `jet check` exactly as `jet build` reports it, so check never
+# passes a program that build then refuses in comptime.bodies: a plain
+# function, a generic one instantiated at compile time, and a nested function.
+fixture: comptime_reached_borrow_error_is_reported_by_check_and_build.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet check direct/main.jet
+exit: 1
+stderr: ~ "E0204" # check reports the conflict
+stderr: ~ "main.jet:9:14" # at the second use of `xs`
+stderr: ~ "1 problem found" # and nothing else
+step: jet build direct/main.jet
+exit: 1
+stderr: ~ "E0204" # build reports the same conflict
+stderr: ~ "main.jet:9:14" # at the same place
+stderr: ~ "1 problem found" # and nothing else
+step: jet check generic/main.jet
+exit: 1
+stderr: ~ "E0204" # check reports the conflict in the generic body
+stderr: ~ "main.jet:9:14" # at the second use of `xs`
+stderr: ~ "1 problem found" # and nothing else
+step: jet build generic/main.jet
+exit: 1
+stderr: ~ "E0204" # build reports the same conflict
+stderr: ~ "main.jet:9:14" # at the same place
+stderr: ~ "1 problem found" # and nothing else
+step: jet check closure/main.jet
+exit: 1
+stderr: ~ "E0204" # check reports the conflict in the nested function
+stderr: ~ "main.jet:10:18" # at the second use of `xs`
+step: jet build closure/main.jet
+exit: 1
+stderr: ~ "E0204" # build reports the same conflict
+stderr: ~ "main.jet:10:18" # at the same place

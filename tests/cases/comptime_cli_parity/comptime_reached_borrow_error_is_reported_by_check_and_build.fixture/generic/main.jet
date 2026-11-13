@@ -1,0 +1,17 @@
+// The same conflict inside a generic function that only a constant's `#run`
+// instantiates: E0204, from check and build alike.
+fill: fn<T>(into: &[T], from: [T], value: T) {
+    into.push(value)
+}
+
+grow: fn<T>(value: T) -> Int {
+    xs := [T]{value.copy()}
+    fill(xs, xs, value)
+    xs.len()
+}
+
+N: #run grow(7)
+
+run: fn() {
+    print(N)
+}
