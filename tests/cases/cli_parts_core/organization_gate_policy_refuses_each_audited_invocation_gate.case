@@ -7,3 +7,10 @@ step: jet run --gate unsafe=allow --gate impure=allow --gate nondeterministic=al
 env: JET_ORG_UNSAFE_POLICY={work}/org-policy.jet
 exit: 1
 stderr: = gate-policy.stderr
+# Without `--gate unsafe=allow`, the organization's `.Forbid` refuses the
+# `#Unsafe` gate itself (E3105) rather than an invocation allowance (E3415).
+step: jet check main.jet
+env: JET_ORG_UNSAFE_POLICY={work}/org-policy.jet
+exit: nonzero
+stderr: ~ "Error [jet.UnsafeForbiddenByPolicy]: Organization or package policy forbids unsafe code" # the lexical gate cannot widen the organization floor
+stderr: ~ "--> main.jet:2:5" # at the `#Unsafe` gate
