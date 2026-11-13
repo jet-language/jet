@@ -138,7 +138,9 @@ runtime `jet_rt_shared_site_publish`; the common read is an ordinary typed
 Source evaluation receives a host-retained typed process segment and explicit
 boundary resets, never a compiler-global root. The browser continues to support
 ordinary `Shared`; only existing env/auth/fault APIs without browser providers
-are refused in sema with `E-WEB-UNSUPPORTED`.
+are refused in sema with `E-WEB-UNSUPPORTED`, and only where the program's own
+modules call them: a Core module's body that reaches one does not refuse a
+program that loads it.
 
 ## Law 4 — Effects
 
