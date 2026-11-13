@@ -1,0 +1,17 @@
+# Claim: interpolation while compiling formats a value through the same Display path as run time: `AT_COMPILE: #run render()` prints exactly what `render()` prints when the program runs, at O0, O1 and O2.
+# render() interpolates a struct with Display, an enum with Display, a nested field with Display, a struct without Display that holds both, and a struct without Display.
+fixture: display_interpolation_reads_the_same_while_compiling_and_running/input
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet run -O0 run.jet
+exit: 0
+stdout: = "failure 7 in q | low | failure 2 in inner | Report { level: high, failure: failure 2 in inner, count: 3 } | Plain { x: 5 }\nfailure 7 in q | low | failure 2 in inner | Report { level: high, failure: failure 2 in inner, count: 3 } | Plain { x: 5 }\n" # O0: the #run line and the run-time line are the same Display text
+stderr: empty
+step: jet run -O1 run.jet
+exit: 0
+stdout: = "failure 7 in q | low | failure 2 in inner | Report { level: high, failure: failure 2 in inner, count: 3 } | Plain { x: 5 }\nfailure 7 in q | low | failure 2 in inner | Report { level: high, failure: failure 2 in inner, count: 3 } | Plain { x: 5 }\n" # O1: the #run line and the run-time line are the same Display text
+stderr: empty
+step: jet run -O2 run.jet
+exit: 0
+stdout: = "failure 7 in q | low | failure 2 in inner | Report { level: high, failure: failure 2 in inner, count: 3 } | Plain { x: 5 }\nfailure 7 in q | low | failure 2 in inner | Report { level: high, failure: failure 2 in inner, count: 3 } | Plain { x: 5 }\n" # O2: the #run line and the run-time line are the same Display text
+stderr: empty

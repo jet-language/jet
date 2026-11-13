@@ -7587,6 +7587,82 @@ sema_comptime_codec_methods_add: fn(graph: SemaRegistrationGraph, ty: Type, modu
     }
 }
 
+// The `display` (Display) and `show` (Printable) methods a value of type `ty`
+// renders through, `ty` named from module `module_identity`. Lowering selects
+// them by owner type for an interpolation, a `print` and a nested value's
+// text (JetIR ir_render), and no call fact records them. Each nominal type
+// `ty` holds, itself or as an element, member, argument, field or payload,
+// adds its own; `seen` holds the nominal keys already read.
+sema_comptime_render_methods: fn(graph: SemaRegistrationGraph, ty: Type, module_identity: String, seen: &[String:Bool]) -> [(module_identity: String, key: String)] {
+    found := [(module_identity: String, key: String)]{}
+    sema_comptime_render_methods_add(graph, ty, module_identity, seen, found)
+    found
+}
+
+sema_comptime_render_methods_add: fn(graph: SemaRegistrationGraph, ty: Type, module_identity: String, seen: &[String:Bool], found: &[(module_identity: String, key: String)]) {
+    if ty == {
+        .List(element) | .Option(element) | .Shared(element) | .Tagged(_, element) | .FixedList(element, _) -> sema_comptime_render_methods_add(graph, element, module_identity, seen, found)
+        .Map(key, _, value) -> {
+            sema_comptime_render_methods_add(graph, key, module_identity, seen, found)
+            sema_comptime_render_methods_add(graph, value, module_identity, seen, found)
+        }
+        .Result(ok, err) -> {
+            sema_comptime_render_methods_add(graph, ok, module_identity, seen, found)
+            sema_comptime_render_methods_add(graph, err, module_identity, seen, found)
+        }
+        .Tuple(fields) -> loop field in fields -> sema_comptime_render_methods_add(graph, field.ty, module_identity, seen, found)
+        .Union(members) -> loop member in members -> sema_comptime_render_methods_add(graph, member, module_identity, seen, found)
+        .Named(_) | .Apply(_, _) -> {
+            if ty == .Apply(_, args) {
+                loop arg in args -> sema_comptime_render_methods_add(graph, arg, module_identity, seen, found)
+            }
+            row: sema_type_resolve_nominal_row(graph, ty, module_identity) ?? return
+            nominal: graph.modules[row.module_index].nominals[row.row]
+            if seen.get(nominal.symbol.id.key) != None -> return
+            seen[nominal.symbol.id.key.copy()] = true
+            loop reference in sema_registration_impl_rows_named(graph, nominal.symbol.name) {
+                implementation: graph.modules[reference.module_index].impls[reference.row]
+                symbol_name: if implementation.trait_symbol == .Val(trait_symbol) -> trait_symbol.name.copy() else -> ""
+                written: if implementation.trait_name == .Val(name) -> name.copy() else -> ""
+                method_name: sema_comptime_render_method_name(written, symbol_name)
+                if method_name == "" -> next
+                if sema_type_graph_impl_target_nominal_key(graph, implementation) != Val(nominal.symbol.id.key) -> next
+                loop method in implementation.methods {
+                    if method.symbol.name == method_name -> found.push((module_identity: graph.modules[reference.module_index].module_identity.copy(), key: method.symbol.id.key.copy()))
+                }
+            }
+            // An `impl Display { … }` or `impl Printable { … }` block in the
+            // type's own body, whose methods the nominal registers.
+            if nominal.source == .SourceAST(item) {
+                loop block in sema_registration_item_trait_blocks(item) {
+                    method_name: sema_comptime_render_method_name(block.trait_name, block.trait_name)
+                    if method_name == "" -> next
+                    loop method in nominal.methods {
+                        if method.symbol.name != method_name -> next
+                        loop written in block.methods {
+                            if written.span == method.declaration.span -> found.push((module_identity: graph.modules[row.module_index].module_identity.copy(), key: method.symbol.id.key.copy()))
+                        }
+                    }
+                }
+            }
+            owner_identity: graph.modules[row.module_index].module_identity
+            loop field in nominal.fields -> sema_comptime_render_methods_add(graph, field.ty, owner_identity, seen, found)
+            loop variant in nominal.variants {
+                if variant.payload_type == .Val(payload) -> sema_comptime_render_methods_add(graph, payload, owner_identity, seen, found)
+            }
+        }
+        .Int | .Float | .Bool | .String | .Char | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Quantity(_, _) | .Measure(_) -> {}
+    }
+}
+
+// The rendering method a trait named `written` (or resolved as `resolved`)
+// selects: `display` for Display, `show` for Printable, else none.
+sema_comptime_render_method_name: fn(written: String, resolved: String) -> String {
+    if written == "Display" || resolved == "Display" -> return "display"
+    if written == "Printable" || resolved == "Printable" -> return "show"
+    ""
+}
+
 // The `close` method a value of type `ty` runs when it is closed, `ty` named
 // from module `module_identity`: the Close implementation of the nominal type
 // `ty` is. Lowering calls it by owner type, for a `close(value)`, a deferred

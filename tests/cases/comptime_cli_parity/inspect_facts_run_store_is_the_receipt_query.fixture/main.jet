@@ -24,7 +24,7 @@ build: fn(b: Build) {
     }
     marker: if compiler.query(compiler.FactSource.Run{receipt: receipt.copy()}, compiler.FactKind.Marker) == {
         .Ok(_) -> "answered"
-        .Err(error) -> error.display()
+        .Err(error) -> "{error}"
     }
     b.error(b.program.types()[0].span, "FACTS", "{count} facts: {text} status={receipt.status} marker={marker}", "the build read the run store", "none: the report is the evidence")
 }

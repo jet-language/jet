@@ -281,7 +281,7 @@ jet_cli_facts_program: fn(kind: String) -> String Never! {
         "JET_FACTS_ROWS: #run {{ jet_facts() ?? [compiler.Fact]{{}} }}",
         "JET_FACTS_LINES: #run jet_facts_lines()",
         "JET_FACTS_FAILURE: #run jet_facts_failure()",
-        "JET_FACTS_FAILURE_TEXT: #run {{ if jet_facts_failure() == .Val(failure) -> failure.display() else -> \"\" }}",
+        "JET_FACTS_FAILURE_TEXT: #run {{ if jet_facts_failure() == .Val(failure) -> \"{{failure}}\" else -> \"\" }}",
         "",
     }
     lines.join("\n")
@@ -300,7 +300,7 @@ jet_cli_facts_program_query: fn(kind: String) -> String Never! {
         "{JET_CLI_FACTS_ENTRY}: fn(program: ProgramInfo) -> JetFactsAnswer {{",
         "    revision: program.revision()",
         "    rows: compiler.query(compiler.FactSource.Program{{program: program}}, compiler.FactKind.{variant}) ?? {{",
-        "        failure_text: err.display()",
+        "        failure_text: \"{{err}}\"",
         "        return JetFactsAnswer{{rows: [compiler.Fact]{{}}, lines: \"\", failure: Val(err), failure_text: failure_text, identity: revision}}",
         "    }}",
         "    text := \"\"",
@@ -332,7 +332,7 @@ jet_cli_facts_run_program: fn(path: String, kind: String) -> String Never! {
         JET_CLI_FACTS_ANSWER_TYPE,
         "",
         "jet_facts_refused: fn(error: compiler.MetadataError, identity: String) -> JetFactsAnswer {{",
-        "    text := error.display()",
+        "    text := \"{{error}}\"",
         "    if error.kind == .Invalid(diagnostics) {{",
         "        loop diagnostic in diagnostics -> text = \"{{text}}: {{diagnostic.message}}\"",
         "    }}",

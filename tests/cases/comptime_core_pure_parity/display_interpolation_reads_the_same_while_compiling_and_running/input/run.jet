@@ -1,0 +1,48 @@
+Failure: struct {
+    query: String
+    code: Int
+}
+
+impl Failure.Display {
+    display: fn(self) -> String {
+        "failure {self.code} in {self.query}"
+    }
+}
+
+Level: enum {
+    Low
+    High
+}
+
+impl Level.Display {
+    display: fn(self) -> String {
+        if self == {
+            .Low -> "low"
+            .High -> "high"
+        }
+    }
+}
+
+Report: struct {
+    level: Level
+    failure: Failure
+    count: Int
+}
+
+Plain: struct {
+    x: Int
+}
+
+render: fn() -> String {
+    failure: Failure{query: "q", code: 7}
+    report: Report{level: Level.High, failure: Failure{query: "inner", code: 2}, count: 3}
+    plain: Plain{x: 5}
+    "{failure} | {Level.Low} | {report.failure} | {report} | {plain}"
+}
+
+AT_COMPILE: #run render()
+
+run: fn() {
+    print(AT_COMPILE)
+    print(render())
+}
