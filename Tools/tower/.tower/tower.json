@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6777,
-    "rev": 101283,
+    "rev": 101284,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -73306,11 +73306,11 @@
         {
           "n": 17,
           "text": "(was #5478) Fast process exit: no memory reclamation when the process ends; user cleanup and secret scrub only",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:27:00.568Z"
+          "evidence": "dev cc02218111 and 5a8f8464d0 (runtime: once the process is ending, jet_rt_free and rc_release return nothing to the allocator, and shared-cell releases are skipped). dev 09dfaea308 adds case control_and_data/process_exit_leaves_heap_to_kernel_after_user_cleanup (Lander5 directq rc 0; Main seed-b14 run PASS 1). The case holds 400k strings and a 64 MiB buffer, then calls process.exit: user cleanup prints key wiped, guard and atexit, and the munmap trace is empty. The drop control shows munmap x2. The runtime scrub of registered Secrets at exit is covered only by the type-checked SecretTests.jet witness.",
+          "at": "2026-11-13T07:25:02.275Z"
         },
         {
           "n": 18,
@@ -73438,7 +73438,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T16:05:34.496Z",
-      "updated": "2026-11-13T06:23:15.641Z",
+      "updated": "2026-11-13T07:25:02.275Z",
       "updatedBy": "Main",
       "criteriaLastN": 30
     },
@@ -198343,6 +198343,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-13T07:25:02.275Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c08r6ogl",
+      "note": "#17"
+    },
     {
       "at": "2026-11-13T07:23:32.019Z",
       "by": "Main",
