@@ -189,7 +189,6 @@ Lane: struct {
     log_dir: String
     jet: String
     runtime_dir: String
-    pack: String
     object: String
     evidence: [Dyn]
 }
@@ -1143,12 +1142,12 @@ scheduler_literal: fn(repo: String, name: String) -[FS]> String Problem! {
 }
 
 strips_transport: fn(name: String) -> Bool Never! {
-    name.starts_with("JET_BOOTSTRAP_") || name.starts_with("JET_FRONT_")
+    name.starts_with("JET_FRONT_")
         || ([String]{"JET_TEST_FILTER", "JET_NATIVE_TEST_ID", "FX_ONLY", "FX_HEAD", "FX_EXCLUDE", "SELFHOST_SKIP", "SELFHOST_ROOTS"}).contains(name)
 }
 
 strips_registry: fn(name: String) -> Bool Never! {
-    name == "JET_RUNTIME_PACK" || name.starts_with("JET_FRONT_") || name.starts_with("JET_BOOTSTRAP_") || name.starts_with("FX_")
+    name.starts_with("JET_FRONT_") || name.starts_with("FX_")
         || ([String]{"JET_TEST_FILTER", "JET_TEST_SHUFFLE_SEED", "JET_TEST_SERIAL", "JET_TEST_TRACE_TIERS", "JET_NATIVE_TEST_ID", "JET_NATIVE_TEST_REPORT_PATH", "JET_NATIVE_TEST_RECORDS_PATH", "JET_UPDATE_SNAPSHOTS", "JET_SCHEMA_CACHE_DIR"}).contains(name)
 }
 
@@ -1194,9 +1193,7 @@ execute: fn(lane: &Lane, command: String, args: [String], cwd: String, extra: [S
             spec = spec.env_remove(name)
         }
     }
-    spec = spec.env("JET_TOOLCHAIN_ROOT", lane.repo).env("JET_KEEP_GOING", "1").env("JET", lane.jet).env("JET_RUN", lane.jet)
-        .env("JET_RUNTIME_PACK", lane.pack).env("JET_RUNTIME_JET_OBJECT", lane.object).env("JET_RUNTIME_OBJECT", lane.object)
-        .env("JET_RUNTIME_C_LIB", lane.object).env("NO_COLOR", "1").env("TERM", "dumb")
+    spec = spec.env("JET_TOOLCHAIN_ROOT", lane.repo).env("JET_KEEP_GOING", "1").env("JET", lane.jet).env("NO_COLOR", "1").env("TERM", "dumb")
     loop setting in extra {
         spec = spec.env(setting.name, setting.value)
     }
@@ -1261,13 +1258,12 @@ front: fn(lane: &Lane, args: [String], prefix: String, cwd: String, extra: [Sett
 // Lower `file` as a native library through `jet doc`, the runtime-library
 // seam (`jet check` lowers no #Export(c) body): the front-end hook writes its
 // object, exports, ABI, thread and issue files beside `prefix`.
-library: fn(lane: &Lane, file: String, prefix: String, lifecycle: String, exports: String) Problem! -[Env, Exec, FS, IO, Time, Time.Wait]> {
+library: fn(lane: &Lane, file: String, prefix: String, lifecycle: String) Problem! -[Env, Exec, FS, IO, Time, Time.Wait]> {
     if !files.exists(lifecycle) -> return Err(problem("native library lifecycle list `{lifecycle}` is missing"))
     loop suffix in ([String]{".o", ".exports", ".abi.json", ".threads", ".issues"}) {
         if files.exists("{prefix}{suffix}") -> files.remove("{prefix}{suffix}") ?? return Err(problem("`{prefix}{suffix}` cannot be removed: {err}"))
     }
-    hooks := [Setting]{Setting{name: "JET_FRONT_LIBRARY_OBJECT_OUTPUT", value: prefix.copy()}, Setting{name: "JET_FRONT_LIBRARY_LIFECYCLE", value: lifecycle.copy()}}
-    if exports != "" -> hooks.push(Setting{name: "JET_FRONT_LIBRARY_EXPORTS", value: exports.copy()})
+    hooks: [Setting]{Setting{name: "JET_FRONT_LIBRARY_OBJECT_OUTPUT", value: prefix.copy()}, Setting{name: "JET_FRONT_LIBRARY_LIFECYCLE", value: lifecycle.copy()}}
     front(lane, [String]{"doc", file}, prefix, files.dirname(file), hooks) ?? return Err(err)
     if files.exists("{prefix}.issues") -> return Err(problem(files.read("{prefix}.issues") ?? ""))
     loop suffix in ([String]{".o", ".exports", ".abi.json", ".threads"}) {
@@ -1395,7 +1391,7 @@ run_transport: fn(entry: Dyn, repo: String, jet: String, log_dir: String, runtim
     files.create_dir_all(out) ?? return Err(problem("`{out}` cannot be created: {err}"))
     files.create_dir_all(log_dir) ?? return Err(problem("`{log_dir}` cannot be created: {err}"))
     staged: stage_toolchain(jet, runtime, "{log_dir}/toolchain") ?? return Err(err)
-    lane := Lane{id: id.copy(), out: out.copy(), repo: repo.copy(), log_dir: log_dir.copy(), jet: staged, runtime_dir: runtime.dir.copy(), pack: runtime.pack.copy(), object: runtime.object.copy(), evidence: [Dyn]{}}
+    lane := Lane{id: id.copy(), out: out.copy(), repo: repo.copy(), log_dir: log_dir.copy(), jet: staged, runtime_dir: runtime.dir.copy(), object: runtime.object.copy(), evidence: [Dyn]{}}
     if drive(lane, found) == {
         .Ok(_) -> {}
         .Err(failure) -> return (ran: Ran{code: 1, signal: None, timed_out: false, stdout: "", stderr: "{failure.message}\n"}, evidence: lane.evidence.copy())
@@ -1445,7 +1441,7 @@ drive: fn(lane: &Lane, found: Spec) Problem! -[Env, Exec, FS, IO, Time, Time.Wai
         }
         lifecycle: "{native}/lifecycle.list"
         files.write(lifecycle, kept.join("\n")) ?? return Err(problem("`{lifecycle}` cannot be written: {err}"))
-        library(lane, fixture, "{native}/fixture", lifecycle, "") ?? return Err(err)
+        library(lane, fixture, "{native}/fixture", lifecycle) ?? return Err(err)
         generated: "{native}/driver.c"
         driver: if found.witness != "" -> "{repo}/{found.witness}" else -> generated.copy()
         if found.witness == "" -> files.write(generated, codec_driver(found.name, export)) ?? return Err(problem("`{generated}` cannot be written: {err}"))
@@ -1745,7 +1741,7 @@ c_verdict: fn(lane: &Lane, found: Spec) Problem! -[Env, Exec, FS, IO, Time, Time
     jet_tool(lane, found.runner, [String]{"--root", "{repo}/Compiler", "unit", "{out}/library", "--test", found.name}) ?? return Err(err)
     files.create_dir_all("{out}/library/Source") ?? return Err(problem("`{out}/library/Source` cannot be created: {err}"))
     files.rename("{out}/library/unit.jet", "{out}/library/Source/Runtime.jet") ?? return Err(problem("`{out}/library/unit.jet` cannot be moved: {err}"))
-    library(lane, "{out}/library/Source/Runtime.jet", "{out}/jet_runtime_jet", "{repo}/Compiler/JetRuntime/lifecycle.list", "") ?? return Err(err)
+    library(lane, "{out}/library/Source/Runtime.jet", "{out}/jet_runtime_jet", "{repo}/Compiler/JetRuntime/lifecycle.list") ?? return Err(err)
     source: if found.name == {
         "VaultHooks" | "VaultProvider" -> "{repo}/{RT}{found.name}Witness.c"
         "Thread" -> "{repo}/{RT}thread-fixture.c"
