@@ -169,6 +169,8 @@ use {
         sema_module_is_core_source,
         sema_registration_module_index,
         sema_source_location_at,
+        sema_type_graph_lookup_symbol_at,
+        sema_type_lookup_nominal_row,
         sema_type_resolve_nominal_row_at,
     ]
 }
@@ -781,15 +783,19 @@ JetCompilerServicesProgramInfo: enum {
 // The build context reads this immutable, fully checked whole-program view.
 // Reuse the same TypeInfo, FunctionInfo and semantic-index producers as the
 // compiler API; a missing producer fact refuses the snapshot and is named.
-// `root_calls` and `root_types`, which no source can spell: `root_calls`
-// holds the CompilerCall of each checked call written in the root
-// package's own source outside its `build` functions, an ambient call's
-// callee being its name (`print`), in the order the checker met them;
-// `meta.events(watch: .Calls{to: f}, …)` reads it.
+// `root_calls`, `root_types` and `scope_types`, which no source can spell:
+// `root_calls` holds the CompilerCall of each checked call written in the
+// root package's own source outside its `build` functions, an ambient
+// call's callee being its name (`print`), in the order the checker met
+// them; `meta.events(watch: .Calls{to: f}, …)` reads it.
 // `root_types` holds a TypeId for each spelling the root module names a
 // declared type by, bare (`Point`) or through its import (`geo.Point`),
-// its `name` that spelling (jet_eval_compiler_services_root_types);
-// `meta.find_type` reads it.
+// its `name` that spelling; `meta.find_type` reads it. `scope_types` holds
+// one, its `name` bare, for each declared type a module the build makes
+// sees, which shares the root module's namespace and imports nothing: a
+// type of the root module or of its namespace, or one the prelude names
+// bare; `meta.add_struct` writes its fields' types with it
+// (jet_eval_compiler_services_type_names).
 // `packages` holds one PackageInfo per package, its modules in load order,
 // each listing every comment of its file; the built package's also lists
 // its effective settings with their origins.
@@ -892,6 +898,7 @@ jet_eval_compiler_services_program_info: fn(registration: SemaRegistrationGraph,
         revision_fields.push(module_source.module_identity.copy())
         revision_fields.push(module_source.source.copy())
     }
+    type_names: jet_eval_compiler_services_type_names(registration)
     fields := [TComptimeField]{
         {name: "types", value: TComptimeValue.List{values: types}},
         {name: "functions", value: TComptimeValue.List{values: functions}},
@@ -899,7 +906,8 @@ jet_eval_compiler_services_program_info: fn(registration: SemaRegistrationGraph,
         {name: "revision", value: jet_eval_compiler_services_string(record_key_digest(revision_fields))},
         {name: "foreign", value: TComptimeValue.List{values: foreign}},
         {name: "root_calls", value: TComptimeValue.List{values: jet_eval_compiler_services_root_calls(registration, graph, build_keys)}},
-        {name: "root_types", value: TComptimeValue.List{values: jet_eval_compiler_services_root_types(registration)}},
+        {name: "root_types", value: TComptimeValue.List{values: type_names.root}},
+        {name: "scope_types", value: TComptimeValue.List{values: type_names.scope}},
     }
     if index.value == .Struct(_, index_fields) {
         loop name in ([String]{"definitions", "references", "calls", "structural_nodes"}) {
@@ -934,12 +942,18 @@ jet_eval_compiler_services_root_calls: fn(registration: SemaRegistrationGraph, g
     calls
 }
 
-// ProgramInfo's `root_types`. A type's identity is its module and name, as
-// TypeId.identity spells it. A root spelling is one the checker resolves
-// from the root module to that very type.
-jet_eval_compiler_services_root_types: fn(registration: SemaRegistrationGraph) -> [TComptimeValue] {
-    types := [TComptimeValue]{}
-    root: sema_registration_module_index(registration, registration.entry_module_identity) ?? return types
+JetCompilerServicesTypeNames: struct {
+    root: [TComptimeValue]
+    scope: [TComptimeValue]
+}
+
+// ProgramInfo's `root_types` and `scope_types`. A type's identity is its
+// module and name, as TypeId.identity spells it. A root spelling is one the
+// checker resolves from the root module to that very type.
+jet_eval_compiler_services_type_names: fn(registration: SemaRegistrationGraph) -> JetCompilerServicesTypeNames {
+    names := JetCompilerServicesTypeNames{root: [TComptimeValue]{}, scope: [TComptimeValue]{}}
+    root: sema_registration_module_index(registration, registration.entry_module_identity) ?? return names
+    namespace: registration.modules[root].namespace
     aliases := [String]{}
     loop import in registration.modules[root].program.imports {
         if import.alias != "" && !aliases.contains(import.alias) -> aliases.push(import.alias.copy())
@@ -952,11 +966,19 @@ jet_eval_compiler_services_root_types: fn(registration: SemaRegistrationGraph) -
             loop alias in aliases -> spellings.push("{alias}.{name}")
             loop spelling in spellings {
                 found: sema_type_resolve_nominal_row_at(registration, Type.Named{name: spelling}, root) ?? next
-                if found.module_index == module_index && found.row == row -> types.push(sema_comptime_reflection_type_id_record(identity.copy(), spelling.copy()))
+                if found.module_index == module_index && found.row == row -> names.root.push(sema_comptime_reflection_type_id_record(identity.copy(), spelling.copy()))
             }
+            if module_index == root || (namespace != "" && module_row.namespace == namespace) {
+                names.scope.push(sema_comptime_reflection_type_id_record(identity, name.copy()))
+                next
+            }
+            // The prelude's bare names, read from no module's scope.
+            bare: sema_type_graph_lookup_symbol_at(registration, -1, name) ?? next
+            found: sema_type_lookup_nominal_row(registration, Val(bare), name, -1) ?? next
+            if found.module_index == module_index && found.row == row -> names.scope.push(sema_comptime_reflection_type_id_record(identity, name.copy()))
         }
     }
-    types
+    names
 }
 
 // The whole-program view of a build no body can read (no source outside
@@ -964,7 +986,7 @@ jet_eval_compiler_services_root_types: fn(registration: SemaRegistrationGraph) -
 // empty, so the build skips the snapshot.
 jet_eval_compiler_services_program_unread: fn() -> TComptimeValue Never! {
     fields := [TComptimeField]{}
-    loop name in ([String]{"types", "functions", "packages", "foreign", "root_calls", "root_types", "definitions", "references", "call_edges", "structural_nodes"}) {
+    loop name in ([String]{"types", "functions", "packages", "foreign", "root_calls", "root_types", "scope_types", "definitions", "references", "call_edges", "structural_nodes"}) {
         fields.push(TComptimeField{name: name, value: TComptimeValue.List{values: [TComptimeValue]{}}})
     }
     TComptimeValue.Struct{type_name: "ProgramInfo", fields: fields}

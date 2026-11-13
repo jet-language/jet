@@ -1,0 +1,21 @@
+// @programmable_build
+// @cli_build
+// A field's type must be one the generated module sees: it shares the
+// root module's namespace and imports nothing, so a type of a module it
+// would have to import is refused when the build runs.
+use core.encoding.csv
+
+build: fn(b: Build) {
+    app: b.add_executable("app", ["meta_ladder_add_struct_refuses_a_type_it_cannot_see.jet"], [])
+    meta: b.compiler(app)
+    fields := [CompilerField]{}
+    loop field in Carrier.reflect().fields -> fields.push(CompilerField{name: field.name.copy(), type: field.type.copy()})
+    meta.add_struct("Holder", fields, scope: "holder")
+    b.default(app)
+}
+
+Carrier: struct {
+    row: csv.CSVRow
+}
+
+run: fn() { print(2) }

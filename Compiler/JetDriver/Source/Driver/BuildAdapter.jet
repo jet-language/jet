@@ -197,10 +197,13 @@ jet_driver_build_step_call: fn(session: &BuildSession, inputs: JetDriverSharedBu
 // like `meta.add` adds source text. It refuses a name that is not one
 // identifier in its kind's casing (E0357). A field's type is a `TypeId`,
 // which only the compiler makes, so values a build computes write only
-// that declaration. `meta.find_type(text)` reads `text` as one type and
-// names each type it names as the root module names it (ProgramInfo's
-// `root_types`) or as a struct the value's target already made; one it
-// can't name, or text that is not one type, gives None.
+// that declaration. The type is written as the new module names it: each
+// declared type by the bare name it has there (ProgramInfo's
+// `scope_types`, and the structs the value's target already made); one the
+// module can't see is refused (E3502). `meta.find_type(text)` reads `text`
+// as one type and names each type it names as the root module names it
+// (ProgramInfo's `root_types`) or as a struct the value's target already
+// made; one it can't name, or text that is not one type, gives None.
 // A `Compiler` value passed to a function sends the pass sema wrote
 // (JetBuildSession `compiler.handoff`); the callee's new value carries the
 // same checked program.
@@ -251,17 +254,28 @@ jet_driver_compiler_call: fn(session: &BuildSession, member: String, args: [TCom
         name: if args[1] == .String(text) -> text.copy() else -> { return jet_driver_build_host_failure(session, span, "`{member}` lost its type's name") }
         if sema_casing_ascii_has_case(name, SemaNameCase.Pascal) != .Val(true) || name == "_" -> return jet_driver_meta_name_refusal(span, "meta.add_struct", "type", name, "PascalCase, as in `Shape`")
         // A field's name may be computed, so it is checked before it is
-        // written. Its type is a `TypeId` the compiler made, written as the
-        // checker prints it.
+        // written. Its type is a `TypeId` the compiler made, written from
+        // its identity as the new module names each type in it.
+        program: jet_eval_build_field(args[0], "program") ?? return jet_driver_build_host_failure(session, span, "the `Compiler` value lost its checked program")
+        seen := jet_driver_meta_type_rows(program, "scope_types", "identity", "name") ?? return jet_driver_build_host_failure(session, span, "the `Compiler` value's checked program lost what `{member}` reads")
+        loop made in build_session_made_structs(session, held) -> seen[made.identity.copy()] = made.name.copy()
         source := "{name}: struct {{\n"
         listed: if args[2] == .List(values) -> values.copy() else -> { return jet_driver_build_host_failure(session, span, "`{member}` lost its fields") }
         loop field in listed {
             field_name: jet_eval_build_field(field, "name") ?? return jet_driver_build_host_failure(session, span, "`{member}` lost a field's name")
             field_type: jet_eval_build_field(field, "type") ?? return jet_driver_build_host_failure(session, span, "`{member}` lost a field's type")
             written: if field_name == .String(text) -> text.copy() else -> { return jet_driver_build_host_failure(session, span, "`{member}` lost a field's name") }
-            spelled: if jet_eval_build_field(field_type, "name") == .Val(.String(text)) -> text.copy() else -> { return jet_driver_build_host_failure(session, span, "`{member}` lost a field's type") }
             if sema_casing_ascii_has_case(written, SemaNameCase.Snake) != .Val(true) || written == "_" -> return jet_driver_meta_name_refusal(span, "meta.add_struct", "field", written, "snake_case, as in `count`")
-            source = "{source}    {written}: {spelled}\n"
+            spelled: if jet_eval_build_field(field_type, "name") == .Val(.String(text)) -> text.copy() else -> { return jet_driver_build_host_failure(session, span, "`{member}` lost a field's type") }
+            identity: if jet_eval_build_field(field_type, "identity") == .Val(.String(text)) -> text.copy() else -> { return jet_driver_build_host_failure(session, span, "`{member}` lost a field's type") }
+            ty: jet_driver_meta_type_text(identity) ?? return jet_driver_build_host_failure(session, span, "`{member}` lost a field's type")
+            heads := [String]{}
+            jet_driver_meta_type_heads(ty, heads)
+            // A name with no module names no declared type (a builtin).
+            loop head in heads {
+                if head.contains(".") && seen.get(head) == None -> return jet_driver_meta_type_refusal(span, written, spelled)
+            }
+            source = "{source}    {written}: {type_name(jet_driver_meta_type_renamed(ty, seen))}\n"
         }
         source = "{source}}}\n"
         home_module: if args[3] == .String(text) -> text.copy() else -> { return jet_driver_build_host_failure(session, span, "`{member}` lost its name argument") }
@@ -269,13 +283,15 @@ jet_driver_compiler_call: fn(session: &BuildSession, member: String, args: [TCom
         producer: jet_eval_build_session_input(args[4]) ?? return jet_driver_build_host_failure(session, span, "`{member}` lost its caller")
         authority: jet_eval_build_session_input(args[5]) ?? return jet_driver_build_host_failure(session, span, "`{member}` lost its Meta effects")
         reply: build_session_call(session, "compiler.add", [BuildSessionValue]{held, scope, producer, authority, BuildSessionValue.Text{value: name.copy()}}, Val(source), false, span.start, span.end)
-        if reply != .Value(_) -> return jet_driver_compiler_reply(session, reply, span)
-        // The new struct's `TypeId`: declared as `name` in the generated
-        // module `module`, which shares the package's namespace.
-        return JetEvalBuildReply.Value{value: TComptimeValue.Struct{type_name: "TypeId", fields: [TComptimeField]{
-            TComptimeField{name: "identity", value: TComptimeValue.String{value: "{home_module}.{name}"}},
-            TComptimeField{name: "name", value: TComptimeValue.String{value: name}},
-        }}}
+        if reply == .Value(_) {
+            // The new struct's `TypeId`: declared as `name` in the generated
+            // module `module`, which shares the package's namespace.
+            return JetEvalBuildReply.Value{value: TComptimeValue.Struct{type_name: "TypeId", fields: [TComptimeField]{
+                TComptimeField{name: "identity", value: TComptimeValue.String{value: "{home_module}.{name}"}},
+                TComptimeField{name: "name", value: TComptimeValue.String{value: name}},
+            }}}
+        }
+        return jet_driver_compiler_reply(session, reply, span)
     }
     // `meta.report(finding, at: c)` sends the finding's code, tier and texts
     // (sema sema_call_try_compiler_report), the file and span of the call
@@ -430,6 +446,19 @@ jet_driver_meta_name_refusal: fn(span: Span, call: String, kind: String, name: S
     })}
 }
 
+// A field's type `spelled` names a declared type the generated module
+// can't name: it shares the root module's namespace and imports nothing.
+jet_driver_meta_type_refusal: fn(span: Span, field: String, spelled: String) -> JetEvalBuildReply Never! {
+    JetEvalBuildReply.Failure{diagnostic: jet_eval_build_session_diagnostic(BuildSessionDiagnostic{
+        code: "E3502",
+        what: "`meta.add_struct` was given the type `{spelled}` for the field `{field}`, which the generated module can't see",
+        why: "The generated module shares the root module's namespace and imports nothing, so it sees only the types of that namespace, the types the prelude names and the structs this build made",
+        fix: "Give the field `{field}` a type the generated module sees, or declare the type it needs beside the root module",
+        start: span.start,
+        end: span.end,
+    })}
+}
+
 // `text` as exactly one type: read as the type of a struct's one field, it
 // parses with no diagnostic, the struct is the only item and has that one
 // field and nothing else, and the field's type spans the whole text, so
@@ -491,6 +520,7 @@ jet_driver_meta_type_heads: fn(ty: Type, heads: &[String]) Never! {
         .Tuple(fields) -> loop field in fields -> jet_driver_meta_type_heads(field.ty, heads)
         .FixedList(elem, _) -> jet_driver_meta_type_heads(elem, heads)
         .Union(members) -> loop member in members -> jet_driver_meta_type_heads(member, heads)
+        .Case(_, payload) -> jet_driver_meta_type_heads(payload, heads)
         .Int | .Float | .Bool | .String | .Char | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Quantity(_, _) | .Measure(_) -> {}
     }
 }
@@ -509,6 +539,7 @@ jet_driver_meta_type_renamed: fn(ty: Type, names: [String:String]) -> Type Never
         .Tuple(fields) -> return Type.Tuple{fields: loop field in fields -> TypeTupleField{name: field.name, ty: jet_driver_meta_type_renamed(field.ty, names)}}
         .FixedList(elem, len) -> return Type.FixedList{elem: jet_driver_meta_type_renamed(elem, names), len: len}
         .Union(members) -> return Type.Union{members: loop member in members -> jet_driver_meta_type_renamed(member, names)}
+        .Case(name, payload) -> return Type.Case{name: name.copy(), payload: jet_driver_meta_type_renamed(payload, names)}
         .Int | .Float | .Bool | .String | .Char | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Quantity(_, _) | .Measure(_) -> {}
     }
     // copy: a form that names no type by name stays as it is.

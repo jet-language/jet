@@ -704,7 +704,12 @@ generated module `name`, and returns the new struct's TypeId. A field's
 name may be computed, and the build host refuses one that is not one
 snake_case identifier (E0357). Its type is a TypeId, which only the
 compiler makes: a reflected field's `type`, the TypeId an earlier
-`meta.add_struct` returned, or one `meta.find_type` found. It uses
+`meta.add_struct` returned, or one `meta.find_type` found. The generated
+module shares the root module's namespace and imports nothing, so the
+field is written with the bare name each type has there: a type of the
+root module or its namespace, one the prelude names, or a struct this
+build made. A type it can't see, such as `geo.Point` of a module only the
+root imports, is refused when the build runs (E3502). It uses
 `Meta.Generate` and `Meta.Types`, but not `Meta.Raw`, since no code a build
 computes is written.
 `meta.find_type(text)` reads `text` as one type's spelling and gives its
