@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6793,
-    "rev": 101522,
+    "nextNum": 6794,
+    "rev": 101525,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -95722,6 +95722,56 @@
       "updated": "2026-11-13T14:36:49.720Z",
       "updatedBy": "Main",
       "criteriaLastN": 5
+    },
+    {
+      "id": "c0x3j5om",
+      "num": 6793,
+      "title": "Data-oriented compiler core: interned u32 ids, flat columns, per-phase arenas, no RC, under 1 GB",
+      "body": "Owner order (2026-11-13): \"i want one slot working the data oriented core immediately. this should be done carefully, systemically, and cleanly. it should be a fast intelligent cutover.\" This card is the work home for #5479 plan step 3 (#5479 c7) and the memory half of #5910. #5479 c7 and #5910 stay as the gates and are met from this card's evidence.\n\nWhat it is: every compiler name, symbol, type and function becomes an interned u32 id, with no String-keyed maps. The AST, types and IR become flat struct-of-arrays columns instead of per-node heap objects. Compiler data lives in per-phase arenas freed in bulk and carries no reference counts. Peak memory falls under 1 GB.\n\nWhy: G11Speed-5's 2026-11-13 profile (check RunColdContext on the core-b1 jet) has no symbol above 2.3% self time. The cost is spread across allocation, RC, string keys and copies, which this work removes. From today's numbers (8,510 lines/s on the c1 cell, about 5 of 32 threads busy, so roughly 590 µs CPU per line), the c7 gate of 5 µs per line is about a 100× CPU cut. The parallel pipeline (its own card) needs this card's arenas and ids to scale.\n\nHow: one slot (G11Speed-5). Design and census first, then slices in dependency order. Each slice is a whole cutover (greenfield: no parallel representation, no adapter layer, no flag) whose proof is identical output: the self-host chain fixed point plus goldens, ui and cases. The worker writes code and submits; Lander5 builds, runs the chain and lands. A slice that cannot be cut over whole is split by package boundary, never by keeping two representations.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Design and census first. The card plan records, for Compiler/ by package: every String-keyed map and set, every heap-allocated node type, every RC-carrying compiler struct, and every phase's data lifetime, each with counts and a reproducible census command. It also records the slice order with each slice's files and its proof. A short durable design note goes in Docs/spec (for example compiler-data.md) with the contract: id spaces, column layout, arena lifetimes, and the rule that compiler data holds no RC.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T14:47:18.201Z"
+        },
+        {
+          "n": 2,
+          "text": "Interning: every compiler name, symbol, type and function is a u32 id from one interner per id space. The census command from c1 shows zero String-keyed maps and sets in compiler data. Proof: that census, a self-host chain fixed point, and goldens, ui and cases identical to before.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T14:47:19.304Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G11"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-13T14:47:04.459Z",
+      "updated": "2026-11-13T14:47:19.304Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 2
     }
   ],
   "decisions": [
@@ -200930,6 +200980,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-13T14:47:19.304Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0x3j5om",
+      "note": "#2 Interning: every compiler name, symbol, type and function is"
+    },
+    {
+      "at": "2026-11-13T14:47:18.201Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0x3j5om",
+      "note": "#1 Design and census first. The card plan records, for Compiler"
+    },
+    {
+      "at": "2026-11-13T14:47:04.459Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0x3j5om",
+      "note": "Data-oriented compiler core: interned u32 ids, flat columns, per-phase arenas, no RC, under 1 GB"
+    },
     {
       "at": "2026-11-13T14:40:10.209Z",
       "by": "Main",
