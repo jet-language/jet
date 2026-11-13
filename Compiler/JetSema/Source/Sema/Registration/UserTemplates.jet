@@ -946,7 +946,9 @@ sema_user_rule_tier_check: fn(items: [Item], diagnostics: &[Diagnostic]) {
 sema_registration_expand_user_templates: fn(graph: &SemaRegistrationGraph) {
     if !graph.complete -> return
     refused := false
-    loop module_index in 0..<graph.modules.len() {
+    // A seeded module was checked and expanded when it was finalized; a rule
+    // body it declares still counts below, since it applies to every module.
+    loop module_index in graph.seeded..<graph.modules.len() {
         problems := [Diagnostic]{}
         sema_user_rule_tier_check(graph.modules[module_index].program.items, problems)
         if problems.len() > 0 -> refused = true
@@ -960,7 +962,7 @@ sema_registration_expand_user_templates: fn(graph: &SemaRegistrationGraph) {
         }
     }
     if !has_any_rule_body -> return
-    loop module_index in 0..<graph.modules.len() -> sema_user_rule_expand_module(graph, module_index)
+    loop module_index in graph.seeded..<graph.modules.len() -> sema_user_rule_expand_module(graph, module_index)
     sema_user_rule_expand_package(graph)
     // A rule's warning-severity `reject` reports without failing the graph.
     graph.complete = !sema_registration_blocking_error(graph.diagnostics)

@@ -11,7 +11,7 @@ use {
     jet_sema.[
         SemaBuildFacts, SemaComptimeFunctionResult, SemaComptimeItemValue, SemaForeignProviderInput,
         SemaRegistrationForeignHandleFacts, SemaRegistrationHostHooks, SemaRegistrationImportEdge,
-        SemaRegistrationModuleInput, SemaRegistrationPackagePolicy, SemaSourceOrigin, SemaSourceSegment,
+        SemaRegistrationModule, SemaRegistrationModuleInput, SemaRegistrationPackagePolicy, SemaSourceOrigin, SemaSourceSegment,
         sema_collect_comptime_declarations, sema_finalize_registration_graph, sema_registration_prepare_graph,
     ]
 }
@@ -34,7 +34,7 @@ core_failure_record_diagnostics: fn(source: String, module_identity: String) -> 
     facts: SemaBuildFacts{package_name: package_identity.copy(), package_version: "0.1.0", os: "linux", profile: "dev", stamp_git: None, stamp_dirty: false, stamp_toolchain: "fixture", stamp_at: ""}
     segment: SemaSourceSegment{generated: Span{start: 0, end: source.len()}, source_file: file.copy(), source_start: 0, line_starts: [Int]{0}, origin: SemaSourceOrigin.Snapshot}
     input: SemaRegistrationModuleInput{package_identity: package_identity.copy(), module_identity: module_identity.copy(), module_name: "fixture", core_source_alias: "", module_path: "fixture.jet", source_file: file.copy(), source_segments: [SemaSourceSegment]{segment}, source_origin: SemaSourceOrigin.Snapshot, program: parsed.program.move(), foreign_handles: [SemaRegistrationForeignHandleFacts]{}, source: source.copy()}
-    graph := sema_registration_prepare_graph([SemaRegistrationModuleInput]{input, effects}, [SemaRegistrationImportEdge]{}, package_identity, module_identity, effects.module_identity, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), facts, false, compiler_threads_single()) ?? panic("registration failed {err}: {source}")
+    graph := sema_registration_prepare_graph([SemaRegistrationModuleInput]{input, effects}, [SemaRegistrationModule]{}, [SemaRegistrationImportEdge]{}, package_identity, module_identity, effects.module_identity, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), facts, false, compiler_threads_single()) ?? panic("registration failed {err}: {source}")
     hooks: Shared{SemaRegistrationHostHooks{numeric_unit_conversion_exact: None}}
     // Declaration checking loans the graph to its stage, which returns it.
     stage := sema_collect_comptime_declarations(graph, [SemaRegistrationPackagePolicy]{}, compiler_threads_single(), None) ?? panic("declaration checking failed {err}: {source}")

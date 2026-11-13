@@ -14,10 +14,19 @@ use jet_foundation.[
     type_identity_equal,
 ]
 
+// A seeded module was canonicalized when it was finalized: its declarations
+// and its import bindings' symbols already carry canonical keys, so it takes
+// no keys and no pass.
 sema_registration_canonicalize_qualified_types: fn(graph: &SemaRegistrationGraph) Never! {
     module_keys := [[String:Type]]{}
-    loop module_index in 0..<graph.modules.len() -> module_keys.push(sema_registration_module_qualified_keys(graph, module_index))
     loop module_index in 0..<graph.modules.len() {
+        if module_index < graph.seeded {
+            module_keys.push([String:Type]{})
+        } else {
+            module_keys.push(sema_registration_module_qualified_keys(graph, module_index))
+        }
+    }
+    loop module_index in graph.seeded..<graph.modules.len() {
         keys: module_keys[module_index]
         if keys.len() > 0 {
             sema_registration_canonical_functions(graph.modules[module_index].functions, keys)

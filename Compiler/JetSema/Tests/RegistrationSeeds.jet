@@ -1,0 +1,94 @@
+// Graph preparation takes seeded module rows, which come registered (the
+// precompiled Core record's, rebased to the graph): they hold the first module
+// indexes, keep the rows registration gave them, and the input modules after
+// them register against them.
+use {
+    jet_parser.[parse_source]
+    jet_sema.[
+        SemaBuildFacts, SemaForeignProviderInput, SemaRegistrationForeignHandleFacts,
+        SemaRegistrationImportEdge, SemaRegistrationModule,
+        SemaRegistrationModuleInput, SemaSourceOrigin, SemaSourceSegment,
+        sema_registration_module_index, sema_registration_prepare_graph,
+    ]
+    jet_driver.[jet_driver_canonical_effect_module]
+    jet_foundation.[Span, compiler_threads_single, jet_target_machine_hosted]
+}
+
+SEEDS_EFFECTS: "IO: struct {{\n    impl Effect {{}}\n}}\nPanic: struct {{\n    impl Effect {{}}\n}}\n"
+SEEDS_MAIN: "Point: struct {{\n    x: Int\n}}\n\nmain: fn() {{\n}}\n"
+
+registration_seeds_input: fn(source: String) -> SemaRegistrationModuleInput {
+    parsed := parse_source(source.bytes())
+    assert_eq(parsed.diagnostics.len(), 0)
+    segment: SemaSourceSegment{generated: Span{start: 0, end: source.len()}, source_file: "main.jet", source_start: 0, line_starts: [Int]{0}, origin: SemaSourceOrigin.Snapshot}
+    SemaRegistrationModuleInput{package_identity: "seeds", module_identity: "seeds::main", module_name: "main", core_source_alias: "", module_path: "main.jet", source_file: "main.jet", source_segments: [SemaSourceSegment]{segment}, source_origin: SemaSourceOrigin.Snapshot, program: parsed.program.move(), foreign_handles: [SemaRegistrationForeignHandleFacts]{}, source: source}
+}
+
+registration_seeds_facts: fn() -> SemaBuildFacts {
+    SemaBuildFacts{package_name: "seeds", package_version: "0.1.0", os: "linux", profile: "dev", stamp_git: None, stamp_dirty: false, stamp_toolchain: "fixture", stamp_at: ""}
+}
+
+#Test("seeded rows take the first module indexes and keep their registration") {
+    effects := jet_driver_canonical_effect_module(SEEDS_EFFECTS) ?? panic("the canonical effect source does not parse")
+    effect_identity: effects.module_identity.copy()
+    first := sema_registration_prepare_graph([SemaRegistrationModuleInput]{registration_seeds_input(SEEDS_MAIN), effects}, [SemaRegistrationModule]{}, [SemaRegistrationImportEdge]{}, "seeds", "seeds::main", effect_identity, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), registration_seeds_facts(), false, compiler_threads_single())
+    assert_eq(first.seeded, 0)
+    first_complete: first.complete
+    first_diagnostics: first.diagnostics.len()
+    module_count: first.modules.len()
+    rows := first.modules.move()
+    first.modules = [SemaRegistrationModule]{}
+    seeds := [SemaRegistrationModule]{}
+    loop rows.len() > 0 {
+        row := rows.pop() ?? break
+        if row.module_identity == "seeds::main" -> seeds.push(row)
+    }
+    assert_eq(seeds.len(), 1)
+    nominals: seeds[0].nominals.len()
+    impls: seeds[0].impls.len()
+    functions: seeds[0].functions.len()
+    assert(nominals > 0)
+    again := jet_driver_canonical_effect_module(SEEDS_EFFECTS) ?? panic("the canonical effect source does not parse")
+    second := sema_registration_prepare_graph([SemaRegistrationModuleInput]{again}, seeds, [SemaRegistrationImportEdge]{}, "seeds", "seeds::main", effect_identity, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), registration_seeds_facts(), false, compiler_threads_single())
+    assert_eq(second.seeded, 1)
+    // The same modules (the retained Prelude error module among them), the
+    // seeded one first.
+    assert_eq(second.modules.len(), module_count)
+    assert_eq(second.modules[0].module_identity, "seeds::main")
+    assert_eq(sema_registration_module_index(second, "seeds::main") ?? -1, 0)
+    assert_eq(sema_registration_module_index(second, effect_identity) ?? -1, 1)
+    // The seeded row keeps exactly the rows it registered with: no pass
+    // registered, attached or injected into it again.
+    assert_eq(second.modules[0].nominals.len(), nominals)
+    assert_eq(second.modules[0].impls.len(), impls)
+    assert_eq(second.modules[0].functions.len(), functions)
+    // The input modules register against the seed as they did beside its
+    // source.
+    assert_eq(second.complete, first_complete)
+    assert_eq(second.diagnostics.len(), first_diagnostics)
+}
+
+#Test("a seed and an input with one identity are one module defined twice") {
+    effects := jet_driver_canonical_effect_module(SEEDS_EFFECTS) ?? panic("the canonical effect source does not parse")
+    effect_identity: effects.module_identity.copy()
+    first := sema_registration_prepare_graph([SemaRegistrationModuleInput]{registration_seeds_input(SEEDS_MAIN), effects}, [SemaRegistrationModule]{}, [SemaRegistrationImportEdge]{}, "seeds", "seeds::main", effect_identity, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), registration_seeds_facts(), false, compiler_threads_single())
+    module_count: first.modules.len()
+    rows := first.modules.move()
+    first.modules = [SemaRegistrationModule]{}
+    seeds := [SemaRegistrationModule]{}
+    loop rows.len() > 0 {
+        row := rows.pop() ?? break
+        if row.module_identity == "seeds::main" -> seeds.push(row)
+    }
+    again := jet_driver_canonical_effect_module(SEEDS_EFFECTS) ?? panic("the canonical effect source does not parse")
+    second := sema_registration_prepare_graph([SemaRegistrationModuleInput]{registration_seeds_input(SEEDS_MAIN), again}, seeds, [SemaRegistrationImportEdge]{}, "seeds", "seeds::main", effect_identity, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), registration_seeds_facts(), false, compiler_threads_single())
+    assert_eq(second.seeded, 1)
+    // The duplicate input adds no row.
+    assert_eq(second.modules.len(), module_count)
+    assert(!second.complete)
+    found := false
+    loop diagnostic in second.diagnostics {
+        if diagnostic.code == "E0105" && diagnostic.what.contains("seeds::main") -> found = true
+    }
+    assert(found)
+}
