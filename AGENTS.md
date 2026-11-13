@@ -92,7 +92,12 @@ files, or one-off run artifacts.
 
 ## Tooling in other languages
 
-Repository tooling is Jet. New tooling may be written first in another
+Repository-management tooling is Jet: the scripts under `Tools/agent/`,
+`Tools/release/` and `Tools/ci/`, which hold the landing, chain, census,
+lane-check and release gates and generators. Everything else (editor
+extensions, the gauntlet, perf, packaging, agent-eval, peer programs, test
+and benchmark subjects) stays in the language its host needs and is out of
+scope. New tooling in scope may be written first in another
 language and proven working; then its Jet twin is written, in the best Jet
 that does the job rather than a copy of the original's exact output, and
 proven to do the same job. The pair is a gauntlet entry: an entry under
@@ -112,20 +117,15 @@ names in `tool.token_gaps`, and clarity of reasoning outranks terseness. Then
 the repository switches to the Jet twin and keeps the original only as the
 entry's reference in the entry's directory. `Tools/gauntlet/PortBars.jet`
 judges every tool entry on all four bars. `Tools/agent/ScriptPairing.jet
---check`, which every lane check runs,
-refuses a change that adds a script in another language without its pair,
-or that switches an entry before it passes every bar; browser-executed
-JavaScript, Nix files, test and example subjects, and the peer programs a
-gauntlet comparison runs Jet against (optimization fixtures' `peer-*`
-programs, an axis's non-Jet rails) are exempt. A library counts as covered
-once the entries' drivers (`Tools/gauntlet/harness/drivers/<entry>.mjs`)
-import every export it has, or, when no driver imports it, once every tool
-script that imports it, directly or through other importers, is paired or
-covered (its job is part of each importer's, so it is replaced only when all
-of them are); a `*.test.mjs` counts once its imports are all paired or
-covered. `--census` lists every script in another language in the checkout
-and its pair, or what keeps it unpaired: the exports a library's drivers do
-not yet import, or its importers that are neither paired nor covered.
+--check`, which every lane check runs, refuses a change that adds an
+in-scope script in another language without its pair, or that switches an
+in-scope entry before it passes every bar; Nix files are not scripts. A
+library counts as covered once every in-scope tool script that imports it,
+directly or through other importers, is paired or covered (its job is part
+of each importer's, so it is replaced only when all of them are); a
+`*.test.mjs` counts once its imports are all paired or covered. `--census`
+lists every script in another language in the checkout as paired, covered,
+unpaired (with the importers that keep it so) or out of scope.
 
 ## Greenfield cutover
 
