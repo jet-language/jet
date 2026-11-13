@@ -1,0 +1,27 @@
+# A text spelling of a dependency type in a generated module.
+# `meta.add_struct` writes its fields into a generated module that imports
+# nothing, so a field typed `geo.Point` or `[geo.Point]` names a module that
+# is not in that module's scope. Sema reports the field's type as unknown
+# (E0119) where the generated module declares it, and the IR builder never
+# meets the unresolved type. A hand-written module that imports `geo` names
+# the same type and runs.
+fixture: a_generated_struct_names_a_module_type_only_in_scope.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet build single/main.jet
+exit: 1
+stderr: ~ "There's no type called `geo.Point`" # the field's type names no module in scope
+stderr: ~ "jet-lang.dev/e/E0119" # the unknown type code
+stderr: !~ "internal compiler error" # sema reports it before the IR builder
+file: single/.jet/build/main absent
+step: jet build list/main.jet
+exit: 1
+stderr: ~ "There's no type called `geo.Point`" # the list's element type names no module in scope
+stderr: ~ "jet-lang.dev/e/E0119" # the unknown type code
+stderr: !~ "internal compiler error" # sema reports it before the IR builder
+file: list/.jet/build/main absent
+step: jet build imported/main.jet
+exit: 0
+step: {work}/imported/.jet/build/main
+exit: 0
+stdout: = "9\n"

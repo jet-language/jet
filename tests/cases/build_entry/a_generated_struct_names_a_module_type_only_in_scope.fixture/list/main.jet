@@ -1,0 +1,15 @@
+// The same spelling inside a list type: `[geo.Point]`.
+use geo
+
+build: fn(b: Build) {
+    app: b.add_executable("app", ["main.jet"], [])
+    meta: b.compiler(app)
+    fields := [CompilerField]{CompilerField{name: "at", type: "[geo.Point]"}}
+    meta.add_struct("Pin", fields, scope: "pin")
+    b.default(app)
+}
+
+run: fn() {
+    pin: Pin{at: [geo.Point]{geo.Point{x: 9}}}
+    print(pin.at[0].x)
+}

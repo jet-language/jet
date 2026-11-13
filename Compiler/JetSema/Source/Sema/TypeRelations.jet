@@ -34,6 +34,7 @@ use jet_foundation.[
     core_bare_source_declared,
     core_bare_source_module,
     core_module_export,
+    core_module_for_alias,
     core_root_type,
     core_type_modules,
     foundation_named_type,
@@ -785,12 +786,13 @@ sema_type_alias_cycles_check: fn(graph: &SemaRegistrationGraph) Never! {
 // no primitive, type parameter, associated type, compiler or Core carrier
 // the checker types itself, compiler-owned bound trait, Core export, or
 // declared or imported type
-// (#6294). Core source, an incomplete graph and qualified spellings
-// (`json.Value`, which resolve through their own owner checks) are never
-// judged here.
+// (#6294). A qualified spelling is judged by its module
+// (sema_type_qualified_name_unknown). Core source and an incomplete graph are
+// never judged here.
 sema_type_written_name_unknown: fn(graph: SemaRegistrationGraph, caller: Int, name: String, generic_names: [String]) -> Bool {
     if !graph.complete || caller < 0 || sema_module_is_core_source(graph.modules[caller].module_identity) -> return false
-    if name == "" || name.contains(".") || name.contains(":") || name.contains("$") || generic_names.contains(name) -> return false
+    if name == "" || name.contains(":") || name.contains("$") || generic_names.contains(name) -> return false
+    if name.split_once(".") == .Val(qualified) -> return sema_type_qualified_name_unknown(graph, caller, name, qualified.before, qualified.after)
     if foundation_named_type(name) != (Type.Named{name: name}) -> return false
     if name == "Self" || name == "Shared" || name == "Unit" || name == "Never" || name == "Err" || name == "Dyn" || name == "_" || name == "()" || name == "str" || name == "bytes" || name == "Complex" -> return false
     if sema_reserved_type_name(name) || core_root_type(name) || sema_registration_core_builtin_is_name(name) || graph.compiler_builtin_rows.get(name) != None || sema_type_builtin_trait_symbol(name) != None -> return false
@@ -800,6 +802,20 @@ sema_type_written_name_unknown: fn(graph: SemaRegistrationGraph, caller: Int, na
     if sema_registration_unit_fact_for_type(graph, Type.Named{name: name}) != None -> return false
     if core_type_modules(name).len() > 0 || SEMA_TYPE_CORE_KNOWN_NAMES.contains(name) -> return false
     !sema_type_graph_declares_assoc_type(graph, name)
+}
+
+// Whether qualified type name `name`, `alias.leaf`, written in module row
+// `caller`, names nothing because no module called `alias` is in scope
+// there: the caller neither imports nor declares `alias`, and it is no Core
+// module's name. A spelling whose module is in scope is that module's to
+// resolve, and a capitalized head (`Self.Item`) is a type's, not a module's.
+sema_type_qualified_name_unknown: fn(graph: SemaRegistrationGraph, caller: Int, name: String, alias: String, leaf: String) -> Bool {
+    if alias == "" || leaf == "" || leaf.contains(".") || alias == "core" || sema_checked_module_uppercase(alias) -> return false
+    if sema_type_graph_lookup_symbol_at(graph, caller, name) != None || core_module_for_alias(alias) != None -> return false
+    loop import in graph.modules[caller].imports {
+        if import.declaration.alias == alias -> return false
+    }
+    sema_registration_lookup_name_at(graph, caller, graph.modules[caller].module_identity, alias) == None
 }
 
 // The rest of Rust `core_type_known` and the `is_core_generic` heads:

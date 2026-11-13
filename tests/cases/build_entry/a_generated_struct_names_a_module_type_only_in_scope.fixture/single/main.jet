@@ -1,0 +1,16 @@
+// The generated module `pin` imports nothing, so the field type `geo.Point`
+// the build spells names no module in its scope.
+use geo
+
+build: fn(b: Build) {
+    app: b.add_executable("app", ["main.jet"], [])
+    meta: b.compiler(app)
+    fields := [CompilerField]{CompilerField{name: "at", type: "geo.Point"}}
+    meta.add_struct("Pin", fields, scope: "pin")
+    b.default(app)
+}
+
+run: fn() {
+    pin: Pin{at: geo.Point{x: 9}}
+    print(pin.at.x)
+}
