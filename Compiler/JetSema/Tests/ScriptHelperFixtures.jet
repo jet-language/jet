@@ -1,0 +1,66 @@
+// A script's variables get the types its own statements give them, from one
+// check of the generated `run: fn` (sema_script_entry_local_types), and a
+// `:=` binding is marked as one a function may change. Functions that name
+// the variables don't stop the probe: their reports are dropped.
+use {
+    jet_foundation.[Span, Type, compiler_threads_single, jet_target_machine_hosted, type_name, type_unqualified_nominals]
+    jet_parser.[parse_source]
+    jet_driver.[jet_driver_canonical_effect_module]
+    jet_sema.[
+        SemaBuildFacts, SemaForeignProviderInput, SemaRegistrationForeignHandleFacts, SemaRegistrationImportEdge,
+        SemaRegistrationModuleInput, SemaRegistrationPackagePolicy, SemaScriptVariable, SemaSourceOrigin, SemaSourceSegment,
+        sema_collect_comptime_declarations, sema_registration_prepare_graph, sema_script_entry, sema_script_entry_local_types,
+    ]
+}
+
+script_helper_types: fn(source: String) -> [String:SemaScriptVariable] {
+    parsed := parse_source(source.bytes())
+    if parsed.diagnostics.len() != 0 -> panic("script fixture did not parse: {source}")
+    program := parsed.program.move()
+    sema_script_entry(program)
+    // copy: registration reads the program's own list too
+    names := program.entry_locals.copy()
+    effects: jet_driver_canonical_effect_module("IO: struct {{\n    impl Effect {{}}\n}}\nPanic: struct {{\n    impl Effect {{}}\n}}\n") ?? panic("canonical effect source did not parse")
+    file: "user/script.jet"
+    facts: SemaBuildFacts{package_name: "user", package_version: "0.1.0", os: "linux", profile: "dev", stamp_git: None, stamp_dirty: false, stamp_toolchain: "fixture", stamp_at: ""}
+    segment: SemaSourceSegment{generated: Span{start: 0, end: source.len()}, source_file: file, source_start: 0, line_starts: [Int]{0}, origin: SemaSourceOrigin.Snapshot}
+    input: SemaRegistrationModuleInput{package_identity: "user", module_identity: "user/script", module_name: "script", core_source_alias: "", module_path: "script.jet", source_file: file, source_segments: [SemaSourceSegment]{segment}, source_origin: SemaSourceOrigin.Snapshot, program: program.move(), foreign_handles: [SemaRegistrationForeignHandleFacts]{}, source: source}
+    graph := sema_registration_prepare_graph([SemaRegistrationModuleInput]{input, effects}, [SemaRegistrationImportEdge]{}, "user", "user/script", effects.module_identity, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), facts, false, compiler_threads_single())
+    stage := sema_collect_comptime_declarations(graph, [SemaRegistrationPackagePolicy]{}, compiler_threads_single(), None)
+    sema_script_entry_local_types(stage, names)
+}
+
+script_helper_variable: fn(variables: [String:SemaScriptVariable], name: String) -> SemaScriptVariable {
+    variables.get(name) ?? panic("the probe gave `{name}` no row")
+}
+
+#Test("script variables take the types the script's statements give them") {
+    counted: script_helper_types(`limit: 3
+count := 0
+note: fn(word: String) {
+    count += 1
+    print("{count}/{limit} {word}")
+}
+note("apple")
+note("pear")
+print("done: {count}")
+`)
+    assert_eq(counted.len(), 2)
+    assert(script_helper_variable(counted, "limit").ty == Type.Int, "`limit: 3` is an Int")
+    assert(!script_helper_variable(counted, "limit").mutable, "`limit: 3` is fixed")
+    assert(script_helper_variable(counted, "count").ty == Type.Int, "`count := 0` is an Int")
+    assert(script_helper_variable(counted, "count").mutable, "`count := 0` may change")
+
+    shaped: script_helper_types(`Point: struct { x: Int, y: Int }
+origin: Point{x: 1, y: 2}
+words := [String]{}
+ratio: 0.5
+words.push("a")
+show: fn() { print("{origin.x} {words.len()} {ratio}") }
+show()
+`)
+    assert_eq(type_name(type_unqualified_nominals(script_helper_variable(shaped, "origin").ty)), "Point")
+    assert_eq(type_name(type_unqualified_nominals(script_helper_variable(shaped, "words").ty)), "[String]")
+    assert(script_helper_variable(shaped, "words").mutable, "`words := …` may change")
+    assert_eq(type_name(script_helper_variable(shaped, "ratio").ty), "Float")
+}

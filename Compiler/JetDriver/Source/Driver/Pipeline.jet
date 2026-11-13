@@ -3909,6 +3909,27 @@ jet_driver_loaded_identity_counts: fn(modules: [JetDriverLoadedModule]) -> [Stri
     counts
 }
 
+// Each loaded package's authority, runtime ceiling and edition. The
+// organization's denial rides on the root package's row, the row whose
+// modules a package denial binds.
+jet_driver_registration_package_policies: fn(request: JetDriverCompileRequest, load: JetDriverLoadResult) -> [SemaRegistrationPackagePolicy] {
+    package_policies := [SemaRegistrationPackagePolicy]{}
+    loop package in load.packages {
+        root: package.identity == load.package_identity
+        package_policies.push(SemaRegistrationPackagePolicy{
+            package_identity: package.identity,
+            authority_allow: package.authority_allow,
+            authority_deny: package.authority_deny,
+            authority_needs: package.authority_needs,
+            runtime_ceiling: package.runtime_ceiling,
+            edition: package.edition,
+            organization_deny: if root -> request.organization_deny.copy() else -> [String]{},
+            organization_source: if root -> request.organization_source.copy() else -> "",
+        })
+    }
+    package_policies
+}
+
 // The checked front-end stages every compile runs.
 jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetDriverKeepGoingLog, owned_load: &&JetDriverLoadResult, checked_projection: Bool, capture: &JetDriverCheckedProjectionCapture) -> JetDriverCompileResult {
     load := owned_load.move()
@@ -3970,22 +3991,7 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
     canonical_effect_module_identity := canonical_effect_module.module_identity
     registration_inputs.push(canonical_effect_module)
     registration_module_count := registration_inputs.len()
-    package_policies := [SemaRegistrationPackagePolicy]{}
-    loop package in load.packages {
-        // The organization's denial rides on the root package's row, the
-        // row whose modules a package denial binds.
-        root: package.identity == load.package_identity
-        package_policies.push(SemaRegistrationPackagePolicy{
-            package_identity: package.identity,
-            authority_allow: package.authority_allow,
-            authority_deny: package.authority_deny,
-            authority_needs: package.authority_needs,
-            runtime_ceiling: package.runtime_ceiling,
-            edition: package.edition,
-            organization_deny: if root -> request.organization_deny.copy() else -> [String]{},
-            organization_source: if root -> request.organization_source.copy() else -> "",
-        })
-    }
+    package_policies: jet_driver_registration_package_policies(request, load)
     // #4319: the graph counts its lookups only while a trace is open.
     counting := false
     if request.trace_sink == .Val(sink) {

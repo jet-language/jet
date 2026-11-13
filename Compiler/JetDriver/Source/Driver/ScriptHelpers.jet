@@ -1,0 +1,59 @@
+// A script's functions may use the script's variables: each such function
+// takes the variables it reaches as extra parameters, whose types come from
+// one probe check of the entry's statements before the real registration
+// (sema_script_entry_local_types).
+use {
+    jet_foundation.[Diagnostic, Expr, Item, TargetMachine, ast_visit_body]
+    jet_sema.[SemaForeignProviderInput, SemaRegistrationPackagePolicy, SemaScriptVariable, sema_collect_comptime_declarations, sema_registration_prepare_graph, sema_script_entry_local_types]
+}
+
+// The script variables of the entry file that a body of one of its other
+// top-level functions names, in the order they are first named. The scan
+// ignores scopes, so a function's own local of the same name also counts:
+// the list only decides whether the probe runs. Empty for a file that is no
+// script or whose functions name none.
+jet_driver_script_named_variables: fn(load: JetDriverLoadResult) -> [String] Never! {
+    named := [String]{}
+    loop loaded_index in 0..<load.modules.len() {
+        if load.modules[loaded_index].module_identity != load.entry_module_identity -> next
+        locals: load.modules[loaded_index].program.entry_locals
+        if locals.len() == 0 -> return named
+        loop item in load.modules[loaded_index].program.items {
+            if item == .Func(function) && function.name != "run" {
+                ast_visit_body(function.body, fn(expression: Expr) { jet_driver_script_note_variable(named, locals, expression) }, true)
+            }
+        }
+        return named
+    }
+    named
+}
+
+jet_driver_script_note_variable: fn(named: &[String], locals: [String], expression: Expr) Never! {
+    if expression == .Ident(name, _, _) {
+        // copy: the expression keeps its name; the list owns one per variable
+        if locals.contains(name) && !named.contains(name) -> named.push(name.copy())
+    }
+}
+
+// Each script variable in `names` as the entry's own statements bind it,
+// from a probe registration and declaration pass over copies of the loaded
+// programs. `load` keeps its programs and diagnostics: the probe's reports
+// are dropped, and the real registration that follows reports every one.
+jet_driver_script_local_types: fn(
+    request: JetDriverCompileRequest,
+    load: &JetDriverLoadResult,
+    providers: [SemaForeignProviderInput],
+    target_machine: TargetMachine,
+    package_policies: [SemaRegistrationPackagePolicy],
+    names: [String],
+) -> [String:SemaScriptVariable] {
+    none: [String:SemaScriptVariable]{}
+    dropped := [Diagnostic]{}
+    inputs := jet_driver_registration_module_inputs(load.modules, load.source_units, load.source_files, load.packages, providers, dropped, request.core_sources, false) ?? return none
+    canonical := jet_driver_canonical_effect_module(request.canonical_effect_source) ?? return none
+    canonical_identity := canonical.module_identity
+    inputs.push(canonical)
+    graph := sema_registration_prepare_graph(inputs, load.imports, load.package_identity, load.entry_module_identity, canonical_identity, providers, target_machine, jet_driver_build_facts(load, request, target_machine), false, request.compiler_threads)
+    stage := sema_collect_comptime_declarations(graph, package_policies, request.compiler_threads, None)
+    sema_script_entry_local_types(stage, names)
+}

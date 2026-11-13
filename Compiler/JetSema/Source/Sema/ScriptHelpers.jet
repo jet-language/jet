@@ -1,0 +1,76 @@
+// A script's functions may use the script's variables: each such function
+// takes the variables it reaches as extra parameters. Their types are the
+// types the script's own statements give them, which only a check of the
+// generated `run: fn` (sema_script_entry) knows.
+use jet_foundation.[Diagnostic, FnBody, Item, TFuncKind, TTypeDef, Type, body_stmt, compiler_transfer_rows]
+
+// A script variable as the script's own statements bind it: its checked type,
+// and whether it is a `:=` binding a function may change.
+SemaScriptVariable: struct {
+    ty: Type
+    mutable: Bool
+}
+
+// Each script variable in `names` that the entry's top-level statements bind,
+// from one check of the entry's generated `run: fn` against the declaration
+// pass `stage`. The check's reports are dropped: a call to a function whose
+// extra parameters aren't written yet is refused there, and the real check
+// reports it. A name whose binding didn't check has no row. `stage` is the
+// probe's own and is used up.
+sema_script_entry_local_types: fn(stage: &&SemaComptimeDeclarationStage, names: [String]) -> [String:SemaScriptVariable] {
+    found := [String:SemaScriptVariable]{}
+    declarations := stage
+    taken := declarations.graph.move()
+    declarations.graph = None
+    graph := taken.move() ?? return found
+    module_index: sema_registration_module_index(graph, graph.entry_module_identity) ?? return found
+    item_index: sema_script_entry_run_item(graph.modules[module_index].program.items) ?? return found
+    types := [TTypeDef]{}
+    loop row in 0..<declarations.modules.len() -> compiler_transfer_rows<TTypeDef>(types, declarations.modules[row].declarations.type_defs)
+    scope := sema_check_pass_environment(graph, types, SemaComptimeBodyValues{})
+    program := SemaProgramTables{
+        registration_graph: scope.registration_graph.move(),
+        checked_types: scope.checked_types.move(),
+        checked_type_rows: scope.checked_type_rows.move(),
+        checked_type_name_slots: scope.checked_type_name_slots.move(),
+        checked_type_name_rows: scope.checked_type_name_rows.move(),
+        boxed_edges: scope.boxed_edges.move(),
+        copy_facts: scope.copy_facts.move(),
+    }
+    scope.registration_graph = None
+    scope.checked_types = [TTypeDef]{}
+    scope.checked_type_rows = [String:Int]{}
+    scope.checked_type_name_slots = [String:Int]{}
+    scope.checked_type_name_rows = [[Int]]{}
+    scope.boxed_edges = [String:[String]]{}
+    scope.copy_facts = sema_copy_facts_table_empty()
+    scopes := sema_check_module_summary_scope_init(scope, program, module_index)
+    sema_scope_environment_enter_module(scope, program, module_index, SemaComptimeBodyValues{})
+    job: SemaBodyJob.TopLevel{item_index: item_index}
+    owner_id: sema_check_registered_function_id(job, module_index, scope, program)
+    dropped := [Diagnostic]{}
+    calls := [SemaCallSiteFact]{}
+    requests := [SemaComptimeRequest]{}
+    references := [SemaNameReferenceFact]{}
+    checked := sema_function_check_registered(job, module_index, sema_function_memory_plan_new(), None, owner_id, TFuncKind.TopLevel, false, scope, program, scopes, None, dropped, calls, requests, references)
+    function: checked.value ?? return found
+    sema_script_entry_bound_types(function, names, found)
+    found
+}
+
+// The row of the generated `run: fn` among an entry file's items.
+sema_script_entry_run_item: fn(items: [Item]) -> Int? Never! {
+    loop (index, item) in items {
+        if item == .Func(function) && function.name == "run" && function.external_type == None -> return Val(index)
+    }
+    None
+}
+
+// Each top-level binding of `function` named in `names`.
+sema_script_entry_bound_types: fn(function: FnBody, names: [String], found: &[String:SemaScriptVariable]) Never! {
+    loop index in function.body {
+        if body_stmt(function.tree, index) == .Let(local, _, _, _, _, _) {
+            if names.contains(local.name) -> found[local.name] = SemaScriptVariable{ty: local.ty, mutable: local.mutable}
+        }
+    }
+}
