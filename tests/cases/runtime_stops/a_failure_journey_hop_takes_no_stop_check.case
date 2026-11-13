@@ -1,0 +1,47 @@
+# Building a failure's Err value and recording its journey hops only
+# allocates and copies texts (Err.jet, JourneyTLS.jet), so none of those
+# runtime calls is followed by a stop poll and its stop edge (JetIR Build.jet
+# ir_route_can_stop). `parse` makes the Err and its journey origin and polls
+# nothing. `relay` adds a hop and keeps only the poll after its call to
+# `parse`. `noted` adds a context frame and keeps the polls after its calls to
+# `relay` and to the Int's text conversion. The failure still reports every hop
+# on every tier. At --optimize=none `jet inspect decisions` prints each
+# function's slot IR twice, before and after the passes, so each poll counts
+# twice.
+fixture: fixtures/a_failure_journey_hop_takes_no_stop_check
+env: NO_COLOR=1
+step: jet inspect decisions --optimize=none main.jet
+env: JET_OPT_DUMP=parse
+exit: 0
+stdout: ~ "jet_rt_record_new_jet_err (" # the Err value
+stdout: ~ "call_runtime jet_journey_origin (" # its journey origin
+stdout: count "jet_ir_stop_poll" = 0 # neither call is followed by a poll
+step: jet inspect decisions --optimize=none main.jet
+env: JET_OPT_DUMP=relay
+exit: 0
+stdout: ~ "call_runtime jet_journey_frame_text (" # relay's hop
+stdout: count "jet_ir_stop_poll" = 2 # only the poll after the call to parse, printed twice
+step: jet inspect decisions --optimize=none main.jet
+env: JET_OPT_DUMP=noted
+exit: 0
+stdout: ~ "jet_err_with_context_frame (" # noted's context frame
+stdout: count "jet_ir_stop_poll" = 4 # the polls after the calls to relay and jet_rt_int_to_string, printed twice
+step run: jet run main.jet
+exit: 1
+stdout: = "10\n"
+stderr: ~ "context (main.jet:14): relaying 0" # the context frame noted adds
+stderr: ~ "failed here: parse (main.jet:3)" # the Err's origin
+stderr: ~ "Trail [E3002] (3 hops via ?, origin first):" # every hop is recorded
+stderr: ~ "1. relay (main.jet:9)" # relay's hop
+stderr: ~ "2. noted (main.jet:14) — relaying 0" # noted's hop with its note
+stderr: ~ "3. run (main.jet:20)" # run's hop
+step release: jet run --release main.jet
+exit: 1
+stdout: == run
+stderr: == run
+step: jet build main.jet
+exit: 0
+step aot: built
+exit: 1
+stdout: == run
+stderr: == run

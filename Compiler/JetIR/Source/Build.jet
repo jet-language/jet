@@ -2507,6 +2507,9 @@ ir_route_can_stop: fn(symbol: String) -> Bool Never! {
     if symbol == {
         "jet_rt_alloc" | "jet_rt_free" | "jet_rt_mem_move" | "jet_rt_mem_fill" | "jet_int_owned_to_i64" | "jet_int_owned_from_i64" -> false
         "jet_rt_string_from_static" | "jet_rt_string_byte_len" | "jet_rt_string_compare" | "jet_rt_string_clear" | "jet_journey_reset" -> false
+        // A failure's Err value and its journey hops (ir_journey_origin, ir_journey_hop)
+        // only allocate and copy texts (Err.jet, JourneyTLS.jet).
+        "jet_rt_record_new_jet_err" | "jet_err_from_message" | "jet_err_with_context_frame" | "jet_journey_origin" | "jet_journey_frame_text" -> false
         "jet_rt_cleanup_enter" | "jet_rt_cleanup_leave" | "jet_rt_session_propagate" | "jet_rt_session_status" -> false
         "jet_ctx_push_deadline" | "jet_ctx_pop_deadline" | "jet_ctx_deadline_present" | "jet_ctx_deadline_ms" | "jet_ctx_thread" -> false
         "jet_term_mode_enter" | "jet_term_mode_leave" -> false

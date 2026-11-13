@@ -1,0 +1,21 @@
+parse: fn(value: Int) -> Int {
+    if value == 0 {
+        return Err("zero")
+    }
+    return value
+}
+
+relay: fn(value: Int) -> Int {
+    n: parse(value)
+    return n + 1
+}
+
+noted: fn(value: Int) -> Int {
+    n: relay(value)?("relaying {value}")
+    return n * 2
+}
+
+run: fn() {
+    print(noted(4) ?? -1)
+    print(noted(0))
+}
