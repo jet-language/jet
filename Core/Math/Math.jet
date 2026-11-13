@@ -14082,6 +14082,11 @@ to_bits: fn(n: Float) -> Int Never! { core.math.to_bits(n) }
 // (no conversion), so NaN payloads and signaling NaNs cross unchanged.
 __to_bits_f32: fn(n: F32) -> Int Never! { core.math.__to_bits_f32(n) }
 __from_bits_f32: fn(bits: Int) -> F32 Never! { core.math.__from_bits_f32(bits) }
+/// The binary32 bits of `value`, and the F32 whose bits are `word`: one bit
+/// copy each, so NaN payloads, signaling NaNs and the sign of zero cross
+/// unchanged, with no allocation and no failure.
+f32_to_bits: fn(value: F32) -> U32 Never! { U32.from_int(__to_bits_f32(value)) ?? panic("binary32 bits fit a U32") }
+f32_from_bits: fn(word: U32) -> F32 Never! { __from_bits_f32(Int.from_u32(word)) }
 from_bits: fn(bits: Int) -> Float Never! { core.math.from_bits(bits) }
 // The bits of n as an I64, and the Float of `bits`: one bit copy each, as
 // to_bits and from_bits, without the Int those box past +-2^62. The
@@ -14809,6 +14814,15 @@ __payload_bits_f32: fn(payload: F32) -> Int? Never! {
     }
     assert(is_nan(Float.from_f32(__from_bits_f32(2139095041))))
     assert_eq(Float.from_f32(__from_bits_f32(1)), from_bits(3936146074321813504))
+    // The public pair: a quiet NaN carrying code 1, negative zero, a
+    // signaling NaN of either sign and the largest subnormal keep their bits.
+    loop word in ([U32]{U32{0x7FC00001}, U32{0x80000000}, U32{0x7F800001}, U32{0xFF800001}, U32{0x007FFFFF}, U32{0}}) {
+        assert_eq(f32_to_bits(f32_from_bits(word)), word)
+    }
+    assert_eq(f32_to_bits(F32{1.0}), U32{0x3F800000})
+    assert_eq(f32_to_bits(F32{-0.0}), U32{0x80000000})
+    assert_eq(f32_to_bits(f32_inf), U32{0x7F800000})
+    assert(is_nan(Float.from_f32(f32_from_bits(U32{0x7FC00001}))))
     assert_eq(radix(0.0), 2)
 }
 

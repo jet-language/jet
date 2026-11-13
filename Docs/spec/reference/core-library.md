@@ -3088,6 +3088,7 @@ The other spellings `expm1`, `log1p`, `truncate`, `nextafter` and
 | `math.INFINITY` / `math.NAN` | `Float` | The IEEE-754 special values `1.0 / 0.0` and `0.0 / 0.0`, as comptime constants. `NAN` compares unequal to every value, itself included; test it with `math.is_nan`. |
 | `math.round(x)` | `Int` | Round to the nearest integer, with ties away from zero. A NaN, an infinity, or a value outside the signed 64-bit range stops. |
 | `math.to_bits(x)` / `math.from_bits(bits)` | integer bits / `Float` | Convert between a floating value and its bit representation. |
+| `math.f32_to_bits(x)` / `math.f32_from_bits(word)` | `U32` / `F32` | Convert between an `F32` and its binary32 bits: one bit copy, so NaN payloads and the sign of zero cross unchanged; no allocation, no failure. |
 | `math.sin_cos(x)` | `(cos: Float, sin: Float)` | Compute cosine and sine together, each correctly rounded as `cos` and `sin` give it. |
 | `math.modf(x)` | `(fract: Float, whole: Float)`; `F32` parts for an `F32` | Split a value into fractional and whole parts, each with the sign of `x`; an infinity has fraction `±0`. |
 | `math.frexp(x)` | `(exp: Int, frac: Float)`; an `F32` `frac` for an `F32` | Split a value into `frac * 2^exp` with `abs(frac)` in [0.5, 1) (C `frexp`); a zero, an infinity or a NaN is its own `frac` with `exp` 0. |
