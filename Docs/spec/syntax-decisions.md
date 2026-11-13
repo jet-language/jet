@@ -9150,8 +9150,9 @@ direct relative path and do not join it with `current_dir()`.
 
 **2026-09-04 — D-LOOPREAD1=A** *(card #2896; ratified 2026-09-04)*: a
 state-loop header initializer runs once. If its condition reads the unchanged
-binding and another turn is reachable, L0529 warns; an unconditional
-`break`/`return` suppresses it. The grammar does not change: use
+binding and another turn is reachable, the loop is the error E0513
+(D-NO-WARNINGS1: Jet has no warnings); an unconditional `break`/`return`
+suppresses it. The grammar does not change: use
 `loop line in io.stdin().lines()` for repeated reads and stop with
 `if test { break }` in the body.
 

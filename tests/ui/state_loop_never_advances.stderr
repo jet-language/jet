@@ -1,0 +1,8 @@
+Error [jet.StateLoopNeverAdvances]: The condition reads `i`, but nothing in the loop changes `i` before the next turn
+  --> tests/ui/state_loop_never_advances.jet:2:10
+    |
+  2 |     loop i := 0, i < 3 {
+    |          ^
+ Why: The header binding is set once, before the first turn; when neither the body nor the step writes it, every turn tests the same value, so the loop never ends or never starts
+ Fix: Change `i` in the body or in a step, as in `loop i := 0, i < n, i += 1`; read repeated input with `loop line in io.stdin().lines()`; or stop from the body with `if test { break }`
+More: jet-lang.dev/e/E0513

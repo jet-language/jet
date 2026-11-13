@@ -4391,11 +4391,10 @@ sema_stmt_refutable_loop_labels: fn(nested_labels: [String], label: NamedSpan?) 
     labels
 }
 
-// L0529 (emit_state_loop_unchanged_lint @ 6083377777): a `loop i := start, cond { …
-// }` whose condition reads the mutable header binding while neither the body nor the
-// step writes it, and whose body can return to the condition, re-tests unchanged
-// state.
-sema_stmt_lint_state_loop_unchanged: fn(init: Binding, cond: Expr, step: Stmt?, body: [Stmt], label: NamedSpan?, diagnostics: &[Diagnostic]) Never! {
+// E0513: a `loop i := start, cond { … }` whose condition reads the mutable
+// header binding while neither the body nor the step writes it, and whose
+// body can return to the condition, re-tests unchanged state.
+sema_stmt_check_state_loop_unchanged: fn(init: Binding, cond: Expr, step: Stmt?, body: [Stmt], label: NamedSpan?, diagnostics: &[Diagnostic]) Never! {
     if !init.mutable || init.name.is_empty() || !sema_stmt_expr_mentions(cond, init.name) || sema_stmt_state_body_writes(body, init.name) -> return
     if step == .Val(step_statement) {
         if sema_stmt_state_writes(step_statement, init.name) -> return
@@ -4403,8 +4402,7 @@ sema_stmt_lint_state_loop_unchanged: fn(init: Binding, cond: Expr, step: Stmt?, 
     label_name := String?{None}
     if label == .Val(value) -> label_name = Val(value.name)
     if !sema_stmt_state_loop_reaches_next_turn(body, label_name) -> return
-    row: diagnostic_registry_row("L0529") ?? panic("L0529 has no registry row")
-    diagnostics.push(sema_lint("L0529", init.name_span, row.what, row.why, row.fix))
+    diagnostics.push(sema_error("E0513", init.name_span, "The condition reads `{init.name}`, but nothing in the loop changes `{init.name}` before the next turn", "The header binding is set once, before the first turn; when neither the body nor the step writes it, every turn tests the same value, so the loop never ends or never starts", "Change `{init.name}` in the body or in a step, as in `loop i := 0, i < n, i += 1`; read repeated input with `loop line in io.stdin().lines()`; or stop from the body with `if test {{ break }}`"))
 }
 
 SemaStmtNameScan: struct {
@@ -8767,8 +8765,8 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, environment: S
                 if label != None -> sema_scope_pop_loop_label(scopes)
                 sema_single_use_leave_scope(scopes, state, diagnostics)
                 if !sema_stmt_close_loop_value_frame(context, loop_frame_index, nested.value, state, loop_fork, true, true, environment, program, diagnostics) -> loop_scope_valid = false
-                // Rust emit_loop_liveness_lints_for_stmt runs after the statement is checked.
-                sema_stmt_lint_state_loop_unchanged(init, cond, step, body, label, diagnostics)
+                // The unchanged-state check runs once the statement is checked.
+                sema_stmt_check_state_loop_unchanged(init, cond, step, body, label, diagnostics)
                 if {
                     init_tree == None || !cond_valid || !nested.complete || !step_valid || !loop_scope_valid -> complete = false
                     else -> {
