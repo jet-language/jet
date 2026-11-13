@@ -22,12 +22,12 @@ step keptnone: jet run --optimize=none kept.jet
 exit: 70
 stdout: = "5\n"
 stderr: ~ "Runtime fault [R0802]" # the report also carries the gate and the obligation
-stderr: ~ "kept.jet:4, in #Unsafe gate" # the fault is located at its gate, whose audit text follows
+stderr: ~ "kept.jet:10:19, in #Unsafe gate" # the fault is located at the read after release
 step keptfull: jet run --optimize=full kept.jet
 exit: 70
 stdout: = "5\n"
 stderr: ~ "Runtime fault [R0802]" # the report also carries the gate and the obligation
-stderr: ~ "kept.jet:4, in #Unsafe gate" # the fault is located at its gate, whose audit text follows
+stderr: ~ "kept.jet:10:19, in #Unsafe gate" # the fault is located at the read after release
 step twice: jet check twice.jet
 exit: 1
 stderr: ~ "E0209" # the take report names both releases of the binding

@@ -19,11 +19,15 @@ step pastnone: jet run --optimize=none past.jet
 exit: 70
 stdout: = "7\n"
 stderr: ~ "Runtime fault [R0801]" # the report also carries the gate and the obligation
-stderr: ~ "past.jet:6, in #Unsafe gate" # the fault is located at its gate, whose audit text follows
-stderr: ~ "raw `read` outside" # the gate's audit text follows; R0801's report does not print the range detail
+stderr: ~ "past.jet:9:15, in #Unsafe gate" # the fault is located at the stepped read
+stderr: ~ "raw `read` outside" # the gate's audit text follows
+stderr: ~ "the access starts at offset 8 of the live range 0x" # the range's addresses vary with ASLR
+stderr: ~ "(8 bytes) and runs past its end" # the one Int cell
 step pastfull: jet run --optimize=full past.jet
 exit: 70
 stdout: = "7\n"
 stderr: ~ "Runtime fault [R0801]" # the report also carries the gate and the obligation
-stderr: ~ "past.jet:6, in #Unsafe gate" # the fault is located at its gate, whose audit text follows
-stderr: ~ "raw `read` outside" # the gate's audit text follows; R0801's report does not print the range detail
+stderr: ~ "past.jet:9:15, in #Unsafe gate" # the fault is located at the stepped read
+stderr: ~ "raw `read` outside" # the gate's audit text follows
+stderr: ~ "the access starts at offset 8 of the live range 0x" # the range's addresses vary with ASLR
+stderr: ~ "(8 bytes) and runs past its end" # the one Int cell

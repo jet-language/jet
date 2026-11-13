@@ -13,17 +13,20 @@ step rangenone: jet run --profile=hardened --optimize=none range.jet
 exit: 70
 stdout: = "4\n"
 stderr: ~ "Runtime fault [R0801]" # O0: the step past the tuple stops
-stderr: ~ "range.jet:5, in #Unsafe gate" # the fault is located at its gate, whose audit text follows
+stderr: ~ "range.jet:8:15, in #Unsafe gate" # the fault is located at the read past the tuple
+stderr: ~ "the access starts at offset 32 of the live range 0x" # the range's addresses vary with ASLR
 step rangebasic: jet run --profile=hardened --optimize=basic range.jet
 exit: 70
 stdout: = "4\n"
 stderr: ~ "Runtime fault [R0801]" # O1: the step past the tuple stops
-stderr: ~ "range.jet:5, in #Unsafe gate" # the fault is located at its gate, whose audit text follows
+stderr: ~ "range.jet:8:15, in #Unsafe gate" # the fault is located at the read past the tuple
+stderr: ~ "the access starts at offset 32 of the live range 0x" # the range's addresses vary with ASLR
 step rangefull: jet run --profile=hardened range.jet
 exit: 70
 stdout: = "4\n"
 stderr: ~ "Runtime fault [R0801]" # O2, the profile's own level: the step past the tuple stops
-stderr: ~ "range.jet:5, in #Unsafe gate" # the fault is located at its gate, whose audit text follows
+stderr: ~ "range.jet:8:15, in #Unsafe gate" # the fault is located at the read past the tuple
+stderr: ~ "the access starts at offset 32 of the live range 0x" # the range's addresses vary with ASLR
 step freeddev: jet run freed.jet
 exit: 70
 stdout: = "6\n"
@@ -32,7 +35,7 @@ step freedhard: jet run --profile=hardened freed.jet
 exit: 70
 stdout: = "6\n"
 stderr: ~ "Runtime fault [R0802]" # the report also carries the gate and the obligation
-stderr: ~ "freed.jet:4, in #Unsafe gate" # the fault is located at its gate, whose audit text follows
+stderr: ~ "freed.jet:10:19, in #Unsafe gate" # the fault is located at the read after release
 step aligndev: jet run misaligned.jet
 exit: 70
 stdout: = "2\n"
