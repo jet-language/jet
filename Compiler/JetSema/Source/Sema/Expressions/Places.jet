@@ -647,7 +647,7 @@ sema_expression_field: fn(field: Expr, base: Expr, member: String, span: Span, e
     // Rust `infer_field` (`fold_enum_variant_path`, `is_known_enum`):
     // `Enum.Variant`, `Enum.Group.Leaf` or `types.Enum.Variant` builds the variant.
     if sema_expression_enum_variant_path(base, member, environment, program, scopes) == .Val(path) {
-        return sema_expression_enum_literal(path.enum_name, [Type]{}, path.variant, [EnumLitArg]{}, false, Val(member_span), span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+        return sema_expression_enum_literal(path.enum_name, sema_expression_path_type_args(base), path.variant, [EnumLitArg]{}, false, Val(member_span), span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     }
     // Rust `infer_field` (imports arm): `alias.NAME` where `alias` is a
     // whole-module import reads that module's constant `NAME`, and

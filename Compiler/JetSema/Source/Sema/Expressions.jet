@@ -5054,7 +5054,9 @@ sema_expr_generic_bound_operator: fn(op: BinOp, lhs: TExpr, rhs: TExpr, span: Sp
     graph: program.registration_graph ?? return None
     bound: sema_type_bound_satisfied_at(graph, lhs.ty, trait_name, sema_scope_caller_row(environment, graph), environment.generic_params) ?? return None
     if !bound -> return None
-    Val(sema_tree_node(lhs.ty, TExprKind.Binary{op: sema_expr_tree_binary_op(op), overflow: false, line: line, lhs: lhs, rhs: rhs}, span))
+    // A fixed-width instantiation checks overflow as its concrete operator
+    // does (sema_expr_check_binary_operands), at this operator's line.
+    Val(sema_tree_node(lhs.ty, TExprKind.Binary{op: sema_expr_tree_binary_op(op), overflow: true, line: line, lhs: lhs, rhs: rhs}, span))
 }
 
 // E2511: a lane or linalg operator outside its fixed operand shapes.
