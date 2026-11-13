@@ -1,10 +1,16 @@
-// D-CRYPTOENV1=A: crypto.sign / crypto.verify (Ed25519 envelope).
+package: {
+    name: "crypto_sign"
+    version: "0.1.0"
+    authority: { allow: [IO, Mem.Alloc, Rand] }
+}
+// crypto.sign / crypto.verify (Ed25519 envelope).
 use crypto: core.crypto
 
 run: fn() {
-    key: crypto.SigningKey.new_random() ?? panic("signing key")
+    key: crypto.SigningKey.new_random() ?? return
     msg: [U8]{116, 0x65, 0x73, 0x74}
-    sig: crypto.sign(key, msg) ?? panic("sign failed")
-    print("sig len: {sig.bytes().len()}")
-    print("verify ok: {crypto.verify(key.public_key(), msg, sig) ?? panic("verify failed")}")
+    sig: crypto.sign(key, msg) ?? return
+    print("sig len: {sig.bytes.len()}")
+    verified: crypto.verify(key.public_key(), msg, sig) ?? return
+    print("verify ok: {verified}")
 }

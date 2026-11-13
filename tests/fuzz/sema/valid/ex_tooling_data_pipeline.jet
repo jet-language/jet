@@ -1,18 +1,22 @@
+package: {
+    name: "tooling_data_pipeline"
+    version: "0.1.0"
+    authority: { allow: [IO, Mem.Alloc] }
+}
+
 use data: core.data
 
-#Codable
 Ticket: struct {
     team: String
     minutes: Float
 }
 
-#Codable
 Budget: struct {
     team: String
     owner: String
 }
 
-must_stay_deferred: fn(ticket: Ticket) -> Bool {
+must_stay_deferred: fn(ticket: Ticket) -> Bool Never! {
     panic("lazy filter ran before collect")
     return false
 }
@@ -24,20 +28,15 @@ run: fn() {
     rows: data.csv<Ticket>(raw) ?? panic("bad csv")
     budget_raw: "team,owner\nCore,Ada\nCore,Lin\nTools,Grace"
     budgets: data.csv<Budget>(budget_raw) ?? panic("bad budget")
-    deferred: data.query(rows)
-        .filter(t -> must_stay_deferred(t))
+
+    deferred: data.query(rows).filter(t -> must_stay_deferred(t))
     print("deferred: {deferred.plan()[1]}")
     planned: data.query(rows)
         .filter(t -> t.minutes >= 4.0)
         .sort_by(t -> t.team)
-    collected: planned.collect() ?? panic("collect")
-    planned_rows: collected
-    focused: data.query(rows)
-        .filter(t -> t.minutes >= 4.0)
-        .collect() ?? panic("filter")
-    sorted: data.query(focused)
-        .sort_by(t -> t.team)
-        .collect() ?? panic("sort")
+    planned_rows: planned.collect() ?? panic("collect")
+    focused: data.query(rows).filter(t -> t.minutes >= 4.0).collect() ?? panic("filter")
+    sorted: data.query(focused).sort_by(t -> t.team).collect() ?? panic("sort")
     groups: data.query(sorted)
         .group_by(t -> t.team)
         .sum(t -> t.minutes)
@@ -45,21 +44,22 @@ run: fn() {
     counts: data.query(sorted)
         .group_by(t -> t.team)
         .count()
-        .collect() ?? panic("group_count")
+        .collect() ?? panic("count")
     joined: data.inner_join(sorted, budgets, t -> t.team, b -> b.team) ?? panic("join")
     left: data.left_join(rows, budgets, t -> t.team, b -> b.team) ?? panic("left")
     pivot: data.pivot_sum(rows, t -> t.team, t -> if t.minutes >= 5.0 -> "long" else -> "short", t -> t.minutes) ?? panic("pivot")
-    values: [4.0, 5.0, 8.0, 3.0]
+    values: [Float]{4.0, 5.0, 8.0, 3.0}
     summary: data.describe(values) ?? panic("describe")
     rolling: data.rolling_mean(values, 2) ?? panic("rolling")
-    maybe_minutes: [Float?]{Val(4.0), no_minutes(), Val(8.0), no_minutes()}
-    print("missing_values: {maybe_minutes.len()}")
-    print(data.count(sorted))
-    print(data.count(planned_rows))
-    print(deferred.plan()[2])
+    maybe_minutes: [Val(Float{4.0}), no_minutes(), Val(Float{8.0}), no_minutes()]
+    series: maybe_minutes
+    print(sorted.len())
+    print(rows.len())
+    print(planned_rows.len())
+    print(planned.plan()[2])
     loop ticket in planned_rows -> print("planned: {ticket.team} {ticket.minutes}")
+    print("series rows: {series.len()}")
     print(data.bar_text(counts) ?? panic("bar"))
-    loop group in groups -> print("sum: {group.key} {group.value}")
     loop pair in joined -> print("join: {pair.left.team} -> {pair.right.owner}")
     loop pair in left {
         if pair.right == {
@@ -67,9 +67,7 @@ run: fn() {
             .None -> { print("left: {pair.left.team} -> none") }
         }
     }
-    loop cell in pivot {
-        print("{cell.row_key}|{cell.column_key} count={cell.count} sum={cell.sum}")
-    }
+    loop cell in pivot -> print("{cell.row_key}|{cell.column_key} count={cell.count} sum={cell.sum}")
     print(summary.count)
     print(summary.median)
     print(rolling[2])

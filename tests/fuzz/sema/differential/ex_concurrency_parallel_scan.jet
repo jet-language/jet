@@ -1,93 +1,59 @@
-// 34 — Parallel file scan: tasks + channels for real I/O-bound work.
-//
-// Default demo (no extra args):
-//   nix develop -c jet run Examples/Concurrency/Parallel/ParallelScan.jet
-//
-// Pick your own files:
-//   nix develop -c jet run Examples/Concurrency/Parallel/ParallelScan.jet Examples/Data/JSON/JSON.jet Examples/Systems/CLI/CLIArgs.jet
-//
-// Interactive prompts:
-//   INTERACTIVE=1 nix develop -c jet run Examples/Concurrency/Parallel/ParallelScan.jet
+// 34 — Parallel file scan.
+// Short path: `para_map`. Expert channel+spawn+join → ParallelScanExpert.jet.
+package: {
+    name: "parallel_scan"
+    authority: { allow: [Env, Exec.Args, FS, IO, Mem.Alloc] }
+}
+
 use {
-    tasks: core.tasks
     fs: core.files
-    io: core.term
     process: core.process
     env: core.sys
 }
 
 count_lines: fn(text: String) -> Int { text.lines().len() }
 
-scan_one: fn(path: String) -> String {
-    text: fs.read(path.copy()) ?? return "{path}: unreadable"
+// Each file is named by its base name, so the output does not depend on
+// where the fixtures live.
+scan_one: fn(file_path: String) -> String {
+    name: fs.basename(file_path)
+    text: fs.read(file_path) ?? return "{name}: unreadable"
     lines: count_lines(text)
-    return "{path}: {lines} lines, {text.len()} chars"
+    return "{name}: {lines} lines, {text.len()} chars"
 }
 
-default_paths: fn() -> [String] {
-    return [
-        "Examples/Concurrency/Tasks.jet",
-        "Examples/Concurrency/Parallel/Pipeline.jet",
-        "Examples/Collections/WordCount.jet",
-        "Examples/Data/JSON/JSON.jet"
-    ]
+// The fixtures live in a fresh directory of this run, so the none, basic and
+// full runs that start at once never write or read each other's files.
+default_paths: fn(dir: String) -> [String] {
+    a: Path.from(dir).join("jet_parallel_scan_a.txt").to_string()
+    b: Path.from(dir).join("jet_parallel_scan_b.txt").to_string()
+    _: fs.write(a, "one\ntwo\n")
+    _: fs.write(b, "alpha\nbeta\ngamma\n")
+    return [a, b]
 }
 
-paths_from_args: fn() -> [String] {
-    return process.args()
-}
+paths_from_args: fn() -> [String] { process.args() }
 
-paths_from_prompt: fn() -> [String] {
-    print("Enter file paths (blank line when done):")
-    out := [String]{}
-    loop true {
-        raw: io.readline("> ") ?? return out.copy()
-        if raw == "" { break }
-        out.push(raw)
-    }
-    return out
-}
-
-gather_paths: fn() -> [String] {
+gather_paths: fn(dir: String) -> [String] {
     from_args: paths_from_args()
     if from_args.len() > 0 -> return from_args
-    if (env.get("INTERACTIVE") ?? "") == "1" -> return paths_from_prompt()
-    return default_paths()
-}
-
-scan_parallel: fn(paths: [String]) -> [String] {
-    { sender, receiver: ch }: channel<String>()
-    workers := [Task<()>]{}
-    loop path in paths {
-        tx: sender.copy()
-        file: path.copy()
-        workers.push(task {
-            tx.send(scan_one(file))
-        })
+    if (env.get("INTERACTIVE") ?? "") == "1" {
+        print("(interactive paths omitted in short-path demo — pass files on the CLI)")
     }
-    loop workers.len() > 0 {
-        worker: workers.pop() ?? panic("missing worker")
-        worker.join() ?? panic("worker failed")
-    }
-    sender.close()
-    results := [String]{}
-    loop value in ch -> results.push(value)
-    results.sort()
-    return results
+    return default_paths(dir)
 }
-
-copy_paths: fn(paths: [String]) -> [String] { paths.map(path -> path.copy()) }
 
 run: fn() {
-    paths: gather_paths()
+    scratch: fs.temp_dir("jet-parallel-scan") ?? panic("temp dir")
+    paths: gather_paths(scratch.path)
     if paths.len() == 0 {
         print("no files to scan")
         return
     }
     print("scanning {paths.len()} files...")
     print("")
-    parallel_paths: copy_paths(paths)
-    parallel: scan_parallel(parallel_paths)
+    parallel := paths.para_map((path: String) -> scan_one(path) ?? "{path}: unreadable")
+    parallel.sort()
     loop line in parallel -> print(line)
     print("")
     print("done — {paths.len()} files scanned in parallel")

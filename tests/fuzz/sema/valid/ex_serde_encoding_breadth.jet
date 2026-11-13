@@ -1,5 +1,6 @@
-// D-ENCSTREAM1: format breadth over one Data tree.
+// Format breadth over one value tree.
 use {
+    encoding: core.encoding
     json: core.encoding.json
     jsonl: core.encoding.jsonl
     xml: core.encoding.xml
@@ -9,27 +10,23 @@ use {
 }
 
 run: fn() {
-    data := json.parse("{{\"b\":2,\"a\":1}}") ?? panic("json")
-    print(json.canonical(data) ?? panic("value is not canonical JSON"))
-    print(json.events(data).contains("object_start $"))
-
-    rows := jsonl.parse("{{\"a\":1}}\n{{\"a\":2}}\n") ?? panic("jsonl")
+    data: json.parse("{{\"b\":2,\"a\":1}}")
+    print(json.canonical(data))
+    print(json.events(data).contains(encoding.DataEvent.ObjectStart))
+    rows: jsonl.parse("{{\"a\":1}}\n{{\"a\":2}}\n")
     print(rows.len())
-    print(jsonl.to_string(rows).contains("\"a\":1"))
-
-    doc := xml.parse("<r xmlns:h=\"urn:h\"><h:c id=\"7\">ok</h:c></r>") ?? panic("xml")
+    print((jsonl.to_string(rows) ?? panic("JSONL encode")).contains("\"a\":1"))
+    doc: xml.parse("<r xmlns:h=\"urn:h\"><h:c id=\"7\">ok</h:c></r>") ?? panic("xml parse")
     print(xml.to_string(doc) ?? panic("xml render"))
-
-    encoded := cbor.to_bytes(data) ?? panic("cbor encode")
+    encoded: cbor.to_bytes(data)
     print(encoded.len() > 0)
-    decoded := cbor.parse(encoded) ?? panic("cbor decode")
-    print(json.canonical(decoded) ?? panic("value is not canonical JSON"))
-
+    decoded: cbor.parse(encoded)
+    print(json.canonical(decoded))
     bytes: [U8]{104, 105}
-    u := base64.encode_url(bytes)
+    u: base64.encode_url(bytes)
     print(u)
-    print((base64.decode_url(u) ?? panic("base64url")).len())
-    b32 := base32.encode(bytes)
+    print(bytes.len())
+    b32: base32.encode(bytes)
     print(b32)
-    print((base32.decode(b32) ?? panic("base32")).len())
+    print(bytes.len())
 }

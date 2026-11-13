@@ -3548,7 +3548,7 @@ run: fn() {
 | `time.duration_as_seconds(duration)` / `elapsed(start)` | `Int` / `Duration` | Convert or measure elapsed time. |
 | `time.isoformat(value)` / `isoformat_date(value)` / `isoformat_time(value)` | `String` | Format supported date, time, and zoned values. |
 | `time.unix_ms(value)` / `unix_seconds(value)` | `Int` | Convert a time value to Unix units. |
-| `time.weekday(value)` | `Int` | Return the weekday index. |
+| `time.weekday(value)` / `date.weekday()` | `Int` | Return Sunday `0` through Saturday `6`, as `asctime` and `%U` count. `isoweekday(value)` returns Monday `1` through Sunday `7`, and `calendar.weekday` returns Monday `0` through Sunday `6`. |
 | `time.Clock.new(seed)` | `Clock` | Construct a deterministic manually advanced clock. |
 | `time.Clock.system()` | `Clock -[Time]>` | Construct a clock backed by the host time source. |
 | `clock.now()` | `Int` | Read clock milliseconds. |

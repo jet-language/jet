@@ -1,15 +1,28 @@
-// E2-M13: the expert low-level tier (D-UNSAFE2). Everything here is gated:
-// `use core.mem` unlocks the vocabulary, `#Unsafe("reason") { ... }`
-// opens the audited region where pointer operations are allowed.
+// E2-M13: the expert low-level tier. Everything here is gated:
+// #Unsafe("reason") { ... } opens the audited region where pointer
+// operations are allowed.
 //
 // Ordinary Jet never needs any of this, and never emits `unsafe`.
-use core.mem
-
 run: fn() {
     cell: 1337
     #Unsafe("`cell` is live on this stack frame and the pointer never escapes") {
-        p: *Int{*cell}
+        p: *cell
         print(p.*)
+        print(p.*)
+    }
+    rawptr_lesson()
+}
+
+// The raw-pointer grammar. `*T` is the raw-pointer TYPE, prefix `*x`
+// takes a raw pointer to `x` (raw-pointer-of), and postfix `p.*` dereferences
+// one. All three are raw memory operations, so they live inside an `#Unsafe`
+// region — ordinary Jet never needs any of this.
+rawptr_lesson: fn() {
+    cell: 1337
+    #Unsafe("`cell` is a live Int on this stack frame; the pointer never escapes") {
+        // `*cell` takes a raw pointer to `cell`; `p` has the raw-pointer type `*Int`.
+        p: *cell
+        // `p.*` dereferences it back to the stored value.
         print(p.*)
     }
 }

@@ -1,4 +1,4 @@
-// 110 — transaction blocks (D-TXN1–D-TXN4 + D-TXN-ROLLBACK).
+// 110 — transaction blocks (–).
 // `#Transact(name) { … }` opens a transaction. Three rollback layers (D-TXN-ROLLBACK):
 //   (1) auto-snapshot  — every value the block mutates is snapshotted on entry and
 //       restored on a `?`-failure. Magic out of the box, zero annotation.
@@ -6,6 +6,7 @@
 //       `on_commit`: Drop-backed, runs LIFO on a `?`-failure, dropped on a clean commit.
 // `name.on_commit(() -> { … })` runs LIFO on a clean commit, dropped on a `?`-failure.
 // An irreversible effect (Net/FS/Exec) directly in the block is rejected (E0746).
+#Error
 Fail: enum {
     Empty
     Insufficient
@@ -15,12 +16,8 @@ Fail: enum {
 place_order: fn(items: Int) -> Int Fail! {
     #Transact(order) {
         print("reserving stock")
-        order.on_commit(() -> {
-            print("commit hook 1: charge card")
-        })
-        order.on_commit(() -> {
-            print("commit hook 2: send receipt")
-        })
+        order.on_commit(() -> print("commit hook 1: charge card"))
+        order.on_commit(() -> print("commit hook 2: send receipt"))
         if items == 0 {
             // `?`-failure: the block never commits, so the hooks are dropped un-run.
             return Err(Fail.Empty)
@@ -50,9 +47,11 @@ transfer: fn(from: &Int, to: &Int, amount: Int) -> Int Fail! {
 reserve_seat: fn(ok_path: Bool) -> Int Fail! {
     #Transact(booking) {
         print("seat held")
-        booking.on_rollback(() -> {
+        booking.on_rollback(
+        () -> {
             print("rollback hook: release seat")
-        })
+        },
+        )
         if !ok_path -> return Err(Fail.Empty)
         print("seat confirmed")
     }
@@ -61,28 +60,28 @@ reserve_seat: fn(ok_path: Bool) -> Int Fail! {
 
 run: fn() {
     print("=== success path ===")
-    n: place_order(3) ?? (-1)
+    n: place_order(3) ?? -1
     print(n)
     print("=== failure path (commit hooks dropped) ===")
-    m: place_order(0) ?? (-1)
+    m: place_order(0) ?? -1
     print(m)
     print("=== auto-snapshot: clean transfer ===")
     alice := 100
     bob := 0
-    a: transfer(alice, bob, 40) ?? (-1)
+    a: transfer(alice, bob, 40) ?? -1
     print(alice)  // 60
     print(bob)  // 40
     print("=== auto-snapshot: failed transfer restores balances ===")
     carol := 100
     dave := 0
-    b: transfer(carol, dave, 150) ?? (-1)
+    b: transfer(carol, dave, 150) ?? -1
     print(carol)  // 100 (debit undone)
     print(dave)  // 0   (credit undone)
     print(b)  // -1  (the `??` default)
     print("=== explicit on_rollback: success (hook dropped) ===")
-    c: reserve_seat(true) ?? (-1)
+    c: reserve_seat(true) ?? -1
     print(c)
     print("=== explicit on_rollback: failure (hook fires) ===")
-    d: reserve_seat(false) ?? (-1)
+    d: reserve_seat(false) ?? -1
     print(d)
 }

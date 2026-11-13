@@ -1,9 +1,30 @@
-// D-LAMBDAINFER1: a lambda parameter's type may be omitted where the
+// A lambda parameter's type may be omitted where the
 // expected type already fixes it. `list.filter` expects `fn(Int) Bool`,
 // so `x -> x > 3` needs no annotation — `x: Int` is inferred one-way from
 // the callee's parameter type. `(x: Int) -> …` stays legal too.
 run: fn() {
     nums: [1, 2, 3, 4, 5]
     big: nums.filter(x -> x > 3)
-    print(big.to_list())
+    print(big)
+    lambda_bare_params_lesson()
+}
+
+// A lambda's PARENS may be dropped
+// too, not just the param type — `m -> m.hp > 0`, no parens, no type.
+// Legal wherever the expected closure/fn type fixes the single param's
+// type (same one-directional inference as the parenthesized omitted-type
+// form, S46). The typed/parenthesized form stays available
+// for anywhere the type can't be inferred.
+Fighter: struct {
+    hp: Int
+}
+
+lambda_bare_params_lesson: fn() {
+    units: [Fighter]{{hp: 12}, {hp: 0}, {hp: 5}}
+    alive: units.filter(u -> u.hp > 0)
+    print(alive.len())
+
+    nums: [1, 2, 3, 4, 5]
+    doubled: nums.map(n -> n * 2)
+    print(doubled)
 }

@@ -1,4 +1,4 @@
-// D-EFF2 expert levers. Beyond the transparent flow-through default, a
+// Expert effect levers. Beyond the transparent flow-through default, a
 // higher-order function may demand or publish callback effects explicitly.
 //
 //   1. Callback param effect bound — `fn(T) -[]> U` (or `fn(T) -[E]> U`)
@@ -10,18 +10,18 @@
 //      contract instead of the conservative flow-through.
 // Lever 1: `transform` insists on a pure callback. An impure one is rejected at
 // the call site before it ever runs.
-transform: fn(items: [Int], f: fn(Int) -[]> Int { ) -> [Int] { items.map(x -> f(x)) } }
+transform: fn(items: [Int], f: fn(Int) -[]> Int) -> [Int] { items.map(x -> f(x)) }
 
-run_each: fn(items: [Int], act: fn(Int) -[IO]>) -[via act]> {
+run_each: fn(items: [Int], act: fn(Int)) -[via act]> {
     loop x in items -> act(x)
 }
 
-double: fn(n: Int) -[]> Int { n * 2 }
+double: fn(n: Int) -[]> Int { return n * 2 }
 
-show: fn(n: Int) { print("{n}") }
+show: fn(n: Int, /) -[IO]> { print("{n}") }
 
 run: fn() {
     doubled: transform([1, 2, 3], double)
     print("{doubled}")
-    run_each([10, 20], show)
+    run_each([10, 20], n -> print("{n}"))
 }
