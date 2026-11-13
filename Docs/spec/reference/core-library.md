@@ -190,9 +190,6 @@ and stdin kernels; the Rust seed entry points retain their fault preflight.
 `take` forwards through the registered source target `__take_bytes`, preserving
 the keyword spelling without a parser exception. Jet rejects a negative count
 before the read fault probe; the existing stdin kernel performs the one raw read.
-Font shaping returns the existing
-host result through a private leaf; the Jet entry owns the exact failure panic
-and never selects an approximate fallback implicitly.
 
 Types and error enums use PascalCase (`String`, `IOError`, `JSON`); functions
 and module segments use snake_case (`read`, `core.files`) (S54). Acronyms keep
