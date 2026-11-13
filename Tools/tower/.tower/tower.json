@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6784,
-    "rev": 101421,
+    "nextNum": 6785,
+    "rev": 101423,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -95079,6 +95079,47 @@
       "needsAcceptance": false,
       "created": "2026-11-13T10:32:46.131Z",
       "updated": "2026-11-13T10:32:50.982Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1
+    },
+    {
+      "id": "c09oub4t",
+      "num": 6784,
+      "title": "Parser: a qualified case pattern with fields (`Inst.Compare{left, ..}`) fails with E0003",
+      "body": "Found by G9Web-1-2 on 2026-11-13 (seed-b14, dev 0f41dd417c). syntax-decisions.md row 35 lets a value or pattern name a case as `.A` or as `Name.A`, and spec.md:696 gives labeled payloads as `Type.Variant{label: value}`. Repro: `Inst: enum { Compare(left: Int, right: Int)  Jump(target: Int) }` with `kind: fn(i: Inst) -> String { if i == { Inst.Compare{left, ..} -> \"c\"  .Jump{..} -> \"j\" } }` gives E0003 \"Expected `->` after an `if` arm value or condition, found `{`\" at the `{`. `Inst.Compare{left, right}` (field bindings) fails the same way. The leading-dot `.Compare{left, ..}` parses and runs. Probe files are under $JET_SCRATCH_ROOT/lanes/G9Web/probe5989c2/qualified_pattern{,_eq}.jet.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A qualified case pattern `Name.Case{…}` parses and matches exactly as `.Case{…}` does, in `if x == { … }` arms, `match` arms and nested patterns, with `..`, field bindings and labeled sub-patterns, on O0, O1 and O2. Proof: a run case printing each arm and a fmt round-trip of the same file, plus a check that the leading-dot form still parses identically.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T11:38:37.736Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G3"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-13T11:38:32.483Z",
+      "updated": "2026-11-13T11:38:37.736Z",
       "updatedBy": "Main",
       "criteriaLastN": 1
     }
@@ -199462,6 +199503,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-13T11:38:37.736Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c09oub4t",
+      "note": "#1 A qualified case pattern `Name.Case{…}` parses and matches e"
+    },
+    {
+      "at": "2026-11-13T11:38:32.483Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c09oub4t",
+      "note": "Parser: a qualified case pattern with fields (`Inst.Compare{left, ..}`) fails with E0003"
+    },
     {
       "at": "2026-11-13T11:23:49.296Z",
       "by": "Main",
