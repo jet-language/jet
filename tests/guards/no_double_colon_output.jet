@@ -1,0 +1,254 @@
+// No Jet output spells `::`: Jet paths are dotted. The UI snapshots, the
+// golden outputs and the expectation lines of the cases under `tests` and
+// `Examples` hold a `::` only inside a foreign subject: an IPv6 address, a
+// Rust path, a PowerShell static call or a GitHub Actions workflow command.
+// The JetCli and JetSemIndex sources write `::` only on the closed list
+// below, each row a foreign spelling the file emits or reads; a new one
+// fails here, and a row whose spelling goes fails until it shrinks or goes.
+use dc_files: core.files
+
+DC_OUTPUT_ROOTS: [String]{"tests", "Examples"}
+
+// The first segment of a Rust path in a Rust FFI snippet or diagnostic.
+DC_RUST_ROOTS: [String]{"std", "rust"}
+
+// The commands of a GitHub Actions workflow annotation
+// (`::error file=…,line=…::message`).
+DC_WORKFLOW_COMMANDS: [String]{"::error ", "::warning ", "::notice "}
+
+// The case lines that spell expected output.
+DC_CASE_EXPECTATIONS: [String]{"stdout:", "stderr:", "json:", "file:"}
+
+DC_SOURCE_ROOTS: [String]{"Compiler/JetCli", "Compiler/JetSemIndex"}
+
+DCSourceRow: struct {
+    path: String
+    count: Int
+    // The foreign spelling the file writes.
+    owner: String
+}
+
+DC_SOURCE_ALLOWED: [DCSourceRow]{
+    DCSourceRow{path: "Compiler/JetCli/Source/Cli/BudgetMeasure.jet", count: 1, owner: "the GitHub Actions workflow annotation of a budget failure"},
+    DCSourceRow{path: "Compiler/JetCli/Source/Cli/ProgramCompletions.jet", count: 2, owner: "PowerShell completion scripts"},
+    DCSourceRow{path: "Compiler/JetCli/Source/Cli/Request.jet", count: 1, owner: "the cgroup v2 line of /proc/self/cgroup"},
+    DCSourceRow{path: "Compiler/JetCli/Source/Cli/RustForeign.jet", count: 4, owner: "Rust paths and the C link identity sema keys"},
+    DCSourceRow{path: "Compiler/JetCli/Source/Cli/SelfDocs.jet", count: 1, owner: "the PowerShell completion script"},
+    DCSourceRow{path: "Compiler/JetCli/Tests/RustForeign.fixture/RustForeign.jet", count: 4, owner: "Rust FFI snippets and cargo output"},
+}
+
+dc_byte: fn(bytes: [U8], at: Int) -> Int {
+    if at < 0 || at >= bytes.len() -> return 32
+    Int.from_u8(bytes[at])
+}
+
+dc_word: fn(byte: Int) -> Bool {
+    (byte >= 48 && byte <= 57) || (byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122) || byte == 95
+}
+
+dc_hex: fn(byte: Int) -> Bool {
+    (byte >= 48 && byte <= 57) || (byte >= 65 && byte <= 70) || (byte >= 97 && byte <= 102)
+}
+
+dc_text: fn(bytes: [U8], start: Int, end: Int) -> String {
+    out := [U8]{}
+    loop at in start..<end -> out.push(bytes[at])
+    String.from_bytes(out) ?? ""
+}
+
+// Whether bytes `start..<end` are one IPv6 group: one to four hex digits.
+dc_group: fn(bytes: [U8], start: Int, end: Int) -> Bool {
+    if end - start > 4 -> return false
+    loop at in start..<end {
+        if !dc_hex(dc_byte(bytes, at)) -> return false
+    }
+    true
+}
+
+dc_digits: fn(bytes: [U8], start: Int, end: Int) -> Bool {
+    if end == start -> return false
+    loop at in start..<end {
+        byte: dc_byte(bytes, at)
+        if byte < 48 || byte > 57 -> return false
+    }
+    true
+}
+
+// Whether the `::` at byte `at` belongs to a foreign subject: the elided
+// groups of an IPv6 address (`::1`, `2001:db8::1`, `[fe80::1%4]`), a
+// PowerShell static call (`[Type]::new`), or a Rust path (`std::cmp::max`).
+// A case writes a newline as `\n`; its letter starts no word.
+dc_foreign: fn(bytes: [U8], at: Int) -> Bool {
+    if dc_byte(bytes, at - 1) == 93 -> return true
+    start := at
+    loop start > 0 && dc_word(dc_byte(bytes, start - 1)) && dc_byte(bytes, start - 2) != 92 -> start -= 1
+    end := at + 2
+    loop end < bytes.len() && dc_word(dc_byte(bytes, end)) -> end += 1
+    if (start < at || end > at + 2) && dc_group(bytes, start, at) && dc_group(bytes, at + 2, end) {
+        elided: start == at || end == at + 2
+        neighbors: dc_byte(bytes, start - 1) == 58 || dc_byte(bytes, end) == 58 || dc_byte(bytes, end) == 37
+        if elided || neighbors || dc_digits(bytes, at + 2, end) -> return true
+    }
+    root := start
+    loop root > 0 && (dc_word(dc_byte(bytes, root - 1)) || dc_byte(bytes, root - 1) == 58) -> root -= 1
+    first := root
+    loop first < at && dc_byte(bytes, first) != 58 -> first += 1
+    DC_RUST_ROOTS.contains(dc_text(bytes, root, first))
+}
+
+// Whether `text` spells a `::` that no foreign subject explains.
+dc_spells: fn(text: String) -> Bool {
+    trimmed: text.trim()
+    loop command in DC_WORKFLOW_COMMANDS {
+        if trimmed.starts_with(command) -> return false
+    }
+    bytes: text.bytes()
+    at := 0
+    loop at + 1 < bytes.len() {
+        if dc_byte(bytes, at) != 58 || dc_byte(bytes, at + 1) != 58 {
+            at += 1
+            next
+        }
+        // In a run of three colons (`host:::1`), the first ends a label and
+        // the last two are the pair to judge.
+        if dc_byte(bytes, at + 2) == 58 {
+            at += 1
+            next
+        }
+        if !dc_foreign(bytes, at) -> return true
+        at += 2
+    }
+    false
+}
+
+// The output a case line expects: the text after its expectation keyword,
+// without the trailing comment, and its quoted contents as written, up to
+// the first unescaped closing quote (a comment may quote text of its own).
+// A negated expectation (`!~`) expects text to be absent and spells none.
+dc_case_expected: fn(line: String) -> String? {
+    keyed := false
+    loop key in DC_CASE_EXPECTATIONS {
+        if line.starts_with(key) -> keyed = true
+    }
+    if !keyed || line.contains("!~") -> return None
+    quoted: line.partition("\"")
+    if quoted.sep == "" -> return Val(line.partition(" # ").head)
+    body: quoted.tail.bytes()
+    close := 0
+    loop close < body.len() && dc_byte(body, close) != 34 {
+        if dc_byte(body, close) == 92 -> close += 1
+        close += 1
+    }
+    if close >= body.len() -> return Val(line.partition(" # ").head)
+    Val(dc_text(body, 0, close))
+}
+
+// Whether `path` snapshots Jet output: a UI snapshot, a golden output, or a
+// CLI, REPL or terminal transcript.
+dc_golden: fn(path: String) -> Bool {
+    name: path.rpartition("/").tail
+    if name == "stderr" || name == "stdout" || name == "expected.stdout" || name == "expected.stderr" -> return true
+    if name.ends_with(".stderr") || name.ends_with(".stdout") || name.ends_with(".out") || name.ends_with(".expected") -> return true
+    name.ends_with(".txt") && (path.starts_with("tests/cli/") || path.starts_with("tests/repl/") || path.starts_with("tests/cases/terminal/"))
+}
+
+// One finding per golden or case line that spells a `::`.
+dc_output_findings: fn(path: String, text: String, findings: &[String]) {
+    golden: dc_golden(path)
+    if !golden && !path.ends_with(".case") -> return
+    loop (index, line) in text.lines() {
+        expected: if golden -> Val(line.copy()) else -> dc_case_expected(line)
+        if expected == .Val(spelled) {
+            if dc_spells(spelled) -> findings.push("{path}:{index + 1}: {line.trim()}")
+        }
+    }
+}
+
+// The lines of a source that write `::`, comments left out.
+dc_source_count: fn(source: String) -> Int {
+    count := 0
+    loop line in source.lines() {
+        if line.contains("::") && !line.trim().starts_with("//") -> count += 1
+    }
+    count
+}
+
+// The source census against the closed list: one line per file whose count
+// differs.
+dc_source_findings: fn(found: [String:Int]) -> [String] {
+    findings := [String]{}
+    allowed := [String:Int]{}
+    loop row in DC_SOURCE_ALLOWED -> allowed[row.path] = row.count
+    loop path in found.keys() {
+        count: found[path]
+        if allowed.get(path) == .Val(expected) {
+            if count != expected -> findings.push("{path}: {count} lines write `::`, the list allows {expected}; update its DC_SOURCE_ALLOWED row")
+        } else {
+            findings.push("{path}: {count} lines write `::`, and no DC_SOURCE_ALLOWED row; spell the path with `.`")
+        }
+    }
+    loop row in DC_SOURCE_ALLOWED {
+        if found.get(row.path) == None -> findings.push("{row.path}: no line writes `::`; delete its DC_SOURCE_ALLOWED row")
+    }
+    findings.sort()
+    findings
+}
+
+#Test("no golden or case expects a `::` outside a foreign subject") {
+    guards_enter_root()
+    findings := [String]{}
+    scanned := 0
+    loop root in DC_OUTPUT_ROOTS {
+        loop path in s2_syntax_paths(root) {
+            if !dc_golden(path) && !path.ends_with(".case") -> next
+            scanned += 1
+            bytes: dc_files.read_bytes(path) ?? panic("read {path}: {err}")
+            // A binary golden, such as an encoded CBOR stream, prints no Jet path.
+            text: String.from_bytes(bytes) ?? next
+            dc_output_findings(path, text, findings)
+        }
+    }
+    assert(scanned > 1000, "the scan found only {scanned} goldens and cases")
+    assert_eq(findings.join("\n"), "")
+}
+
+#Test("JetCli and JetSemIndex write `::` only on the closed list") {
+    guards_enter_root()
+    found := [String:Int]{}
+    loop root in DC_SOURCE_ROOTS {
+        loop path in s2_syntax_paths(root) {
+            if !path.ends_with(".jet") -> next
+            count: dc_source_count(dc_files.read(path) ?? panic("read {path}: {err}"))
+            if count > 0 -> found[path] = count
+        }
+    }
+    assert_eq(dc_source_findings(found).join("\n"), "")
+}
+
+#Test("the scan tells a Jet path from a foreign subject") {
+    assert(dc_spells("note: `dep` now reaches `FS.Read` through dep::greet → dep::load"))
+    assert(dc_spells("    count :: reactive.signal(0)"))
+    assert(dc_spells("fn:module:app::helper"))
+    assert(!dc_spells("localhost: ::1 127.0.0.1"))
+    assert(!dc_spells("v6 host:::1 port:443"))
+    assert(dc_spells("host:::run"))
+    assert(!dc_spells("2001:db8::1:false|[2001:db8::1]:443|[fe80::1%4294967295]:65535|64:ff9b::a00:1"))
+    assert(!dc_spells("[::1]:53\\nsocket_addr\\n::1\\nport must be in 0..=65535"))
+    assert(!dc_spells("  3 |     mutate: fn(left: Int, right: Int) -> Int = \"std::cmp::max\""))
+    assert(!dc_spells("[System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', $_)"))
+    assert(!dc_spells("::error file=src/run.jet,line=2,col=15,title=Jet E2907::over budget"))
+    assert((dc_case_expected("stderr: ~ \"through dep::greet\" # the path") ?? "") == "through dep::greet")
+    assert((dc_case_expected("stdout: = \"aGk=\\n\" # the bridged base64::encode(\"hi\")") ?? "") == "aGk=\\n")
+    assert((dc_case_expected("stdout: = \"say \\\"a::b\\\"\" # quoted") ?? "") == "say \\\"a::b\\\"")
+    assert(dc_case_expected("stdout: !~ \"::\" # no path spells it") == None)
+    assert(dc_case_expected("step: jet run main.jet") == None)
+    assert(dc_golden("tests/ui/effects/x.stderr") && dc_golden("tests/ui/dir/stderr") && dc_golden("tests/cli/help.txt"))
+    assert(!dc_golden("tests/cases/fixture/notes.txt"))
+    found := [String:Int]{}
+    found["Compiler/JetCli/Source/Cli/New.jet"] = 1
+    found["Compiler/JetCli/Source/Cli/Request.jet"] = 2
+    findings: dc_source_findings(found)
+    assert(findings.contains("Compiler/JetCli/Source/Cli/New.jet: 1 lines write `::`, and no DC_SOURCE_ALLOWED row; spell the path with `.`"))
+    assert(findings.contains("Compiler/JetCli/Source/Cli/Request.jet: 2 lines write `::`, the list allows 1; update its DC_SOURCE_ALLOWED row"))
+    assert_eq(dc_source_count("a: \"x::y\"\n// a::b in a comment\n"), 1)
+}
