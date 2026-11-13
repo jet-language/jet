@@ -14,7 +14,7 @@ use {
         jet_driver_explain_pointer_line,
         jet_driver_target_machine_by_name,
     ]
-    jet_foundation.[diagnostic_theme_paint]
+    jet_foundation.[ENV_PREFIX_JET_REGISTRY, diagnostic_theme_paint]
     jet_pkg_model.[
         JET_VERSION, pkg_legacy_user_hangar_dir, pkg_resolve_roots, pkg_source_store_dir, publication_redact_registry_url,
         publication_resolve_publish_registry,
@@ -159,7 +159,7 @@ jet_cli_doctor_check_registry: fn() -[FS, Env, Exec, Time.Wait]> JetCLIDoctorChe
     git := doctor_process.cmd([String]{"git", "-c", "credential.useHttpPath=true", "ls-remote", "--", registry.url}).env("GIT_TERMINAL_PROMPT", "0")
     names: doctor_sys.vars() ?? [String]{}
     loop name in names {
-        if name.starts_with("JET_REGISTRY_") -> git = git.env_remove(name)
+        if name.starts_with(ENV_PREFIX_JET_REGISTRY) -> git = git.env_remove(name)
     }
     if git.run() == {
         .Ok(receipt) -> {
