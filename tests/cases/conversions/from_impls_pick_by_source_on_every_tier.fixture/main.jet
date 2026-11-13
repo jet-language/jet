@@ -1,0 +1,25 @@
+Celsius: struct {
+    degrees: Float
+}
+
+// One conversion impl per source; either direction is legal in the module
+// that declares Celsius.
+impl Celsius.From(Float) {
+    from: fn(value: Float) -> Celsius { Celsius{degrees: value} }
+}
+
+impl Celsius.From(Int) {
+    from: fn(value: Int) -> Celsius { Celsius{degrees: Float{value}} }
+}
+
+impl Float.From(Celsius) {
+    from: fn(value: Celsius) -> Float { value.degrees }
+}
+
+run: fn() {
+    reading: 21.5
+    warm: Celsius{reading}
+    cool: Celsius.from(12)
+    print("{warm.degrees} {cool.degrees}")
+    print("{Float{warm}} {Float.from(cool)}")
+}

@@ -125,6 +125,7 @@ use {
         owned_trait_codec,
         owned_trait_codec_marker,
         owned_trait_is_operator,
+        owned_trait_keyed_by_argument,
         sema_reserved_type_name,
         symbol_id,
         type_identity,
@@ -1873,14 +1874,16 @@ sema_registration_trait_method: fn(method: TraitMethodSig, module_identity: Stri
     SemaRegistrationTraitMethod{symbol: symbol, declaration: method, signature: signature, identity: type_identity(signature), identity_key: sema_registration_function_identity_key(module_identity, owner.id.key, signature), parameters: parameters}
 }
 
-// Hook callable identity is the operand pair, not the ordinary owner/name key.
+// Hook callable identity is the operand pair, not the ordinary owner/name
+// key, and a conversion's is its target and source (`impl Celsius.From(Float)`
+// and `impl Celsius.From(Int)` each declare a `from`).
 sema_registration_operator_owner: fn(owner: SymbolID, module_identity: String, left: Type, trait_name: String?, rhs: Type?) -> SymbolID Never! {
     // copy: the operator owner is a new owned SymbolID. With no trait it equals `owner`, the
     // caller's declaring symbol (a read parameter), which the caller keeps.
     trait_value: trait_name ?? return owner.copy()
     // copy: the operator owner is a new owned SymbolID. For an unchecked trait it equals `owner`,
     // the caller's declaring symbol (a read parameter), which the caller keeps.
-    if !owned_trait_is_operator(trait_value) -> return owner.copy()
+    if !owned_trait_keyed_by_argument(trait_value) -> return owner.copy()
     right: rhs ?? left
     symbol_id(SymbolKind.Impl, module_identity, owner.key, "{type_name(left)}::{trait_value}<{type_name(right)}>")
 }
@@ -2721,7 +2724,9 @@ sema_registration_builtin_impl_allowed: fn(items: [Item], definition: ImplDef) -
 
 // (Rust `opmix_allows_builtin_impl`): an operator hook on a built-in
 // type belongs to the package that declares the other operand, so
-// `impl Int.Mul(Price)` is legal when this module declares `Price`.
+// `impl Int.Mul(Price)` is legal when this module declares `Price`, and so
+// does a conversion into a built-in type from its source
+// (`impl Float.From(Celsius)`).
 // An imported operand (`impl Int.Sub(lib.Foreign)`) is not a built-in
 // target error: the orphan rule (E0902) judges which package owns it.
 // `items` are the module's program items.
@@ -2729,7 +2734,7 @@ sema_registration_opmix_builtin_impl: fn(items: [Item], definition: ImplDef) -> 
     if definition.type_name.contains(".") -> return false
     if sema_registration_builtin_scalar(definition.type_name) == None && !sema_core_is_math_type(definition.type_name) -> return false
     trait_name: definition.trait_name ?? return false
-    if !owned_trait_is_operator(trait_name) -> return false
+    if !owned_trait_keyed_by_argument(trait_name) -> return false
     rhs: definition.operator_rhs ?? return false
     if rhs == .Named(rhs_name) {
         if rhs_name == definition.type_name -> return false

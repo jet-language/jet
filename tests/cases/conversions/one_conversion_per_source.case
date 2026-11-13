@@ -1,0 +1,11 @@
+# A conversion's identity is its target and its source: a second
+# `impl Celsius.From(Float)` is E0908 at its head.
+fixture: one_conversion_per_source.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet
+exit: 1
+stderr: ~ "`Celsius` already implements `From` for `Float`"
+stderr: ~ "main.jet:9:6"
+stderr: ~ "jet-lang.dev/e/E0908"

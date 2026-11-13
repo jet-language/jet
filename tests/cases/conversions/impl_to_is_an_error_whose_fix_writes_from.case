@@ -1,0 +1,12 @@
+# `To(T)` is only a bound, so `impl Celsius.To(Float)` is an error at the
+# impl head whose fix writes the impl it means, `impl Float.From(Celsius)`.
+fixture: impl_to_is_an_error_whose_fix_writes_from.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet
+exit: 1
+stderr: ~ "`impl Celsius.To(Float)` is not an impl"
+stderr: ~ "main.jet:5:6"
+stderr: ~ "write `impl Float.From(Celsius)`"
+stderr: ~ "jet-lang.dev/e/E0003"

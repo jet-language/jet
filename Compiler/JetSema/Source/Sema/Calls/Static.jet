@@ -45,6 +45,7 @@ use jet_foundation.[
     ModuleID,
     module_is_core,
     module_is_none,
+    owned_trait_conversion,
 ]
 
 SemaStaticMethodTarget: struct {
@@ -291,14 +292,48 @@ sema_call_static_registered_targets: fn(graph: SemaRegistrationGraph, nominal: S
             sema_call_static_append_registered(targets, graph, nominal, function, owner_name, owner_module, owner_package, owner_type_args, type_args, args, expected, environment, program, scopes, state, tail_store, context, span, diagnostics)
         }
     }
+    // An inherent impl adds statics, and so does a conversion: each
+    // `impl Celsius.From(Float)` declares one `Celsius.from`. One the owner's
+    // own module writes is already among `nominal.methods`.
     loop impl_row in sema_registration_impl_rows_named(graph, nominal.symbol.name) {
         implementation: graph.modules[impl_row.module_index].impls[impl_row.row]
-        if implementation.trait_name != None -> next
+        if implementation.trait_name == .Val(trait_name) && !owned_trait_conversion(trait_name) -> next
         if implementation.target_identity_key != nominal.identity_key && (module_is_none(implementation.target_module_identity) || implementation.target_module_identity != nominal_module || implementation.target_type_name != nominal.symbol.name) -> next
         loop function in implementation.methods {
-            if function.symbol.name == method {
-                sema_call_static_append_registered(targets, graph, nominal, function, owner_name, graph.modules[impl_row.module_index].module_identity, graph.modules[impl_row.module_index].package_identity, owner_type_args, type_args, args, expected, environment, program, scopes, state, tail_store, context, span, diagnostics)
-            }
+            if function.symbol.name != method -> next
+            if implementation.trait_name != None && sema_call_static_nominal_declares(nominal, function.symbol.id) -> next
+            sema_call_static_append_registered(targets, graph, nominal, function, owner_name, graph.modules[impl_row.module_index].module_identity, graph.modules[impl_row.module_index].package_identity, owner_type_args, type_args, args, expected, environment, program, scopes, state, tail_store, context, span, diagnostics)
+        }
+    }
+    targets
+}
+
+sema_call_static_nominal_declares: fn(nominal: SemaRegistrationNominal, symbol: SymbolID) -> Bool Never! {
+    loop function in nominal.methods {
+        if function.symbol.id.key == symbol.key -> return true
+    }
+    false
+}
+
+// A built-in type's conversions (`impl Float.From(Celsius)`) are its
+// `from` statics, one per source: each impl's registered function, which
+// names types as its own module sees them.
+sema_call_static_builtin_conversion_targets: fn(graph: SemaRegistrationGraph, owner_name: String, method: String, environment: SemaScopeEnvironment, program: SemaProgramTables, span: Span, diagnostics: &[Diagnostic]) -> [SemaStaticMethodTarget] {
+    targets := [SemaStaticMethodTarget]{}
+    owner_type: sema_registration_builtin_scalar(owner_name) ?? return targets
+    loop impl_row in sema_registration_impl_rows_named(graph, owner_name) {
+        module_row: graph.modules[impl_row.module_index]
+        implementation: module_row.impls[impl_row.row]
+        trait_name: implementation.trait_name ?? next
+        if !owned_trait_conversion(trait_name) || !module_is_none(implementation.target_module_identity) -> next
+        loop function in implementation.methods {
+            if function.symbol.name != method || sema_call_static_has_method(targets, function.symbol.id) -> next
+            if !sema_registration_visible(function.symbol.visibility, environment.module_identity, environment.package_identity, module_row.module_identity, module_row.package_identity) -> next
+            generics: loop param in function.generic_params -> TGenericParam{name: param.name, bounds: [SymbolID]{}}
+            signature: sema_type_resolve_declared_with_generics(graph, function.signature, module_row.module_identity, generics)
+            target: sema_call_static_function_target(function.symbol, signature, sema_inference_registration_params(function.generic_params), [Type]{}, environment, program, span, diagnostics) ?? next
+            reference := TMethodRef{symbol: function.symbol.id, name: function.symbol.name, mangled: true, trait_owner: None, operator_identity: None}
+            targets.push(SemaStaticMethodTarget{owner_name: owner_name, owner_type: owner_type, method: reference, target: target, function: Val(function.declaration)})
         }
     }
     targets
@@ -1138,6 +1173,10 @@ sema_call_try_static_method: fn(receiver: Expr, method: String, method_span: Spa
                 }
                 math := sema_call_try_math_static(name, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
                 if math.handled -> return math
+                if program.registration_graph == .Val(graph) {
+                    conversions: sema_call_static_builtin_conversion_targets(graph, name, method, environment, program, span, diagnostics)
+                    if conversions.len() > 0 -> return sema_call_static_selected(name, method, conversions, type_args, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+                }
             }
             return sema_call_try_builtin_static(name, "", method, owner_type_args, type_args, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         }
@@ -1222,6 +1261,12 @@ sema_call_try_static_method: fn(receiver: Expr, method: String, method_span: Spa
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
 
+    sema_call_static_selected(type_name, method, targets, type_args, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+}
+
+// The checked call of the one target among `targets` the arguments select,
+// rewritten to its registered method.
+sema_call_static_selected: fn(type_name: String, method: String, targets: [SemaStaticMethodTarget], type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     direct_targets: loop target in targets -> target.target
     selected: sema_call_resolve_direct_candidates("{type_name}.{method}", args, direct_targets, span, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     target := targets[0]

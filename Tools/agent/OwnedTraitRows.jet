@@ -38,7 +38,7 @@ ASSOCIATED: Regex{"^([A-Z][A-Za-z]*): type$"}
 METHOD_OPEN: Regex{"^[a-z][a-z0-9_]*: fn\("}
 NAME: Regex{"^[A-Z][A-Za-z0-9]*$"}
 METHOD_NAME: Regex{"^[a-z][a-z0-9_]*$"}
-FLAG_COLUMNS: [String]{"local", "bare_bound", "raw_return", "any_receiver", "commutative", "codec", "derived", "checked_text", "auto_derive", "bundle", "through_elements"}
+FLAG_COLUMNS: [String]{"local", "bare_bound", "raw_return", "any_receiver", "commutative", "codec", "conversion", "derived", "checked_text", "auto_derive", "bundle", "through_elements"}
 TEXT_COLUMNS: [String]{"operators", "auto_derive_family", "bundle_family", "requires", "shares"}
 // The columns that name a family marker.
 FAMILY_COLUMNS: [String]{"auto_derive_family", "bundle_family"}
@@ -296,6 +296,7 @@ optional_text: fn(source: TraitSource, name: String) -> String Never! {
 contract_kinds: fn(source: TraitSource) -> [String] Never! {
     kinds := [String]{}
     if flag(source, "codec") -> kinds.push("codec")
+    if flag(source, "conversion") -> kinds.push("conversion")
     if flag(source, "derived") -> kinds.push("derived")
     if flag(source, "checked_text") -> kinds.push("checked_text")
     if fact(source, "operators") != None -> kinds.push("operators")
@@ -337,6 +338,11 @@ render_row: fn(source: TraitSource, traits: [TraitSource], checked_text_declared
         "codec" -> {
             method: sole_method(source, context, kind) ?? return Err(err)
             contract = "OwnedContract.Codec{{verb: \"{method.name}\"}}"
+        }
+        "conversion" -> {
+            method: sole_method(source, context, kind) ?? return Err(err)
+            if method.receiver != "" || method.params.len() != 1 || method.params[0].ty != "Source" || !source.associated.contains("Source") || method.returns != "Self" -> return Err(rows_fail("{context}: a conversion is `Source: type` and `hook: fn(value: Source) -> Self Error!`"))
+            contract = "OwnedContract.Conversion{{hook: \"{method.name}\"}}"
         }
         "module Literal" -> {
             method: sole_method(source, context, kind) ?? return Err(err)

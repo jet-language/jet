@@ -5666,6 +5666,18 @@ hooks may opt into reverse lookup with `#Commutative`, as in
 declared operand order. The exact foundations example exercises both operand
 orders without changing its integer or rational representation.
 
+A conversion is the Core trait `From(S)`, written on the type it makes with
+its source after the trait: `impl Celsius.From(Float) { from: fn(value: Float)
+-> Celsius { ... } }`. A type takes one impl per source (a second is
+**E0908**), and the impl belongs to the module that declares the target or the
+source, so `impl Float.From(Celsius)` is legal beside `Celsius`. `Celsius{x}`,
+when `x` names no field of `Celsius`, and `Celsius.from(x)` pick the impl by
+the type of `x`; `Float{c}` and `Float.from(c)` do the same for a built-in
+target. `from` may fail, narrow its failure, or drop it, and may add
+parameters with defaults after `value`. `To(T)` names the other end of the
+same arrow and is never written as an impl, so `impl X.To(Y)` is an error
+whose fix writes `impl Y.From(X)`.
+
 Plain arithmetic on a fixed-width integer traps on overflow, and a typed-literal
 conversion to a fixed width that can't hold every source value (`U8{count}`,
 `I32{wide}`) stops with **E3010** when the value doesn't fit. Use one of the

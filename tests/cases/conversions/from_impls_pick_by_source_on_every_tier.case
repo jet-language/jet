@@ -1,0 +1,18 @@
+# `impl Celsius.From(Float)` and `impl Celsius.From(Int)` give Celsius one
+# `from` per source: `Celsius{reading}` (no field is named `reading`) and
+# `Celsius.from(12)` pick the impl by the argument's type. A conversion into
+# a built-in type is the declaring module's too, so `impl Float.From(Celsius)`
+# makes `Float{warm}` and `Float.from(cool)` work. Every tier prints the same.
+fixture: from_impls_pick_by_source_on_every_tier.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet run --optimize=none main.jet
+exit: 0
+stdout: = "21.5 12.0\n21.5 12.0\n"
+step: jet run --optimize=basic main.jet
+exit: 0
+stdout: = "21.5 12.0\n21.5 12.0\n"
+step: jet run --optimize=full main.jet
+exit: 0
+stdout: = "21.5 12.0\n21.5 12.0\n"

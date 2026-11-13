@@ -45,6 +45,10 @@ OwnedContract: enum {
     Codec(verb: String)
     // `#run from_literal: fn(value: Source) -> T` on the literal's source.
     Literal(source: Type)
+    // `{hook}: fn(value: Source) -> Self` on the destination type, with the
+    // source written after the trait (`impl Celsius.From(Float)`); a type
+    // takes one impl per source.
+    Conversion(hook: String)
     // A `distinct String` type's pure checker and hole encoder; the prelude
     // spells the same declaration for readers.
     CheckedText
@@ -97,6 +101,7 @@ owned_trait_declares: fn(owned: OwnedTrait, method: String) -> Bool Never! {
         .Operator(hook, _) -> hook == method
         .Codec(verb) -> verb == method
         .Literal(_) -> method == "from_literal"
+        .Conversion(hook) -> hook == method
         .CheckedText -> method == "check" || method == "encode_hole" || method == "build"
         .Derived -> false
     }
@@ -137,12 +142,34 @@ owned_trait_arithmetic: fn(trait_name: String) -> Bool Never! {
     false
 }
 
-// The arithmetic operator traits for a reader, in table order:
-// "Add, Sub, Mul, and Div".
-owned_trait_arithmetic_listed: fn() -> String Never! {
+// A conversion trait: `From`, whose impl names its source type
+// (`impl Celsius.From(Float)`).
+owned_trait_conversion: fn(trait_name: String) -> Bool Never! {
+    owned: owned_trait(trait_name) ?? return false
+    if owned.contract == .Conversion(_) -> return true
+    false
+}
+
+// A trait whose impl writes one type in parentheses after the trait name:
+// an arithmetic operator's right-hand type (`impl Vec2.Mul(Float)`) or a
+// conversion's source (`impl Celsius.From(Float)`).
+owned_trait_typed_argument: fn(trait_name: String) -> Bool Never! {
+    owned_trait_arithmetic(trait_name) || owned_trait_conversion(trait_name)
+}
+
+// A trait whose impl identity is its owner, the trait and the type its impl
+// names: the operator traits (the right-hand type, the owner itself when
+// unwritten) and the conversion traits (the source).
+owned_trait_keyed_by_argument: fn(trait_name: String) -> Bool Never! {
+    owned_trait_is_operator(trait_name) || owned_trait_conversion(trait_name)
+}
+
+// The typed-argument traits for a reader, in table order:
+// "Add, Sub, Mul, Div, and From".
+owned_trait_typed_argument_listed: fn() -> String Never! {
     names := [String]{}
     loop owned in OWNED_TRAITS {
-        if owned_trait_arithmetic(owned.name) -> names.push(owned.name.copy())
+        if owned_trait_typed_argument(owned.name) -> names.push(owned.name.copy())
     }
     owned_trait_listed(names)
 }

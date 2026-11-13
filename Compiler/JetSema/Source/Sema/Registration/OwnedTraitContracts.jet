@@ -3,7 +3,8 @@
 use jet_foundation.[AccessConvention, Diagnostic, Func, NamedType, OwnedMethod, OwnedTrait, Param, Span, Type, access_sigil, type_identity_equal, type_name]
 
 // E0906, E0907 and E0913 for an impl of an owned trait on `owner_type`:
-// `rhs` is an operator's right-hand type, `associated` the types the impl
+// `rhs` is an operator's right-hand type or a conversion's source,
+// `associated` the types the impl
 // binds, `sibling` those the `shares` trait's impl binds, `distinct_base` the
 // base of a `distinct` owner. Answers whether the impl meets the contract.
 sema_owned_check_impl: fn(owned: OwnedTrait, owner_type: Type, rhs: Type, methods: [Func], associated: [NamedType], sibling: [NamedType], distinct_base: Type?, span: Span, diagnostics: &[Diagnostic]) -> Bool {
@@ -12,6 +13,7 @@ sema_owned_check_impl: fn(owned: OwnedTrait, owner_type: Type, rhs: Type, method
         .Operator(hook, result) -> sema_owned_check_operator(owned.name, hook, result, rhs, methods, span, diagnostics)
         .Codec(verb) -> sema_owned_check_codec(owned.name, verb, owner_type, methods, span, diagnostics)
         .Literal(source) -> sema_owned_check_literal(owned.name, source, owner_type, methods, span, diagnostics)
+        .Conversion(hook) -> sema_owned_check_conversion(owned.name, hook, owner_type, rhs, methods, span, diagnostics)
         .CheckedText -> sema_owned_check_checked_text(methods, associated, distinct_base, owner_type, span, diagnostics)
         .Derived -> true
     }
@@ -262,6 +264,44 @@ sema_owned_check_literal: fn(trait_name: String, source: Type, owner_type: Type,
         }
     }
     if !valid -> diagnostics.push(sema_owned_mismatch(trait_name, "from_literal", "`#run from_literal: fn(value: {type_name(source)}) -> {owner}`", hook.name_span))
+    valid
+}
+
+// A conversion (`impl Celsius.From(Float)`) is its one hook, once: static,
+// with a read `value` of the source the impl names, then only parameters
+// with defaults, and making the owner, with or without a failure (E0906 when
+// it is missing, E0907 at a hook of the wrong shape and at every other
+// method). Types compare by name, since a built-in owner the impl names
+// (`impl Float.From(Celsius)`) is a written name.
+sema_owned_check_conversion: fn(trait_name: String, hook: String, owner_type: Type, source: Type, methods: [Func], span: Span, diagnostics: &[Diagnostic]) -> Bool {
+    owner: sema_owned_owner_name(owner_type)
+    expected: "`{hook}: fn(value: {type_name(source)}) -> {owner}`"
+    hooks: loop index in 0..<methods.len() if methods[index].name == hook -> index
+    if hooks.len() == 0 {
+        diagnostics.push(sema_owned_missing(trait_name, [String]{hook}, span))
+        return false
+    }
+    found: methods[hooks[0]]
+    valid := hooks.len() == 1 && found.type_params.len() == 0 && found.params.len() >= 1 && !found.is_comptime
+    if valid {
+        value: found.params[0]
+        valid = value.name != "self" && value.convention == AccessConvention.Read && type_name(value.ty) == type_name(source) && value.default == None && !value.variadic
+        loop index in 1..<found.params.len() {
+            if found.params[index].default == None -> valid = false
+        }
+    }
+    if valid {
+        returned: found.return_type ?? Type.Named{name: "Unit"}
+        success: if returned == .Result(ok, _) -> ok else -> returned
+        valid = type_name(success) == owner || type_name(success) == "Self"
+    }
+    if !valid -> diagnostics.push(sema_owned_mismatch(trait_name, hook, expected, found.name_span))
+    loop method in methods {
+        if method.name != hook {
+            valid = false
+            diagnostics.push(sema_owned_mismatch(trait_name, method.name, "only `{hook}`", method.name_span))
+        }
+    }
     valid
 }
 

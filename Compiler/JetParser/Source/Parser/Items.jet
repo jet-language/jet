@@ -80,8 +80,9 @@ use {
         marker_hook_of_declaration,
         marker_registered,
         marker_registered_accepts_arguments,
-        owned_trait_arithmetic,
-        owned_trait_arithmetic_listed,
+        owned_trait_conversion,
+        owned_trait_typed_argument,
+        owned_trait_typed_argument_listed,
         target_os_gates,
         target_os_key,
         target_os_named,
@@ -2286,7 +2287,10 @@ parser_parse_trait_impl_block: fn(state: &JetParserState, above: [Marker]) -> Tr
         trait_end = segment.span
     }
     trait_span: parser_cover(trait_name.span, trait_end)
-    operator_rhs: parser_parse_operator_rhs(state, Val(trait_text.copy()))
+    operator_rhs: parser_parse_operator_rhs(state, Val(trait_text.copy()), None, None)
+    if operator_rhs == None && owned_trait_conversion(trait_text) {
+        parser_add_error(state, trait_span, "`impl {trait_text}` names no source", "a conversion is keyed by the type it converts from, as in `impl From(Float)`", "write the source type: `impl {trait_text}(Source)`")
+    }
     operator_marker := parser_operator_marker(state, above)
     loop parser_current_kind(state) == TOKEN_HASH {
         marker: parser_parse_marker(state)
@@ -2715,24 +2719,38 @@ parser_parse_quantity_bound: fn(state: &JetParserState) -> String {
     "Quantity<{parser_value(state, dimension)}, .{kind}>"
 }
 
-// The one parenthesized right-hand type allowed on an
-// operator trait impl. A bare operator impl keeps `None`, which means `Self`.
-parser_parse_operator_rhs: fn(state: &JetParserState, trait_name: String?) -> Type? {
+// The one parenthesized type argument allowed on a trait impl: an
+// operator's right-hand type (`impl Money.Mul(Int)`) or a conversion's
+// source (`impl Celsius.From(Float)`). A bare operator impl keeps `None`,
+// which means `Self`. `To(T)` is only a bound, so `impl X.To(Y)` is an error
+// whose fix writes the impl it means, `impl Y.From(X)`; `owner` is the
+// spelled target and `head` its span when the impl is written at top level.
+parser_parse_operator_rhs: fn(state: &JetParserState, trait_name: String?, owner: String?, head: Span?) -> Type? {
     if parser_current_kind(state) != TOKEN_LPAREN -> return None
     parser_bump(state)
     rhs: parser_parse_type(state, 0)
     if parser_current_kind(state) == TOKEN_COMMA {
         comma: parser_bump(state)
-        parser_add_error(state, comma.span, "an operator impl accepts exactly one right-hand type", "operator dispatch has one right-hand operand; multiple type arguments would make the hook ambiguous", "write one type, for example `impl Money.Mul(Int)`")
+        parser_add_error(state, comma.span, "an impl accepts exactly one type argument", "an operator has one right-hand operand and a conversion one source; more type arguments would make the impl ambiguous", "write one type, for example `impl Money.Mul(Int)` or `impl Celsius.From(Float)`")
         return None
     }
-    parser_expect(state, TOKEN_RPAREN, "`)` after the operator right-hand type")
+    parser_expect(state, TOKEN_RPAREN, "`)` after the impl's type argument")
     name: trait_name ?? {
-        parser_add_error(state, rhs.span, "type arguments on an impl need an operator trait", "only {owned_trait_arithmetic_listed()} accept an explicit right-hand operand type", "write a dotted operator impl such as `impl Money.Mul(Int)`")
+        parser_add_error(state, rhs.span, "type arguments on an impl need an operator or conversion trait", "only {owned_trait_typed_argument_listed()} accept a type argument", "write a dotted impl such as `impl Money.Mul(Int)` or `impl Celsius.From(Float)`")
         return None
     }
-    if !owned_trait_arithmetic(name) {
-        parser_add_error(state, rhs.span, "`{name}` does not accept an operator right-hand type", "only {owned_trait_arithmetic_listed()} have a typed right-hand operand", "remove the type arguments or use an arithmetic operator trait")
+    if name == "To" {
+        source: parser_source_text(state, rhs.span)
+        if owner == .Val(target) && head == .Val(start) {
+            whole: Span{start: start.start, end: parser_prev_token_end(state)}
+            parser_add_error_code_edit(state, "E0003", whole, "`impl {target}.To({source})` is not an impl", "`To(T)` is only a bound: `S: To({source})` holds when `{source}.From(S)` exists, so a conversion is written on the type it makes", "write `impl {source}.From({target})`", TextEdit{span: whole, new_text: "{source}.From({target})"})
+        } else {
+            parser_add_error(state, rhs.span, "`impl To({source})` is not an impl", "`To(T)` is only a bound: `S: To({source})` holds when `{source}.From(S)` exists, so a conversion is written on the type it makes", "write `impl {source}.From(ThisType)` at the top level")
+        }
+        return None
+    }
+    if !owned_trait_typed_argument(name) {
+        parser_add_error(state, rhs.span, "`{name}` does not accept a type argument", "only {owned_trait_typed_argument_listed()} take a typed right-hand operand or source", "remove the type argument or use an arithmetic operator trait or `From`")
         return None
     }
     Val(rhs.ty)
@@ -2824,7 +2842,10 @@ parser_parse_impl: fn(state: &JetParserState, modifiers: ParsedItemModifiers) ->
         body: parser_parse_callable_body(state, true)
         return Item.ErrorConv{value: ErrorConvDef{from_ty: type_name, from_span: type_span, to_ty: to_ty, to_span: target.span, body: body.statements, body_span: body.span, markers: modifiers.markers}}
     }
-    operator_rhs: parser_parse_operator_rhs(state, trait_name)
+    operator_rhs: parser_parse_operator_rhs(state, trait_name, Val(type_name.copy()), Val(type_span))
+    if trait_name == .Val(written_trait) && operator_rhs == None && owned_trait_conversion(written_trait) {
+        parser_add_error(state, trait_span ?? type_span, "`impl {type_name}.{written_trait}` names no source", "a conversion is keyed by the type it converts from, as in `impl {type_name}.From(Float)`", "write the source type: `impl {type_name}.{written_trait}(Source)`")
+    }
     operator_marker := parser_operator_marker(state, modifiers.markers)
     loop parser_current_kind(state) == TOKEN_HASH && !parser_aborting(state) {
         marker: parser_parse_marker(state)

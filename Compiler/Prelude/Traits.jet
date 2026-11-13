@@ -19,6 +19,8 @@
 //   commutative       `#Commutative` on a typed impl also answers the swapped
 //                     operands (`2 * v` from `v * 2`)
 //   codec             the one method is a hand codec (`encode` or `decode`)
+//   conversion        the one static method makes `Self` from the `Source`
+//                     its impl names (`impl Celsius.From(Float)`)
 //   derived           the compiler derives it from the type; an impl adds no
 //                     method the compiler reads
 //   checked_text      the contract of `CheckedText: trait` in core/prelude.jet
@@ -129,6 +131,17 @@ Decode: trait {
     bundle_family: String{"CodableAsBase"}
     through_elements: Bool{true}
     decode: fn(tree: Dyn) -> Self [FieldError]!
+}
+
+// `Target{value}` and `Target.from(value)`: a `Target` made from a `Source`.
+// The impl names its source after the trait, `impl Celsius.From(Float)`, and
+// a type takes one impl per source.
+From: trait {
+    local: Bool{true}
+    bare_bound: Bool{true}
+    conversion: Bool{true}
+    Source: type
+    from: fn(value: Source) -> Self Err!
 }
 
 Literal: module {

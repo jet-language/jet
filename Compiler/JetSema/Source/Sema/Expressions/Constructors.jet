@@ -59,6 +59,7 @@ use {
         ModuleID,
         module_is_core,
         module_is_none,
+        owned_trait_conversion,
         module_text,
     ]
 }
@@ -2063,6 +2064,86 @@ sema_expression_field_is_shorthand: fn(field: ExprField) -> Bool Never! {
     false
 }
 
+// The written head of `Celsius{x}` when the declared type it names has a
+// conversion impl (`impl Celsius.From(Float)`), so the literal is
+// `Celsius.from(x)`; a field shorthand (`shorthand`) that names one of the
+// type's fields stays a struct literal.
+sema_expression_conversion_head: fn(head: Type?, shorthand: String?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable) -> String? {
+    written: head ?? return None
+    if sema_expr_unwrap_tag(written) == .Named(written_name) {
+        if program.registration_graph == .Val(graph) {
+            symbol: sema_expression_type_symbol(scopes, environment, program, written_name) ?? return None
+            row: sema_type_graph_nominal_row(graph, symbol.id.key) ?? return None
+            nominal: graph.modules[row.module_index].nominals[row.row]
+            if shorthand == .Val(field_name) {
+                loop field in nominal.fields {
+                    if field.symbol.name == field_name -> return None
+                }
+            }
+            loop impl_row in sema_registration_impl_rows_named(graph, nominal.symbol.name) {
+                implementation: graph.modules[impl_row.module_index].impls[impl_row.row]
+                trait_name: implementation.trait_name ?? next
+                if !owned_trait_conversion(trait_name) -> next
+                if implementation.target_identity_key == nominal.identity_key || (!module_is_none(implementation.target_module_identity) && implementation.target_module_identity == nominal.symbol.module_identity && implementation.target_type_name == nominal.symbol.name) -> return Val(written_name.copy())
+            }
+        }
+    }
+    None
+}
+
+// `Celsius{x}` through a conversion is the static call `Celsius.from(x)`,
+// which picks the impl by the type of `x`.
+sema_expression_conversion: fn(written_name: String, value: Expr, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    receiver := Expr?{None}
+    loop part in written_name.split(".") {
+        receiver = if receiver == {
+            .Val(base) -> Val(Expr.Field{base: base, member: part.copy(), span: span, id: AST_NODE_GENERATED})
+            .None -> Val(Expr.Ident{name: part.copy(), span: span, id: AST_NODE_GENERATED})
+        }
+    }
+    owner: receiver ?? return None
+    argument: CallArg{convention: AccessConvention.Read, expr: value.copy(), span: expr_span(value), flags: ast_empty_call_arg_flags(), label: None, spread: false}
+    call: Expr.MethodCall{receiver: owner, method: "from", method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: [CallArg]{argument}, id: AST_NODE_GENERATED}
+    sema_check_expression(call, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+}
+
+// The one value of `Float{c}` when a conversion into the built-in head
+// (`impl Float.From(Celsius)`) takes that value's type as its source; the
+// value is probed, so its diagnostics and moves come from the call it becomes.
+sema_expression_builtin_conversion_value: fn(head: Type, body: TypedLitBody, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext) -> Expr? {
+    value: if body == {
+        .Value(written) -> written
+        .Elements(elements) -> if elements.len() == 1 -> elements[0] else -> return None
+        .Fields(_) | .Entries(_) | .ByteText(_) | .Empty -> return None
+    }
+    head_name: type_name(head)
+    if sema_registration_builtin_scalar(head_name) == None -> return None
+    if program.registration_graph == .Val(graph) {
+        sources := [String]{}
+        loop impl_row in sema_registration_impl_rows_named(graph, head_name) {
+            implementation: graph.modules[impl_row.module_index].impls[impl_row.row]
+            trait_name: implementation.trait_name ?? next
+            if !owned_trait_conversion(trait_name) || !module_is_none(implementation.target_module_identity) -> next
+            source: implementation.declaration.operator_rhs ?? next
+            sources.push(sema_expression_type_leaf(type_name(source)))
+        }
+        if sources.len() == 0 -> return None
+        probe_diagnostics := [Diagnostic]{}
+        probed: sema_probe_expression(value, None, environment, program, scopes, state, tail_store, context, probe_diagnostics) ?? return None
+        if sources.contains(sema_expression_type_leaf(type_name(probed.ty))) -> return Val(value.copy())
+    }
+    None
+}
+
+// The last segment of a written or resolved type name: `Celsius` for
+// `units.Celsius` and for a resolved `units::Celsius`.
+sema_expression_type_leaf: fn(text: String) -> String Never! {
+    dot: text.rfind(".")
+    colon: text.rfind(":")
+    cut: if dot > colon -> dot else -> colon
+    text.slice(cut + 1, text.len())
+}
+
 // E0753: a distinct head never re-types its base value;
 // the destination owns the explicit conversion. Returns true when reported.
 sema_expression_typed_literal_distinct_mismatch: fn(head: Type, value: TExpr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
@@ -2194,6 +2275,11 @@ sema_expression_typed_literal: fn(head: Type?, body: TypedLitBody, span: Span, e
                     // copy: `fields` is a payload of read parameter `body`, which keeps the original
                     return sema_expression_typed_literal(head, TypedLitBody.Value{value: fields[0].value.copy()}, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
                 }
+                // `Celsius{reading}` converts `reading` through `Celsius.From`
+                // when `reading` names no field of `Celsius`.
+                if fields.len() == 1 && sema_expression_field_is_shorthand(fields[0]) {
+                    if sema_expression_conversion_head(head, Val(fields[0].name), environment, program, scopes) == .Val(written_name) -> return sema_expression_conversion(written_name, fields[0].value, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+                }
                 checked: sema_expression_struct_literal(name, [Type]{}, fields, false, None, span, Val(result_head), environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
                 return sema_expr_expected_owned(checked, expected, environment, program, diagnostics)
             }
@@ -2201,7 +2287,15 @@ sema_expression_typed_literal: fn(head: Type?, body: TypedLitBody, span: Span, e
                 checked: sema_expression_struct_literal(name, [Type]{}, [ExprField]{}, false, None, span, Val(result_head), environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
                 return sema_expr_expected_owned(checked, expected, environment, program, diagnostics)
             }
-            .Elements(_) | .Entries(_) | .Value(_) | .ByteText(_) -> {}
+            .Value(value) -> {
+                if sema_expression_conversion_head(head, None, environment, program, scopes) == .Val(written_name) -> return sema_expression_conversion(written_name, value, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+            }
+            .Elements(elements) -> {
+                if elements.len() == 1 {
+                    if sema_expression_conversion_head(head, None, environment, program, scopes) == .Val(written_name) -> return sema_expression_conversion(written_name, elements[0], span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+                }
+            }
+            .Entries(_) | .ByteText(_) -> {}
         }
         .Apply(name, args) -> if body == {
             .Fields(fields) -> {
@@ -2227,6 +2321,8 @@ sema_expression_typed_literal: fn(head: Type?, body: TypedLitBody, span: Span, e
         .Int | .Float | .Bool | .String | .Char | .Shared(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
     }
 
+    // `Float{c}` with `impl Float.From(Celsius)` is `Float.from(c)`.
+    if sema_expression_builtin_conversion_value(result_head, body, environment, program, scopes, state, tail_store, context) == .Val(source) -> return sema_expression_conversion(type_name(result_head), source, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     if body == {
         .Value(value) -> {
             // The `Regex` head is the compile-checked pattern literal whether it is
