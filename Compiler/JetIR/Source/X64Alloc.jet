@@ -4,17 +4,22 @@
 // register for the whole of its live range, or its frame home. A General
 // slot's register is callee-saved (rbx, r12-r15), or r8 or r9 (which no
 // one has to save) for a slot whose range holds no instruction that may
-// call (ir_x64_silent), which it takes first; in a leaf (a function whose
+// call (ir_x64_silent), which it takes first, or none but the exact Int
+// routes, whose calls are all in slow paths (ir_x64_int_calls), which it
+// takes once the callee-saved ones are taken; in a leaf (a function whose
 // selection makes no call but of the stop poll, ir_x64_leaf) every slot's
-// range is such a one. A Float slot's is one of xmm2-xmm15, which the C
-// ABI lets a call clobber, so around every call inside its range the slot
-// is stored to its home and loaded back (X64Select.jet ir_x64_call_out),
-// except a stop poll's, which keeps them and every general register but
-// rax (X64Select.jet ir_x64_stop_poll). Selection then uses rax, rcx,
+// range is silent. Around each route call inside its range a routed slot is
+// stored to its frame home and loaded back, as a Float slot is (X64Select.jet
+// ir_x64_keep_routed). A Float slot's register is one of xmm2-xmm15, which
+// the C ABI lets a call clobber, so around every call inside its range the
+// slot is stored to its home and loaded back (X64Select.jet
+// ir_x64_call_out), except a stop poll's, which keeps them and every
+// general register but rax (X64Select.jet ir_x64_stop_poll). Selection
+// then uses rax, rcx,
 // rdx, rsi, rdi, r8-r11, xmm0 and xmm1 as scratch inside one instruction
-// only (r8 and r9 only for a call's arguments, and xmm0-xmm7 for the Float
-// arguments of a call), and structured control never needs moves on its
-// edges.
+// only (r8 and r9 only for the arguments of a call no route makes, and
+// xmm0-xmm7 for the Float arguments of a call), and structured control
+// never needs moves on its edges.
 //
 // A slot's live range is the span of instruction indexes that reference it
 // (parameters start at -1, before the first instruction). Because control is
@@ -46,7 +51,8 @@ IR_X64_SLOT_REGISTERS: [Int]{3, 12, 13, 14, 15}
 // A leaf's: r8 and r9 first, then the callee-saved ones.
 IR_X64_LEAF_REGISTERS: [Int]{8, 9, 3, 12, 13, 14, 15}
 // Any other function's: the callee-saved ones, then r8 and r9 for a slot
-// whose range holds no instruction that may call (ir_x64_silent).
+// whose range holds no instruction that may call (ir_x64_silent) but the
+// exact Int routes (ir_x64_int_calls).
 IR_X64_QUIET_REGISTERS: [Int]{3, 12, 13, 14, 15, 8, 9}
 // The xmm registers handed to Float slots, in preference order. From row
 // IR_X64_XMM_OPEN on, those a call's third to eighth Float arguments fill:
@@ -96,15 +102,20 @@ ir_x64_row_class: fn(m: IRModule, row: Int) -> IRX64Class Never! {
 }
 
 IRX64Allocation: struct {
-    // Per slot: the register holding it (callee-saved, or r8 or r9 in a
-    // leaf), -1 for none.
+    // Per slot: the register holding it (callee-saved, or r8 or r9), -1
+    // for none.
     regs: [Int]
     // Per slot: the xmm register holding a Float slot, -1 for none; and the
     // slots holding one, in slot order.
     xmms: [Int]
     xmm_slots: [Int]
+    // The General slots in r8 or r9 whose ranges hold exact Int routes
+    // (ir_x64_int_calls), in slot order: each has a frame home it is kept
+    // in across their calls.
+    routed: [Int]
     // Per slot: the rbp displacement of its frame home (0 for a slot in a
-    // callee-saved register, a constant slot, a frame address or a Unit slot).
+    // register but a routed one, a constant slot, a frame address or a Unit
+    // slot).
     homes: [Int]
     // Per slot: whether it is a constant (a General temporary whose only
     // write is a Const): it has no place, every read is its immediate
@@ -239,20 +250,21 @@ ir_x64_inline_unique: fn(m: IRModule, f: IRFunction, at: Int) -> Bool Never! {
 
 // Whether selecting instruction `at` makes no call, in its body or in a
 // slow path, and leaves r8 and r9 alone: structure, a constant, a memory
-// access, a frame address or byte copy, a quiet value (ir_x64_quiet), a
-// call of an `#FFI(asm)` template selected in place that keeps r8 and r9
-// (IRAsmLeaf.quiet; X64Select.jet ir_x64_asm_inline), a tail call
-// (TailCalls.jet), which leaves the function: its arguments go to rdi,
-// rsi, rdx and rcx (ir_x64_tail_silent) and no value of this frame is
+// access, a frame address or byte copy, an inline-range test (IntBig, in
+// rax and rdx: X64Select.jet ir_x64_int_big), a quiet value
+// (ir_x64_quiet), a call of an `#FFI(asm)` template selected in place that
+// keeps r8 and r9 (IRAsmLeaf.quiet; X64Select.jet ir_x64_asm_inline), a
+// tail call (TailCalls.jet), which leaves the function: its arguments go to
+// rdi, rsi, rdx and rcx (ir_x64_tail_silent) and no value of this frame is
 // read after its jump, or a call of the stop poll, which keeps every
 // register but rax (X64Select.jet ir_x64_stop_poll), so a loop's check
 // costs its slots no register.
 ir_x64_silent: fn(m: IRModule, f: IRFunction, consts: [Bool], values: [Int], at: Int) -> Bool Never! {
     if f.op[at] == {
-        .Nop | .Const | .Load | .Store | .StreamStore | .Offset | .StackAddress | .CopyBytes | .Block | .Loop | .If | .Else | .End | .Br | .BrIf | .Unreachable -> true
+        .Nop | .Const | .Load | .Store | .StreamStore | .Offset | .StackAddress | .CopyBytes | .Block | .Loop | .If | .Else | .End | .Br | .BrIf | .Unreachable | .IntBig -> true
         .Return -> f.b[at] != IR_TAIL_JUMP || (at > 0 && ir_x64_tail_silent(m, f, at - 1))
         .Call -> ir_x64_tail_silent(m, f, at) || ir_x64_asm_silent(m, f, at) || ir_x64_poll_silent(m, f, at)
-        .ConstText | .ConstBigInt | .Copy | .Move | .Drop | .Close | .Add | .Sub | .Mul | .Div | .Rem | .FloorDiv | .Mod | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Neg | .Not | .Convert | .Concat | .CallRuntime | .CallIndirect | .FunctionAddress | .DataAddress | .Sqrt | .IntBig -> ir_x64_quiet(m, f, consts, values, at)
+        .ConstText | .ConstBigInt | .Copy | .Move | .Drop | .Close | .Add | .Sub | .Mul | .Div | .Rem | .FloorDiv | .Mod | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Neg | .Not | .Convert | .Concat | .CallRuntime | .CallIndirect | .FunctionAddress | .DataAddress | .Sqrt -> ir_x64_quiet(m, f, consts, values, at)
     }
 }
 
@@ -288,13 +300,66 @@ ir_x64_asm_silent: fn(m: IRModule, f: IRFunction, at: Int) -> Bool Never! {
     leaf.quiet && leaf.code.len() > 0 && ir_x64_asm_inlinable(m, f, leaf, f.args, f.b[at], f.c[at], f.dst[at])
 }
 
+// Whether selecting instruction `at` makes calls only in its slow path, of
+// exact Int runtime routes with their arguments in rdi and rsi alone,
+// through X64Select.jet ir_x64_call_out, and else leaves r8 and r9 alone:
+// an exact Int Add, Sub, Mul, negation or comparison (the route and the
+// operand drops it covers: ir_x64_exact_arithmetic, ir_x64_exact_compare),
+// or such a covered Drop (ir_x64_covered_drop). A slot in r8 or r9 lives
+// across those calls in its frame home (ir_x64_keep_routed); the hot path
+// stays as it is.
+// The operand's type is read only once the op is known to be one of these:
+// another op's `a` may be no slot at all (a Call's callee, a CallRuntime's
+// interned name, a Br's depth).
+ir_x64_int_calls: fn(m: IRModule, f: IRFunction, consts: [Bool], at: Int) -> Bool Never! {
+    op: f.op[at]
+    if op == .Drop -> return ir_x64_covered_drop(m, f, consts, at)
+    exact: if op == {
+        .Add | .Sub | .Mul | .Eq | .Ne | .Lt | .Le | .Gt | .Ge -> !ir_overflow_wraps(f.c[at])
+        .Neg -> true
+        .Nop | .Const | .ConstText | .ConstBigInt | .Copy | .Move | .Drop | .Close | .Div | .Rem | .FloorDiv | .Mod | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Not | .Convert | .Concat | .Call | .CallRuntime | .CallIndirect | .FunctionAddress | .DataAddress | .Load | .Store | .StackAddress | .Offset | .CopyBytes | .Block | .Loop | .If | .Else | .End | .Br | .BrIf | .Return | .Unreachable | .Sqrt | .IntBig | .StreamStore -> false
+    }
+    exact && f.a[at] >= 0 && m.types[f.slot_type[f.a[at]]].kind == .Int
+}
+
+// Whether Drop `at` is one of the operand drops an exact Int Add, Sub, Mul
+// or comparison right before it covers, which selects nothing itself
+// (X64Select.jet ir_x64_operand_drops, as it walks them; a comparison of
+// words with a constant covers none). The instruction before the drops is
+// checked to be such an op before its operand's type is read.
+ir_x64_covered_drop: fn(m: IRModule, f: IRFunction, consts: [Bool], at: Int) -> Bool Never! {
+    first := at
+    loop first > 0 && f.op[first - 1] == .Drop -> first -= 1
+    owner: first - 1
+    if owner < 0 -> return false
+    op: f.op[owner]
+    compare: op == .Eq || op == .Ne || op == .Lt || op == .Le || op == .Gt || op == .Ge
+    if op != .Add && op != .Sub && op != .Mul && !compare -> return false
+    if f.a[owner] < 0 || m.types[f.slot_type[f.a[owner]]].kind != .Int || ir_overflow_wraps(f.c[owner]) -> return false
+    if (op == .Eq || op == .Ne) && (consts[f.a[owner]] || consts[f.b[owner]]) -> return false
+    drops := [Int]{}
+    loop next in first..<(at + 1) {
+        slot: f.a[next]
+        if (slot != f.a[owner] && slot != f.b[owner]) || slot == f.dst[owner] || (drops.len() == 1 && drops[0] == slot) -> return false
+        row: m.types[f.slot_type[slot]]
+        if row.kind != .Int || row.drop == "" -> return false
+        drops.push(slot)
+    }
+    true
+}
+
 // Per slot: whether it is a `general` slot other than a parameter whose
 // range (`starts`..`ends`) holds only silent instructions (ir_x64_silent),
-// so r8 and r9 may hold it.
-ir_x64_silent_slots: fn(m: IRModule, f: IRFunction, consts: [Bool], values: [Int], general: [Bool], starts: [Int], ends: [Int]) -> [Bool] Never! {
-    // Per instruction, how many before it may call.
+// with `routes` exact Int routes too (ir_x64_int_calls), so r8 and r9 may
+// hold it.
+ir_x64_silent_slots: fn(m: IRModule, f: IRFunction, consts: [Bool], values: [Int], general: [Bool], starts: [Int], ends: [Int], routes: Bool) -> [Bool] Never! {
+    // Per instruction, how many before it may call (but in a route's slow
+    // path).
     noisy := [Int]{0}
-    loop at in 0..<f.op.len() -> noisy.push(noisy[at] + (if ir_x64_silent(m, f, consts, values, at) -> 0 else -> 1))
+    loop at in 0..<f.op.len() {
+        calm: ir_x64_silent(m, f, consts, values, at) || (routes && ir_x64_int_calls(m, f, consts, at))
+        noisy.push(noisy[at] + (if calm -> 0 else -> 1))
+    }
     loop slot in 0..<starts.len() -> general[slot] && slot >= f.param_count && starts[slot] >= 0 && noisy[ends[slot] + 1] == noisy[starts[slot]]
 }
 
@@ -659,27 +724,41 @@ ir_x64_allocate: fn(m: IRModule, f: IRFunction) -> IRX64Allocation Never! {
 
     // Linear scan: the General slots over the callee-saved registers and,
     // for those whose ranges hold no instruction that may call (r8 and r9
-    // carry only a call's arguments: ir_x64_silent), r8 and r9 first (in a
-    // leaf every slot's range is such a one); the Float slots over
+    // carry only the arguments of calls: ir_x64_silent), r8 and r9 first (in
+    // a leaf every slot's range is such a one), and for those whose ranges
+    // also hold exact Int routes (ir_x64_int_calls), whose calls are all in
+    // slow paths, r8 and r9 once the callee-saved registers are taken; the
+    // Float slots over
     // xmm8-xmm15 and, for those whose ranges hold no call passing more than
     // two Floats, xmm2-xmm7 (IR_X64_XMM_REGISTERS). A
     // slot that starts with its write may take the register of one its
     // writer reads last, that of the writer's first operand first
     // (`partners`), an If's result that of its then arm's source
     // (ir_x64_phis), and a copy that may share its source's register
-    // (ir_x64_aliases) rides on it. Sharing holds for Float slots across the
-    // calls inside an instruction too: before the call ir_x64_keep_xmms
-    // stores every slot sharing the register, all of them holding the same
-    // value, and after it loads them all back.
+    // (ir_x64_aliases) rides on it. Sharing holds for Float and routed slots
+    // across the calls inside an instruction too: before the call
+    // ir_x64_keep_xmms and ir_x64_keep_routed store every slot sharing the
+    // register, all of them holding the same value, and after it load them
+    // all back.
     general: loop slot in 0..<count -> starts[slot] <= ends[slot] && !consts[slot] && !addressed[slot] && classes[slot] == .General
     floating: loop slot in 0..<count -> starts[slot] <= ends[slot] && classes[slot] == .Float
     fresh: loop slot in 0..<count -> first_writes[slot] && starts[slot] >= 0 && ir_x64_write(f, starts[slot]) == slot
     partners: loop slot in 0..<count -> if fresh[slot] && left_reads[starts[slot]] -> f.a[starts[slot]] else -> -1
     phis: ir_x64_phis(m, f, starts, ends, last_write, writes, classes, consts, addressed, around)
     aliases: ir_x64_aliases(m, f, starts, ends, last_write, writes, classes, consts, addressed)
+    leaf: ir_x64_leaf(m, f, classes, consts, values)
+    silent: if leaf -> [Bool]{} else -> ir_x64_silent_slots(m, f, consts, values, general, starts, ends, false)
     regs: if {
-        ir_x64_leaf(m, f, classes, consts, values) -> ir_x64_scan(starts, ends, weights, general, general, IR_X64_LEAF_REGISTERS.len(), 0, fresh, partners, phis, aliases, IR_X64_LEAF_REGISTERS)
-        else -> ir_x64_scan(starts, ends, weights, general, ir_x64_silent_slots(m, f, consts, values, general, starts, ends), IR_X64_SLOT_REGISTERS.len(), IR_X64_SLOT_REGISTERS.len(), fresh, partners, phis, aliases, IR_X64_QUIET_REGISTERS)
+        leaf -> ir_x64_scan(starts, ends, weights, general, general, general, IR_X64_LEAF_REGISTERS.len(), 0, fresh, partners, phis, aliases, IR_X64_LEAF_REGISTERS)
+        else -> ir_x64_scan(starts, ends, weights, general, ir_x64_silent_slots(m, f, consts, values, general, starts, ends, true), silent, IR_X64_SLOT_REGISTERS.len(), IR_X64_SLOT_REGISTERS.len(), fresh, partners, phis, aliases, IR_X64_QUIET_REGISTERS)
+    }
+    // The slots in r8 or r9 whose ranges hold a route call (all but the
+    // silent ones), each kept in its frame home across those calls.
+    routed := [Int]{}
+    if !leaf {
+        loop slot in 0..<count {
+            if (regs[slot] == 8 || regs[slot] == 9) && !silent[slot] -> routed.push(slot)
+        }
     }
     // Per instruction, how many before it pass more than two Float
     // arguments.
@@ -696,7 +775,7 @@ ir_x64_allocate: fn(m: IRModule, f: IRFunction) -> IRX64Allocation Never! {
         crowded.push(crowded[at] + (if floats > 2 -> 1 else -> 0))
     }
     roomy: loop slot in 0..<count -> floating[slot] && slot >= f.param_count && starts[slot] >= 0 && crowded[ends[slot] + 1] == crowded[starts[slot]]
-    xmms: ir_x64_scan(starts, ends, weights, floating, roomy, IR_X64_XMM_OPEN, 0, fresh, partners, phis, aliases, IR_X64_XMM_REGISTERS)
+    xmms: ir_x64_scan(starts, ends, weights, floating, roomy, roomy, IR_X64_XMM_OPEN, 0, fresh, partners, phis, aliases, IR_X64_XMM_REGISTERS)
     xmm_slots := [Int]{}
     loop slot in 0..<count {
         if xmms[slot] >= 0 -> xmm_slots.push(slot)
@@ -714,8 +793,10 @@ ir_x64_allocate: fn(m: IRModule, f: IRFunction) -> IRX64Allocation Never! {
 
     // Frame homes below the saved registers, for the referenced slots
     // without a callee-saved register or a constant (a Float slot in an xmm
-    // register keeps its home across the calls it lives through).
-    homed: loop slot in 0..<count -> regs[slot] < 0 && !consts[slot] && !addressed[slot] && starts[slot] <= ends[slot] && classes[slot] != .Empty
+    // register and a routed slot keep their homes across the calls they
+    // live through).
+    homed := loop slot in 0..<count -> regs[slot] < 0 && !consts[slot] && !addressed[slot] && starts[slot] <= ends[slot] && classes[slot] != .Empty
+    loop slot in routed -> homed[slot] = true
     named: loop slot in 0..<count -> f.slot_name[slot] >= 0
     homes: ir_x64_homes(starts, ends, refs, homed, named, 8 * kept.len())
     depth := 8 * kept.len()
@@ -753,7 +834,7 @@ ir_x64_allocate: fn(m: IRModule, f: IRFunction) -> IRX64Allocation Never! {
     loop slot in 0..<count -> frames.push(if roots[slot] >= 0 -> stack[last_write[roots[slot]]] + shifts[slot] else -> 0)
     total: ir_x64_align(depth, 16)
     frame_bytes: total - 8 * kept.len()
-    IRX64Allocation{regs: regs.move(), xmms: xmms.move(), xmm_slots: xmm_slots.move(), homes: homes.move(), consts: consts.move(), values: values.move(), frames: frames.move(), starts: starts.move(), ends: ends.move(), stack: stack.move(), saved: kept.move(), frame_bytes: frame_bytes, result_home: result_home, result_storage: result_storage}
+    IRX64Allocation{regs: regs.move(), xmms: xmms.move(), xmm_slots: xmm_slots.move(), routed: routed.move(), homes: homes.move(), consts: consts.move(), values: values.move(), frames: frames.move(), starts: starts.move(), ends: ends.move(), stack: stack.move(), saved: kept.move(), frame_bytes: frame_bytes, result_home: result_home, result_storage: result_storage}
 }
 
 // IR_X64_ALIAS_SPAN: the most instructions a copy's range may cover to
@@ -875,9 +956,9 @@ ir_x64_storage_size: fn(f: IRFunction, at: Int) -> Int Never! {
 // Linear scan of the `eligible` slots over the registers of `pool`, by start
 // then slot: one sort of the keys (start + 1) * count + slot (a parameter
 // starts at -1). The rows of `pool` from `wide` on go only to the `open`
-// slots, which look for a free register from row `open_first` on first (0:
-// from the first row), keeping the rows before it for the slots that may
-// take no other. A copy that
+// slots; the `leading` ones among them look for a free register from row
+// `open_first` on first (0: from the first row), keeping the rows before
+// it for the slots that may take no other. A copy that
 // may share its source's register (`aliases`,
 // ir_x64_aliases) rides on it while the source has one, taking none of its
 // own, and loses it with the source; its range lies inside the source's.
@@ -893,7 +974,7 @@ ir_x64_storage_size: fn(f: IRFunction, at: Int) -> Int Never! {
 // are lighter than it; else the range stays in its home, until
 // ir_x64_fill_homes finds it a register no range kept over all of it. Per
 // slot: its register, -1 for none.
-ir_x64_scan: fn(starts: [Int], ends: [Int], weights: [Int], eligible: [Bool], open: [Bool], wide: Int, open_first: Int, fresh: [Bool], partners: [Int], phis: [Int], aliases: [Int], pool: [Int]) -> [Int] Never! {
+ir_x64_scan: fn(starts: [Int], ends: [Int], weights: [Int], eligible: [Bool], open: [Bool], leading: [Bool], wide: Int, open_first: Int, fresh: [Bool], partners: [Int], phis: [Int], aliases: [Int], pool: [Int]) -> [Int] Never! {
     count: starts.len()
     regs := [Int]{}
     loop _ in 0..<count -> regs.push(-1)
@@ -937,7 +1018,7 @@ ir_x64_scan: fn(starts: [Int], ends: [Int], weights: [Int], eligible: [Bool], op
                 if owners[row] == partner -> free = row
             }
         }
-        first: if open[slot] && open_first < rows -> open_first else -> 0
+        first: if open[slot] && leading[slot] && open_first < rows -> open_first else -> 0
         loop step in 0..<rows {
             row: (step + first) %% rows
             if free < 0 && (owners[row] < 0 || (shares && ends[owners[row]] == start)) -> free = row
@@ -981,7 +1062,7 @@ ir_x64_scan: fn(starts: [Int], ends: [Int], weights: [Int], eligible: [Bool], op
             regs[slot] = pool[victim]
         }
     }
-    ir_x64_fill_homes(starts, ends, weights, eligible, open, wide, open_first, pool, regs)
+    ir_x64_fill_homes(starts, ends, weights, eligible, open, leading, wide, open_first, pool, regs)
     regs
 }
 
@@ -994,10 +1075,10 @@ IR_X64_FILL_WORK: 64
 // stand free over the stretches where the scan had sent other ranges home
 // for want of them. Each such range (`eligible`, no register in `regs`),
 // heaviest first, takes the first row of `pool` it may have (from
-// `open_first` on for an `open` one, which may have them all; the rows
-// before `wide` for any other) whose register no range holds anywhere over
+// `open_first` on for a `leading` one; an `open` one may have them all, any
+// other the rows before `wide`) whose register no range holds anywhere over
 // it. Bounded by IR_X64_FILL_WORK.
-ir_x64_fill_homes: fn(starts: [Int], ends: [Int], weights: [Int], eligible: [Bool], open: [Bool], wide: Int, open_first: Int, pool: [Int], regs: &[Int]) Never! {
+ir_x64_fill_homes: fn(starts: [Int], ends: [Int], weights: [Int], eligible: [Bool], open: [Bool], leading: [Bool], wide: Int, open_first: Int, pool: [Int], regs: &[Int]) Never! {
     count: starts.len()
     // Per instruction (from -1, a parameter's start): the pool rows whose
     // registers a range holds there, one bit each.
@@ -1033,7 +1114,7 @@ ir_x64_fill_homes: fn(starts: [Int], ends: [Int], weights: [Int], eligible: [Boo
         taken := 0
         loop at in lo..<(hi + 1) -> taken = taken.bit_or(held[at])
         rows: if open[slot] -> pool.len() else -> wide
-        first: if open[slot] && open_first < rows -> open_first else -> 0
+        first: if open[slot] && leading[slot] && open_first < rows -> open_first else -> 0
         free := -1
         loop step in 0..<rows {
             row: (step + first) %% rows
@@ -1056,7 +1137,7 @@ ir_x64_fill_homes: fn(starts: [Int], ends: [Int], weights: [Int], eligible: [Boo
     eligible: [Bool]{true, true, true}
     fresh: [Bool]{true, true, true}
     none: [Int]{-1, -1, -1}
-    regs: ir_x64_scan(starts, ends, weights, eligible, eligible, 1, 0, fresh, none, none, none, [Int]{3})
+    regs: ir_x64_scan(starts, ends, weights, eligible, eligible, eligible, 1, 0, fresh, none, none, none, [Int]{3})
     assert_eq(regs[2], 3)
     assert_eq(regs[1], 3)
     assert_eq(regs[0], -1)
@@ -1079,12 +1160,12 @@ ir_x64_lighter: fn(a: Int, a_end: Int, b: Int, b_end: Int) -> Bool Never! {
     fresh: [Bool]{true, true, true}
     aliases: [Int]{-1, 0, -1}
     partners: [Int]{-1, -1, -1}
-    regs: ir_x64_scan(starts, ends, weights, eligible, eligible, 1, 0, fresh, partners, partners, aliases, [Int]{3})
+    regs: ir_x64_scan(starts, ends, weights, eligible, eligible, eligible, 1, 0, fresh, partners, partners, aliases, [Int]{3})
     assert_eq(regs[0], 3)
     assert_eq(regs[1], 3)
     assert_eq(regs[2], -1)
     // Without the copy riding, the value alone is lighter and goes home.
-    alone: ir_x64_scan(starts, ends, weights, eligible, eligible, 1, 0, fresh, partners, partners, [Int]{-1, -1, -1}, [Int]{3})
+    alone: ir_x64_scan(starts, ends, weights, eligible, eligible, eligible, 1, 0, fresh, partners, partners, [Int]{-1, -1, -1}, [Int]{3})
     assert_eq(alone[0], -1)
 }
 
@@ -1099,11 +1180,11 @@ ir_x64_lighter: fn(a: Int, a_end: Int, b: Int, b_end: Int) -> Bool Never! {
     fresh: [Bool]{true, true, true}
     aliases: [Int]{-1, -1, -1}
     pool: [Int]{3, 12}
-    regs: ir_x64_scan(starts, ends, weights, eligible, eligible, 2, 0, fresh, [Int]{-1, -1, 1}, aliases, aliases, pool)
+    regs: ir_x64_scan(starts, ends, weights, eligible, eligible, eligible, 2, 0, fresh, [Int]{-1, -1, 1}, aliases, aliases, pool)
     assert_eq(regs[0], 3)
     assert_eq(regs[1], 12)
     assert_eq(regs[2], 12)
-    first: ir_x64_scan(starts, ends, weights, eligible, eligible, 2, 0, fresh, aliases, aliases, aliases, pool)
+    first: ir_x64_scan(starts, ends, weights, eligible, eligible, eligible, 2, 0, fresh, aliases, aliases, aliases, pool)
     assert_eq(first[2], 3)
 }
 
@@ -1119,11 +1200,11 @@ ir_x64_lighter: fn(a: Int, a_end: Int, b: Int, b_end: Int) -> Bool Never! {
     fresh: [Bool]{true, true, true}
     none: [Int]{-1, -1, -1}
     pool: [Int]{3, 12}
-    regs: ir_x64_scan(starts, ends, weights, eligible, eligible, 2, 0, fresh, none, [Int]{-1, -1, 1}, none, pool)
+    regs: ir_x64_scan(starts, ends, weights, eligible, eligible, eligible, 2, 0, fresh, none, [Int]{-1, -1, 1}, none, pool)
     assert_eq(regs[0], 3)
     assert_eq(regs[1], 12)
     assert_eq(regs[2], 12)
-    apart: ir_x64_scan(starts, ends, weights, eligible, eligible, 2, 0, fresh, none, none, none, pool)
+    apart: ir_x64_scan(starts, ends, weights, eligible, eligible, eligible, 2, 0, fresh, none, none, none, pool)
     assert_eq(apart[2], -1)
 }
 
@@ -1140,13 +1221,21 @@ ir_x64_lighter: fn(a: Int, a_end: Int, b: Int, b_end: Int) -> Bool Never! {
     fresh: [Bool]{true, true, true}
     none: [Int]{-1, -1, -1}
     pool: [Int]{3, 12, 8}
-    regs: ir_x64_scan(starts, ends, weights, eligible, open, 2, 2, fresh, none, none, none, pool)
+    regs: ir_x64_scan(starts, ends, weights, eligible, open, open, 2, 2, fresh, none, none, none, pool)
     assert_eq(regs[0], 3)
     assert_eq(regs[1], 8)
     assert_eq(regs[2], 12)
-    plain: ir_x64_scan(starts, ends, weights, eligible, open, 2, 0, fresh, none, none, none, pool)
+    plain: ir_x64_scan(starts, ends, weights, eligible, open, open, 2, 0, fresh, none, none, none, pool)
     assert_eq(plain[1], 12)
     assert_eq(plain[2], -1)
+    // Ranges that may call only in the exact Int routes' slow paths (open,
+    // not leading) take r12 like any other, and r8 only once the
+    // callee-saved rows are full.
+    calm: [Bool]{false, true, true}
+    lagging: [Bool]{false, false, false}
+    routed: ir_x64_scan(starts, ends, weights, eligible, calm, lagging, 2, 2, fresh, none, none, none, pool)
+    assert_eq(routed[1], 12)
+    assert_eq(routed[2], 8)
 }
 
 // f(x) = g(x - 1) + x: the Call is the last read of x - 1 and writes g's
@@ -1181,6 +1270,39 @@ ir_x64_lighter: fn(a: Int, a_end: Int, b: Int, b_end: Int) -> Bool Never! {
     assert_eq(al.regs[got], al.regs[less])
     assert(al.regs[sum] == al.regs[x] || al.regs[sum] == al.regs[got])
     assert_eq(al.saved.len(), 2)
+}
+
+// A Call's `a` is its callee's row, no slot: the exact Int route check
+// (ir_x64_int_calls) reads an operand's type only for an exact Int op, so a
+// caller with fewer slots than the callee's row allocates.
+#Test("A callee row past the caller's slots is no exact Int operand") {
+    m := ir_module_new()
+    int_row: ir_type_row(m, Type.Int) ?? panic("no Int row")
+    loop k in 0..<16 {
+        filler := ir_function_new("g{k}", "test:route.jet::g{k}", "", "route.jet", 1)
+        n: ir_slot(filler, int_row, IRSlotKind.Param, ir_intern_name(m, "n"), 1)
+        filler.result = int_row
+        _ := ir_emit(filler, IROp.Return, -1, n, -1, -1, 1)
+        name_rows_set(m.function_rows, filler.key, m.functions.len())
+        m.functions.push(filler)
+    }
+    callee: m.functions.len() - 1
+    f := ir_function_new("f", "test:route.jet::f", "", "route.jet", 2)
+    x: ir_slot(f, int_row, IRSlotKind.Param, ir_intern_name(m, "x"), 2)
+    f.result = int_row
+    one: ir_slot(f, int_row, IRSlotKind.Temp, -1, 0)
+    _ := ir_emit(f, IROp.Const, one, 1, -1, -1, 3)
+    more: ir_slot(f, int_row, IRSlotKind.Temp, -1, 0)
+    _ := ir_emit(f, IROp.Add, more, x, one, IR_OVERFLOW_TRAP, 3)
+    args: ir_args(f, [Int]{x})
+    got: ir_slot(f, int_row, IRSlotKind.Temp, -1, 0)
+    _ := ir_emit(f, IROp.Call, got, callee, args, 1, 3)
+    sum: ir_slot(f, int_row, IRSlotKind.Temp, -1, 0)
+    _ := ir_emit(f, IROp.Add, sum, more, got, IR_OVERFLOW_TRAP, 3)
+    _ := ir_emit(f, IROp.Return, -1, sum, -1, -1, 3)
+    assert(callee >= f.slot_type.len())
+    al: ir_x64_allocate(m, f)
+    assert(al.regs[more] >= 0)
 }
 
 // f(x, y) = ((x * y) + y) * x, then that through a Move: each Float result

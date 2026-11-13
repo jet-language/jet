@@ -491,10 +491,10 @@ ir_x64_home_xmm: fn(al: IRX64Allocation, slot: Int, scratch: Int) -> Int Never! 
     scratch
 }
 
-// Whether a call from instruction `at` keeps xmm slot `slot`: a call
-// instruction reads its arguments before and writes its result after the
-// call itself; within any other instruction every slot whose range holds
-// it is kept.
+// Whether a call from instruction `at` keeps xmm (or routed) slot `slot`:
+// a call instruction reads its arguments before and writes its result
+// after the call itself; within any other instruction every slot whose
+// range holds it is kept.
 ir_x64_keeps_xmm: fn(f: IRFunction, al: IRX64Allocation, at: Int, slot: Int) -> Bool Never! {
     op: f.op[at]
     if op == .Call || op == .CallRuntime || op == .CallIndirect -> return al.starts[slot] < at && al.ends[slot] > at
@@ -526,13 +526,33 @@ ir_x64_keep_xmms: fn(e: &IRX64Emitter, f: IRFunction, al: IRX64Allocation, out: 
     }
 }
 
+// ir_x64_keep_xmms for the routed slots (IRX64Allocation.routed), in r8
+// or r9, whose ranges hold only the exact Int routes' calls (X64Alloc.jet
+// ir_x64_int_calls): those set no argument in r8 or r9, so before the call
+// the register still holds the slot.
+ir_x64_keep_routed: fn(e: &IRX64Emitter, f: IRFunction, al: IRX64Allocation, out: Bool) Never! {
+    at: e.at
+    if at < 0 -> return
+    loop slot in al.routed {
+        if !ir_x64_keeps_xmm(f, al, at, slot) -> next
+        if out {
+            x64_store(e.code, X64_RBP, al.homes[slot], al.regs[slot])
+        } else {
+            x64_load(e.code, al.regs[slot], X64_RBP, al.homes[slot])
+        }
+    }
+}
+
 // A call from instruction e.at of `target` (`call r10` when `indirect`),
-// keeping the xmm slots live across it (ir_x64_keep_xmms); a stop poll
-// keeps them itself (ir_x64_stop_poll).
+// keeping the xmm and routed slots live across it (ir_x64_keep_xmms,
+// ir_x64_keep_routed); a stop poll keeps them itself (ir_x64_stop_poll).
 ir_x64_call_out: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, target: X64RelocTarget, indirect: Bool) Never! {
     keeps := false
     if !indirect && target == .Function(id) -> keeps = ir_x64_is_poll(m, id.value)
-    if !keeps -> ir_x64_keep_xmms(e, f, al, true)
+    if !keeps {
+        ir_x64_keep_xmms(e, f, al, true)
+        ir_x64_keep_routed(e, f, al, true)
+    }
     if e.streams && !keeps -> x64_sfence(e.code)
     if indirect {
         e.dynamic = true
@@ -541,7 +561,10 @@ ir_x64_call_out: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Alloc
         at: x64_call_rel32(e.code)
         e.relocs.push(X64Reloc{at: at, target: target})
     }
-    if !keeps -> ir_x64_keep_xmms(e, f, al, false)
+    if !keeps {
+        ir_x64_keep_xmms(e, f, al, false)
+        ir_x64_keep_routed(e, f, al, false)
+    }
 }
 
 // `bytes` pushed below the frame for a while (ir_x64_compile_body's
@@ -3655,8 +3678,9 @@ ir_x64_pad_local: fn(f: IRFunction, al: IRX64Allocation, pad: IRX64Pad, slot: In
 // branches into the body runs on there for `other` too, so it must keep
 // every value the body holds over `other`: no temp of the tail may hold the
 // register or the frame home of such a value (temps whose ranges lie apart
-// share homes, X64Alloc), and no such value may be in an xmm register (a
-// call in the tail keeps only the xmm values live over `pad`).
+// share homes, X64Alloc), and no such value may be in an xmm register or
+// be a routed one (a call in the tail keeps only the values live over
+// `pad`).
 ir_x64_share_safe: fn(f: IRFunction, al: IRX64Allocation, pad: IRX64Pad, from: Int, other: IRX64Pad) -> Bool Never! {
     if f.op[pad.end - 1] == .Return -> return true
     taken := [Int]{}
@@ -3674,7 +3698,7 @@ ir_x64_share_safe: fn(f: IRFunction, al: IRX64Allocation, pad: IRX64Pad, from: I
     }
     loop slot in 0..<al.starts.len() {
         if al.starts[slot] > other.end || al.ends[slot] < other.at || ir_x64_pad_local(f, al, other, slot) -> next
-        if al.xmms[slot] >= 0 -> return false
+        if al.xmms[slot] >= 0 || al.routed.contains(slot) -> return false
         if al.regs[slot] >= 0 {
             loop reg in taken {
                 if reg == al.regs[slot] -> return false
@@ -4175,7 +4199,8 @@ ir_x64_wrap_op: fn(m: IRModule, f: IRFunction, al: IRX64Allocation, picks: [Int]
 }
 
 // The prefix's allocation: `al` with the prefix registers `regs` in place
-// of the body's registers and no frame homes.
+// of the body's registers and no frame homes (it makes no call, so it
+// keeps no routed slot).
 ir_x64_wrap_allocation: fn(al: IRX64Allocation, regs: [Int]) -> IRX64Allocation Never! {
     homes := [Int]{}
     loop _ in 0..<regs.len() -> homes.push(0)
@@ -4183,6 +4208,7 @@ ir_x64_wrap_allocation: fn(al: IRX64Allocation, regs: [Int]) -> IRX64Allocation 
         regs: regs,
         xmms: al.xmms,
         xmm_slots: al.xmm_slots,
+        routed: [Int]{},
         homes: homes,
         consts: al.consts,
         values: al.values,
@@ -5179,6 +5205,66 @@ ir_x64_test_jcc_target: fn(code: [U8], at: Int) -> Int Never! {
     assert(al.regs[value] == X64_R8 || al.regs[value] == X64_R9)
 }
 
+// spread(n) sums n + 1 .. n + 7, all seven live at once, by exact Int Adds
+// whose slow paths call the runtime: the last takes n's register, and the
+// other six outlive the four callee-saved registers left, so r8 and r9 hold
+// two, each stored to its home before a route call and loaded back after it.
+#Test("Values live across exact Int routes take r8 and r9") {
+    m := ir_module_new()
+    int_row: ir_type_row(m, Type.Int) ?? panic("no Int row")
+    f := ir_function_new("spread", "test:spread.jet::spread", "", "spread.jet", 1)
+    n: ir_slot(f, int_row, IRSlotKind.Param, ir_intern_name(m, "n"), 1)
+    f.result = int_row
+    parts := [Int]{}
+    loop k in 1..<8 {
+        constant: ir_slot(f, int_row, IRSlotKind.Temp, -1, 0)
+        _ := ir_emit(f, IROp.Const, constant, k, -1, -1, 2)
+        part: ir_slot(f, int_row, IRSlotKind.Temp, -1, 0)
+        _ := ir_emit(f, IROp.Add, part, n, constant, IR_OVERFLOW_TRAP, 2)
+        parts.push(part)
+    }
+    total := parts[0]
+    loop k in 1..<parts.len() {
+        sum: ir_slot(f, int_row, IRSlotKind.Temp, -1, 0)
+        _ := ir_emit(f, IROp.Add, sum, total, parts[k], IR_OVERFLOW_TRAP, 3)
+        total = sum
+    }
+    _ := ir_emit(f, IROp.Return, -1, total, -1, -1, 3)
+    m.functions.push(f)
+    al: ir_x64_allocate(m, m.functions[0])
+    loop part in parts -> assert(al.regs[part] >= 0)
+    assert(al.routed.len() >= 2)
+    loop slot in al.routed {
+        assert(al.regs[slot] == X64_R8 || al.regs[slot] == X64_R9)
+        assert(al.homes[slot] != 0)
+    }
+    compiled: ir_x64_compile_function(m, ir_x64_tables(m), 0)
+    assert(compiled.errors.is_empty())
+    code: compiled.function.code
+    slot: al.routed[0]
+    ways: [Bool]{true, false}
+    loop out in ways {
+        wanted := x64_code()
+        if out {
+            x64_store(wanted, X64_RBP, al.homes[slot], al.regs[slot])
+        } else {
+            x64_load(wanted, al.regs[slot], X64_RBP, al.homes[slot])
+        }
+        want: wanted.bytes
+        found := false
+        loop start in 0..<(code.len() - want.len() + 1) {
+            same := true
+            loop k in 0..<want.len() {
+                if code[start + k] != want[k] {
+                    same = false
+                    break
+                }
+            }
+            if same -> found = true
+        }
+        assert(found)
+    }
+}
 // A big-integer constant is data: its base-1e9 limbs, least significant
 // first, a carrier with its sign and limb count, and the word naming it
 // with bit 62 set. One in the inline range stays a runtime parse.
