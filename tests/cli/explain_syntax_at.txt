@@ -1,11 +1,19 @@
 @
 
 What this means:
-  Before a name:
-    Marks a name whose value is worked out while compiling, not while the program runs. The mark is part of the name, so write it at every use.
+  Before a type:
+    `@T` is a live link to a `T`: every copy of the link reaches the same value, so a change made through one copy shows through all of them.
     Example:
-      @LIMIT: 1000
-      print("{@LIMIT}")
-    Afterwards: The value is fixed in the built program; reading it costs nothing at run time.
+      Scoreboard: struct {
+          total: @Int
+      }
+    Afterwards: Copying the link never copies the value. `@T?` is an optional link.
+
+  Before a new value:
+    `@value` puts a new value behind a live link and gives you the link.
+    Example:
+      total: @0
+      home: @Team{name: "Lions"}
+    Afterwards: Only a new value can be linked: an `@` before a named place, such as `@player`, is refused.
 
 This explanation comes from Jet's syntax dictionary.
