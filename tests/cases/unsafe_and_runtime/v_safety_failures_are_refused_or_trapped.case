@@ -1,0 +1,31 @@
+# #5971 c9: every V 0.5.2 safety failure seen on 2026-10-16 is refused or
+# trapped by Jet, one program each: a null field, an unfilled reference list,
+# an int-to-pointer cast, a silent i32 overflow and a C declaration that
+# disagrees with the binding.
+fixture: v_safety_failures_are_refused_or_trapped.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+# null field: no null, so a literal that leaves a field out is refused
+step: jet check null_field/main.jet
+exit: 1
+stderr: ~ "[jet.InvalidConstructionField]"
+stderr: ~ "missing fields: label"
+# unfilled list: a slot read before any write is refused
+step: jet check unfilled_list/main.jet
+exit: 1
+stderr: ~ "[jet.UninitializedRead]"
+# int-to-pointer cast: an address becomes a pointer only inside #Unsafe
+step: jet check int_to_pointer/main.jet
+exit: 1
+stderr: ~ "[jet.MemoryOperationOutsideUnsafe]"
+# silent overflow: I32 2147483647 + 1 stops instead of wrapping
+step: jet run overflow/main.jet
+env: JET_V_SAFETY_VALUE=2147483647
+exit: 70
+stdout: = "2147483647\n"
+stderr: ~ "Stop [E3010]"
+stderr: ~ "overflow"
+# mismatched C declaration: a written declaration must match the binding
+step: jet check c_declaration/main.jet
+exit: 1
+stderr: ~ "[jet.OverlayBindingConflict]"

@@ -1,0 +1,8 @@
+// V 0.5.2 accepted `[]&int{len: n}` and crashed reading its unset slots.
+// Jet's only unfilled list is `{ uninit }`, and a read needs every slot written.
+use core.mem
+run: fn() {
+    refs := [Int#3]{ uninit }
+    refs[0] = 1
+    print(refs[1])
+}

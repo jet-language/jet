@@ -1,0 +1,9 @@
+// V 0.5.2 wrapped i32 overflow silently. Jet's fixed widths trap.
+use env: core.sys
+
+run: fn() {
+    raw: Int.parse(env.get("JET_V_SAFETY_VALUE") ?? "0") ?? 0
+    value: I32.from_int(raw) ?? I32{0}
+    print(value)
+    print(value + I32{1})
+}
