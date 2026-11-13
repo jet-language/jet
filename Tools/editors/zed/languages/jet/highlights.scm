@@ -67,7 +67,7 @@
 ] @keyword
 
 ; keyword.ownership: uninit
-; keyword.other: #caller #code #here #if #loop #run @SOURCE @TYPES it self
+; keyword.other: #build #caller #code #here #if #loop #package #phase #program #run @SOURCE @TYPES it self
 [
   "self"
 ] @keyword

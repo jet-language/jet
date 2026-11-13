@@ -1286,8 +1286,7 @@ and `Compiler/Prelude/Traits.jet`; `Tools/agent/SyntaxDictionaryRows.jet` and
 `Tools/agent/OwnedTraitRows.jet` generate those rows, whose `--check` fails when
 they drift, and only their meanings are written by hand, on the row. A generated
 row with no written meaning explains itself plainly (``The marker `#Unsafe`.``).
-The few rows the registry does not yet classify (the `#build`, `#package`,
-`#phase` and `#program` fact roots, `&=` and `|=`) are written by hand.
+The two rows the registry does not classify, `&=` and `|=`, are written by hand.
 A token can have several position-dependent meanings, examples, consequences,
 and related diagnostic codes. Lookup ignores ASCII case; `--verbose` adds the
 registry name and decision only in text mode. Unknown syntax-like queries
