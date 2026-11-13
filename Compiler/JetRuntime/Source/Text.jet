@@ -727,7 +727,11 @@ rt_text_skip: fn(data: I64, len: I64, from: I64, scalars: I64) -> I64 {
     at - data
 }
 
+// A one-byte needle goes straight to the byte scan, as rt_text_find_bytes
+// would send it (rt_text_find_byte itself answers -1 for a `start` at or
+// past the end), with no call through the general search.
 rt_text_find: fn(value: I64, needle: I64, start: I64, last: Bool) -> I64 {
+    if (rt_text_len(needle) == I64{1}) -> return rt_text_find_byte(rt_text_data(value), rt_text_len(value), rt_text_byte(rt_text_data(needle)), start, last)
     rt_text_find_bytes(rt_text_data(value), rt_text_len(value), rt_text_data(needle), rt_text_len(needle), start, last)
 }
 
@@ -1037,12 +1041,13 @@ rt_text_trim: fn(value: I64) -> I64 {
 RT_TEXT_FRAME: I64{-2}
 
 // Writes frame cell `cell` as a view of bytes start..<end of `value` and
-// returns the view.
+// returns the view. Every view lies inside `value` (0 <= start <= end <=
+// its length), so the arithmetic cannot overflow.
 rt_text_frame_view: fn(cell: I64, value: I64, start: I64, end: I64) -> I64 {
     rt_text_store(cell, I64{-1})
     header: wrapping(cell + I64{8})
     rt_text_store(header, wrapping(rt_text_data(value) + start))
-    rt_text_store(wrapping(header + I64{8}), end - start)
+    rt_text_store(wrapping(header + I64{8}), wrapping(end - start))
     rt_text_store(wrapping(header + I64{16}), RT_TEXT_FRAME)
     rt_text_store(wrapping(header + I64{24}), I64{0})
     header
@@ -1064,25 +1069,29 @@ rt_text_frame_view: fn(cell: I64, value: I64, start: I64, end: I64) -> I64 {
     rt_text_frame_view(cell, value, start, rt_text_trim_end(value, start))
 }
 
-// The cut of `value` at the separator found at byte `found` (-1: none):
-// the text before it as a frame view in the cell at `cells`, the text after
-// it in the cell at cells + 40. 1 when there is one; 0, cells untouched,
-// when not.
-rt_text_cut_frame: fn(value: I64, separator: I64, cells: I64, found: I64) -> I64 {
-    if (found < I64{0}) -> return I64{0}
+// The cut of `value` around a separator at bytes found..<after: the text
+// before it as a frame view in the cell at `cells`, the text after it in
+// the cell at cells + 40. 1, for the cut found. No step can stop, so this
+// is a leaf that saves no register.
+rt_text_cut_views: fn(value: I64, found: I64, after: I64, cells: I64) -> I64 {
     _: rt_text_frame_view(cells, value, I64{0}, found)
-    _: rt_text_frame_view(wrapping(cells + I64{40}), value, found + rt_text_len(separator), rt_text_len(value))
+    _: rt_text_frame_view(wrapping(cells + I64{40}), value, after, rt_text_len(value))
     I64{1}
 }
 
-// `value.split_once(separator)` as frame views (rt_text_cut_frame).
+// `value.split_once(separator)` as frame views (rt_text_cut_views): 1 when
+// there is a cut; 0, cells untouched, when not.
 #Export(c) jet_rt_text_split_frame: fn(value: I64, separator: I64, cells: I64) -> I64 {
-    rt_text_cut_frame(value, separator, cells, rt_text_find(value, separator, I64{0}, false))
+    found: rt_text_find(value, separator, I64{0}, false)
+    if (found < I64{0}) -> return I64{0}
+    rt_text_cut_views(value, found, wrapping(found + rt_text_len(separator)), cells)
 }
 
-// `value.cut_last(separator)` as frame views (rt_text_cut_frame).
+// `value.cut_last(separator)` as frame views (rt_text_cut_views).
 #Export(c) jet_rt_text_cut_last_frame: fn(value: I64, separator: I64, cells: I64) -> I64 {
-    rt_text_cut_frame(value, separator, cells, rt_text_find(value, separator, I64{0}, true))
+    found: rt_text_find(value, separator, I64{0}, true)
+    if (found < I64{0}) -> return I64{0}
+    rt_text_cut_views(value, found, wrapping(found + rt_text_len(separator)), cells)
 }
 
 rt_text_push_word: fn(target: I64, word: I64, len: I64) {
