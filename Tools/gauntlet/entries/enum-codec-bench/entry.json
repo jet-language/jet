@@ -1,0 +1,27 @@
+{
+  "name": "enum-codec-bench",
+  "mode": "tool",
+  "description": "Tools/perf/enum_codec_bench.py and its Jet twin enum_codec_bench/run.jet, the bounded Wave A enum-codec benchmark harness (#3151): the static workload report, and with --run an adapter command measured per form, case and operation, printed as JSON with sorted keys. fixtures/adapter.sh is a stand-in adapter, run from the repository root: the external form codes correctly with metrics whose codec_ns follows the sample index, the internal form writes the wrong wire, exits 3, accepts a future variant and writes metrics that are not JSON or not an object, and the untagged form writes no metrics or a negative or Boolean field; ADAPTER_SLEEP names a cell that sleeps past the timeout. The scratch root is the case directory's scratch/. Cases: the static report; every metadata option and variable; a command from the environment without --run; --run without a command; two samples with appended options; a placeholder template with a literal brace; a timeout; a command that cannot start; and exit 2 for an unknown placeholder, unclosed quoting, an empty command, a /tmp scratch root, --samples 0, --run with --dry-run and an unknown profile.",
+  "tool": {
+    "original": "Tools/perf/enum_codec_bench.py",
+    "jet": "Tools/perf/enum_codec_bench/run.jet",
+    "fixtures": "fixtures",
+    "cases": [
+      {"args": [], "env": {"JET_ENUM_CODEC_BENCH_SCRATCH_ROOT": "scratch"}, "check": "check.jet", "expected": "expected/static.out"},
+      {"args": ["--dry-run", "--profile", "debug", "--compiler-version", "9.1", "--toolchain", "tc", "--library", "lib", "--library-version", "", "--samples", "7", "--rounds", "3", "--timeout", "2.5", "--memory-limit-mib", "64", "--max-output-bytes", "4096", "--scratch-root", "./a//b/"], "env": {"JET_ENUM_CODEC_BENCH_SCRATCH_ROOT": "scratch", "JET_ENUM_CODEC_COMPILER": "jetc", "JET_ENUM_CODEC_OPTIMIZED": "Yes", "JET_ENUM_CODEC_LTO": "thin", "JET_ENUM_CODEC_COMMIT": "abc123", "JET_ENUM_CODEC_ENTRYPOINT": ""}, "check": "check.jet", "expected": "expected/meta.out"},
+      {"args": [], "env": {"JET_ENUM_CODEC_BENCH_SCRATCH_ROOT": "scratch", "JET_ENUM_CODEC_BENCH_COMMAND": "sh Tools/gauntlet/entries/enum-codec-bench/fixtures/adapter.sh"}, "check": "check.jet", "expected": "expected/envcmd.out"},
+      {"args": ["--run"], "env": {"JET_ENUM_CODEC_BENCH_SCRATCH_ROOT": "scratch"}, "check": "check.jet", "expected": "expected/nocmd.out"},
+      {"args": ["--run", "--samples", "2", "--command", "sh Tools/gauntlet/entries/enum-codec-bench/fixtures/adapter.sh"], "env": {"JET_ENUM_CODEC_BENCH_SCRATCH_ROOT": "scratch"}, "check": "check.jet", "expected": "expected/run2.out"},
+      {"args": ["--run", "--samples", "1", "--command", "sh Tools/gauntlet/entries/enum-codec-bench/fixtures/adapter.sh --operation {operation} --form {form} --case {case} --input {input} --expected {expected} --output {output} --metrics {metrics} --rounds {rounds} --brace {{x}}"], "env": {"JET_ENUM_CODEC_BENCH_SCRATCH_ROOT": "scratch"}, "check": "check.jet", "expected": "expected/template.out"},
+      {"args": ["--run", "--samples", "1", "--timeout-seconds", "0.25"], "env": {"JET_ENUM_CODEC_BENCH_SCRATCH_ROOT": "scratch", "JET_ENUM_CODEC_BENCH_COMMAND": "sh Tools/gauntlet/entries/enum-codec-bench/fixtures/adapter.sh", "ADAPTER_SLEEP": "external-payload-encode"}, "check": "check.jet", "expected": "expected/timeout.out"},
+      {"args": ["--run", "--samples", "1", "--command", "Tools/gauntlet/entries/enum-codec-bench/fixtures/no-such-adapter"], "env": {"JET_ENUM_CODEC_BENCH_SCRATCH_ROOT": "scratch"}, "check": "check.jet", "expected": "expected/missing.out"},
+      {"args": ["--run", "--samples", "1", "--command", "sh {bogus}"], "env": {"JET_ENUM_CODEC_BENCH_SCRATCH_ROOT": "scratch"}, "exit": 2, "check": "check.jet", "expected": "expected/none.out"},
+      {"args": ["--run", "--samples", "1", "--command", "sh 'adapter"], "env": {"JET_ENUM_CODEC_BENCH_SCRATCH_ROOT": "scratch"}, "exit": 2, "check": "check.jet", "expected": "expected/none.out"},
+      {"args": ["--run", "--command", "  "], "env": {"JET_ENUM_CODEC_BENCH_SCRATCH_ROOT": "scratch"}, "exit": 2, "check": "check.jet", "expected": "expected/none.out"},
+      {"args": ["--run", "--command", "sh Tools/gauntlet/entries/enum-codec-bench/fixtures/adapter.sh", "--scratch-root", "/tmp/enum-codec-bench-x"], "env": {}, "exit": 2, "check": "check.jet", "expected": "expected/none.out"},
+      {"args": ["--samples", "0"], "env": {"JET_ENUM_CODEC_BENCH_SCRATCH_ROOT": "scratch"}, "exit": 2, "check": "check.jet", "expected": "expected/none.out"},
+      {"args": ["--run", "--dry-run"], "env": {"JET_ENUM_CODEC_BENCH_SCRATCH_ROOT": "scratch"}, "exit": 2, "check": "check.jet", "expected": "expected/none.out"},
+      {"args": ["--profile", "fast"], "env": {"JET_ENUM_CODEC_BENCH_SCRATCH_ROOT": "scratch"}, "exit": 2, "check": "check.jet", "expected": "expected/none.out"}
+    ]
+  }
+}

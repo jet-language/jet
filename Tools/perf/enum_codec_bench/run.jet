@@ -1,0 +1,727 @@
+// The Jet twin of Tools/perf/enum_codec_bench.py, the bounded Wave A
+// enum-codec benchmark harness (#3151). It describes one fixed `Command`
+// workload and, when an existing canonical codec command is supplied with
+// --run, measures that command. It never implements a codec itself: the
+// JSON-looking strings below are fixture wire values.
+//
+//   jet Tools/perf/enum_codec_bench/run.jet                  static report
+//   jet Tools/perf/enum_codec_bench/run.jet -- --run --command ADAPTER
+//
+// The adapter (--command or $JET_ENUM_CODEC_BENCH_COMMAND, split as
+// shlex.split splits it) runs from the repository root. A command with none
+// of the {operation}, {form}, {case}, {input}, {expected}, {output},
+// {metrics} or {rounds} placeholders gets them appended as options:
+//
+// * `encode` reads the source expression at --input and writes the exact wire
+//   bytes to --output;
+// * `decode` reads the wire bytes at --input and may use the expected source
+//   expression at --expected; exit 0 accepts and any other status rejects;
+// * either may write a JSON object to --metrics with non-negative integer
+//   `codec_ns` and `allocation_count`. A missing field is reported
+//   unavailable, never estimated.
+//
+// Every sample uses the same payload, rounds, limits and scratch policy, in a
+// fresh directory below the scratch root (never /tmp or the repository's
+// target/), removed at the end. Each sample runs under the wall timeout, a
+// CPU-time limit of the timeout rounded up and an address-space limit; its
+// output is captured up to --max-output-bytes. Core has no file-size limit,
+// so an oversized output or metrics file is refused when it is read, as the
+// original's bounded read refuses it. The report, printed as JSON with sorted
+// keys, keeps process wall time apart from adapter-reported codec time, keeps
+// unavailable cells, and compares no peer implementation. A bad option is
+// exit 2.
+use core.[files, math, process, regex, sys, time]
+use core.text.fmt
+use core.encoding.json
+
+HARNESS: "Tools/perf/enum_codec_bench/run.jet"
+PROTOCOL_VERSION: 1
+FORMS: ["external", "internal", "untagged", "adjacent"]
+CASES: ["payload", "evolution", "unknown", "malformed"]
+OPERATIONS: ["encode", "decode"]
+ENTRYPOINT: "core.encoding.json.to_string/decode<T>"
+UNAVAILABLE: "canonical enum codec command was not provided; static mode does not execute Core"
+ADJACENT_UNAVAILABLE: "adjacent tag/content codec entry point is unavailable by contract; this cell is never substituted with an external serializer"
+TRUTHY: ["1", "true", "yes", "on"]
+// The default scratch parent, the original's Path.home() / ".cache" / "jet-dev" / "enum-codec-bench".
+SCRATCH_DEFAULT_PARTS: ["~", ".cache", "jet-dev", "enum-codec-bench"]
+
+#Encode
+Witness: struct {
+    source_expression: String
+    semantic_value: String
+    decode_expectation: String
+    purpose: String
+}
+
+// The same semantic value is the known payload in every form.
+WORKLOAD_CASES: [
+    "payload": Witness{source_expression: "Command.Write(\"hello\")", semantic_value: "Command.Write(\"hello\")", decode_expectation: "accept", purpose: "equal known payload across all supported enum forms"},
+    "evolution": Witness{source_expression: "Command.Archive(\"hello\")", semantic_value: "future Command.Archive(\"hello\")", decode_expectation: "reject", purpose: "future variant/evolution input kept separate from known payload"},
+    "unknown": Witness{source_expression: "Command.Future(\"hello\")", semantic_value: "unknown Command.Future(\"hello\")", decode_expectation: "reject", purpose: "unknown variant input; no unknown-retention claim is made"},
+    "malformed": Witness{source_expression: "Command.Write(7)", semantic_value: "known Command.Write with malformed payload shape", decode_expectation: "reject", purpose: "known variant with the wrong payload type"},
+]
+
+WIRE_PAYLOADS: [
+    "external": ["payload": "{{\"Write\":\"hello\"}}", "evolution": "{{\"Archive\":\"hello\"}}", "unknown": "{{\"Future\":\"hello\"}}", "malformed": "{{\"Write\":7}}"],
+    "internal": ["payload": "{{\"type\":\"Write\",\"value\":\"hello\"}}", "evolution": "{{\"type\":\"Archive\",\"value\":\"hello\"}}", "unknown": "{{\"type\":\"Future\",\"value\":\"hello\"}}", "malformed": "{{\"type\":\"Write\",\"value\":7}}"],
+    "untagged": ["payload": "\"hello\"", "evolution": "{{\"Archive\":\"hello\"}}", "unknown": "{{\"Future\":\"hello\"}}", "malformed": "7"],
+    "adjacent": ["payload": "{{\"kind\":\"Write\",\"body\":\"hello\"}}", "evolution": "{{\"kind\":\"Archive\",\"body\":\"hello\"}}", "unknown": "{{\"kind\":\"Future\",\"body\":\"hello\"}}", "malformed": "{{\"kind\":\"Write\",\"body\":7}}"],
+]
+
+#Encode
+FormInfo: struct {
+    description: String
+    entrypoint: String
+    marker: String
+    runtime_supported: Bool
+}
+
+FORM_INFO: [
+    "external": FormInfo{description: "externally tagged canonical enum representation", entrypoint: ENTRYPOINT, marker: "none", runtime_supported: true},
+    "internal": FormInfo{description: "internally tagged canonical enum representation", entrypoint: ENTRYPOINT, marker: "#Discriminant(\"type\")", runtime_supported: true},
+    "untagged": FormInfo{description: "untagged canonical enum representation", entrypoint: ENTRYPOINT, marker: "#Untagged", runtime_supported: true},
+    "adjacent": FormInfo{description: "adjacently tagged tag/content representation", entrypoint: "adjacent marker entry point", marker: "unavailable", runtime_supported: false},
+]
+
+// shlex.split's words, and the pieces of one: plain text, a backslash
+// escape, a single-quoted run or a double-quoted run.
+WORD: Regex{"(?:[^ \t\r\n'\"\\]|\\.|'[^']*'|\"(?:[^\"\\]|\\.)*\")+"}
+PIECE: Regex{"([^ \t\r\n'\"\\]+)|\\(.)|'([^']*)'|\"((?:[^\"\\]|\\.)*)\""}
+REPR_ESCAPES: ["\\": "\\\\", "\n": "\\n", "\r": "\\r", "\t": "\\t", "'": "\\'", "\"": "\\\""]
+DIGITS: Regex{"[0-9]+"}
+
+#CLI
+Args: struct {
+    #Doc("run an explicitly supplied existing canonical codec adapter") run: Bool
+    #Doc("emit static workload/unavailable cells without running a command (default)") dry_run: Bool
+    #[Doc("existing adapter command"), Arg(env: "JET_ENUM_CODEC_BENCH_COMMAND")] command: String?
+    #Doc("number of fresh samples per executable cell, 1..99") samples: Int{5}
+    #Doc("equal workload repetitions requested from the adapter, 1..1000000") rounds: Int{1}
+    #Doc("wall timeout per sample in seconds, above 0 and at most 3600") timeout_seconds: Float{30.0}
+    #Doc("the same as --timeout-seconds") timeout: Float?
+    #Doc("best-effort child address-space limit in MiB, 1..65536") memory_limit_mib: Int{1024}
+    #Doc("maximum adapter output and metrics file size, 1..16777216") max_output_bytes: Int{1048576}
+    #[Doc("disk-oriented scratch parent; /tmp and the repository's target/ are refused (default the enum-codec-bench dir of the user cache's jet-dev dir)"), Arg(env: "JET_ENUM_CODEC_BENCH_SCRATCH_ROOT")] scratch_root: String?
+    #Doc("requested optimized profile metadata, release or debug (does not verify the adapter)") profile: String{"release"}
+    #Doc("compiler name metadata override") compiler: String?
+    #Doc("compiler version metadata override") compiler_version: String?
+    #Doc("toolchain metadata override") toolchain: String?
+    #Doc("codec library metadata override") library: String?
+    #Doc("codec library version metadata override") library_version: String?
+}
+
+// What a sample is run with.
+Bench: struct {
+    root: String
+    command: String
+    scratch: String
+    samples: Int
+    rounds: Int
+    timeout_seconds: Float
+    memory_limit_mib: Int
+    max_output_bytes: Int
+    profile: String
+}
+
+#Encode
+FieldStatus: struct {
+    encoded_bytes: String
+    allocation_count: String
+    encode_median_ns: String
+    decode_median_ns: String
+}
+
+#Encode
+Matrix: struct {
+    id: String
+    form: String
+    case: String
+    operation: String
+    source_expression: String
+    wire_payload: String
+    wire_payload_bytes: Int
+    decode_expectation: String
+    status: String
+    reason: String
+    sample_results: [Dyn]
+    process_wall_median_ns: Int?
+    codec_median_ns: Int?
+    encode_median_ns: Int?
+    decode_median_ns: Int?
+    encode_time_ns: Int?
+    decode_time_ns: Int?
+    allocation_count: Int?
+    allocation_median: Int?
+    encoded_bytes: Int
+    encoded_bytes_status: String
+    allocation_status: String
+    timing_status: String
+    field_status: FieldStatus
+}
+
+run: fn(args: Args) Err! {
+    root: sys.executable().remove_suffix("/{HARNESS}")
+    bounds: [(value: args.samples, low: 1, high: 99), (value: args.rounds, low: 1, high: 1000000), (value: args.memory_limit_mib, low: 1, high: 65536), (value: args.max_output_bytes, low: 1, high: 16777216)]
+    in_range: bounds.all(bound -> bound.value >= bound.low && bound.value <= bound.high)
+    timeout: args.timeout ?? args.timeout_seconds
+    if !in_range || !math.is_finite(timeout) || timeout <= 0.0 || timeout > 3600.0 -> usage_error("--samples 1..99, --rounds 1..1000000, --timeout-seconds above 0 and at most 3600, --memory-limit-mib 1..65536, --max-output-bytes 1..16777216")
+    if args.run && args.dry_run -> usage_error("argument --dry-run: not allowed with argument --run")
+    if args.profile != "release" && args.profile != "debug" -> usage_error("argument --profile: invalid choice: {python_repr(args.profile)} (choose from 'release', 'debug')")
+    if args.run && (args.command ?? "x").trim() == "" -> usage_error("--command must not be empty when --run is used")
+    command: args.command ?? ""
+    measuring: args.run && command != ""
+    // Static mode is the default even when the environment names a command;
+    // only --run starts a process.
+    requested_root: files.expanduser(args.scratch_root ?? SCRATCH_DEFAULT_PARTS.join("/"))
+    scratch_root: if measuring -> safe_scratch_root(root, requested_root) ?? usage_error(err.message) else -> path_text(requested_root)
+    bench: Bench{root: root, command: command, scratch: "", samples: args.samples, rounds: args.rounds, timeout_seconds: timeout, memory_limit_mib: args.memory_limit_mib, max_output_bytes: args.max_output_bytes, profile: args.profile}
+    unmeasured: if command == "" -> "runtime requested without an existing canonical codec command; no command was executed" else -> "static/dry mode selected; provide --run and an existing canonical codec command to measure this cell"
+    cells: if measuring -> measured_cells(bench, scratch_root) ?? usage_error(err.message) else -> static_cells(unmeasured)
+    report: Dyn{[String: Dyn]{
+        "benchmark": "enum-codec-wave-a-v1",
+        "card": 3151,
+        "mode": if args.run -> "run" else -> "dry-run",
+        "protocol_version": PROTOCOL_VERSION,
+        "harness": HARNESS,
+        "static_validation": static_validation() ?? usage_error("workload validation failed: {err.message}"),
+        "workload": workload_description(),
+        "metadata": metadata(args, command),
+        "limits": Dyn{[String: Dyn]{
+            "samples": args.samples, "rounds": args.rounds, "timeout_seconds": Dyn.Float(timeout),
+            "memory_limit_mib": args.memory_limit_mib, "max_output_bytes": args.max_output_bytes, "scratch_root": scratch_root,
+        }},
+        "cells": Dyn.Array(cells.map(cell -> cell_tree(cell))),
+        "summary": summarize(cells),
+        "peer_comparison": Dyn{[String: Dyn]{"status": "not_run", "reason": "peer comparison is outside card #3151 harness scope", "performance_win_claim": false, "arms": Dyn.Array([Dyn]{})}},
+        "receipt": Dyn{[String: Dyn]{"status": "not_available", "text": Dyn.Null, "reason": "no canonical runtime receipt is claimed by this harness"}},
+    }}
+    // json.canonical writes every object's keys sorted, and parsing keeps
+    // their order: the report as json.dumps(sort_keys=True, indent=2) writes it.
+    print(json.to_string_pretty(json.parse(json.canonical(report))))
+}
+
+usage_error: fn(message: String) -> Never {
+    process.fail(2, "usage: jet {HARNESS} -- [--help] [--run | --dry-run] [--command COMMAND] [OPTION VALUE]...\nenum_codec_bench: error: {message}")
+}
+
+// The path as Python's Path prints it: no empty or `.` segment and no
+// trailing slash.
+path_text: fn(path: String) -> String Never! {
+    absolute: path.starts_with("/")
+    kept: path.split("/").filter(part -> part != "" && part != ".").to_list()
+    joined: kept.join("/")
+    if {
+        absolute -> "/{joined}"
+        joined == "" -> "."
+        else -> joined
+    }
+}
+
+// The scratch root made absolute and resolved, refused when it is the
+// filesystem root, /tmp or below it, or the repository's target/ or below
+// it; then created.
+safe_scratch_root: fn(root: String, raw: String) -> String Err! {
+    resolved: resolve(files.resolve(raw))
+    if resolved == "/" -> return Err("scratch root must not be the filesystem root")
+    if within(resolved, resolve("/tmp")) -> return Err("scratch root must not be /tmp or a child of /tmp")
+    if within(resolved, resolve(files.join(root, "target"))) -> return Err("scratch root must not be the repository target directory")
+    files.create_dir_all(resolved) ?? return Err("scratch root is not writable: {resolved}")
+    Ok(resolved)
+}
+
+// `path` with every symbolic link of its existing part resolved.
+resolve: fn(path: String) -> String Never! {
+    if files.exists(path) -> return files.realpath(path) ?? path.copy()
+    parent: files.dirname(path)
+    if parent == path -> return path.copy()
+    files.join(resolve(parent), files.basename(path))
+}
+
+within: fn(path: String, parent: String) -> Bool Never! {
+    path == parent || path.starts_with(if parent.ends_with("/") -> parent.copy() else -> "{parent}/")
+}
+
+static_validation: fn() -> Dyn Err! {
+    loop form in FORMS {
+        loop case in CASES {
+            wire: WIRE_PAYLOADS[form][case]
+            if wire == "" || wire.contains("\n") -> return Err("wire fixture is empty or multiline: {form}/{case}")
+        }
+    }
+    if WORKLOAD_CASES["payload"].semantic_value != "Command.Write(\"hello\")" -> return Err("known payload semantic value changed")
+    names: ["form_inventory", "case_inventory", "equal_known_payload", "wire_fixtures_are_bounded", "adjacent_is_explicitly_unavailable"]
+    Ok(Dyn{[String: Dyn]{"status": "ok", "checks": Dyn.Array(names.map(name -> Dyn{[String: Dyn]{"name": name, "status": "ok"}}))}})
+}
+
+workload_description: fn() -> Dyn Never! {
+    forms := [Dyn]{}
+    loop form in FORMS {
+        entry := FORM_INFO[form].encode()
+        entry["name"] = form
+        entry["wire_payloads"] = wires(form, CASES)
+        forms.push(entry)
+    }
+    cases := [Dyn]{}
+    loop case in CASES {
+        entry := WORKLOAD_CASES[case].encode()
+        entry["name"] = case
+        entry["wire_is_fixture_only"] = true
+        cases.push(entry)
+    }
+    payload_by_form := Dyn{[String: Dyn]{}}
+    loop form in FORMS -> payload_by_form[form] = Dyn.Text(WIRE_PAYLOADS[form]["payload"])
+    Dyn{[String: Dyn]{
+        "id": "enum-codec-wave-a-v1",
+        "card": 3151,
+        "protocol_version": PROTOCOL_VERSION,
+        "enum": "Command",
+        "variants": Dyn.Array([Dyn]{Dyn{[String: Dyn]{"name": "Read", "payload": "unit"}}, Dyn{[String: Dyn]{"name": "Write", "payload": "String"}}}),
+        "forms": Dyn.Array(forms),
+        "cases": Dyn.Array(cases),
+        "equal_payload": Dyn{[String: Dyn]{"case": "payload", "semantic_value": WORKLOAD_CASES["payload"].semantic_value, "wire_payload_by_form": payload_by_form}},
+        "no_peer_comparison": true,
+    }}
+}
+
+wires: fn(form: String, cases: [String]) -> Dyn Never! {
+    out := Dyn{[String: Dyn]{}}
+    loop case in cases -> out[case] = Dyn.Text(WIRE_PAYLOADS[form][case])
+    out
+}
+
+// A metadata value: the option when it is given and not empty, else the
+// environment variable when it is set and not empty, else "unavailable".
+setting: fn(given: String?, name: String) -> String Never! {
+    if given == .Val(value) && value != "" -> return value.copy()
+    process.env_nonempty(name) ?? "unavailable"
+}
+
+metadata: fn(args: Args, command: String) -> Dyn Never! {
+    compiler: setting(args.compiler, "JET_ENUM_CODEC_COMPILER")
+    optimized: process.env_get("JET_ENUM_CODEC_OPTIMIZED")
+    release: args.profile == "release"
+    configured: command != ""
+    Dyn{[String: Dyn]{
+        "compiler": Dyn{[String: Dyn]{
+            "name": compiler,
+            "version": Dyn.Text(setting(args.compiler_version, "JET_ENUM_CODEC_COMPILER_VERSION")),
+            "source": if compiler != "unavailable" -> "environment-or-cli" else -> "unavailable",
+        }},
+        "toolchain": Dyn{[String: Dyn]{"name": Dyn.Text(setting(args.toolchain, "JET_ENUM_CODEC_TOOLCHAIN"))}},
+        "library": Dyn{[String: Dyn]{
+            "name": Dyn.Text(setting(args.library, "JET_ENUM_CODEC_LIBRARY")),
+            "version": Dyn.Text(setting(args.library_version, "JET_ENUM_CODEC_LIBRARY_VERSION")),
+            "entrypoint": Dyn.Text(process.env_get("JET_ENUM_CODEC_ENTRYPOINT") ?? ENTRYPOINT),
+            "status": if configured -> "provided-command-not-verified" else -> "canonical-entrypoint-not-provided",
+        }},
+        "optimized": Dyn{[String: Dyn]{
+            "requested_profile": args.profile,
+            "requested": release,
+            "verified": if optimized == .Val(text) -> Dyn.Bool(TRUTHY.contains(text.trim().lower())) else -> Dyn.Null,
+            "settings": Dyn{[String: Dyn]{
+                "profile": args.profile,
+                "debug_assertions": if release -> Dyn.Bool(false) else -> Dyn.Null,
+                "lto": Dyn.Text(process.env_get("JET_ENUM_CODEC_LTO") ?? "unavailable"),
+            }},
+        }},
+        "command": Dyn{[String: Dyn]{"configured": configured, "template": if configured -> Dyn.Text(command.copy()) else -> Dyn.Text("unavailable")}},
+        "repository_commit": Dyn.Text(process.env_get("JET_ENUM_CODEC_COMMIT") ?? "unavailable"),
+    }}
+}
+
+// The cell before anything runs: unavailable, its fixture byte count only.
+base_cell: fn(form: String, case: String, operation: String) -> Matrix Never! {
+    wire: WIRE_PAYLOADS[form][case]
+    witness: WORKLOAD_CASES[case]
+    Matrix{
+        id: "{form}/{case}/{operation}", form: form, case: case, operation: operation,
+        source_expression: witness.source_expression, wire_payload: wire, wire_payload_bytes: wire.bytes().len(),
+        decode_expectation: witness.decode_expectation, status: "unavailable", reason: UNAVAILABLE, sample_results: [Dyn]{},
+        process_wall_median_ns: None, codec_median_ns: None, encode_median_ns: None, decode_median_ns: None,
+        encode_time_ns: None, decode_time_ns: None, allocation_count: None, allocation_median: None,
+        encoded_bytes: wire.bytes().len(), encoded_bytes_status: "fixture", allocation_status: "unavailable", timing_status: "unavailable",
+        field_status: FieldStatus{
+            encoded_bytes: "fixture", allocation_count: "unavailable",
+            encode_median_ns: if operation == "decode" -> "not_applicable" else -> "unavailable",
+            decode_median_ns: if operation == "encode" -> "not_applicable" else -> "unavailable",
+        },
+    }
+}
+
+// Why a cell is not measured, when that does not depend on a command: the
+// adjacent form, or an encode of a witness no constructor can build.
+fixed_reason: fn(form: String, case: String, operation: String) -> (status: String, reason: String)? Never! {
+    if {
+        form == "adjacent" -> Val((status: "unavailable", reason: ADJACENT_UNAVAILABLE))
+        operation != "encode" || case == "payload" -> None
+        case == "malformed" -> Val((status: "unsupported", reason: "malformed wrong-shape witness is decode-only; no valid Command constructor can encode it"))
+        else -> Val((status: "unsupported", reason: "no source constructor exists in the closed Command workload for the {case} witness; decode-only rejection cell"))
+    }
+}
+
+with_reason: fn(base: Matrix, fixed: (status: String, reason: String)) -> Matrix Never! {
+    cell := base
+    cell.status = fixed.status
+    cell.reason = fixed.reason
+    cell
+}
+
+// The cell as the report holds it: #Encode leaves an absent figure out, and
+// the report writes it as null.
+cell_tree: fn(cell: Matrix) -> Dyn Never! {
+    tree := cell.encode()
+    loop key in ["process_wall_median_ns", "codec_median_ns", "encode_median_ns", "decode_median_ns", "encode_time_ns", "decode_time_ns", "allocation_count", "allocation_median"] {
+        if tree.get(key) == .None -> tree[key] = Dyn.Null
+    }
+    tree
+}
+
+// Every cell of a static report, each executable one unavailable for
+// `reason`: --run without a command, or no --run.
+static_cells: fn(reason: String) -> [Matrix] Never! {
+    cells := [Matrix]{}
+    loop form in FORMS {
+        loop case in CASES {
+            loop operation in OPERATIONS {
+                cells.push(with_reason(base_cell(form, case, operation), fixed_reason(form, case, operation) ?? (status: "unavailable", reason: reason)))
+            }
+        }
+    }
+    cells
+}
+
+// Every cell, each executable one measured in a fresh directory below the
+// scratch root that is gone when this returns.
+measured_cells: fn(bench: Bench, scratch_root: String) -> [Matrix] Err! {
+    scoped := bench.copy()
+    scoped.scratch = files.join(scratch_root, ".enum-codec-bench-{process.current_pid()}-{time.unix_ns()}")
+    files.create_dir_all(scoped.scratch)
+    cells: measure_all(scoped) ?? {
+        files.remove_all(scoped.scratch)
+        return Err(err)
+    }
+    files.remove_all(scoped.scratch)
+    Ok(cells)
+}
+
+measure_all: fn(bench: Bench) -> [Matrix] Err! {
+    loop form in FORMS {
+        loop case in CASES {
+            stem: files.join(bench.scratch, "{form}-{case}")
+            files.write("{stem}.source", "{WORKLOAD_CASES[case].source_expression}\n")
+            files.write("{stem}.wire", WIRE_PAYLOADS[form][case])
+        }
+    }
+    cells := [Matrix]{}
+    loop form in FORMS {
+        loop case in CASES {
+            loop operation in OPERATIONS {
+                base: base_cell(form, case, operation)
+                cell: if fixed_reason(form, case, operation) == .Val(fixed) -> with_reason(base, fixed) else -> measure_cell(bench, base)
+                cells.push(cell)
+            }
+        }
+    }
+    Ok(cells)
+}
+
+// One cell's samples and, when all of them measured, their medians.
+measure_cell: fn(bench: Bench, base: Matrix) -> Matrix Err! {
+    cell := base
+    stem: files.join(bench.scratch, "{cell.form}-{cell.case}")
+    source: "{stem}.source"
+    wire: "{stem}.wire"
+    samples := [Sample]{}
+    loop index in 0..<bench.samples {
+        samples.push(sample(bench, cell, if cell.operation == "encode" -> source else -> wire, if cell.operation == "encode" -> wire else -> source, index))
+    }
+    cell.sample_results = samples.map(one -> one.tree.copy())
+    statuses: samples.map(one -> one.status.copy())
+    verdict: if {
+        statuses.contains("timeout") -> (status: "timeout", reason: "at least one sample exceeded the timeout")
+        statuses.contains("error") -> (status: "error", reason: "at least one sample failed the adapter protocol or fixture check")
+        statuses.all(status -> status == "measured") -> (status: "measured", reason: "all samples completed with the expected codec outcome")
+        else -> (status: "error", reason: "no successful samples")
+    }
+    cell.status = verdict.status
+    cell.reason = verdict.reason
+    if verdict.status == "measured" {
+        cell.process_wall_median_ns = median(samples.map(one -> Val(one.wall_ns)))
+        cell.codec_median_ns = median(samples.map(one -> one.codec_ns))
+        cell.timing_status = if cell.codec_median_ns != None -> "adapter_codec_and_process_wall" else -> "process_wall_only;adapter_codec_ns_unavailable"
+        cell.allocation_median = median(samples.map(one -> one.allocation_count))
+        cell.allocation_count = cell.allocation_median
+        cell.allocation_status = if cell.allocation_median != None -> "measured" else -> "adapter_allocation_count_unavailable"
+        cell.encoded_bytes_status = if cell.operation == "encode" -> "verified" else -> "fixture"
+    }
+    if cell.operation == "encode" -> cell.encode_median_ns = cell.codec_median_ns else -> cell.decode_median_ns = cell.codec_median_ns
+    cell.encode_time_ns = cell.encode_median_ns
+    cell.decode_time_ns = cell.decode_median_ns
+    if cell.encode_median_ns != None -> cell.field_status.encode_median_ns = "measured"
+    if cell.decode_median_ns != None -> cell.field_status.decode_median_ns = "measured"
+    Ok(cell)
+}
+
+// statistics.median as an int: the middle value, or the two middle values'
+// mean rounded down; None unless every value is present.
+median: fn(values: [Int?]) -> Int? Never! {
+    present := [Int]{}
+    loop value in values {
+        if value == .Val(number) -> present.push(number) else -> return None
+    }
+    sorted := present.copy()
+    sorted.sort()
+    middle: sorted.len() /% 2
+    if sorted.len() % 2 == 1 -> Val(sorted[middle]) else -> Val((sorted[middle - 1] + sorted[middle]) /% 2)
+}
+
+// One sample: its report row, and what the cell's medians read from it.
+Sample: struct {
+    tree: Dyn
+    status: String
+    wall_ns: Int
+    codec_ns: Int?
+    allocation_count: Int?
+}
+
+Metrics: struct {
+    codec_ns: Int?
+    allocation_count: Int?
+}
+
+// One run of the adapter for a cell, judged against the cell's fixture.
+sample: fn(bench: Bench, cell: Matrix, input: String, expected: String, index: Int) -> Sample Err! {
+    stem: files.join(bench.scratch, "{cell.form}-{cell.case}-{cell.operation}-{index}")
+    output: "{stem}.output"
+    metrics_path: "{stem}.metrics.json"
+    loop stale in [output, metrics_path] {
+        if files.exists(stale) -> files.remove(stale)
+    }
+    values: [
+        "operation": cell.operation, "form": cell.form, "case": cell.case, "input": input, "expected": expected,
+        "output": output, "metrics": metrics_path, "rounds": "{bench.rounds}",
+    ]
+    argv: command_argv(bench.command, values)
+    expected_bytes: cell.wire_payload.bytes().len()
+    spec: process.cmd(argv).cwd(bench.root).env("JET_ENUM_CODEC_BENCH_PROTOCOL", "{PROTOCOL_VERSION}").env("JET_ENUM_CODEC_BENCH_PROFILE", bench.profile)
+        .timeout(time.duration_ns(Int.from_float(bench.timeout_seconds * 1000000000.0) ?? 0))
+        .cpu_time_limit(time.duration_seconds(max(1, Int.from_float(math.ceil(bench.timeout_seconds)) ?? 1)))
+        .memory_limit(bench.memory_limit_mib * 1048576).output_limit(bench.max_output_bytes)
+    watch: time.start()
+    tree := Dyn{[String: Dyn]{"codec_ns": Dyn.Null, "allocation_count": Dyn.Null, "encoded_bytes": expected_bytes, "stderr": ""}}
+    receipt: spec.run() ?? {
+        tree["wall_ns"] = time.elapsed(watch).ns
+        tree["returncode"] = Dyn.Null
+        return Ok(errored(tree, "could not start canonical codec command: {err}"))
+    }
+    wall_ns: time.elapsed(watch).ns
+    tree["wall_ns"] = wall_ns
+    returncode: if receipt.signal == .Val(number) -> -number else -> receipt.code
+    tree["returncode"] = returncode
+    if receipt.limit_hit == .Val(.Output) {
+        stream: if receipt.output.bytes().len() > bench.max_output_bytes -> "stdout" else -> "stderr"
+        return Ok(errored(tree, "adapter output exceeded {bench.max_output_bytes} bytes: {files.basename(stem)}.{stream}"))
+    }
+    read: load_metrics(metrics_path, bench.max_output_bytes) ?? return Ok(errored(tree, err.message))
+    tree["stderr"] = Dyn.Text(receipt.errors.chars().take(4096).to_list().join(""))
+    if receipt.timed_out {
+        tree["status"] = "timeout"
+        tree["reason"] = Dyn.Text("adapter exceeded {general(bench.timeout_seconds)}s timeout")
+        return Ok(Sample{tree: tree, status: "timeout", wall_ns: wall_ns, codec_ns: None, allocation_count: None})
+    }
+    tree["codec_ns"] = optional(read.codec_ns)
+    tree["allocation_count"] = optional(read.allocation_count)
+    if cell.operation == "encode" {
+        actual: read_bounded(output, bench.max_output_bytes) ?? return Ok(errored(tree, err.message))
+        tree["encoded_bytes"] = actual.len()
+        verdict: if {
+            returncode != 0 -> (status: "error", reason: "encode command exited {returncode}")
+            actual != cell.wire_payload.bytes() -> (status: "error", reason: "canonical encode output differs from the fixed wire fixture")
+            else -> (status: "measured", reason: "canonical encode output matched the fixed wire fixture")
+        }
+        if verdict.status == "measured" -> tree["stdout_bytes"] = receipt.output.bytes().len()
+        return Ok(judged(tree, verdict, wall_ns, read))
+    }
+    accepting: cell.decode_expectation == "accept"
+    tree["decode_outcome"] = if {
+        returncode == 0 -> "accepted"
+        accepting -> "failed"
+        else -> "rejected"
+    }
+    tree["stdout_bytes"] = receipt.output.bytes().len()
+    verdict: if {
+        accepting && returncode != 0 -> (status: "error", reason: "decode command exited {returncode} for an accepting fixture")
+        !accepting && returncode == 0 -> (status: "error", reason: "decode command accepted a fixture expected to be rejected")
+        accepting -> (status: "measured", reason: "canonical decode accepted the fixed wire fixture")
+        else -> (status: "measured", reason: "canonical decode rejected the expected-invalid fixture")
+    }
+    Ok(judged(tree, verdict, wall_ns, read))
+}
+
+// A sample the adapter ran to the end, with its verdict.
+judged: fn(tree: Dyn, verdict: (status: String, reason: String), wall_ns: Int, read: Metrics) -> Sample Never! {
+    row := tree
+    row["status"] = verdict.status
+    row["reason"] = verdict.reason
+    Sample{tree: row, status: verdict.status, wall_ns: wall_ns, codec_ns: read.codec_ns, allocation_count: read.allocation_count}
+}
+
+optional: fn(value: Int?) -> Dyn Never! {
+    if value == .Val(number) -> Dyn.Int(number) else -> Dyn.Null
+}
+
+// A sample the adapter protocol or the fixture check failed, which reports
+// no codec figures.
+errored: fn(tree: Dyn, reason: String) -> Sample Never! {
+    row := tree
+    row["status"] = "error"
+    row["reason"] = reason
+    row["codec_ns"] = Dyn.Null
+    row["allocation_count"] = Dyn.Null
+    Sample{tree: row, status: "error", wall_ns: 0, codec_ns: None, allocation_count: None}
+}
+
+// A file's bytes, empty when it is missing; longer than `limit` is refused.
+read_bounded: fn(path: String, limit: Int) -> [U8] Err! {
+    if !files.exists(path) -> return Ok([U8]{})
+    bytes: files.read_bytes(path) ?? return Ok([U8]{})
+    if bytes.len() > limit -> return Err("adapter output exceeded {limit} bytes: {files.basename(path)}")
+    Ok(bytes)
+}
+
+// The adapter's metrics object: none when the file is missing or empty;
+// `codec_ns` and `allocation_count` must be non-negative integers.
+load_metrics: fn(path: String, limit: Int) -> Metrics Err! {
+    raw: read_bounded(path, limit)
+    if raw.len() == 0 -> return Ok(Metrics{codec_ns: None, allocation_count: None})
+    text: String.from_bytes(raw) ?? return Err("metrics file is not JSON: {files.basename(path)}")
+    value: json.parse(text) ?? return Err("metrics file is not JSON: {files.basename(path)}")
+    if !(value == .Object(_)) -> return Err("metrics JSON must be an object")
+    codec_ns: count(value, "codec_ns")
+    allocation_count: count(value, "allocation_count")
+    Ok(Metrics{codec_ns: codec_ns, allocation_count: allocation_count})
+}
+
+count: fn(metrics: Dyn, field: String) -> Int? Err! {
+    value: metrics.get(field) ?? return Ok(None)
+    if value == .Int(number) && number >= 0 -> return Ok(Val(number))
+    // A JSON integer parses as its digits.
+    if value == .Number(digits) && DIGITS.full_match(digits) -> return Ok(Val(Int.parse(digits) ?? 0))
+    Err("metrics field {field} must be a non-negative integer")
+}
+
+// The adapter's argv: the command split as shlex.split splits it, each
+// placeholder word formatted; with no placeholder, the protocol options
+// appended.
+command_argv: fn(command: String, values: [String: String]) -> [String] Err! {
+    left: WORD.replace(command, "").trim()
+    if left != "" -> return Err("invalid command quoting: {if left.ends_with("\\") -> "No escaped character" else -> "No closing quotation"}")
+    parts: WORD.find_all(command).map(word -> unquote(word))
+    if parts.len() == 0 -> return Err("configured command is empty")
+    argv := [String]{}
+    placeholder := false
+    loop part in parts {
+        if !part.contains("{{") && !part.contains("}}") {
+            argv.push(part.copy())
+            next
+        }
+        formatted: format_word(part, values) ?? return Err("unknown command placeholder in {python_repr(part)}")
+        placeholder = placeholder || formatted != part || part.contains("{{")
+        argv.push(formatted)
+    }
+    if !placeholder {
+        loop name in ["operation", "form", "case", "input", "expected", "output", "metrics", "rounds"] {
+            argv.push("--{name}")
+            argv.push(values[name].copy())
+        }
+    }
+    Ok(argv)
+}
+
+// str.format over one word: `{{` and `}}` are braces and `{name}` is the
+// value of name; any other field is None.
+format_word: fn(word: String, values: [String: String]) -> String? Never! {
+    out := ""
+    rest := word.copy()
+    loop rest != "" {
+        step: if {
+            rest.starts_with("{{{{") || rest.starts_with("}}}}") -> (text: rest.slice(0, 1), used: 2)
+            rest.starts_with("{{") -> {
+                close: rest.index_of("}}") ?? return None
+                (text: values.get(rest.slice(1, close)) ?? return None, used: close + 1)
+            }
+            rest.starts_with("}}") -> return None
+            else -> (text: rest.slice(0, 1), used: 1)
+        }
+        out = "{out}{step.text}"
+        rest = rest.slice(step.used, rest.len())
+    }
+    Val(out)
+}
+
+// A shlex word without its quoting: in double quotes a backslash escapes
+// only a double quote or a backslash.
+unquote: fn(word: String) -> String Never! {
+    PIECE.replace_all_with(word, found -> "{found.groups[0]}{found.groups[1]}{found.groups[2]}{regex.replace(Regex{"\\([\"\\])"}, found.groups[3], "$1")}")
+}
+
+// repr of printable text: in single quotes, or in double quotes when it has
+// a single quote and no double quote; backslashes, that quote and control
+// characters escaped.
+python_repr: fn(text: String) -> String Never! {
+    if text.contains("'") && !text.contains("\"") -> return "\"{Regex{"[\\\x{{0}}-\x{{1F}}\x{{7F}}]"}.replace_all_with(text, found -> repr_escape(found.text))}\""
+    "'{Regex{"[\\\x{{0}}-\x{{1F}}\x{{7F}}']"}.replace_all_with(text, found -> repr_escape(found.text))}'"
+}
+
+repr_escape: fn(character: String) -> String Never! {
+    REPR_ESCAPES.get(character) ?? "\\x{fmt.hex(Int{character.bytes()[0]}, 2)}"
+}
+
+// A positive number as Python's `:g` writes it: six significant digits,
+// trailing zeros dropped, in exponent form below 1e-4 or from 1e6.
+general: fn(value: Float) -> String Never! {
+    exponent: Int.from_float(math.floor(math.log10(value))) ?? 0
+    if exponent < -4 || exponent >= 6 {
+        mantissa: trimmed(fmt.decimal(value / math.pow_n(10.0, exponent), 5))
+        sign: if exponent < 0 -> "-" else -> "+"
+        return "{mantissa}e{sign}{"{if exponent < 0 -> -exponent else -> exponent}".pad_start(2, "0")}"
+    }
+    trimmed(fmt.decimal(value, max(0, 5 - exponent)))
+}
+
+trimmed: fn(text: String) -> String Never! {
+    if !text.contains(".") -> return text.copy()
+    out := text.copy()
+    loop out.ends_with("0") {
+        out = out.remove_suffix("0")
+    }
+    out.remove_suffix(".")
+}
+
+summarize: fn(cells: [Matrix]) -> Dyn Never! {
+    counts := Dyn{[String: Dyn]{}}
+    tally := [String: Int]{}
+    unavailable := [Dyn]{}
+    loop cell in cells {
+        tally[cell.status] = (tally.get(cell.status) ?? 0) + 1
+        if cell.status == "unavailable" || cell.status == "unsupported" {
+            unavailable.push(Dyn{[String: Dyn]{"id": cell.id, "status": cell.status, "reason": cell.reason}})
+        }
+    }
+    loop entry in tally -> counts[entry.key] = entry.value
+    measured: tally.get("measured") ?? 0
+    status: if {
+        tally.has_key("error") || tally.has_key("timeout") -> "error"
+        measured > 0 && tally.len() == 1 -> "measured"
+        measured > 0 -> "partial"
+        else -> "unavailable"
+    }
+    Dyn{[String: Dyn]{
+        "status": status,
+        "cell_counts": counts,
+        "measured_cells": measured,
+        "unavailable_cells": Dyn.Array(unavailable.copy()),
+        "measurement_cells_remain_unavailable": unavailable.len() > 0,
+    }}
+}

@@ -1,0 +1,73 @@
+// What an enum-codec-bench case printed (PortBars.jet runs this in the case
+// directory with the file holding the program's output): `no output`, or each
+// value of the printed JSON as `path: value`, sorted by key as both sides
+// print it. What varies by run, machine or side is held fixed:
+// - wall times are N;
+// - the harness path is <harness>;
+// - the toolchain's python and runner entries, which only the original
+//   writes, are left out;
+// - the case directory is <cwd>;
+// - a command that could not start keeps only that prefix, since the system
+//   error is worded by each runtime;
+// - a timed-out sample's return code, the signal each runtime kills it with,
+//   is <killed>.
+use {
+    files: core.files
+    json: core.encoding.json
+    process: core.process
+}
+
+MEASURED: ["wall_ns", "process_wall_median_ns"]
+ORIGINAL_ONLY: [".metadata.toolchain.python", ".metadata.toolchain.runner"]
+NOT_STARTED: "could not start canonical codec command"
+
+#CLI
+Check: struct {
+    #Doc("The file holding the program's output") stdout: String
+}
+
+run: fn(check: Check) {
+    printed: (files.read(check.stdout) ?? process.fail(1, "{err}")).trim()
+    if printed == "" -> return print("no output")
+    here: files.cwd() ?? process.fail(1, "{err}")
+    places: [files.realpath(here) ?? here.copy(), here.copy()]
+    show("", json.parse(printed) ?? process.fail(1, err.display_text()), "", places, "")
+}
+
+// Each value under `value`, the value of field `key` in an object whose
+// status is `status`, as `path: value`.
+show: fn(path: String, value: Dyn, key: String, places: [String], status: String) {
+    if ORIGINAL_ONLY.contains(path) -> return
+    if value == {
+        .Object(fields) -> {
+            inner := ""
+            loop field in fields {
+                if field.key == "status" && field.value == .Text(text) -> inner = text.copy()
+            }
+            loop field in fields -> show("{path}.{field.key}", field.value, field.key, places, inner)
+        }
+        .Array(items) -> {
+            if items.len() == 0 -> print("{path}: []")
+            loop index in 0..<items.len() -> show("{path}[{index}]", items[index], key, places, "")
+        }
+        .Int(_) | .Float(_) | .Number(_) -> print("{path}: {number(value, key, status)}")
+        .Text(text) -> print("{path}: {json.stringify(Dyn.Text(fixed(text, key, places)))}")
+        .Null | .Bool(_) | .Bytes(_) | .DateTime(_) -> print("{path}: {json.stringify(value)}")
+    }
+}
+
+number: fn(value: Dyn, key: String, status: String) -> String {
+    if {
+        MEASURED.contains(key) -> "N"
+        status == "timeout" && key == "returncode" -> "<killed>"
+        else -> json.stringify(value)
+    }
+}
+
+fixed: fn(text: String, key: String, places: [String]) -> String {
+    if key == "harness" -> return "<harness>"
+    if text.starts_with(NOT_STARTED) -> return NOT_STARTED
+    out := text.copy()
+    loop place in places -> out = out.replace(place, "<cwd>")
+    out
+}
