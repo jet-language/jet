@@ -73,8 +73,10 @@ AUDIT_NAME: "-diagnostic-safety-audit.md"
 SAFETY_RANGES: [String]{"E00", "E01", "E02", "E03", "E04", "E05", "E06", "E07", "E08", "E09", "E10", "E11", "E12", "E13", "E14", "E18", "E20", "E21", "E22", "E23", "E24", "E25", "E26", "E27", "E28", "E29", "E30", "E31", "E32", "E33", "E34", "E35", "E36", "E42", "E-A", "E-C", "E-E", "E-F", "E-M", "E-O", "E-S", "E-T", "E-W", "JT0", "L11", "R08"}
 // Where a sealed floor's report site is looked for first.
 SEMA_ROOT: "Compiler/JetSema/"
-// A quoted diagnostic code in compiler source, as `sema_error("E0212", …)` passes it.
-QUOTED_CODE: Regex{"\x22(E[0-9]{{4}})\x22"}
+// A diagnostic code in compiler source: quoted whole, as `sema_error("E0212", …)`
+// passes it, at the head of a message, as `"E2416: env var …"`, or in a runtime
+// report's brackets, as `Runtime fault [R0801]: …`.
+QUOTED_CODE: Regex{"[\x22\[]((?:E|R|JT)[0-9]{{4}}|E-[A-Z]+(?:-[A-Z]+)*)[\x22\]:]"}
 
 STRUCT_OPEN: Regex{"^(\w+): struct \x7B$"}
 STRUCT_FIELD: Regex{"^    ([a-z][a-z0-9_]*): String$"}
@@ -1194,9 +1196,8 @@ report_sites: fn(rows: [RowFacts]) -[FS]> ReportSites DiagnosticRowsError! {
             sites.files += 1
             sites.copies += one.copies
             loop problem in one.problems -> sites.problems.push(problem)
-            if !text.contains("\"E") -> next
+            if !QUOTED_CODE.is_match(text) -> next
             loop (index, line) in text.split("\n").to_list() {
-                if !line.contains("\"E") -> next
                 loop quoted in QUOTED_CODE.matches(line) {
                     code: quoted.groups[0]
                     rank: site_rank(path, line, code)
@@ -1233,6 +1234,7 @@ render_audit: fn(facts: [RowFacts], sites: ReportSites) -> String Never! {
     opinion := 0
     pending := 0
     floors := [String]{}
+    unreported := [String]{}
     lifted := [String]{}
     classified := [String]{}
     loop row in facts {
@@ -1252,11 +1254,15 @@ render_audit: fn(facts: [RowFacts], sites: ReportSites) -> String Never! {
             lifted.push("| {row.code} | {type_name} | {audit_cell(row.expert_path)} |")
             next
         }
-        at := "no source quotes the code"
-        if sites.code_sites.get(row.code) == .Val(site) -> at = site.copy()
-        floors.push("| {row.code} | {type_name} | {at} | {audit_cell(row.expert_path.remove_prefix("none: "))} |")
+        reason: audit_cell(row.expert_path.remove_prefix("none: "))
+        site: sites.code_sites.get(row.code) ?? {
+            unreported.push("| {row.code} | {type_name} | {reason} |")
+            next
+        }
+        floors.push("| {row.code} | {type_name} | {site} | {reason} |")
     }
     floors.sort()
+    unreported.sort()
     lifted.sort()
     classified.sort()
     ranges := [String]{}
@@ -1274,11 +1280,19 @@ render_audit: fn(facts: [RowFacts], sites: ReportSites) -> String Never! {
         "",
         "## Sealed floors",
         "",
-        "A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lifts. Its site is the first compiler call that passes the code to a report, in sema when sema has one. A code no call passes shows the first line that quotes it.",
+        "A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lifts. Its site is the first compiler call that passes the code to a report, in sema when sema has one. A code no call passes shows the first line that quotes it: whole, at the head of a message, or in a runtime report's brackets.",
         "",
         "| Code | Type | Reported at | Why no expert path reaches the program |",
         "|---|---|---|---|",
         floors.join("\n"),
+        "",
+        "## Sealed floors no source reports",
+        "",
+        "These soundness rows have no expert path, but no line under {REPORT_ROOTS.join(", ")} passes or quotes their code, so no program meets them today. Each becomes a sealed floor once a report site names it, or is retired.",
+        "",
+        "| Code | Type | Why no expert path reaches the program |",
+        "|---|---|---|",
+        unreported.join("\n"),
         "",
         "## Soundness errors an expert can lift",
         "",
@@ -1592,14 +1606,21 @@ MINIMAL_MEANING: "        meaning: \"A route that doesn't start at the root\"\n"
     assert(diagnostic_rows_error(row.replace(code, "{opinion}        status: .Retired\n")).contains("only an active `.Error` row"))
     sites := ReportSites{files: 0, copies: 0, problems: [String]{}, code_sites: [String:String]{}, site_ranks: [String:Int]{}}
     floor: (render_rows(row.replace(code, "{sound}        expert_path: \"none: nothing reaches it\"\n")) ?? panic(err.message)).facts
-    assert(render_audit(floor, sites).contains("| E0299 | BadPath | no source quotes the code | nothing reaches it |"))
+    assert(render_audit(floor, sites).contains("| E0299 | BadPath | nothing reaches it |"))
     sites.code_sites["E0299"] = "Compiler/JetSema/b.jet:7"
     audit: render_audit(floor, sites)
     assert(audit.contains("| E0299 | BadPath | Compiler/JetSema/b.jet:7 | nothing reaches it |"))
+    assert(!audit.contains("| E0299 | BadPath | nothing reaches it |"))
     assert_eq(site_rank("Compiler/JetSema/b.jet", "    sema_error(\"E0299\", span)", "E0299"), 0)
     assert_eq(site_rank("Compiler/JetParser/a.jet", "    parse_error(\"E0299\", span)", "E0299"), 1)
     assert_eq(site_rank("Compiler/JetSema/b.jet", "    codes: [\"E0298\", \"E0299\"]", "E0299"), 2)
     assert_eq(site_rank("Compiler/JetCli/c.jet", "    codes: [\"E0298\", \"E0299\"]", "E0299"), 3)
+    quoted := [String]{}
+    lines: [String]{"    sema_error(\"E-SUBJECT-CALL\", span)", "    push(rt_static_text(\"E2416: env var \"))", "    rt_static_text(\"Runtime fault [R0801]: raw\")", "    row(\"JT0198\")", "    x: \"Error\" + \"E-mail\""}
+    loop line in lines {
+        loop found in QUOTED_CODE.matches(line) -> quoted.push(found.groups[0].copy())
+    }
+    assert_eq(quoted.join(" "), "E-SUBJECT-CALL E2416 R0801 JT0198")
     assert(audit.contains("| E0299 | BadPath | soundness | a \\| b |"))
     lifted: (render_rows(row.replace(code, "{sound}        expert_path: \"an `#Unsafe` block\"\n")) ?? panic(err.message)).facts
     assert(render_audit(lifted, sites).contains("| E0299 | BadPath | an `#Unsafe` block |"))

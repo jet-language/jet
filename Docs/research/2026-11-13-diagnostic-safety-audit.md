@@ -10,23 +10,23 @@ Classified ranges: E00xx, E01xx, E02xx, E03xx, E04xx, E05xx, E06xx, E07xx, E08xx
 
 ## Sealed floors
 
-A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lifts. Its site is the first compiler call that passes the code to a report, in sema when sema has one. A code no call passes shows the first line that quotes it.
+A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lifts. Its site is the first compiler call that passes the code to a report, in sema when sema has one. A code no call passes shows the first line that quotes it: whole, at the head of a message, or in a runtime report's brackets.
 
 | Code | Type | Reported at | Why no expert path reaches the program |
 |---|---|---|---|
-| E-APP-TARGET-FEATURE | AppFeatureNotOnTarget | no source quotes the code | the target supports the feature |
-| E-OSTARGET-BUILD-CONTEXT | OsDispatchSubjectMismatch | no source quotes the code | dispatch on `#build.target.os` |
-| E-OSTARGET-DISPATCH-ARM | InvalidOsDispatchArm | no source quotes the code | each arm names one OS variant once |
-| E-OSTARGET-DISPATCH-EXHAUSTIVE | NonExhaustiveOsDispatch | no source quotes the code | cover every OS, or add `else` |
-| E-OSTARGET-MIXED-AXIS | OsAndWebTargetConflict | no source quotes the code | gate the item on one axis |
-| E-OSTARGET-UNMATCHED-CALL | OsGatedTypeUngatedUse | no source quotes the code | gate the caller to the same OS |
-| E-SUBJECT-CALL | MemberShorthandAsValue | no source quotes the code | write the value, or a lambda where a callable is meant |
-| E-SUBJECT-CALL-ARITY | MemberShorthandArity | no source quotes the code | a lambda names every parameter |
-| E-WEB-ABI-TYPE | WebBoundaryTypeNotAllowed | no source quotes the code | an ABI-safe type crosses the boundary |
-| E-WEB-CROSS-PARTITION | WebPartitionCrossed | no source quotes the code | both functions live in one partition |
-| E-WEB-RUN | WebProgramRunNotSupported | no source quotes the code | run it in a browser |
-| E-WEB-TARGET-BROWSER | WasmFunctionUsesBrowser | no source quotes the code | browser calls stay in JS code |
-| E-WEB-UNSUPPORTED | WebConstructNotSupported | no source quotes the code | the function uses constructs the web output lowers |
+| E-APP-TARGET-FEATURE | AppFeatureNotOnTarget | Compiler/JetSema/Source/Sema/Calls/Methods.jet:1329 | the target supports the feature |
+| E-OSTARGET-BUILD-CONTEXT | OsDispatchSubjectMismatch | Compiler/JetSema/Source/Sema/Statements.jet:9463 | dispatch on `#build.target.os` |
+| E-OSTARGET-DISPATCH-ARM | InvalidOsDispatchArm | Compiler/JetSema/Source/Sema/Statements.jet:9603 | each arm names one OS variant once |
+| E-OSTARGET-DISPATCH-EXHAUSTIVE | NonExhaustiveOsDispatch | Compiler/JetSema/Source/Sema/Statements.jet:9498 | cover every OS, or add `else` |
+| E-OSTARGET-MIXED-AXIS | OsAndWebTargetConflict | Compiler/JetSema/Source/Sema/OSTarget.jet:73 | gate the item on one axis |
+| E-OSTARGET-UNMATCHED-CALL | OsGatedTypeUngatedUse | Compiler/JetSema/Source/Sema/OSTarget.jet:99 | gate the caller to the same OS |
+| E-SUBJECT-CALL | MemberShorthandAsValue | Compiler/JetSema/Source/Sema/Expressions.jet:6778 | write the value, or a lambda where a callable is meant |
+| E-SUBJECT-CALL-ARITY | MemberShorthandArity | Compiler/JetSema/Source/Sema/Expressions.jet:6774 | a lambda names every parameter |
+| E-WEB-ABI-TYPE | WebBoundaryTypeNotAllowed | Compiler/JetSema/Source/Sema/WebPartition.jet:256 | an ABI-safe type crosses the boundary |
+| E-WEB-CROSS-PARTITION | WebPartitionCrossed | Compiler/JetSema/Source/Sema/WebPartition.jet:102 | both functions live in one partition |
+| E-WEB-RUN | WebProgramRunNotSupported | Compiler/JetCli/Source/Cli/Front.jet:1865 | run it in a browser |
+| E-WEB-TARGET-BROWSER | WasmFunctionUsesBrowser | Compiler/JetSema/Source/Sema/WebPartition.jet:91 | browser calls stay in JS code |
+| E-WEB-UNSUPPORTED | WebConstructNotSupported | Compiler/JetSema/Source/Sema/Calls/TaskGroups.jet:390 | the function uses constructs the web output lowers |
 | E0001 | StrayCharacter | Compiler/JetSema/Source/Sema/Expressions/Literals.jet:786 | no opt-in gives a meaningless character a meaning |
 | E0002 | UnterminatedText | Compiler/JetLexer/Source/Lexer/Payload.jet:762 | no opt-in decides where unterminated text ends |
 | E0003 | InvalidStatement | Compiler/JetSema/Source/Sema/Calls/ComputeModels.jet:58 | no opt-in gives an incomplete statement a meaning |
@@ -250,7 +250,6 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E0906 | MissingTraitMethod | Compiler/JetSema/Source/Sema/Calls/Checking.jet:145 | the impl gives every method without a default |
 | E0907 | TraitMethodMismatch | Compiler/JetSema/Source/Sema/Expressions/Constructors.jet:1445 | the method matches the trait's signature |
 | E0908 | DuplicateTraitImpl | Compiler/JetSema/Source/Sema/Registration/Checked.jet:3374 | a type implements a trait once |
-| E0909 | InstantiationTooDeep | no source quotes the code | no opt-in builds an unbounded instantiation |
 | E0910 | BreakingSchemaChange | Compiler/JetSema/Source/Sema/SchemaMigration.jet:180 | a migration bridges the old shape |
 | E0911 | UnknownMigrationVerb | Compiler/JetParser/Source/Parser/Declarations/Migrations.jet:102 | migrations use `rename`, `add`, `remove` and `change` |
 | E0913 | MissingAssociatedType | Compiler/JetSema/Source/Sema/Registration/Checked.jet:3063 | the impl gives every associated type |
@@ -411,22 +410,8 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E1273 | RecipeBuildFailed | Jetpack/Provider/Source/Core/Realized.jet:145 | the failed step is fixed |
 | E1274 | MissingStoreRecord | Jetpack/CLI/Source/Commands/DiscoveryCommands.jet:216 | the package is realized here first |
 | E1276 | OfflineNeedsNetwork | Jetpack/CLI/Source/CcDriver/DriverInvocation.jet:521 | the verb runs online |
-| E1278 | IncompleteActivationProof | no source quotes the code | the activation proof is completed first |
-| E1279 | MissingVmProofTools | no source quotes the code | the pinned proof tools are installed |
-| E1280 | MissingKernelPackage | no source quotes the code | the first-party kernel package is present |
-| E1281 | MissingInitPackage | no source quotes the code | the first-party `systemd` package is present |
-| E1282 | MissingBootArtifacts | no source quotes the code | the kernel package provides its boot artifacts |
-| E1283 | MissingInitArtifacts | no source quotes the code | the init package provides its binary |
-| E1284 | MissingKernelRecipe | no source quotes the code | the kernel package carries its source recipe |
-| E1285 | VmProofNotRun | no source quotes the code | `jet os vm prove` runs first |
-| E1286 | KernelBuildFailed | no source quotes the code | the source build succeeds |
-| E1287 | MissingInstalledDisk | no source quotes the code | `jet os vm prove` installs and proves the disk first |
-| E1288 | MissingDesktopPackage | no source quotes the code | the first-party desktop packages are present |
-| E1289 | NixosImportFailed | no source quotes the code | the configuration uses the surface the importer reads |
-| E1290 | FakeVmTools | no source quotes the code | the real VM tools are installed |
-| E1291 | UnmappedNixosOption | no source quotes the code | the declaration uses options the backend maps |
 | E1292 | MissingRandomness | Jetpack/Publication/Source/Sign.jet:185 | the operating system provides randomness |
-| E1294 | UnknownJob | Jetpack/CLI/Source/Jobs/JobRunner.jet:22 | the name is a `#Job fn` of the entry |
+| E1294 | UnknownJob | Compiler/JetIR/Source/Build.jet:1473 | the name is a `#Job fn` of the entry |
 | E1295 | UnknownGitRef | Jetpack/Environment/Source/Workspace/MemberSelect.jet:342 | the ref names a commit |
 | E1297 | ToolJobConflict | Compiler/JetFoundation/Data/Syntax/EffectsSurface.jet:715 | the tool or the job takes another name |
 | E1298 | ToolProviderUnavailable | Compiler/JetFoundation/Data/Syntax/EffectsSurface.jet:718 | use a provider with a handler |
@@ -468,7 +453,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E1345 | CliMemberNotCallable | Compiler/JetSema/Source/Sema/Registration/Items.jet:3627 | the member has a callable CLI shape |
 | E1347 | WritableCliReceiver | Compiler/JetSema/Source/Sema/Registration/Items.jet:3388 | the receiver is read-only |
 | E1348 | UntrustedNixpkgsIndex | Jetpack/CLI/Source/Env/EnvCommand.jet:374 | a verified index |
-| E1349 | NixpkgsAttrNotIndexed | Jetpack/Provider/Source/Core/Realized.jet:198 | an attr the index covers |
+| E1349 | NixpkgsAttrNotIndexed | Jetpack/Nix/Source/Index/IndexWire.jet:48 | an attr the index covers |
 | E1350 | NixCacheAdmissionFailed | Jetpack/Provider/Source/Core/Realized.jet:150 | a closure that passes its checks |
 | E1351 | NixExecutionUnavailable | Jetpack/Store/Source/Shell/NixProjection.jet:221 | the host supports the isolated projection |
 | E1355 | OutsideProjectEnvironment | Compiler/JetCli/Source/Cli/EnvBoundary.jet:63 | the command runs inside `jetpack env` |
@@ -516,12 +501,12 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E2406 | OrphanErrorConversion | Compiler/JetSema/Source/Sema/FailureLaw.jet:268 | one of the types is defined locally |
 | E2408 | FlattenNonStruct | Compiler/JetSema/Source/Sema/Registration/Items.jet:3691 | the flattened field is a `#Codable` struct |
 | E2409 | UnknownCasingStyle | Compiler/JetSema/Source/Sema/Registration/Items.jet:3742 | a NamingCase style |
-| E2410 | MissingRequiredField | no source quotes the code | the field is optional or has a default |
+| E2410 | MissingRequiredField | Compiler/JetSema/Source/Sema/Registration/SerdeItems.jet:584 | the field is optional or has a default |
 | E2411 | NotSerializable | Compiler/JetSema/Source/Sema/Calls/Http.jet:344 | the type qualifies for a codec or supplies one |
-| E2412 | UnknownDecodedField | no source quotes the code | the type leaves out `#DenyUnknownFields` |
+| E2412 | UnknownDecodedField | Compiler/JetSema/Source/Sema/Registration/SerdeItems.jet:736 | the type leaves out `#DenyUnknownFields` |
 | E2414 | DefaultNotConstant | Compiler/JetCli/Source/Cli/SyntaxDictionaryData.jet:290 | the default is a compile-time constant |
 | E2415 | AmbiguousUnionShape | Compiler/JetSema/Source/Sema/Registration/Items.jet:3901 | members have distinct wire shapes |
-| E2416 | EnvDecodeFailed | no source quotes the code | the environment variable is fixed |
+| E2416 | EnvDecodeFailed | Compiler/JetRuntime/Source/CodecEnv.jet:363 | the environment variable is fixed |
 | E2417 | FailureDomainNotErrorType | Compiler/JetSema/Source/Sema/FailureLaw.jet:650 | the domain is an error type |
 | E2418 | ErrorConversionCycle | Compiler/JetSema/Source/Sema/FailureLaw.jet:280 | the conversions form no cycle |
 | E2419 | AmbiguousErrorConversion | Compiler/JetSema/Source/Sema/FailureLaw.jet:284 | one route per pair |
@@ -551,10 +536,10 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E2608 | BlockedPackageName | Jetpack/Publication/Source/NamePolicy.jet:64 | choose a distinct name |
 | E2610 | RejectedSource | Jetpack/Publication/Source/Advisory.jet:478 | a signed, current source |
 | E2611 | MissingAuditInput | Jetpack/Publication/Source/Advisory.jet:481 | provide the input |
-| E2701 | MalformedRingInput | no source quotes the code | the input is fixed |
+| E2701 | MalformedRingInput | Compiler/JetRuntime/Source/CodecCSV.jet:95 | the input is fixed |
 | E2702 | CryptoMisuse | Compiler/JetSema/Source/Sema/Calls/Checking.jet:873 | the API is used as documented |
-| E2703 | InvalidTimeFormat | no source quotes the code | the format uses the checked token grammar |
-| E2704 | EpochOutOfRange | no source quotes the code | a coarser unit |
+| E2703 | InvalidTimeFormat | Core/Time/Time.jet:1952 | the format uses the checked token grammar |
+| E2704 | EpochOutOfRange | Core/Time/Time.jet:1237 | a coarser unit |
 | E2712 | CheckedTextRejected | Compiler/JetSema/Source/Sema/Expressions/Constructors.jet:1688 | the literal passes the check |
 | E2804 | AmbiguousRoute | Compiler/JetSema/Source/Sema/Calls/HttpRouting.jet:1142 | each route has its own pattern |
 | E2805 | InvalidRoute | Compiler/JetSema/Source/Sema/Calls/HttpMount.jet:86 | the route binds decodable inputs by name |
@@ -578,13 +563,13 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E2950 | SolverCounterexample | Compiler/JetCli/Source/Cli/ProveSolverReport.jet:282 | the code or the claim is fixed |
 | E2967 | FrameScheduleConflict | Compiler/JetSema/Source/Sema/Calls/Game.jet:185 | access and completion facts resolve |
 | E3001 | Panic | Compiler/JetRuntime/Source/ProductionReceipt.jet:24 | the failing condition is fixed |
-| E3002 | FailureTrail | no source quotes the code | a caller handles the failure |
-| E3003 | DeadlineExceeded | no source quotes the code | a longer deadline, or less work |
+| E3002 | FailureTrail | Compiler/JetRuntime/Source/JourneyReport.jet:158 | a caller handles the failure |
+| E3003 | DeadlineExceeded | Compiler/JetRuntime/Source/SchedulerMessages.jet:84 | a longer deadline, or less work |
 | E3005 | ContractFailed | Compiler/JetCli/Source/Cli/ProveReport.jet:912 | the caller or the function is fixed |
 | E3010 | ArithmeticOrBoundsFailure | Compiler/JetEval/Source/EvalValues.jet:160 | the operands or index are checked first |
 | E3011 | TodoReached | Compiler/JetEval/Source/IR/Native.jet:769 | the `#Todo` is written |
 | E3012 | StackOverflow | Compiler/JetCli/Source/Cli/Crash.jet:119 | the recursion is bounded |
-| E3013 | ParkedTasksAtExit | no source quotes the code | every task is woken or joined before exit |
+| E3013 | ParkedTasksAtExit | Compiler/JetRuntime/Source/ObserveMessages.jet:55 | every task is woken or joined before exit |
 | E3015 | UnhandledEntryFailure | Jetpack/Store/Source/Build/Cache.jet:794 | the entry handles the failure |
 | E3016 | OutputCheckNotRun | Compiler/JetCli/Source/Cli/Host.jet:2099 | the fatal trap is fixed |
 | E3105 | UnsafeForbiddenByPolicy | Compiler/JetSema/Source/Sema/UnsafeObligations.jet:286 | the policy owner changes the outer policy |
@@ -635,7 +620,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E3504 | BuildActionAuthorityDenied | Compiler/JetCli/Source/Cli/BuildExecute.jet:698 | invocation, package and workspace policy grant it |
 | E3505 | BuildProbeFailed | Compiler/JetCli/Source/Cli/BuildExecute.jet:191 | the action's cause is fixed |
 | E3510 | GeneratedModuleShadows | Compiler/JetCli/Source/Cli/InspectBuild.jet:415 | generate under another name |
-| E3511 | GenerationCycle | Compiler/JetBuildSession/Source/Session.jet:348 | one producer per module |
+| E3511 | GenerationCycle | Compiler/JetBuildSession/Source/Session.jet:346 | one producer per module |
 | E3512 | LockedGenerationDrift | Jetpack/PackageModel/Source/Lock/Verify.jet:170 | regenerate and lock again |
 | E3513 | LockedEffectRowWidened | Jetpack/PackageModel/Source/Policy/EffectBudget.jet:511 | lock the new effect row after review |
 | E3515 | MissingProducer | Compiler/JetBuildSession/Source/Graph.jet:164 | a producer makes the file |
@@ -656,11 +641,33 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E4201 | TlsHandshakeFailed | Jetpack/Foundation/Source/Net/FetchError.jet:18 | an HTTPS server at the URL |
 | E4202 | UntrustedCertificate | Jetpack/Foundation/Source/Net/FetchError.jet:19 | a certificate valid for the host |
 | E4203 | MissingCertificateRoots | Jetpack/Foundation/Source/Net/FetchError.jet:20 | install the system certificate bundle |
-| JT0198 | SourceImportFailed | no source quotes the code | the path or permission is fixed |
-| JT0199 | SourceImportConflict | no source quotes the code | the files are reconciled first |
-| R0801 | RawAccessOutsideProvenance | no source quotes the code | the access is bounded to the live allocation |
-| R0802 | UseAfterLifetime | no source quotes the code | the pointer is not used after release or frame exit |
-| R0803 | MisalignedRawAccess | no source quotes the code | an aligned pointer from the live allocation |
+| JT0198 | SourceImportFailed | Compiler/JetCli/Source/Cli/Import.jet:44 | the path or permission is fixed |
+| JT0199 | SourceImportConflict | Compiler/JetCli/Source/Cli/Import.jet:202 | the files are reconciled first |
+| R0801 | RawAccessOutsideProvenance | Compiler/JetRuntime/Source/ServicesMessages.jet:396 | the access is bounded to the live allocation |
+| R0802 | UseAfterLifetime | Compiler/JetRuntime/Source/ServicesMessages.jet:417 | the pointer is not used after release or frame exit |
+| R0803 | MisalignedRawAccess | Compiler/JetRuntime/Source/ServicesMessages.jet:438 | an aligned pointer from the live allocation |
+
+## Sealed floors no source reports
+
+These soundness rows have no expert path, but no line under Compiler, Core, Jetpack passes or quotes their code, so no program meets them today. Each becomes a sealed floor once a report site names it, or is retired.
+
+| Code | Type | Why no expert path reaches the program |
+|---|---|---|
+| E0909 | InstantiationTooDeep | no opt-in builds an unbounded instantiation |
+| E1278 | IncompleteActivationProof | the activation proof is completed first |
+| E1279 | MissingVmProofTools | the pinned proof tools are installed |
+| E1280 | MissingKernelPackage | the first-party kernel package is present |
+| E1281 | MissingInitPackage | the first-party `systemd` package is present |
+| E1282 | MissingBootArtifacts | the kernel package provides its boot artifacts |
+| E1283 | MissingInitArtifacts | the init package provides its binary |
+| E1284 | MissingKernelRecipe | the kernel package carries its source recipe |
+| E1285 | VmProofNotRun | `jet os vm prove` runs first |
+| E1286 | KernelBuildFailed | the source build succeeds |
+| E1287 | MissingInstalledDisk | `jet os vm prove` installs and proves the disk first |
+| E1288 | MissingDesktopPackage | the first-party desktop packages are present |
+| E1289 | NixosImportFailed | the configuration uses the surface the importer reads |
+| E1290 | FakeVmTools | the real VM tools are installed |
+| E1291 | UnmappedNixosOption | the declaration uses options the backend maps |
 
 ## Soundness errors an expert can lift
 
