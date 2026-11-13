@@ -3260,17 +3260,28 @@ ir_union_rewiden_fresh: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int
 
 // The spelling an error conversion reports for `ty`: a nominal type's
 // declared name (`StoreErr`, `IOError`), never the owner-qualified key
-// (`module:…::StoreErr`, `<corelib>/…::IOError`) that identifies it, and a
-// list of them (`[FieldError]`) by that name; any other type's own spelling.
+// (`module:…::StoreErr`, `<corelib>/…::IOError`) that identifies it, a
+// generic one's instance by that name and its arguments' (`Unsent<Int>`),
+// and a list of them (`[FieldError]`) by that name; any other type's own
+// spelling.
 ir_error_spelling: fn(p: IRProgram, ty: Type) -> String Never! {
     plain: ir_untag(ty)
     if plain == .List(element) -> return "[{ir_error_spelling(p, element)}]"
-    if plain == .Named(name) {
-        if ir_type_def(p, name) == .Val(row) -> return p.types[row].name.copy()
-        parts: name.split("::").to_list()
-        return parts[parts.len() - 1].copy()
+    if plain == .Named(name) -> return ir_error_spelling_name(p, name)
+    if plain == .Apply(name, args) {
+        spelled: loop arg in args -> ir_error_spelling(p, arg)
+        return "{ir_error_spelling_name(p, name)}<{spelled.join(", ")}>"
     }
     type_name(ty)
+}
+
+// The declared name of the nominal type `name` (ir_error_spelling).
+ir_error_spelling_name: fn(p: IRProgram, name: String) -> String Never! {
+    // copy: the spelling outlives the borrowed program row and name.
+    if ir_type_def(p, name) == .Val(row) -> return p.types[row].name.copy()
+    parts: name.split("::").to_list()
+    // copy: as above.
+    parts[parts.len() - 1].copy()
 }
 
 // The Err box the failure edge of `?` returns for the Err box `subject` under

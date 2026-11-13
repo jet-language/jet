@@ -7980,6 +7980,56 @@ sema_comptime_close_methods: fn(graph: SemaRegistrationGraph, ty: Type, module_i
     found
 }
 
+// The trait methods the generic calls in checked tree `tree` (named from
+// `module_identity`) reach through a bounded type parameter. An instance
+// calls its bound's methods on the type argument by owner type
+// (`math.floor<Float>` calls Float's `rounded`), and no call fact records
+// them, so a compile-time closure queues the argument's implementation of
+// each bound like a callee.
+sema_comptime_bound_methods: fn(graph: SemaRegistrationGraph, tree: BodyTree, module_identity: ModuleID) -> [(module_identity: ModuleID, key: String)] {
+    found := [(module_identity: ModuleID, key: String)]{}
+    loop node in tree.nodes {
+        if node.kind == .Call(callee, type_args, _) {
+            if type_args.len() == 0 -> next
+            row: sema_registration_callable_row(graph, graph.decls.rows[callee.row].key) ?? next
+            if row == .Function(declaring, index) {
+                params: graph.modules[declaring].functions[index].declaration.type_params
+                loop (position, arg) in type_args {
+                    if position >= params.len() -> break
+                    loop bound in params[position].bounds -> sema_comptime_trait_methods_add(graph, arg, bound, module_identity, found)
+                }
+            }
+        }
+    }
+    found
+}
+
+// The methods of type `ty`'s implementation of the trait written `bound`
+// (`Roundable` or `math.Roundable`), `ty` named from module
+// `module_identity`, added to `found`.
+sema_comptime_trait_methods_add: fn(graph: SemaRegistrationGraph, ty: Type, bound: String, module_identity: ModuleID, found: &[(module_identity: ModuleID, key: String)]) {
+    owner: sema_expr_unwrap_tag(ty)
+    parts: bound.split(".").to_list()
+    trait_name: parts[parts.len() - 1]
+    nominal := SymbolID?{None}
+    target := type_name(owner)
+    if owner == .Named(_) || owner == .Apply(_, _) {
+        row: sema_type_resolve_nominal_row(graph, owner, module_identity) ?? return
+        nominal = Val(graph.modules[row.module_index].nominals[row.row].symbol.id)
+        // copy: the name keys the impl lookup; the nominal row stays in the graph.
+        target = graph.modules[row.module_index].nominals[row.row].symbol.name.copy()
+    }
+    loop reference in sema_registration_impl_rows_named(graph, target) {
+        implementation: graph.modules[reference.module_index].impls[reference.row]
+        // copy: the written name is compared once; the impl row stays in the graph.
+        symbol_name: if implementation.trait_symbol == .Val(trait_symbol) -> trait_symbol.name.copy() else -> ""
+        if implementation.trait_name != Val((trait_name)) && symbol_name != trait_name -> next
+        implemented: if nominal == .Val(id) -> sema_type_graph_impl_target_nominal(graph, implementation) == Val((id)) else -> implementation.target_type == owner
+        if !implemented -> next
+        loop method in implementation.methods -> found.push((module_identity: graph.modules[reference.module_index].module_identity, key: symbol_table_key(graph.symbols, method.symbol.id)))
+    }
+}
+
 // Why the call sites `call_facts` keep an evaluation from running while
 // building, or None when they keep it pure: a call reaches a foreign body,
 // names an effect outside `Panic` and `Mem` in its row (files, network,

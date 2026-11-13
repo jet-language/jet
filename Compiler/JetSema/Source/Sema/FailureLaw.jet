@@ -311,7 +311,7 @@ sema_error_conversion_items: fn(items: &[Item], facts: &[AppliedRuleApplication]
                 routine := sema_error_conversion_routine(route, param_name, convention, type_params, local_types, edges, diagnostics) ?? next
                 if kept {
                     hooked := definition
-                    hooked.methods[0].body = sema_error_conversion_hook_body(route, param_name, convention)
+                    hooked.methods[0].body = sema_error_conversion_hook_body(route, definition.methods[0])
                     output.push(Item.Impl{value: hooked})
                 }
                 output.push(routine)
@@ -356,7 +356,8 @@ sema_error_conversion_items: fn(items: &[Item], facts: &[AppliedRuleApplication]
 sema_error_conversion_route_blocks: fn(blocks: &[TraitImplBlock], routes: [SemaErrorConversionNestedRoute], dropped: [Int]) {
     loop nested in routes {
         if dropped.contains(nested.index) -> next
-        blocks[nested.index].methods[0].body = sema_error_conversion_hook_body(nested.route, nested.param_name, nested.convention)
+        body: sema_error_conversion_hook_body(nested.route, blocks[nested.index].methods[0])
+        blocks[nested.index].methods[0].body = body
     }
     sema_error_conversion_drop_blocks(blocks, dropped)
 }
@@ -463,10 +464,13 @@ sema_error_conversion_plain_types: fn(items: [Item]) -> [String] Never! {
 
 // The body a kept hook takes: the call of its route's routine, which holds
 // the hook's own body, passing the source as the hook received it
-// (`errconv_ReadErr_to_AppErr(error)`).
-sema_error_conversion_hook_body: fn(route: ErrorConvDef, param_name: String, convention: AccessConvention) -> [Stmt] Never! {
-    span: route.body_span
-    argument: CallArg{convention: convention, expr: Expr.Ident{name: param_name, span: span, id: AST_NODE_GENERATED}, span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false}
+// (`errconv_ReadErr_to_AppErr(error)`). The call sits at the hook's return
+// type, after its parameter: a body binding is visible only from its
+// declaration on, and the hook's own span starts before the parameter.
+sema_error_conversion_hook_body: fn(route: ErrorConvDef, hook: Func) -> [Stmt] Never! {
+    param: hook.params[0]
+    span: hook.return_type_span ?? param.name_span
+    argument: CallArg{convention: param.convention, expr: Expr.Ident{name: param.name, span: span, id: AST_NODE_GENERATED}, span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false}
     call: Call{name: sema_error_conversion_routine_name(route), name_span: span, type_args: [Type]{}, args: [CallArg]{argument}}
     [Stmt]{Stmt.Expr{expr: Expr.Call{call: call, id: AST_NODE_GENERATED}}}
 }

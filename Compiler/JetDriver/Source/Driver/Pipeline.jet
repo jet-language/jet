@@ -53,6 +53,7 @@ use {
         sema_comptime_tree_reads_context,
         sema_comptime_tree_reads_phase,
         sema_comptime_call_facts_impurity,
+        sema_comptime_bound_methods,
         sema_comptime_codec_methods,
         sema_comptime_close_methods,
         sema_comptime_render_methods,
@@ -1090,13 +1091,15 @@ jet_driver_comptime_owner_refs: fn(graph: SemaRegistrationGraph, module_identity
 
 // The functions that `roots` and `body` of `tree` (named from
 // `module_identity`) reach with no call fact: the precise helpers, codec
-// methods and owner-type methods lowering calls, in that order, each
-// possibly more than once. The closure queues each the first time.
+// methods, owner-type methods and bounded trait methods lowering calls, in
+// that order, each possibly more than once. The closure queues each the
+// first time.
 jet_driver_comptime_body_refs: fn(graph: SemaRegistrationGraph, index: &JetDriverComptimeRunIndex, module_identity: ModuleID, tree: BodyTree, roots: [Int], body: [Int]) -> [JetDriverComptimeFunctionRef] {
     refs := [JetDriverComptimeFunctionRef]{}
     jet_driver_comptime_precise_refs(graph, index, tree, roots, body, refs)
     jet_driver_comptime_codec_refs(graph, index, module_identity, tree, roots, body, refs)
     jet_driver_comptime_owner_refs(graph, module_identity, tree, roots, body, refs)
+    loop method in sema_comptime_bound_methods(graph, tree, module_identity) -> refs.push(JetDriverComptimeFunctionRef{module_identity: method.module_identity, function_key: method.key})
     refs
 }
 
