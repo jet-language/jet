@@ -228,8 +228,19 @@ sema_call_histories_derive: fn(written: String, command_type: String, environmen
         loop index in 0..<(arms.len() - 1) -> cases.push("        {index} -> {arms[index]}\n")
         body = "if __variant == {{\n{cases.join("")}        else -> {arms[arms.len() - 1]}\n    }}"
     }
-    make: "[(__variant: Int, __ints: [Int], __bools: [Bool], __texts: [String]) -> {{\n    {body}\n}}]"
-    SemaHistoriesDerived{variants: rows, make: make, unsupported: ""}
+    SemaHistoriesDerived{variants: rows, make: sema_call_histories_make_text(body), unsupported: ""}
+}
+
+// The source of the derived `__make` list: one lambda that builds a command
+// from a row position and its payload values, `body` choosing the variant.
+sema_call_histories_make_text: fn(body: String) -> String Never! {
+    "[fn(__variant: Int, __ints: [Int], __bools: [Bool], __texts: [String]) {{\n    {body}\n}}]"
+}
+
+#Test("the derived `__make` source parses as generated source") {
+    body: "if __variant == {{\n        0 -> Command.Reset\n        else -> Command.Add(__ints[0])\n    }}"
+    assert(sema_call_histories_parse_expr(sema_call_histories_make_text(body), 1) != None, "the derived constructor lambda is current lambda syntax")
+    assert(sema_call_histories_parse_expr("[String]{{}}", 0) != None, "the empty variant rows parse")
 }
 
 sema_call_histories_enum_variants: fn(definition: TTypeDef) -> [TVariant]? Never! {
