@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6777,
-    "rev": 101244,
+    "rev": 101248,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -52651,11 +52651,11 @@
         {
           "n": 10,
           "text": "(was #6310) (a) The repro builds and runs on o0/o1/o2; implicit AllocError propagation from try_alloc prints the coded AllocError stop through a runtime export that exists (no exit 101); a cases row covers it.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:25:37.749Z"
+          "evidence": "dev 9be2756e42 (G9Web-5014-c10-alloc-error-stop-pin; the fix came from d79ea59ae7, which added the jet_rt_handle_show_alloc_error export): jet test Compiler --profile cases --filter allocator_families/try_alloc_refusal_propagates_as_the_coded_alloc_error_stop PASS 1 FAIL 0. On o0, o1 and o2 it prints first 7, then Error: AllocError { requested_bytes: 8, allocator: \"Fixed\" } / failed here: run (main.jet:10), and exits 1, not 101.",
+          "at": "2026-11-13T05:55:58.713Z"
         },
         {
           "n": 11,
@@ -52723,11 +52723,11 @@
         {
           "n": 18,
           "text": "(was #5988) (was #5835) jet check misses a borrow error (E0204) that jet build reports in the comptime.bodies phase",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T04:45:07.707Z"
+          "evidence": "dev fb5e43c458 (G9Web-5014-c18-comptime-borrow-parity-pin): jet test Compiler --profile cases --filter comptime_cli_parity/comptime_reached_borrow_error_is_reported_by_check_and_build PASS 1 FAIL 0. E0204 in code reached only through a constant #run (a plain fn, a generic fn instantiated at comptime, a nested fn) is reported by check and build at the same line:col. The original #5835 repro did not survive the merge, so the delivering commit is untraced.",
+          "at": "2026-11-13T05:55:59.676Z"
         },
         {
           "n": 19,
@@ -52755,7 +52755,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-16T07:36:29.780Z",
-      "updated": "2026-11-13T05:38:07.824Z",
+      "updated": "2026-11-13T05:55:59.676Z",
       "updatedBy": "Main",
       "goals": [
         "G10"
@@ -88598,20 +88598,20 @@
         {
           "n": 3,
           "text": "tests/fuzz/sema/invalid/ui_external_method_field_collision.E0105.jet matches current law. Since c21adb2388 fields have their own member namespace, so a field beside an external method or an operator hook of the same name is accepted (tests/ui/external_method_field_namespace pins \"(no errors)\"). The program therefore moves to tests/fuzz/sema/valid and passes there. E0105 stays the refusal for an ordinary method beside an operator hook of the same name, and syntax-decisions.md:289 is corrected to say so. Proof: the fuzz profile passes the moved row with no #6663 known-failing row, and a ui snapshot shows the method-beside-hook E0105.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-13T05:48:29.897Z"
+          "evidence": "dev c003cb289e (G5DevX-fuzz4): the collision program moved to tests/fuzz/sema/valid and passes (fuzz --filter valid/ui_external_method_field_namespace rc 0). jet test Compiler --profile ui --filter member_namespace_operator_hook_method PASS 1 (an ordinary method beside a Mul hook is E0105). syntax-decisions.md is corrected (a field stands in its own namespace), and no #6663 row remains in tests/known-failing.tsv.",
+          "at": "2026-11-13T05:56:00.784Z"
         },
         {
           "n": 4,
           "text": "tests/fuzz/sema/invalid/ui_gc_escape_ownership.E2111.jet is refused with E2111: a GC-managed value escaping its ownership scope. Today sema accepts it, so this is an I1 gap. Proof: the fuzz invalid row passes and a UI snapshot pins the diagnostic.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-13T05:15:55.035Z"
+          "evidence": "dev c003cb289e (G5DevX-fuzz4): jet test Compiler --profile fuzz --filter invalid/ui_gc_escape_ownership PASS 1 (E2111; the stale corpus program now marks the function with #Policy(gc) instead of the whole file). The full jet test Compiler --profile fuzz gives 474 rows, 474 PASS, 0 FAIL and 0 KNOWN-FAILING.",
+          "at": "2026-11-13T05:56:01.775Z"
         },
         {
           "n": 5,
@@ -88631,7 +88631,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-07T08:39:11.469Z",
-      "updated": "2026-11-13T05:48:29.897Z",
+      "updated": "2026-11-13T05:56:01.775Z",
       "updatedBy": "Main",
       "criteriaLastN": 5
     },
@@ -197712,6 +197712,34 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-13T05:56:01.776Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0kbej10",
+      "note": "#4"
+    },
+    {
+      "at": "2026-11-13T05:56:00.784Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0kbej10",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-13T05:55:59.676Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0mj3ijb",
+      "note": "#18"
+    },
+    {
+      "at": "2026-11-13T05:55:58.713Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0mj3ijb",
+      "note": "#10"
+    },
     {
       "at": "2026-11-13T05:52:40.406Z",
       "by": "Main",
