@@ -1,0 +1,27 @@
+# Each construct that holds memory for a program frees it with its last owner:
+# a Shared pair closed by Weak back-edges, a channel dropped with values still
+# queued, a generator the consumer breaks off, a joined task's result and a
+# bounded memo table. The program churns each one and panics when its peak
+# RSS grows with the round count; the same output on O0, O1 and O2.
+requires: os:linux
+fixture: retaining_constructs_free_what_they_held.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet run --optimize=none main.jet
+stdin: null
+limit: time=300
+exit: 0
+stdout: = retaining_constructs_free_what_they_held.stdout.expected
+stderr: empty
+step: jet run --optimize=basic main.jet
+stdin: null
+limit: time=300
+exit: 0
+stdout: = retaining_constructs_free_what_they_held.stdout.expected
+stderr: empty
+step: jet run --optimize=full main.jet
+stdin: null
+limit: time=300
+exit: 0
+stdout: = retaining_constructs_free_what_they_held.stdout.expected
+stderr: empty
