@@ -400,7 +400,7 @@ round_func: fn(db: &conn.Conn, v: &conn.Vdbe) Never! {
         // No fractional part to round.
     } else if n == 0 {
         half: if r < 0.0 -> Float{-0.5} else -> Float{0.5}
-        r = util.int_to_double(Int.from_float(math.trunc(r + half)) ?? 0)
+        r = util.int_to_double(checked(Int{math.trunc(r + half)}) ?? 0)
     } else {
         z: printf.mprintf("%!.*f".bytes(), [Mem]{base.mem_int(n), base.mem_real(r)}, db.limits[ast.LIMIT_LENGTH]) ?? {
             api.result_error_nomem(db, v)

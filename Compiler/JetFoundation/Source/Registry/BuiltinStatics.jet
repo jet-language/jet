@@ -201,10 +201,10 @@ BUILTIN_NUMERIC_KINDS: #run { [BuiltinNumericKind]{
 
 // Destination-owned `from_<source>` spellings (`NUMERIC_CONVERSION_SOURCES`;
 // the semantic symbol catalog reads it too). A built-in owner keeps only the
-// rows that cross into or out of a non-integer type (`Int.from_float`,
-// `F32.from_int`): between two whole-number types `T{x}` is the one
-// conversion. A distinct numeric type keeps every row of its base
-// (`UserID.from_int`).
+// rows whose head is F32 or Float (`F32.from_int`, `Float.from_f32`): between
+// two whole-number types `T{x}` is the one conversion, and an integer head
+// takes a Float by `Int{f}`. A distinct numeric type keeps every row of its
+// base (`UserID.from_int`).
 BUILTIN_NUMERIC_SOURCES: #run { [BuiltinNumericSource]{
     {method: "from_i8", source: "I8"},
     {method: "from_i64", source: "I64"},
@@ -246,7 +246,6 @@ builtin_numeric_return: fn(source: BuiltinNumericKind, target: BuiltinNumericKin
     checked := Type.Result{ok: target.ty, err: Type.String}
     if source.name == "Int" && target.fixed -> return checked
     if source.fixed && target.name == "Int" -> return target.ty
-    if !source.integer && target.integer -> return checked
     if source.fixed && target.fixed {
         return if builtin_numeric_widening(source, target) -> target.ty else -> checked
     }
@@ -277,19 +276,19 @@ builtin_numeric_operation: fn(source: BuiltinNumericKind, target: BuiltinNumeric
     // `U64` into `Int` rides an i64 word on the exact CastAs adapter.
     if target.name == "Int" && source.integer && !source.signed -> return TNumericOp.CastAs{dst_rust: target.rust}
     if source.name == "Int" && target.name != "Int" -> return TNumericOp.TryFrom{host_kind: builtin_numeric_host_kind(target)}
-    if source.integer {
-        if builtin_numeric_widening(source, target) -> return TNumericOp.CastAs{dst_rust: target.rust}
-        return TNumericOp.TryFrom{host_kind: builtin_numeric_host_kind(target)}
-    }
-    TNumericOp.FloatToInt{host_kind: builtin_numeric_host_kind(target)}
+    if builtin_numeric_widening(source, target) -> return TNumericOp.CastAs{dst_rust: target.rust}
+    TNumericOp.TryFrom{host_kind: builtin_numeric_host_kind(target)}
 }
 
 // Every `from_<source>` row of a numeric owner; distinct numeric types reach
-// it through their base.
+// it through their base. An integer head has no `from_float` or `from_f32`:
+// `Int{f}` converts a whole Float exactly, and `checked(Int{f})` /
+// `saturating(Int{f})` choose what any other value gives.
 builtin_static_numeric_row: fn(owner: String, method: String) -> BuiltinStaticRow? {
     target: builtin_numeric_kind(owner) ?? return None
     source_name: builtin_numeric_source(method) ?? return None
     source: builtin_numeric_kind(source_name) ?? return None
+    if target.integer && !source.integer -> return None
     Val(builtin_static(owner, method, [Type]{source.ty}, builtin_numeric_return(source, target), BuiltinStaticLowering.Numeric{operation: builtin_numeric_operation(source, target)}))
 }
 

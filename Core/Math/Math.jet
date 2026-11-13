@@ -1138,7 +1138,7 @@ exp10: fn(n: Float) -> Float Never! {
     }
     if (bits.bit_and(0xFFFF_FFFF_FFFF) == 0 && (ax >> 48) <= 0x4036 && bits >= 0 && __round_even(n) == n) {
         r := Float{1.0}
-        loop _ in 0..<(Int.from_float(n) ?? 0) { r = r * Float{10.0} }
+        loop _ in 0..<(checked(Int{n}) ?? 0) { r = r * Float{10.0} }
         return r
     }
     // 10^x rounds to 1 for |x| <= 2^-55.2
@@ -1264,7 +1264,7 @@ exp2_m1: fn(n: Float) -> Float Never! {
         l: fma(Float{2.3190468138462996e-17}, n, fma(Float{0.6931471805599453}, n, -h)) + Float{0.24022650695910072} * n * n
         return h + l
     }
-    if (fabs(n) <= Float{53.0} && n == core.math.trunc(n)) -> return ldexp(Float{1.0}, Int.from_float(n) ?? 0) - Float{1.0}
+    if (fabs(n) <= Float{53.0} && n == core.math.trunc(n)) -> return ldexp(Float{1.0}, checked(Int{n}) ?? 0) - Float{1.0}
     tiny: ax <= 0x3FC0_0000_0000_0000
     f: __exp2_m1_fast(n, tiny)
     left: f.hi + (f.lo - f.err)
@@ -1302,7 +1302,7 @@ exp10_m1: fn(n: Float) -> Float Never! {
         l: fma(Float{2.650949055239199} * n, n, fma(Float{-2.1707562233822494e-16}, n, fma(Float{2.302585092994046}, n, -h)))
         return h + l
     }
-    if (n >= Float{1.0} && n <= Float{15.0} && n == core.math.trunc(n)) -> return __EXP10_POWERS[(Int.from_float(n) ?? 0) + 15] - Float{1.0}
+    if (n >= Float{1.0} && n <= Float{15.0} && n == core.math.trunc(n)) -> return __EXP10_POWERS[(checked(Int{n}) ?? 0) + 15] - Float{1.0}
     tiny: ax <= 0x3FB0_0000_0000_0000
     f: __exp10_m1_fast(n, tiny)
     left: f.hi + (f.lo - f.err)
@@ -1373,7 +1373,7 @@ __erf_fast: fn(z: Float) -> (hi: Float, lo: Float, err: Float) Never! {
     }
     // i/16 <= z < (i + 1)/16, and z - 1/32 - v/16 is exact
     v: core.math.floor(Float{16.0} * z)
-    b: 13 * ((Int.from_float(v) ?? 1) - 1)
+    b: 13 * ((checked(Int{v}) ?? 1) - 1)
     x: (z - Float{0.03125}) - Float{0.0625} * v
     x2: x * x
     x4: x2 * x2
@@ -1400,7 +1400,7 @@ __erf_fast: fn(z: Float) -> (hi: Float, lo: Float, err: Float) Never! {
 __erf_accurate: fn(z: Float) -> (hi: Float, lo: Float) Never! {
     if (z < Float{0.125}) -> return __erf_accurate_tiny(z)
     v: core.math.floor(Float{8.0} * z)
-    b: 27 * ((Int.from_float(v) ?? 1) - 1)
+    b: 27 * ((checked(Int{v}) ?? 1) - 1)
     x: (z - Float{0.0625}) - Float{0.125} * v
     h := __ERF_C2[b + 26]
     j := 17
@@ -1951,7 +1951,7 @@ __erfc_exp_accurate: fn(xh: Float, xl: Float) -> (hi: Float, lo: Float, k: Int) 
         }
         i = i - 1
     }
-    (hi: h, lo: l, k: Int.from_float(kf) ?? 0)
+    (hi: h, lo: l, k: checked(Int{kf}) ?? 0)
 }
 // erfc.c's T: for x past 2.8845070422535213, erfc(x) e^(x^2) = y p(y^2)
 // with y = 1/x, row i for y up to __ERFC_ASYMPT_CUT[i]: c1 as (hi, lo), then
@@ -2096,7 +2096,7 @@ gamma: fn(n: Float) -> Float Never! {
     if fx == n {
         if (n < Float{0.0}) -> return Float{0.0} / Float{0.0}
         // (n - 1)! exactly in double-double up to 23!, then rounded once
-        k: Int.from_float(fx) ?? 0
+        k: checked(Int{fx}) ?? 0
         th := Float{1.0}
         tl := Float{0.0}
         x0 := Float{1.0}
@@ -2112,14 +2112,14 @@ gamma: fn(n: Float) -> Float Never! {
     }
     // below -184, |gamma(x)| < 2^-1078 rounds to a zero of the sign of
     // (-1)^floor(x)
-    if (n <= Float{-184.0}) -> return if (Int.from_float(fx) ?? 0) % 2 == 0 -> Float{0.0} else -> Float{-0.0}
+    if (n <= Float{-184.0}) -> return if (checked(Int{fx}) ?? 0) % 2 == 0 -> Float{0.0} else -> Float{-0.0}
     if (n < Float{-3.0}) {
         // reflection: gamma(x) = pi / (sin(pi x) gamma(1 - x)), gamma(1 - x)
         // as e^lgamma(1 - x) 2^e
         y: __fast_two_sum(-n, Float{1.0})
         lg: __tgamma_lgamma_asym(y.hi, y.lo)
         ex: __tgamma_exp(lg.hi, lg.lo)
-        ip: Int.from_float(fx) ?? 0
+        ip: checked(Int{fx}) ?? 0
         sp: __gamma_sin_pi(n - fx, __TGAMMA_SIN_PI_T)
         l: __exp_cr_muldd(sp.hi, sp.lo, ex.hi, ex.lo)
         pih: Float{3.141592653589793}
@@ -2161,7 +2161,7 @@ gamma: fn(n: Float) -> Float Never! {
     d4: d2 * d2
     c: __TGAMMA_MID_C
     f: __gamma_polyddd(d, __TGAMMA_MID_CC, 0, 10, d * (((c[0] + d * c[1]) + d2 * (c[2] + d * c[3])) + d4 * ((c[4] + d * c[5]) + d2 * (c[6] + d * c[7]))))
-    jm: Int.from_float(fabs(i)) ?? 0
+    jm: checked(Int{fabs(i)}) ?? 0
     wh := Float{1.0}
     wl := Float{0.0}
     if jm != 0 {
@@ -2214,7 +2214,7 @@ __tgamma_accurate: fn(x: Float) -> Float Never! {
     }
     ix: core.math.floor(x)
     d: Float{2.0} * (x - (ix + Float{0.5}))
-    i: Int.from_float(ix) ?? 0
+    i: checked(Int{ix}) ?? 0
     seg := 0
     loop seg < 8 && i <= __TGAMMA_ACC_SEG[7 * seg] {
         seg = seg + 1
@@ -2386,7 +2386,7 @@ __gamma_sin_pi: fn(x: Float, t: [Float]) -> (hi: Float, lo: Float) Never! {
     iv: __round_even(v)
     d: iv - v
     d2: d * d
-    ky: Int.from_float(iv) ?? 0
+    ky: checked(Int{iv}) ?? 0
     kx: 64 - ky
     sh: t[2 * kx + 1]
     sl: t[2 * kx]
@@ -2407,7 +2407,7 @@ __tgamma_exp: fn(xh: Float, xl: Float) -> (hi: Float, lo: Float, e: Int) Never! 
     t: __exp_cr_muldd(xh, xl, Float{1477.3197218702985}, Float{2.0843800310713378e-14})
     kf: __round_even(t.hi)
     y: __fast_two_sum(t.hi - kf, t.lo)
-    k: Int.from_float(kf) ?? 0
+    k: checked(Int{kf}) ?? 0
     i0: (k >> 5).bit_and(31)
     i1: k.bit_and(31)
     r: __exp_cr_muldd(__TGAMMA_EXP_T0[2 * i0 + 1], __TGAMMA_EXP_T0[2 * i0], __TGAMMA_EXP_T1[2 * i1 + 1], __TGAMMA_EXP_T1[2 * i1])
@@ -3257,7 +3257,7 @@ __lgamma_sin_pi_accurate: fn(x: Float) -> (hi: Float, lo: Float) Never! {
     v: fabs(x - Float{0.5}) * Float{128.0}
     iv: __round_even(v)
     d: iv - v
-    ky: Int.from_float(iv) ?? 0
+    ky: checked(Int{iv}) ?? 0
     kx: 64 - ky
     t: __LGAMMA_SIN_PI_T
     d2h: d * d
@@ -3986,7 +3986,7 @@ __isqrt_floor: fn(n: Int) -> Int Never! {
     if n < 2 -> return n
     b: __bit_len(n)
     sh: if b > 100 -> (b - 100) /% 2 else -> 0
-    seed: Int.from_float(core.math.floor(sqrt(approx(n >> (2 * sh))))) ?? 1
+    seed: checked(Int{core.math.floor(sqrt(approx(n >> (2 * sh))))}) ?? 1
     x0: if seed < 1 -> Int{1} << sh else -> seed << sh
     // one step lands at or above floor(sqrt(n)); from there it decreases
     x := (x0 + n /% x0) /% 2
@@ -6947,7 +6947,7 @@ __tan_reduce_fast: fn(x: Float) -> (i: Int, h: Float, l: Float) Never! {
         }
     }
     k: core.math.floor(h * Float{2048.0})
-    (i: Int.from_float(k) ?? 0, h: fma(k, Float{-0.00048828125}, h), l: l)
+    (i: checked(Int{k}) ?? 0, h: fma(k, Float{-0.00048828125}, h), l: l)
 }
 // tan x as hi + lo within |err| (CORE-MATH tan_fast): sin2pi and cos2pi of
 // the reduced argument from __TAN_SC's points and short polynomials, then
@@ -8513,7 +8513,7 @@ __ATAN_HARD: [Float]{
 // polynomial at t = z^2 - j/128; the bounds (lb, ub) are eps apart.
 __asin_core: fn(jd: Float, t: Float, z: Float, zl: Float, f0h: Float, f0l: Float, eps: Float) -> (lb: Float, ub: Float) Never! {
     c: __ASIN_CC
-    b: 8 * (Int.from_float(jd) ?? 0)
+    b: 8 * (checked(Int{jd}) ?? 0)
     t2: t * t
     d: t * ((c[b + 2] + t * c[b + 3]) + t2 * ((c[b + 4] + t * c[b + 5]) + t2 * (c[b + 6] + t * c[b + 7])))
     f: __exp_cr_muldd(z, zl, c[b], c[b + 1] + d)
@@ -8564,7 +8564,7 @@ __asin_renorm: fn(ph: Float, pl: Float, ps: Float) -> (hi: Float, mid: Float, lo
 // approximates asin(x), x = sin(j pi/64 + delta); the hardest are tabulated.
 __asin_refine: fn(x: Float, phi: Float) -> Float Never! {
     jf: __round_even(fabs(phi) * Float{20.371832715762604})
-    r: __asin_rotate(x, Int.from_float(jf) ?? 0)
+    r: __asin_rotate(x, checked(Int{jf}) ?? 0)
     sg: copysign(Float{1.0}, x)
     f: __asin_series(r.hi, r.lo, sg)
     jt: jf * sg
@@ -8588,7 +8588,7 @@ __asin_refine: fn(x: Float, phi: Float) -> Float Never! {
 // rounding boundary is nudged by the next term's sign; five inputs are listed.
 __acos_refine: fn(x: Float, phi: Float) -> Float Never! {
     jf: __round_even(fabs(phi - Float{1.5707963267948966}) * Float{20.371832715762604})
-    r: __asin_rotate(x, Int.from_float(jf) ?? 0)
+    r: __asin_rotate(x, checked(Int{jf}) ?? 0)
     sg: copysign(Float{1.0}, x)
     f: __asin_series(r.hi, r.lo, -sg)
     jt: Float{32.0} - jf * sg
@@ -9797,7 +9797,7 @@ __atan2_pi_fast: fn(y0: Float, x0: Float) -> (hi: Float, lo: Float, err: Float) 
     sz: if neg -> Float{-1.0} else -> Float{1.0}
     zh0: if neg -> -qh else -> qh
     zl: if neg -> -ql else -> ql
-    i: Int.from_float(core.math.trunc(Float{64.0} * zh0)) ?? 0
+    i: checked(Int{core.math.trunc(Float{64.0} * zh0)}) ?? 0
     b: 10 * i
     zh: zh0 - __ATAN2PI_POINT[i]
     z: zh + zl
@@ -10848,7 +10848,7 @@ __exp_m1_cr_accurate: fn(n: Float) -> Float Never! {
         return c0.hi + v1
     }
     t: __round_even(n * Float{5909.278887481194})
-    jt: Int.from_float(t) ?? 0
+    jt: checked(Int{t}) ?? 0
     i0: (jt >> 6).bit_and(0x3F)
     i1: jt.bit_and(0x3F)
     ie: jt >> 12
@@ -11913,7 +11913,7 @@ __ln_1p_cr_refine: fn(x: Float, a: Float) -> Float Never! {
         return __log_cr_round3(x, m.hi, m.lo)
     }
     // 2^16 / log(2)
-    j: Int.from_float(__round_even(a * Float{94548.4621996991})) ?? 0
+    j: checked(Int{__round_even(a * Float{94548.4621996991})}) ?? 0
     i: j + 34952
     j1: (i >> 12).bit_and(15)
     j2: (i >> 8).bit_and(15)
@@ -14610,7 +14610,7 @@ round_to_signed: fn(n: Float, mode: Rounding, bits: Int) -> Int? Never! {
     whole: __rounded(n, mode)
     limit: ldexp(Float{1.0}, width - 1)
     if whole < -limit || whole >= limit -> return None
-    Val(Int.from_float(whole) ?? 0)
+    Val(checked(Int{whole}) ?? 0)
 }
 /// `n` rounded in `mode` to an integer that fits an unsigned integer of
 /// `bits` bits (C23 ufromfp, with widths above 64 read as 64); None for an
@@ -14621,8 +14621,8 @@ round_to_unsigned: fn(n: Float, mode: Rounding, bits: Int) -> Int? Never! {
     whole: __rounded(n, mode)
     if (whole < Float{0.0} || whole >= ldexp(Float{1.0}, width)) -> return None
     // An Int conversion of a whole value above 2^63 halves exactly first.
-    if (whole >= Float{9223372036854775808.0}) -> return Val((Int.from_float(whole * Float{0.5}) ?? 0) * 2)
-    Val(Int.from_float(whole) ?? 0)
+    if (whole >= Float{9223372036854775808.0}) -> return Val((checked(Int{whole * Float{0.5}}) ?? 0) * 2)
+    Val(checked(Int{whole}) ?? 0)
 }
 
 /// fdim.c from musl 1.2.5: `a - b` when `a` is greater, else +0; a NaN
@@ -14752,7 +14752,7 @@ set_payload_signaling: fn(payload: Float) -> Float? Never! {
 // A payload Float's integer, when it is +0 or whole and below 2^51.
 __payload_bits: fn(payload: Float) -> Int? Never! {
     if sign_bit(payload) || !(payload < Float{2251799813685248.0}) || core.math.trunc(payload) != payload -> return None
-    Val(Int.from_float(payload) ?? 0)
+    Val(checked(Int{payload}) ?? 0)
 }
 // The F32 forms (an all-F32 call) of the bit operations above, on the
 // binary32 bits themselves: widening would quiet a signaling NaN and move a
@@ -14794,7 +14794,7 @@ __set_payload_signaling_f32: fn(payload: F32) -> F32? Never! {
 __payload_bits_f32: fn(payload: F32) -> Int? Never! {
     wide: Float.from_f32(payload)
     if sign_bit(wide) || !(wide < Float{4194304.0}) || trunc(wide) != wide -> return None
-    Val(Int.from_float(wide) ?? 0)
+    Val(checked(Int{wide}) ?? 0)
 }
 
 #Test("math F32 forms step and read the binary32 bits") {

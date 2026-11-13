@@ -466,7 +466,7 @@ table_line: fn(values: [String], columns: Int, width: Int) -> String Never! {
 
 normalized_weight: fn(weight: Float) -> Float Never! {
     // This conversion is bounded and truncating: positive half ties round up.
-    rounded: Int.from_float(bounded_float(weight, 65535.0) + 0.5) ?? panic("a bounded weight is finite")
+    rounded: checked(Int{core.math.trunc(bounded_float(weight, 65535.0) + 0.5)}) ?? panic("a bounded weight is finite")
     Float{clamp_int(rounded, 65535)}
 }
 

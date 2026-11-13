@@ -111,8 +111,8 @@ disp_card_num: fn(card: Dyn) -> Int {
     value: card.field("num") ?? panic("Tower card num is required")
     if value == {
         .Int(number) -> number
-        .Float(number) -> Int.from_float(number) ?? panic("card num is not an integer")
-        .Number(number) -> Int.from_float(Float.parse(number) ?? panic("card num is not numeric")) ?? panic("card num is not an integer")
+        .Float(number) -> checked(Int{number}) ?? panic("card num is not an integer")
+        .Number(number) -> checked(Int{Float.parse(number) ?? panic("card num is not numeric")}) ?? panic("card num is not an integer")
         .Null | .Bool(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> panic("card num is not numeric")
     }
 }

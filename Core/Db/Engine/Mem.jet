@@ -95,7 +95,7 @@ stringify: fn(m: &Mem, enc: Int, force: Bool) Never! {
 real_to_i64: fn(r: Float) -> Int Never! {
     if r < -9223372036854774784.0 -> return base.I64_MIN
     if r > 9223372036854774784.0 -> return base.I64_MAX
-    Int.from_float(math.trunc(r)) ?? 0
+    checked(Int{math.trunc(r)}) ?? 0
 }
 
 // sqlite3RealSameAsInt: r1 and the integer i taken from it are the same

@@ -424,7 +424,7 @@ sema_call_static_call_value: fn(value: TExpr, method_id: DeclID) -> TExpr? {
     }
 }
 
-// Built-in owners (`Int.parse`, `Int.from_float`, `Atomic<Int>.new`,
+// Built-in owners (`Int.parse`, `F32.from_float`, `Atomic<Int>.new`,
 // `crypto.Hasher.new`) have no declaration to resolve. Their checked contract
 // is the Foundation BuiltinStaticRow table: this layer admits the row for how
 // the owner was named, binds its type parameters, checks arity and argument
@@ -1393,16 +1393,6 @@ sema_call_try_distinct_conversion: fn(owner: Symbol, display_name: String, metho
                     }
                     if outside -> diagnostics.push(sema_error("E0135", argument.span, "`{decimal}` is outside `{display_name}`'s range {bounds.lo}..{bounds.hi}", "a range type only holds values inside its bounds; `{decimal}` can never be a `{display_name}`", "use a value in `{bounds.lo}..{bounds.hi}`, or widen the type's range"))
                 }
-            }
-        }
-        // A float literal past the bounds can never convert either; its
-        // conversion stays fallible, as any float source's does.
-        if args[0].expr == .Float(number, _, _, raw, _) {
-            if sema_expr_is_integer(facts.base) && (number < approx(bounds.lo) || number > approx(bounds.hi)) {
-                // A whole-number literal reads as the integer it converts to.
-                text: raw ?? "{number}"
-                written: if text.ends_with(".0") -> text.slice(0, text.len() - 2) else -> text
-                diagnostics.push(sema_error("E0135", argument.span, "`{written}` is outside `{display_name}`'s range {bounds.lo}..{bounds.hi}", "a range type only holds values inside its bounds; `{written}` can never be a `{display_name}`", "use a value in `{bounds.lo}..{bounds.hi}`, or widen the type's range"))
             }
         }
     }

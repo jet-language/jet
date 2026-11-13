@@ -5695,12 +5695,13 @@ run: fn() {
 ```
 
 Between two whole-number types, `T{x}` widens and `checked(T{x})` narrows: it
-is `None` when the value is outside the target's range. Conversions that cross
-into or out of floating point stay destination-owned and fallible:
-`F32.from_float`, `Int.from_float`, and the corresponding fixed-width
-conversions reject values outside the target's finite range; integer-to-float
-conversion truncates only where the destination contract says so. Handle each
-conversion's failure rather than relying on implicit narrowing.
+is `None` when the value is outside the target's range. A Float becomes an
+integer the same way: `Int{f}` stops unless `f` is whole, finite and in range,
+`checked(Int{f})` returns `None` instead, and `saturating(U8{f})` truncates
+and clamps; integer heads have no `from_float`. `F32.from_float` rejects a
+value outside F32's finite range, and integer-to-float conversion truncates
+only where the destination contract says so. Handle each conversion's failure
+rather than relying on implicit narrowing.
 
 
 ### `core.net` — sockets and DNS

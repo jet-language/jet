@@ -2658,7 +2658,7 @@ priv quantile_select: module {
         work := [Float]{}
         loop value in values -> work.push(value)
         pos := q * Float{work.len() - 1}
-        lo := Int.from_float(pos) ?? panic("quantile position must be finite")
+        lo := checked(Int{math.trunc(pos)}) ?? panic("quantile position must be finite")
         hi := lo
         if (Float{lo}) < pos -> hi = lo + 1
         if hi >= work.len() -> hi = work.len() - 1
@@ -3087,7 +3087,7 @@ scale_between: fn(value: Float, minimum: Float, maximum: Float, extent: Int) -> 
     ratio := (value - minimum) / (maximum - minimum)
     if ratio <= (Float{0.0}) -> return 0
     if ratio >= (Float{1.0}) -> return extent
-    Int.from_float(ratio * Float{extent}) ?? panic("plot coordinate must be finite")
+    checked(Int{math.trunc(ratio * Float{extent})}) ?? panic("plot coordinate must be finite")
 }
 
 

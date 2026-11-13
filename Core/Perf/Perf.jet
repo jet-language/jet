@@ -54,7 +54,7 @@ is_full: fn(perf: Perf) -> Bool Never! { perf.fidelity >= 1.0 }
 is_low: fn(perf: Perf) -> Bool Never! { perf.fidelity < 0.25 }
 
 scale: fn(perf: Perf, work: Int) -> Int Never! {
-    n: Int.from_float((Float{work}) * perf.fidelity) ?? panic("scaled work must be finite")
+    n: checked(Int{core.math.trunc((Float{work}) * perf.fidelity)}) ?? panic("scaled work must be finite")
     if n < 0 -> return 0
     n
 }

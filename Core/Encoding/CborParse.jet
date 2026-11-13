@@ -216,7 +216,7 @@ Parser: struct {
                     if math.is_finite(seconds) && seconds > -9000000000.0 && seconds < 9000000000.0 {
                         whole: math.floor(seconds)
                         nanos: Int{math.round((seconds - whole) * 1000000000.0)}
-                        epoch: Int.from_float(whole) ?? return Err(failure(.Unsupported, start, path, "epoch is outside DateTime"))
+                        epoch: checked(Int{whole}) ?? return Err(failure(.Unsupported, start, path, "epoch is outside DateTime"))
                         return Ok(Dyn.DateTime(time.zoned(time.from_unix_nanoseconds(epoch * 1000000000 + nanos), time.utc())))
                     }
                     return Err(failure(.Unsupported, start, path, "epoch is outside DateTime"))

@@ -2425,14 +2425,10 @@ sema_expression_typed_literal_float_fits: fn(head: Type, number: Float, span: Sp
     shown: type_name(head)
     roundings: "round it first, as in `{shown}{{math.trunc(value)}}`, or with `math.floor`, `math.ceil`, `math.round` or `math.round_even`"
     // Every finite Float of magnitude 2^52 or more is whole; a smaller one
-    // is when its truncation is itself.
+    // is in Int's range, so it is whole when `checked(Int{…})` takes it.
     finite: number - number == 0.0
     large: number >= 4503599627370496.0 || number <= -4503599627370496.0
-    whole := finite && large
-    if finite && !large {
-        truncated: Int.from_float(number) ?? 0
-        whole = approx(truncated) == number
-    }
+    whole: finite && (large || checked(Int{number}) != None)
     if !whole {
         diagnostics.push(sema_error("E0112", span, "`{number}` isn't a whole number, so `{shown}` can't hold it exactly", "an integer typed literal converts a Float only when no rounding is needed; it never picks a rounding for you", roundings))
         return false

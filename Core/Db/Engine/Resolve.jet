@@ -771,7 +771,7 @@ expr_probability: fn(a: ast.AST, e: Int) -> Int Never! {
     if a.exprs[e].op != tk.TK_FLOAT -> return -1
     r: util.atof(a.exprs[e].token ?? [U8]{}, base.UTF8).value
     if r > 1.0 -> return -1
-    Int.from_float(math.trunc(r * 134217728.0)) ?? -1
+    checked(Int{math.trunc(r * 134217728.0)}) ?? -1
 }
 
 // The row-value size check of resolveExprStep's comparison operators.

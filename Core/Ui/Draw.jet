@@ -515,8 +515,8 @@ turn_image: fn(image: &Image, pixels: [U8]) {
 
 // A Float rounded toward zero; past the Int range it is 0.
 trunc_int: fn(value: Float) -> Int {
-    if value < 0.0 -> return -(Int.from_float(core.math.floor(-value)) ?? 0)
-    Int.from_float(core.math.floor(value)) ?? 0
+    if value < 0.0 -> return -(checked(Int{core.math.floor(-value)}) ?? 0)
+    checked(Int{core.math.floor(value)}) ?? 0
 }
 
 // Clears copy the color, alpha included.
@@ -691,11 +691,11 @@ blend_pixel: fn(pixels: &[U8], at: Int, red: Int, green: Int, blue: Int, alpha: 
 // A Float rounded to the nearest whole pixel, halves up; past the Int
 // range it is 0.
 round_px: fn(value: Float) -> Int {
-    Int.from_float(core.math.floor(value + 0.5)) ?? 0
+    checked(Int{core.math.floor(value + 0.5)}) ?? 0
 }
 
 floor_px: fn(value: Float) -> Int {
-    Int.from_float(core.math.floor(value)) ?? 0
+    checked(Int{core.math.floor(value)}) ?? 0
 }
 
 // A line; both endpoints are drawn.
@@ -843,7 +843,7 @@ axis_rgba: fn(first: Int, last: Int, t: Float) -> Int {
         level: Float{(first >> shift).bit_and(255)} * (Float{1.0} - t) + Float{(last >> shift).bit_and(255)} * t + 0.5
         whole: core.math.floor(level)
         if level - whole < 0.000000001 || whole + 1.0 - level < 0.000000001 -> return -1
-        rgba = (rgba << 8) + clamp8(Int.from_float(whole) ?? 0)
+        rgba = (rgba << 8) + clamp8(checked(Int{whole}) ?? 0)
         shift -= 8
     }
     rgba
@@ -1473,7 +1473,7 @@ subpixel: fn(value: Float) -> Int {
     scaled: core.math.floor(value * 256.0 + 0.5)
     if scaled > 268435456.0 -> return C_SUBPIXEL_LIMIT
     if scaled < -268435456.0 -> return -C_SUBPIXEL_LIMIT
-    Int.from_float(scaled) ?? 0
+    checked(Int{scaled}) ?? 0
 }
 
 // The first pixel whose center lies at or past subpixel coordinate `at`.
@@ -1574,7 +1574,7 @@ gradient_rgba: fn(top_left: Int, bottom_left: Int, bottom_right: Int, top_right:
         } else {
             level = Float{tl} * (Float{1.0} - u) + Float{tr} * (u - v) + Float{br} * v
         }
-        rgba = (rgba << 8) + clamp8(Int.from_float(core.math.floor(level + 0.5)) ?? 0)
+        rgba = (rgba << 8) + clamp8(checked(Int{core.math.floor(level + 0.5)}) ?? 0)
         shift -= 8
     }
     rgba
@@ -1738,7 +1738,7 @@ ellipse_cover: fn(extent: Extent, center_x: Int, center_y: Int, radius_h: Float,
             estimate: core.math.floor(core.math.sqrt(limit - dy * dy) / radius_v)
             half := reach_h
             reach: Float{reach_h}
-            if estimate < reach -> half = max_int(Int.from_float(estimate) ?? 0, 0)
+            if estimate < reach -> half = max_int(checked(Int{estimate}) ?? 0, 0)
             loop half < reach_h && ellipse_inside(half + 1, dy, radius_v, limit) -> half += 1
             loop half > 0 && !ellipse_inside(half, dy, radius_v, limit) -> half -= 1
             lo: max_int(center_x - half, -1)
@@ -1759,7 +1759,7 @@ ellipse_inside: fn(dx: Int, dy: Float, radius_v: Float, limit: Float) -> Bool {
 // floor(radius) + 1, capped far past any image.
 whole_reach: fn(radius: Float) -> Int {
     if radius >= 1073741824.0 -> return 1073741824
-    (Int.from_float(core.math.floor(radius)) ?? 0) + 1
+    (checked(Int{core.math.floor(radius)}) ?? 0) + 1
 }
 
 cover_runs: fn(extent: Extent, cover: Cover, rgba: Int) -> [Run] {
@@ -1851,7 +1851,7 @@ rounded_pieces: fn(rec: Rect, roundness: Float, segments: Int, grow: Float, divi
     if radius <= 0.0 -> return pieces
     count := segments
     if count < 4 {
-        count = Int.from_float(core.math.trunc(core.math.ceil(C_TAU / arc_step(radius)) / divisor)) ?? 0
+        count = checked(Int{core.math.trunc(core.math.ceil(C_TAU / arc_step(radius)) / divisor)}) ?? 0
         if count <= 0 -> count = 4
     }
     step: Float{90.0} / Float{count}
@@ -1901,10 +1901,10 @@ ring_pieces: fn(center: Point, inner_radius: Float, outer_radius: Float, start_a
         start = end_angle
         finish = start_angle
     }
-    least: Int.from_float(core.math.ceil((finish - start) / 90.0)) ?? 1
+    least: checked(Int{core.math.ceil((finish - start) / 90.0)}) ?? 1
     count := segments
     if count < least {
-        count = Int.from_float(core.math.trunc((finish - start) * core.math.ceil(C_TAU / arc_step(outer)) / 360.0)) ?? 0
+        count = checked(Int{core.math.trunc((finish - start) * core.math.ceil(C_TAU / arc_step(outer)) / 360.0)}) ?? 0
         if count <= 0 -> count = least
     }
     if count <= 0 -> return pieces

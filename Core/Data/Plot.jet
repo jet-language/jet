@@ -2,6 +2,7 @@ use core.data.[
     JetDataPlotMark, JetDataPlotValue, JetDataPlotField, JetDataPlotSchema,
     JetDataPlotEncoding, JetDataPlotLayout, JetDataPlotPlan, JetDataPlotRender
 ]
+use math: core.math
 // core.data.plot — text and SVG charts from labelled series.
 //
 // A plan is a mark plus aligned `labels` / `values`. Rendering never talks to
@@ -227,7 +228,7 @@ scale_between: fn(value: Float, minimum: Float, maximum: Float, extent: Int) -> 
     ratio := (value - minimum) / (maximum - minimum)
     if ratio <= (Float{0.0}) -> return 0
     if ratio >= (Float{1.0}) -> return extent
-    Int.from_float(ratio * (Float{extent})) ?? panic("plot coordinate must be finite")
+    checked(Int{math.trunc(ratio * (Float{extent}))}) ?? panic("plot coordinate must be finite")
 }
 
 xml_escape: fn(text: String) -> String {

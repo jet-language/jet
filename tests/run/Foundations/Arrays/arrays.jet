@@ -273,7 +273,7 @@ encode_ppm: fn(image: ImageArray) -> String {
             samples := [String]{}
             if image.channels == 1 {
                 gray: compute.get(image.pixels, [y, x, 0]) ?? panic("gray output read")
-                sample: Int.from_float(gray * 255.0) ?? panic("gray output sample")
+                sample: saturating(Int{gray * 255.0})
                 samples.push("{sample}")
                 samples.push("{sample}")
                 samples.push("{sample}")
@@ -281,7 +281,7 @@ encode_ppm: fn(image: ImageArray) -> String {
                 channel := 0
                 loop channel < 3 {
                     value: compute.get(image.pixels, [y, x, channel]) ?? panic("output read")
-                    sample: Int.from_float(value * 255.0) ?? panic("output sample")
+                    sample: saturating(Int{value * 255.0})
                     samples.push("{sample}")
                     channel += 1
                 }

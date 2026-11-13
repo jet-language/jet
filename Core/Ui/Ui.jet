@@ -1433,10 +1433,10 @@ priv internal: module {
     // coordinate no Int holds.
     around: fn(x0: Float, y0: Float, x1: Float, y1: Float) -> UIRect {
         whole: UIRect{x: 0, y: 0, width: SIDE_MAX, height: SIDE_MAX}
-        left: Int.from_float(core.math.floor(x0)) ?? return whole
-        top: Int.from_float(core.math.floor(y0)) ?? return whole
-        right: Int.from_float(core.math.floor(x1)) ?? return whole
-        bottom: Int.from_float(core.math.floor(y1)) ?? return whole
+        left: checked(Int{core.math.floor(x0)}) ?? return whole
+        top: checked(Int{core.math.floor(y0)}) ?? return whole
+        right: checked(Int{core.math.floor(x1)}) ?? return whole
+        bottom: checked(Int{core.math.floor(y1)}) ?? return whole
         x: min_of(left, right) - 2
         y: min_of(top, bottom) - 2
         UIRect{x: x, y: y, width: max_of(left, right) + 3 - x, height: max_of(top, bottom) + 3 - y}
@@ -1626,7 +1626,7 @@ priv internal: module {
     cell_index: fn(value: Float) -> Int Never! {
         if !(value >= 1.0) -> return 0
         if value >= 9223372036854775807.0 -> return 9223372036854775807
-        Int.from_float(core.math.floor(value)) ?? 0
+        checked(Int{core.math.floor(value)}) ?? 0
     }
 
     // The UTF-8 bytes of scalar `n`.

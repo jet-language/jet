@@ -55,10 +55,10 @@ small: U8{ 255 }
 wide: I64{ 9_000_000_000 } // `_` digit separators (S67)
     mask: 0xDEAD_BEEF             // hex; also 0o.. octal, 0b.. binary (S67)
     big: 6.022e23                 // float exponent (S67)
-    // safe widening is implicit; narrowing uses named methods (S42)
+    // safe widening is implicit; narrowing is explicit (S42)
     f := Float{ 0.0 }
     f = small
-    n: Int.from_float(f) ?? 0
+    n: checked(Int{f}) ?? 0
 }
 
 // D-INTBIG1/D-NUMOPS1: default Int arithmetic is exact; fixed-width arithmetic

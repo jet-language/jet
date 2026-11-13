@@ -66,7 +66,7 @@ collisions: fn() {
         hits_wall: ui.check_collision_recs(paddle, wall)
         hits_ball: ui.check_collision_circle_rec(ball, 3.0, paddle)
         overlap: ui.get_collision_rec(paddle, wall)
-        print("step={step} wall={hits_wall} ball={hits_ball} overlap_width={Int.from_float(overlap.width) ?? -1}")
+        print("step={step} wall={hits_wall} ball={hits_ball} overlap_width={checked(Int{overlap.width}) ?? -1}")
     }
     corner: ui.point(48.0, 30.0)
     print("corner_inside={ui.check_collision_point_rec(corner, wall)}")
@@ -78,7 +78,7 @@ collisions: fn() {
     star: [ui.Point]{ui.point(10.0, 0.0), ui.point(13.0, 7.0), ui.point(20.0, 7.0), ui.point(14.0, 12.0), ui.point(16.0, 20.0), ui.point(10.0, 15.0), ui.point(4.0, 20.0), ui.point(6.0, 12.0), ui.point(0.0, 7.0), ui.point(7.0, 7.0)}
     print("star_center={ui.check_collision_point_poly(ui.point(10.0, 10.0), star)} star_notch={ui.check_collision_point_poly(ui.point(10.0, 18.0), star)}")
     crossing: ui.check_collision_lines(slope_from, slope_to, ui.point(0.0, 0.0), ui.point(60.0, 30.0)) ?? ui.point(-1.0, -1.0)
-    print("slopes_cross_at={Int.from_float(crossing.x) ?? -1},{Int.from_float(crossing.y) ?? -1}")
+    print("slopes_cross_at={checked(Int{crossing.x}) ?? -1},{checked(Int{crossing.y}) ?? -1}")
     print("circles={ui.check_collision_circles(ball, 3.0, ui.point(36.0, 28.0), 7.0)}")
 }
 

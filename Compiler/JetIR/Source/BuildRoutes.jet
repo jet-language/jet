@@ -3543,64 +3543,10 @@ ir_is_null: fn(m: &IRModule, b: &IRBuilder, pointer: Int) -> Int Never! {
     absent
 }
 
-// `Int.from_float(x)` and its fixed-width forms: ordered bounds reject NaN
-// and infinity before the truncating conversion; Ok holds the integer, Err
-// the text "value doesn't fit in destination type". An F32 first widens
-// exactly.
-ir_float_to_int: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, ty: Type, span: Span) -> Int Never! {
-    unsupported: "Prelude conversion float_to_int of this shape is not lowered at O0 yet"
-    source: m.types[b.f.slot_type[value]].kind
-    if source != .Float && source != .Float32 -> return ir_fail_slot(b, span, unsupported)
-    ok_ty: if ir_untag(ty) == .Result(ok, _) -> ok else -> { return ir_fail_slot(b, span, unsupported) }
-    err_ty: if ir_untag(ty) == .Result(_, err) -> err else -> { return ir_fail_slot(b, span, unsupported) }
-    ok_row: ir_value_type(m, p, ok_ty) ?? return ir_type_fail(b, span, ok_ty)
-    err_row: ir_value_type(m, p, err_ty) ?? return ir_type_fail(b, span, err_ty)
-    if m.types[err_row].kind != .String -> return ir_fail_slot(b, span, unsupported)
-    exact: m.types[ok_row].kind == .Int
-    if !exact && m.types[ok_row].kind != .Word -> return ir_fail_slot(b, span, unsupported)
-    signed: exact || m.types[ok_row].signed
-    bits: if exact -> 64 else -> m.types[ok_row].bits
-    if bits != 8 && bits != 16 && bits != 32 && bits != 64 -> return ir_fail_slot(b, span, unsupported)
-    result_row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
-    float_row: ir_type_row(m, Type.Float) ?? return ir_fail_slot(b, span, unsupported)
-    floating := value
-    if source == .Float32 {
-        floating = ir_temp(m, b, float_row)
-        ir_emit(b.f, IROp.Convert, floating, value, -1, -1, b.line)
-    }
-    high_bits: (1023 + bits - (if signed -> 1 else -> 0)) << 52
-    high: ir_int_constant(m, b, float_row, high_bits)
-    low: ir_int_constant(m, b, float_row, if signed -> high_bits.bit_or(-9223372036854775807 - 1) else -> 0)
-    bool_row: ir_type_row(m, Type.Bool) ?? 0
-    fits: ir_temp(m, b, bool_row)
-    ir_emit(b.f, IROp.Const, fits, 0, -1, -1, b.line)
-    above: ir_bool_op(m, b, IROp.Ge, floating, low)
-    ir_open_if(b.f, above, b.line)
-    below: ir_bool_op(m, b, IROp.Lt, floating, high)
-    ir_emit(b.f, IROp.Copy, fits, below, -1, -1, b.line)
-    ir_end(b.f, b.line)
-    found: ir_fresh_temp(m, b, result_row)
-    ir_open_if(b.f, fits, b.line)
-    word_row: if exact -> ir_word_row(m) else -> ok_row
-    word: ir_float_word(m, b, floating, word_row, !signed && bits == 64)
-    converted: if exact -> ir_runtime(m, b, "jet_int_owned_from_i64", [Int]{word}, ok_row) else -> word
-    success: ir_result_box(m, p, b, ty, true, converted)
-    ir_emit(b.f, IROp.Copy, found, success, -1, -1, b.line)
-    ir_else(b.f, b.line)
-    string_row: ir_string_row(m)
-    text: ir_temp(m, b, string_row)
-    message: ir_intern_text(m, "value doesn't fit in destination type")
-    ir_emit(b.f, IROp.ConstText, text, message, -1, -1, b.line)
-    failure: ir_result_box(m, p, b, ty, false, text)
-    ir_emit(b.f, IROp.Copy, found, failure, -1, -1, b.line)
-    ir_end(b.f, b.line)
-    found
-}
-
 // `Int{f}`, `U8{f}` and every other integer head's typed literal of a Float
 // or F32 (TNumericOp.FloatExact). A whole, finite value in the destination's
 // range converts exactly; an exact Int destination has the signed 64-bit
-// range, as `Int.from_float` does. Any other value stops at `line` with E3010
+// range. Any other value stops at `line` with E3010
 // naming the roundings (Stop), or is None (Absent, whose `ty` is the Option).
 // Saturate truncates toward zero and takes the nearest bound, and NaN is 0.
 // The ordered range tests reject NaN and both infinities.

@@ -2861,7 +2861,7 @@ vec_int: fn(d: Dyn, key: String) -> Int {
     if d[key] == {
         .Int(n) -> n
         .Number(s) -> Int.parse(s) ?? panic("Wycheproof field {key}: {s}")
-        .Float(x) -> Int.from_float(x) ?? panic("Wycheproof field {key}: {x}")
+        .Float(x) -> checked(Int{core.math.trunc(x)}) ?? panic("Wycheproof field {key}: {x}")
         .Null | .Bool(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> panic("Wycheproof field {key} is missing")
     }
 }

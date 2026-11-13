@@ -93,7 +93,7 @@ run: fn() {
 // A position bouncing between 0 and `span` at `speed` pixels per second.
 bounce: fn(t: Float, speed: Float, span: Int) -> Int {
     if span <= 0 -> return 0
-    travelled: Int.from_float(t * speed) ?? 0
+    travelled: saturating(Int{t * speed})
     period: 2 * span
     at: travelled %% period
     if at > span -> period - at else -> at

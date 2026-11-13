@@ -135,7 +135,7 @@ run: fn() {
             // The original JSON::json_int also truncates Float with an i64 cast.
             resolved: if value == {
                 .Int(number) -> number
-                .Float(number) -> Int.from_float(number) ?? panic("Tower card JSON num is not an integer")
+                .Float(number) -> checked(Int{number}) ?? panic("Tower card JSON num is not an integer")
                 .Number(number) -> Int.parse(number) ?? panic("Tower card JSON num is not an integer: {number}")
                 .Null | .Bool(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> panic("Tower card JSON must contain a numeric num")
             }

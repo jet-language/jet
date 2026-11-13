@@ -331,7 +331,12 @@ semindex_symbol_distinct_conversions: fn(owner: String, base: Type, ranged: Bool
     conversions := [SemSymbolConversion]{}
     base_name: type_name(base)
     if semindex_symbol_is_numeric(base) {
-        loop row in BUILTIN_NUMERIC_SOURCES -> conversions.push(SemSymbolConversion{method: row.method, source: row.source})
+        // An integer base has no Float source: `Int{f}` converts instead.
+        integer_base: base == .Int || base == .IntN(_, _)
+        loop row in BUILTIN_NUMERIC_SOURCES {
+            if integer_base && (row.source == "Float" || row.source == "F32") -> next
+            conversions.push(SemSymbolConversion{method: row.method, source: row.source})
+        }
     }
     if !semindex_symbol_is_numeric(base) -> conversions.push(SemSymbolConversion{method: semindex_symbol_conversion_method(base_name), source: base_name})
     loop conversion in conversions {

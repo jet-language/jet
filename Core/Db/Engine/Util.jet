@@ -1100,7 +1100,7 @@ log_est: fn(x_in: Int) -> Int Never! {
 // sqlite3LogEstFromDouble.
 log_est_from_double: fn(x: Float) -> Int Never! {
     if x <= 1.0 -> return 0
-    if x <= 2000000000.0 -> return log_est(Int.from_float(math.trunc(x)) ?? 0)
+    if x <= 2000000000.0 -> return log_est(checked(Int{math.trunc(x)}) ?? 0)
     bits: as_u64(math.to_bits(x))
     ((bits >> 52) - 1022) * 10
 }

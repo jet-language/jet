@@ -359,7 +359,7 @@ recipe_debug_num_field: fn(object: [String: Dyn], key: String) -> Int Never! {
     value: object.get(key) ?? return 0
     if value.decode<Int>() == .Ok(number) -> return if number >= 0 -> number else -> 0
     fraction: value.decode<Float>() ?? return 0
-    if fraction >= 0.0 -> Int.from_float(math.trunc(fraction)) ?? 0 else -> 0
+    if fraction >= 0.0 -> checked(Int{math.trunc(fraction)}) ?? 0 else -> 0
 }
 
 // Copy a real directory tree; links and special entries are refused.
