@@ -1,0 +1,528 @@
+// The host-only control half of jet.devtools.v1. Observation facts stay in
+// Protocol.jet; these values cross the host command boundary carrying only a
+// checked identity and bounded limits, never SQL text, bindings, credentials
+// or an arbitrary evaluator. A session owns its command FIFO and receipt
+// stream as explicit state (JetDevtoolsCommandQueue); there is no
+// process-global registry.
+use jet_foundation.[foundation_json_quote, jettrace_has_control]
+
+JET_DEVTOOLS_MAX_COMMANDS: Int{JET_DEVTOOLS_MAX_EVENTS}
+JET_DEVTOOLS_MAX_COMMAND_ROWS: Int{256}
+JET_DEVTOOLS_MAX_EXPLAIN_TIMEOUT_MS: Int{30000}
+
+// One database EXPLAIN request. SQL text, bindings, credentials and authority
+// facts stay in the owning runtime.
+JetDevtoolsDatabaseExplainRequest: struct {
+    session_id: String
+    request_id: String
+    statement_identity: String
+    timeout_ms: Int
+    max_rows: Int
+}
+
+impl JetDevtoolsDatabaseExplainRequest {
+    new: fn(&&session_id: String, &&request_id: String, &&statement_identity: String, timeout_ms: Int, max_rows: Int) -> JetDevtoolsDatabaseExplainRequest Err! {
+        request: JetDevtoolsDatabaseExplainRequest{session_id: session_id.move(), request_id: request_id.move(), statement_identity: statement_identity.move(), timeout_ms: timeout_ms, max_rows: max_rows}
+        request.validate()
+        Ok(request)
+    }
+    validate: fn(self) Err! {
+        devtools_control_text(self.session_id, "session_id")
+        devtools_control_text(self.request_id, "request_id")
+        devtools_control_text(self.statement_identity, "statement_identity")
+        if self.timeout_ms <= 0 || self.timeout_ms > JET_DEVTOOLS_MAX_EXPLAIN_TIMEOUT_MS -> return Err("jet.devtools.v1 EXPLAIN timeout is outside its limit")
+        if self.max_rows <= 0 || self.max_rows > JET_DEVTOOLS_MAX_COMMAND_ROWS -> return Err("jet.devtools.v1 EXPLAIN row limit is outside its limit")
+        Ok()
+    }
+    render_json: fn(self) -> String Never! {
+        "{{\"session_id\":{foundation_json_quote(self.session_id)},\"request_id\":{foundation_json_quote(self.request_id)},\"statement_identity\":{foundation_json_quote(self.statement_identity)},\"timeout_ms\":{self.timeout_ms},\"max_rows\":{self.max_rows}}}"
+    }
+}
+
+// One redacted structural EXPLAIN row: never SQL literals, parameter values
+// or credentials.
+JetDevtoolsDBPlanRow: struct {
+    id: String
+    parent: String?
+    detail: String
+}
+
+impl JetDevtoolsDBPlanRow {
+    new: fn(&&id: String, &&parent: String?, &&detail: String) -> JetDevtoolsDBPlanRow Err! {
+        row: JetDevtoolsDBPlanRow{id: id.move(), parent: parent.move(), detail: detail.move()}
+        row.validate()
+        Ok(row)
+    }
+    validate: fn(self) Err! {
+        devtools_control_text(self.id, "plan row id")
+        devtools_control_optional_text(self.parent, "plan row parent")
+        devtools_control_text(self.detail, "plan row detail")
+        Ok()
+    }
+    render_json: fn(self) -> String Never! {
+        "{{\"id\":{foundation_json_quote(self.id)},\"parent\":{devtools_control_optional_json(self.parent)},\"detail\":{foundation_json_quote(self.detail)}}}"
+    }
+}
+
+// The typed result a database handler returns. Driver and authority state
+// stay out of it; errors are bounded, redacted text.
+JetDevtoolsDatabaseExplainResult: struct {
+    session_id: String
+    request_id: String
+    statement_identity: String
+    status: String
+    elapsed_ns: Int
+    truncated: Bool
+    row_count: Int
+    plan_rows: [JetDevtoolsDBPlanRow]
+    error_code: String?
+    error_message: String?
+}
+
+impl JetDevtoolsDatabaseExplainResult {
+    new: fn(&&session_id: String, &&request_id: String, &&statement_identity: String, &&status: String, elapsed_ns: Int, truncated: Bool, row_count: Int, &&plan_rows: [JetDevtoolsDBPlanRow], &&error_code: String?, &&error_message: String?) -> JetDevtoolsDatabaseExplainResult Err! {
+        if plan_rows.len() > JET_DEVTOOLS_MAX_COMMAND_ROWS -> return Err("jet.devtools.v1 EXPLAIN result has too many plan rows")
+        result: JetDevtoolsDatabaseExplainResult{
+            session_id: session_id.move(), request_id: request_id.move(), statement_identity: statement_identity.move(), status: status.move(),
+            elapsed_ns: elapsed_ns, truncated: truncated, row_count: row_count, plan_rows: plan_rows.move(),
+            error_code: error_code.move(), error_message: error_message.move(),
+        }
+        result.validate()
+        Ok(result)
+    }
+    validate: fn(self) Err! {
+        devtools_control_text(self.session_id, "session_id")
+        devtools_control_text(self.request_id, "request_id")
+        devtools_control_text(self.statement_identity, "statement_identity")
+        devtools_control_text(self.status, "status")
+        if self.plan_rows.len() > JET_DEVTOOLS_MAX_COMMAND_ROWS -> return Err("jet.devtools.v1 EXPLAIN result has too many plan rows")
+        loop row in self.plan_rows -> row.validate()
+        devtools_control_optional_text(self.error_code, "error code")
+        devtools_control_optional_text(self.error_message, "error message")
+        Ok()
+    }
+    render_json: fn(self) -> String Never! {
+        rows := [String]{}
+        loop row in self.plan_rows -> rows.push(row.render_json())
+        "{{\"session_id\":{foundation_json_quote(self.session_id)},\"request_id\":{foundation_json_quote(self.request_id)},\"statement_identity\":{foundation_json_quote(self.statement_identity)},\"status\":{foundation_json_quote(self.status)},\"elapsed_ns\":{self.elapsed_ns},\"truncated\":{self.truncated},\"row_count\":{self.row_count},\"plan_rows\":[{rows.join(",")}],\"error_code\":{devtools_control_optional_json(self.error_code)},\"error_message\":{devtools_control_optional_json(self.error_message)}}}"
+    }
+}
+
+// Game controls are the only interactive commands that cross the boundary.
+// The operation set is closed, so a host cannot smuggle an evaluator or an
+// unrecognised state transition into a live game.
+impl JetDevtoolsGameControlKind {
+    as_str: fn(self) -> String Never! {
+        if self == {
+            .Play -> "play"
+            .Simulate -> "simulate"
+            .Pause -> "pause"
+            .Step -> "step"
+            .Resume -> "resume"
+            .FrameAdvance -> "frame_advance"
+            .Edit -> "edit"
+            .Eject -> "eject"
+            .Keep -> "keep"
+            .Discard -> "discard"
+            .SelectCategory -> "select_category"
+            .SelectWorld -> "select_world"
+            .EditWorld -> "edit_world"
+            .EvaluateWorld -> "evaluate_world"
+        }
+    }
+    parse: fn(value: String) -> JetDevtoolsGameControlKind Err! {
+        if value == {
+            "play" -> Ok(.Play)
+            "simulate" -> Ok(.Simulate)
+            "pause" -> Ok(.Pause)
+            "step" -> Ok(.Step)
+            "resume" -> Ok(.Resume)
+            "frame_advance" -> Ok(.FrameAdvance)
+            "edit" -> Ok(.Edit)
+            "eject" -> Ok(.Eject)
+            "keep" -> Ok(.Keep)
+            "discard" -> Ok(.Discard)
+            "select_category" -> Ok(.SelectCategory)
+            "select_world" -> Ok(.SelectWorld)
+            "edit_world" -> Ok(.EditWorld)
+            "evaluate_world" -> Ok(.EvaluateWorld)
+            else -> Err("jet.devtools.v1 game control operation `{value}` is unsupported")
+        }
+    }
+}
+
+// One checked game control request. An optional field is used only by the
+// operation that owns it; validation rejects missing provenance before the
+// request enters the session queue or the generated runtime.
+JetDevtoolsGameControlRequest: struct {
+    session_id: String
+    request_id: String
+    kind: JetDevtoolsGameControlKind
+    source_id: String?
+    revision: String?
+    world_id: String?
+    actor_id: String?
+    component_id: String?
+    authored_instance_id: String?
+    source_span_start: Int?
+    source_span_end: Int?
+    field: String?
+    value: String?
+    category: String?
+    expression: String?
+    required_authority: String?
+    frame_id: Int?
+    budget: Int?
+}
+
+impl JetDevtoolsGameControlRequest {
+    new: fn(&&session_id: String, &&request_id: String, kind: JetDevtoolsGameControlKind) -> JetDevtoolsGameControlRequest Err! {
+        request: JetDevtoolsGameControlRequest{
+            session_id: session_id.move(), request_id: request_id.move(), kind: kind,
+            source_id: None, revision: None, world_id: None, actor_id: None, component_id: None, authored_instance_id: None,
+            source_span_start: None, source_span_end: None, field: None, value: None, category: None, expression: None,
+            required_authority: None, frame_id: None, budget: None,
+        }
+        request.validate()
+        Ok(request)
+    }
+    validate: fn(self) Err! {
+        devtools_control_text(self.session_id, "game control session_id")
+        devtools_control_text(self.request_id, "game control request_id")
+        devtools_control_optional_text(self.source_id, "game control source_id")
+        devtools_control_optional_text(self.revision, "game control revision")
+        devtools_control_optional_text(self.world_id, "game control world_id")
+        devtools_control_optional_text(self.actor_id, "game control actor_id")
+        devtools_control_optional_text(self.component_id, "game control component_id")
+        devtools_control_optional_text(self.authored_instance_id, "game control authored_instance_id")
+        devtools_control_optional_text(self.field, "game control field")
+        devtools_control_optional_text(self.value, "game control value")
+        devtools_control_optional_text(self.category, "game control category")
+        devtools_control_optional_text(self.expression, "game control expression")
+        devtools_control_optional_text(self.required_authority, "game control required_authority")
+        kind: self.kind
+        if kind == .Play || kind == .Simulate || kind == .Eject || kind == .Keep || kind == .EditWorld {
+            devtools_control_required(self.source_id, kind, "source_id")
+            devtools_control_required(self.revision, kind, "revision")
+        }
+        if kind == .Eject {
+            devtools_control_required(self.world_id, kind, "world_id")
+            devtools_control_required(self.actor_id, kind, "actor_id")
+        }
+        if kind == .Keep || kind == .EditWorld {
+            devtools_control_required(self.authored_instance_id, kind, "authored_instance_id")
+            devtools_control_required(self.field, kind, "field")
+            devtools_control_required(self.value, kind, "value")
+            if self.source_span_start == None || self.source_span_end == None -> return Err("game control `{kind.as_str()}` requires source_span_start and source_span_end")
+        }
+        if kind == .SelectCategory -> devtools_control_required(self.category, kind, "category")
+        if kind == .SelectWorld {
+            devtools_control_required(self.world_id, kind, "world_id")
+            if self.component_id != None && self.actor_id == None -> return Err("select_world component_id requires actor_id")
+            if self.field != None && self.component_id == None -> return Err("select_world field requires component_id")
+        }
+        if kind == .EvaluateWorld {
+            devtools_control_required(self.world_id, kind, "world_id")
+            devtools_control_required(self.actor_id, kind, "actor_id")
+            devtools_control_required(self.component_id, kind, "component_id")
+            devtools_control_required(self.expression, kind, "expression")
+            devtools_control_required(self.required_authority, kind, "required_authority")
+            if self.frame_id == None -> return Err("evaluate_world requires frame_id")
+            if (self.budget ?? 0) <= 0 -> return Err("evaluate_world requires a positive budget")
+        }
+        if self.source_span_start == .Val(start) {
+            end: self.source_span_end ?? return Err("game control source span must include both bounds")
+            if start >= end -> return Err("game control source span must end after it starts")
+        } else {
+            if self.source_span_end != None -> return Err("game control source span must include both bounds")
+        }
+        Ok()
+    }
+    render_json: fn(self) -> String Never! {
+        identity: "\"session_id\":{foundation_json_quote(self.session_id)},\"request_id\":{foundation_json_quote(self.request_id)},\"kind\":{foundation_json_quote(self.kind.as_str())}"
+        target: "\"source_id\":{devtools_control_optional_json(self.source_id)},\"revision\":{devtools_control_optional_json(self.revision)},\"world_id\":{devtools_control_optional_json(self.world_id)},\"actor_id\":{devtools_control_optional_json(self.actor_id)},\"component_id\":{devtools_control_optional_json(self.component_id)},\"authored_instance_id\":{devtools_control_optional_json(self.authored_instance_id)}"
+        span: "\"source_span_start\":{devtools_control_optional_int(self.source_span_start)},\"source_span_end\":{devtools_control_optional_int(self.source_span_end)}"
+        edit: "\"field\":{devtools_control_optional_json(self.field)},\"value\":{devtools_control_optional_json(self.value)},\"category\":{devtools_control_optional_json(self.category)},\"expression\":{devtools_control_optional_json(self.expression)},\"required_authority\":{devtools_control_optional_json(self.required_authority)}"
+        "{{{identity},{target},{span},{edit},\"frame_id\":{devtools_control_optional_int(self.frame_id)},\"budget\":{devtools_control_optional_int(self.budget)}}}"
+    }
+}
+
+// A checked browser request to rebuild the project through the resident dev
+// loop. The revision is admission-bound: the driver never reads it as an
+// evaluator or a file-mtime hint.
+JetDevtoolsProjectRebuildRequest: struct {
+    session_id: String
+    request_id: String
+    expected_revision: String
+}
+
+impl JetDevtoolsProjectRebuildRequest {
+    new: fn(&&session_id: String, &&request_id: String, &&expected_revision: String) -> JetDevtoolsProjectRebuildRequest Err! {
+        request: JetDevtoolsProjectRebuildRequest{session_id: session_id.move(), request_id: request_id.move(), expected_revision: expected_revision.move()}
+        request.validate()
+        Ok(request)
+    }
+    validate: fn(self) Err! {
+        devtools_control_text(self.session_id, "project rebuild session_id")
+        devtools_control_text(self.request_id, "project rebuild request_id")
+        devtools_control_text(self.expected_revision, "project rebuild expected_revision")
+        Ok()
+    }
+    render_json: fn(self) -> String Never! {
+        "{{\"session_id\":{foundation_json_quote(self.session_id)},\"request_id\":{foundation_json_quote(self.request_id)},\"expected_revision\":{foundation_json_quote(self.expected_revision)}}}"
+    }
+}
+
+// The closed command vocabulary: a new kind needs a protocol decision, and a
+// host registers no handler through it.
+impl JetDevtoolsCommand {
+    session_id: fn(self) -> String Never! {
+        if self == {
+            .DatabaseExplain(request) -> request.session_id
+            .GameControl(request) -> request.session_id
+            .ProjectRebuild(request) -> request.session_id
+        }
+    }
+    request_id: fn(self) -> String Never! {
+        if self == {
+            .DatabaseExplain(request) -> request.request_id
+            .GameControl(request) -> request.request_id
+            .ProjectRebuild(request) -> request.request_id
+        }
+    }
+    kind: fn(self) -> String Never! {
+        if self == {
+            .DatabaseExplain(_) -> "DatabaseExplain"
+            .GameControl(_) -> "GameControl"
+            .ProjectRebuild(_) -> "ProjectRebuild"
+        }
+    }
+    validate: fn(self) Err! {
+        if self == {
+            .DatabaseExplain(request) -> request.validate()
+            .GameControl(request) -> request.validate()
+            .ProjectRebuild(request) -> request.validate()
+        }
+        Ok()
+    }
+    render_json: fn(self) -> String Never! {
+        if self == {
+            .DatabaseExplain(request) -> request.render_json()
+            .GameControl(request) -> request.render_json()
+            .ProjectRebuild(request) -> request.render_json()
+        }
+    }
+}
+
+// One bounded admission or dispatch receipt for a host command.
+JetDevtoolsCommandReceipt: struct {
+    sequence: Int
+    session_id: String
+    request_id: String
+    kind: String
+    status: String
+    error: String?
+}
+
+impl JetDevtoolsCommandReceipt {
+    validate: fn(self) Err! {
+        devtools_control_text(self.session_id, "command receipt session_id")
+        devtools_control_text(self.request_id, "command receipt request_id")
+        devtools_control_text(self.kind, "command receipt kind")
+        devtools_control_text(self.status, "command receipt status")
+        devtools_control_optional_text(self.error, "command receipt error")
+        Ok()
+    }
+    render_json: fn(self) -> String Never! {
+        "{{\"sequence\":{self.sequence},\"session_id\":{foundation_json_quote(self.session_id)},\"request_id\":{foundation_json_quote(self.request_id)},\"kind\":{foundation_json_quote(self.kind)},\"status\":{foundation_json_quote(self.status)},\"error\":{devtools_control_optional_json(self.error)}}}"
+    }
+}
+
+// One session's command FIFO and receipt stream. Database, game and rebuild
+// commands share the FIFO, so polling one family never consumes another.
+// Receipt sequences are this session's own counter.
+JetDevtoolsCommandQueue: struct {
+    session_id: String
+    command_list: [JetDevtoolsCommand]
+    receipt_list: [JetDevtoolsCommandReceipt]
+    next_receipt_sequence: Int
+}
+
+impl JetDevtoolsCommandQueue {
+    new: fn(&&session_id: String) -> JetDevtoolsCommandQueue Never! {
+        JetDevtoolsCommandQueue{session_id: session_id.move(), command_list: [JetDevtoolsCommand]{}, receipt_list: [JetDevtoolsCommandReceipt]{}, next_receipt_sequence: 1}
+    }
+    // Admit one checked command and record its `queued` receipt.
+    enqueue: fn(&self, &&command: JetDevtoolsCommand) Err! {
+        self.admit(command)
+        if self.receipt_list.len() >= JET_DEVTOOLS_MAX_COMMANDS -> return Err("jet.devtools.v1 command receipt queue is full")
+        if self.command_list.len() >= JET_DEVTOOLS_MAX_COMMANDS -> return Err("jet.devtools.v1 command queue is full")
+        receipt: self.receipt_for(command, "queued", None)
+        self.receipt_list.push(receipt)
+        self.command_list.push(command.move())
+        Ok()
+    }
+    // Put a command back at the head when its runtime destination is not
+    // ready yet, keeping FIFO order.
+    requeue_front: fn(&self, &&command: JetDevtoolsCommand) Err! {
+        self.admit(command)
+        if self.command_list.len() >= JET_DEVTOOLS_MAX_COMMANDS -> return Err("jet.devtools.v1 command queue is full")
+        self.command_list.insert(0, command.move())
+        Ok()
+    }
+    poll: fn(&self) -> JetDevtoolsCommand? Never! {
+        if self.command_list.len() == 0 -> return None
+        self.command_list.remove(0, .Slot)
+    }
+    // The oldest database command; every other queued command keeps its place.
+    poll_database_explain: fn(&self) -> JetDevtoolsDatabaseExplainRequest? Never! {
+        found := Int?{None}
+        loop (index, command) in self.command_list {
+            if command == .DatabaseExplain(_) {
+                found = Val(index)
+                break
+            }
+        }
+        at: found ?? return None
+        taken: self.command_list.remove(at, .Slot) ?? return None
+        if taken == .DatabaseExplain(request) -> return Val(request)
+        None
+    }
+    command_count: fn(self) -> Int Never! { self.command_list.len() }
+    // Append one receipt for `command` to the stream.
+    record_receipt: fn(&self, command: JetDevtoolsCommand, &&status: String, &&error: String?) Err! {
+        receipt: self.receipt_for(command, status, error)
+        receipt.validate()
+        if receipt.session_id != self.session_id -> return Err("jet.devtools.v1 command session identity mismatch")
+        if self.receipt_list.len() >= JET_DEVTOOLS_MAX_COMMANDS -> return Err("jet.devtools.v1 command receipt queue is full")
+        self.receipt_list.push(receipt)
+        Ok()
+    }
+    // Update the newest receipt of one request in place; no second row.
+    update_receipt: fn(&self, request_id: String, &&status: String, &&error: String?) Err! {
+        devtools_control_text(request_id, "command receipt request_id")
+        devtools_control_text(status, "command receipt status")
+        devtools_control_optional_text(error, "command receipt error")
+        count: self.receipt_list.len()
+        loop offset in 0..<count {
+            index: count - 1 - offset
+            if self.receipt_list[index].request_id == request_id {
+                self.receipt_list[index].status = status.move()
+                self.receipt_list[index].error = error.move()
+                return Ok()
+            }
+        }
+        Err("jet.devtools.v1 command receipt was not retained")
+    }
+    // The retained receipts, oldest first, without consuming them.
+    receipts: fn(self) -> [JetDevtoolsCommandReceipt] Never! { self.receipt_list }
+    // Drop every queued command and receipt at session teardown.
+    clear: fn(&self) Never! {
+        self.command_list = [JetDevtoolsCommand]{}
+        self.receipt_list = [JetDevtoolsCommandReceipt]{}
+    }
+    admit: fn(self, command: JetDevtoolsCommand) Err! {
+        command.validate()
+        if command.session_id() != self.session_id -> return Err("jet.devtools.v1 command session identity mismatch")
+        Ok()
+    }
+    receipt_for: fn(&self, command: JetDevtoolsCommand, &&status: String, &&error: String?) -> JetDevtoolsCommandReceipt Never! {
+        sequence: self.next_receipt_sequence
+        self.next_receipt_sequence = sequence + 1
+        JetDevtoolsCommandReceipt{sequence: sequence, session_id: command.session_id(), request_id: command.request_id(), kind: command.kind(), status: status.move(), error: error.move()}
+    }
+}
+
+// A bounded host-to-runtime command envelope, separate from the event-only
+// JetDevtoolsEnvelope. Its direction is always `host_to_runtime`: runtime to
+// host traffic is events only.
+JetDevtoolsCommandEnvelope: struct {
+    session_id: String
+    started_at_ms: Int
+    command_list: [JetDevtoolsCommand]
+}
+
+impl JetDevtoolsCommandEnvelope {
+    new: fn(&&session_id: String, started_at_ms: Int) -> JetDevtoolsCommandEnvelope Never! {
+        JetDevtoolsCommandEnvelope{session_id: session_id.move(), started_at_ms: started_at_ms, command_list: [JetDevtoolsCommand]{}}
+    }
+    validate: fn(self) Err! {
+        devtools_control_text(self.session_id, "session_id")
+        if self.command_list.len() > JET_DEVTOOLS_MAX_COMMANDS -> return Err("jet.devtools.v1 command queue is full")
+        loop command in self.command_list {
+            command.validate()
+            if command.session_id() != self.session_id -> return Err("jet.devtools.v1 command session identity mismatch")
+        }
+        Ok()
+    }
+    enqueue_command: fn(&self, &&command: JetDevtoolsCommand) Err! {
+        command.validate()
+        if command.session_id() != self.session_id -> return Err("jet.devtools.v1 command session identity mismatch")
+        if self.command_list.len() >= JET_DEVTOOLS_MAX_COMMANDS -> return Err("jet.devtools.v1 command queue is full")
+        self.command_list.push(command.move())
+        Ok()
+    }
+    commands: fn(self) -> [JetDevtoolsCommand] Never! { self.command_list }
+    command_count: fn(self) -> Int Never! { self.command_list.len() }
+    serialize: fn(self) -> String Err! {
+        self.validate()
+        commands := [String]{}
+        loop command in self.command_list -> commands.push("{{\"kind\":{foundation_json_quote(command.kind())},\"payload\":{command.render_json()}}}")
+        out: "{{\"protocol\":{foundation_json_quote(JET_DEVTOOLS_PROTOCOL)},\"session_id\":{foundation_json_quote(self.session_id)},\"started_at_ms\":{self.started_at_ms},\"direction\":\"host_to_runtime\",\"commands\":[{commands.join(",")}]}}"
+        if out.bytes().len() > JET_DEVTOOLS_MAX_ENVELOPE_BYTES -> return Err("jet.devtools.v1 command envelope exceeds the Prelude byte limit")
+        Ok(out)
+    }
+}
+
+// A decoded transport has one direction and one payload kind; the host
+// decoder rejects mixed envelopes before a session sees them.
+JetDevtoolsDecodedEnvelope: enum {
+    Events(envelope: JetDevtoolsEnvelope)
+    Commands(envelope: JetDevtoolsCommandEnvelope)
+}
+
+impl JetDevtoolsDecodedEnvelope {
+    validate: fn(self) Err! {
+        if self == {
+            .Events(envelope) -> { _: envelope.serialize() }
+            .Commands(envelope) -> envelope.validate()
+        }
+        Ok()
+    }
+    session_id: fn(self) -> String Never! {
+        if self == {
+            .Events(envelope) -> envelope.session_id
+            .Commands(envelope) -> envelope.session_id
+        }
+    }
+}
+
+// Nonempty, within the text limit and free of control characters.
+devtools_control_text: fn(value: String, field: String) Err! {
+    if value == "" -> return Err("jet.devtools.v1 {field} must not be empty")
+    if value.bytes().len() > JET_DEVTOOLS_MAX_TEXT_BYTES -> return Err("jet.devtools.v1 {field} exceeds the Prelude text limit")
+    if jettrace_has_control(value) -> return Err("jet.devtools.v1 {field} contains a control character")
+    Ok()
+}
+
+devtools_control_optional_text: fn(value: String?, field: String) Err! {
+    if value == .Val(text) -> devtools_control_text(text, field)
+    Ok()
+}
+
+devtools_control_required: fn(value: String?, kind: JetDevtoolsGameControlKind, field: String) Err! {
+    if value == .Val(text) {
+        if text != "" -> return Ok()
+    }
+    Err("game control `{kind.as_str()}` requires {field}")
+}
+
+devtools_control_optional_json: fn(value: String?) -> String Never! {
+    if value == .Val(text) -> return foundation_json_quote(text)
+    "null"
+}
+
+devtools_control_optional_int: fn(value: Int?) -> String Never! {
+    if value == .Val(number) -> return "{number}"
+    "null"
+}
