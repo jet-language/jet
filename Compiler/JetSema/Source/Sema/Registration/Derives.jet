@@ -327,9 +327,12 @@ sema_derive_static_pattern_test: fn(expansion: SemaDeriveExpansion, subject: Exp
             missing: sema_derive_ct_absent(value) ?? return None
             return Val(CtValue.Bool{value: missing})
         }
-        parts: variant.split(".").to_list()
-        owner: if parts.len() > 1 -> parts[parts.len() - 2].copy() else -> ""
-        written: CtValue.Enum{type_name: owner, variant: parts[parts.len() - 1].copy(), args: [CtEnumArg]{}}
+        // The variant leaf, then the owner written before it, move out of
+        // the parts.
+        parts := variant.split(".").to_list()
+        leaf: parts.pop() ?? return None
+        owner: parts.pop() ?? ""
+        written: CtValue.Enum{type_name: owner, variant: leaf, args: [CtEnumArg]{}}
         equal: sema_derive_ct_scalar_equal(value, written) ?? return None
         return Val(CtValue.Bool{value: equal})
     }

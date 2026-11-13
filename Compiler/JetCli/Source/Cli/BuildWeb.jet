@@ -83,7 +83,7 @@ jet_cli_web_partition_report: fn(functions: [FnBody]) -> String Never! {
     loop function in functions {
         if function.synthetic || function.module_identity.starts_with("<corelib>/") -> next
         bucket: function.web_bucket ?? next
-        name: if function.module_name != "" -> "{function.module_name}.{function.name}" else -> function.name.copy()
+        qualifier: if function.module_name != "" -> "{function.module_name}." else -> ""
         browser: function.effects.solved.contains("Browser")
         reason: if function.web_marker == {
             .Val(.WasmExport) -> "#Export(wasm)"
@@ -102,7 +102,7 @@ jet_cli_web_partition_report: fn(functions: [FnBody]) -> String Never! {
         effects := function.effects.solved.copy()
         effects.sort()
         shown: if effects.len() == 0 -> "(pure)" else -> effects.join(", ")
-        rows.push("{function.key}\t{name} -> {partition}  {reason}  effects: {shown}")
+        rows.push("{function.key}\t{qualifier}{function.name} -> {partition}  {reason}  effects: {shown}")
     }
     rows.sort()
     text := "Web partition report\n"
