@@ -2,12 +2,13 @@
 // check (every Core body of the Prelude, as `jet self devtools core-record`
 // checks it) decodes: each row reads back under the record's CBOR limits
 // (JetSema CoreRecordBodies.jet SEMA_CORE_RECORD_CBOR) and encodes to the
-// bytes it was read from.
+// bytes it was read from, and it holds every comptime value the check landed
+// on a Core module.
 use {
     jet_driver.[
         JetDriverAuthorizedSourceFile, JetDriverAuthorizedSourceRoot, JetDriverAuthorizedSourceSnapshot,
         JetDriverCompileMode, JetDriverCompileRequest, JetDriverCoreSource, jet_driver_core_record_module,
-        jet_driver_core_record_open, jet_driver_core_record_round_trip, jet_driver_core_record_write,
+        jet_driver_core_record_open, jet_driver_core_record_round_trip, jet_driver_core_record_values, jet_driver_core_record_write,
         jet_driver_has_errors, jet_driver_lowering_inputs,
     ]
     jet_cli.[jet_cli_driver_request]
@@ -35,13 +36,30 @@ core_record_rows_request: fn() -> JetDriverCompileRequest {
     assert(front.compile.internal_problem == None)
     assert(!jet_driver_has_errors(front.compile.diagnostics))
     inputs := front.inputs.move() ?? panic("the check stopped before lowering")
+    core_modules := [String:Bool]{}
+    loop module_row in inputs.modules {
+        if module_row.module_identity != inputs.entry_module_identity -> core_modules[module_row.module_identity.copy()] = true
+    }
+    landed := 0
+    loop value in inputs.comptime_values {
+        if core_modules.get(value.module_identity) != None -> landed += 1
+    }
+    assert(landed > 0)
     bytes: jet_driver_core_record_write(inputs, "fixture", "x86_64-unknown-linux-gnu") ?? panic("the record can't be written: {err}")
     counts: jet_driver_core_record_round_trip(bytes) ?? panic("the record doesn't read back: {err}")
     assert(counts.modules > 0)
     assert(counts.bodies > 0)
+    assert_eq(counts.values, landed)
     assert_eq(counts.bytes, bytes.len())
     record: jet_driver_core_record_open(bytes) ?? panic("the record doesn't open: {err}")
     row: jet_driver_core_record_module(record, 0) ?? panic("the first module row doesn't decode: {err}")
     assert_eq(row.module_name, record.module_names[0])
     assert_eq(row.module_identity, record.module_identities[0])
+    held := 0
+    loop index in 0..<record.module_names.len() {
+        values: jet_driver_core_record_values(record, index) ?? panic("module {index}'s value rows don't decode: {err}")
+        loop value in values -> assert_eq(value.module_identity, record.module_identities[index])
+        held += values.len()
+    }
+    assert_eq(held, landed)
 }

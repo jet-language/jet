@@ -8219,8 +8219,12 @@ sema_comptime_collect_module_sources: fn(graph: SemaRegistrationGraph, source_mo
 // host callbacks. `graph` moves into the pass's program tables, which no
 // check changes, and leaves unchanged with the stage as the comptime run's
 // graph: the pass never copies it. The modules' declaration checks and the
-// name facts run on up to `threads` compiler threads.
+// name facts run on up to `threads` compiler threads. A taken seeded module
+// (sema_finalize_seeded_taken) comes with the values its own check landed,
+// which the driver hands the comptime run from the Core record
+// (jet_driver_core_record_take), so none of its sources is collected.
 sema_collect_comptime_declarations: fn(graph: &&SemaRegistrationGraph, package_policies: [SemaRegistrationPackagePolicy], threads: CompilerThreads, trace_sink: CompilerTraceSink?) -> SemaComptimeDeclarationStage {
+    seeded_taken: sema_finalize_seeded_taken(graph)
     diagnostics := [Diagnostic]{}
     loop diagnostic in graph.diagnostics -> diagnostics.push(diagnostic)
     complete := graph.complete
@@ -8275,7 +8279,7 @@ sema_collect_comptime_declarations: fn(graph: &&SemaRegistrationGraph, package_p
     }
     sources := [SemaComptimeItemSource]{}
     source_keys := [String:Bool]{}
-    loop source_module_index in 0..<module_count {
+    loop source_module_index in seeded_taken..<module_count {
         module_sources := sema_comptime_module_sources(pass_program, source_module_index)
         // Moved onto `sources` in order, without a copy.
         reversed_sources := [SemaComptimeItemSource]{}
@@ -8289,7 +8293,7 @@ sema_collect_comptime_declarations: fn(graph: &&SemaRegistrationGraph, package_p
             sources.push(source)
         }
     }
-    loop checked_module_index in 0..<modules.len() {
+    loop checked_module_index in seeded_taken..<modules.len() {
         checked_module: modules[checked_module_index]
         loop request in checked_module.comptime_requests {
             evaluation: request.checked_text ?? next

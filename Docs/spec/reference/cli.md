@@ -1435,7 +1435,7 @@ commands own their raw arguments: `reduce` accepts the two-word `--code` form.
 the closed program the precompiled Core record is written from, with every
 Core body checked, and prints its module, function, constant, type and impl
 counts, or the diagnostics that keep Core from checking clean. `--write <file>`
-also writes the `jet.core/v2` record of that check to the file, reads it back
+also writes the `jet.core/v3` record of that check to the file, reads it back
 and encodes every row again, which must give the bytes it was read from.
 `--embed <image> <out>` writes the executable `image` to `out` with the
 record added as its `jet.core` part; the compiler build runs it with the jet it

@@ -3534,8 +3534,9 @@ JetDriverCheckedProjectionCapture: struct {
 // compile has no entry: it carries the tests and Check
 // Outputs its harness runs (jet_driver_test_plan) instead. A check under
 // `every_core_body` (the Core record's check) also keeps the finalized
-// registration modules, declarations and source included, which the Core
-// record writes beside the checked ones.
+// registration modules, declarations and source included, and every
+// comptime value the check landed, which the Core record writes beside the
+// checked ones.
 JetDriverLoweringInputs: struct {
     functions: [FnBody]
     modules: [SemaGraphModuleResult]
@@ -3550,6 +3551,7 @@ JetDriverLoweringInputs: struct {
     // The entry module's jobs (jet_driver_job_rows).
     jobs: [JetDriverJobRow]{[JetDriverJobRow]{}}
     registration_modules: [SemaRegistrationModule]{[SemaRegistrationModule]{}}
+    comptime_values: [SemaComptimeItemValue]{[SemaComptimeItemValue]{}}
 }
 
 JetDriverLoweringInputsResult: struct {
@@ -4062,9 +4064,11 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
         request.compiler_threads,
     )
     // The seeded Core modules come finalized: their results and body packets
-    // are the record's, taken, not checked (jet_driver_core_record_take).
+    // are the record's, taken, not checked, and their comptime values are
+    // the record's too, not evaluated (jet_driver_core_record_take).
+    core_values := [SemaComptimeItemValue]{}
     if request.core_record == .Val(record) {
-        _: jet_driver_core_record_take(registration_graph, record) ?? return jet_driver_compile_internal_result(load, trace, "the Core record can't seed the graph: {err}")
+        _: jet_driver_core_record_take(registration_graph, record, core_values) ?? return jet_driver_compile_internal_result(load, trace, "the Core record can't seed the graph: {err}")
     }
     output_intent: if request.mode == JetDriverCompileMode.Test -> SemaOutputIntent.Test else -> request.output_intent
     output_diagnostics: sema_output_resolve(registration_graph, output_intent, request.output_address, jet_driver_entry_selection(load) != None)
@@ -4144,16 +4148,22 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
     comptime_stage.modules = [SemaGraphModuleResult]{}
     declared_facts := comptime_stage.graph_facts.move()
     comptime_stage.graph_facts = None
+    // The taken Core modules' values type their rows before the run, which
+    // starts from them; `core_trail` records those edits, undone with the
+    // run's once finalization is done.
+    core_trail := sema_graph_trail_init()
+    sema_comptime_graph_apply_values(run_staged, core_values, core_trail)
     comptime_run := jet_driver_run_comptime(
         run_staged,
         declared_modules,
         declared_facts,
         comptime_stage.sources,
-        [SemaComptimeItemValue]{},
+        core_values,
         [SemaComptimeFunctionResult]{},
         request,
         stage_diagnostics,
     )
+    core_values = [SemaComptimeItemValue]{}
     jet_driver_comptime_return_declared(comptime_stage, comptime_run)
     if request.trace_sink == .Val(sink) -> sink.end("comptime", comptime_run.values.len())
     comptime_lookups := jet_driver_stage_lookup_counts(comptime_run.partial_graph, check_lookups)
@@ -4236,6 +4246,7 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
     checked_graph.registration_graph = None
     registration_graph = finalized_graph.move() ?? return jet_driver_compile_internal_result(load, trace, "semantic finalization lost the registration graph")
     sema_graph_trail_undo(registration_graph, trail)
+    sema_graph_trail_undo(registration_graph, core_trail)
     if request.recheck_verify && comptime_run.values.len() > staged_values {
         start := verify_start.move() ?? return jet_driver_compile_internal_result(load, trace, "JET_RECHECK_VERIFY lost the demand the finalization started from")
         verify_problem := String?{None}
@@ -4543,7 +4554,8 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
         result.foreign_link = jet_driver_foreign_link_facts(runtime_semantic_modules, load.source_files)
         // `jet prove --lens solver` reads every checked function, unpruned,
         // with the declaration table their direct calls name; the Core
-        // record also writes the finalized registration modules.
+        // record also writes the finalized registration modules and the
+        // landed comptime values.
         if capture.stop_before_lowering {
             sources := [String:String]{}
             loop file in load.source_files {
@@ -4552,11 +4564,14 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
             decls := registration_graph.decls.move()
             registration_graph.decls = DeclTable{}
             registration_modules := [SemaRegistrationModule]{}
+            landed_values := [SemaComptimeItemValue]{}
             if request.every_core_body {
                 registration_modules = registration_graph.modules.move()
                 registration_graph.modules = [SemaRegistrationModule]{}
+                landed_values = comptime_values.move()
+                comptime_values = [SemaComptimeItemValue]{}
             }
-            capture.lowering_inputs = Val(JetDriverLoweringInputs{functions: checked_functions.move(), modules: runtime_semantic_modules.move(), decls: decls.move(), sources: sources.move(), entry_module_identity: load.entry_module_identity, entry_key: check_entry.copy(), registration_modules: registration_modules.move()})
+            capture.lowering_inputs = Val(JetDriverLoweringInputs{functions: checked_functions.move(), modules: runtime_semantic_modules.move(), decls: decls.move(), sources: sources.move(), entry_module_identity: load.entry_module_identity, entry_key: check_entry.copy(), registration_modules: registration_modules.move(), comptime_values: landed_values.move()})
         }
         return result
     }

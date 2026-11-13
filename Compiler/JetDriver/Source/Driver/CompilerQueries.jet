@@ -118,6 +118,7 @@ use {
         SemaRegistrationModuleInput,
         SemaRegistrationPackagePolicy,
         sema_collect_comptime_declarations,
+        sema_comptime_graph_apply_values,
         sema_comptime_graph_with_values,
         sema_finalize_graph,
         sema_graph_trail_init,
@@ -423,8 +424,11 @@ jet_driver_compiler_check: fn(input: JetDriverCompilerCheckInput) -> JetDriverCo
         false,
         input.request.compiler_threads,
     )
+    // The taken Core modules' comptime values are the record's
+    // (jet_driver_core_record_take), as in Pipeline.jet.
+    core_values := [SemaComptimeItemValue]{}
     if input.request.core_record == .Val(record) {
-        _: jet_driver_core_record_take(registration, record) ?? return jet_driver_compiler_check_failure(load, JetDriverStage.Check, Val("the Core record can't seed the graph: {err}"))
+        _: jet_driver_core_record_take(registration, record, core_values) ?? return jet_driver_compiler_check_failure(load, JetDriverStage.Check, Val("the Core record can't seed the graph: {err}"))
     }
     if input.retain_projection -> registration.retain_programs = true
     registration.plugin_facts = jet_driver_plugin_facts(input.request)
@@ -461,7 +465,10 @@ jet_driver_compiler_check: fn(input: JetDriverCompilerCheckInput) -> JetDriverCo
         if !jet_driver_has_errors(load.diagnostics) -> return jet_driver_compiler_check_failure(load, JetDriverStage.Check, Val(jet_driver_totality_problem("semantic declaration checking did not return a complete resolved package graph ({stage.modules.len()} of {registration_count} modules checked)", "sema.check", stage.modules)))
         return jet_driver_compiler_check_failure(load, JetDriverStage.Check, None)
     }
-    initial_values := [SemaComptimeItemValue]{ }
+    // The run starts from the taken Core modules' values, which type their
+    // rows first; `core_trail` records those edits, undone with the run's.
+    core_trail := sema_graph_trail_init()
+    sema_comptime_graph_apply_values(registration, core_values, core_trail)
     // Body/comptime stage callees read the complete load while appending
     // diagnostics, so this existing stage boundary travels beside the load.
     stage_diagnostics := load.diagnostics
@@ -476,7 +483,7 @@ jet_driver_compiler_check: fn(input: JetDriverCompilerCheckInput) -> JetDriverCo
         declared_modules,
         declared_facts,
         stage.sources,
-        initial_values,
+        core_values,
         [SemaComptimeFunctionResult]{},
         input.request,
         stage_diagnostics,
@@ -499,6 +506,7 @@ jet_driver_compiler_check: fn(input: JetDriverCompilerCheckInput) -> JetDriverCo
             provisional.registration_graph = None
             registration = restored.move() ?? return jet_driver_compiler_check_failure(load, JetDriverStage.Check, Val("semantic finalization lost its registration graph"))
             sema_graph_trail_undo(registration, run.trail)
+            sema_graph_trail_undo(registration, core_trail)
             jet_driver_comptime_diagnostics_add(load.diagnostics, provisional.diagnostics)
             packet := jet_driver_compiler_check_diagnostic_packet(input, registration, provisional, module_sources, load.diagnostics)
             if packet == .Val(result) -> return result
@@ -510,6 +518,7 @@ jet_driver_compiler_check: fn(input: JetDriverCompilerCheckInput) -> JetDriverCo
     graph.registration_graph = None
     registration = restored.move() ?? return jet_driver_compiler_check_failure(load, JetDriverStage.Check, Val("semantic finalization lost its registration graph"))
     sema_graph_trail_undo(registration, run.trail)
+    sema_graph_trail_undo(registration, core_trail)
     if graph.modules.len() != registration_count {
         jet_driver_comptime_diagnostics_add(load.diagnostics, graph.diagnostics)
         return jet_driver_compiler_check_failure(load, JetDriverStage.Check, Val("semantic finalization did not return every registered module"))
