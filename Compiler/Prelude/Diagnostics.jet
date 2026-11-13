@@ -13401,6 +13401,7 @@ AtomGroupWithoutParentheses: struct {
 RawAccessOutsideProvenance: struct {
     operation: String
     gate: String
+    detail: String
     obligation: String
 
     impl Diagnostic {
@@ -13412,7 +13413,7 @@ RawAccessOutsideProvenance: struct {
         no_fix: .Behavior
         fix_next: "Bound the raw access before it reaches storage and satisfy the named unsafe obligation."
         what: fn(self) -> String { "Runtime fault [R0801]: raw `{self.operation}` outside `{self.gate}`'s storage" }
-        why: fn(self) -> String { "The pointer is outside the allocation provenance tracked for the active `#Unsafe` gate; runtime evidence never replaces a required static obligation." }
+        why: fn(self) -> String { "The pointer is outside the allocation provenance tracked for the active `#Unsafe` gate ({self.detail}); runtime evidence never replaces a required static obligation." }
         fix: fn(self) -> String { "Bound the raw access before it reaches storage — obligation `{self.obligation}` was not met on this run." }
     }
 }

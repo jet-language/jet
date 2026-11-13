@@ -260,13 +260,6 @@ services_msg_sentry_provenance: fn() -> I64 {
     text
 }
 
-services_msg_sentry_bounds: fn() -> I64 {
-    text: scheduler_text_new(I64{51})
-    data: sync_load(text)
-    coll_copy(rt_text_data(rt_static_text("the foreign access extends beyond a live allocation")), data, I64{51})
-    text
-}
-
 services_msg_sentry_heap: fn() -> I64 {
     text: scheduler_text_new(I64{42})
     data: sync_load(text)
@@ -300,6 +293,48 @@ services_msg_sentry_bytes: fn() -> I64 {
     text: scheduler_text_new(I64{6})
     data: sync_load(text)
     sync_store(wrapping(data + I64{0}), I64{126879583003168})
+    text
+}
+
+services_msg_sentry_offset: fn() -> I64 {
+    text: scheduler_text_new(I64{28})
+    data: sync_load(text)
+    coll_copy(rt_text_data(rt_static_text("the access starts at offset ")), data, I64{28})
+    text
+}
+
+services_msg_sentry_within: fn() -> I64 {
+    text: scheduler_text_new(I64{21})
+    data: sync_load(text)
+    coll_copy(rt_text_data(rt_static_text(" of the live range 0x")), data, I64{21})
+    text
+}
+
+services_msg_sentry_nearest: fn() -> I64 {
+    text: scheduler_text_new(I64{39})
+    data: sync_load(text)
+    coll_copy(rt_text_data(rt_static_text(" of the nearest live range below it, 0x")), data, I64{39})
+    text
+}
+
+services_msg_sentry_upto: fn() -> I64 {
+    text: scheduler_text_new(I64{5})
+    data: sync_load(text)
+    sync_store(wrapping(data + I64{0}), I64{516205325870})
+    text
+}
+
+services_msg_sentry_size: fn() -> I64 {
+    text: scheduler_text_new(I64{2})
+    data: sync_load(text)
+    sync_store(wrapping(data + I64{0}), I64{10272})
+    text
+}
+
+services_msg_sentry_past: fn() -> I64 {
+    text: scheduler_text_new(I64{29})
+    data: sync_load(text)
+    coll_copy(rt_text_data(rt_static_text(" bytes) and runs past its end")), data, I64{29})
     text
 }
 
@@ -398,9 +433,9 @@ services_msg_sentry_r0801_what: fn() -> I64 {
 }
 
 services_msg_sentry_r0801_why: fn() -> I64 {
-    text: scheduler_text_new(I64{149})
+    text: scheduler_text_new(I64{160})
     data: sync_load(text)
-    coll_copy(rt_text_data(rt_static_text("The pointer is outside the allocation provenance tracked for the active `#Unsafe` gate; runtime evidence never replaces a required static obligation.")), data, I64{149})
+    coll_copy(rt_text_data(rt_static_text("The pointer is outside the allocation provenance tracked for the active `#Unsafe` gate ({{detail}}); runtime evidence never replaces a required static obligation.")), data, I64{160})
     text
 }
 

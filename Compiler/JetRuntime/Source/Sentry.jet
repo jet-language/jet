@@ -452,7 +452,7 @@ sentry_gate_name: fn() -> I64 {
     text
 }
 // `{gate}`, `{operation}`, `{detail}` and `{obligation}` fill a registry
-// template; only R0803 names `{detail}` (address and required alignment).
+// template; R0801 and R0803 name `{detail}` (sentry_detail).
 sentry_template: fn(text: I64, template: I64, operation: I64, gate: I64, obligation: I64, detail: I64) {
     data: rt_text_data(template)
     end: rt_text_len(template)
@@ -477,11 +477,71 @@ sentry_template: fn(text: I64, template: I64, operation: I64, gate: I64, obligat
 sentry_code: fn(fault: I64) -> I64 {
     if (fault == I64{2} || fault == I64{4}) -> I64{2} else -> if (fault == I64{3}) -> I64{3} else -> I64{1}
 }
+// The live range an out-of-range access is measured against: the one with
+// the highest start at or below `start`, over live heap rows and live frame
+// rows. With none, the detail says no live allocation holds the address.
+// Runs on a fault only, after the check has released the lock.
+sentry_range_detail: fn(fault: I64, start: I64) -> I64 {
+    found := false
+    best := I64{0}
+    best_length := I64{0}
+    sync_mutex_lock(sentry_root)
+    header: wrapping(sentry_root + I64{40})
+    data: sync_load(wrapping(header + I64{16}))
+    at := I64{0}
+    loop at < sync_load(header) {
+        row: data + at * I64{8}
+        begin: sync_load(row)
+        if (sync_load(wrapping(row + I64{16})) != I64{0} && !world_unsigned_before(start, begin) && (!found || world_unsigned_before(best, begin))) {
+            found = true
+            best = begin
+            best_length = sync_load(wrapping(row + I64{8}))
+        }
+        at += I64{5}
+    }
+    frames: wrapping(sentry_root + I64{88})
+    entries: sync_load(wrapping(frames + I64{16}))
+    index := I64{0}
+    loop index < sync_load(frames) {
+        rows: wrapping(sync_load(wrapping(entries + index * I64{8})) + I64{8})
+        data_frame: sync_load(wrapping(rows + I64{16}))
+        at = I64{0}
+        loop at < sync_load(rows) {
+            row: data_frame + at * I64{8}
+            begin: sync_load(row)
+            if (!world_unsigned_before(start, begin) && (!found || world_unsigned_before(best, begin))) {
+                found = true
+                best = begin
+                best_length = sync_load(wrapping(row + I64{8}))
+            }
+            at += I64{3}
+        }
+        index += I64{1}
+    }
+    sync_mutex_unlock(sentry_root)
+    if !found -> return services_msg_sentry_provenance()
+    text: services_msg_sentry_offset()
+    sentry_append_number(text, wrapping(start - best))
+    sentry_append_owned(text, if (fault == I64{5}) -> services_msg_sentry_within() else -> services_msg_sentry_nearest())
+    sentry_hex(text, best)
+    sentry_append_owned(text, services_msg_sentry_upto())
+    sentry_hex(text, wrapping(best + best_length))
+    sentry_append_owned(text, services_msg_sentry_size())
+    sentry_append_number(text, best_length)
+    if (fault == I64{5}) {
+        sentry_append_owned(text, services_msg_sentry_past())
+    } else {
+        sentry_append_owned(text, services_msg_sentry_bytes())
+        rt_text_push_scalar(text, I64{41})
+    }
+    text
+}
+// The fault's detail text: for R0801 the live range and the access's offset
+// in it, for R0803 the address and the alignment it needed.
 sentry_detail: fn(fault: I64, start: I64, alignment: I64) -> I64 {
     if {
         (fault == I64{2}) -> services_msg_sentry_heap()
         (fault == I64{4}) -> services_msg_sentry_stack()
-        (fault == I64{5}) -> services_msg_sentry_bounds()
         (fault == I64{3}) -> {
             text: services_msg_sentry_address()
             sentry_hex(text, start)
@@ -490,7 +550,7 @@ sentry_detail: fn(fault: I64, start: I64, alignment: I64) -> I64 {
             sentry_append_owned(text, services_msg_sentry_bytes())
             text
         }
-        else -> services_msg_sentry_provenance()
+        else -> sentry_range_detail(fault, start)
     }
 }
 sentry_report: fn(fault: I64, operation: I64, obligation: I64, component: I64, fenced: Bool, gate: I64, detail: I64) -> I64 {
