@@ -304,9 +304,12 @@ current `dev` commit (moved forward whenever its owner's work lands, never a
 day behind), and holds no build output and no commits of its own. It is
 removed as soon as its owner is idle or gone, after its work reaches `dev` or
 is recorded on its card. Stale, orphaned and superseded worktrees are removed
-whenever found and at every milestone. The master checkout holds `master`
-only: it is the board's checkout, never a copy of the code; read and run code
-from the dev worktree. Never create any other branch, worktree, or other
+whenever found and at every milestone. The master checkout tracks `master`
+only: it is the board's checkout. Its other files are an untracked mirror of
+`dev`'s tip, refreshed after every push to `dev`, so sessions and tools
+started there read the current code and rules; nothing is ever committed from
+the mirror, and work reads and runs code from the dev worktree. Never create
+any other branch, worktree, or other
 ref (`refs/keep`, `refs/salvage`, `refs/archive`, private lineages), for any
 purpose: experiments, candidates, measurements, and proofs included. Work
 happens in these worktrees; no agent keeps its own copy of the repository. A
