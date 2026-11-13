@@ -1,0 +1,8 @@
+Error [jet.TypestateWrongState]: `open` needs `Door.Shut`, but `door` is `Door.Locked`
+  --> tests/ui/typestate/enum_arm_narrows_to_its_case.jet:21:28
+    |
+ 21 |         .Locked(_) -> door.open()
+    |                            ^^^^
+ Why: Typestate: `open` takes only `Door.Shut`; calling it with `Door` in another state is the out-of-order bug the state list rules out
+ Fix: Bring `door` to `Door.Shut` before calling `open`
+More: jet-lang.dev/e/E0150

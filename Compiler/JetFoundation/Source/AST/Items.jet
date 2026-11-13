@@ -702,12 +702,31 @@ ProtocolDecl: struct {
     span: Span
 }
 
+// One entry of a `state { }` list: `From -> To, Other` names the moves out
+// of `From`; a bare `From` is a state with no moves.
+StateArrow: struct {
+    from: NamedSpan
+    to: [NamedSpan]
+    span: Span
+}
+
+// `Open: Draft | Confirmed` names a group of states.
+StateGroup: struct {
+    name: NamedSpan
+    members: [NamedSpan]
+    span: Span
+}
+
+// `states` lists every entry's state in order; `arrows` keeps each entry
+// with its moves, and `groups` the named groups.
 StateDecl: struct {
     is_pub: Bool
     is_package_pub: Bool
     type_name: String
     type_name_span: Span
     states: [NamedSpan]
+    arrows: [StateArrow]{[StateArrow]{}}
+    groups: [StateGroup]{[StateGroup]{}}
     span: Span
 }
 
@@ -923,6 +942,17 @@ EveryMarker: struct {
     resolved: EverySchedule?
 }
 
+// A parameter or result typed by states: `Order.Draft`, the set
+// `Order.Draft | Order.Confirmed`, or a group `Order.Open`. `states` holds
+// the state names, groups expanded, in list order.
+StateTypeUse: struct {
+    // The parameter's position, or -1 for the result.
+    position: Int
+    owner: String
+    states: [String]
+    span: Span
+}
+
 EverySchedule: enum {
     Duration(nanos: Int)
     WallClockTime(hour: Int, minute: Int)
@@ -1023,6 +1053,10 @@ Func: struct {
     // `#MaxDepth(n)`: at most n calls of this function wait at once on one
     // thread; 0 when unmarked.
     max_depth: Int{0}
+    // The parameters and result that name states (`self: Order.Draft`,
+    // `-> Order.Shipped`). Sema fills this and gives each one the owner's
+    // plain type, so states cost nothing once checked.
+    state_types: [StateTypeUse]{[StateTypeUse]{}}
 }
 
 // Only a concrete `App` or `App E!` return makes `run` an app entry.
@@ -1273,6 +1307,8 @@ EnumDef: struct {
     effect_impl: EffectImpl?{None}
     // The type's `#FX(…)` cap; the marker stays in `type_markers`.
     cap: ModuleCap?{None}
+    // The `state { }` list; its states are the enum's cases.
+    state: StateDecl?{None}
 }
 
 EnumGroup: struct {

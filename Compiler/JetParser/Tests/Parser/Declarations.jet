@@ -279,6 +279,81 @@ run: fn() {}
     assert_eq(names, [String]{"Open", "Closed"})
 }
 
+#Test("state_list_reads_moves_and_groups") {
+    source: `Order: struct {
+    state {
+        Draft -> Confirmed, Cancelled
+        Confirmed -> Shipped, Cancelled
+        Shipped
+        Cancelled
+        Open: Draft | Confirmed
+    }
+    id: Int
+}
+run: fn() {}
+`
+    program: parser_test_program(source)
+    program.items[0] == .Struct(definition) ?? panic("struct")
+    state: definition.state ?? panic("struct-owned state list")
+    names := [String]{}
+    loop name in state.states -> names.push(name.name)
+    assert_eq(names, [String]{"Draft", "Confirmed", "Shipped", "Cancelled"})
+    assert_eq(state.arrows.len(), 4)
+    moves := [String]{}
+    loop target in state.arrows[0].to -> moves.push(target.name)
+    assert_eq(moves, [String]{"Confirmed", "Cancelled"})
+    assert(state.arrows[2].to.is_empty())
+    assert_eq(state.groups.len(), 1)
+    assert_eq(state.groups[0].name.name, "Open")
+    members := [String]{}
+    loop member in state.groups[0].members -> members.push(member.name)
+    assert_eq(members, [String]{"Draft", "Confirmed"})
+    assert_eq(definition.fields.len(), 1)
+    formatted: jet_format_source(source, false)
+    assert(formatted.ok)
+    assert(formatted.text.contains("    state {{\n        Draft -> Confirmed, Cancelled\n        Confirmed -> Shipped, Cancelled\n        Shipped\n        Cancelled\n        Open: Draft | Confirmed\n    }}\n"))
+    assert_eq(jet_format_source(formatted.text, false).text, formatted.text)
+    flat: jet_format_source(`Door: struct { state { Open, Closed } }
+run: fn() {}
+`, false)
+    assert(flat.text.contains("state {{ Open, Closed }}"))
+}
+
+#Test("enum_body_owns_one_state_list") {
+    source: `Door: enum {
+    Shut
+    Open
+    Locked(code: Int)
+    state {
+        Shut -> Open, Locked
+        Open -> Shut
+        Locked -> Shut
+    }
+}
+run: fn() {}
+`
+    program: parser_test_program(source)
+    program.items[0] == .Enum(definition) ?? panic("enum")
+    assert_eq(definition.variants.len(), 3)
+    state: definition.state ?? panic("enum-owned state list")
+    assert_eq(state.type_name, "Door")
+    assert_eq(state.states.len(), 3)
+    assert_eq(state.arrows[0].to.len(), 2)
+    formatted: jet_format_source(source, false)
+    assert(formatted.ok)
+    assert(formatted.text.contains("    state {{\n        Shut -> Open, Locked\n        Open -> Shut\n        Locked -> Shut\n    }}\n"))
+    repeated: `Door: enum {
+    Shut
+    state { Shut }
+    state { Shut }
+}
+run: fn() {}
+`
+    diagnostic: parser_test_diagnostic(parser_test_errors(repeated), "E0168")
+    start: parser_test_rfind(repeated, "state {{")
+    assert_eq(diagnostic.span, Val(Span{start: start, end: start + "state {{ Shut }}".len()}))
+}
+
 #Test("top_level_state_companion_is_rejected_with_a_spanned_rewrite") {
     source: `state Door { Open, Closed }
 Door: struct { value: Int }
@@ -310,9 +385,6 @@ run: fn() {}
 
 #Test("ineligible_state_section_uses_one_registered_parser_diagnostic") {
     loop testcase in [
-        (source: `Door: enum { state { Open } }
-run: fn() {}
-`, owner: "enum"),
         (source: `Door: trait { state { Open } }
 run: fn() {}
 `, owner: "trait"),

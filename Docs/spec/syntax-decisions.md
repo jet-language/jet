@@ -1792,6 +1792,24 @@ unreachable-state lint for declarations that no entry path reaches. With no
 entry transition, reachability stays unknown and the compiler does not invent
 an initial state. This outcome adds no syntax.
 
+**D-MACHINE1=A** *(ratified 2026-11-01, card #6326)*: a type lists its states
+and moves once, in a `state { }` block inside a `struct` or an `enum` body. Each
+line names a state and its moves (`Draft -> Confirmed, Cancelled`); a state with
+no moves stands alone (`Shipped`); a group names a set (`Open: Draft |
+Confirmed`). In an enum the states are its cases, with their data; a name that
+is not a case is E0151. A type path `Order.Draft` is a state type, `|` joins
+them into a set, and a group stands for its members; a plain `Order` is any
+state. A method whose `self` and result name states of one type is a move, and
+each start and end pair must be an arrow of the list (E0174, which names the
+missing arrow and a state that reaches the target). A constructor's result
+type names the start state. A call whose argument is in a state outside its
+parameter's state type is E0150, and the fix lists the moves from the current
+state. A value never changes state in place: the call's result carries the new
+one. Inside an enum table arm, the tested local is in the arm's case. State
+types erase to the plain type before registration, so struct states cost
+nothing at run time. Proof: `Examples/Types/StateLists.jet` with
+`Examples/Types/StateLists.out`.
+
 **D-REFINE1 — Refinements** *(retired by D-TYPE2-REFINE1=A)*: the former
 `#Invariant("value >= lo && value < hi")` spelling is retired. Use
 `distinct Int(lo..hi)` for a named range or `Int(lo..hi)` inline; the interval

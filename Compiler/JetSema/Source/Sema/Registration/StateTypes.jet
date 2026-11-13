@@ -1,0 +1,213 @@
+// State types. A type with a `state { }` list names its states in type
+// position: `Order.Draft`, a set `Order.Draft | Order.Confirmed`, or a group
+// `Order.Open`. Before any module registers, each parameter and result typed
+// this way takes the owner's plain type (`Order`), and the function records
+// the states on `state_types`. The typestate pass checks calls against them,
+// and the declaration pass checks each move against the list's arrows. A name
+// that is not a state of the owner stays in the record, so the declaration
+// pass reports it.
+use jet_foundation.[
+    Func,
+    Item,
+    Param,
+    StateDecl,
+    StateTypeUse,
+    Span,
+    Type,
+]
+
+// One owner's list: its states, and each group with its members.
+SemaStateTypeOwner: struct {
+    states: [String]
+    groups: [String:[String]]
+}
+
+// Rewrites state types in every module input in place. The owner a name
+// refers to is the type of that name in the same module, else the one type of
+// that name across all modules. Inputs whose items name no owner are left
+// untouched.
+sema_state_types_rewrite_inputs: fn(inputs: &[SemaRegistrationModuleInput]) Never! {
+    local := [[String:SemaStateTypeOwner]]{}
+    global := [String:SemaStateTypeOwner]{}
+    repeated := [String:Bool]{}
+    loop index in 0..<inputs.len() {
+        owners := [String:SemaStateTypeOwner]{}
+        sema_state_types_collect(inputs[index].program.items, owners)
+        loop name in owners.keys() {
+            if global.get(name) != None {
+                repeated[name] = true
+            } else {
+                global[name] = owners.get(name) ?? next
+            }
+        }
+        local.push(owners.move())
+    }
+    if global.len() == 0 -> return
+    loop name in repeated.keys() -> _ := global.remove(name)
+    loop index in 0..<inputs.len() {
+        visible := global.copy()
+        loop name in local[index].keys() -> visible[name] = local[index].get(name) ?? next
+        if !sema_state_types_items_name_owner(inputs[index].program.items, visible) -> next
+        inputs[index].program.items = sema_state_types_rewrite_items(inputs[index].program.items, visible)
+    }
+}
+
+sema_state_types_collect: fn(items: [Item], owners: &[String:SemaStateTypeOwner]) Never! {
+    loop item in items {
+        if item == .Struct(definition) {
+            if definition.state == .Val(state) -> owners[definition.name] = sema_state_types_owner(state)
+        }
+        if item == .Enum(definition) {
+            if definition.state == .Val(state) -> owners[definition.name] = sema_state_types_owner(state)
+        }
+    }
+}
+
+sema_state_types_owner: fn(state: StateDecl) -> SemaStateTypeOwner Never! {
+    states := [String]{}
+    loop entry in state.states -> states.push(entry.name.copy())
+    groups := [String:[String]]{}
+    loop group in state.groups {
+        members := [String]{}
+        loop member in group.members -> members.push(member.name.copy())
+        groups[group.name.name] = members.move()
+    }
+    SemaStateTypeOwner{states: states, groups: groups}
+}
+
+// Whether any function signature in `items` names a state type, so inputs
+// without one are not copied.
+sema_state_types_items_name_owner: fn(items: [Item], owners: [String:SemaStateTypeOwner]) -> Bool Never! {
+    loop item in items {
+        if item == {
+            .Func(function) -> {
+                if sema_state_types_fn_names_owner(function, owners) -> return true
+            }
+            .Struct(definition) -> {
+                loop method in definition.methods {
+                    if sema_state_types_fn_names_owner(method, owners) -> return true
+                }
+            }
+            .Enum(definition) -> {
+                loop method in definition.methods {
+                    if sema_state_types_fn_names_owner(method, owners) -> return true
+                }
+            }
+            .Impl(implementation) -> {
+                loop method in implementation.methods {
+                    if sema_state_types_fn_names_owner(method, owners) -> return true
+                }
+            }
+            .Test(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+        }
+    }
+    false
+}
+
+sema_state_types_fn_names_owner: fn(function: Func, owners: [String:SemaStateTypeOwner]) -> Bool Never! {
+    loop param in function.params {
+        if sema_state_types_split(param.ty, owners) != None -> return true
+    }
+    if function.return_type == .Val(ty) -> return sema_state_types_split(sema_state_types_success(ty), owners) != None
+    false
+}
+
+sema_state_types_rewrite_items: fn(items: [Item], owners: [String:SemaStateTypeOwner]) -> [Item] Never! {
+    out := [Item]{}
+    loop item in items {
+        if item == {
+            .Func(function) -> out.push(Item.Func{value: sema_state_types_rewrite_fn(function, owners)})
+            .Struct(definition) -> {
+                updated := definition
+                updated.methods = loop method in definition.methods -> sema_state_types_rewrite_fn(method, owners)
+                out.push(Item.Struct{value: updated})
+            }
+            .Enum(definition) -> {
+                updated := definition
+                updated.methods = loop method in definition.methods -> sema_state_types_rewrite_fn(method, owners)
+                out.push(Item.Enum{value: updated})
+            }
+            .Impl(implementation) -> {
+                updated := implementation
+                updated.methods = loop method in implementation.methods -> sema_state_types_rewrite_fn(method, owners)
+                out.push(Item.Impl{value: updated})
+            }
+            .Test(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> out.push(item.copy())
+        }
+    }
+    out
+}
+
+sema_state_types_rewrite_fn: fn(function: Func, owners: [String:SemaStateTypeOwner]) -> Func Never! {
+    updated := function
+    params := [Param]{}
+    loop position in 0..<function.params.len() {
+        param := function.params[position]
+        if sema_state_types_split(param.ty, owners) == .Val(found) {
+            updated.state_types.push(StateTypeUse{position: position, owner: found.owner, states: found.states, span: param.ty_span})
+            param.ty = Type.Named{name: found.owner}
+        }
+        params.push(param)
+    }
+    updated.params = params.move()
+    if function.return_type == .Val(ty) {
+        if sema_state_types_split(sema_state_types_success(ty), owners) == .Val(found) {
+            span: function.return_type_span ?? function.name_span
+            updated.state_types.push(StateTypeUse{position: -1, owner: found.owner, states: found.states, span: span})
+            plain: Type.Named{name: found.owner}
+            updated.return_type = Val(if ty == .Result(_, err) -> Type.Result{ok: plain, err: err} else -> plain)
+        }
+    }
+    updated
+}
+
+// The success type of a result: `Order.Draft` in `Order.Draft E!`.
+sema_state_types_success: fn(ty: Type) -> Type Never! {
+    if ty == .Result(ok, _) -> return ok.copy()
+    ty.copy()
+}
+
+// The owner and states a state type names.
+SemaStateTypeFound: struct {
+    owner: String
+    states: [String]
+}
+
+// `Owner.Name` is a state type when `Owner` has a state list; a union is
+// one when every member is one of the same owner. A group expands to its
+// members; a name that is neither a state nor a group is kept as written.
+sema_state_types_split: fn(ty: Type, owners: [String:SemaStateTypeOwner]) -> SemaStateTypeFound? Never! {
+    if ty == .Named(name) {
+        parts: name.split(".").to_list()
+        if parts.len() != 2 -> return None
+        owner: owners.get(parts[0]) ?? return None
+        states := [String]{}
+        sema_state_types_expand(owner, parts[1], states)
+        return Val(SemaStateTypeFound{owner: parts[0].copy(), states: states})
+    }
+    if ty == .Union(members) {
+        if members.len() == 0 -> return None
+        owner_name := ""
+        states := [String]{}
+        loop member in members {
+            found: sema_state_types_split(member, owners) ?? return None
+            if owner_name != "" && owner_name != found.owner -> return None
+            owner_name = found.owner.copy()
+            loop state in found.states {
+                if !states.contains(state) -> states.push(state)
+            }
+        }
+        return Val(SemaStateTypeFound{owner: owner_name, states: states})
+    }
+    None
+}
+
+sema_state_types_expand: fn(owner: SemaStateTypeOwner, name: String, states: &[String]) Never! {
+    if owner.groups.get(name) == .Val(members) {
+        loop member in members {
+            if !states.contains(member) -> states.push(member.copy())
+        }
+        return
+    }
+    if !states.contains(name) -> states.push(name.copy())
+}

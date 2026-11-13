@@ -2082,13 +2082,16 @@ jfmt_fmt_view_source_union: fn(f: &JetFmt, provenance: ViewProvenance, params: [
     }
 }
 
-// Print one type-body member. `derives_decode` is the type-level `Decode`
-// fact a field's type spelling depends on.
-jfmt_fmt_type_body_member: fn(f: &JetFmt, member: JetFmtMember, body: JetFmtTypeBody, derives_decode: Bool) {
-    if member.kind == JFMT_MEMBER_STATE {
-        state: body.state ?? return
-        jfmt_emit_leading(f, state.span.start)
-        jfmt_write(f, "state {{")
+// A state list with no moves and no groups keeps the comma form
+// `state { A, B }`; any move or group puts one entry on each line.
+jfmt_fmt_state_section: fn(f: &JetFmt, state: StateDecl) {
+    jfmt_emit_leading(f, state.span.start)
+    jfmt_write(f, "state {{")
+    lines := state.groups.len() > 0
+    loop arrow in state.arrows {
+        if arrow.to.len() > 0 -> lines = true
+    }
+    if !lines {
         if state.states.len() > 0 {
             source: jfmt_source_list_span_after(f, state.span.start, JFMT_DELIM_BRACE)
             multiline: if source == .Val(list) -> jfmt_source_span_multiline(f, list.span) else -> false
@@ -2104,6 +2107,45 @@ jfmt_fmt_type_body_member: fn(f: &JetFmt, member: JetFmtMember, body: JetFmtType
             if !multiline -> jfmt_write(f, " ")
         }
         jfmt_write(f, "}}")
+        return
+    }
+    f.indent += 1
+    // Entries and groups print in source order.
+    arrow_at := 0
+    group_at := 0
+    loop arrow_at < state.arrows.len() || group_at < state.groups.len() {
+        jfmt_newline(f)
+        take_arrow: group_at >= state.groups.len() || (arrow_at < state.arrows.len() && state.arrows[arrow_at].span.start < state.groups[group_at].span.start)
+        if take_arrow {
+            arrow: state.arrows[arrow_at]
+            arrow_at += 1
+            jfmt_emit_leading(f, arrow.span.start)
+            jfmt_write(f, arrow.from.name)
+            loop index in 0..<arrow.to.len() {
+                jfmt_write(f, if index == 0 -> " -> " else -> ", ")
+                jfmt_write(f, arrow.to[index].name)
+            }
+        } else {
+            group: state.groups[group_at]
+            group_at += 1
+            jfmt_emit_leading(f, group.span.start)
+            jfmt_write(f, "{group.name.name}: ")
+            loop index in 0..<group.members.len() {
+                if index > 0 -> jfmt_write(f, " | ")
+                jfmt_write(f, group.members[index].name)
+            }
+        }
+    }
+    f.indent -= 1
+    jfmt_end_block(f)
+}
+
+// Print one type-body member. `derives_decode` is the type-level `Decode`
+// fact a field's type spelling depends on.
+jfmt_fmt_type_body_member: fn(f: &JetFmt, member: JetFmtMember, body: JetFmtTypeBody, derives_decode: Bool) {
+    if member.kind == JFMT_MEMBER_STATE {
+        state: body.state ?? return
+        jfmt_fmt_state_section(f, state)
     } else if member.kind == JFMT_MEMBER_FIELD {
         field: body.fields[member.index]
         jfmt_emit_leading_declaration(f, field.name_span.start)
@@ -2338,7 +2380,7 @@ jfmt_fmt_enum: fn(f: &JetFmt, e: EnumDef) {
     loop marker in e.type_markers {
         if marker.inside -> inside_marker = true
     }
-    if e.variants.len() == 0 && e.groups.len() == 0 && e.trait_impls.len() == 0 && e.methods.len() == 0 && e.effect_impl == None && !inside_marker {
+    if e.variants.len() == 0 && e.groups.len() == 0 && e.trait_impls.len() == 0 && e.methods.len() == 0 && e.effect_impl == None && e.state == None && !inside_marker {
         jfmt_fmt_empty_type_body(f, e.name_span.end, e.span.end)
         return
     }
@@ -2377,10 +2419,11 @@ jfmt_fmt_enum: fn(f: &JetFmt, e: EnumDef) {
     loop index in 0..<e.trait_impls.len() -> members.push(JetFmtMember{kind: JFMT_MEMBER_TRAIT_IMPL, index: index, start: e.trait_impls[index].trait_span.start})
     loop index in 0..<e.methods.len() -> members.push(JetFmtMember{kind: JFMT_MEMBER_METHOD, index: index, start: e.methods[index].span.start})
     if e.effect_impl == .Val(declared) -> members.push(JetFmtMember{kind: JFMT_MEMBER_EFFECT_IMPL, index: 0, start: declared.span.start})
+    if e.state == .Val(state) -> members.push(JetFmtMember{kind: JFMT_MEMBER_STATE, index: 0, start: state.span.start})
     loop index in 0..<e.type_markers.len() {
         if e.type_markers[index].inside && e.type_markers[index].span.start > last_placed -> members.push(JetFmtMember{kind: JFMT_MEMBER_MARKER, index: index, start: e.type_markers[index].span.start})
     }
-    body: JetFmtTypeBody{state: None, fields: [Field]{}, cli_bindings: [CLICommandBinding]{}, trait_impls: e.trait_impls, methods: e.methods, validate_body: [Stmt]{}, effect_impl: e.effect_impl, markers: e.type_markers}
+    body: JetFmtTypeBody{state: e.state, fields: [Field]{}, cli_bindings: [CLICommandBinding]{}, trait_impls: e.trait_impls, methods: e.methods, validate_body: [Stmt]{}, effect_impl: e.effect_impl, markers: e.type_markers}
     jfmt_fmt_type_body_members(f, jfmt_sort_members(members), body, derives_decode, e.variants.len() > 0)
     f.indent -= 1
     jfmt_end_block(f)

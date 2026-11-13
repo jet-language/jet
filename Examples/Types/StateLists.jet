@@ -1,0 +1,98 @@
+// State lists: a type lists its states and the moves between them once, in a
+// `state { }` block, and each method's types name the move it makes.
+//
+//   Order: struct { state { Draft -> Confirmed, Cancelled ... } }
+//   confirm: fn(self: &&Order.Draft) -> Order.Confirmed
+//
+// `Order.Draft` is a state type: an `Order` known to be in `Draft`. A set is
+// `Order.Draft | Order.Confirmed`, and a group such as `Open: Draft | Confirmed`
+// names one in the list. A plain `Order` is any state. A method that takes one
+// state and returns another is a move, and the build checks the list has its
+// arrow (E0174). Passing a value in the wrong state is E0150. Struct states
+// are compile-time facts and erase in codegen.
+Lamp: struct {
+    state {
+        Off -> On
+        On -> Off
+    }
+    watts: Int
+
+    // A constructor's result type names the start state.
+    make: fn(watts: Int) -> Lamp.Off { Lamp{watts: watts} }
+    turn_on: fn(self: &&Lamp.Off) -> Lamp.On { self }
+    turn_off: fn(self: &&Lamp.On) -> Lamp.Off { self }
+}
+
+Order: struct {
+    state {
+        Draft -> Confirmed, Cancelled
+        Confirmed -> Shipped, Cancelled
+        Shipped
+        Cancelled
+        Open: Draft | Confirmed
+    }
+    id: Int
+
+    start: fn(id: Int) -> Order.Draft { Order{id: id} }
+    confirm: fn(self: &&Order.Draft) -> Order.Confirmed { self }
+    ship: fn(self: &&Order.Confirmed) -> Order.Shipped { self }
+    cancel: fn(self: &&Order.Open) -> Order.Cancelled { self }
+}
+
+// Parameters name a state, a set, or a group.
+receipt: fn(order: Order.Shipped) -> String { "shipped {order.id}" }
+edit: fn(order: Order.Draft | Order.Confirmed) -> String { "edit {order.id}" }
+remind: fn(order: Order.Open) -> String { "order {order.id} is open" }
+
+// In an enum the states are its cases, with their data.
+Door: enum {
+    Shut
+    Open
+    Locked(code: Int)
+    state {
+        Shut -> Open, Locked
+        Open -> Shut
+        Locked -> Shut
+    }
+
+    open: fn(self: Door.Shut) -> Door.Open { .Open }
+    lock: fn(self: Door.Shut, code: Int) -> Door.Locked { .Locked(code: code) }
+    // Staying in `Locked` is not a move, so only `Locked -> Shut` is checked.
+    unlock: fn(self: Door.Locked, key: Int) -> Door.Shut | Door.Locked {
+        if self == {
+            .Locked(code) -> {
+                if code == key -> return .Shut
+                self.copy()
+            }
+            .Shut | .Open -> self.copy()
+        }
+    }
+    label: fn(self) -> String {
+        if self == {
+            .Shut -> "shut"
+            .Open -> "open"
+            .Locked(_) -> "locked"
+        }
+    }
+}
+
+// A value whose state is known only at run time: each arm narrows it, so
+// `door` is a `Door.Shut` inside the `.Shut` arm.
+press: fn(door: Door, key: Int) -> Door {
+    if door == {
+        .Shut -> door.open()
+        .Open -> door.copy()
+        .Locked(_) -> door.unlock(key)
+    }
+}
+
+run: fn() {
+    lamp: Lamp.make(60).turn_on()
+    print(lamp.watts)
+    o: Order.start(1)
+    print(remind(o))
+    print(edit(o))
+    shipped: o.confirm().ship()
+    print(receipt(shipped))
+    print(press(Door.Shut.lock(7), 7).label())
+}

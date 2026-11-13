@@ -4536,6 +4536,10 @@ sema_registration_prepare_graph: fn(inputs: &&[SemaRegistrationModuleInput], see
     // #6176: a `Name: path` binding whose path names a type is a type
     // alias; it is rewritten before markers bind or casing reads the items.
     sema_alias_classify_inputs(prepared_inputs, edges)
+    // A parameter or result typed by states (`Order.Draft`) takes its
+    // owner's plain type before any module registers; the function keeps
+    // the states for the typestate checks.
+    sema_state_types_rewrite_inputs(prepared_inputs)
     // Rust CheckInner `bind_marker_applications`: a directly used imported
     // marker binds to its declaring module before any module registers.
     // Each program binds in place; its bindings read every input in place.

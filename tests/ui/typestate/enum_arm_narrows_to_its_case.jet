@@ -1,0 +1,31 @@
+// An enum's states are its cases, and a switch arm narrows a value to the
+// arm's case: `open` needs `Door.Shut`, but in the `.Locked` arm `door` is
+// `Door.Locked`.
+Door: enum {
+    Shut
+    Open
+    Locked(code: Int)
+    state {
+        Shut -> Open, Locked
+        Open -> Shut
+        Locked -> Shut
+    }
+
+    open: fn(self: Door.Shut) -> Door.Open { .Open }
+}
+
+press: fn(door: Door) -> Door {
+    if door == {
+        .Shut -> door.open()
+        .Open -> door
+        .Locked(_) -> door.open()
+    }
+}
+
+run: fn() {
+    if press(.Shut) == {
+        .Open -> print("open")
+        .Shut -> print("shut")
+        .Locked(_) -> print("locked")
+    }
+}

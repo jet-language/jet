@@ -34,6 +34,7 @@ Run a lesson from the repository root, for example `jet run Examples/Types/<Less
 - [Refinements](Refinements.jet) — One interval fact feeds the fixed-list index prover, so `faces[roll.raw() - 1]` needs no runtime bounds check.
 - [RenderableVarargs](RenderableVarargs.jet) — `parts: ...Renderable` — a trait-bounded heterogeneous variadic.
 - [SelfReturn](SelfReturn.jet) — `Self` in a method signature names the impl's type: a static `-> Self` method returns that type, so methods chain on its result.
+- [StateLists](StateLists.jet) — State lists: a type lists its states and the moves between them once, in a `state { }` block, and each method's types name the move it makes.
 - [Structs](Structs.jet)
 - [TypeAlias](TypeAlias.jet) — Transparent generic type aliases shorten fallible signatures.
 - [TypedLiteralForms](TypedLiteralForms.jet) — Universal typed-literal Type{ body } form.

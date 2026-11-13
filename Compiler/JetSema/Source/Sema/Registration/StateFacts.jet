@@ -3,11 +3,13 @@
 // Invalid transition labels are omitted from the graph; the pass reports them.
 use jet_foundation.[
     Diagnostic,
+    EnumDef,
     Func,
-    Item,
     NamedSpan,
     Span,
+    StateArrow,
     StateDecl,
+    StateTypeUse,
     StructDef,
     TextEdit,
     diagnostic_with_edit,
@@ -80,6 +82,32 @@ sema_state_graph_add_method_transitions: fn(
         }
         transitions.push(SemaStateGraphTransition{operation: method.name, from: from, to: to})
     }
+    sema_state_graph_add_typed_transitions(methods, owner, state_names, entries, transitions)
+}
+
+// A method whose result names states of `owner` and whose first parameter
+// does not is an entry into those states; one whose first parameter does too
+// is a move. The list's arrows give the edges.
+sema_state_graph_add_typed_transitions: fn(methods: [Func], owner: String, state_names: [String], entries: &[String], transitions: &[SemaStateGraphTransition]) Never! {
+    loop method in methods {
+        sources := [String]{}
+        targets := [String]{}
+        loop typed in method.state_types {
+            if typed.owner != owner -> next
+            if typed.position == 0 -> sources = loop name in typed.states if sema_state_graph_contains(state_names, name) -> name
+            if typed.position == -1 -> targets = loop name in typed.states if sema_state_graph_contains(state_names, name) -> name
+        }
+        loop target in targets {
+            if sources.len() == 0 {
+                entries.push(target.copy())
+                transitions.push(SemaStateGraphTransition{operation: method.name, from: None, to: target})
+                next
+            }
+            loop source in sources {
+                if source != target -> transitions.push(SemaStateGraphTransition{operation: method.name, from: Val(source), to: target.copy()})
+            }
+        }
+    }
 }
 
 sema_state_graph_for_struct: fn(definition: StructDef, items: [Item]) -> SemaStateGraphFact Never! {
@@ -103,6 +131,13 @@ sema_state_graph_for_struct: fn(definition: StructDef, items: [Item]) -> SemaSta
                 loop block in candidate.trait_impls -> sema_state_graph_add_method_transitions(block.methods, definition.name, state_names, outgoing, edges, transitions, entries)
             }
             .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+        }
+    }
+    loop arrow in state.arrows {
+        loop target in arrow.to {
+            if !sema_state_graph_contains(state_names, arrow.from.name) || !sema_state_graph_contains(state_names, target.name) -> next
+            outgoing.push(arrow.from.name.copy())
+            edges.push(SemaStateGraphEdge{from: arrow.from.name.copy(), to: target.name.copy()})
         }
     }
     reachable_states := [String]{}
@@ -140,7 +175,7 @@ sema_state_graph_facts: fn(items: [Item]) -> [SemaStateGraphFact] Never! {
 
 sema_state_methods_use_markers: fn(methods: [Func]) -> Bool Never! {
     loop method in methods {
-        if method.state_requires != None || method.state_transition != None -> return true
+        if method.state_requires != None || method.state_transition != None || method.state_types.len() > 0 -> return true
     }
     false
 }
@@ -160,9 +195,12 @@ sema_state_items_use_typestate: fn(items: [Item]) -> Bool Never! {
                 if sema_state_methods_use_markers(implementation.methods) -> return true
             }
             .Enum(definition) -> {
-                if sema_state_methods_use_markers(definition.methods) -> return true
+                if definition.state != None || sema_state_methods_use_markers(definition.methods) -> return true
             }
-            .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+            .Func(function) -> {
+                if function.state_types.len() > 0 -> return true
+            }
+            .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
     false
@@ -192,40 +230,86 @@ sema_state_owner_methods: fn(items: [Item], type_name: String) -> [Func] Never! 
     methods
 }
 
-// Rust `e0151`: a marker names a state outside the owner's section.
-sema_state_unknown: fn(state: String, type_name: String, candidates: [String], span: Span) -> Diagnostic {
+// Rust `e0151`: a marker or a state list names a state outside the owner's
+// list. `kind` names the owner: `struct` or `enum`. A suggestion replaces the
+// text at `edit_span`, when the name has one of its own.
+sema_state_unknown: fn(state: String, type_name: String, kind: String, candidates: [String], span: Span, edit_span: Span?) -> Diagnostic {
     parts: state.split(".").to_list()
     suggestion: sema_suggest_field(parts[parts.len() - 1], candidates)
     fix: if suggestion == {
-        .Val(candidate) -> "did you mean `{candidate}`? Check the `{type_name}: struct {{ state {{ … }} }}` declaration for valid names"
-        .None -> "add `{state}` inside `{type_name}: struct {{ state {{ … }} }}`, or correct the spelling"
+        .Val(candidate) -> "did you mean `{candidate}`? Check the `{type_name}: {kind} {{ state {{ … }} }}` declaration for valid names"
+        .None -> "add `{state}` inside `{type_name}: {kind} {{ state {{ … }} }}`, or correct the spelling"
     }
-    diagnostic: sema_error("E0151", span, "`{state}` is not a declared state of `{type_name}`", "typestate: `{type_name}: struct {{ state {{ … }} }}` defines the valid state labels; `{state}` is not among them — a typo here would silently create a phantom state that no transition reaches", fix)
-    if suggestion == .Val(candidate) -> return diagnostic_with_edit(diagnostic, TextEdit{span: span, new_text: candidate})
+    diagnostic: sema_error("E0151", span, "`{state}` is not a declared state of `{type_name}`", "typestate: `{type_name}: {kind} {{ state {{ … }} }}` defines the valid state labels; `{state}` is not among them — a typo here would silently create a phantom state that no transition reaches", fix)
+    if suggestion == .Val(candidate) && edit_span == .Val(at) -> return diagnostic_with_edit(diagnostic, TextEdit{span: at, new_text: candidate})
     diagnostic
 }
 
-sema_state_check_reference: fn(state: String, type_name: String, state_names: [String], span: Span, diagnostics: &[Diagnostic]) Never! {
+sema_state_check_reference: fn(state: String, type_name: String, kind: String, state_names: [String], span: Span, diagnostics: &[Diagnostic]) Never! {
     leaf: sema_state_graph_leaf(type_name, state)
     if leaf == .Val(name) && sema_state_graph_contains(state_names, name) -> return
     candidate_name: leaf ?? state
     candidates: loop name in state_names if sema_taint_edit_distance(candidate_name, name) <= 2 -> name
-    diagnostics.push(sema_state_unknown(state, type_name, candidates, span))
+    diagnostics.push(sema_state_unknown(state, type_name, kind, candidates, span, Val(span)))
+}
+
+// The moves and groups of a state list name only its own states (E0151),
+// and a group is named like no state (E0166).
+sema_state_validate_list: fn(state: StateDecl, type_name: String, kind: String, seen: [String], diagnostics: &[Diagnostic]) Never! {
+    loop arrow in state.arrows {
+        loop target in arrow.to -> sema_state_check_reference(target.name, type_name, kind, seen, target.span, diagnostics)
+    }
+    groups := [String]{}
+    loop group in state.groups {
+        if sema_state_graph_contains(seen, group.name.name) || sema_state_graph_contains(groups, group.name.name) {
+            diagnostics.push(sema_error("E0166", group.name.span, "state `{group.name.name}` is declared more than once for `{type_name}`", "the owning {kind} has one bounded state set, so a group named like a state would make `{type_name}.{group.name.name}` ambiguous", "rename the group or the state so each name is declared once"))
+        } else {
+            groups.push(group.name.name)
+        }
+        loop member in group.members -> sema_state_check_reference(member.name, type_name, kind, seen, member.span, diagnostics)
+    }
+}
+
+// The states of a list, each once (E0166), and none at all (E0169). `kind`
+// names the owner: `struct` or `enum`.
+sema_state_declared_names: fn(state: StateDecl, type_name: String, kind: String, diagnostics: &[Diagnostic]) -> [String] Never! {
+    if state.states.len() == 0 -> diagnostics.push(sema_error("E0169", state.span, "`{type_name}` has an empty `state {{ … }}` section", "an empty state set cannot validate markers or provide a useful reflected fact", "add at least one state name, or remove the section"))
+    seen := [String]{}
+    loop member in state.states {
+        if sema_state_graph_contains(seen, member.name) {
+            diagnostics.push(sema_error("E0166", member.span, "state `{member.name}` is declared more than once for `{type_name}`", "the owning {kind} has one bounded state set, so a repeated name would make `Type.State.{member.name}` ambiguous", "keep one declaration of `{member.name}` in the {kind}'s `state {{ … }}` section"))
+        } else {
+            seen.push(member.name)
+        }
+    }
+    seen
+}
+
+// An enum's state list: its states are the enum's cases (E0151 otherwise).
+sema_state_validate_enum: fn(definition: EnumDef, state: StateDecl, diagnostics: &[Diagnostic]) Never! {
+    type_name: definition.name
+    seen: sema_state_declared_names(state, type_name, "enum", diagnostics)
+    cases: loop variant in definition.variants -> variant.name
+    loop member in state.states {
+        if sema_state_graph_contains(cases, member.name) -> next
+        candidates: loop name in cases if sema_taint_edit_distance(member.name, name) <= 2 -> name
+        suggestion: sema_suggest_field(member.name, candidates)
+        fix: if suggestion == {
+            .Val(candidate) -> "did you mean `{candidate}`? An enum's states are its cases"
+            .None -> "add `{member.name}` as a case of `{type_name}`, or correct the spelling"
+        }
+        diagnostic: sema_error("E0151", member.span, "`{member.name}` is not a case of `{type_name}`", "the states of an enum are its cases, so a state list in `{type_name}: enum` names only cases", fix)
+        diagnostics.push(if suggestion == .Val(candidate) -> diagnostic_with_edit(diagnostic, TextEdit{span: member.span, new_text: candidate}) else -> diagnostic)
+    }
+    sema_state_validate_list(state, type_name, "enum", seen, diagnostics)
 }
 
 // One owner's section: empty (E0169), repeated (E0166) and member-colliding
 // (E0167) labels, marker references (E0151) and entry reachability (L0153).
 sema_state_validate_owner: fn(definition: StructDef, state: StateDecl, all_items: [Item], diagnostics: &[Diagnostic]) {
     type_name: definition.name
-    if state.states.len() == 0 -> diagnostics.push(sema_error("E0169", state.span, "`{type_name}` has an empty `state {{ … }}` section", "an empty state set cannot validate markers or provide a useful reflected fact", "add at least one state name, or remove the section"))
-    seen := [String]{}
-    loop member in state.states {
-        if sema_state_graph_contains(seen, member.name) {
-            diagnostics.push(sema_error("E0166", member.span, "state `{member.name}` is declared more than once for `{type_name}`", "the owning struct has one bounded state set, so a repeated name would make `Type.State.{member.name}` ambiguous", "keep one declaration of `{member.name}` in the struct's `state {{ … }}` section"))
-        } else {
-            seen.push(member.name)
-        }
-    }
+    seen: sema_state_declared_names(state, type_name, "struct", diagnostics)
+    sema_state_validate_list(state, type_name, "struct", seen, diagnostics)
     members := [String]{}
     loop field_index in 0..<definition.fields.len() -> members.push(definition.fields[field_index].name)
     loop method_index in 0..<definition.methods.len() -> members.push(definition.methods[method_index].name)
@@ -241,10 +325,10 @@ sema_state_validate_owner: fn(definition: StructDef, state: StateDecl, all_items
         if sema_state_graph_contains(members, member.name) -> diagnostics.push(sema_error("E0167", member.span, "state `{member.name}` collides with a member of `{type_name}`", "state facts and ordinary members share the owning type's namespace", "rename the state or the member so `Type.State.{member.name}` is unique"))
     }
     loop method in sema_state_owner_methods(all_items, type_name) {
-        if method.state_requires == .Val(required) -> sema_state_check_reference(required.name, type_name, seen, required.span, diagnostics)
+        if method.state_requires == .Val(required) -> sema_state_check_reference(required.name, type_name, "struct", seen, required.span, diagnostics)
         if method.state_transition == .Val(transition) {
-            if transition.from == .Val(from) -> sema_state_check_reference(from, type_name, seen, transition.span, diagnostics)
-            sema_state_check_reference(transition.to, type_name, seen, transition.span, diagnostics)
+            if transition.from == .Val(from) -> sema_state_check_reference(from, type_name, "struct", seen, transition.span, diagnostics)
+            sema_state_check_reference(transition.to, type_name, "struct", seen, transition.span, diagnostics)
         }
     }
     graph: sema_state_graph_for_struct(definition, all_items)
@@ -271,9 +355,16 @@ sema_state_validate_declarations: fn(items: [Item], all_items: [Item]) -> [Diagn
         if item == .Struct(definition) && definition.state != None -> declared.push(definition.name)
     }
     loop item in items {
-        if item == .Struct(definition) {
-            state: definition.state ?? next
-            sema_state_validate_owner(definition, state, all_items, diagnostics)
+        if item == {
+            .Struct(definition) -> {
+                state: definition.state ?? next
+                sema_state_validate_owner(definition, state, all_items, diagnostics)
+            }
+            .Enum(definition) -> {
+                state: definition.state ?? next
+                sema_state_validate_enum(definition, state, diagnostics)
+            }
+            .Impl(_) | .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
     // A marker on a nominal owner without its state section (E0159). Free
@@ -304,5 +395,92 @@ sema_state_validate_declarations: fn(items: [Item], all_items: [Item]) -> [Diagn
             if method.state_requires != None || method.state_transition != None -> diagnostics.push(sema_error("E0159", method.span, "`{owner}` has a `#State` marker but no `state {{ … }}` section", "markers describe facts owned by the struct; without its declared set the marker cannot be checked or reflected", "add one `state {{ Name, … }}` section inside `{owner}: struct`, or remove the typestate marker"))
         }
     }
+    loop item in items {
+        if item == {
+            .Func(function) -> sema_state_validate_typed(function, all_items, diagnostics)
+            .Impl(implementation) -> {
+                loop method in implementation.methods -> sema_state_validate_typed(method, all_items, diagnostics)
+            }
+            .Struct(definition) -> {
+                loop method in definition.methods -> sema_state_validate_typed(method, all_items, diagnostics)
+            }
+            .Enum(definition) -> {
+                loop method in definition.methods -> sema_state_validate_typed(method, all_items, diagnostics)
+            }
+            .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+        }
+    }
     diagnostics
+}
+
+// The state list of the struct or enum `type_name`, and which of the two
+// it is.
+SemaStateOwnerList: struct {
+    state: StateDecl
+    kind: String
+}
+
+sema_state_owner_list: fn(all_items: [Item], type_name: String) -> SemaStateOwnerList? Never! {
+    loop item in all_items {
+        if item == .Struct(definition) && definition.name == type_name {
+            if definition.state == .Val(state) -> return Val(SemaStateOwnerList{state: state, kind: "struct"})
+        }
+        if item == .Enum(definition) && definition.name == type_name {
+            if definition.state == .Val(state) -> return Val(SemaStateOwnerList{state: state, kind: "enum"})
+        }
+    }
+    None
+}
+
+// A function's state types name states of their owner (E0151). One whose
+// first parameter and result name states of the same owner is a move, and
+// each change of state it allows is an arrow of the list (E0174); staying in
+// the same state is not a move.
+sema_state_validate_typed: fn(function: Func, all_items: [Item], diagnostics: &[Diagnostic]) Never! {
+    if function.state_types.len() == 0 -> return
+    loop typed in function.state_types {
+        list: sema_state_owner_list(all_items, typed.owner) ?? next
+        names: loop entry in list.state.states -> entry.name
+        // The span is the whole type, so a suggestion stays in the fix text.
+        loop state in typed.states {
+            if names.contains(state) -> next
+            candidates: loop name in names if sema_taint_edit_distance(state, name) <= 2 -> name
+            diagnostics.push(sema_state_unknown(state, typed.owner, list.kind, candidates, typed.span, None))
+        }
+    }
+    from := StateTypeUse?{None}
+    to := StateTypeUse?{None}
+    loop typed in function.state_types {
+        if typed.position == 0 -> from = Val(typed)
+        if typed.position == -1 -> to = Val(typed)
+    }
+    start: from ?? return
+    end: to ?? return
+    if start.owner != end.owner -> return
+    list: sema_state_owner_list(all_items, end.owner) ?? return
+    // An unknown state already has its E0151.
+    declared: loop entry in list.state.states -> entry.name
+    loop source in start.states {
+        loop target in end.states {
+            if !declared.contains(source) || !declared.contains(target) -> next
+            if source == target || sema_state_list_has_arrow(list.state, source, target) -> next
+            sources: loop arrow in list.state.arrows if sema_state_arrow_reaches(arrow, target) -> arrow.from.name
+            fix: if sources.len() == 0 -> "add `{source} -> {target}` to the state list of `{end.owner}`" else -> "add `{source} -> {target}` to the state list of `{end.owner}`, or start from `{end.owner}.{sources[0]}`"
+            diagnostics.push(sema_error("E0174", end.span, "`{end.owner}` has no `{source} -> {target}` in its state list", "`{function.name}` takes `{end.owner}.{source}` and returns `{end.owner}.{target}`, so it is a move, and every move is an arrow in the state list", fix))
+        }
+    }
+}
+
+sema_state_list_has_arrow: fn(state: StateDecl, source: String, target: String) -> Bool Never! {
+    loop arrow in state.arrows {
+        if arrow.from.name == source && sema_state_arrow_reaches(arrow, target) -> return true
+    }
+    false
+}
+
+sema_state_arrow_reaches: fn(arrow: StateArrow, target: String) -> Bool Never! {
+    loop to in arrow.to {
+        if to.name == target -> return true
+    }
+    false
 }

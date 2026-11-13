@@ -349,10 +349,10 @@ parser_report_top_level_state_decl: fn(state: &JetParserState, declaration: Stat
 }
 
 parser_report_ineligible_state_section: fn(state: &JetParserState, section: StateDecl, owner: String) {
-    parser_add_error_code(state, "E0158", section.span, "`state {{ … }}` is not valid inside a {owner}", "state sections attach only to named struct bodies; enums, traits, aliases, impls, modules, and anonymous shapes have no state-set owner", "Move `state {{ … }}` into the named struct body")
+    parser_add_error_code(state, "E0158", section.span, "`state {{ … }}` is not valid inside a {owner}", "state sections attach only to named struct and enum bodies; traits, aliases, impls, modules, and anonymous shapes have no state-set owner", "Move `state {{ … }}` into a named struct or enum body")
 }
 parser_report_repeated_state_section: fn(state: &JetParserState, section: StateDecl, type_name: String) {
-    parser_add_error_code(state, "E0168", section.span, "`{type_name}` may declare only one `state {{ … }}` section", "The state set is one erased fact row owned by the struct", "Merge the state names into one `state {{ … }}` section")
+    parser_add_error_code(state, "E0168", section.span, "`{type_name}` may declare only one `state {{ … }}` section", "A type's states and moves form one list", "Merge the states and moves into one `state {{ … }}` section")
 }
 
 // (card #4723): declarations are public by default. `priv` and
@@ -2117,9 +2117,11 @@ parser_parse_enum: fn(state: &JetParserState, modifiers: ParsedItemModifiers) ->
             next
         }
         if parser_state_section_ahead(state) {
-            section_start: parser_current(state).span
-            section := parser_parse_state_section(state, "", section_start)
-            parser_report_ineligible_state_section(state, section, "enum")
+            section := parser_parse_state_section(state, value.name, value.name_span)
+            if value.state == {
+                .None -> value.state = Val(section)
+                .Val(_) -> parser_report_repeated_state_section(state, section, value.name)
+            }
             next
         }
         if parser_method_starts_here(state) {

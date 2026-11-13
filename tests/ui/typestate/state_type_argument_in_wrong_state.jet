@@ -1,0 +1,23 @@
+// A parameter typed by a state takes only values in that state.
+Order: struct {
+    state {
+        Draft -> Confirmed, Cancelled
+        Confirmed -> Shipped, Cancelled
+        Shipped
+        Cancelled
+        Open: Draft | Confirmed
+    }
+    id: Int
+
+    start: fn(id: Int) -> Order.Draft { Order{id: id} }
+    confirm: fn(self: &&Order.Draft) -> Order.Confirmed { self }
+    ship: fn(self: &&Order.Confirmed) -> Order.Shipped { self }
+    cancel: fn(self: &&Order.Open) -> Order.Cancelled { self }
+}
+
+receipt: fn(order: Order.Shipped) -> String { "shipped {order.id}" }
+
+run: fn() {
+    o: Order.start(1)
+    print(receipt(o))
+}

@@ -1,0 +1,8 @@
+Error [jet.TypestateMoveWithoutArrow]: `Order` has no `Draft -> Shipped` in its state list
+  --> tests/ui/typestate/state_type_move_without_arrow.jet:11:38
+    |
+ 11 |     ship: fn(self: &&Order.Draft) -> Order.Shipped { self }
+    |                                      ^^^^^^^^^^^^^
+ Why: `ship` takes `Order.Draft` and returns `Order.Shipped`, so it is a move, and every move is an arrow in the state list
+ Fix: Add `Draft -> Shipped` to the state list of `Order`, or start from `Order.Confirmed`
+More: jet-lang.dev/e/E0174

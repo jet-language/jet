@@ -2174,8 +2174,8 @@ StateSectionNotAllowed: struct {
         meaning: "Typestate state section attached to an ineligible declaration"
         detail: true
         what: fn(self) -> String { "`state {{ … }}` is not valid inside a {self.owner}" }
-        why: fn(self) -> String { "State sections attach only to named bodies: struct; enums, traits, aliases, impls, modules, and anonymous shapes have no state-set owner" }
-        fix: fn(self) -> String { "Move `state {{ … }}` into the named struct body" }
+        why: fn(self) -> String { "State sections attach only to named struct and enum bodies; traits, aliases, impls, modules, and anonymous shapes have no state-set owner" }
+        fix: fn(self) -> String { "Move `state {{ … }}` into a named struct or enum body" }
     }
 }
 
@@ -2246,8 +2246,8 @@ DuplicateStateSection: struct {
         detail: true
         no_fix: .Ambiguous
         what: fn(self) -> String { "`{self.type}` may declare only one `state {{ … }}` section" }
-        why: fn(self) -> String { "The state set is one erased fact row owned by the struct" }
-        fix: fn(self) -> String { "Merge the state names into one `state {{ … }}` section" }
+        why: fn(self) -> String { "A type's states and moves form one list" }
+        fix: fn(self) -> String { "Merge the states and moves into one `state {{ … }}` section" }
     }
 }
 
@@ -2324,6 +2324,22 @@ DynCondition: struct {
         what: fn(self) -> String { "A `Dyn` value is not a condition" }
         why: fn(self) -> String { "Dyn has no implicit truthiness" }
         fix: fn(self) -> String { "Write `if d.decode<Bool>() ?? false -> …`" }
+    }
+}
+
+TypestateMoveWithoutArrow: struct {
+    type: String
+    from: String
+    to: String
+    op: String
+
+    impl Diagnostic {
+        code: "E0174"
+        meaning: "Typestate: a method moves between two states the state list does not connect"
+        detail: true
+        what: fn(self) -> String { "`{self.type}` has no `{self.from} -> {self.to}` in its state list" }
+        why: fn(self) -> String { "`{self.op}` takes `{self.type}.{self.from}` and returns `{self.type}.{self.to}`, so it is a move, and every move is an arrow in the state list" }
+        fix: fn(self) -> String { "Add `{self.from} -> {self.to}` to the state list of `{self.type}`, or start from a state that has that arrow" }
     }
 }
 
