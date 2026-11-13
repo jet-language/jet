@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6777,
-    "rev": 101262,
+    "rev": 101263,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -72940,6 +72940,11 @@
         {
           "at": "2026-11-13",
           "by": "Main",
+          "text": "Main 2026-11-13 (G11Speed-4 finding): Dyn arm pruning (D1-D3) is not done: it is unsound without a complete census of Dyn producers. The msf twin builds Dyn natively (jet_rt_record_new_dyn_text/array, seq_list_rec_dyn_push, jet_rt_dyn_from_native at record crossings), route results and record fields carry Dyn handles, and Dyn place edits round-trip through the runtime, so a missed producer becomes a silent Unreachable trap. The gain is at most 6.4 KB on Timer. R6 poll coalescing is not done for the same reason: the msf polls follow runtime calls on the stop list (alloc failure). Either needs a sema-owned Dyn producer fact first. Next: c28 (sha256 links only SHA-256)."
+        },
+        {
+          "at": "2026-11-13",
+          "by": "Main",
           "text": "c22 S5 split (G11Speed-4, 2026-11-12). Route: rebase rows on load, not identity-keyed rows everywhere (those are #5479 c7). The record keeps its own module indexes and DeclTable; each reached Core module is appended to the graph and its RowRefs and DeclIDs are rebased. Items of about an hour each, stacked in order: S5.1 the record adds Core registration modules and the DeclTable as sections 6 and 7, with a round trip. S5.2 a rebase of one record module (RowRef and DeclID maps; FnBody Call, FnValue, GlobalShared), unit-tested. S5.3 a graph seed of rebased Core modules, which registration passes skip. S5.4 loader cutover: CoreReach reads the record and does no Core parse. S5.5 finalize skips seeded modules. S5.6 delete CoreDemand.jet; a demanded key takes its record body and side facts. S5.7-S5.9 the 225 whole-graph walks in three area batches. S5.10 Core spans come from the locations section. S5.11 proof: goldens, ui and cases byte-identical, plus the c03 trace and the hello strace (joins S8). Risk: pk1 at a17e showed `Program` isnt `Decode`; S3 and S5.1 need the AST to derive Decode."
         },
         {
@@ -73414,7 +73419,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T16:05:34.496Z",
-      "updated": "2026-11-13T03:14:42.258Z",
+      "updated": "2026-11-13T06:23:15.641Z",
       "updatedBy": "Main",
       "criteriaLastN": 30
     },
@@ -198069,6 +198074,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-13T06:23:15.641Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c08r6ogl",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-13T06:21:49.917Z",
       "by": "Main",
