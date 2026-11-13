@@ -9659,7 +9659,7 @@ sema_stmt_check_scoped_statement: fn(statement: Stmt, return_type: Type?, enviro
             }
         }
         .Reactive(body, span) -> {
-            state.reactive_bodies.push(span)
+            state.reactive_bodies.push(span.copy())
             checked := sema_stmt_check_reactive(body, span, environment, program, scopes, state, tail_store, context, diagnostics)
             if checked == {
                 .Val(value) -> output.push(TStmt.Reactive{executable: value, span: span})

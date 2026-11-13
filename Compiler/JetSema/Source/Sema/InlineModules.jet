@@ -1955,10 +1955,13 @@ sema_inline_modules_lower: fn(program: &Program, diagnostics: &[Diagnostic]) -> 
     //    stays where it is.
     hoist := SemaInlineHoist{declarations: [Item]{}, exported: [String:Type]{}, has_exported: false}
     loop index in 0..<program.items.len() {
+        hoisted := Item?{None}
         if program.items[index] == .CodeModule(definition) {
-            hoisted: sema_inline_hoist_module(definition, definition.name, hoist)
-            program.items[index] = Item.CodeModule{value: hoisted.code_module}
+            lowered: sema_inline_hoist_module(definition, definition.name, hoist)
+            hoisted = Val(Item.CodeModule{value: lowered.code_module})
         }
+        // The module item's view ends above, so its slot takes the hoisted item.
+        program.items[index] = hoisted.move() ?? next
     }
     if hoist.has_exported {
         exported := sema_inline_rewrite_empty()

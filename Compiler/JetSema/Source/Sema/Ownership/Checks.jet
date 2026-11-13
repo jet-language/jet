@@ -2170,7 +2170,7 @@ sema_ownership_check_binding_view_conflicts: fn(state: &SemaOwnershipState, carr
 sema_ownership_list_view_element_spans: fn(elements: [Expr]) -> [Span] Never! {
     spans := [Span]{}
     loop element in elements {
-        if element == .Place(_, access, span, _) && access == PlaceAccess.Write -> spans.push(span)
+        if element == .Place(_, access, span, _) && access == PlaceAccess.Write -> spans.push(span.copy())
     }
     spans
 }
@@ -2207,7 +2207,7 @@ sema_ownership_check_list_view_element_aliases: fn(state: &SemaOwnershipState, e
                 }
             }
             previous.push(place)
-            previous_access.push(access)
+            previous_access.push(access.copy())
         }
     }
 }
@@ -3784,7 +3784,7 @@ sema_ownership_note_implicit_take: fn(state: &SemaOwnershipState, expr: Expr, ty
         if sema_ownership_binding_captured(scopes, binding) -> return None
         if !type_identity_equal(ty, required) || sema_ownership_type_mentions_generic(ty, generic_params) -> return None
         if !facts.accepted || !facts.complete || facts.copyable || !facts.cloneable || facts.resource || facts.materializes_view || facts.dynamic_loan -> return None
-        state.implicit_take_ok.push(span)
+        state.implicit_take_ok.push(span.copy())
         return Val(binding.symbol.id.key)
     }
     None
@@ -3799,7 +3799,7 @@ sema_ownership_note_implicit_take_twice: fn(state: &SemaOwnershipState, span: Sp
         index -= 1
         if sema_ownership_span_same(state.implicit_take_ok[index], span) -> _ := state.implicit_take_ok.remove(index, .Slot)
     }
-    state.implicit_take_twice.push(span)
+    state.implicit_take_twice.push(span.copy())
 }
 
 // A binding declared outside the innermost lambda body around this point.
