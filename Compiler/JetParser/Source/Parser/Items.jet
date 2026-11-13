@@ -1333,7 +1333,7 @@ parser_parse_effect_row_entries: fn(state: &JetParserState, close: Int) -> [Effe
             prohibited: parser_current_kind(state) == TOKEN_BANG
             if prohibited -> parser_bump(state)
             entry: parser_expect_effect_path_name(state)
-            if !prohibited && entry.name.starts_with("Mem.Alloc(") {
+            if !prohibited && (entry.name.starts_with("Mem.Alloc(") || entry.name.starts_with("Mem.Stack(")) {
                 parser_add_fatal_code(state, "E0119", entry.span, "`{entry.name}` is only valid as a memory denial", "the `above: Bytes` argument parameterizes a prohibition, not a positive effect bound", "write `-[!{entry.name}]>`")
                 break
             }
@@ -1346,9 +1346,10 @@ parser_parse_effect_row_entries: fn(state: &JetParserState, close: Int) -> [Effe
     effects
 }
 
-// An effect path `ident (.ident)*`, with an optional argument: the bounded
-// memory denial `Mem.Alloc(above: N)`, or a scope string naming a folder, a
-// host or a device (`FS.Read("templates/")`, `Net("api.example.com")`).
+// An effect path `ident (.ident)*`, with an optional argument: a bounded
+// memory denial (`Mem.Alloc(above: N)`, `Mem.Stack(above: N)`), or a scope
+// string naming a folder, a host or a device (`FS.Read("templates/")`,
+// `Net("api.example.com")`). `Mem.Stack` is only ever bounded.
 parser_expect_effect_path_name: fn(state: &JetParserState) -> NamedSpan {
     first: parser_expect_name(state, "for an effect name")
     name := parser_value(state, first)
@@ -1359,7 +1360,7 @@ parser_expect_effect_path_name: fn(state: &JetParserState) -> NamedSpan {
         name = "{name}.{parser_value(state, segment)}"
         end = segment.span.end
     }
-    if name != "Mem.Alloc" && parser_current_kind(state) == TOKEN_LPAREN {
+    if !parser_memory_bounded(name) && parser_current_kind(state) == TOKEN_LPAREN {
         parser_bump(state)
         token: parser_current(state)
         if token.kind != TOKEN_STRING || parser_interpolations(state, token) > 0 {
@@ -1375,23 +1376,27 @@ parser_expect_effect_path_name: fn(state: &JetParserState) -> NamedSpan {
         close: parser_expect(state, TOKEN_RPAREN, "`)` after the effect scope")
         return NamedSpan{name: effect_scope_name(name, scope), span: Span{start: first.span.start, end: close.span.end}}
     }
-    if name == "Mem.Alloc" && parser_current_kind(state) == TOKEN_LPAREN {
+    if name == "Mem.Stack" && parser_current_kind(state) != TOKEN_LPAREN {
+        parser_add_fatal_code(state, "E0119", Span{start: first.span.start, end: end}, "`Mem.Stack` needs a byte ceiling", "a stack denial bounds the bytes every call path may take; it has no unbounded form", "write `Mem.Stack(above: 65536)`")
+        return NamedSpan{name: name, span: Span{start: first.span.start, end: end}}
+    }
+    if parser_memory_bounded(name) && parser_current_kind(state) == TOKEN_LPAREN {
         parser_bump(state)
         label: parser_expect_name(state, "for the memory denial argument name")
         label_name: parser_value(state, label)
         if label_name != "above" {
-            parser_add_fatal_code(state, "E0119", label.span, "`Mem.Alloc` does not accept the argument `{label_name}`", "the bounded memory denial has one closed argument: `above: Bytes`", "write `Mem.Alloc(above: 65536)`")
+            parser_add_fatal_code(state, "E0119", label.span, "`{name}` does not accept the argument `{label_name}`", "the bounded memory denial has one closed argument: `above: Bytes`", "write `{name}(above: 65536)`")
             return NamedSpan{name: name, span: Span{start: first.span.start, end: end}}
         }
         parser_expect(state, TOKEN_COLON, "`:` after `above`")
         value: parser_bump(state)
         if value.kind != TOKEN_INT {
-            parser_add_fatal_code(state, "E0119", value.span, "`Mem.Alloc(above: …)` needs an integer byte ceiling", "the bounded denial is checked at compile time and accepts a positive byte count", "write `Mem.Alloc(above: 65536)`")
+            parser_add_fatal_code(state, "E0119", value.span, "`{name}(above: …)` needs an integer byte ceiling", "the bounded denial is checked at compile time and accepts a positive byte count", "write `{name}(above: 65536)`")
             return NamedSpan{name: name, span: Span{start: first.span.start, end: end}}
         }
         bytes: parser_integer(state, value) ?? 0
         if bytes <= 0 {
-            parser_add_fatal_code(state, "E0119", value.span, "`Mem.Alloc(above: …)` needs a positive byte ceiling", "zero cannot bound a usable memory region", "write a positive byte count, such as `Mem.Alloc(above: 65536)`")
+            parser_add_fatal_code(state, "E0119", value.span, "`{name}(above: …)` needs a positive byte ceiling", "zero cannot bound a usable memory region", "write a positive byte count, such as `{name}(above: 65536)`")
             return NamedSpan{name: name, span: Span{start: first.span.start, end: end}}
         }
         close: parser_expect(state, TOKEN_RPAREN, "`)` after the memory denial argument")
@@ -1399,6 +1404,11 @@ parser_expect_effect_path_name: fn(state: &JetParserState) -> NamedSpan {
         end = close.span.end
     }
     NamedSpan{name: name, span: Span{start: first.span.start, end: end}}
+}
+
+// The memory denials an `above: Bytes` argument bounds.
+parser_memory_bounded: fn(name: String) -> Bool Never! {
+    name == "Mem.Alloc" || name == "Mem.Stack"
 }
 
 // Rust `type_starts_here`, with the `#Tag Type` value-tag prefix.

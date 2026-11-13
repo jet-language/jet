@@ -1,5 +1,6 @@
 // Every leaf Compiler/Prelude/Effects.jet declares, written in a signature
-// row; each deny-only leaf (Time.Wait, Panic, Mem.Alloc, Mem.Rc) as a denial.
+// row; each deny-only leaf (Time.Wait, Panic, Mem.Alloc, Mem.Rc, Mem.Stack)
+// as a denial.
 net: fn() -[Net]> {}
 fs_read: fn() -[FS.Read]> {}
 fs_write: fn() -[FS.Write]> {}
@@ -42,6 +43,7 @@ no_wait: fn() -[!Time.Wait]> {}
 no_panic: fn() -[!Panic]> {}
 no_alloc: fn() -[!Mem.Alloc]> {}
 no_rc: fn() -[!Mem.Rc]> {}
+no_stack: fn() -[!Mem.Stack(above: 4096)]> {}
 
 run: fn() -[Net, FS.Read, FS.Write, IO, DB.Read, DB.Write, Rand.Draw, Env, Exec.Exit, Exec.Args, Log, GPU, FFI.Go, FFI.Java, FFI.DotNet, FFI.Fortran, FFI.Cobol, FFI.Tcl, FFI.Lua, FFI.Ada, FFI.Pascal, FFI.Dart, FFI.PowerShell, FFI.Perl, FFI.Ruby, FFI.Php, FFI.R, FFI.Com, FFI.C, FFI.Cpp, FFI.Asm, FFI.Py, FFI.Octave, FFI.Rust, FFI.JS, FFI.Swift, Browser, Secret]> {
     net()

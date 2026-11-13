@@ -2125,16 +2125,26 @@ array per field (D-COLUMNS1). See
 Memory floors are effect-row prohibitions, not `#Policy` settings. Sema checks
 every reachable call, including dependency calls, against the function's
 `!Mem.*` denial. The unbounded forms are `!Mem.Alloc` and `!Mem.Rc`; the bounded
-form is `!Mem.Alloc(above: N)`. E0921 identifies the incompatible operation,
-prints the full call path, and names the denial and its provenance. An open-world
-dispatch needs a sealed target set or signed dependency summary; otherwise the
-strict fact is unprovable and rejected (D-AUTHORITY-MEM1, D-MEM-FACTS1).
+forms are `!Mem.Alloc(above: N)` and `!Mem.Stack(above: N)`. E0921 identifies
+the incompatible operation, prints the full call path, and names the denial and
+its provenance. An open-world dispatch needs a sealed target set or signed
+dependency summary; otherwise the strict fact is unprovable and rejected
+(D-AUTHORITY-MEM1, D-MEM-FACTS1).
 
 ```jet
 integrate: fn(e: &Entity, dt: Float) -[!Mem.Alloc]> {
     e.pos += e.vel * dt
 }
 ```
+
+`!Mem.Stack(above: N)` bounds the stack every call path may take, in bytes
+(D-STACKBOUND1). Sema bounds each frame by a fixed allowance for call linkage
+and saved registers plus two slots for every parameter and checked value, each
+slot sized by the value's layout, and adds the deepest callee's path. A path
+through recursion, a function value, a trait value, an open dispatch or a
+value of unknown size, such as an unbound generic parameter, has no bound, so
+the denial is E0921. `Mem.Stack` has no unbounded form: `!Mem.Stack` alone is
+E0119.
 
 The human aliasing rule is: while something is being changed, nobody else may be
 looking at it. Foreign `read` and `write` spellings are not Jet access syntax;
@@ -2413,8 +2423,9 @@ a read parameter, `self`, an alias or a lambda capture may be such a cell, so
 writing it, taking its `guard_edit()` lease included, is E3401 too. Its own
 locals, a cell it builds (`Shared{…}`, `Cell.new(…)`), and a `&` parameter
 its caller lends for writing stay free to change.
-`Mem.Alloc(above: N)` is the parameterized memory-denial spelling. An explicit
-memory, waiting, or panic denial still rejects a reachable operation
+`Mem.Alloc(above: N)` and `Mem.Stack(above: N)` are the parameterized
+memory-denial spellings. An explicit memory, waiting, or panic denial still
+rejects a reachable operation
 (D-EFFTREE1, D-PANICROOT1, D-AUTHORITY-MEM1, D-AUTH-AMBIENT2).
 
 Core operations contribute the following broad categories. More precise leaves
@@ -2719,11 +2730,12 @@ non-major release is E1218, and narrowing or adding one is compatible.
 
 An entry of a cap or a block is spelled as a row entry: a dotted effect, one
 with a plain string scope (`FS.Read("data/")`, `Net("api.example.com")`), or
-the denial `!Mem.Alloc(above: N)`. Any other argument is E0119, as is
-`Mem.Alloc(above: N)` without `!`. A scoped `FS` or `Net` entry is mediated at
-run time as a written row's is (see "Effect scopes"): while a capped function
-runs, its cap is in force before its own row, and while a block runs, its
-list is in force, for every callee and every task it spawns. So
+a bounded denial `!Mem.Alloc(above: N)` or `!Mem.Stack(above: N)`. Any other
+argument is E0119, as is either without `!`. A scoped `FS` or `Net` entry is
+mediated at run time as a written row's is (see "Effect scopes"): while a
+capped function runs, its cap is in force before its own row, and while a
+block runs, its list is in force, for every callee and every task it spawns.
+So
 
 ```jet
 #FX(FS.Read("data/"))

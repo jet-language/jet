@@ -1,0 +1,22 @@
+# `!Mem.Stack(above: N)` bounds the stack of every call path from the
+# function that denies it, by sema's frame model: each frame counts a fixed
+# allowance plus slots for its parameters and checked values. run -> leaf
+# takes more than 128 bytes but well under 64 KiB. A recursive path has no
+# bound. A stack denial with no byte ceiling is a parse error.
+fixture: stack_denial_bounds_every_call_path.fixture
+env: NO_COLOR=1
+step deep: jet check deep.jet
+exit: nonzero
+stderr: ~ "Error [jet.MemoryDenialViolated]: deep::run may take " # the path is over the bound
+stderr: ~ " bytes of stack, above the effective `!Mem.Stack(above: 128)` declared at deep.jet" # the report names the denial
+stderr: ~ "the deepest call path is deep::run (" # the path starts at the denying function
+stderr: ~ " B) -> deep::leaf (" # and runs through its callee, each frame with its bound
+step roomy: jet check roomy.jet
+exit: 0
+stderr: !~ "Error [" # the same path fits under 64 KiB
+step recursive: jet check recursive.jet
+exit: nonzero
+stderr: ~ "`!Mem.Stack(above: 65536)` cannot be proved for recursive::run: recursion through recursive::down" # a cycle has no stack bound
+step bare: jet check bare.jet
+exit: nonzero
+stderr: ~ "`Mem.Stack` needs a byte ceiling" # a stack denial is only ever bounded

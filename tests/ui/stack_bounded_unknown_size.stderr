@@ -1,0 +1,8 @@
+Error [jet.MemoryDenialViolated]: `!Mem.Stack(above: 4096)` cannot be proved for stack_bounded_unknown_size::keep: `T` has no known size in stack_bounded_unknown_size::keep
+  --> tests/ui/stack_bounded_unknown_size.jet:1:26
+    |
+  1 | keep: fn<T>(value: T) -[!Mem.Stack(above: 4096)]> T { value }
+    |                          ^^^^^^^^^^^^^^^^^^^^^^
+ Why: no bound holds for the call path stack_bounded_unknown_size::keep; a stack bound needs every value's size and every call's target; declaration provenance: signature denial `-[!Mem.Stack(above: 4096)]>` in stack_bounded_unknown_size.jet
+ Fix: Give every value a known size and every call a direct target, or move the call outside this denial
+More: jet-lang.dev/e/E0921

@@ -30,11 +30,18 @@ parser_authority_effect_path: fn(expr: Expr) -> String? {
 // One `#FX(…)` entry, spelled as an effect row spells it
 // (parser_expect_effect_path_name) and without an `Effect.` prefix: an
 // effect path, a path with one plain string scope (`FS.Read("data/")`,
-// `Net("api.example.com")`) or, under the `!` prefix, the bounded memory
-// denial `Mem.Alloc(above: N)`. A malformed entry is reported here and gives
-// None.
+// `Net("api.example.com")`) or, under the `!` prefix, a bounded memory
+// denial `Mem.Alloc(above: N)` or `Mem.Stack(above: N)`. A malformed entry is
+// reported here and gives None.
 parser_authority_effect_entry: fn(state: &JetParserState, marker: Marker, expr: Expr, prefix: String) -> String? {
-    if parser_authority_effect_path(expr) == .Val(path) -> return Val(parser_authority_effect_unprefixed(path))
+    if parser_authority_effect_path(expr) == .Val(path) {
+        name: parser_authority_effect_unprefixed(path)
+        if name == "Mem.Stack" {
+            parser_add_error_code(state, "E0119", expr_span(expr), "`Mem.Stack` needs a byte ceiling", "a stack denial bounds the bytes every call path may take; it has no unbounded form", "write `Mem.Stack(above: 65536)`")
+            return None
+        }
+        return Val(name)
+    }
     if expr == .Call(call, _) {
         // A one-word call (`Net("api.example.com")`) has no `Effect.` prefix.
         if call.type_args.len() == 0 -> return parser_authority_scoped_entry(state, call.name, call.args, expr_span(expr), prefix)
@@ -50,11 +57,11 @@ parser_authority_effect_entry: fn(state: &JetParserState, marker: Marker, expr: 
     None
 }
 
-// The entry `base(args)`: `base` with one plain string scope, or the memory
-// denial when `base` is `Mem.Alloc`. A bad scope is reported at its argument,
-// as the row parser reports it.
+// The entry `base(args)`: `base` with one plain string scope, or a bounded
+// memory denial when `base` is `Mem.Alloc` or `Mem.Stack`. A bad scope is
+// reported at its argument, as the row parser reports it.
 parser_authority_scoped_entry: fn(state: &JetParserState, base: String, args: [CallArg], span: Span, prefix: String) -> String? {
-    if base == "Mem.Alloc" -> return parser_authority_memory_denial(state, args, span, prefix)
+    if parser_memory_bounded(base) -> return parser_authority_memory_denial(state, base, args, span, prefix)
     scope := ""
     plain := false
     scope_span := span
@@ -86,25 +93,25 @@ parser_authority_effect_unprefixed: fn(path: &&String) -> String {
     path
 }
 
-// `Mem.Alloc(above: N)`, the bounded memory denial, as the row parser reads
-// it: one `above:` argument, a positive integer byte ceiling, and only under
-// the `!` prefix.
-parser_authority_memory_denial: fn(state: &JetParserState, args: [CallArg], span: Span, prefix: String) -> String? {
+// `Mem.Alloc(above: N)` or `Mem.Stack(above: N)`, a bounded memory denial, as
+// the row parser reads it: one `above:` argument, a positive integer byte
+// ceiling, and only under the `!` prefix.
+parser_authority_memory_denial: fn(state: &JetParserState, base: String, args: [CallArg], span: Span, prefix: String) -> String? {
     labeled := false
     if args.len() == 1 && !args[0].spread && args[0].label == .Val(label) {
         labeled = label.name == "above"
     }
     if !labeled {
-        parser_add_error_code(state, "E0119", span, "`Mem.Alloc(…)` takes one argument, `above: Bytes`", "the bounded memory denial has one closed argument: `above: Bytes`", "write `Mem.Alloc(above: 65536)`")
+        parser_add_error_code(state, "E0119", span, "`{base}(…)` takes one argument, `above: Bytes`", "the bounded memory denial has one closed argument: `above: Bytes`", "write `{base}(above: 65536)`")
         return None
     }
     bytes := 0
     if args[0].expr == .Int(value, _, _, _, _) -> bytes = value
     if bytes <= 0 {
-        parser_add_error_code(state, "E0119", span, "`Mem.Alloc(above: …)` needs a positive integer byte ceiling", "the bounded denial is checked at compile time and accepts a positive byte count", "write a positive byte count, such as `Mem.Alloc(above: 65536)`")
+        parser_add_error_code(state, "E0119", span, "`{base}(above: …)` needs a positive integer byte ceiling", "the bounded denial is checked at compile time and accepts a positive byte count", "write a positive byte count, such as `{base}(above: 65536)`")
         return None
     }
-    name: "Mem.Alloc(above: {bytes})"
+    name: "{base}(above: {bytes})"
     if prefix != "!" {
         parser_add_error_code(state, "E0119", span, "`{name}` is only valid as a memory denial", "the `above: Bytes` argument parameterizes a prohibition, not a positive effect bound", "write `!{name}`")
         return None
