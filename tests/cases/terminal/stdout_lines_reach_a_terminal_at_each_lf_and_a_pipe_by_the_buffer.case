@@ -1,0 +1,21 @@
+# One stdout policy, chosen from the TTY fact the runtime reads once at
+# start: on a terminal each line is written at its LF; to a pipe or a file
+# whole 8192-byte buffers are written, plus what is left at exit. `print` and
+# `term.stdout()` writes share that policy. The program prints one line,
+# writes another in two parts and then sleeps, and the step kills it first,
+# so no exit drains the buffer. The lines reach a terminal and never reach a
+# pipe.
+requires: os:unix
+fixture: stdout_lines_reach_a_terminal_at_each_lf_and_a_pipe_by_the_buffer.fixture
+env: NO_COLOR=1
+step build: jet build --optimize=full main.jet
+exit: 0
+step piped: sh -c "timeout -s KILL 2 .jet/build/main | od -c; echo killed"
+exit: 0
+stdout: = "0000000\nkilled\n" # the buffered lines died with the process
+step terminal: sh -c "timeout -s KILL 2 .jet/build/main; echo killed"
+pty: true
+exit: 0
+stdout: ~ "a printed line written at its LF" # each LF wrote its line at once
+stdout: ~ "a stdout line written at its LF" # the stdout handle wrote its line at its LF too
+stdout.replace("\r", ""): before "a stdout line written at its LF" "killed" # both lines were out before the kill

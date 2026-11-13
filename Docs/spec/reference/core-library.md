@@ -2214,8 +2214,8 @@ run: fn() {
 | `confirm(prompt)` / `choose(prompt, options)` | `Bool` / `String !IOError` | Ask a bounded yes/no or choice question. |
 | `stdin()` / `buffered()` | `StdinHandle` | Return the buffered stdin handle; `buffered` is its alias. |
 | `stdout()` / `stderr()` | `Stdout` / `Stderr` | Return output stream handles. |
-| `stream.write(text)` / `stream.write_line(text)` | `!IOError` | Write text with or without a newline. |
-| `stream.write_bytes(bytes)` / `stream.flush()` | `!IOError` | Write raw bytes or flush a stream. |
+| `stream.write(text)` / `stream.write_line(text)` | `!IOError` | Write text with or without a newline; stdout keeps the buffering `print` has, and stderr writes at once. |
+| `stream.write_bytes(bytes)` / `stream.flush()` | `!IOError` | Write raw bytes, or write a stream's pending bytes now. |
 | `binread(path)` / `binwrite(path, bytes)` | `[U8] !IOError` / `!IOError` | Read or atomically write raw file bytes. |
 | `terminal_width()` / `terminal_height()` | `Int` | Query terminal dimensions with the provider fallback. |
 | `style(style, text)` / `style_force(style, text)` | `String` | Render known ANSI styles conditionally or unconditionally. |

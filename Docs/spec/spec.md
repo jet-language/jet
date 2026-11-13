@@ -441,9 +441,11 @@ execution tier.
 
 `print` is an ambient prelude operation. It accepts one or more printable
 arguments and writes one line per argument with a trailing newline. `eprint` is
-the ambient stderr twin. Stdout is buffered the same way on every tier: a
-terminal stdout is written at each line end, a pipe or file when
-its buffer fills. Pending stdout is written before any stderr write, before
+the ambient stderr twin. Stdout is buffered the same way on every tier, for
+`print` and for every `core.term.stdout()` write alike: a terminal stdout is
+written at each line end, a pipe or file when its buffer fills, and an
+explicit `flush()` writes what is pending at once (D-STDOUT-BUFFER1=A).
+Stderr is never held. Pending stdout is written before any stderr write, before
 every read of stdin (so all that was printed is out before the program waits
 for input), before a child process starts, and when the process stops. Stdin
 is read through one shared buffer (a read of up to 64 KiB), so lines,

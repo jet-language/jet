@@ -1,0 +1,19 @@
+use {
+    process: core.process
+    term: core.term
+}
+
+// Each line names its place in the order a reader of one shared descriptor
+// must see. A piped stdout is buffered, for a `term.stdout()` write (line 1)
+// as for `print`, so the order holds only because the runtime drains stdout
+// before a stderr write, before a child that inherits stdout starts, and
+// before the stop report.
+run: fn() {
+    out := term.stdout()
+    out.write_line("1 stdout before stderr") ?? panic("write stdout: {err}")
+    eprint("2 stderr after stdout")
+    print("3 stdout before the child")
+    _: process.cmd(["sh", "-c", "echo '4 the child inherits stdout'"]).stdout(.Inherit).run() ?? panic("run child: {err}")
+    print("5 stdout before the stop")
+    panic("6 the stop report comes last")
+}

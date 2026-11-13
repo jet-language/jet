@@ -1,0 +1,16 @@
+# A piped stdout is buffered, and the interleavings the old
+# flush-every-write rule protected still hold on one shared descriptor: stdout
+# written before a stderr line, before a child that inherits stdout, and before
+# the stop report, reaches the file first, on every optimization level.
+requires: os:unix
+fixture: stdout_buffer_keeps_stream_order_on_every_level.fixture
+env: NO_COLOR=1
+step o0: sh -c "exec {jet} run --quiet --optimize=none main.jet > {work}/o0.merged 2>&1"
+exit: 70
+file: o0.merged = stdout_buffer_keeps_stream_order_on_every_level.merged
+step o1: sh -c "exec {jet} run --quiet --optimize=basic main.jet > {work}/o1.merged 2>&1"
+exit: == o0
+file: o1.merged = stdout_buffer_keeps_stream_order_on_every_level.merged
+step o2: sh -c "exec {jet} run --quiet --optimize=full main.jet > {work}/o2.merged 2>&1"
+exit: == o0
+file: o2.merged = stdout_buffer_keeps_stream_order_on_every_level.merged
