@@ -6897,7 +6897,7 @@ sema_expr_probe_type: fn(expr: Expr, carrier: Bool, environment: SemaScopeEnviro
     context.suppress_partial_move_root_read = previous_root_read
     sema_check_context_rollback(context, context_mark)
     sema_scope_rollback(scopes, scope_mark)
-    sema_ownership_state_restore(state, saved_state)
+    sema_ownership_state_restore(state, saved_state.move())
     loop diagnostics.len() > diagnostic_count -> _ := diagnostics.pop()
     loop tail_store.bodies.len() > tail_body_count -> _ := tail_store.bodies.pop()
     checked: probed ?? return None

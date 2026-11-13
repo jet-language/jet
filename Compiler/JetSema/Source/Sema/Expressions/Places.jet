@@ -720,7 +720,7 @@ sema_expression_field: fn(field: Expr, base: Expr, member: String, span: Span, e
         if rewritten == .Val(generated) {
             sema_check_context_rollback(context, base_context_mark)
             sema_scope_rollback(scopes, base_scope_mark)
-            sema_ownership_state_restore(state, base_state)
+            sema_ownership_state_restore(state, base_state.move())
             loop diagnostics.len() > base_diagnostic_count -> _ := diagnostics.pop()
             loop tail_store.bodies.len() > base_tail_body_count -> _ := tail_store.bodies.pop()
             checked_generated: sema_check_expression(generated, expected, environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
