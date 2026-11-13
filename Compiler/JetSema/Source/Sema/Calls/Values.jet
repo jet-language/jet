@@ -252,11 +252,11 @@ sema_call_value_is_inline_loop: fn(callee: Expr, args: [CallArg]) -> Bool Never!
     }
 }
 
-sema_call_value_is_lambda: fn(callee: Expr) -> Bool Never! {
+sema_call_value_lambda: fn(callee: Expr) -> Lambda? Never! {
     if callee == {
-        .Lambda(_, _) -> true
-        .Paren(value, _, _) -> sema_call_value_is_lambda(value)
-        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> false
+        .Lambda(lambda, _) -> Val(lambda)
+        .Paren(value, _, _) -> sema_call_value_lambda(value)
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> None
     }
 }
 
@@ -265,9 +265,13 @@ sema_call_check_value_owned: fn(state: &SemaOwnershipState, callee: Expr, args: 
         if callee == .Lambda(lambda, _) -> return sema_call_value_inline_loop(lambda, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     }
     // A lambda called where it is written ends with the call: it does not
-    // escape, so its captures are checked as a non-escaping lambda's.
+    // escape, so its captures are checked as a non-escaping lambda's, and it
+    // runs once each time the call runs.
     previous_escapes := context.lambda_escapes
-    if sema_call_value_is_lambda(callee) -> context.lambda_escapes = Val(false)
+    if sema_call_value_lambda(callee) == .Val(called) {
+        context.lambda_escapes = Val(false)
+        sema_ownership_note_direct_call_lambda(state, called.span)
+    }
     checked_callee := sema_check_expression(callee, None, environment, program, scopes, state, tail_store, context, diagnostics)
     context.lambda_escapes = previous_escapes
     callee_value: checked_callee ?? return None

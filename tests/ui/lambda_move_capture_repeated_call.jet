@@ -1,0 +1,14 @@
+// E0121: a lambda passed to a call may run once per item, so moving a
+// captured owner inside it would give the value away again on the next run.
+consume: fn(&&s: String) -> Int {
+    s.len()
+}
+
+total: fn(xs: [Int]) -> Int {
+    s: "abc".repeat(3)
+    xs.fold(0, (acc, x) -> { acc + x + consume(s.move()) })
+}
+
+run: fn() {
+    print(total([1, 2, 3]))
+}

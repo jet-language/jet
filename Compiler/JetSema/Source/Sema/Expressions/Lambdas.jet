@@ -8,6 +8,7 @@ use jet_foundation.[
     CallablePolicy,
     CallablePolicyChain,
     Diagnostic,
+    diagnostic_with_label,
     EffectRowEntry,
     effect_scope_descriptor,
     Expr,
@@ -1386,6 +1387,22 @@ sema_expression_lambda_write_capture_diagnostic: fn(name: String, ty: Type, span
     sema_error("E0120", span, "`{name}` was not moved here, so a returned lambda cannot write it", "`{name}` is lent for writing only until this call returns, and the lambda it returns runs after that", "make the parameter owned (`{name}: &&{type_name(ty)}`) and return the result, or write `{name}` inside this call")
 }
 
+// A lambda that may run more than once moves its capture: its second run
+// would use the value the first gave away. An unmarked move that may become a
+// share is noted as one, as a loop's is, and the next pass copies there. One
+// report per move, though a nested lambda's move reaches each enclosing
+// lambda too.
+sema_expression_lambda_repeated_capture_move: fn(state: &SemaOwnershipState, moved: SemaOwnershipMovedPlace, lambda_span: Span, diagnostics: &[Diagnostic]) {
+    span: moved.origin.span
+    loop known in diagnostics {
+        if known.code == "E0121" && known.span == .Val(reported) && sema_ownership_span_same(reported, span) -> return
+    }
+    // copy: `ty` is a payload of read parameter `moved`; the new share site owns this one
+    if moved.origin.share_ty == .Val(ty) -> sema_ownership_note_share_found(state, SemaOwnershipShareSite{span: span, ty: ty.copy()})
+    name: sema_ownership_place_name(moved.place)
+    diagnostics.push(diagnostic_with_label(sema_error("E0121", span, "`{name}` moves out of a lambda that can run more than once", "the lambda is passed on or stored, so it may be called again, and that call would use `{name}` after the first call gave it away", "pass a copy (`{name}.copy()`), or move `{name}` in as a parameter of the lambda instead of capturing it"), lambda_span, "this lambda may run more than once"))
+}
+
 sema_expression_lambda_view_diagnostic: fn(name: String, span: Span) -> Diagnostic {
     sema_error("E0631", span, "`{name}` cannot be shared — it does not live long enough to be captured by a stored lambda", "a view borrows storage owned by the surrounding scope; retaining the lambda could outlive that storage", "copy the view into an owned value before capturing it, or keep the lambda inside the view's scope")
 }
@@ -2144,7 +2161,11 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, e
     // (Rust `once_lambda_sites`): a `.move()` take of a captured
     // name inside the body moves it into the lambda, and the lambda runs
     // once. The capture is gone for the enclosing body too. An explicit
-    // `task &&name` capture keeps its own capture move.
+    // `task &&name` capture keeps its own capture move. Only a task body, a
+    // lambda called where it is written, and a lambda bound to a local that
+    // only direct calls reach are known to run once (the binding's calls are
+    // counted); any other lambda is passed on or stored, may run again, and
+    // would move the capture again (E0121).
     if !inline_loop {
         loop moved in lambda_state.moved {
             if sema_ownership_place_moved(lambda_parent_state, moved.place) != None -> next
@@ -2154,6 +2175,7 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, e
                 if capture.name == moved.place.root -> explicit_capture = true
             }
             if explicit_capture -> next
+            if !task_body && !sema_ownership_is_direct_call_lambda(state, lambda.span) -> sema_expression_lambda_repeated_capture_move(state, moved, lambda.span, diagnostics)
             sema_ownership_note_once_lambda(state, lambda.span, moved.place.root)
             state.moved.push(moved)
         }

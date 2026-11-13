@@ -3696,7 +3696,8 @@ sema_ownership_in_reactive_body: fn(state: SemaOwnershipState, span: Span) -> Bo
     false
 }
 
-// The lambda at `site` is bound to a local that only direct calls reach.
+// The lambda at `site` is bound to a local that only direct calls reach, or
+// is called where it is written.
 sema_ownership_note_direct_call_lambda: fn(state: &SemaOwnershipState, site: Span) Never! {
     loop known in state.direct_call_lambdas {
         if sema_ownership_span_same(known, site) -> return
@@ -3704,7 +3705,8 @@ sema_ownership_note_direct_call_lambda: fn(state: &SemaOwnershipState, site: Spa
     state.direct_call_lambdas.push(site.copy())
 }
 
-// Whether the lambda at `site` is bound to a local that only direct calls reach.
+// Whether the lambda at `site` is bound to a local that only direct calls
+// reach, or is called where it is written.
 sema_ownership_is_direct_call_lambda: fn(state: SemaOwnershipState, site: Span) -> Bool Never! {
     loop known in state.direct_call_lambdas {
         if sema_ownership_span_same(known, site) -> return true

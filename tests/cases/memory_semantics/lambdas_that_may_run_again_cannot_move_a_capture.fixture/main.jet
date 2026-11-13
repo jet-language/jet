@@ -1,0 +1,64 @@
+consume: fn(&&s: String) -> Int {
+    s.len()
+}
+
+// Passed to a call that runs it once per item: the second item's run would
+// move a value the first run already gave away.
+each_item: fn() -> Int {
+    s: "abc".repeat(3)
+    [1, 2, 3].map(x -> consume(s.move()) + x).sum()
+}
+
+// Bound, then passed on: the binding's own calls are not the only ones.
+passed_on: fn() -> Int {
+    s: "abc".repeat(3)
+    add: (acc: Int, x: Int) -> acc + x + consume(s.move())
+    [1, 2, 3].fold(0, add)
+}
+
+// Handed back: the caller may call it any number of times.
+handed_back: fn() -> fn() -> Int {
+    s: "abc".repeat(3)
+    () -> consume(s.move())
+}
+
+// Bound and only called directly: its one call is counted.
+called_once: fn() -> Int {
+    s: "abc".repeat(3)
+    finish: () -> consume(s.move())
+    finish()
+}
+
+// Called where it is written: it runs once each time the call runs.
+called_here: fn() -> Int {
+    s: "abc".repeat(3)
+    (() -> consume(s.move()))()
+}
+
+// A copy per run leaves the capture standing.
+copies: fn() -> Int {
+    s: "abc".repeat(3)
+    [1, 2, 3].map(x -> consume(s.copy()) + x).sum()
+}
+
+// An unmarked take of a clonable capture copies on each run, as it does in
+// a loop body.
+unmarked: fn() -> Int {
+    s: "abc".repeat(3)
+    [1, 2, 3].map(x -> consume(s) + x).sum()
+}
+
+// A task body runs once.
+in_a_task: fn() {
+    s: "abc".repeat(3)
+    worker: task { consume(s.move()) }
+    if worker.join() == {
+        .Ok(n) -> print(n)
+        .Err(_) -> print("failed")
+    }
+}
+
+run: fn() {
+    print(each_item() + passed_on() + handed_back().call() + called_once() + called_here() + copies() + unmarked())
+    in_a_task()
+}
