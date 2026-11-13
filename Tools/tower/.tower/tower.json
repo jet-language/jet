@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6791,
-    "rev": 101483,
+    "nextNum": 6792,
+    "rev": 101488,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -92259,64 +92259,6 @@
       "completedAt": "2026-11-13T03:50:40.627Z"
     },
     {
-      "id": "c0j5nzl5",
-      "num": 6729,
-      "title": "One version string everywhere: a0.0.N for releases, a0.0.N-dev+<commit> for unreleased builds",
-      "body": "OWNER RULING 2026-11-09 (chat, chosen from options a0.0.41 / a0.0.041 / 0.0.41-alpha): Jet's version is spelled a0.0.N (alpha prefix, no zero padding). Today jet --version prints 'Jet 0.1.0' (COMPILER_VERSION, never updated), the identity says jet@0.0.1#<hash>, and the releases are named a0_NNN, so a tester can't tell compilers apart. Cutover: one version string in jet --version, help and the banner, the compiler identity, the REPL banner, jet new, git tags, seed directories, RELEASE.json and GitHub releases. Unreleased builds print a0.0.<next>-dev+<commit10>. The release tooling stamps the version at admit; the build stamps the dev form. Migrate every in-repo reader (Jetpack version checks, the version-skew handshake, the seeds launcher and jet-use, the release scripts, tests and goldens) in one cutover with no aliases (greenfield). Existing published a0_NNN tags and seeds stay as history; the first release with the new spelling is the one after a0_042.",
-      "kind": "task",
-      "track": "epoch",
-      "epoch": "e5",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P1",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "jet --version on a release prints 'jet a0.0.N (<commit10>, <date>, alpha)', and on an unreleased build 'jet a0.0.<next>-dev+<commit10> (...)'; jet --version --json carries the same fields.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "478a3a33a5: jet --version prints jet a0.0.N (<commit10>, <date>, alpha) from the VERSION stamp, and jet a0.0.N-dev+<commit10> from the COMMIT stamp. JET_VERSION a0.0.43 is the one constant. The Lander integrated t2c on e4096a0f3b; landed as dev e4096a0f3b..c057ea659d.",
-          "at": "2026-11-10T02:36:15.720Z"
-        },
-        {
-          "n": 2,
-          "text": "The compiler identity, REPL banner, help, jet new, the version-skew handshake and Jetpack's compiler version checks read the one constant; no 0.1.0 or 0.0.1 literal remains (a guard enforces it).",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "478a3a33a5 (t2c, dev c057ea659d). Manifest.jet JET_VERSION is the one constant. The help greeting, REPL banner, man page, jet new/init pin, lock toolchain, BuildStamp, the E1227/E1228 version-skew handshake, Jetpack's E1208 and trust-pin checks, and the IDENTITY string all read it; PKG_BUILD_STAMP_TOOLCHAIN 0.1.0 is removed. The guard tests/guards/jet_version.jet refuses the old self-version spellings (Jet 0.1.0/0.0.1, jet: \"0., toolchain: \"0., COMPILER_VERSION, new a0_NNN names) across Compiler, Core, Jetpack, Tools and tests. jet test tests/guards gave rc 0 on the t2c tree. The remaining \"0.1.0\" literals are package versions of guard fixtures, not Jet's own version.",
-          "at": "2026-11-10T02:42:58.678Z"
-        },
-        {
-          "n": 3,
-          "text": "The release tooling names the tag, the seed directory, RELEASE.json and the GitHub release a0.0.N, and the seeds launcher and jet-use accept it; the next release after a0_042 is published as a0.0.43 and jet --version on PATH prints it.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Release cut 6 admitted a0.0.43 on dev c460ba91e5 at 08:18:58 EST. Tag a0.0.43 is on origin and published as its GitHub release, with seed directory a0.0.43 and RELEASE.json verdict PASS over the full suites. `jet-use a0.0.43` accepted it: current -> a0.0.43 (jet@a0.0.43#16e86927…). The launcher on PATH ($HOME/.local/share/jet-seeds/bin/jet --version) prints \"jet a0.0.43 (c460ba91e5, 2026-11-10, alpha)\". Master merged dev c460ba91e5 (f1dec0721c).",
-          "at": "2026-11-10T13:22:20.527Z"
-        }
-      ],
-      "refs": [],
-      "tags": [],
-      "goals": [],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-11-09T15:05:51.058Z",
-      "updated": "2026-11-10T13:22:31.371Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 3,
-      "completedAt": "2026-11-10T13:22:31.371Z"
-    },
-    {
       "id": "c06vkd04",
       "num": 6730,
       "title": "jet debug: right locals, debug info for optimized builds, and the debugger contract on the self-hosted toolchain",
@@ -95513,6 +95455,74 @@
       "updated": "2026-11-13T13:13:01.632Z",
       "updatedBy": "Main",
       "criteriaLastN": 1
+    },
+    {
+      "id": "c0lmfkg7",
+      "num": 6791,
+      "title": "Dev golden reds after the lambda-shape1 cutover: test histories, shared guard projection, fold association, RunColdContext capture ICE",
+      "body": "Golden reds on dev at 380c3fbf7a (they fail with the g6-cut3b dev jet as well; seen in g11-c1r2 cmds 7 and 10, outputs in $JET_SCRATCH_ROOT/lanes/Lander/probe/out/g11-c1r2/10.out and 7.out). The Metaprogramming reflection and derive reds are covered by #6786 and #6789. ReturnedFunctionCall is covered by #6790. OSTreeCPUTime and RequiredPostDecided are already carded. This card holds the remaining roots, one criterion each.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Examples/Tooling/Testing/TestHistory and TestOutcomes pass their goldens on o0/o1/o2. Today o1/o2 fail with \"This call to `core.testing.histories` is missing `__variants`\" (MissingArgument). Proof: jet test Compiler --profile golden --filter Testing/TestHistory and --filter Testing/TestOutcomes.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T13:24:48.528Z"
+        },
+        {
+          "n": 2,
+          "text": "Examples/Memory/Shared/SharedGuardProjection passes on o0/o1/o2. Today it fails with E InvalidGuardMap \"`SharedGuard.map` needs a stored field projection\". Proof: jet test Compiler --profile golden --filter SharedGuardProjection.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T13:24:49.453Z"
+        },
+        {
+          "n": 3,
+          "text": "Examples/Collections/Iterators/FoldAssociation matches its .out snapshot on o0/o1/o2. Fix the program or the meaning, and update the snapshot only if the new output is the ratified meaning. Proof: jet test Compiler --profile golden --filter FoldAssociation.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T13:24:50.397Z"
+        },
+        {
+          "n": 4,
+          "text": "Tools/agent-eval/RunColdContext.jet builds with no ICE. Today: \"ir.build unlowered: make_report.lambda… capture of unknown local r\". The fix goes in the lambda capture lowering (an I2 defect), not in the tool. Then PortBars run-cold-context parity is 26/26. Proof: the PortBars run-cold-context line, plus a case reproducing the capture shape.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T13:24:51.367Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G5"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-13T13:24:40.292Z",
+      "updated": "2026-11-13T13:24:51.367Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 4
     }
   ],
   "decisions": [
@@ -200721,6 +200731,41 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-13T13:24:51.367Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0lmfkg7",
+      "note": "#4 Tools/agent-eval/RunColdContext.jet builds with no ICE. Toda"
+    },
+    {
+      "at": "2026-11-13T13:24:50.397Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0lmfkg7",
+      "note": "#3 Examples/Collections/Iterators/FoldAssociation matches its ."
+    },
+    {
+      "at": "2026-11-13T13:24:49.453Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0lmfkg7",
+      "note": "#2 Examples/Memory/Shared/SharedGuardProjection passes on o0/o1"
+    },
+    {
+      "at": "2026-11-13T13:24:48.528Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0lmfkg7",
+      "note": "#1 Examples/Tooling/Testing/TestHistory and TestOutcomes pass t"
+    },
+    {
+      "at": "2026-11-13T13:24:40.293Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0lmfkg7",
+      "note": "Dev golden reds after the lambda-shape1 cutover: test histories, shared guard projection, fold association, RunColdContext capture ICE"
+    },
     {
       "at": "2026-11-13T13:13:01.632Z",
       "by": "Main",
