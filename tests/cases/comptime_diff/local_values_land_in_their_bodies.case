@@ -10,6 +10,6 @@ write: main.jet = "square: fn(n: Int) -> Int {\n    n * n\n}\n\nsum_squares: fn(
 step: jet run --trace main.jet
 exit: 0
 stdout: = "4 14 ababab ==4\n"
-stderr: ~ "# sema.local_values_spliced = 2\n" # `run` and `show`, one pass, no second finalization
+stderr: ~ "# sema.local_values_spliced = 5\n" # `run` and `show`, and `square`, `sum_squares` and `repeat`, which the pass first checked to run while compiling; one pass, no second finalization
 stderr: !~ "# sema.local_values_refused" # no pass fell back to the full recheck
 stderr: !~ "JET_RECHECK_VERIFY" # the spliced result is the full recheck's

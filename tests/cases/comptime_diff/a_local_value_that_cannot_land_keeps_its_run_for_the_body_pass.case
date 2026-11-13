@@ -1,0 +1,16 @@
+# Card #6759 c1 (fin1): in a compile that lowers, a local value cannot land
+# before the whole-program passes when the comptime function its pass adds
+# names a Core body that waits for demand: `parts`, checked to run while
+# compiling, names core.text.parse `split`. sema_local_value_land refuses the
+# pass and traces the reason. The pass already ran, so the first body pass
+# after finalization takes its run (JetDriver BodyComptime.jet
+# jet_driver_comptime_body_run) instead of building the same program again.
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+write: main.jet = "use {\n    parse: core.text.parse\n}\n\nparts: fn(text: String) -> Int {\n    parse.split(text, \",\").len()\n}\n\nrun: fn() {\n    count: parts(\"a,b,c\")\n    print(\"{count}\")\n}\n"
+step: jet run --trace main.jet
+exit: 0
+stdout: = "3\n"
+stderr: ~ "# sema.local_values_refused = " # the pass's value cannot land before the whole-program passes
+stderr: ~ "# comptime.refused_pass_taken = " # the body pass takes the refused pass's run, counted by its sites
+stderr: ~ "# comptime.bodies_pending = 0\n" # the taken run leaves no body site behind

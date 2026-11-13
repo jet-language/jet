@@ -13,14 +13,24 @@ use {
         SemaComptimeItemKind,
         SemaComptimeItemSource,
         SemaComptimeItemValue,
+        SemaFinalizeBodies,
         SemaGraphModuleResult,
         SemaGraphResult,
+        SemaLocalSpliceDemand,
         SemaRegistrationGraph,
         sema_comptime_body_item_source,
+        sema_comptime_function_diagnostics,
+        sema_comptime_graph_apply_values,
         SemaGraphTrail,
+        sema_graph_trail_init,
         sema_graph_trail_undo,
         sema_finalize_graph,
+        sema_local_splice_demand_swap,
+        sema_local_value_land,
         sema_local_value_splice,
+        sema_local_values_blocked,
+        sema_name_facts_empty,
+        sema_stage_declaration_modules,
     ]
 }
 
@@ -133,10 +143,10 @@ jet_driver_comptime_body_source_add: fn(
     sources.push(item)
 }
 
-jet_driver_comptime_body_sources: fn(graph: SemaGraphResult) -> [SemaComptimeBodySource] Never! {
+jet_driver_comptime_body_sources: fn(modules: [SemaGraphModuleResult]) -> [SemaComptimeBodySource] Never! {
     sources := [SemaComptimeBodySource]{}
     seen := [String:Bool]{}
-    loop graph_module in graph.modules {
+    loop graph_module in modules {
         loop source in graph_module.comptime_body_sources {
             key: "{source.module_identity}\n{source.key}"
             if seen.get(key) != None -> next
@@ -148,7 +158,7 @@ jet_driver_comptime_body_sources: fn(graph: SemaGraphResult) -> [SemaComptimeBod
 }
 
 jet_driver_pending_comptime_body_sources: fn(
-    graph: SemaGraphResult,
+    modules: [SemaGraphModuleResult],
     values: [SemaComptimeItemValue],
 ) -> [SemaComptimeBodySource] Never! {
     // The `module\nkey` of every staged body value, collected once rather
@@ -158,7 +168,7 @@ jet_driver_pending_comptime_body_sources: fn(
         if value.kind == SemaComptimeItemKind.BodyExpression -> present["{value.module_identity}\n{value.key}"] = true
     }
     pending := [SemaComptimeBodySource]{}
-    loop source in jet_driver_comptime_body_sources(graph) {
+    loop source in jet_driver_comptime_body_sources(modules) {
         if present.get("{source.module_identity}\n{source.key}") == None -> pending.push(source)
     }
     pending
@@ -168,7 +178,7 @@ jet_driver_pending_comptime_body_sources: fn(
 // `graph` and so reads its name facts (jet_driver_comptime_body_pass,
 // jet_driver_validate_checked_text).
 jet_driver_comptime_reads_names: fn(graph: SemaGraphResult, values: [SemaComptimeItemValue]) -> Bool Never! {
-    if jet_driver_pending_comptime_body_sources(graph, values).len() > 0 -> return true
+    if jet_driver_pending_comptime_body_sources(graph.modules, values).len() > 0 -> return true
     loop graph_module in graph.modules {
         loop call in graph_module.comptime_requests {
             if call.checked_text != None -> return true
@@ -183,12 +193,16 @@ jet_driver_comptime_body_stage: fn(
     sources: &&[SemaComptimeItemSource],
 ) -> SemaComptimeDeclarationStage Never! {
     // The successful evaluation retired the old graph; its resolved modules
-    // now belong to the recheck stage, never to a second copied graph.
+    // now belong to the recheck stage, never to a second copied graph. The
+    // recheck reads only their declarations, so their checked bodies, the
+    // graph's merged rows and its name facts are freed here, before it checks
+    // every body again.
+    retired := graph.move()
     SemaComptimeDeclarationStage{
-        modules: graph.modules.move(),
+        modules: sema_stage_declaration_modules(retired.modules),
         imports: stage.imports,
         package_policies: stage.package_policies,
-        names: graph.names.move(),
+        names: sema_name_facts_empty(),
         sources: sources.move(),
         diagnostics: stage.diagnostics,
         complete: stage.complete,
@@ -197,7 +211,9 @@ jet_driver_comptime_body_stage: fn(
 
 // The caller moves its registration graph in and takes it back from
 // `registration` of the result (every exit returns it). The run's values,
-// closures and trace move in too; the result hands them back.
+// closures and trace move in too; the result hands them back. `refused` is
+// the pass the first finalization ran and did not land
+// (jet_driver_land_local_values), or None; the first pass takes it.
 jet_driver_orchestrate_comptime_bodies: fn(
     graph: &&SemaRegistrationGraph,
     stage: SemaComptimeDeclarationStage,
@@ -208,16 +224,18 @@ jet_driver_orchestrate_comptime_bodies: fn(
     load: JetDriverLoadResult,
     request: JetDriverCompileRequest,
     diagnostics: &[Diagnostic],
+    refused: &&JetDriverRefusedPass?,
 ) -> JetDriverComptimeBodyResult {
     jet_driver_comptime_body_pass(
         graph, stage, initial_graph, initial_values, initial_functions,
-        initial_trace, load, request, diagnostics, 0,
+        initial_trace, load, request, diagnostics, 0, refused,
     )
 }
 
 // Each bounded pass owns its graphs until evaluation succeeds, then moves
 // them into rechecking. Like pure folding, passes thread ownership through
-// calls instead of copying a graph across a loop backedge.
+// calls instead of copying a graph across a loop backedge. A pass takes the
+// run of `refused` when it fits (jet_driver_comptime_body_run).
 jet_driver_comptime_body_pass: fn(
     graph: &&SemaRegistrationGraph,
     stage: SemaComptimeDeclarationStage,
@@ -229,6 +247,7 @@ jet_driver_comptime_body_pass: fn(
     request: JetDriverCompileRequest,
     diagnostics: &[Diagnostic],
     completed_passes: Int,
+    refused: &&JetDriverRefusedPass?,
 ) -> JetDriverComptimeBodyResult {
     registration := graph.move()
     current_graph := initial_graph.move()
@@ -242,7 +261,8 @@ jet_driver_comptime_body_pass: fn(
         ), registration)
     }
     jet_driver_comptime_diagnostics_add(diagnostics, current_graph.diagnostics)
-    pending := jet_driver_pending_comptime_body_sources(current_graph, values)
+    pending := jet_driver_pending_comptime_body_sources(current_graph.modules, values)
+    if request.trace_sink == .Val(sink) -> sink.progress("counters.comptime.bodies_pending", pending.len(), -1)
     if current_graph.complete && pending.len() == 0 && !jet_driver_has_errors(current_graph.diagnostics) {
         return jet_driver_comptime_body_returning(jet_driver_comptime_body_result(current_graph, values, functions, trace, true, false), registration)
     }
@@ -268,10 +288,7 @@ jet_driver_comptime_body_pass: fn(
     body_sources := [SemaComptimeItemSource]{}
     known := [String:Bool]{}
     loop source in pending -> jet_driver_comptime_body_source_add(body_sources, known, source)
-    run := jet_driver_run_comptime(
-        registration, [SemaGraphModuleResult]{}, None, body_sources, values, functions,
-        request, diagnostics,
-    )
+    run := jet_driver_comptime_body_run(registration, body_sources, values, functions, refused, request, diagnostics)
     finished_registration := run.graph.move()
     run.graph = None
     partial_registration := run.partial_graph.move()
@@ -323,9 +340,13 @@ jet_driver_comptime_body_pass: fn(
         sema_graph_trail_undo(registration, run.trail)
         return jet_driver_comptime_body_pass(
             registration, stage, current_graph, values, functions, trace,
-            load, request, diagnostics, pass,
+            load, request, diagnostics, pass, None,
         )
     }
+    // The refused splice was the last reader of the values and closures the
+    // finalization was checked against.
+    earlier_values = [SemaComptimeItemValue]{}
+    earlier_functions = [SemaComptimeFunctionResult]{}
     // The run's graph already carries every value: the recheck finalizes it
     // in place instead of copying the registration graph.
     rechecked := jet_driver_recheck_comptime_bodies(
@@ -338,8 +359,82 @@ jet_driver_comptime_body_pass: fn(
     sema_graph_trail_undo(registration, run.trail)
     jet_driver_comptime_body_pass(
         registration, stage, rechecked, values, functions, trace,
-        load, request, diagnostics, pass,
+        load, request, diagnostics, pass, None,
     )
+}
+
+// A body comptime pass the first finalization ran and did not land
+// (jet_driver_land_local_values): its sites by `module\nkey`, how many
+// values and closures it started from, and the run's results. The first
+// body pass after finalization starts from the same values and closures and
+// takes the same sites, so it takes these results instead of building and
+// evaluating the same comptime program again.
+JetDriverRefusedPass: struct {
+    sites: [String:Bool]
+    base_values: Int
+    base_functions: Int
+    values: [SemaComptimeItemValue]
+    functions: [SemaComptimeFunctionResult]
+    trace: JetDriverCompileTrace
+}
+
+// `refused`, moved out, when its pass is the one a body pass over `sources`
+// runs from `values` and `functions`: the same sites, from the same values
+// and closures. Otherwise None, and `refused` is dropped.
+jet_driver_take_refused_pass: fn(refused: &&JetDriverRefusedPass?, sources: [SemaComptimeItemSource], values: [SemaComptimeItemValue], functions: [SemaComptimeFunctionResult]) -> JetDriverRefusedPass? Never! {
+    pass := refused.move() ?? return None
+    if pass.base_values != values.len() || pass.base_functions != functions.len() || pass.sites.len() != sources.len() -> return None
+    loop source in sources {
+        if pass.sites.get("{source.module_identity}\n{source.key}") == None -> return None
+    }
+    Val(pass.move())
+}
+
+// The comptime run of a body pass over `sources` from `values` and
+// `functions` (jet_driver_run_comptime). When `refused` fits
+// (jet_driver_take_refused_pass), its results stand for the run: the graph
+// takes `values` as a run's environment does and the pass's values on the
+// result's trail, as the run applies them. Under `recheck_verify` the pass
+// runs again instead, and a run that differs from the refused one fails.
+// The graph moves in and comes back in the result.
+jet_driver_comptime_body_run: fn(
+    graph: &&SemaRegistrationGraph,
+    sources: [SemaComptimeItemSource],
+    values: [SemaComptimeItemValue],
+    functions: [SemaComptimeFunctionResult],
+    refused: &&JetDriverRefusedPass?,
+    request: JetDriverCompileRequest,
+    diagnostics: &[Diagnostic],
+) -> JetDriverComptimeRunResult {
+    registration := graph.move()
+    kept := jet_driver_take_refused_pass(refused, sources, values, functions)
+    pass := kept.move() ?? return jet_driver_run_comptime(registration, [SemaGraphModuleResult]{}, None, sources, values, functions, request, diagnostics)
+    if request.recheck_verify {
+        fresh := jet_driver_run_comptime(registration, [SemaGraphModuleResult]{}, None, sources, values, functions, request, diagnostics)
+        if fresh.complete && ("{fresh.values:Debug}" != "{pass.values:Debug}" || "{fresh.functions:Debug}" != "{pass.functions:Debug}") {
+            fresh.complete = false
+            fresh.internal_problem = Val("JET_RECHECK_VERIFY: the body pass the first finalization did not land differs from the same pass run again")
+        }
+        return fresh
+    }
+    if request.trace_sink == .Val(sink) -> sink.progress("counters.comptime.refused_pass_taken", sources.len(), -1)
+    environment_trail := sema_graph_trail_init()
+    sema_comptime_graph_apply_values(registration, values, environment_trail)
+    trail := sema_graph_trail_init()
+    sema_comptime_graph_apply_values(registration, pass.values, trail)
+    JetDriverComptimeRunResult{
+        values: pass.values.move(),
+        functions: pass.functions.move(),
+        trace: pass.trace.move(),
+        complete: true,
+        soft_stop: false,
+        internal_problem: None,
+        graph: Val(registration.move()),
+        partial_graph: None,
+        graph_finished: true,
+        trail: trail.move(),
+        declared: [SemaGraphModuleResult]{},
+    }
 }
 
 // JET_RECHECK_VERIFY (JetDriverCompileRequest.recheck_verify): the first
@@ -360,7 +455,7 @@ jet_driver_recheck_differences: fn(spliced: SemaGraphResult, full: SemaGraphResu
         if "{ours.call_facts:Debug}" != "{theirs.call_facts:Debug}" -> differences.push("{name}: call facts differ")
         if "{ours.name_references:Debug}" != "{theirs.name_references:Debug}" -> differences.push("{name}: name references differ")
         if "{ours.comptime_body_sources:Debug}" != "{theirs.comptime_body_sources:Debug}" -> differences.push("{name}: body comptime sites differ")
-        if "{ours.diagnostics:Debug}" != "{theirs.diagnostics:Debug}" -> differences.push("{name}: diagnostics differ")
+        if "{ours.diagnostics:Debug}" != "{theirs.diagnostics:Debug}" -> differences.push("{name}: diagnostics differ: {jet_driver_recheck_diagnostic_difference(ours.diagnostics, theirs.diagnostics)}")
         if "{ours.failure_facts:Debug}" != "{theirs.failure_facts:Debug}" -> differences.push("{name}: failure facts differ")
         our_rows := ours.copy()
         our_rows.functions = [FnBody]{}
@@ -369,8 +464,28 @@ jet_driver_recheck_differences: fn(spliced: SemaGraphResult, full: SemaGraphResu
         if "{our_rows:Debug}" != "{their_rows:Debug}" -> differences.push("{name}: module rows differ")
         if differences.len() >= 20 -> return differences
     }
-    if jet_driver_recheck_graph_rows(spliced) != jet_driver_recheck_graph_rows(full) -> differences.push("graph rows differ")
+    if jet_driver_recheck_graph_rows(spliced) != jet_driver_recheck_graph_rows(full) {
+        detail: if "{spliced.diagnostics:Debug}" != "{full.diagnostics:Debug}" -> ": diagnostics: {jet_driver_recheck_diagnostic_difference(spliced.diagnostics, full.diagnostics)}" else -> ""
+        differences.push("graph rows differ{detail}")
+    }
     differences
+}
+
+// How the diagnostics of the splice (`ours`) and of the recheck (`theirs`)
+// differ: their counts and the first one each holds that the other lacks.
+jet_driver_recheck_diagnostic_difference: fn(ours: [Diagnostic], theirs: [Diagnostic]) -> String Never! {
+    "{ours.len()} spliced, {theirs.len()} rechecked; first only spliced: {jet_driver_recheck_first_missing(ours, theirs)}; first only rechecked: {jet_driver_recheck_first_missing(theirs, ours)}"
+}
+
+// The first diagnostic of `diagnostics` that `others` lacks, by code, span
+// and text; "none" when there is none.
+jet_driver_recheck_first_missing: fn(diagnostics: [Diagnostic], others: [Diagnostic]) -> String Never! {
+    present := [String:Bool]{}
+    loop diagnostic in others -> present["{diagnostic:Debug}"] = true
+    loop diagnostic in diagnostics {
+        if present.get("{diagnostic:Debug}") == None -> return "{diagnostic.code} at {diagnostic.span:Debug}: {diagnostic.what}"
+    }
+    "none"
 }
 
 // The graph rows of `graph` outside its modules, as one display. The
@@ -484,4 +599,136 @@ jet_driver_recheck_comptime_bodies: fn(
 ) -> SemaGraphResult {
     body_stage := jet_driver_comptime_body_stage(stage, semantic_graph, body_sources)
     sema_finalize_graph(graph, trail, body_stage, values, comptime_functions, request.eval_config.host_hooks, request.compiler_threads, None, true, request.trace_sink)
+}
+
+// Lands each body comptime pass whose pending sites are all local values in
+// the modules of the first finalization (`bodies`) after its body half and
+// Core demand (sema_finalize_bodies, sema_finalize_demand) and before its
+// whole-program half (sema_finalize_program), so that half runs once, over
+// every value, instead of once before the pass and again after it
+// (sema_local_value_land). The sites of user and Core bodies land in one
+// pass, and only a pass whose values change no Core demand. A pass that cannot
+// land cleanly (an error other than a failure obligation or an incomplete
+// check so far, a site that is not a local value or that an earlier pass
+// already took, a run that reports anything, stops, does not complete or
+// adds no value, or a splice that does not hold) is dropped, and the body
+// passes after finalization (jet_driver_orchestrate_comptime_bodies) take
+// its sites as before. A clean run whose splice does not hold goes to
+// `refused`, so the first of those passes takes its results instead of
+// running it again. The registration graph moves in and comes back with no
+// edit; `values`, `functions` and `trace` take what the landed passes add.
+jet_driver_land_local_values: fn(
+    graph: &&SemaRegistrationGraph,
+    bodies: &SemaFinalizeBodies,
+    stage: SemaComptimeDeclarationStage,
+    values: &[SemaComptimeItemValue],
+    functions: &[SemaComptimeFunctionResult],
+    trace: &JetDriverCompileTrace,
+    request: JetDriverCompileRequest,
+    refused: &JetDriverRefusedPass?,
+) -> SemaRegistrationGraph {
+    registration := graph.move()
+    // The `module\nkey` of every site a pass took: a site pending again
+    // ends the landing, so it ends.
+    tried := [String:Bool]{}
+    loop {
+        if !jet_driver_local_values_open(bodies, stage, functions) -> break
+        pending := jet_driver_pending_comptime_body_sources(bodies.modules, values)
+        if pending.len() == 0 -> break
+        again := false
+        loop source in pending {
+            site: "{source.module_identity}\n{source.key}"
+            if tried.get(site) != None -> again = true
+            tried[site] = true
+        }
+        if again -> break
+        body_sources := [SemaComptimeItemSource]{}
+        known := [String:Bool]{}
+        loop source in pending -> jet_driver_comptime_body_source_add(body_sources, known, source)
+        if !jet_driver_local_sources_only(body_sources) -> break
+        run_diagnostics := [Diagnostic]{}
+        run := jet_driver_run_comptime(
+            registration, [SemaGraphModuleResult]{}, None, body_sources, values, functions,
+            request, run_diagnostics,
+        )
+        finished_registration := run.graph.move()
+        run.graph = None
+        partial_registration := run.partial_graph.move()
+        run.partial_graph = None
+        registration = jet_driver_comptime_take_registration(finished_registration, partial_registration)
+        if run.soft_stop || !run.complete || run.values.len() <= values.len() || run_diagnostics.len() > 0 {
+            sema_graph_trail_undo(registration, run.trail)
+            break
+        }
+        splice := sema_local_value_land(registration, run.trail, bodies.modules, body_sources, values, functions, run.values, run.functions, request.eval_config.host_hooks, request.compiler_threads, request.trace_sink)
+        registration = splice.graph.move()
+        sema_graph_trail_undo(registration, run.trail)
+        if !splice.spliced {
+            sites := [String:Bool]{}
+            loop source in body_sources -> sites["{source.module_identity}\n{source.key}"] = true
+            refused = Val(JetDriverRefusedPass{sites: sites, base_values: values.len(), base_functions: functions.len(), values: run.values.move(), functions: run.functions.move(), trace: run.trace.move()})
+            break
+        }
+        values = run.values.move()
+        functions = run.functions.move()
+        jet_driver_comptime_trace_append(trace, run.trace)
+    }
+    registration
+}
+
+// Whether the body half of a finalization (`bodies`) over the declaration
+// `stage` and the comptime `functions` is complete and reports no error so
+// far but the failure obligations its whole-program half settles
+// (sema_local_values_blocked), which a body comptime pass needs to land
+// before that half (jet_driver_land_local_values).
+jet_driver_local_values_open: fn(bodies: SemaFinalizeBodies, stage: SemaComptimeDeclarationStage, functions: [SemaComptimeFunctionResult]) -> Bool Never! {
+    if !bodies.complete || sema_local_values_blocked(stage.diagnostics) -> return false
+    loop graph_module in bodies.modules {
+        if !graph_module.complete || sema_local_values_blocked(graph_module.diagnostics) -> return false
+    }
+    function_diagnostics := [Diagnostic]{}
+    sema_comptime_function_diagnostics(functions, function_diagnostics) && !sema_local_values_blocked(function_diagnostics)
+}
+
+// Whether every source of `sources` is a local value.
+jet_driver_local_sources_only: fn(sources: [SemaComptimeItemSource]) -> Bool Never! {
+    loop source in sources {
+        if !source.local_value -> return false
+    }
+    true
+}
+
+// JET_RECHECK_VERIFY (JetDriverCompileRequest.recheck_verify) for the values
+// landed before the whole-program half of the first finalization
+// (jet_driver_land_local_values): finalizes the program again with every
+// value applied, as a body pass's full recheck does, and puts the first rows
+// in which `landed`, that finalization's result, differs from it
+// (jet_driver_recheck_differences) in `problem`. The finalization starts
+// from `start`, the codec and derive demand the first one started from (the
+// item runs leave theirs pending, and the undo of the first one's generated
+// bodies takes it off the graph). The registration graph moves in without
+// staged edits and comes back the same.
+jet_driver_verify_landed_values: fn(
+    graph: &&SemaRegistrationGraph,
+    stage: SemaComptimeDeclarationStage,
+    landed: SemaGraphResult,
+    values: [SemaComptimeItemValue],
+    functions: [SemaComptimeFunctionResult],
+    start: &&SemaLocalSpliceDemand,
+    request: JetDriverCompileRequest,
+    problem: &String?,
+) -> SemaRegistrationGraph {
+    registration := graph.move()
+    held := sema_local_splice_demand_swap(registration, start)
+    trail := sema_graph_trail_init()
+    sema_comptime_graph_apply_values(registration, values, trail)
+    full := sema_finalize_graph(registration, trail, stage, values, functions, request.eval_config.host_hooks, request.compiler_threads, None, false, None)
+    restored := full.registration_graph.move()
+    full.registration_graph = None
+    registration = restored.move() ?? panic("the verifying finalization lost its registration graph")
+    sema_graph_trail_undo(registration, trail)
+    _ := sema_local_splice_demand_swap(registration, held)
+    differences: jet_driver_recheck_differences(landed, full)
+    if differences.len() > 0 -> problem = Val("JET_RECHECK_VERIFY: the local values landed before the whole-program passes differ from the full recheck:\n{differences.join("\n")}")
+    registration
 }

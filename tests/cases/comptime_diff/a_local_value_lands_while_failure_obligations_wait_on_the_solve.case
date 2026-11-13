@@ -1,0 +1,20 @@
+# A Core body this program reaches holds a failure-domain obligation (a call
+# of an unannotated callee that only the failure solve proves infallible).
+# That is not an error yet: the whole-program half of the first finalization
+# discharges it, so the pass still lands `data` before that half (JetDriver
+# BodyComptime.jet jet_driver_land_local_values) instead of checking the whole
+# program again. The step checks without lowering: a compile that lowers
+# refuses a pass whose comptime functions name a Core body that waits for
+# demand (`sha256` does), as a_local_value_that_cannot_land_keeps_its_run_for_the_body_pass
+# shows. JET_RECHECK_VERIFY=1 checks it again anyway and stops the compile
+# on any difference.
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JET_RECHECK_VERIFY=1
+write: main.jet = "use crypto: core.crypto\n\nrun: fn() {\n    data: \"abc\".bytes()\n    print(crypto.sha256(data).hex().len())\n}\n"
+step: jet check --trace main.jet
+exit: 0
+stdout: = ""
+stderr: ~ "# sema.local_values_spliced = " # the value lands in `run`
+stderr: !~ "# sema.local_values_refused" # the landing holds, so nothing falls back to the full recheck
+stderr: !~ "JET_RECHECK_VERIFY" # the landed result is the full recheck's

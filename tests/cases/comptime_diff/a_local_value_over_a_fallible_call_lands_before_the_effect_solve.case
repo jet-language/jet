@@ -1,0 +1,17 @@
+# A local value drops the call edges of the initializer it replaces.
+# `checked(3) ?? panic("no")` holds the calls `checked(3)` and `panic("no")`
+# inside the site's span. The pass lands the value in the first finalization
+# (JetSema Comptime/LocalSplice.jet) before the effect solve puts any call
+# edge on `run`, so no stale edge is left and the whole
+# program is not checked again. JET_RECHECK_VERIFY=1 checks it again anyway
+# and stops the compile on any difference.
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JET_RECHECK_VERIFY=1
+write: main.jet = "checked: fn(raw: Int) -> Int(0..10) { Int(0..10).from_int(raw) }\n\nrun: fn() {\n    value: checked(3) ?? panic(\"no\")\n    print(\"{value}\")\n}\n"
+step: jet run --trace main.jet
+exit: 0
+stdout: = "3\n"
+stderr: ~ "# sema.local_values_spliced = 2\n" # `run`, and `checked`, which the pass first checked to run while compiling
+stderr: !~ "# sema.local_values_refused" # the landing holds, so nothing falls back to the full recheck
+stderr: !~ "JET_RECHECK_VERIFY" # the landed result is the full recheck's

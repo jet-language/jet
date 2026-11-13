@@ -1,0 +1,22 @@
+# Card #6759 c1: the local values of the Core bodies a program reaches land
+# in the first finalization with the program's own, after its Core demand and
+# before its whole-program passes (JetDriver BodyComptime.jet
+# jet_driver_land_local_values), so no body comptime site is left for a pass
+# after it and the program is not checked again. `count` is the program's;
+# the Path literal reaches core.files `path_component_encode`, whose `hex` is
+# Core's. The step checks without lowering: a compile that lowers refuses a
+# pass whose comptime functions name a Core body that waits for demand, as
+# a_local_value_that_cannot_land_keeps_its_run_for_the_body_pass shows.
+# JET_RECHECK_VERIFY=1 checks the whole program again anyway and stops the
+# compile on any difference.
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JET_RECHECK_VERIFY=1
+write: main.jet = "run: fn() {\n    name: \"a b/c\"\n    count: \"ab\".len()\n    path: Path{\"/tmp/{name}\"}\n    print(\"{path} {count}\")\n}\n"
+step: jet check --trace main.jet
+exit: 0
+stdout: = ""
+stderr: ~ "# comptime.bodies_pending = 0\n" # every body site landed in the first finalization
+stderr: ~ "# sema.local_values_spliced = " # the values land in `run` and in `path_component_encode`
+stderr: !~ "# sema.local_values_refused" # no pass fell back to the full recheck
+stderr: !~ "JET_RECHECK_VERIFY" # the landed result is the full recheck's

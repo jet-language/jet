@@ -9696,6 +9696,27 @@ sema_stage_checked_types: fn(modules: [SemaGraphModuleResult]) -> [TTypeDef] Nev
     checked_types
 }
 
+// `modules`, moved in, as a finalization's stage needs them: it reads only
+// their declarations (sema_stage_checked_types). The checked bodies and the
+// rows their checks filled are freed, so finalizing a checked program again
+// never holds its old bodies beside the new ones.
+sema_stage_declaration_modules: fn(modules: &&[SemaGraphModuleResult]) -> [SemaGraphModuleResult] Never! {
+    kept := modules.move()
+    loop index in 0..<kept.len() {
+        kept[index].functions = [FnBody]{}
+        kept[index].call_facts = [SemaCallSiteFact]{}
+        kept[index].name_references = [SemaNameReferenceFact]{}
+        kept[index].comptime_requests = [SemaComptimeRequest]{}
+        kept[index].comptime_body_sources = [SemaComptimeBodySource]{}
+        kept[index].compute_facts = [SemaComputeFunctionFacts]{}
+        kept[index].copy_events = [SemaCopyEvent]{}
+        kept[index].diagnostics = [Diagnostic]{}
+        kept[index].failure_facts = [SemaFunctionFailureFacts]{}
+        kept[index].tests = [TTestFact]{}
+    }
+    kept
+}
+
 // Adds the diagnostics `comptime_functions` bring a finalization to
 // `diagnostics`; whether they leave it complete. A pending result's
 // obligations reach the failure solve through the body pass that reuses it
@@ -9891,15 +9912,17 @@ sema_finalize_graph: fn(resolved: &&SemaRegistrationGraph, trail: &SemaGraphTrai
     bodies := sema_finalize_bodies_empty()
     bodies.build_names = build_names
     body_graph := sema_finalize_bodies(resolved, trail, stage, values, comptime_functions, host_hooks, threads, session, trace_sink, bodies)
-    sema_finalize_program(body_graph, trail, stage, values, comptime_functions, host_hooks, threads, trace_sink, bodies)
+    demand_graph := sema_finalize_demand(body_graph, trail, values, comptime_functions, host_hooks, threads, trace_sink, bodies)
+    sema_finalize_program(demand_graph, trail, stage, values, comptime_functions, host_hooks, threads, trace_sink, bodies)
 }
 
 // What the body half of a finalization (sema_finalize_bodies) hands its
-// whole-program half (sema_finalize_program): the checked modules, the pass
-// facts the Core demand waves read while the graph rows stay unchanged, the
-// stage's checked types, whether the graph and the stage were complete, and
-// whether the whole-program half builds the bundle's name facts
-// (sema_finalize_graph's `build_names`).
+// Core demand (sema_finalize_demand) and its whole-program half
+// (sema_finalize_program): the checked modules, the pass facts the Core
+// demand waves read while the graph rows stay unchanged, the stage's checked
+// types, whether the graph and the stage were complete, and whether the
+// whole-program half builds the bundle's name facts (sema_finalize_graph's
+// `build_names`).
 SemaFinalizeBodies: struct {
     modules: [SemaGraphModuleResult]
     carried: [SemaPassFacts]
@@ -9947,24 +9970,37 @@ sema_finalize_bodies: fn(resolved: &&SemaRegistrationGraph, trail: &SemaGraphTra
     sema_derive_waves(after_codec_graph, values, comptime_functions, bodies.checked_types, hook_access, threads, trace_sink, bodies.carried, bodies.modules)
 }
 
+// The Core demand of a finalization over the `bodies` of
+// sema_finalize_bodies (sema_core_demand_waves), checked against `values`
+// and `comptime_functions`. A caller may land body comptime values in those
+// bodies after it, before the whole-program half (the driver's
+// jet_driver_land_local_values), when the landing demands nothing new
+// (sema_local_value_land). The graph moves in and comes back with its edits
+// on `trail`.
+sema_finalize_demand: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrail, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], host_hooks: Shared<SemaRegistrationHostHooks>, threads: CompilerThreads, trace_sink: CompilerTraceSink?, bodies: &SemaFinalizeBodies) -> SemaRegistrationGraph {
+    graph := owned.move()
+    hook_access: sema_host_hook_access(host_hooks)
+    demanded := sema_core_demand_waves(graph, trail, values, comptime_functions, bodies.checked_types, hook_access, threads, trace_sink, bodies.carried, bodies.modules)
+    // The whole-program half reads rows the waves may have changed.
+    bodies.carried = [SemaPassFacts]{}
+    demanded
+}
+
 // The whole-program half of sema_finalize_graph over the `bodies` of
-// sema_finalize_bodies: the Core demand waves, the failure solve and
-// recheck, and every whole-program pass after them. The graph moves in and
-// comes back as the result's `registration_graph`, with its edits on
-// `trail`. `values` and `comptime_functions` are the ones the bodies were
-// checked against.
+// sema_finalize_bodies after their Core demand (sema_finalize_demand): the
+// failure solve and recheck, and every whole-program pass after them. The
+// graph moves in and comes back as the result's `registration_graph`, with
+// its edits on `trail`. `values` and `comptime_functions` are the ones the
+// bodies were checked against.
 sema_finalize_program: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrail, stage: SemaComptimeDeclarationStage, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], host_hooks: Shared<SemaRegistrationHostHooks>, threads: CompilerThreads, trace_sink: CompilerTraceSink?, bodies: &&SemaFinalizeBodies) -> SemaGraphResult {
-    body_graph := owned.move()
+    after_body_graph := owned.move()
     held := bodies.move()
     modules := held.modules.move()
-    carried := held.carried.move()
     checked_types: held.checked_types.move()
     complete := held.complete
     hook_access: sema_host_hook_access(host_hooks)
     diagnostics := stage.diagnostics
     if !sema_comptime_function_diagnostics(comptime_functions, diagnostics) -> complete = false
-    after_body_graph := sema_core_demand_waves(body_graph, trail, values, comptime_functions, checked_types, hook_access, threads, trace_sink, carried, modules)
-    carried = [SemaPassFacts]{}
     // Every body the program reaches is checked (a Core body no check
     // demanded stays unchecked and has no caller), so the failure solve finds
     // the unannotated functions that can never fail.

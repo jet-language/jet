@@ -1,0 +1,21 @@
+# `strict` holds the local value `four` and a call of the unannotated
+# `checked`, which can fail: a failure-domain obligation the failure solve
+# keeps as E2404. The obligation does not stop `four` landing before the
+# whole-program half of the first finalization (JetDriver BodyComptime.jet
+# jet_driver_land_local_values), and the landed value changes nothing the
+# compile reports: the diagnostics are word for word the ones of a compile
+# that lands no value. JET_RECHECK_VERIFY=1 checks the whole program again
+# anyway and stops the compile on any difference.
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JET_RECHECK_VERIFY=1
+write: main.jet = "square: fn(n: Int) -> Int {\n    n * n\n}\n\nchecked: fn(row: Int) -> Int {\n    if row < 0 -> return Err(\"negative {row}\")\n    row\n}\n\nstrict: fn(row: Int) -> Int Never! {\n    four: square(2)\n    checked(row) + four\n}\n\nrun: fn() {\n    print(\"{strict(1)}\")\n}\n"
+step: jet check main.jet
+exit: nonzero
+stdout: empty
+stderr: = "Error [jet.ErrorNotPropagatable]: `checked` fails with `Err`, which can't propagate into `Never` here\n  --> main.jet:12:5\n    |\n 12 |     checked(row) + four\n    |     ^^^^^^^\n Why: `checked` is defined at `main.jet:5:1` with effective failure contract `implicit default Err!`; the caller's `explicit Never! (proven unreachable)` contract has no route from `Err` to `Never`\n Fix: Declare the caller with `Err` as its failure domain, or add `impl Err -> Never { … }`; otherwise handle `checked` locally with `??`\nMore: jet-lang.dev/e/E2404\n\n1 problem found\nrun `jet explain E2404` to learn more\n"
+step: jet check --trace main.jet
+exit: nonzero
+stderr: ~ "# comptime.programs_built = 1\n" # `four` ran while compiling, before the failure solve
+stderr: ~ "Error [jet.ErrorNotPropagatable]: `checked` fails with `Err`" # the traced compile reports the same E2404; its trace lines sit between the report's lines
+stderr: !~ "JET_RECHECK_VERIFY" # the landed result is the full recheck's
