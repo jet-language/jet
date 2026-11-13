@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6832,
-    "rev": 101756,
+    "nextNum": 6833,
+    "rev": 101758,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -97881,6 +97881,47 @@
       "updated": "2026-11-13T17:08:39.315Z",
       "updatedBy": "Main",
       "criteriaLastN": 2
+    },
+    {
+      "id": "c0pv78gy",
+      "num": 6832,
+      "title": "ELF object writer: extended section numbering (SHN_XINDEX) for objects over 65280 sections",
+      "body": "The sweep2 Core object reached 107273 sections, above the ELF limit of 65280 without extended numbering. The stage-A build worked around it by splitting or merging the Core object. The object writer should emit extended section indices: e_shnum 0 with the real count in section 0 sh_size, e_shstrndx SHN_XINDEX with the index in section 0 sh_link, and a .symtab_shndx table for symbols in sections at or above SHN_LORESERVE, so that any program of any size links.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "The object writer emits extended section numbering (SHN_XINDEX, .symtab_shndx) when an object has 65280 or more sections, and a generated program whose object has more than 70000 sections links and runs on O0, O1 and O2. Proof: a case under tests/cases that builds that program.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T20:22:15.728Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G11"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-13T20:22:10.960Z",
+      "updated": "2026-11-13T20:22:15.728Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1
     }
   ],
   "decisions": [
@@ -204163,6 +204204,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-13T20:22:15.728Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0pv78gy",
+      "note": "#1 The object writer emits extended section numbering (SHN_XIND"
+    },
+    {
+      "at": "2026-11-13T20:22:10.960Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0pv78gy",
+      "note": "ELF object writer: extended section numbering (SHN_XINDEX) for objects over 65280 sections"
+    },
     {
       "at": "2026-11-13T20:14:11.098Z",
       "by": "Main",
