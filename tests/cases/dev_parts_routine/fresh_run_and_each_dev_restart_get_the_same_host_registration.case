@@ -1,0 +1,27 @@
+# Claim (#3078 c5, run and restart): the O0 host registers a program's start
+# the same way for a fresh `jet run` and for every `jet dev` restart, and a
+# restart leaves nothing behind. Each start records its arguments, the
+# variables jet set, a variable jet passes through, its descriptors past stdio,
+# its blocked, ignored and handled signals and its thread count, then compares
+# that record with the fresh run's (the fixture's app.jet). The second dev
+# start runs after an edit; a stale descriptor, handler, mask bit or variable
+# from the first start would show in its record.
+requires: os-name:linux
+fixture: fresh_run_and_each_dev_restart_get_the_same_host_registration.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: CASE_MARK=kept
+step fresh: jet run -A app.jet
+exit: 0
+stdout: ~ "fresh: registered " # the line count follows the JET_ variables the runner sets
+session dev raw: jet dev -A app.jet
+recv dev until ~ "dev-1 (edition 1): registration" within 60s # the first dev start has compared its record
+stdout: ~ "dev-1 (edition 1): registration matches the fresh run" # the first dev start; the rest is jet dev's watch lines
+write: app.jet fresh_run_and_each_dev_restart_get_the_same_host_registration.v2.template
+recv dev until ~ "dev-2 (edition 2): registration" within 60s # the edit restarted the program
+stdout: ~ "dev-2 (edition 2): registration matches the fresh run" # the restart after the edit
+stdout: !~ "differs from the fresh run" # no start registered anything else
+signal dev: KILL
+close dev
+exit: any # killed on purpose

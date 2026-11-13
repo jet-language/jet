@@ -1,0 +1,74 @@
+// Records what the host registered for this start and compares it with the
+// fresh `jet run`'s record: the arguments, the names of the variables jet
+// set (their values carry the source digest, which an edit changes), a
+// variable jet must pass through unchanged, the descriptors past stdio, the
+// blocked, ignored and handled signal sets and the thread count.
+use {
+    files: core.files
+    process: core.process
+    sys: core.sys
+}
+
+EDITION: 1
+
+status_line: fn(status: String, key: String) -> String {
+    loop line in status.split("\n") {
+        if line.starts_with("{key}:") -> return line.copy()
+    }
+    "{key}: missing"
+}
+
+// The kind of what descriptor `name` holds: a pipe, socket or file is named
+// by its kind alone, since inode numbers and paths differ between starts.
+descriptor: fn(name: String) -> String {
+    target: files.read_link("/proc/self/fd/{name}") ?? return "{name} closed"
+    if target.starts_with("pipe:") -> return "{name} pipe"
+    if target.starts_with("socket:") -> return "{name} socket"
+    if target.starts_with("/") -> return "{name} file"
+    "{name} {target}"
+}
+
+registration: fn() -> [String] {
+    lines := [String]{}
+    lines.push("arguments {process.args().len()}")
+    all_names: sys.vars() ?? [String]{}
+    names := [String]{}
+    loop name in all_names {
+        if name.starts_with("JET_") -> names.push(name.copy())
+    }
+    names.sort()
+    loop name in names -> lines.push("set {name}")
+    lines.push("passed CASE_MARK={sys.get("CASE_MARK") ?? "unset"}")
+    entries: files.list_dir("/proc/self/fd") ?? [DirEntry]{}
+    numbers := [Int]{}
+    loop entry in entries {
+        number: Int.parse(entry.name) ?? next
+        if number > 2 -> numbers.push(number)
+    }
+    numbers.sort()
+    loop number in numbers -> lines.push("descriptor {descriptor("{number}")}")
+    status: files.read("/proc/self/status") ?? ""
+    loop key in ["SigBlk", "SigIgn", "SigCgt", "Threads"] -> lines.push(status_line(status, key))
+    lines
+}
+
+run: fn() {
+    record: registration().join("\n")
+    if !files.exists("fresh.reg") {
+        files.write("fresh.reg", record) ?? panic("write fresh.reg")
+        print("fresh: registered {record.split("\n").to_list().len()} lines")
+        return
+    }
+    start := 1
+    loop files.exists("dev-{start}.reg") -> start += 1
+    label: "dev-{start}"
+    files.write("{label}.reg", record) ?? panic("write {label}.reg")
+    fresh: files.read("fresh.reg") ?? panic("read fresh.reg")
+    if record == fresh {
+        print("{label} (edition {EDITION}): registration matches the fresh run")
+        return
+    }
+    print("{label} (edition {EDITION}): registration differs from the fresh run")
+    print("fresh:\n{fresh}")
+    print("{label}:\n{record}")
+}
