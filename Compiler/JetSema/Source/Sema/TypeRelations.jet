@@ -1100,12 +1100,15 @@ sema_type_resolve_declared_recursive: fn(graph: SemaRegistrationGraph, ty: Type,
             if rewritten.len() == 1 && sema_type_core_pointer_name(graph, name, caller) -> return Type.Apply{name: "Ptr", args: rewritten}
             head: if sema_type_name_is_generic(generic_params, name) -> name else -> sema_type_graph_resolve_apply_name(graph, name, caller)
             // Invalid alias graphs are rejected during registration, before
-            // consumers can recurse through their transparent targets.
-            if graph.complete && !sema_type_name_is_generic(generic_params, name) {
+            // consumers can recurse through their transparent targets; under
+            // JET_KEEP_GOING an alias expands only from a settled module row
+            // (sema_registration_module_settled), so a cycle reported in its
+            // module is never followed.
+            if !sema_type_name_is_generic(generic_params, name) {
                 row := sema_type_resolve_nominal_row_at(graph, Type.Apply{name: head, args: rewritten}, caller)
                 if row == .Val(alias_row) {
                     nominal: graph.modules[alias_row.module_index].nominals[alias_row.row]
-                    if nominal.kind == SemaRegistrationNominalKind.TypeAlias && rewritten.len() == nominal.generic_params.len() {
+                    if nominal.kind == SemaRegistrationNominalKind.TypeAlias && rewritten.len() == nominal.generic_params.len() && sema_registration_module_settled(graph, alias_row.module_index) {
                         item: sema_registration_nominal_source_item(nominal.source) ?? return Type.Apply{name: head, args: rewritten}
                         if item == .TypeAlias(definition) {
                             names: loop parameter in definition.type_params -> parameter.name
@@ -1680,7 +1683,9 @@ sema_type_bound_satisfied_nominal: fn(graph: SemaRegistrationGraph, nominal: Sem
         }
     }
     if sema_type_graph_inline_impl_matches_trait(graph, nominal, trait_symbol) -> return Val(true)
-    if unresolved_impl || !graph.complete -> return None
+    // No impl found is known once the nominal's and the trait's packages
+    // registered in full (sema_registration_package_settled).
+    if unresolved_impl || !sema_registration_package_settled(graph, nominal.symbol.module_identity) || !sema_registration_package_settled(graph, trait_symbol.module_identity) -> return None
     return Val(false)
 }
 
@@ -1844,7 +1849,7 @@ sema_type_builtin_bound_satisfied_nominal: fn(graph: SemaRegistrationGraph, nomi
             }
         }
     }
-    if unresolved_impl || !graph.complete -> return None
+    if unresolved_impl || !sema_registration_package_settled(graph, nominal.symbol.module_identity) -> return None
     Val(false)
 }
 

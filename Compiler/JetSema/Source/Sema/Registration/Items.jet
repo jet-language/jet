@@ -913,6 +913,13 @@ SemaRegistrationGraph: struct {
     // kept as a typed trap of its declared signature instead of being left
     // out, so its callers and every later phase still run.
     keep_going: Bool{false}
+    // Under keep_going, per module row: whether the row's own sources hold no
+    // registration-blocking error (sema_registration_settle_modules). One
+    // module's error leaves the graph incomplete, yet every other module
+    // registered in full, so its facts stay known
+    // (sema_registration_module_settled). Empty when not set, or when an
+    // error names no source file.
+    settled_modules: [Bool]{[Bool]{}}
     // Test mode (Rust `CompileMode::Test`/`TestOverride`), set by the driver:
     // named `#Test` bodies are checked and lowered as synthetic functions.
     test_mode: Bool{false}
@@ -4055,6 +4062,61 @@ sema_registration_import_is_unqualified: fn(declaration: ImportDecl) -> Bool Nev
         .Unqualified(_, _, _, _, _) -> true
         .File(_, _) | .Module(_, _) -> false
     }
+}
+
+// Records, for JET_KEEP_GOING, which module rows registered in full: a row
+// is settled when no registration-blocking error
+// (sema_registration_blocking_diagnostic) lies in one of its source files.
+// An error with no source file could belong to any row, so it leaves every
+// row unsettled.
+sema_registration_settle_modules: fn(graph: &SemaRegistrationGraph) Never! {
+    graph.settled_modules = [Bool]{}
+    if graph.internal_problem != None -> return
+    settled := (loop _ in 0..<graph.modules.len() -> true)
+    loop diagnostic in graph.diagnostics {
+        if !sema_registration_blocking_diagnostic(diagnostic) -> next
+        path: diagnostic.source_path ?? return
+        loop module_index in 0..<graph.modules.len() {
+            loop segment in graph.modules[module_index].source_segments {
+                if segment.source_file == path {
+                    settled[module_index] = false
+                    break
+                }
+            }
+        }
+    }
+    graph.settled_modules = settled.move()
+}
+
+// Whether module row `module_index`'s registered declarations are final: the
+// graph is complete, or JET_KEEP_GOING settled the row. Facts a query reads
+// from a settled row are known even when the graph is incomplete.
+sema_registration_module_settled: fn(graph: SemaRegistrationGraph, module_index: Int) -> Bool Never! {
+    if graph.complete -> return true
+    module_index >= 0 && module_index < graph.settled_modules.len() && graph.settled_modules[module_index]
+}
+
+// sema_registration_module_settled for the row of module `module_id`.
+sema_registration_identity_settled: fn(graph: SemaRegistrationGraph, module_id: ModuleID) -> Bool Never! {
+    if graph.complete -> return true
+    position: module_index(module_id)
+    if position >= graph.module_rows.len() || graph.module_rows[position] < 0 -> return false
+    sema_registration_module_settled(graph, graph.module_rows[position])
+}
+
+// Whether every module row of the package that owns module `module_id` is
+// settled (sema_registration_module_settled): an impl for a type may sit in
+// any module of the type's package, so an impl query about the type is known
+// only when all of them registered in full.
+sema_registration_package_settled: fn(graph: SemaRegistrationGraph, module_id: ModuleID) -> Bool Never! {
+    if graph.complete -> return true
+    position: module_index(module_id)
+    if position >= graph.module_rows.len() || graph.module_rows[position] < 0 -> return false
+    package: graph.modules[graph.module_rows[position]].package_identity
+    loop row in 0..<graph.modules.len() {
+        if graph.modules[row].package_identity == package && !sema_registration_module_settled(graph, row) -> return false
+    }
+    true
 }
 
 // `by_identity`: the row of module `module_id`, None when it has none.

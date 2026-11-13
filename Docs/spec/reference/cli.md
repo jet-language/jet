@@ -707,6 +707,10 @@ reported, nor one in a codec body the compiler generates for a Core type. Any
 other `jet check` loads and checks only the Core declarations its program can
 name; `JET_KEEP_GOING=1` loads and checks every declaration of each Core module
 the program imports. `jet check --style` adds the opt-in style lints (L0535).
+A declaration error such as E0358 stops a plain check after declarations;
+under `JET_KEEP_GOING=1` the check goes on, and every package with no such
+error keeps its declarations' facts (what copies, which traits a type meets),
+so a clean dependency reports nothing beside the failing package's errors.
 
 Source snapshots enumerate held no-follow directories and read each source or
 foreign cache through one bounded opened file. File identities include the

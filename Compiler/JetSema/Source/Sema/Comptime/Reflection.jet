@@ -2431,8 +2431,10 @@ sema_comptime_reflection_distinct_type_info: fn(
     )
 }
 
-// Resolve only the exact registered module/type identity. The complete graph
-// supplies original declarations, checked state facts, and target layout; the
+// Resolve only the exact registered module/type identity. The complete graph,
+// or under JET_KEEP_GOING a fully registered package
+// (sema_registration_package_settled), supplies original declarations,
+// checked state facts, and target layout; the
 // complete applied-rule catalog is intentionally explicit. `args` names a
 // specialization of a generic type (`Shelf<Int>.reflect()`): one type per
 // type parameter specializes it, any other count (none included) reflects the
@@ -2444,7 +2446,7 @@ sema_comptime_reflection_type_info: fn(
     catalog: TAppliedRuleCatalog,
     args: [Type],
 ) -> TComptimeValue? {
-    if !graph.complete -> return None
+    if !sema_registration_package_settled(graph, module_identity) -> return None
     module_index := Int?{None}
     loop index in 0..<graph.modules.len() {
         if graph.modules[index].module_identity == module_identity {

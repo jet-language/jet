@@ -102,6 +102,7 @@ use {
         sema_registration_module_index,
         sema_registration_original_error_module,
         sema_registration_prepare_graph,
+        sema_registration_settle_modules,
         SEMA_PRELUDE_ERROR_SOURCE_PATH,
         sema_cli_command_record,
         sema_marker_is_guest_export,
@@ -4256,6 +4257,10 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
     // with the stage's diagnostics, and the bodies are checked too
     // (sema_check_registration_module_start).
     registration_errors: sema_registration_blocking_error(registration_graph.diagnostics)
+    // Under JET_KEEP_GOING the check goes on past such an error; every module
+    // row without one keeps its registered facts known
+    // (sema_registration_settle_modules).
+    if kg.enabled -> sema_registration_settle_modules(registration_graph)
     if request.trace_sink == .Val(sink) -> sink.begin("sema.check", "", -1, -1)
     comptime_stage := sema_collect_comptime_declarations(registration_graph, package_policies, request.compiler_threads, request.trace_sink)
     if request.trace_sink == .Val(sink) -> sink.end("sema.check", comptime_stage.modules.len())

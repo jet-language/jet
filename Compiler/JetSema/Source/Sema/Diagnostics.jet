@@ -153,9 +153,15 @@ sema_has_error_since: fn(diagnostics: [Diagnostic], start: Int) -> Bool Never! {
 // resolves to, so bodies are still checked beside it, as the Rust reference did.
 sema_registration_blocking_error: fn(diagnostics: [Diagnostic]) -> Bool Never! {
     loop diagnostic in diagnostics {
-        if diagnostic.severity == DIAGNOSTIC_ERROR && diagnostic.code != "E0357" -> return true
+        if sema_registration_blocking_diagnostic(diagnostic) -> return true
     }
     false
+}
+
+// Whether one registration diagnostic stops checking
+// (sema_registration_blocking_error).
+sema_registration_blocking_diagnostic: fn(diagnostic: Diagnostic) -> Bool Never! {
+    diagnostic.severity == DIAGNOSTIC_ERROR && diagnostic.code != "E0357"
 }
 
 // Names the first error in `root_start..<start` as the cause of every report

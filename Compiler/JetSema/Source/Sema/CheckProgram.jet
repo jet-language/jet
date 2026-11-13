@@ -1706,9 +1706,10 @@ sema_function_generic_params: fn(func: Func, graph_option: SemaRegistrationGraph
                 // Rust registers a generic bound as its written name and never
                 // rejects an unregistered one at the declaration (tests/ui
                 // embedded_generic_method_scope: `T: Clone`); such a bound has no
-                // trait identity to carry, so a complete graph drops it.
+                // trait identity to carry, so a settled module drops it
+                // (sema_registration_identity_settled).
                 resolved: sema_type_graph_bound_symbol(graph, module_identity, bound) ?? {
-                    if !graph.complete -> complete = false
+                    if !sema_registration_identity_settled(graph, module_identity) -> complete = false
                     next
                 }
                 if sema_resolved_kind(graph, resolved) != SymbolKind.Trait {
@@ -1789,7 +1790,7 @@ sema_function_owner_generic_params: fn(graph: SemaRegistrationGraph, owner_type:
             resolved := sema_type_graph_bound_symbol(graph, owner_module.module_identity, bound)
             // Rust never rejects an unregistered bound name at the declaration.
             if resolved == None {
-                if !graph.complete -> complete = false
+                if !sema_registration_identity_settled(graph, owner_module.module_identity) -> complete = false
                 next
             }
             symbol: resolved ?? {
@@ -3461,9 +3462,10 @@ sema_check_registered_method_stub: fn(job: SemaBodyJob, module_index: Int, memor
 sema_check_registration_module_start: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, module_index: Int, values: [SemaComptimeItemValue], scopes: &SemaScopeTable) -> SemaGraphModuleResult {
     if program.registration_graph == .Val(graph) {
         diagnostics := [Diagnostic]{}
-        complete := graph.complete
+        settled: sema_registration_module_settled(graph, module_index)
+        complete := settled
         incomplete_reasons := [String]{}
-        if !graph.complete -> incomplete_reasons.push("registration graph is incomplete")
+        if !settled -> incomplete_reasons.push("registration graph is incomplete")
         if !sema_registration_apply_graph_module(graph, graph.modules[module_index].module_identity, scopes, diagnostics) {
             complete = false
             incomplete_reasons.push("module scope could not be applied")

@@ -411,7 +411,10 @@ sema_copy_foreign_handle_facts: fn(
 // only that name's impl rows are read (the same rows the full scan would
 // accept, in the same order); before then every impl is scanned. The graph
 // and its impl rows are read in place through the `.Val(…)` pattern on the
-// parameter.
+// parameter. No impl found is a known answer when the nominal's package
+// registered in full (sema_registration_package_settled), so one package's
+// registration error under JET_KEEP_GOING leaves every other package's
+// copy facts known.
 sema_copy_nominal_has_impl: fn(
     graph: SemaRegistrationGraph?,
     nominal: SemaRegistrationNominal,
@@ -430,7 +433,7 @@ sema_copy_nominal_has_impl: fn(
                     if target_matches -> return (known: true, value: true)
                 }
             }
-            return (known: registered.complete, value: false)
+            return (known: sema_registration_package_settled(registered, nominal.symbol.module_identity), value: false)
         }
         loop graph_module in registered.modules {
             loop implementation in graph_module.impls {
@@ -446,7 +449,7 @@ sema_copy_nominal_has_impl: fn(
                 if target_matches -> return (known: true, value: true)
             }
         }
-        return (known: registered.complete, value: false)
+        return (known: sema_registration_package_settled(registered, nominal.symbol.module_identity), value: false)
     }
     (known: false, value: false)
 }
