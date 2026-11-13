@@ -5055,6 +5055,24 @@ StateLoopNeverAdvances: struct {
     }
 }
 
+MutableNeverReassigned: struct {
+    name: String
+
+    impl Diagnostic {
+        code: "E0514"
+        safety_class: .Opinion
+        safety_reason: "A `:=` name nothing writes runs exactly like a `:` name, and Jet refuses it so the binding says what the code does."
+        meaning: "A `:=` name is never written"
+        detail: true
+        structured_fix: .SourceEdit
+        no_fix: None
+        fix_safety: .BehaviorPreserving
+        what: fn(self) -> String { "`{self.name}` never changes, so declare it with `:`" }
+        why: fn(self) -> String { "`:=` tells the reader the value changes later, but nothing in its scope writes it" }
+        fix: fn(self) -> String { "Write `{self.name}: …` instead of `{self.name} := …`" }
+    }
+}
+
 SliceCopyInLoop: struct {
     impl Diagnostic {
         code: "L0501"
@@ -5399,19 +5417,15 @@ RawMultilineHtml: struct {
     }
 }
 
-MutableNeverReassigned: struct {
-    name: String
-
+RetiredMutableNeverReassigned: struct {
     impl Diagnostic {
         code: "L0528"
-        meaning: "A `:=` name is never written"
-        detail: true
-        structured_fix: .SourceEdit
+        severity: .Lint
+        status: .Retired
         no_fix: None
-        fix_safety: .BehaviorPreserving
-        what: fn(self) -> String { "`{self.name}` never changes, so declare it with `:`" }
-        why: fn(self) -> String { "`:=` tells the reader the value changes later, but nothing in its scope writes it" }
-        fix: fn(self) -> String { "Write `{self.name}: …` instead of `{self.name} := …`" }
+        what: fn(self) -> String { "*Retired* (was: a `:=` name is never written)" }
+        why: fn(self) -> String { "Jet has no warnings, so such a binding is the error E0514" }
+        fix: fn(self) -> String { "Do not use L0528" }
     }
 }
 

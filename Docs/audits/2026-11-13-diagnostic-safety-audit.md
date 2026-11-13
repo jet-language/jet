@@ -6,7 +6,7 @@ An error refuses a program for one of two reasons. A soundness error stops a mem
 
 Each row states its class in `safety_class` and why in `safety_reason`. A soundness row also states its `expert_path`: the opt-in that reaches the same program, or `none:` and why nothing can.
 
-Classified ranges: E00xx, E01xx, E02xx, E03xx, E04xx, E05xx, E06xx, E07xx, E08xx, E09xx, E10xx, E11xx, E12xx, E13xx, E14xx, E18xx, E20xx, E21xx, E22xx, E23xx, E24xx, E25xx, E26xx, E27xx, E28xx, E29xx, E30xx, E31xx, E32xx, E33xx, E34xx, E35xx, E36xx, E42xx, E-Axx, E-Cxx, E-Exx, E-Fxx, E-Mxx, E-Oxx, E-Sxx, E-Txx, E-Wxx, JT0xx, L11xx, R08xx. They hold 814 active error rows: 698 soundness and 116 opinion. The other ranges hold 1 active error rows with no class yet.
+Classified ranges: E00xx, E01xx, E02xx, E03xx, E04xx, E05xx, E06xx, E07xx, E08xx, E09xx, E10xx, E11xx, E12xx, E13xx, E14xx, E18xx, E20xx, E21xx, E22xx, E23xx, E24xx, E25xx, E26xx, E27xx, E28xx, E29xx, E30xx, E31xx, E32xx, E33xx, E34xx, E35xx, E36xx, E42xx, E-Axx, E-Cxx, E-Exx, E-Fxx, E-Mxx, E-Oxx, E-Sxx, E-Txx, E-Wxx, JT0xx, L11xx, R08xx. They hold 815 active error rows: 698 soundness and 117 opinion. The other ranges hold 0 active error rows with no class yet.
 
 ## Sealed floors
 
@@ -962,6 +962,7 @@ These soundness rows have no expert path, but no line under Compiler, Core, Jetp
 | E0511 | ExpiringForce | opinion | Reading the cached value past its expiry would run safely, and Jet refuses it so a stale value is never read as fresh. |
 | E0512 | DeferPropagatesFailure | soundness | A `defer` body runs after its block's exit was chosen, so a failure passed out of it would have no exit to take. |
 | E0513 | StateLoopNeverAdvances | opinion | A loop whose condition never changes would run safely until it is stopped, and Jet refuses it so a loop that cannot end is caught before it runs. |
+| E0514 | MutableNeverReassigned | opinion | A `:=` name nothing writes runs exactly like a `:` name, and Jet refuses it so the binding says what the code does. |
 | E0601 | NoTestsFound | opinion | Running no tests would finish safely, and Jet refuses it so an empty run is never taken for a passing one. |
 | E0602 | UsePathEscapesProject | opinion | Code outside the project would compile and run, and Jet refuses it so a build reads only files the project holds. |
 | E0603 | UseTargetNotFound | soundness | The imported file or module does not exist, so its names refer to nothing. |

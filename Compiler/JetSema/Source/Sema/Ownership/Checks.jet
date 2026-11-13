@@ -343,7 +343,7 @@ SemaOwnershipState: struct {
     // (`return`, `break`). A fork rollback drops a leaving path's references,
     // but its reads are still uses for L0101/L0102.
     used_keys: [String:Bool]{[String:Bool]{}}
-    // The `:=` bindings this body declares (L0528 candidates) and the name
+    // The `:=` bindings this body declares (E0514 candidates) and the name
     // starts of the bindings a checked write needed `:=` for. Like
     // `used_keys`, neither is rolled back: a write in a branch, a lambda, an
     // unreached line or a discarded check still counts.
@@ -381,7 +381,7 @@ sema_ownership_block_allocator_refuses: fn(state: SemaOwnershipState, places: [S
 
 // A written `name := value` (or `{a, b} := value`): the names it declares,
 // by name start, and the text from the end of the name through `:=`, which
-// the L0528 edit replaces with `:`.
+// the E0514 edit replaces with `:`.
 SemaOwnershipMutableBinding: struct {
     name: String
     name_span: Span
@@ -2484,20 +2484,20 @@ sema_ownership_keep_mutations: fn(state: &SemaOwnershipState, branch: SemaOwners
     loop (start, _) in branch.mutated_starts -> state.mutated_starts[start] = true
 }
 
-// L0528: a `:=` binding nothing in its scope writes. Any checked write counts,
+// E0514: a `:=` binding nothing in its scope writes. Any checked write counts,
 // whether or not it can run; the edit swaps ` :=` for `:`. It reports as a
 // lint until the repo-wide `:=` -> `:` sweep lands: as an error it stops the
 // build's own Core compile (the runtime step), which still has those sites,
 // and a lint in Core is dropped (sema_core_source_lint).
 sema_ownership_report_never_written: fn(state: SemaOwnershipState, diagnostics: &[Diagnostic]) {
-    row: diagnostic_registry_row("L0528") ?? panic("L0528 has no registry row")
+    row: diagnostic_registry_row("E0514") ?? panic("E0514 has no registry row")
     loop binding in state.mutable_bindings {
         written := false
         loop start in binding.starts {
             if state.mutated_starts.get(start) != None -> written = true
         }
         if written -> next
-        diagnostic := sema_error("L0528", binding.name_span, row.what.replace("{{name}}", binding.name), row.why, row.fix.replace("{{name}}", binding.name))
+        diagnostic := sema_error("E0514", binding.name_span, row.what.replace("{{name}}", binding.name), row.why, row.fix.replace("{{name}}", binding.name))
         diagnostic.severity = DIAGNOSTIC_LINT
         diagnostics.push(diagnostic_with_edit_grade(diagnostic, TextEdit{span: binding.sigil, new_text: ":"}, DiagnosticFixApplicability.Safe, DiagnosticFixSafety.BehaviorPreserving))
     }
