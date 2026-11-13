@@ -1,0 +1,116 @@
+// Every corpus row is one call of a core.math narrowing function (f32_add,
+// f32_sub, f32_mul, f32_div, f32_fma, f32_sqrt), or of math.fma and
+// math.muladd on three F32: its argument words, then the F32 nearest the
+// exact result, computed offline with exact rational arithmetic, as the hex
+// bits of its binary64 widening. The program prints one line per function
+// with the rows it checked and how many results differ, plus the first
+// differing rows. A NaN matches any NaN.
+use {
+    math: core.math
+}
+
+FADD: #run embed_file("corpus/fadd.txt")
+FSUB: #run embed_file("corpus/fsub.txt")
+FMUL: #run embed_file("corpus/fmul.txt")
+FDIV: #run embed_file("corpus/fdiv.txt")
+FFMA: #run embed_file("corpus/ffma.txt")
+FSQRT: #run embed_file("corpus/fsqrt.txt")
+FMA32: #run embed_file("corpus/fma32.txt")
+
+hex_value: fn(b: U8) -> Int {
+    n: Int.from_u8(b)
+    if n >= 48 && n <= 57 -> return n - 48
+    n - 87
+}
+
+// The 16-digit hex word at `at`, as the signed Int math.from_bits takes.
+word_at: fn(raw: [U8], at: Int) -> Int {
+    n := 0
+    loop i in 0..<16 -> n = n * 16 + hex_value(raw[at + i])
+    if n > 9223372036854775807 -> n = n - 18446744073709551616
+    n
+}
+
+hex_word: fn(word: Int) -> String {
+    digits: "0123456789abcdef".bytes()
+    n := if word < 0 -> word + 18446744073709551616 else -> word
+    out := [U8]{}
+    loop _ in 0..<16 {
+        out.push(digits[n %% 16])
+        n = n /% 16
+    }
+    out.reverse()
+    String.from_bytes(out) ?? ""
+}
+
+is_nan_word: fn(word: Int) -> Bool {
+    magnitude: if word < 0 -> word + 9223372036854775808 else -> word
+    magnitude > 9218868437227405312
+}
+
+// The F32 whose exact widening is x; the checked `F32{x}` would stop on the
+// infinities and NaN.
+narrow: fn(x: Float) -> F32 {
+    if math.is_nan(x) -> return F32{0.0} / F32{0.0}
+    if (x > Float{3.4028234663852886e38}) -> return F32{1.0} / F32{0.0}
+    if (x < Float{-3.4028234663852886e38}) -> return F32{-1.0} / F32{0.0}
+    F32{x}
+}
+
+value: fn(name: String, a: [Float]) -> F32 {
+    if name == "fadd" -> return math.f32_add(a[0], a[1])
+    if name == "fsub" -> return math.f32_sub(a[0], a[1])
+    if name == "fmul" -> return math.f32_mul(a[0], a[1])
+    if name == "fdiv" -> return math.f32_div(a[0], a[1])
+    if name == "ffma" -> return math.f32_fma(a[0], a[1], a[2])
+    if name == "fsqrt" -> return math.f32_sqrt(a[0])
+    if name == "fma32" -> return math.fma(narrow(a[0]), narrow(a[1]), narrow(a[2]))
+    if name == "muladd32" -> return math.muladd(narrow(a[0]), narrow(a[1]), narrow(a[2]))
+    panic("no corpus function {name}")
+}
+
+check: fn(name: String, corpus: String) {
+    raw: corpus.bytes()
+    at := 0
+    rows := 0
+    wrong := 0
+    loop at < raw.len() {
+        if raw[at] == (U8{35}) {
+            loop raw[at] != (U8{10}) -> at = at + 1
+            at = at + 1
+            next
+        }
+        // The row's words: its arguments, then the result.
+        words := [Int]{}
+        loop {
+            words.push(word_at(raw, at))
+            at = at + 17
+            if raw[at - 1] == (U8{10}) -> break
+        }
+        want: words[words.len() - 1]
+        arguments := [Float]{}
+        shown := [String]{}
+        loop i in 0..<(words.len() - 1) {
+            arguments.push(math.from_bits(words[i]))
+            shown.push(hex_word(words[i]))
+        }
+        got: math.to_bits(Float.from_f32(value(name, arguments)))
+        rows = rows + 1
+        if got != want && !(is_nan_word(got) && is_nan_word(want)) {
+            wrong = wrong + 1
+            if wrong <= 3 -> print("{name}({shown.join(", ")}) = {hex_word(got)}, correctly rounded {hex_word(want)}")
+        }
+    }
+    print("{name}: {rows} rows, {wrong} not correctly rounded")
+}
+
+run: fn() {
+    check("fadd", FADD)
+    check("fsub", FSUB)
+    check("fmul", FMUL)
+    check("fdiv", FDIV)
+    check("ffma", FFMA)
+    check("fsqrt", FSQRT)
+    check("fma32", FMA32)
+    check("muladd32", FMA32)
+}

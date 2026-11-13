@@ -3007,7 +3007,7 @@ An all-F32 call of a correctly rounded function below (`sin`, `cos`, `tan`,
 `cbrt`, `hypot`, `rsqrt`, `erf`, `erfc`, `gamma`, `lgamma`, `sin_pi`,
 `cos_pi`, `tan_pi`, `asin_pi`, `acos_pi`, `atan_pi`, `atan2_pi`, `exp2_m1`,
 `exp10_m1`, `log2_1p`, `log10_1p`, `pow_r`, `pow_n`, `root_n`,
-`compound_n`), and F32 `pow`,
+`compound_n`, `fma`, `muladd`), and F32 `pow`,
 returns the correctly rounded `F32` result on every tier, never
 a double rounding of the Float one (C23's `f` forms such as `rsqrtf` and
 `pownf`); the whole exponent of `pow_n`, `root_n` and `compound_n` stays an
@@ -3045,6 +3045,7 @@ a double rounding of the Float one (C23's `f` forms such as `rsqrtf` and
 | `math.lerp(a, b, t)` | `Float` | Linear interpolation. |
 | `math.copysign(value, sign)` / `math.fma(a, b, c)` | `Float` | Copy a sign, or `a * b + c` rounded once (IEEE 754 `fusedMultiplyAdd`), the same bits on every tier. A nonzero exact result that rounds to zero keeps its sign, so `fma(2^-1074, -0.5, 0.0)` is `-0.0`, where musl's C fma gives `+0.0`. Native x86-64 code runs one `vfmadd213sd` when the CPU has FMA3 (probed at a module's first fma) and the soft fma otherwise, with the same bits either way. A plain `a * b + c` is never fused: it rounds the product and then the sum on every tier. |
 | `math.muladd(a, b, c)` | `Float` | Multiply and add through the math wrapper. |
+| `math.f32_add(a, b)`, `f32_sub(a, b)`, `f32_mul(a, b)`, `f32_div(a, b)`, `f32_fma(a, b, c)`, `f32_sqrt(x)` | `F32` | The exact `a + b`, `a - b`, `a * b`, `a / b`, `a * b + c` or square root of `Float` operands rounded once to `F32`, ties to even, so every tier returns the same bits (C23 `fadd`, `fsub`, `fmul`, `fdiv`, `ffma`, `fsqrt`; D-MATH-NARROW1). Narrowing the Float result instead can round twice and land one `F32` step off. An overflow is the `F32` infinity, a NaN operand or invalid operation is the `F32` NaN, and an exact zero keeps the sign IEEE 754 gives it. |
 | `math.inv(x)` / `math.signum(x)` | `Float` | Reciprocal or floating-point signum. |
 | `math.fabs(x)` / `math.real(x)` / `math.imag(x)` / `math.conj(x)` | `Float` | Absolute floating-point value and scalar component helpers. |
 | `math.is_nan(x)`, `is_inf(x)`, `is_finite(x)` | `Bool` | Test NaN, infinity, or finite status. `is_finite` accepts both `Float` and `F32`. `isnan`, `isinf`, and `isfinite` are aliases. |

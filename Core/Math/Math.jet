@@ -13756,6 +13756,129 @@ copysign: fn(value: Float, sign_value: Float) -> Float Never! {
 }
 fma: fn(a: Float, b: Float, c: Float) -> Float Never! { core.math.fma(a, b, c) }
 muladd: fn(a: Float, b: Float, c: Float) -> Float Never! { fma(a, b, c) }
+
+// C23's narrowing arithmetic (D-MATH-NARROW1): Float operands, the exact
+// result rounded once to F32, ties to even. Each exact result is first
+// rounded to odd at Float width, and from at least two more bits than F32
+// keeps that odd rounding then rounds to nearest exactly as the exact result
+// would. A result under 2^-200 in magnitude, which every F32 rounds to a
+// zero, is only kept to its sign.
+
+/// `a + b` rounded once to F32, ties to even (C23 `fadd`): the F32 nearest
+/// the exact sum, never the F32 nearest the Float sum.
+f32_add: fn(a: Float, b: Float) -> F32 Never! { __f32_narrow(__add_odd(a, b)) }
+/// `a - b` rounded once to F32, ties to even (C23 `fsub`).
+f32_sub: fn(a: Float, b: Float) -> F32 Never! { __f32_narrow(__add_odd(a, -b)) }
+/// `a * b` rounded once to F32, ties to even (C23 `fmul`).
+f32_mul: fn(a: Float, b: Float) -> F32 Never! { __f32_narrow(__mul_odd(a, b)) }
+/// `a / b` rounded once to F32, ties to even (C23 `fdiv`).
+f32_div: fn(a: Float, b: Float) -> F32 Never! { __f32_narrow(__div_odd(a, b)) }
+/// `a * b + c` rounded once to F32, ties to even (C23 `ffma`).
+f32_fma: fn(a: Float, b: Float, c: Float) -> F32 Never! { __f32_narrow(__fma_odd(a, b, c)) }
+/// The square root of `x` rounded once to F32, ties to even (C23 `fsqrt`).
+f32_sqrt: fn(x: Float) -> F32 Never! { __f32_narrow(__sqrt_odd(x)) }
+// The F32 form of fma and muladd (an all-F32 call): the exact a * b + c
+// rounded to odd, which then narrows correctly. Narrowing fma(a, b, c) would
+// round twice.
+__fma_f32: fn(a: Float, b: Float, c: Float) -> Float Never! { __fma_odd(a, b, c) }
+__muladd_f32: fn(a: Float, b: Float, c: Float) -> Float Never! { __fma_odd(a, b, c) }
+
+// The F32 nearest x, ties to even: a NaN is the F32 NaN, and a magnitude
+// from 2^128 - 2^103 (the midpoint above the largest F32) is the infinity.
+// The checked `F32{x}` would stop on both.
+__f32_narrow: fn(x: Float) -> F32 Never! {
+    if is_nan(x) -> return F32.NAN
+    a: fabs(x)
+    if a >= 3.4028235677973366e38 -> return if x > 0.0 -> F32.INFINITY else -> F32.NEG_INFINITY
+    if a > 3.4028234663852886e38 -> return if x > 0.0 -> F32.MAX else -> -F32.MAX
+    F32{x}
+}
+// A value rounded to odd, from s, its nearest Float, and e, of the sign of
+// the value minus s (zero when s is exact): s when it is exact, odd or not
+// finite, else s's odd neighbour on e's side.
+__round_odd: fn(s: Float, e: Float) -> Float Never! {
+    if e == 0.0 || !is_finite(s) -> return s
+    if s == 0.0 -> return copysign(from_bits(1), e)
+    bits: to_bits(s)
+    if bits.bit_and(1) == 1 -> return s
+    if (e > 0.0) == (s > 0.0) -> return from_bits(bits + 1)
+    from_bits(bits - 1)
+}
+// a + b rounded to odd; the two-sum error is exact.
+__add_odd: fn(a: Float, b: Float) -> Float Never! {
+    s: __two_sum(a, b)
+    __round_odd(s.hi, s.lo)
+}
+// a * b rounded to odd; above 2^-200 the fma error of the product is exact.
+__mul_odd: fn(a: Float, b: Float) -> Float Never! {
+    p: a * b
+    if !is_finite(p) || fabs(p) < 6.223015277861142e-61 -> return p
+    __round_odd(p, fma(a, b, -p))
+}
+// a / b rounded to odd: the exact quotient lies on the side of q that the
+// remainder a - q b times the sign of b gives. The remainder is exact once
+// |a| is at least 2^-900, so a smaller a is scaled by 2^600 with b, which
+// leaves q alone and cannot overflow b when |q| is at least 2^-200.
+__div_odd: fn(a: Float, b: Float) -> Float Never! {
+    q: a / b
+    if !is_finite(q) || fabs(q) < 6.223015277861142e-61 -> return q
+    small: fabs(a) < 1.1830521861667747e-271
+    x: if small -> a * 4.149515568880993e180 else -> a
+    y: if small -> b * 4.149515568880993e180 else -> b
+    r: fma(-q, y, x)
+    __round_odd(q, if y > 0.0 -> r else -> -r)
+}
+// The square root of x rounded to odd: x - s^2, exact once x is at least
+// 2^-400, has the sign of the exact root minus s.
+__sqrt_odd: fn(x: Float) -> Float Never! {
+    s: sqrt(x)
+    if !is_finite(s) || x < 3.8725919148493183e-121 -> return s
+    __round_odd(s, fma(-s, s, x))
+}
+// a * b + c rounded to odd. A Float sum f under 2^-200, an infinity or NaN,
+// or an overflow is f itself: each rounds to F32 as the exact sum does. A
+// product under 2^-800 is below half a step of c (|c| is then at least
+// 2^-201) and only decides c's side. Otherwise a * b = p + l exactly; with
+// l zero the two-sum of p and c is exact, and else p + l + c is summed as
+// one whole number of the least of their steps.
+__fma_odd: fn(a: Float, b: Float, c: Float) -> Float Never! {
+    f: fma(a, b, c)
+    p: a * b
+    if !is_finite(p) || !is_finite(c) || fabs(f) < 6.223015277861142e-61 -> return f
+    if fabs(p) < 1.499696813895631e-241 {
+        side: if a == 0.0 || b == 0.0 -> Float{0.0} else -> copysign(1.0, a) * copysign(1.0, b)
+        return __round_odd(c, side)
+    }
+    l: fma(a, b, -p)
+    if l == 0.0 {
+        s: __two_sum(p, c)
+        return __round_odd(s.hi, s.lo)
+    }
+    if c == 0.0 -> return __round_odd(p, l)
+    pe: __float_parts(p).e
+    le: __float_parts(l).e
+    ce: __float_parts(c).e
+    e0: if pe < le -> pe else -> le
+    e: if ce < e0 -> ce else -> e0
+    __odd_scaled(__scaled_at(p, e) + __scaled_at(l, e) + __scaled_at(c, e), e)
+}
+// A finite x as a whole multiple of 2^e, for an e at most its own exponent.
+__scaled_at: fn(x: Float, e: Int) -> Int Never! {
+    parts: __float_parts(x)
+    m: parts.m << (parts.e - e)
+    if x < 0.0 -> -m else -> m
+}
+// n 2^e rounded to odd at Float width, for a whole n whose value is at
+// least 2^-1022 in magnitude (an overflow is the infinity).
+__odd_scaled: fn(n: Int, e: Int) -> Float Never! {
+    m: if n < 0 -> -n else -> n
+    b: __bit_len(m)
+    shift: if b > 53 -> b - 53 else -> 0
+    q := m >> shift
+    if (q << shift) != m -> q = q.bit_or(1)
+    r: ldexp(Float{q}, e + shift)
+    if n < 0 -> -r else -> r
+}
 inv: fn(n: Float) -> Float Never! { 1.0 / n }
 signum: fn(n: Float) -> Float Never! {
     if is_nan(n) -> return NAN
