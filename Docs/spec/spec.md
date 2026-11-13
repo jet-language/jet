@@ -1524,8 +1524,9 @@ The conversion applies when a fallible call propagates. A conversion into the
 default `Err` may name a foreign source type. A typed target must obey the
 orphan rule: the declaration must be owned by the source or target side. The
 compiler reports an undeclared conversion as E2402, a duplicate as E2405, and a
-violation of the typed-target rule as E2406. (D-ERR-CONV, D-FAIL-CONV1,
-D-FAIL-CONV2)
+violation of the typed-target rule as E2406. The target is a failure domain, so
+a value type such as `Float` can't be one (E2417): a value conversion is an
+ordinary function. (D-ERR-CONV, D-FAIL-CONV1, D-FAIL-CONV2)
 
 A conversion from a generic error type names the type bare, as an impl of a
 generic type does (`impl Unsent -> Err`), and applies to every instantiation:

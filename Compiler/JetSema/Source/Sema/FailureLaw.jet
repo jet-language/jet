@@ -315,6 +315,12 @@ sema_error_conversion_routine: fn(definition: ErrorConvDef, type_params: [TypePa
         diagnostics.push(sema_error("E2406", span, "can't declare `impl {from_ty} -> {to_ty}` — neither type is defined in this program", "typed-target error conversions obey the same orphan rule as trait impls (S28); only the default `Err` target may name a foreign source", "define one of these types locally, or convert the foreign source into `Err`"))
         return None
     }
+    // `impl Source -> Target` converts failures, so its target is a failure
+    // domain: a primitive value type describes no failure.
+    if !(foundation_named_type(to_ty) == .Named(_)) {
+        diagnostics.push(sema_error("E2417", definition.to_span, "`impl {from_ty} -> {to_ty}` converts failures into `{to_ty}`, which is not an Error type", "`impl Source -> Target` is a failure conversion: it applies when a `Source` failure propagates where a `Target` failure is expected, and a value type such as `{to_ty}` describes no failure.", "To turn a `{from_ty}` value into a `{to_ty}`, write a function that takes `{from_ty}` and returns `{to_ty}`; to convert failures, name `Err`, a Core error or an `#Error` type as the target."))
+        return None
+    }
     duplicate := false
     loop edge in edges {
         if edge.source == from_ty && edge.target == to_ty -> duplicate = true
