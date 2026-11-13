@@ -1,0 +1,62 @@
+// Moves out of fields, `&&` parameters and returned variables take the value:
+// none of them clones it, and a field emptied after its move refills.
+Holder: struct {
+    items: [Int]
+    name: String
+}
+
+take_name: fn(n: Int) -> Int {
+    h := Holder{items: [Int]{n, n}, name: "x{n}"}
+    got := h.name.move()
+    h.name = ""
+    h.name = "{h.name}y"
+    got.len() + h.items.len() + h.name.len()
+}
+
+take_items: fn(n: Int) -> Int {
+    h := Holder{items: [Int]{n, n, n}, name: "z"}
+    got := h.items.move()
+    h.items = [Int]{}
+    h.items.push(n)
+    got.len() + h.items.len()
+}
+
+take_param: fn(h: &&Holder) -> String {
+    h.name.move()
+}
+
+param_items: fn(h: &&Holder) -> [Int] {
+    items := h.items.move()
+    items
+}
+
+moved_param: fn(items: &&[Int]) -> [Int] {
+    kept := items.move()
+    kept
+}
+
+built_list: fn(n: Int) -> [Int] {
+    out := [Int]{}
+    loop i in 0..<n -> out.push(i)
+    out
+}
+
+built_name: fn(n: Int) -> String {
+    name := "n{n}"
+    name
+}
+
+run: fn() {
+    print(take_name(7))
+    print(take_items(4))
+    print(take_param(Holder{items: [Int]{1}, name: "param"}))
+    print(param_items(Holder{items: [Int]{1, 2, 3}, name: "p"}).len())
+    print(moved_param([Int]{5, 6}).len())
+    print(built_list(5).len())
+    print(built_name(42))
+    total := 0
+    loop i in 0..<100 {
+        total += take_name(i) + take_items(i) + param_items(Holder{items: built_list(i), name: built_name(i)}).len() + moved_param(built_list(3)).len()
+    }
+    print(total)
+}

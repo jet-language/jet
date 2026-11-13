@@ -507,8 +507,10 @@ rt_text_lossy: fn(ptr: I64, len: I64) -> I64 {
 // sole heap owner keeps its buffer, emptied (and its cache word cleared, as
 // rt_text_writable does), so refilling it reuses the capacity. A shared or
 // static `value` keeps its bytes: this owner is released and the result is
-// the static empty text.
+// the static empty text. A field whose value `s.f.move()` took holds the
+// zero word (ir_zero_drops), which has no owner to consume.
 #Export(c) jet_rt_string_clear: fn(value: I64) -> I64 {
+    if (value == I64{0}) -> return rt_static_text("")
     if (!rt_text_immortal(value) && jet_rt_rc_unique(wrapping(value - I64{8}))) {
         rt_text_store(wrapping(value + I64{8}), I64{0})
         rt_text_store(wrapping(value + I64{24}), I64{0})

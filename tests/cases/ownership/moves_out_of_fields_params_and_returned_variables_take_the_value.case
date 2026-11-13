@@ -1,0 +1,24 @@
+# Moves out of fields and params take the value instead of copying it:
+# `s.f.move()` of a String or List field followed by `s.f = ""` / `s.f = []`
+# empties the field and refills it, a `&&` parameter's field or whole value
+# moves out, and a function returning its own variable (a moved parameter,
+# a built List or String) hands that value over. The dump has no List retain
+# and no String clone in take_param, param_items, moved_param, built_list or
+# built_name, and the values match on o0, o1 and o2.
+fixture: moves_out_of_fields_params_and_returned_variables_take_the_value.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet inspect decisions --optimize=basic --opt-dump=take_param,param_items,moved_param,built_list,built_name main.jet
+exit: 0
+stdout: ~ "after fn built_name" # the dump covers the moves
+stdout: !~ "jet_rt_block_retain" # no List gains an owner on its way out
+stdout: !~ "jet_rt_string_clone" # no String is cloned on its way out
+step: jet run --optimize=none main.jet
+exit: 0 # o0
+stdout: = moves_out_of_fields_params_and_returned_variables_take_the_value.out # o0
+step: jet run --optimize=basic main.jet
+exit: 0 # o1
+stdout: = moves_out_of_fields_params_and_returned_variables_take_the_value.out # o1
+step: jet run --optimize=full main.jet
+exit: 0 # o2
+stdout: = moves_out_of_fields_params_and_returned_variables_take_the_value.out # o2

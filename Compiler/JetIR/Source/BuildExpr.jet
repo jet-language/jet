@@ -5687,6 +5687,10 @@ ir_return: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int?, span: Span
     // The value leaves with the caller: a variable it is read out of no
     // longer closes it (a held box is shared by ir_own, not moved).
     ir_close_disarm(b, slot)
+    // A variable the return reads is at its last use, since its frame ends
+    // here: its own value moves out as `x.move()` would move it, instead of
+    // gaining an owner that the variable's scope-end drop then gives back.
+    if b.transactions.len() == 0 && !ir_lent(b, slot) && returned_node.kind == .Local(_) -> b.moving = slot
     owned := ir_own(m, p, b, slot)
     // A drop-free aggregate ir_own leaves in place can be a window into
     // storage the return's own drops free (a payload bound out of an Option
