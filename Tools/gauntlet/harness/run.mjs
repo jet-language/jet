@@ -2682,10 +2682,20 @@ function toolCommand(script) {
   return [...(TOOL_INTERPRETERS[path.extname(script)] ?? []), script];
 }
 
+// `argv` with a case's `env` set where it wins. Each command runs through
+// JetEnv, which applies the dev shell's variables over the caller's the way
+// `nix develop` does, so the shell's CC would replace a case's `CC`; env(1)
+// inside JetEnv sets the case's variables again, last.
+function withCaseEnv(env, argv) {
+  const pairs = Object.entries(env).map(([name, value]) => `${name}=${value}`);
+  return pairs.length === 0 ? argv : ["env", "--", ...pairs, ...argv];
+}
+
 // Runs a tool entry's parity cases (Tools/agent/ScriptPairing.jet checks the
 // entry's shape). Each case runs the original (`tool.original`) and the Jet
 // twin (`tool.jet`), both paths under `root` (the repository), with the
-// case's `args` and `env` (variables added to the harness environment); each
+// case's `args` and `env` (variables over the harness environment and over
+// the dev shell's, which JetEnv applies: the case's always win); each
 // must exit with the case's `exit` (0 when it names none) and do the job. A
 // case with a `check` (a Jet program in the entry) proves the job: after each
 // program, `jetBin CHECK STDOUT` runs in the case directory, STDOUT being a
@@ -2738,14 +2748,14 @@ async function runToolEntry(dir, entry, jetBin, workDir, root = repoDir) {
       await fs.rm(cwd, { recursive: true, force: true });
       if (fixtures === null) await fs.mkdir(cwd, { recursive: true });
       else await fs.cp(fixtures, cwd, { recursive: true, verbatimSymlinks: true });
-      const result = await runProcess(cwd, [...command, ...args], { env: { ...inner, ...env } });
+      const result = await runProcess(cwd, withCaseEnv(env, [...command, ...args]), { env: { ...inner, ...env } });
       let reason = result.code !== exitCode
         ? `exit ${result.code}, not ${exitCode}: ${result.stderr.toString("utf8").trim().slice(0, 300)}`
         : null;
       if (reason === null && typeof item?.check === "string" && item.check !== "") {
         const printed = `${cwd}.stdout`;
         await fs.writeFile(printed, result.stdout);
-        const checked = await runProcess(cwd, [jetBin, path.join(dir, item.check), printed], { env: { ...inner, ...env } });
+        const checked = await runProcess(cwd, withCaseEnv(env, [jetBin, path.join(dir, item.check), printed]), { env: { ...inner, ...env } });
         await fs.rm(printed, { force: true });
         reason = checked.code !== 0
           ? `its check \`${item.check}\` fails (exit ${checked.code}): ${checked.stderr.toString("utf8").trim().slice(0, 300)}`

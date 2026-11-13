@@ -311,6 +311,20 @@ test("a tool case's env reaches both runs and its exit is the code both must giv
   });
 });
 
+test("a tool case's env wins over the dev shell's variables in both runs", stagedEntryTestOptions, async () => {
+  await withScratch("tool-env-shell", async (root) => {
+    const { entryDir, entry, jetBin } = await writeToolEntry(root, { twinOutput: "" });
+    // The dev shell exports CC, its own compiler; JetEnv applies it over the
+    // caller's, so only a CC set again inside JetEnv reaches the programs.
+    await fs.writeFile(path.join(root, "Tools", "count", "count.mjs"), "process.stdout.write(`${process.env.CC}\\n`);\n");
+    await fs.writeFile(jetBin, "#!/bin/sh\nprintf '%s\\n' \"$CC\"\n");
+    await fs.writeFile(path.join(entryDir, "expected", "lines.out"), "./fake-cc\n");
+    entry.tool.cases = [{ args: [], env: { CC: "./fake-cc" }, expected: "expected/lines.out" }];
+    const result = await runToolEntry(entryDir, entry, jetBin, path.join(root, "work"), root);
+    assert.deepEqual(result.cases.map((row) => [row.original, row.jet]), [[{ status: "pass" }, { status: "pass" }]]);
+  });
+});
+
 test("a tool case's args reach the twin verbatim, a leading -- included", stagedEntryTestOptions, async () => {
   await withScratch("tool-separator", async (root) => {
     const { entryDir, entry, jetBin } = await writeToolEntry(root, { twinOutput: "" });
