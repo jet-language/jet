@@ -1,5 +1,7 @@
 // Linux parent observations reproduce typed memory/open-file exhaustion
-// classification. Kernel rlimits are installed by HostSpawn.
+// classification. Kernel rlimits are installed by HostSpawn. Reading the
+// started child's /proc entry is part of the Exec call that started it, not an
+// FS.Read (host-reads.md H22).
 process_execution_proc_path: fn(pid: I64, suffix: I64) -> I64 {
     text: jet_rt_string_builder_new()
     jet_rt_string_builder_push(text, rt_static_text("/proc/"))

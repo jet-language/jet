@@ -578,7 +578,11 @@ none is E2102 too, never ignored: a switch takes no `=value`
   `run`, `build`, `jobs`, `repl`, and `db`; `-A` (`--allow-all`) allows and
   acknowledges every right on `run` and `build`, so a run names none; `jet inspect gates` records these and the other
   invocation choices as gate rows; `--offline` reuses only cached
-  signed toolchain and package data.
+  signed toolchain and package data. A denial covers a host read made under
+  another effect's row only as [host-reads.md](host-reads.md) classifies it:
+  `--deny=FS.Read` does not stop the resolver's `/etc/hosts` read under `Net`,
+  `core.sys` host facts under `Env`, `/proc/self` reads, or an `Exec` call's
+  reads of its own child's `/proc` entry for a memory or open-file limit.
 - `--locked` requires locked dependency and provenance facts, and refuses a
   dependency whose inferred effect row is wider than the one `.jet/lock`
   records (E3513); `--fixtures` selects an explicit fixture bundle.

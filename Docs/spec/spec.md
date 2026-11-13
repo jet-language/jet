@@ -2401,8 +2401,12 @@ call starts, or inspects the running process belongs to the calling
 operation's effect (D-HOST-NONCE1=A). The temporary-name and atomic-write
 reads are part of `FS.Write`, the `PATH` lookup is part of `Exec`, and
 `/proc/self` reads are part of whatever call makes them. A name such a read
-makes is unspecified, so it differs from run to run. Any other host read
-either fits this rule or declares its own effect.
+makes is unspecified, so it differs from run to run. Reading the `/proc` entry
+of a child that an `Exec` call started, to enforce that call's memory or
+open-file limit, is part of `Exec` too, and the typed limit errors stay
+(D-HOST-NONCE2=A). The vault write lock reads no process entry: it is a
+kernel lock, released when its writer exits. Any other host read either fits
+these rules or declares its own effect.
 
 For example, interpolated `print` in
 `Examples/Basics/FirstHourExpert.jet` records both `IO` and the
@@ -2530,7 +2534,12 @@ and so does the same right in the package's `authority.allow` row.
 `--deny=R` wins over every grant: a run that reaches a denied effect stops
 with E1803 before host state changes. A host read that runs under another
 effect's row is denied only as [host-reads.md](reference/host-reads.md)
-classifies it.
+classifies it. `--deny=FS.Read`, for example, does not stop the reads that
+page places under the operation making them: the resolver's `/etc/hosts` and
+`/etc/resolv.conf` under `Net`, the `/proc`, `/sys` and `/etc/group` facts
+`core.sys` reads under `Env`, the running process's own `/proc/self` entries,
+and the `/proc` entry of a child an `Exec` call started, read to enforce that
+call's memory or open-file limit.
 
 A written authority row is a ceiling. This holds for an `authority` row in
 `package.jet` or in a script's inline `package: { … }` block, a module's
