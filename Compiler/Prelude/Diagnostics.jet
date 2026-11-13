@@ -2708,6 +2708,7 @@ ImplOnBuiltinType: struct {
 UnknownField: struct {
     impl Diagnostic {
         code: "E0302"
+        meaning: "A field access that names no field of the type"
         structured_fix: .SuggestedSourceEdit
         no_fix: None
         fix_safety: .NeedsReview
@@ -2720,6 +2721,7 @@ UnknownField: struct {
 InvalidConstructionField: struct {
     impl Diagnostic {
         code: "E0303"
+        meaning: "A struct or variant built with a missing, repeated or unknown field"
         structured_fix: .SuggestedSourceEdit
         no_fix: None
         fix_safety: .NeedsReview
@@ -2732,6 +2734,7 @@ InvalidConstructionField: struct {
 UnknownEnumCase: struct {
     impl Diagnostic {
         code: "E0304"
+        meaning: "A variant name the enum doesn't declare"
         structured_fix: .SuggestedSourceEdit
         no_fix: None
         fix_safety: .BehaviorPreserving
@@ -2744,6 +2747,7 @@ UnknownEnumCase: struct {
 PatternTypeMismatch: struct {
     impl Diagnostic {
         code: "E0305"
+        meaning: "A pattern written for another type than the value it tests"
         what: fn(self) -> String { "Pattern doesn't belong to value's type" }
         why: fn(self) -> String { "A pattern can only test a value of the type it describes" }
         fix: fn(self) -> String { "Make the pattern's shape and types match the value." }
@@ -2753,6 +2757,7 @@ PatternTypeMismatch: struct {
 PatternBindingCountMismatch: struct {
     impl Diagnostic {
         code: "E0306"
+        meaning: "A pattern that binds a different number of names than the value has parts"
         no_fix: .Ambiguous
         what: fn(self) -> String { "Pattern binding count mismatch" }
         why: fn(self) -> String { "A pattern binds one name for each part the value provides" }
@@ -2763,6 +2768,7 @@ PatternBindingCountMismatch: struct {
 NonExhaustiveDispatch: struct {
     impl Diagnostic {
         code: "E0307"
+        meaning: "An `if` table or multi-head dispatch that leaves a case without an arm"
         detail: true
         structured_fix: .GeneratedMissingArms
         no_fix: None
@@ -2776,6 +2782,7 @@ NonExhaustiveDispatch: struct {
 UntypedNone: struct {
     impl Diagnostic {
         code: "E0308"
+        meaning: "A bare `None` whose optional type isn't known"
         structured_fix: .SourceEdit
         no_fix: None
         fix_safety: .BehaviorPreserving
@@ -2788,6 +2795,7 @@ UntypedNone: struct {
 NestedOptional: struct {
     impl Diagnostic {
         code: "E0309"
+        meaning: "An optional of an optional (`T??`)"
         what: fn(self) -> String { "Nested `T??` rejected" }
         why: fn(self) -> String { "An optional value is written `T?` once; an optional optional has no meaning of its own" }
         fix: fn(self) -> String { "Use one optional layer or define a distinct wrapper instead of `T??`." }
@@ -2797,6 +2805,7 @@ NestedOptional: struct {
 OptionalWhereValueExpected: struct {
     impl Diagnostic {
         code: "E0310"
+        meaning: "An optional value used where a plain value is needed"
         what: fn(self) -> String { "`T?` used where plain `T` expected" }
         why: fn(self) -> String { "An optional value may be missing, so it must be handled before it is used as a plain value" }
         fix: fn(self) -> String { "Handle or unwrap the optional value before using it as plain `T`." }
@@ -2820,6 +2829,7 @@ UnknownMethod: struct {
 EqualityNotSupported: struct {
     impl Diagnostic {
         code: "E0312"
+        meaning: "`==` on a value with a part that can't be compared"
         what: fn(self) -> String { "Value `==` unsupported (field detail)" }
         why: fn(self) -> String { "Value equality needs every part of the value to support comparison" }
         fix: fn(self) -> String { "Compare values with a supported equality operation or compare their fields." }
@@ -2829,6 +2839,7 @@ EqualityNotSupported: struct {
 DestructureShapeMismatch: struct {
     impl Diagnostic {
         code: "E0313"
+        meaning: "A destructuring pattern whose shape doesn't fit the value"
         what: fn(self) -> String { "The destructuring pattern's shape doesn't match the value" }
         why: fn(self) -> String { "Destructuring takes a value apart by its shape: `[ ]` takes list items, a struct pattern its fields, and a tuple pattern its members by name" }
         fix: fn(self) -> String { "Make the destructuring target match the value’s shape." }
@@ -2838,6 +2849,7 @@ DestructureShapeMismatch: struct {
 CheckedTextOutsideUnsafe: struct {
     impl Diagnostic {
         code: "E0387"
+        meaning: "Checked text built with `raw` outside `#Unsafe`"
         detail: true
         what: fn(self) -> String { "Checked text raw construction requires an audited `#Unsafe` region" }
         why: fn(self) -> String { "`Type.raw(text)` bypasses the declared CheckedText checker and is an expert-only escape" }
@@ -2848,6 +2860,7 @@ CheckedTextOutsideUnsafe: struct {
 ListPatternLengthMismatch: struct {
     impl Diagnostic {
         code: "E0315"
+        meaning: "A list pattern with a different item count than the list's known length"
         what: fn(self) -> String { "The list pattern names a different number of items than the list holds" }
         why: fn(self) -> String { "A list pattern must name exactly as many items as a list of known length holds" }
         fix: fn(self) -> String { "Make the list pattern length match the known list length." }
@@ -2857,6 +2870,7 @@ ListPatternLengthMismatch: struct {
 InvalidRangePattern: struct {
     impl Diagnostic {
         code: "E0316"
+        meaning: "A range pattern over a non-integer or with its low end above its high end"
         what: fn(self) -> String { "Range pattern on non-integer field, or `lo > hi` (empty range)" }
         why: fn(self) -> String { "A range pattern compares whole numbers, and a range whose low end is above its high end matches nothing" }
         fix: fn(self) -> String { "Use an integer field and a non-empty range with `lo <= hi`." }
@@ -2866,6 +2880,7 @@ InvalidRangePattern: struct {
 OrPatternBindingMismatch: struct {
     impl Diagnostic {
         code: "E0317"
+        meaning: "Or-pattern alternatives that bind different names or types"
         no_fix: .Ambiguous
         what: fn(self) -> String { "Or-pattern alternatives bind different names or types" }
         why: fn(self) -> String { "Every alternative of an or-pattern must bind the same names at the same types, so the arm body works whichever one matched" }
@@ -2920,6 +2935,7 @@ RetiredImplColon: struct {
 AssignmentInCondition: struct {
     impl Diagnostic {
         code: "E0322"
+        meaning: "A condition that assigns with `=` instead of comparing with `==`"
         what: fn(self) -> String { "Assignment `=` in `if` condition — did you mean `==`?" }
         why: fn(self) -> String { "`=` stores a value and `==` compares two values; a condition needs a comparison" }
         fix: fn(self) -> String { "Use `==` for comparison in the `if` condition." }
@@ -2940,6 +2956,7 @@ RetiredForeignNamespaceKeyword: struct {
 AliasWithoutParameters: struct {
     impl Diagnostic {
         code: "E0324"
+        meaning: "A type alias with no type parameters"
         what: fn(self) -> String { "Type alias without type parameters — use `distinct` for a distinct primitive name, or give a number its value" }
         why: fn(self) -> String { "At file level `name: Type` with no value names a type, and a transparent alias is only for shortening generic spellings" }
         fix: fn(self) -> String { "Use `Name: distinct BaseType` for a distinct primitive name, add type parameters to the alias, or give a number constant its value (`LIMIT: Int{{0}}`)." }
@@ -2960,6 +2977,7 @@ RetiredMethodConnector: struct {
 PartialDestructureWithoutRest: struct {
     impl Diagnostic {
         code: "E0326"
+        meaning: "A struct destructure that skips fields without a trailing `..`"
         what: fn(self) -> String { "A partial destructure: struct (`{{ … }}`) with no trailing `..`" }
         why: fn(self) -> String { "A destructure that doesn't name every field ends with `..`, so the skipped fields are visible at a glance" }
         fix: fn(self) -> String { "Add a trailing `..` to a partial struct destructure, or name every field." }
@@ -2969,6 +2987,7 @@ PartialDestructureWithoutRest: struct {
 RedundantDestructureRest: struct {
     impl Diagnostic {
         code: "E0327"
+        meaning: "A trailing `..` on a destructure that names every field"
         what: fn(self) -> String { "A redundant `..` on a destructure that already names every field" }
         why: fn(self) -> String { "A trailing `..` stands for fields left unnamed, and this pattern already names them all" }
         fix: fn(self) -> String { "Remove the redundant `..` when every field is already named." }
@@ -2989,6 +3008,7 @@ RetiredMixedArmOperators: struct {
 NestedArmWithoutSubject: struct {
     impl Diagnostic {
         code: "E0329"
+        meaning: "An arm table nested directly in an arm with no named subject"
         what: fn(self) -> String { "Direct braceless nesting in an arm table without a named subject" }
         why: fn(self) -> String { "Without a named subject, a nested arm table directly inside an arm can't be told apart from the outer one" }
         fix: fn(self) -> String { "Give the arm table a named subject before nesting braceless arms." }
@@ -2998,6 +3018,7 @@ NestedArmWithoutSubject: struct {
 UninferableEnumCase: struct {
     impl Diagnostic {
         code: "E0330"
+        meaning: "A leading-dot variant with no enum type to take it from"
         what: fn(self) -> String { "Leading-dot variant: enum (`.Variant`) with no inferable type from context" }
         why: fn(self) -> String { "A leading-dot variant takes its enum type from the surrounding code, and here nothing names one" }
         fix: fn(self) -> String { "Provide a type context for the leading-dot enum variant." }
@@ -3008,6 +3029,7 @@ PayloadOnCaseGroup: struct {
     impl Diagnostic {
         code: "E0331"
         stage: [.Parse]
+        meaning: "A payload written on a variant group"
         what: fn(self) -> String { "A payload on a variant group name" }
         why: fn(self) -> String { "A variant group only names its subtree; the data lives on its leaf variants" }
         fix: fn(self) -> String { "Remove the payload from the variant group name." }
@@ -3017,6 +3039,7 @@ PayloadOnCaseGroup: struct {
 CaseGroupAsValue: struct {
     impl Diagnostic {
         code: "E0332"
+        meaning: "A variant group name used as a value"
         what: fn(self) -> String { "A group name used as a value" }
         why: fn(self) -> String { "A group name matches its whole subtree in patterns, but a real value is always one leaf variant" }
         fix: fn(self) -> String { "Use a concrete variant instead of the variant group name as a value." }
@@ -3027,6 +3050,7 @@ MixedComparisonChain: struct {
     impl Diagnostic {
         code: "E0333"
         stage: [.Parse]
+        meaning: "A comparison chain that mixes `<` and `>`"
         what: fn(self) -> String { "A chained comparison changes direction (`a < b > c`)" }
         why: fn(self) -> String { "A comparison chain reads in one direction; mixing `<` and `>` in one chain has no single meaning" }
         fix: fn(self) -> String { "Split the comparison or keep its direction consistent." }
@@ -3059,6 +3083,7 @@ BlockAfterCall: struct {
 PatchableGenericStruct: struct {
     impl Diagnostic {
         code: "E0336"
+        meaning: "A generic struct marked `#Patchable`"
         what: fn(self) -> String { "`#Patchable` on a generic struct" }
         why: fn(self) -> String { "A patch type is built from a concrete field list, which a generic struct doesn't have yet" }
         fix: fn(self) -> String { "Remove `#Patchable` from the generic struct or make the struct non-generic." }
@@ -3068,6 +3093,7 @@ PatchableGenericStruct: struct {
 PatchableFunctionField: struct {
     impl Diagnostic {
         code: "E0337"
+        meaning: "A `#Patchable` struct with a function-typed field"
         what: fn(self) -> String { "`#Patchable` struct has a function-typed field" }
         why: fn(self) -> String { "A patch is plain data, and a function-typed field can't be patched" }
         fix: fn(self) -> String { "Remove the function-typed field or remove `#Patchable` from the struct." }
@@ -3077,6 +3103,7 @@ PatchableFunctionField: struct {
 ComputedFieldCycle: struct {
     impl Diagnostic {
         code: "E0338"
+        meaning: "Computed-field formulas that depend on each other in a cycle"
         no_fix: .Ambiguous
         what: fn(self) -> String { "A cycle among computed-field formulas, including self-reference" }
         why: fn(self) -> String { "A computed field's formula reads other fields, so the formulas must not depend on each other in a loop" }
@@ -3087,6 +3114,7 @@ ComputedFieldCycle: struct {
 ComputedFieldAssigned: struct {
     impl Diagnostic {
         code: "E0339"
+        meaning: "A computed field that is set, written or taken"
         what: fn(self) -> String { "A computed field set in a struct literal, assigned, lent for writing or taken" }
         why: fn(self) -> String { "A computed field's value always comes from its formula, so it has no storage to set, write or take" }
         fix: fn(self) -> String { "Change the stored field the formula reads, or remove the computed field from the struct literal." }
@@ -3142,6 +3170,7 @@ DuplicateSwitchOff: struct {
 DuplicateMetaField: struct {
     impl Diagnostic {
         code: "E0346"
+        meaning: "A `#Meta` field written twice"
         no_fix: .Ambiguous
         what: fn(self) -> String { "`#Meta` duplicate field" }
         why: fn(self) -> String { "Each `#Meta` field has one value, so writing it twice would make tooling choose between the two" }
@@ -3152,6 +3181,7 @@ DuplicateMetaField: struct {
 InvalidMetaCategory: struct {
     impl Diagnostic {
         code: "E0347"
+        meaning: "A `#Meta` category that isn't plain quoted text"
         what: fn(self) -> String { "`#Meta` category is not plain quoted text" }
         why: fn(self) -> String { "Tooling shows the category as a label, so it must be fixed text written in quotes" }
         fix: fn(self) -> String { "Use a plain quoted string for the `#Meta` category." }
@@ -3161,6 +3191,7 @@ InvalidMetaCategory: struct {
 EmptyMetaCategory: struct {
     impl Diagnostic {
         code: "E0348"
+        meaning: "An empty `#Meta` category"
         what: fn(self) -> String { "`#Meta` category is empty" }
         why: fn(self) -> String { "Tooling shows the category as a visible label, and an empty one labels nothing" }
         fix: fn(self) -> String { "Set the `#Meta` category to non-empty text." }
@@ -3171,6 +3202,7 @@ MetaNotAllowedHere: struct {
     impl Diagnostic {
         code: "E0349"
         stage: [.Parse]
+        meaning: "`#Meta` on something other than a binding or function"
         what: fn(self) -> String { "`#Meta` written outside binding/function position" }
         why: fn(self) -> String { "`#Meta` describes a named source item, and an expression has no name for tooling to attach it to" }
         fix: fn(self) -> String { "Place `#Meta` on a binding or function declaration." }
@@ -3215,6 +3247,7 @@ InvalidMetaMaturity: struct {
 InvalidValidateRule: struct {
     impl Diagnostic {
         code: "E0353"
+        meaning: "A `validate` block statement that isn't a `check(cond, at: field, message)` call"
         what: fn(self) -> String { "A `validate {{ … }}` rule statement isn't `check(cond, at: field, \"msg\")`" }
         why: fn(self) -> String { "Every statement in a `validate` block is a `check` call naming its condition, the field it reports against and its message" }
         fix: fn(self) -> String { "Write each validation statement as `check(cond, at: field, \"msg\")`." }
@@ -3224,6 +3257,7 @@ InvalidValidateRule: struct {
 UnknownValidateField: struct {
     impl Diagnostic {
         code: "E0354"
+        meaning: "A `check` whose `at:` names no field of the struct"
         what: fn(self) -> String { "`check(…, at: field, …)`'s `at:` doesn't name a field on the struct" }
         why: fn(self) -> String { "`at:` names the field a failed check is reported against, so it must be a field the struct declares" }
         fix: fn(self) -> String { "Set `at:` to a field declared by the struct." }
@@ -3763,6 +3797,7 @@ UnreachableElseArm: struct {
 FallibleWhereValueExpected: struct {
     impl Diagnostic {
         code: "E0401"
+        meaning: "A fallible value used where a plain value is needed"
         what: fn(self) -> String { "Fallible value used where plain `T` expected" }
         why: fn(self) -> String { "A fallible value may hold a failure, so it must be handled before it is used as a plain value" }
         fix: fn(self) -> String { "Handle the fallible result or use it in a fallible context." }
@@ -3772,6 +3807,7 @@ FallibleWhereValueExpected: struct {
 FallibleCallIgnored: struct {
     impl Diagnostic {
         code: "E0402"
+        meaning: "A fallible call whose result is ignored"
         what: fn(self) -> String { "Fallible call ignored as a statement" }
         why: fn(self) -> String { "A failure no code looks at is lost silently, so a fallible call's result must be handled" }
         fix: fn(self) -> String { "Handle, propagate, or explicitly discard the fallible result." }
@@ -3792,6 +3828,7 @@ FailureDomainMismatch: struct {
 OkErrOutsideFallible: struct {
     impl Diagnostic {
         code: "E0404"
+        meaning: "`ok` or `err` where no fallible result is expected"
         what: fn(self) -> String { "`ok`/`err` need a fallible context" }
         why: fn(self) -> String { "`ok` and `err` build a fallible result, so they only make sense where one is expected" }
         fix: fn(self) -> String { "Use `ok` or `err` only inside a fallible function or expression." }
@@ -3801,6 +3838,7 @@ OkErrOutsideFallible: struct {
 FallbackTypeMismatch: struct {
     impl Diagnostic {
         code: "E0405"
+        meaning: "A `??` fallback of another type than the value it replaces"
         no_fix: .Ambiguous
         what: fn(self) -> String { "`??` fallback type/`return` mismatch" }
         why: fn(self) -> String { "The `??` fallback stands in for the missing value, so it must have the same type, or leave the function" }
@@ -3896,6 +3934,7 @@ BareQuestionMark: struct {
 InvalidDropReason: struct {
     impl Diagnostic {
         code: "E0407"
+        meaning: "A `.drop()` without a valid reason"
         what: fn(self) -> String { "`.drop()` reason missing or invalid" }
         why: fn(self) -> String { "The reason records why a result is thrown away on purpose, so a reader doesn't take it for a mistake" }
         fix: fn(self) -> String { "Provide a valid reason string to `.drop()`." }
@@ -3905,6 +3944,7 @@ InvalidDropReason: struct {
 ErrInOptionalFallback: struct {
     impl Diagnostic {
         code: "E0408"
+        meaning: "`err` read in an optional fallback"
         what: fn(self) -> String { "`err` is not available in an optional fallback" }
         why: fn(self) -> String { "An optional can be absent, but it has no failure report to name" }
         fix: fn(self) -> String { "Remove `err`, or use a fallible result when the fallback needs the failure" }
@@ -3914,6 +3954,7 @@ ErrInOptionalFallback: struct {
 ErrAfterPatternMiss: struct {
     impl Diagnostic {
         code: "E0409"
+        meaning: "`err` read after a pattern miss"
         what: fn(self) -> String { "`err` is not available after a pure pattern miss" }
         why: fn(self) -> String { "A shape test only reports whether the subject matched; it carries no failure value" }
         fix: fn(self) -> String { "Remove `err`, or return an explicit value from the miss route" }
@@ -3968,6 +4009,7 @@ UnknownPrivQualifier: struct {
     impl Diagnostic {
         code: "E0414"
         stage: [.Parse]
+        meaning: "An unknown `priv(…)` qualifier, or `priv(package)` on a top-level declaration"
         structured_fix: .SourceEdit
         no_fix: None
         fix_safety: .NeedsReview
@@ -3981,6 +4023,7 @@ VisibilitySectionLabel: struct {
     impl Diagnostic {
         code: "E0415"
         stage: [.Parse]
+        meaning: "A `pub:` or `priv:` section label"
         structured_fix: .SourceEdit
         no_fix: None
         fix_safety: .NeedsReview
@@ -4004,6 +4047,7 @@ RetiredDuplicatePubFile: struct {
 PackagePrivField: struct {
     impl Diagnostic {
         code: "E0417"
+        meaning: "`priv(package)` on a field"
         structured_fix: .SourceEdit
         no_fix: None
         fix_safety: .NeedsReview
@@ -4027,6 +4071,7 @@ RetiredPubFile: struct {
 MustUseIgnored: struct {
     impl Diagnostic {
         code: "E0419"
+        meaning: "A `#MustUse` result ignored as a statement"
         what: fn(self) -> String { "`#MustUse` result ignored as a bare statement" }
         why: fn(self) -> String { "A `#MustUse` result carries work or a resource that is lost when nothing checks it" }
         fix: fn(self) -> String { "Use the `#MustUse` result, bind it, or explicitly discard it." }
@@ -4210,6 +4255,7 @@ ValueThrownAway: struct {
 UntypedEmptyList: struct {
     impl Diagnostic {
         code: "E0501"
+        meaning: "An empty `[]` with no type from its context"
         structured_fix: .SourceEdit
         no_fix: None
         fix_safety: .BehaviorPreserving
@@ -4233,6 +4279,7 @@ InvalidMapKeyType: struct {
 StringIndex: struct {
     impl Diagnostic {
         code: "E0503"
+        meaning: "Text indexed with `[ ]`"
         what: fn(self) -> String { "Strings aren't indexable with `[ ]`" }
         why: fn(self) -> String { "Text is a sequence of characters of varying size, so a byte position can split one; characters are walked or sliced instead" }
         fix: fn(self) -> String { "Use a supported string operation instead of indexing with `[ ]`." }
@@ -4242,6 +4289,7 @@ StringIndex: struct {
 MixedCollectionLiteral: struct {
     impl Diagnostic {
         code: "E0504"
+        meaning: "A list or map literal whose items have different types"
         what: fn(self) -> String { "Mixed-type list/map literal" }
         why: fn(self) -> String { "A list or map holds items of one type, so every item in a literal must share it" }
         fix: fn(self) -> String { "Make the collection literal elements share one type." }
@@ -4251,6 +4299,7 @@ MixedCollectionLiteral: struct {
 InvalidIndexType: struct {
     impl Diagnostic {
         code: "E0505"
+        meaning: "An index or key of the wrong type, or a slice of something that isn't a collection"
         what: fn(self) -> String { "Wrong index/key type or bad slice target" }
         why: fn(self) -> String { "A collection is indexed by its own key or position type, and only a collection can be sliced" }
         fix: fn(self) -> String { "Use the correct index or key type and slice a valid target." }
@@ -4260,6 +4309,7 @@ InvalidIndexType: struct {
 UnhashableSetElement: struct {
     impl Diagnostic {
         code: "E0506"
+        meaning: "A `Set` whose element type can't be hashed"
         what: fn(self) -> String { "`Set<T>` element type is not hashable" }
         why: fn(self) -> String { "A set finds its elements by hash, so its element type must support hashing and equality" }
         fix: fn(self) -> String { "Use a hashable element type for `Set<T>`." }
@@ -4284,6 +4334,7 @@ CollectionChangedWhileRead: struct {
 CryptoExpertNotAllowed: struct {
     impl Diagnostic {
         code: "E0510"
+        meaning: "A raw crypto primitive used outside the expert gate"
         what: fn(self) -> String { "Raw crypto expert API used without `use core.crypto.expert` and/or outside `#Unsafe` — use `crypto.seal`/`open` instead" }
         why: fn(self) -> String { "Raw crypto primitives are easy to misuse, so they run only inside an explicit expert gate" }
         fix: fn(self) -> String { "Import `core.crypto.expert` and use the required `#Unsafe` gate, or use `crypto.seal`/`open`." }
@@ -4293,6 +4344,7 @@ CryptoExpertNotAllowed: struct {
 ExpiringForce: struct {
     impl Diagnostic {
         code: "E0511"
+        meaning: "`Expiring.force` reading past the expiry check"
         what: fn(self) -> String { "`Expiring.force` bypasses fallible cache-expiry access — use `get(clock)`" }
         why: fn(self) -> String { "An expiring value can be past its time, so it is read through `get(clock)`, which reports the expiry" }
         fix: fn(self) -> String { "Use fallible `Expiring.get(clock)` instead of `Expiring.force`." }
