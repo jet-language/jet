@@ -1,0 +1,28 @@
+# Claim (D-SCRIPT-HELPERS1=A): a script function also takes the variables the
+# script functions it calls reach. `step` names no variable but calls `bump`,
+# which writes `count`, and `show`, which reaches `count` and `limit` through
+# `label`, so it takes `count` as `&` and `limit` as a read; the recursive
+# `countdown` takes the same through `step`. `label` and `show` only read, so
+# `count` stays a read for them. Each call in the file fills them in, and the
+# file prints the same lines on O0, O1 and O2.
+fixture: script_functions_reach_variables_through_the_functions_they_call.fixture
+env: NO_COLOR=1
+env: XDG_CACHE_HOME={work}/cache
+env: JET_STORE_DIR={work}/store
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet
+exit: 0
+stdout: = ""
+stderr: = "ok: `main.jet` has no problems\n"
+step file_o0: jet run --optimize=none main.jet
+exit: 0
+stdout: = "tick 2\n1/2\ntick 1\n2/2\nshown: 2/2\ndone: 2\n"
+stderr: = ""
+step file_o1: jet run --optimize=basic main.jet
+exit: 0
+stdout: == file_o0
+stderr: = ""
+step file_o2: jet run --optimize=full main.jet
+exit: 0
+stdout: == file_o0
+stderr: = ""

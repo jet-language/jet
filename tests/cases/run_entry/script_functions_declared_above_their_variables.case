@@ -1,0 +1,29 @@
+# Claim (D-SCRIPT-HELPERS1=A): a script function declared above the lines
+# that set the variables it uses takes them the same, and each call after
+# those lines passes the script's own. A `#Test`, outside the script's lines,
+# passes them by name. The file checks clean, prints the same lines on O0, O1
+# and O2, and its test passes.
+fixture: script_functions_declared_above_their_variables.fixture
+env: NO_COLOR=1
+env: XDG_CACHE_HOME={work}/cache
+env: JET_STORE_DIR={work}/store
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet
+exit: 0
+stdout: = ""
+stderr: = "ok: `main.jet` has no problems\n"
+step file_o0: jet run --optimize=none main.jet
+exit: 0
+stdout: = "1/2\ndone: 2/2\n"
+stderr: = ""
+step file_o1: jet run --optimize=basic main.jet
+exit: 0
+stdout: == file_o0
+stderr: = ""
+step file_o2: jet run --optimize=full main.jet
+exit: 0
+stdout: == file_o0
+stderr: = ""
+step: jet test main.jet
+exit: 0
+stdout: ~ "1 passed, 0 failed"

@@ -7,21 +7,22 @@
 // writes is a `&` parameter, from a second probe that checks each function
 // with its `:=` variables as `&` (sema_script_helper_writes).
 use {
-    jet_foundation.[AST_NODE_GENERATED, AccessConvention, Diagnostic, Expr, Func, Item, Param, ParamZone, Span, TargetMachine, ast_visit_body]
+    jet_foundation.[AST_NODE_GENERATED, AccessConvention, Diagnostic, Expr, Item, Param, ParamZone, Span, TargetMachine]
     jet_sema.[
         SemaComptimeDeclarationStage, SemaForeignProviderInput, SemaRegistrationPackagePolicy, SemaScriptVariable,
-        sema_collect_comptime_declarations, sema_registration_prepare_graph, sema_script_entry_local_types, sema_script_helper_writes,
+        sema_collect_comptime_declarations, sema_registration_prepare_graph, sema_script_entry_local_types, sema_script_function, sema_script_function_hides,
+        sema_script_function_uses, sema_script_functions, sema_script_helper_writes,
     ]
 }
 
 // Gives each function of the entry script the parameters of the script
-// variables it names. Nothing changes for a file that is no script or whose
-// functions name none of its variables.
+// variables it reaches. Nothing changes for a file that is no script or whose
+// functions reach none of its variables.
 jet_driver_script_helpers: fn(request: JetDriverCompileRequest, load: &JetDriverLoadResult, providers: [SemaForeignProviderInput], target_machine: TargetMachine) {
     reach: jet_driver_script_reach(load)
-    if reach.len() == 0 -> return
+    if reach.variables.len() == 0 -> return
     names := [String]{}
-    loop (_, named) in reach {
+    loop (_, named) in reach.variables {
         loop name in named {
             // copy: the reach keeps its names; the probe takes its own list
             if !names.contains(name) -> names.push(name.copy())
@@ -31,29 +32,86 @@ jet_driver_script_helpers: fn(request: JetDriverCompileRequest, load: &JetDriver
     typing := jet_driver_script_probe_stage(request, load, providers, target_machine, policies) ?? return
     variables: sema_script_entry_local_types(typing, names)
     if variables.len() == 0 -> return
-    candidates: jet_driver_script_add_parameters(load, reach, variables)
+    candidates: jet_driver_script_add_parameters(load, reach.variables, variables)
     if candidates.len() == 0 -> return
     writing := jet_driver_script_probe_stage(request, load, providers, target_machine, policies) ?? return
-    written: sema_script_helper_writes(writing, candidates)
+    written := sema_script_helper_writes(writing, candidates)
+    jet_driver_script_chain_writes(written, reach)
     jet_driver_script_settle_writes(load, written)
 }
 
+// A function also writes each variable a function it calls writes, when it
+// passes its own: until no list grows.
+jet_driver_script_chain_writes: fn(written: &[String:[String]], reach: JetDriverScriptReach) Never! {
+    grew := true
+    loop grew {
+        grew = false
+        loop (caller, callees) in reach.calls {
+            reached: reach.variables.get(caller) ?? next
+            writes := written.get(caller) ?? next
+            before: writes.len()
+            loop callee in callees {
+                callee_writes: written.get(callee) ?? next
+                loop name in callee_writes {
+                    // copy: the callee keeps its list
+                    if reached.contains(name) && !writes.contains(name) -> writes.push(name.copy())
+                }
+            }
+            if writes.len() > before {
+                // copy: the reach keeps its key
+                written[caller.copy()] = writes
+                grew = true
+            }
+        }
+    }
+}
+
+// The script variables each script function reaches, and the script
+// functions each one calls or names.
+JetDriverScriptReach: struct {
+    variables: [String:[String]]
+    calls: [String:[String]]
+}
+
 // For each top-level function of the entry script but `run`, the script
-// variables its body names, in the order they are first named. A function's
-// own parameter or top-level local of a variable's spelling hides the
-// variable. A method gets none. Empty for a file that is no script.
-jet_driver_script_reach: fn(load: JetDriverLoadResult) -> [String:[String]] Never! {
-    reach := [String:[String]]{}
+// variables it reaches: the ones its body names, in the order they are first
+// named, then the ones each script function it calls or names reaches, so
+// functions that call each other share one list. A function's own parameter
+// or top-level local of a variable's spelling hides the variable. A method
+// gets none. Empty for a file that is no script.
+jet_driver_script_reach: fn(load: JetDriverLoadResult) -> JetDriverScriptReach Never! {
+    reach := JetDriverScriptReach{variables: [String:[String]]{}, calls: [String:[String]]{}}
     loop loaded_index in 0..<load.modules.len() {
         if load.modules[loaded_index].module_identity != load.entry_module_identity -> next
         locals: load.modules[loaded_index].program.entry_locals
         if locals.len() == 0 -> return reach
+        functions: sema_script_functions(load.modules[loaded_index].program.items)
+        named := [[String]]{}
+        hidden := [[String]]{}
+        calls := [[Int]]{}
         loop item in load.modules[loaded_index].program.items {
-            if item == .Func(function) && function.name != "run" && function.external_type == None {
-                named := [String]{}
-                ast_visit_body(function.body, fn(expression: Expr) { jet_driver_script_note_variable(named, locals, function, expression) }, true)
-                // copy: the function keeps its name; the reach holds one per function
-                if named.len() > 0 -> reach[function.name.copy()] = named
+            if item == .Func(function) && sema_script_function(function) {
+                uses := sema_script_function_uses(function, locals, functions)
+                hides := [String]{}
+                loop local in locals {
+                    // copy: the entry keeps its locals; the row owns its own
+                    if sema_script_function_hides(function, local) -> hides.push(local.copy())
+                }
+                named.push(uses.variables.move())
+                calls.push(uses.functions.move())
+                hidden.push(hides)
+            }
+        }
+        jet_driver_script_reach_chains(named, calls, hidden)
+        loop (row, name) in functions {
+            // copy: the row lists keep their names and variables
+            if named[row].len() > 0 -> reach.variables[name.copy()] = named[row].copy()
+            if calls[row].len() > 0 {
+                callees := [String]{}
+                // copy: the row list keeps its names
+                loop callee in calls[row] -> callees.push(functions[callee].copy())
+                // copy: the row list keeps its names
+                reach.calls[name.copy()] = callees
             }
         }
         return reach
@@ -61,23 +119,24 @@ jet_driver_script_reach: fn(load: JetDriverLoadResult) -> [String:[String]] Neve
     reach
 }
 
-jet_driver_script_note_variable: fn(named: &[String], locals: [String], function: Func, expression: Expr) Never! {
-    if expression == .Ident(name, _, _) {
-        // copy: the expression keeps its name; the list owns one per variable
-        if locals.contains(name) && !named.contains(name) && !jet_driver_script_hides(function, name) -> named.push(name.copy())
+// Each function also reaches what the functions it calls reach, unless it
+// hides the spelling itself, until no list grows.
+jet_driver_script_reach_chains: fn(named: &[[String]], calls: [[Int]], hidden: [[String]]) Never! {
+    grew := true
+    loop grew {
+        grew = false
+        loop caller in 0..<calls.len() {
+            loop callee in calls[caller] {
+                if callee == caller -> next
+                loop position in 0..<named[callee].len() {
+                    if named[caller].contains(named[callee][position]) || hidden[caller].contains(named[callee][position]) -> next
+                    // copy: the callee keeps its list
+                    named[caller].push(named[callee][position].copy())
+                    grew = true
+                }
+            }
+        }
     }
-}
-
-// Whether `function` binds `name` itself, as a parameter or a local of its
-// top-level statements.
-jet_driver_script_hides: fn(function: Func, name: String) -> Bool Never! {
-    loop parameter in function.params {
-        if parameter.name == name -> return true
-    }
-    loop statement in function.body {
-        if statement == .Val(binding) && binding.name == name -> return true
-    }
-    false
 }
 
 // Appends each reached variable that the probe typed to its function as a
@@ -88,7 +147,7 @@ jet_driver_script_add_parameters: fn(load: &JetDriverLoadResult, reach: [String:
     loop loaded_index in 0..<load.modules.len() {
         if load.modules[loaded_index].module_identity != load.entry_module_identity -> next
         loop item_index in 0..<load.modules[loaded_index].program.items.len() {
-            if load.modules[loaded_index].program.items[item_index] == .Func(function) {
+            if load.modules[loaded_index].program.items[item_index] == .Func(function) && sema_script_function(function) {
                 named: reach.get(function.name) ?? next
                 updated := function
                 writes := [String]{}
@@ -141,7 +200,7 @@ jet_driver_script_settle_writes: fn(load: &JetDriverLoadResult, written: [String
     loop loaded_index in 0..<load.modules.len() {
         if load.modules[loaded_index].module_identity != load.entry_module_identity -> next
         loop item_index in 0..<load.modules[loaded_index].program.items.len() {
-            if load.modules[loaded_index].program.items[item_index] == .Func(function) {
+            if load.modules[loaded_index].program.items[item_index] == .Func(function) && sema_script_function(function) {
                 writes: written.get(function.name) ?? next
                 updated := function
                 loop index in 0..<updated.params.len() {

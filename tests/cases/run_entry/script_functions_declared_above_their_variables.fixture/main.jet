@@ -1,0 +1,18 @@
+// The functions come before the lines that set the variables they use, and
+// every call in the script comes after them.
+label: fn() -> String {
+    "{count}/{limit}"
+}
+bump: fn() {
+    count += 1
+}
+count := 0
+limit: 2
+bump()
+print(label())
+bump()
+print("done: {label()}")
+
+#Test("a test passes the script's variables by name") {
+    assert_eq(label(count: 1, limit: 3), "1/3")
+}

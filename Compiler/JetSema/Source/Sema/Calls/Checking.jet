@@ -480,6 +480,16 @@ sema_call_typecheck_bound_arguments: fn(callee: String, params: [SemaCallParam],
         parameter: params[slot]
         // A `#caller` default is the place of this call.
         if binding.sources[index] == .Default(_) && sema_site_is_caller(args[index].expr) -> args[index].expr = sema_site_location_expr("", environment, program, scopes, span)
+        // A script variable's default reads the caller's binding at the
+        // call; a caller that hasn't bound it is refused.
+        if binding.sources[index] == .Default(_) && sema_script_variable_default(args[index].expr, parameter) == .Val(declared) {
+            if sema_scope_resolve_index_at(scopes, parameter.name, span) == None {
+                diagnostics.push(sema_script_unbound_variable(declared, parameter.name, span, environment, program, scopes))
+                complete = false
+                next
+            }
+            args[index].expr = sema_script_variable_read(parameter.name, span)
+        }
         required_declared: sema_call_argument_parameter_type(parameter, args[index]) ?? {
             diagnostics.push(sema_error("E0112", args[index].span, "this callable parameter has no checked type", "call checking cannot prove an argument safe without the declaration type", "register the complete callable signature"))
             return None

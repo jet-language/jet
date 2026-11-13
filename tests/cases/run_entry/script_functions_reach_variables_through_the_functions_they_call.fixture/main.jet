@@ -1,0 +1,31 @@
+count := 0
+limit: 2
+
+bump: fn() {
+    count += 1
+}
+
+label: fn() -> String {
+    "{count}/{limit}"
+}
+
+show: fn() {
+    print(label())
+}
+
+step: fn(word: String) {
+    bump()
+    print(word)
+    show()
+}
+
+countdown: fn(n: Int) {
+    if n > 0 {
+        step("tick {n}")
+        countdown(n - 1)
+    }
+}
+
+countdown(2)
+print("shown: {label()}")
+print("done: {count}")

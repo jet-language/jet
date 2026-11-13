@@ -1,0 +1,12 @@
+Error [jet.UnknownName]: `show` needs `total`, which the script hasn't set yet here
+  --> tests/ui/script_function_called_before_its_variable_is_set.jet:9:1
+    |
+  9 | show()
+    | ^^^^
+  --> tests/ui/script_function_called_before_its_variable_is_set.jet:10:1
+    |
+ 10 | total: 5
+    | ^^^^^ `total` is set here
+ Why: `show` uses the script's `total` through `label`, so each call passes it, and this call runs before the line that sets it
+ Fix: Move this call below the line that sets `total`
+More: jet-lang.dev/e/E0107

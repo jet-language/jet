@@ -3,7 +3,7 @@
 // types the script's own statements give them, which only a check of the
 // generated `run: fn` (sema_script_entry) knows, and a parameter is `&` when
 // a check of the function's body finds it written.
-use jet_foundation.[AccessConvention, BodyTree, Diagnostic, FnBody, Item, TFuncKind, TLocal, TTypeDef, Type, body_node, body_stmt, compiler_transfer_rows]
+use jet_foundation.[AST_NODE_GENERATED, AccessConvention, BodyTree, Diagnostic, Expr, FnBody, Func, Item, Span, TFuncKind, TLocal, TTypeDef, Type, ast_visit_body, body_node, body_stmt, compiler_transfer_rows, diagnostic_with_label]
 
 // A script variable as the script's own statements bind it: its checked type,
 // and whether it is a `:=` binding a function may change.
@@ -36,18 +36,21 @@ sema_script_entry_local_types: fn(stage: &&SemaComptimeDeclarationStage, names: 
 }
 
 // For each function of the entry named in `candidates`, the extra parameters
-// among its candidates that its checked body writes. The declaration pass
-// `stage` registers each candidate as `&`, so a write checks; one the body
-// only reads becomes a read parameter. `stage` is used up.
+// among its candidates that its checked body writes itself. The declaration
+// pass `stage` registers each candidate as `&`, so a write checks; one the
+// body only reads becomes a read parameter. A parameter a call passes on to
+// another script function's parameter is not written here: the caller
+// chains the callee's writes. `stage` is used up.
 sema_script_helper_writes: fn(stage: &&SemaComptimeDeclarationStage, candidates: [String:[String]]) -> [String:[String]] {
     written := [String:[String]]{}
     probe := sema_script_probe_open(stage) ?? return written
     loop (helper, names) in candidates {
         function: sema_script_probe_check(probe, helper) ?? next
+        passed: sema_script_passed_on(function.tree)
         writes := [String]{}
         loop parameter in function.params {
             // copy: the checked body keeps its parameter's name; the answer holds its own
-            if names.contains(parameter.name) && sema_script_body_writes(function.tree, parameter.local) -> writes.push(parameter.name.copy())
+            if names.contains(parameter.name) && sema_script_body_writes(function.tree, parameter.local, passed) -> writes.push(parameter.name.copy())
         }
         // copy: `candidates` keeps its key
         written[helper.copy()] = writes
@@ -118,35 +121,53 @@ sema_script_entry_bound_types: fn(function: FnBody, names: [String], found: &[St
 
 // Whether `tree` writes a place rooted at `parameter`: an assignment, or a
 // write borrow (a `&` argument, a changing method's receiver, a written
-// index), lambdas included.
-sema_script_body_writes: fn(tree: BodyTree, parameter: TLocal) -> Bool Never! {
+// index), lambdas included. The reads in `passed` don't count.
+sema_script_body_writes: fn(tree: BodyTree, parameter: TLocal, passed: [Int]) -> Bool Never! {
     loop statement in tree.stmts {
         if statement == .Assign(place, _, _, _, _) {
             if place == {
                 .Local(local) -> if sema_script_same_local(local, parameter) -> return true
-                .Expr(value) -> if sema_script_place_rooted_at(tree, value, parameter) -> return true
+                .Expr(value) -> if sema_script_place_rooted_at(tree, value, parameter, passed) -> return true
             }
         }
     }
     loop node in tree.nodes {
-        if node.kind == .Borrow(place, access) && access == AccessConvention.Write && sema_script_place_rooted_at(tree, place, parameter) -> return true
-        if node.kind == .Index(base, _, _, access, _, _) && access == AccessConvention.Write && sema_script_place_rooted_at(tree, base, parameter) -> return true
+        if node.kind == .Borrow(place, access) && access == AccessConvention.Write && sema_script_place_rooted_at(tree, place, parameter, passed) -> return true
+        if node.kind == .Index(base, _, _, access, _, _) && access == AccessConvention.Write && sema_script_place_rooted_at(tree, base, parameter, passed) -> return true
     }
     false
 }
 
-// Whether node `id` is a place whose root local is `parameter`. A place's
-// chain is no longer than the tree.
-sema_script_place_rooted_at: fn(tree: BodyTree, id: Int, parameter: TLocal) -> Bool Never! {
+// The reads of a script variable a call passes on as another script
+// function's default: the call reads each at its own name
+// (sema_script_variable_default), so the read carries the call's span.
+sema_script_passed_on: fn(tree: BodyTree) -> [Int] Never! {
+    passed := [Int]{}
+    loop node in tree.nodes {
+        if node.kind == .Call(_, _, args) {
+            loop argument in args {
+                at := argument.value
+                if body_node(tree, at).kind == .Borrow(place, _) -> at = place
+                read: body_node(tree, at)
+                if read.kind == .Local(_) && read.span.start == node.span.start && read.span.end == node.span.end -> passed.push(at)
+            }
+        }
+    }
+    passed
+}
+
+// Whether node `id` is a place whose root local is `parameter`, other than a
+// read in `passed`. A place's chain is no longer than the tree.
+sema_script_place_rooted_at: fn(tree: BodyTree, id: Int, parameter: TLocal, passed: [Int]) -> Bool Never! {
     at := id
     loop _ in 0..<tree.nodes.len() {
-        kind: body_node(tree, at).kind
-        if kind == .Local(local) -> return sema_script_same_local(local, parameter)
-        if kind == .Field(receiver, _) {
+        node: body_node(tree, at)
+        if node.kind == .Local(local) -> return !passed.contains(at) && sema_script_same_local(local, parameter)
+        if node.kind == .Field(receiver, _) {
             at = receiver
-        } else if kind == .Index(base, _, _, _, _, _) {
+        } else if node.kind == .Index(base, _, _, _, _, _) {
             at = base
-        } else if kind == .Borrow(place, _) {
+        } else if node.kind == .Borrow(place, _) {
             at = place
         } else {
             return false
@@ -159,4 +180,186 @@ sema_script_place_rooted_at: fn(tree: BodyTree, id: Int, parameter: TLocal) -> B
 // parameter's span is where it was declared.
 sema_script_same_local: fn(local: TLocal, parameter: TLocal) -> Bool Never! {
     local.name == parameter.name && local.span.start == parameter.span.start && local.span.end == parameter.span.end
+}
+
+// What one script function's body uses: the script variables it names and
+// the rows of the script functions it calls or names.
+SemaScriptUses: struct {
+    variables: [String]
+    functions: [Int]
+}
+
+// Whether `function` is a script function, which may take script variables:
+// a top-level function of the entry script but `run`. A method is none.
+sema_script_function: fn(function: Func) -> Bool Never! {
+    function.name != "run" && function.external_type == None
+}
+
+// The names of the script functions among an entry script's items, in item
+// order: a function's row in the lists that go with it.
+sema_script_functions: fn(items: [Item]) -> [String] Never! {
+    functions := [String]{}
+    loop item in items {
+        // copy: the function keeps its name; the row list holds one per function
+        if item == .Func(function) && sema_script_function(function) -> functions.push(function.name.copy())
+    }
+    functions
+}
+
+// The script variables among `locals` that the body of `function` names, in
+// the order it first names them, and the rows of the script functions it
+// calls or names. A name `function` binds itself is its own.
+sema_script_function_uses: fn(function: Func, locals: [String], functions: [String]) -> SemaScriptUses Never! {
+    uses := SemaScriptUses{variables: [String]{}, functions: [Int]{}}
+    ast_visit_body(function.body, fn(expression: Expr) { sema_script_note_use(uses, locals, functions, function, expression) }, true)
+    uses
+}
+
+sema_script_note_use: fn(uses: &SemaScriptUses, locals: [String], functions: [String], function: Func, expression: Expr) Never! {
+    if expression == .Ident(name, _, _) {
+        // copy: the expression keeps its name; the list owns one per variable
+        if locals.contains(name) && !uses.variables.contains(name) && !sema_script_function_hides(function, name) -> uses.variables.push(name.copy())
+        sema_script_note_function(uses, functions, function, name)
+    }
+    if expression == .Call(call, _) -> sema_script_note_function(uses, functions, function, call.name)
+}
+
+sema_script_note_function: fn(uses: &SemaScriptUses, functions: [String], function: Func, name: String) Never! {
+    if sema_script_function_hides(function, name) -> return
+    loop (row, candidate) in functions {
+        if candidate == name {
+            if !uses.functions.contains(row) -> uses.functions.push(row)
+            return
+        }
+    }
+}
+
+// Whether `function` binds `name` itself, as a parameter it declares or a
+// local of its top-level statements.
+sema_script_function_hides: fn(function: Func, name: String) -> Bool Never! {
+    loop parameter in function.params {
+        if parameter.name == name && !parameter.script_variable -> return true
+    }
+    loop statement in function.body {
+        if statement == .Val(binding) && binding.name == name -> return true
+    }
+    false
+}
+
+// The span of the function the checker gave `parameter`, when `argument`, the
+// default a call filled in for it, is a script variable's: such a parameter's
+// default names the parameter itself, at the function's name.
+sema_script_variable_default: fn(argument: Expr, parameter: SemaCallParam) -> Span? Never! {
+    if argument == .Ident(name, at, id) && id == AST_NODE_GENERATED && name == parameter.name -> return Val(at)
+    None
+}
+
+// A script variable's default as the call reads it: the caller's binding of
+// `name`, at the call.
+sema_script_variable_read: fn(name: String, call_span: Span) -> Expr Never! {
+    // copy: the parameter keeps its name
+    Expr.Ident{name: name.copy(), span: call_span, id: AST_NODE_GENERATED}
+}
+
+// E0107 for a call to a script function that needs script variable `name`
+// where the caller hasn't bound it: a script line before the one that sets
+// it, or code outside the script's lines, such as a `#Test` or a method,
+// which passes it by name. `declared` is the function's name, where its
+// parameter's default is spanned.
+sema_script_unbound_variable: fn(declared: Span, name: String, call_span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> Diagnostic {
+    graph: program.registration_graph ?? return sema_unknown_name_in(name, call_span, scopes)
+    module_index: sema_registration_module_index(graph, environment.module_identity) ?? return sema_unknown_name_in(name, call_span, scopes)
+    items: graph.modules[module_index].program.items
+    helper: sema_script_function_at(items, declared) ?? return sema_unknown_name_in(name, call_span, scopes)
+    chain: sema_script_chain(items, graph.modules[module_index].program.entry_locals, helper, name)
+    through: if chain.len() == 0 -> "" else -> " through {sema_script_chain_text(chain)}"
+    in_lines: sema_script_lines_hold(items, call_span)
+    what: if in_lines -> "`{helper}` needs `{name}`, which the script hasn't set yet here" else -> "`{helper}` needs the script's `{name}`, which isn't bound here"
+    why: if in_lines -> "`{helper}` uses the script's `{name}`{through}, so each call passes it, and this call runs before the line that sets it" else -> "`{helper}` uses `{name}`{through}, and only the script's own lines pass it by themselves"
+    fix: if in_lines -> "move this call below the line that sets `{name}`" else -> "pass it by name: `{helper}(…, {name}: …)`"
+    diagnostic := sema_error("E0107", call_span, what, why, fix)
+    entry: sema_script_entry_function_item(items, "run") ?? return diagnostic
+    if items[entry] == .Func(function) {
+        loop statement in function.body {
+            if statement == .Val(binding) && binding.name == name -> return diagnostic_with_label(diagnostic, binding.name_span, "`{name}` is set here")
+        }
+    }
+    diagnostic
+}
+
+// The script function named at `declared`.
+sema_script_function_at: fn(items: [Item], declared: Span) -> String? Never! {
+    loop item in items {
+        if item == .Func(function) && sema_script_function(function) && function.name_span.start == declared.start && function.name_span.end == declared.end {
+            // copy: the item keeps its name
+            return Val(function.name.copy())
+        }
+    }
+    None
+}
+
+// The script functions through which `helper` reaches `name`, along the
+// fewest calls: from the one it calls to the one whose body names `name`.
+// Empty when `helper` names it itself.
+sema_script_chain: fn(items: [Item], locals: [String], helper: String, name: String) -> [String] Never! {
+    functions: sema_script_functions(items)
+    uses := [SemaScriptUses]{}
+    hides := [Bool]{}
+    loop item in items {
+        if item == .Func(function) && sema_script_function(function) {
+            uses.push(sema_script_function_uses(function, locals, functions))
+            hides.push(sema_script_function_hides(function, name))
+        }
+    }
+    parents := [Int]{}
+    queue := [Int]{}
+    loop (row, candidate) in functions {
+        parents.push(-1)
+        if candidate == helper {
+            parents[row] = row
+            queue.push(row)
+        }
+    }
+    head := 0
+    loop head < queue.len() {
+        row: queue[head]
+        head += 1
+        if uses[row].variables.contains(name) {
+            chain := [String]{}
+            at := row
+            loop at != parents[at] {
+                // copy: the row list keeps its names
+                chain.insert(0, functions[at].copy())
+                at = parents[at]
+            }
+            return chain
+        }
+        if hides[row] -> next
+        loop callee in uses[row].functions {
+            if parents[callee] < 0 {
+                parents[callee] = row
+                queue.push(callee)
+            }
+        }
+    }
+    [String]{}
+}
+
+sema_script_chain_text: fn(chain: [String]) -> String Never! {
+    text := ""
+    loop (index, function) in chain {
+        text = if index == 0 -> "`{function}`" else -> "{text}, then `{function}`"
+    }
+    text
+}
+
+// Whether `span` is among the script's own lines rather than inside one of
+// the file's declarations.
+sema_script_lines_hold: fn(items: [Item], span: Span) -> Bool Never! {
+    loop item in items {
+        if item == .Func(function) && function.name == "run" && function.external_type == None -> next
+        declared: sema_compiler_index_item_span(item)
+        if declared.start <= span.start && span.end <= declared.end -> return false
+    }
+    true
 }
