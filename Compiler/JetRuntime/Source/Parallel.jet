@@ -81,8 +81,7 @@ parallel_raise: fn(record: I64) {
     }
     if (scheduler_control_current() != I64{0}) {
         if (sync_load(record) == I64{5}) {
-            if (jet_rt_stop_domain() != I64{0}) {
-                _ := scheduler_panic_check()
+            if (jet_rt_stop_domain() != I64{0} && !scheduler_stop_fatal()) {
                 _ := scheduler_panic_publish_record(record)
                 return
             }
@@ -91,7 +90,8 @@ parallel_raise: fn(record: I64) {
             return
         }
     }
-    // The process edge has no parent control. Replay the captured diagnostic,
+    // The process edge has no parent control, and a process-fatal panic is
+    // never published (scheduler_stop_fatal). Replay the captured diagnostic,
     // not a replacement panic; the owned stop is released before process exit.
     message: scheduler_stop_take_message(record)
     form: sync_load(wrapping(record + I64{48}))

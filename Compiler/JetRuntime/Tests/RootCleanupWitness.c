@@ -404,7 +404,7 @@ int main(int argc, char **argv, char **envp) {
             assert(jet_rt_stop_domain() == 1 && jet_rt_session_status() == 0);
         }
         jet_rt_panic_message(WORD("second"), 6);
-        abort(); /* actual delivered cleanup/inheritance beats the shield */
+        abort(); /* actual delivered cleanup/inheritance beats the shield: the second panic exits 70 */
     } else {
         fprintf(stderr, "unknown Root witness mode: %s\n", mode);
         return 2;

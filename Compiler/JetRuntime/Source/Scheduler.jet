@@ -120,7 +120,9 @@ scheduler_control_new: fn() -> I64 {
 
 // Trap.jet trap_root's target: the root's half of a trap, which the trap
 // reaches only once it has found the control that holds its capture or owns
-// its stop. PREPARE begins a root stop's captured report. WRITE and
+// its stop. PREPARE begins a root stop's captured report, except for a
+// process-fatal stop, whose report goes straight to fd 2 and whose EXIT then
+// finds no capture. WRITE and
 // WRITE_WORD append `b` (an address or a word) of `c` bytes to the capture
 // `a`. EXIT publishes the captured report with status `a` to the root; an
 // exit with no captured report (jet_rt_process_exit called directly, as an
@@ -129,8 +131,7 @@ scheduler_control_new: fn() -> I64 {
 // control `a`. The others return 1.
 #Export(c) jet_rt_trap_root: fn(op: I64, a: I64, b: I64, c: I64) -> I64 {
     if (op == TRAP_ROOT_PREPARE) {
-        _ := scheduler_panic_check()
-        scheduler_root_capture_begin()
+        if !scheduler_stop_fatal() -> scheduler_root_capture_begin()
     } else if (op == TRAP_ROOT_EXIT) {
         text: scheduler_root_capture_take(scheduler_control_current())
         if (text == I64{0}) -> return I64{0}
@@ -349,8 +350,11 @@ scheduler_root_publish_owned: fn(text: I64, code: I64) -> Bool {
         jet_rt_string_drop(text)
         return false
     }
-    if !scheduler_panic_check() {
+    if scheduler_stop_fatal() {
+        jet_rt_stdout_flush()
+        if (text != I64{0}) -> trap_write_handle(text)
         jet_rt_string_drop(text)
+        trap_exit(code)
         return false
     }
     record: scheduler_stop_new(I64{5}, text)
@@ -359,17 +363,14 @@ scheduler_root_publish_owned: fn(text: I64, code: I64) -> Bool {
     scheduler_panic_publish_record(record)
 }
 #Export(c) jet_rt_root_publish_rendered: fn(message: I64, length: I64, requested_code: I64) -> Bool {
-    if (jet_rt_stop_domain() != I64{1} || !scheduler_panic_check()) -> return false
+    if (jet_rt_stop_domain() != I64{1}) -> return false
     text := I64{0}
     if (length != I64{0}) {
         text = scheduler_text_new(length)
         if (text == I64{0} && jet_rt_session_propagate() != I64{0}) -> return false
         coll_copy(message, sync_load(text), length)
     }
-    record: scheduler_stop_new(I64{5}, text)
-    sync_store(wrapping(record + I64{48}), I64{1})
-    scheduler_root_set_code(scheduler_control_current(), requested_code)
-    scheduler_panic_publish_record(record)
+    scheduler_root_publish_owned(text, requested_code)
 }
 #Export(c) jet_rt_root_take_stop: fn(control: I64, code_out: I64) -> I64 {
     record: scheduler_control_take_stop(control)
@@ -1874,6 +1875,8 @@ scheduler_limit_write: fn(soft: I64) {
     if (soft < I64{0}) -> trap_write_static(rt_static_text("unlimited")) else -> trap_number(soft)
 }
 
+// The one stop that reaches a root capture already being written: a stop
+// raised while its own report renders. No report can be trusted, so abort.
 scheduler_abort_double_panic: fn() {
     jet_rt_stdout_flush()
     // Bypass a root's report capture: this is the terminal abort diagnostic.
@@ -1884,13 +1887,33 @@ scheduler_abort_double_panic: fn() {
     alloc_write_word(I64{44836417121}, I64{5})
     alloc_abort()
 }
-scheduler_panic_check: fn() -> Bool {
+// A stop that arrives while another unwinds is process-fatal: a panic during
+// cleanup with a stop pending, or in a body whose inherited stop unwinds
+// (Docs/spec/core-library-native-contract.md). It is never published: its
+// report goes straight to fd 2 and the process exits 70, so no further
+// cleanup runs.
+scheduler_stop_fatal: fn() -> Bool {
     if (jet_rt_stop_domain() == I64{0}) -> return false
     flags: scheduler_scope_flags(scheduler_control_current())
     if ((flags.bit_and(SCHEDULER_SCOPE_INHERITED_STOP)) != I64{0} ||
         ((flags.bit_and(SCHEDULER_SCOPE_CLEANUP)) != I64{0} && scheduler_scope_delivered_kind(flags) != I64{0}) ||
-        scheduler_delivered_status_unmasked() != I64{0}) -> scheduler_abort_double_panic()
-    true
+        scheduler_delivered_status_unmasked() != I64{0}) -> return true
+    false
+}
+// A process-fatal stop handed over as its message: `form` 1 is a rendered
+// report, written as it is; 0 is a raw panic reason, rendered as the root
+// renders one. Either way the process exits 70.
+scheduler_fatal_stop: fn(message: I64, length: I64, form: I64) {
+    if (form == I64{1}) {
+        jet_rt_stdout_flush()
+        trap_write(message, length)
+        trap_exit(I64{70})
+        return
+    }
+    trap_header(I64{0})
+    trap_write(message, length)
+    trap_msg_prelude_end()
+    trap_footer(I64{0})
 }
 // `code` is the registered stop row the root report would carry (0 E3001, 1 E3010, 2 E3011, 3
 // the host stop E2805; trap_header's numbering). jet_runtime_stop records the raw stop on
@@ -1914,7 +1937,7 @@ rt_task_panic_publish_recorded: fn(message: I64, length: I64) -> Bool {
 // the stop is published to the task, 0 when the caller reports it.
 #Export(c) jet_rt_task_panic_publish: fn(message: I64, length: I64) -> I64 {
     if (jet_rt_stop_domain() != I64{2}) -> return I64{0}
-    if !scheduler_panic_check() -> return I64{0}
+    if scheduler_stop_fatal() -> return I64{0}
     text: scheduler_text_new(length)
     if (text == I64{0} && jet_rt_session_propagate() != I64{0}) -> return I64{1}
     coll_copy(message, sync_load(text), length)
@@ -1973,8 +1996,16 @@ scheduler_thread_detach: fn() {
 #Export(c) jet_rt_stop_form: fn(record: I64) -> I64 { sync_load(wrapping(record + I64{48})) }
 #Export(c) jet_rt_stop_take_message: fn(record: I64) -> I64 { scheduler_stop_take_message(record) }
 #Export(c) jet_rt_stop_drop: fn(record: I64) { scheduler_stop_drop(record) }
+// A stop's publication to the current control. A process-fatal panic is
+// reported and ends the process here instead (scheduler_stop_fatal).
 #Export(c) jet_rt_control_publish_stop: fn(kind: I64, jct_status: I64, owner: I64, start: I64, end: I64, message: I64, length: I64, form: I64) -> Bool {
-    if (kind == I64{5} && !scheduler_panic_check()) -> return false
+    if (kind == I64{5}) {
+        if (jet_rt_stop_domain() == I64{0}) -> return false
+        if scheduler_stop_fatal() {
+            scheduler_fatal_stop(message, length, form)
+            return false
+        }
+    }
     text: scheduler_text_new(length)
     if (text == I64{0} && jet_rt_session_propagate() != I64{0}) -> return false
     coll_copy(message, sync_load(text), length)

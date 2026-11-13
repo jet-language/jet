@@ -472,7 +472,7 @@ static void run_stop(int64_t mode) {
         assert(jet_rt_control_publish_stop(mode - 100, -1, -1, -1, -1, WORD(reason), sizeof(reason) - 1, 0));
         assert(jet_scheduler_native_propagate() != 0);
         jet_rt_numeric_stop(0, 0, 0, WORD(numeric_reason), sizeof(numeric_reason) - 1);
-        assert(!"panic during propagation must abort");
+        assert(!"panic during propagation must exit 70");
     } else {
         assert(!"unknown witness mode");
     }

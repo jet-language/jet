@@ -79,8 +79,9 @@ token restores the control's scope flags for nesting) plus Shield. The first
 owned Stop stays in the control slot, while Check/Propagate delivery of it is
 masked even inside deferred thunks and resource closes. Cancellation and
 deadlines do not interrupt those
-closes. A new panic during cleanup with a pending Stop is process-fatal (70),
-the same abort a panic during unwinding gets. No additional TLS state
+closes. A new panic during cleanup with a pending Stop is process-fatal, as is
+a panic during unwinding: its own Stop report goes to stderr, no further
+cleanup runs, and the process exits 70. No additional TLS state
 or specialized plain cleanup call graph is introduced.
 Gated rows prove these rules on every tier:
 - the goldens `tests/run/Ownership/ReleaseDeferPanic` and `ReleaseDeferLifo` and
@@ -91,7 +92,7 @@ Gated rows prove these rules on every tier:
 - the case `task_control_tiers/a_cancel_at_cleanup_entry_waits_out_the_close_on_every_tier`
   proves that a cancel arriving at cleanup entry waits until the close
   finishes, then stops the task at its next wait.
-Both rows are known-failing under #5989.
+The cancel row is known-failing under #5989.
 
 Native expectation probes consume only a pending panic with a recorded raw
 `E3001`, `E3010`, `E3011` or `R0801`–`R0803` stop in the innermost matching

@@ -1582,7 +1582,9 @@ cleanup, without exposing a successful return value.
 If the first stop happens in an exit handler, the remaining handlers already
 registered before that stop are still owed cleanup, in registration order.
 Handlers registered after the stop do not run; their adopted captures are
-released inside stopped cleanup. A second panic during stopped cleanup aborts.
+released inside stopped cleanup. A second panic during stopped cleanup is
+process-fatal: its own Stop report prints, no further cleanup runs, and the
+process exits 70.
 
 ### Handling and discarding failure values
 
