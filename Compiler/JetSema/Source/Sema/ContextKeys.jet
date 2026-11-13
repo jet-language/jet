@@ -28,12 +28,12 @@ use jet_foundation.[
 ]
 
 // The fields `#Context` sets itself; any other label names a key.
-SEMA_CONTEXT_SET_FIELDS: comptime { [String]{"allocator", "deadline"} }
+SEMA_CONTEXT_SET_FIELDS: [String]{"allocator", "deadline"}
 
 // The names of the context's own fields and of `context.get`, which a key
 // may not take: `context.<name>` already means them. A Core module declares
 // the key behind a field it owns (sema_context_field_module).
-SEMA_CONTEXT_RESERVED_NAMES: comptime { [String]{"allocator", "logger", "deadline", "scratch", "on_stop", "print", "thread", "trace", "get"} }
+SEMA_CONTEXT_RESERVED_NAMES: [String]{"allocator", "logger", "deadline", "scratch", "on_stop", "print", "thread", "trace", "get"}
 
 // A resolved key: its SymbolID key text and its value type.
 SemaContextKey: struct {
@@ -47,7 +47,7 @@ sema_context_field_settable: fn(name: String) -> Bool Never! { SEMA_CONTEXT_SET_
 // The context fields a Core module carries (sema_context_field_module). The
 // loader loads that module wherever the field is spelled (Loader.jet
 // jet_driver_context_field_spelled).
-SEMA_CONTEXT_CORE_FIELDS: comptime { [String]{"logger", "on_stop", "trace"} }
+SEMA_CONTEXT_CORE_FIELDS: [String]{"logger", "on_stop", "trace"}
 
 // The Core module that carries the context field `name`: `logger` is
 // core.log's `logger` key, a `log.Handler`; `on_stop` is a
