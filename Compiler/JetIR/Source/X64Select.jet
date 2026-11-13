@@ -4371,18 +4371,48 @@ ir_x64_compile_body: fn(m: IRModule, f: IRFunction, tables: IRX64Tables, row: In
     variables := [X64DebugVariable]{}
     ranges := [X64VariableRange]{}
     ir_x64_variables(m, f, al, tables, positions, body_at, ends, variables, ranges)
+    // The return address, rbp, the saved registers, the frame homes and the
+    // most pushed below them at once, against the bound sema's frame model
+    // gives the function (IRFunction.frame_bound). Sema gives one only to a
+    // function a `!Mem.Stack(above: N)` denial reaches, whose proof relies on
+    // it, so a frame over it is a compiler fault, which the driver makes an
+    // ICE (exit 101).
+    stack: 16 + 8 * al.saved.len() + al.frame_bytes + e.below
+    if f.frame_bound >= 0 && stack > f.frame_bound -> e.errors.push("{f.name}: a frame of {stack} bytes is over sema's frame bound of {f.frame_bound} bytes")
     name: if f.symbol != "" -> f.symbol else if f.key != "" -> f.key else -> f.name
     log: if logged -> ir_x64_log_text(m, f, e.code) else -> [String]{}
     if checked -> ir_timing_x64_check(m, f, e.code.log, e.errors)
     IRX64FunctionResult{
         function: X64CompiledFunction{id: X64FunctionID{value: row}, name: name, code: e.code.bytes.move(), relocs: e.relocs.move(), align: relax.align},
-        // The return address, rbp, the saved registers, the frame homes and
-        // the most pushed below them at once.
-        debug: X64FunctionDebug{lines: lines.move(), body: body_at, cfi: cfi.move(), ranges: ranges.move(), stack: 16 + 8 * al.saved.len() + al.frame_bytes + e.below, dynamic: e.dynamic},
+        debug: X64FunctionDebug{lines: lines.move(), body: body_at, cfi: cfi.move(), ranges: ranges.move(), stack: stack, dynamic: e.dynamic},
         variables: variables.move(),
         errors: e.errors.move(),
         log: log,
     }
+}
+
+// A frame over the bound sema's frame model gave its function is a
+// selection error (an ICE); a frame within it, or a function with no bound,
+// is none.
+#Test("A frame over sema's frame bound is a selection error") {
+    m := ir_module_new()
+    word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
+    f := ir_function_new("twice", "test:frame.jet::twice", "", "frame.jet", 1)
+    x: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "x"), 1)
+    f.result = word
+    sum: ir_slot(f, word, IRSlotKind.Temp, -1, 0)
+    _ := ir_emit(f, IROp.Add, sum, x, x, IR_OVERFLOW_WRAP, 2)
+    _ := ir_emit(f, IROp.Return, -1, sum, -1, -1, 2)
+    f.frame_bound = 8
+    m.functions.push(f)
+    tables: ir_x64_tables(m)
+    tight: ir_x64_compile_function(m, tables, 0)
+    assert(tight.debug.stack > 8)
+    assert(tight.errors.len() == 1 && tight.errors[0].contains("over sema's frame bound of 8 bytes"))
+    m.functions[0].frame_bound = tight.debug.stack
+    assert(ir_x64_compile_function(m, tables, 0).errors.len() == 0)
+    m.functions[0].frame_bound = -1
+    assert(ir_x64_compile_function(m, tables, 0).errors.len() == 0)
 }
 
 // load(data, i) is the word at data + i * 8: the product and the sum are

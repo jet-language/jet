@@ -731,8 +731,9 @@ FnBody: struct {
     // step with its frame bound, or "unbounded, <why> via <path>"; else "".
     stack: String{""}
     // The bytes sema's frame model (Target/Frame.jet) bounds this function's
-    // own frame by, the backend checking its real frame against it; -1 when
-    // a value in it has no known size or sema has not bounded it.
+    // own frame by when a `!Mem.Stack(above: N)` denial reaches it; the
+    // backend checks its real frame against that. -1 when no stack denial
+    // reaches it or a value in it has no known size.
     frame_bound: Int{-1}
     body: [Int]
     kind: TFuncKind

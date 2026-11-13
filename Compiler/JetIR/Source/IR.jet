@@ -281,6 +281,18 @@ IRFunction: struct {
     // and IR Lint follows the values computed from these (Lint.jet
     // ir_lint_fixed). ir_slot adds every slot unmarked.
     slot_fixed: [Bool]{[Bool]{}}
+    // The bytes sema's frame model bounds this function's frame by
+    // (FnBody.frame_bound), plus the bound of each body inlined into it
+    // (OptInline.jet ir_opt_splice); -1 none. Selection checks the frame it
+    // lays out against it (X64Select.jet ir_x64_compile_body).
+    frame_bound: Int{-1}
+}
+
+// The frame bound of a function with a body of bound `inlined` spliced into
+// it (IRFunction.frame_bound): -1 when either has none.
+ir_frame_bound_add: fn(bound: Int, inlined: Int) -> Int Never! {
+    if bound < 0 || inlined < 0 -> return -1
+    bound + inlined
 }
 
 // The leaves of the UI provider seam (JetRuntime UiHostProvider.jet), by C

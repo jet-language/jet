@@ -2144,7 +2144,11 @@ slot sized by the value's layout, and adds the deepest callee's path. A path
 through recursion, a function value, a trait value, an open dispatch or a
 value of unknown size, such as an unbound generic parameter, has no bound, so
 the denial is E0921. `Mem.Stack` has no unbounded form: `!Mem.Stack` alone is
-E0119.
+E0119. The backend checks every frame it lays out for a function a
+`!Mem.Stack(above: N)` denial reaches against sema's bound for that function,
+with the bounds of the bodies inlined into it added; a frame over it is a
+compiler fault, an ICE (exit 101). Frames no stack denial reaches are not
+checked.
 
 The human aliasing rule is: while something is being changed, nobody else may be
 looking at it. Foreign `read` and `write` spellings are not Jet access syntax;

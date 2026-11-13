@@ -3925,10 +3925,30 @@ SemaStackWalk: struct {
     why: [String]
     // The callee the node's deepest or unbounded path goes through; -1 none.
     next: [Int]
+    // Whether a `!Mem.Stack(above: N)` denial reaches the node: only these
+    // nodes' frames are stamped with their bound (FnBody.frame_bound), which
+    // the backend then holds each laid-out frame to.
+    guarded: [Bool]
 }
 
 sema_effect_stack_walk: fn(nodes: [SemaEffectNode]) -> SemaStackWalk Never! {
-    SemaStackWalk{state: (loop _ in nodes -> 0), bytes: (loop _ in nodes -> 0), why: (loop _ in nodes -> ""), next: (loop _ in nodes -> -1)}
+    SemaStackWalk{state: (loop _ in nodes -> 0), bytes: (loop _ in nodes -> 0), why: (loop _ in nodes -> ""), next: (loop _ in nodes -> -1), guarded: (loop _ in nodes -> false)}
+}
+
+// Mark every node `root` reaches, itself included, as guarded.
+sema_effect_stack_guard: fn(walk: &SemaStackWalk, nodes: [SemaEffectNode], node_by_key: NameRows, root: Int) Never! {
+    if walk.guarded[root] -> return
+    walk.guarded[root] = true
+    pending := [Int]{root}
+    loop {
+        index := pending.pop() ?? { break }
+        loop edge in nodes[index].call_edges {
+            target: sema_effect_node_index(node_by_key, edge) ?? next
+            if walk.guarded[target] -> next
+            walk.guarded[target] = true
+            pending.push(target)
+        }
+    }
 }
 
 sema_effect_stack_open: fn(walk: &SemaStackWalk, index: Int, why: String, next: Int) Never! {
@@ -4028,6 +4048,7 @@ sema_effect_stack_bounds: fn(walk: &SemaStackWalk, frames: SemaStackFrames, node
 // most N bytes of stack by the frame model, so none may be unbounded.
 sema_effect_check_stack: fn(walk: &SemaStackWalk, frames: SemaStackFrames, nodes: [SemaEffectNode], node_by_key: NameRows, root: Int, denial: EffectRowEntry, provenance: String, diagnostics: &[Diagnostic]) {
     limit: sema_effect_stack_bound(denial.name) ?? return
+    sema_effect_stack_guard(walk, nodes, node_by_key, root)
     if walk.state[root] == 0 -> sema_effect_stack_visit(walk, frames, nodes, node_by_key, root)
     if walk.bytes[root] >= 0 && walk.bytes[root] <= limit -> return
     fact: "!{denial.name}"
@@ -4523,9 +4544,9 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
     loop module_row in inputs {
         sema_effect_check_discarded(modules[module_row.module_index].call_facts, module_row, nodes, calls.node_by_key, solved, diagnostics)
     }
-    // All source reads are finished: stamp the solved rows in place, each
-    // function's frame bound, and each uncalled function's heap and stack
-    // bounds.
+    // All source reads are finished: stamp the solved rows in place, the
+    // frame bound of each function a stack denial reaches, and each uncalled
+    // function's heap and stack bounds.
     called: sema_effect_called(nodes, calls.node_by_key)
     heaps: sema_effect_heap_bounds(nodes, calls.node_by_key, called)
     stacks: sema_effect_stack_bounds(stack, frames, nodes, calls.node_by_key, called)
@@ -4539,7 +4560,7 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
             }
             if heaps[node_index] != "" -> modules[target].functions[function_index].heap = heaps[node_index].copy()
             if stacks[node_index] != "" -> modules[target].functions[function_index].stack = stacks[node_index].copy()
-            modules[target].functions[function_index].frame_bound = frames.own[node_index]
+            modules[target].functions[function_index].frame_bound = if stack.guarded[node_index] -> frames.own[node_index] else -> -1
         }
     }
     // e3401 names the first impure call and its chain; the reached row is the

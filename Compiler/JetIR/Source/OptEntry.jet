@@ -80,6 +80,7 @@ ir_opt_entry_guard: fn(m: IRModule, g: IRFunction, clone: Int) -> IRFunction? Ne
     }
     guard.result = g.result
     guard.inline_sites = g.inline_sites.copy()
+    guard.frame_bound = g.frame_bound
     loop k in 0..<at {
         written: g.dst[k]
         if written >= 0 && map[written] < 0 {
@@ -149,6 +150,7 @@ ir_opt_entry_build: fn(caller: IRFunction, guards: [[IRFunction]], keys: [String
     out.symbol_hash = caller.symbol_hash
     out.cold = caller.cold
     out.host_symbol = caller.host_symbol.copy()
+    out.frame_bound = caller.frame_bound
     out.inline_sites = caller.inline_sites.copy()
     loop slot in 0..<caller.slot_type.len() -> _ := ir_slot(out, caller.slot_type[slot], caller.slot_kind[slot], caller.slot_name[slot], caller.slot_line[slot])
     out.slot_fixed = caller.slot_fixed.copy()
@@ -214,6 +216,8 @@ ir_opt_entry_splice: fn(f: &IRFunction, caller: IRFunction, guard: IRFunction, a
     loop slot in 0..<guard.slot_type.len() {
         map.push(if slot < guard.param_count -> caller.args[caller.b[at] + slot] else -> ir_slot(f, guard.slot_type[slot], IRSlotKind.Temp, -1, 0))
     }
+    // The head's slots are some of the guarded function's own.
+    f.frame_bound = ir_frame_bound_add(f.frame_bound, guard.frame_bound)
     returning: guard.op.len() - 2
     loop k in 0..<returning -> ir_opt_emit_mapped(f, guard, k, map, line)
     value: guard.a[returning]
