@@ -1,8 +1,10 @@
 # SIGTERM stops accepting, and the request in flight is still answered: a
 # client task holds half a request across the signal and finishes it 300 ms
 # later; it gets 200, and serve reports the connection completed, at O0, O1
-# and O2. Each tier builds into the default directory and its session runs
-# that build, before the next tier replaces it.
+# and O2. The signal cancels every task, the client's too: its `#Shield`
+# defers that until the response is read, and its join then reports the
+# cancel (spec.md #Shield). Each tier builds into the default directory and
+# its session runs that build, before the next tier replaces it.
 requires: os:unix
 fixture: sigterm_answers_the_request_in_flight.fixture
 env: NO_COLOR=1
@@ -18,7 +20,7 @@ repeat while process {pid:o0} alive timeout 5s every 10ms fail "the O0 artifact 
 end repeat
 close o0
 exit: 0
-stdout: = "in flight: HTTP/1.1 200 OK\ndrained: accepted=1 completed=1 cancelled=0\n"
+stdout: = "in flight: HTTP/1.1 200 OK\nclient: cancelled\ndrained: accepted=1 completed=1 cancelled=0\n"
 
 step: jet build --optimize=basic --allow=Exec,Net,Time,FS.Read,IO main.jet
 exit: 0
@@ -31,7 +33,7 @@ repeat while process {pid:o1} alive timeout 5s every 10ms fail "the O1 artifact 
 end repeat
 close o1
 exit: 0
-stdout: = "in flight: HTTP/1.1 200 OK\ndrained: accepted=1 completed=1 cancelled=0\n"
+stdout: = "in flight: HTTP/1.1 200 OK\nclient: cancelled\ndrained: accepted=1 completed=1 cancelled=0\n"
 
 step: jet build --optimize=full --allow=Exec,Net,Time,FS.Read,IO main.jet
 exit: 0
@@ -44,4 +46,4 @@ repeat while process {pid:o2} alive timeout 5s every 10ms fail "the O2 artifact 
 end repeat
 close o2
 exit: 0
-stdout: = "in flight: HTTP/1.1 200 OK\ndrained: accepted=1 completed=1 cancelled=0\n"
+stdout: = "in flight: HTTP/1.1 200 OK\nclient: cancelled\ndrained: accepted=1 completed=1 cancelled=0\n"

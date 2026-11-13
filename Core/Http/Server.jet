@@ -274,9 +274,12 @@ __HTTPServerState: struct {
 
 /// A bound listener and its mux. `serve` answers connections until
 /// `shutdown` or a cancelled accept; the report is the same for every caller.
+/// The listener closes when accepting stops, so nothing listens after serving.
 HTTPServer: struct {
     __state: Shared<__HTTPServerState>
-    __listener: TCPListener
+    // The bound listener, the one item until serving closes it
+    // (__server_close_listener).
+    __listener: Shared<[TCPListener]>
     __mux: HTTPMux
     __deadline: Duration?
     __tls: HTTPServerTLS?
@@ -284,7 +287,8 @@ HTTPServer: struct {
     __finished: Receiver<Int>
 
     local_addr: fn(self) -[Net]> String HTTPError! {
-        self.__listener.local_addr() ?? return Err(.IO{operation: "local address: {err}"})
+        listener: __server_listener(self) ?? return Err(.IO{operation: "local address: the server has stopped serving, so its listener is closed"})
+        listener.local_addr() ?? return Err(.IO{operation: "local address: {err}"})
     }
 
     // Each admitted connection is served by its own task, so a held
@@ -302,7 +306,8 @@ HTTPServer: struct {
         running := true
         backoff := 0
         loop running && !__server_stopping(self) {
-            if self.__listener.accept(deadline: Duration{ns: C_ACCEPT_POLL_NS}) == {
+            listener: __server_listener(self) ?? break
+            if listener.accept(deadline: Duration{ns: C_ACCEPT_POLL_NS}) == {
                 .Ok(stream) -> {
                     accepted = accepted + 1
                     backoff = 0
@@ -345,6 +350,9 @@ HTTPServer: struct {
                 }
             }
         }
+        // Accepting has stopped: the listener closes now, so the port is free
+        // (a connect is refused) while the connections in flight drain.
+        __server_close_listener(self)
         #Shield {
             drain_end: rt.clock_mono_ns() + __drain_budget(self.__state, self.__deadline)
             loop __live(self.__state) > 0 && rt.clock_mono_ns() < drain_end {
@@ -386,6 +394,19 @@ __server_begin: fn(server: HTTPServer) -> Bool Never! {
     if guard.value.phase != 0 -> return false
     guard.value.phase = 1
     true
+}
+
+// The server's listener while it accepts; None once serving closed it.
+__server_listener: fn(server: HTTPServer) -> TCPListener? Never! {
+    guard: server.__listener.guard_read()
+    if guard.value.len() == 0 -> return None
+    Val(guard.value[0])
+}
+
+// The listener's one holder lets it go, so its socket closes.
+__server_close_listener: fn(server: HTTPServer) Never! {
+    guard := server.__listener.guard_edit()
+    _: guard.value.pop()
 }
 
 __server_stopping: fn(server: HTTPServer) -> Bool Never! {
@@ -573,7 +594,7 @@ __server_on: fn(listener: TCPListener, mux: HTTPMux, tls: HTTPServerTLS?, deadli
     pair: core.tasks.__channel_bounded<Int>(1)
     HTTPServer{
         __state: Shared{__HTTPServerState{phase: 0, stopping: false, report: None}},
-        __listener: listener,
+        __listener: Shared{[TCPListener]{listener}},
         __mux: mux,
         __deadline: deadline,
         __tls: tls,

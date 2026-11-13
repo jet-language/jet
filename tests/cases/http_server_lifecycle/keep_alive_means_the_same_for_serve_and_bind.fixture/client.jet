@@ -33,12 +33,11 @@ run: fn() {
     request: "GET / HTTP/1.1{crlf}Host: localhost{crlf}Connection: keep-alive{crlf}{crlf}"
     stream.write_all(request.bytes()) ?? panic("request write")
     // A server that kept the connection open would leave this read waiting
-    // until the timeout.
-    net.set_read_timeout(stream, 5000) ?? panic("read timeout")
+    // until its 5 s deadline.
     bytes := [U8]{}
     closed := false
     loop {
-        if net.tcp_read_bytes(stream, 8192) == {
+        if stream.read(8192, deadline: time.duration_ms(5000)) == {
             .Ok(part) -> {
                 if part.len() == 0 {
                     closed = true

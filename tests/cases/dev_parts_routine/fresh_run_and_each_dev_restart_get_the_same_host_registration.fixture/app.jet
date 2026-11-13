@@ -1,8 +1,8 @@
 // Records what the host registered for this start and compares it with the
 // fresh `jet run`'s record: the arguments, the names of the variables jet
-// set (their values carry the source digest, which an edit changes), a
-// variable jet must pass through unchanged, the descriptors past stdio, the
-// blocked, ignored and handled signal sets and the thread count.
+// set but JET_DEV (their values carry the source digest, which an edit
+// changes), a variable jet must pass through unchanged, the descriptors past
+// stdio, the blocked, ignored and handled signal sets and the thread count.
 use {
     files: core.files
     process: core.process
@@ -34,7 +34,9 @@ registration: fn() -> [String] {
     all_names: sys.vars() ?? [String]{}
     names := [String]{}
     loop name in all_names {
-        if name.starts_with("JET_") -> names.push(name.copy())
+        // `jet dev` marks each start it runs with JET_DEV=1 (core.web serves
+        // live reload on it), the one variable meant to differ from `jet run`.
+        if name.starts_with("JET_") && name != "JET_DEV" -> names.push(name.copy())
     }
     names.sort()
     loop name in names -> lines.push("set {name}")

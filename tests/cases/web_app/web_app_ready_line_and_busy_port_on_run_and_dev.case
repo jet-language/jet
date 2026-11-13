@@ -27,16 +27,16 @@ stderr: ~ "Stop [E2809]: The web app can't listen on 127.0.0.1:{free-port:app}: 
 stderr: ~ " Fix: Stop the program that holds the port, or choose another port" # and how to choose another
 stderr: !~ "panic" # a registered stop, not a panic
 stderr: !~ "E3001" # nor a generic program-side stop
-spawn dev: jet dev {work}/app.jet
+# A spawn's `stdout: file` is written only once the child ends, so the dev
+# ready line is read live from a session.
+session dev raw: jet dev {work}/app.jet
 env: JET_APP_PORT={free-port:app}
-stdout: file dev.stdout
-stderr: file dev.stderr
-poll moved: cat {work}/dev.stdout until exit: 0 && stdout: ~ " (live reload)\n" timeout 120s every 100ms # `jet dev` printed its ready line
+recv dev until ~ " (live reload)\n" within 120s # `jet dev` printed its ready line
+stdout: ~ "serving http://127.0.0.1:" # the dev ready line names its address
+stdout: !~ "serving http://127.0.0.1:{free-port:app} " # on another port than the busy one
 signal dev: KILL
-wait: dev
+close dev
 exit: any # the case kills the dev loop; its status is not part of this proof
-file: dev.stdout ~ "serving http://127.0.0.1:" # the dev ready line names its address
-file: dev.stdout !~ "serving http://127.0.0.1:{free-port:app} " # on another port than the busy one
 signal server: KILL
 wait: server
 exit: any # the case kills the server; its status is not part of this proof

@@ -1,7 +1,9 @@
 // `env.decode<T>()` inside generic functions, one and two levels deep: each
 // instance reads the env names of the record it is made for, so the renamed
 // `stripe` field (variable APP_STRIPE_SECRET) decodes, and a failure names
-// that variable. Prints the decoded record or each framed failure.
+// that variable. Prints the decoded record or each framed failure; the
+// secret itself is never printed (the case's receipt redacts the value of a
+// secret-named variable from captured output), only whether it decoded.
 package: {
     name: "env_decode_in_generic_functions"
     authority: { allow: [Env, FS, Exec, IO] }
@@ -30,7 +32,7 @@ load_twice_removed: fn<T: Decode>(prefix: String) -[FS, Env, Exec]> T [FieldErro
 
 run: fn() {
     if load<Settings>("APP_") == {
-        .Ok(settings) -> print("settings: port {settings.port} stripe {settings.stripe}")
+        .Ok(settings) -> print("settings: port {settings.port} stripe decoded: {settings.stripe == 7}")
         .Err(errors) -> { loop error in errors -> print("settings: {error.reason}") }
     }
     if load_twice_removed<Mail>("APP_") == {

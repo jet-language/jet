@@ -1,11 +1,12 @@
 # Claim (#3078 c5, run and restart): the O0 host registers a program's start
 # the same way for a fresh `jet run` and for every `jet dev` restart, and a
 # restart leaves nothing behind. Each start records its arguments, the
-# variables jet set, a variable jet passes through, its descriptors past stdio,
-# its blocked, ignored and handled signals and its thread count, then compares
-# that record with the fresh run's (the fixture's app.jet). The second dev
-# start runs after an edit; a stale descriptor, handler, mask bit or variable
-# from the first start would show in its record.
+# variables jet set (but JET_DEV, the mark of a `jet dev` start), a variable
+# jet passes through, its descriptors past stdio, its blocked, ignored and
+# handled signals and its thread count, then compares that record with the
+# fresh run's (the fixture's app.jet). The second dev start runs after an
+# edit; a stale descriptor, handler, mask bit or variable from the first start
+# would show in its record.
 requires: os-name:linux
 fixture: fresh_run_and_each_dev_restart_get_the_same_host_registration.fixture
 env: NO_COLOR=1

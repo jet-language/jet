@@ -1,0 +1,35 @@
+# A `-> Never Never!` call (process.fail) is a valued function's return: as
+# the tail of an Int function and as the arm of a valued tail `if` whose
+# other arm returns, it builds (no "return of a value without a slot" ICE)
+# and stops the run with its code and message, on O0, O1 and O2.
+fixture: never_never_calls_end_a_valued_return_on_every_tier.fixture
+env: NO_COLOR=1
+
+step tail_o0: jet run main.jet
+exit: 3 # O0: the Int function's tail call ends the run
+stdout: = expected.out
+stderr: ~ "0 is not positive\n" # O0: process.fail's message
+step tail_o1: jet run --optimize=basic main.jet
+exit: 3 # O1: the Int function's tail call ends the run
+stdout: = expected.out
+stderr: ~ "0 is not positive\n" # O1: process.fail's message
+step tail_o2: jet run --optimize=full main.jet
+exit: 3 # O2: the Int function's tail call ends the run
+stdout: = expected.out
+stderr: ~ "0 is not positive\n" # O2: process.fail's message
+
+step arm_o0: jet run main.jet
+env: NEVER_CASE=arm
+exit: 4 # O0: the arm's call ends the run
+stdout: = expected.out
+stderr: ~ "`forty` is not a number\n" # O0: process.fail's message
+step arm_o1: jet run --optimize=basic main.jet
+env: NEVER_CASE=arm
+exit: 4 # O1: the arm's call ends the run
+stdout: = expected.out
+stderr: ~ "`forty` is not a number\n" # O1: process.fail's message
+step arm_o2: jet run --optimize=full main.jet
+env: NEVER_CASE=arm
+exit: 4 # O2: the arm's call ends the run
+stdout: = expected.out
+stderr: ~ "`forty` is not a number\n" # O2: process.fail's message

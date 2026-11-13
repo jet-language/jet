@@ -485,14 +485,14 @@ C_APP_SETTINGS_EXIT: 78
 // the E2416 stop with exit 78: every failure on its own line, naming the
 // variable and field path, a secret value hidden (core.sys __decode_errors).
 __app_settings: fn<Settings: Decode>(prefix: String) -[Env, IO, FS, Exec, Time]> Settings Never! {
-    if core.sys.decode<Settings>(prefix: prefix) == {
-        .Ok(settings) -> return settings
-        .Err(errors) -> {
-            report := "Stop [E2416]: The app's settings did not decode, so it does not listen:"
-            loop error in errors -> report = "{report}\n  {error.reason}"
-            core.process.fail(C_APP_SETTINGS_EXIT, report)
-        }
-    }
+    core.sys.decode<Settings>(prefix: prefix) ?? core.process.fail(C_APP_SETTINGS_EXIT, __app_settings_failure(err))
+}
+
+// The E2416 stop report of the settings that did not decode.
+__app_settings_failure: fn(errors: [FieldError]) -> String Never! {
+    report := "Stop [E2416]: The app's settings did not decode, so it does not listen:"
+    loop error in errors -> report = "{report}\n  {error.reason}"
+    report
 }
 
 __app_mode: fn(app: App, mode: String) -> App Never! {

@@ -1,0 +1,27 @@
+use {
+    process: core.process
+    sys: core.sys
+}
+
+// A `-> Never Never!` call (process.fail) stands where a valued function's
+// return value is due: the tail of an Int function, and the arm of a valued
+// tail `if` whose other arm returns.
+positive: fn(n: Int) -[Exec, IO, Time]> Int {
+    if n > 0 -> return n
+    process.fail(3, "{n} is not positive")
+}
+
+parsed: fn(text: String) -[Exec, IO, Time]> Int {
+    if Int.parse(text) == {
+        .Ok(n) -> return n
+        .Err(_) -> process.fail(4, "`{text}` is not a number")
+    }
+}
+
+run: fn() {
+    print("{positive(3)} {parsed("42")}")
+    which: sys.get("NEVER_CASE") ?? "tail"
+    if which == "arm" -> print("{parsed("forty")}")
+    print("{positive(0)}")
+    print("unreached")
+}

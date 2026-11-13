@@ -22,7 +22,7 @@ Calls: struct { count: Int }
 
 // Where the service keeps notes: the SQL database, or a fake in memory.
 NoteStore: enum {
-    Sql(db.DBScope)
+    Database(db.DBScope)
     Fake(Shared<Book>)
 }
 
@@ -30,7 +30,7 @@ NoteStore: enum {
 add_note: fn(store: NoteStore, calls: Shared<Calls>, owner: String, text: String) -> Int DBError! {
     calls.count += 1
     if store == {
-        .Sql(scoped) -> {
+        .Database(scoped) -> {
             _: scoped.execute(SQL{"INSERT INTO notes (owner, body) VALUES ({owner}, {text})"}) ?? return Err(err)
             rows: scoped.query(SQL{"SELECT body FROM notes WHERE owner = {owner}"}) ?? return Err(err)
             return Ok(rows.len())
@@ -133,7 +133,7 @@ run: fn() (HTTPError | NetError | TaskFailure)! {
     scoped: conn.with_policy(db.policy("notes", "true") ?? panic("policy"), "service")
     _: db.migrate(scoped, "notes-v1", [SQL{"CREATE TABLE notes (id INTEGER PRIMARY KEY, owner TEXT, body TEXT)"}]) ?? panic("migrate")
     book: Shared{Book{notes: [String]{}}}
-    seam("sql", NoteStore.Sql(scoped.copy()))
+    seam("sql", NoteStore.Database(scoped.copy()))
     seam("fake", NoteStore.Fake(book))
     rows: scoped.query(SQL{"SELECT body FROM notes"}) ?? panic("query")
     print("notes stored: sql {rows.len()}, fake {book.guard_read().value.notes.len()}")
