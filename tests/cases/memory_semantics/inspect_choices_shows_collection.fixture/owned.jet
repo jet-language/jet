@@ -1,0 +1,15 @@
+#[!Equatable, !Comparable]
+Link: enum {
+    End(Int)
+    Next(Link)
+}
+
+// No value outlives its owner, so nothing is collected.
+chain: fn() -> Link {
+    first := Link.Next(Link.End(1))
+    Link.Next(first)
+}
+
+run: fn() {
+    print(chain())
+}

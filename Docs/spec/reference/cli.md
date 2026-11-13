@@ -1493,6 +1493,12 @@ why it was taken: its size within the level's callee limit and the caller's
 remaining budget, its only call, or `marked #Inline(Always)`.
 `#Inline(Always)` locks the callee inlined; a change that makes it recursive,
 address-taken, or too large fails the build (E0917-E0919).
+Collection: under `#Policy(gc)`, a binding whose returned heap graph needs
+identity beyond its lexical owner is kept by the policy scope's collector, at
+the function's line, for example ``collection: main.jet:10 in build: `first`
+collected under the module `#Policy(gc)`: returned heap graph requires
+identity beyond its lexical owner``; a binding that takes such a value from
+its call holds collected storage too.
 JSON uses the `inspect.choices` status with `kinds` and one `choices` row
 (kind, file, line, function, choice) per choice.
 

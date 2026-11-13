@@ -10,6 +10,10 @@
 //   flags), with why it was taken (JetIR OptInline.jet). `#Inline(Always)`
 //   locks a callee inlined: a change that makes it recursive, address-taken
 //   or too large fails the build naming it (E0917-E0919).
+// - Collection: under `#Policy(gc)`, a binding whose returned heap graph
+//   needs identity beyond its lexical owner is kept by the policy scope's
+//   collector, and a binding that takes such a value from its call holds it
+//   there too (sema's promotion facts, FunctionMemory.jet).
 use {
     jet_driver.[JetDriverCompileMode, JetDriverVerbOutput, JET_DRIVER_EXIT_OK, jet_driver_present_diagnostics]
     jet_foundation.[CompilerThreads, FnBody, build_options_stock]
@@ -17,7 +21,7 @@ use {
 }
 
 // The choice kinds the report lists, in order; a kind with no row says none.
-JET_CLI_CHOICE_KINDS: [String]{"storage form", "inlining"}
+JET_CLI_CHOICE_KINDS: [String]{"storage form", "inlining", "collection"}
 
 // One automatic choice: its kind, the function it was made in, and what was
 // chosen with its reason.
@@ -67,6 +71,26 @@ jet_cli_inline_choices: fn(rows: [IROptInlined], out: &[JetCLIChoice]) Never! {
     loop row in rows {
         choice: JetCLIChoice{kind: "inlining", file: row.file.copy(), line: row.line, function: row.caller.copy(), choice: "{row.callee} inlined: {row.reason}"}
         if !jet_cli_choice_seen(out, choice) -> out.push(choice)
+    }
+}
+
+// The collection choices of `functions`, at the function's line: each
+// binding sema moves into a scoped collector (FunctionMemory.jet), with the
+// policy scope that allows it and why, and each binding that takes a
+// collected value its call returns.
+jet_cli_collection_choices: fn(functions: [FnBody], out: &[JetCLIChoice]) Never! {
+    loop function in functions {
+        if function.synthetic -> next
+        loop statement in function.tree.stmts {
+            if statement == .Let(local, _, _, promotion, transferred, _) {
+                text := ""
+                if promotion == .Val(promoted) -> text = "`{local.name}` collected under the {promoted.scope} `#Policy(gc)`: {promoted.reason}"
+                if text == "" && transferred -> text = "`{local.name}` holds the collected value its call returns"
+                if text == "" -> next
+                choice: JetCLIChoice{kind: "collection", file: function.source_file.copy(), line: function.line, function: function.name.copy(), choice: text}
+                if !jet_cli_choice_seen(out, choice) -> out.push(choice)
+            }
+        }
     }
 }
 
@@ -122,6 +146,7 @@ jet_cli_inspect_choices_host: fn(job: JetCLIInspectJob, source: String) -> JetDr
             if front.compile.internal_problem == .Val(problem) -> jet_cli_inspect_finish(job, jet_cli_ice(problem))
             inputs := front.inputs.move() ?? jet_cli_inspect_finish(job, jet_cli_ice("the checked compile of `{job.file}` has no lowering inputs"))
             choices := jet_cli_storage_choices(inputs.functions)
+            jet_cli_collection_choices(inputs.functions, choices)
             if inputs.entry_key != None {
                 threads: CompilerThreads{cap: compiler_threads.cap, cores: compiler_threads.cores, memory_available: jet_cli_memory_available()}
                 build := build_options_stock("build")

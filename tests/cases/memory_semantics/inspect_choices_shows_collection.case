@@ -1,0 +1,20 @@
+# `jet inspect choices` lists collection choices. Under `#Policy(gc)`, a
+# binding whose returned heap graph needs identity beyond its lexical owner
+# is kept by the policy scope's collector. The row names the binding, the
+# scope and the reason. A binding that takes such a value from its call
+# holds collected storage too. With no policy and no escaping graph, the
+# kind says none.
+fixture: inspect_choices_shows_collection.fixture
+env: NO_COLOR=1
+step cycle: jet inspect choices cycle.jet
+exit: 0
+stdout: ~ "collection: cycle.jet:10 in promoted_cycle: `first` collected under the module `#Policy(gc)`: returned heap graph requires identity beyond its lexical owner" # the returned cycle is collected, with the policy scope and why
+stdout: ~ "collection: cycle.jet:17 in run: `cycle` holds the collected value its call returns" # the caller's binding holds it
+step owned: jet inspect choices owned.jet
+exit: 0
+stdout: ~ "collection: none" # owned values need no collector
+step json: jet inspect choices cycle.jet --json
+exit: 0
+json: stdout doc $.kinds[2] = "collection"
+json: stdout doc $.choices[0].kind = "collection"
+json: stdout doc $.choices[0].function = "promoted_cycle"
