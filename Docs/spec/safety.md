@@ -4607,28 +4607,28 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Text.jet",
-      "line": 16,
+      "line": 19,
       "column": 5,
       "reason": "address borrows an initialized word in a live text or iterator header"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Text.jet",
-      "line": 22,
+      "line": 25,
       "column": 5,
       "reason": "address is an exclusively owned writable header word"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Text.jet",
-      "line": 26,
+      "line": 29,
       "column": 5,
       "reason": "address borrows an initialized byte inside the caller's live buffer"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Text.jet",
-      "line": 32,
+      "line": 35,
       "column": 5,
       "reason": "address is one exclusively owned writable byte and value is a byte"
     },
@@ -4985,189 +4985,189 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet",
-      "line": 67,
+      "line": 71,
       "column": 5,
       "reason": "first's private header names its live slab, whose arena word is fixed"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet",
-      "line": 84,
+      "line": 89,
       "column": 5,
-      "reason": "the flushed cache left the slab linked; its live count and the class cell are stable while this thread is the heap's only user"
+      "reason": "the flushed cache left the slab linked at its class head; its live count and the class cell are stable while this thread is the heap's only user"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet",
-      "line": 94,
+      "line": 96,
       "column": 9,
       "reason": "pointer's private header identifies its still-live slab, which must be the same mapping"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet",
-      "line": 99,
+      "line": 101,
       "column": 9,
       "reason": "no other thread touches the slab or its class list"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet",
-      "line": 113,
+      "line": 114,
       "column": 5,
       "reason": "first's private header holds its mapping base and length"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet",
-      "line": 137,
+      "line": 138,
       "column": 9,
       "reason": "the test owns the full payload and can read its allocator header"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet",
-      "line": 154,
+      "line": 155,
       "column": 9,
       "reason": "the chain word remains readable until its payload is freed"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet",
-      "line": 161,
+      "line": 162,
       "column": 5,
       "reason": "after all payloads are freed, the class keeps its emptied slabs linked up to ALLOC_RETAINED_EMPTY_SLABS and counts each; any further empty slab went onto the free-slab stack"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet",
-      "line": 187,
+      "line": 188,
       "column": 9,
       "reason": "the test owns the full payload and keeps its chain word there"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet",
-      "line": 195,
+      "line": 196,
       "column": 9,
       "reason": "the chain word remains readable until its payload is freed"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet",
-      "line": 202,
+      "line": 203,
       "column": 5,
       "reason": "this thread is the heap's only user; the stack word is read once and the stacked slab's link word stays mapped"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet",
-      "line": 210,
+      "line": 211,
       "column": 5,
       "reason": "the retired slab is the stack's top again; its pages were never unmapped"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet",
-      "line": 237,
+      "line": 238,
       "column": 5,
       "reason": "the test owns this fresh align-8 block and its count word"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet",
-      "line": 266,
+      "line": 267,
       "column": 5,
       "reason": "the test owns this fresh align-8 block of size bytes"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet",
-      "line": 275,
+      "line": 276,
       "column": 5,
       "reason": "the test holds both owners of this block and its count word"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet",
-      "line": 281,
+      "line": 282,
       "column": 5,
       "reason": "the test still owns this block"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet",
-      "line": 287,
+      "line": 288,
       "column": 5,
       "reason": "a cached small block stays mapped; its payload bytes are not cache links"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet",
-      "line": 302,
+      "line": 303,
       "column": 5,
       "reason": "the test owns these fresh align-8 blocks and their count words"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet",
-      "line": 306,
+      "line": 307,
       "column": 5,
       "reason": "the test owns these fresh align-8 blocks and their count words"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet",
-      "line": 335,
+      "line": 336,
       "column": 9,
       "reason": "the test owns the payload and keeps its chain word there"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet",
-      "line": 344,
+      "line": 345,
       "column": 5,
       "reason": "row is this thread's own cache row"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet",
-      "line": 348,
+      "line": 349,
       "column": 9,
       "reason": "the chain word remains readable until its payload is freed"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet",
-      "line": 354,
+      "line": 355,
       "column": 9,
       "reason": "row is this thread's own cache row"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet",
-      "line": 361,
+      "line": 362,
       "column": 5,
       "reason": "after the flush the row is empty"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet",
-      "line": 371,
+      "line": 372,
       "column": 5,
       "reason": "row is this thread's own cache row"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet",
-      "line": 380,
+      "line": 381,
       "column": 5,
       "reason": "the test owns this fresh align-8 block and its header words"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet",
-      "line": 462,
+      "line": 463,
       "column": 5,
       "reason": "the exact success line is two bounded stack words written to stdout"
     },
@@ -10879,10 +10879,10 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Source/TestSuite.jet | 24:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/TestSuite.jet | 83:5 | "`test: fn` calls `t.run()` on the harness's main thread, before any test task exists" |
 | Compiler | Compiler/JetRuntime/Source/TestSuite.jet | 92:5 | "the pinned named-fn box code takes its box and writable inline 16B result storage" |
-| Compiler | Compiler/JetRuntime/Source/Text.jet | 16:5 | "address borrows an initialized word in a live text or iterator header" |
-| Compiler | Compiler/JetRuntime/Source/Text.jet | 22:5 | "address is an exclusively owned writable header word" |
-| Compiler | Compiler/JetRuntime/Source/Text.jet | 26:5 | "address borrows an initialized byte inside the caller's live buffer" |
-| Compiler | Compiler/JetRuntime/Source/Text.jet | 32:5 | "address is one exclusively owned writable byte and value is a byte" |
+| Compiler | Compiler/JetRuntime/Source/Text.jet | 19:5 | "address borrows an initialized word in a live text or iterator header" |
+| Compiler | Compiler/JetRuntime/Source/Text.jet | 25:5 | "address is an exclusively owned writable header word" |
+| Compiler | Compiler/JetRuntime/Source/Text.jet | 29:5 | "address borrows an initialized byte inside the caller's live buffer" |
+| Compiler | Compiler/JetRuntime/Source/Text.jet | 35:5 | "address is one exclusively owned writable byte and value is a byte" |
 | Compiler | Compiler/JetRuntime/Source/TextGlue.jet | 4:5 | "borrows an initialized aligned word in a live native text diagnostic" |
 | Compiler | Compiler/JetRuntime/Source/TextGlue.jet | 7:5 | "owns a writable aligned word in a fresh native text diagnostic" |
 | Compiler | Compiler/JetRuntime/Source/TextMethods.jet | 146:9 | "item0 lends the C-ABI tuple's one writable Bool byte" |
@@ -10933,33 +10933,33 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Source/XMLGlue.jet | 7:5 | "owns a writable aligned word in a fresh XML carrier or caller output" |
 | Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet | 11:5 | "a failed allocator witness terminates this isolated test process" |
 | Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet | 27:5 | "both allocations own count bytes; touching their endpoints must not alias each other or their metadata" |
-| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet | 67:5 | "first's private header names its live slab, whose arena word is fixed" |
-| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet | 84:5 | "the flushed cache left the slab linked; its live count and the class cell are stable while this thread is the heap's only user" |
-| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet | 94:9 | "pointer's private header identifies its still-live slab, which must be the same mapping" |
-| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet | 99:9 | "no other thread touches the slab or its class list" |
-| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet | 113:5 | "first's private header holds its mapping base and length" |
-| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet | 137:9 | "the test owns the full payload and can read its allocator header" |
-| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet | 154:9 | "the chain word remains readable until its payload is freed" |
-| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet | 161:5 | "after all payloads are freed, the class keeps its emptied slabs linked up to ALLOC_RETAINED_EMPTY_SLABS and counts each; any further empty slab went onto the free-slab stack" |
-| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet | 187:9 | "the test owns the full payload and keeps its chain word there" |
-| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet | 195:9 | "the chain word remains readable until its payload is freed" |
-| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet | 202:5 | "this thread is the heap's only user; the stack word is read once and the stacked slab's link word stays mapped" |
-| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet | 210:5 | "the retired slab is the stack's top again; its pages were never unmapped" |
-| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet | 237:5 | "the test owns this fresh align-8 block and its count word" |
-| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet | 266:5 | "the test owns this fresh align-8 block of size bytes" |
-| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet | 275:5 | "the test holds both owners of this block and its count word" |
-| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet | 281:5 | "the test still owns this block" |
-| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet | 287:5 | "a cached small block stays mapped; its payload bytes are not cache links" |
-| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet | 302:5 | "the test owns these fresh align-8 blocks and their count words" |
-| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet | 306:5 | "the test owns these fresh align-8 blocks and their count words" |
-| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet | 335:9 | "the test owns the payload and keeps its chain word there" |
-| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet | 344:5 | "row is this thread's own cache row" |
-| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet | 348:9 | "the chain word remains readable until its payload is freed" |
-| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet | 354:9 | "row is this thread's own cache row" |
-| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet | 361:5 | "after the flush the row is empty" |
-| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet | 371:5 | "row is this thread's own cache row" |
-| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet | 380:5 | "the test owns this fresh align-8 block and its header words" |
-| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet | 462:5 | "the exact success line is two bounded stack words written to stdout" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet | 71:5 | "first's private header names its live slab, whose arena word is fixed" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet | 89:5 | "the flushed cache left the slab linked at its class head; its live count and the class cell are stable while this thread is the heap's only user" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet | 96:9 | "pointer's private header identifies its still-live slab, which must be the same mapping" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet | 101:9 | "no other thread touches the slab or its class list" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet | 114:5 | "first's private header holds its mapping base and length" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet | 138:9 | "the test owns the full payload and can read its allocator header" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet | 155:9 | "the chain word remains readable until its payload is freed" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet | 162:5 | "after all payloads are freed, the class keeps its emptied slabs linked up to ALLOC_RETAINED_EMPTY_SLABS and counts each; any further empty slab went onto the free-slab stack" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet | 188:9 | "the test owns the full payload and keeps its chain word there" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet | 196:9 | "the chain word remains readable until its payload is freed" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet | 203:5 | "this thread is the heap's only user; the stack word is read once and the stacked slab's link word stays mapped" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet | 211:5 | "the retired slab is the stack's top again; its pages were never unmapped" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet | 238:5 | "the test owns this fresh align-8 block and its count word" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet | 267:5 | "the test owns this fresh align-8 block of size bytes" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet | 276:5 | "the test holds both owners of this block and its count word" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet | 282:5 | "the test still owns this block" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet | 288:5 | "a cached small block stays mapped; its payload bytes are not cache links" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet | 303:5 | "the test owns these fresh align-8 blocks and their count words" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet | 307:5 | "the test owns these fresh align-8 blocks and their count words" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet | 336:9 | "the test owns the payload and keeps its chain word there" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet | 345:5 | "row is this thread's own cache row" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet | 349:9 | "the chain word remains readable until its payload is freed" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet | 355:9 | "row is this thread's own cache row" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet | 362:5 | "after the flush the row is empty" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet | 372:5 | "row is this thread's own cache row" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet | 381:5 | "the test owns this fresh align-8 block and its header words" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet | 463:5 | "the exact success line is two bounded stack words written to stdout" |
 | Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/AllocationPolicyTests.jet | 5:5 | "the single-threaded fixture reads the process-lifetime tracked-node count after all its payloads were freed" |
 | Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/CollectionsStopTests.jet | 22:5 | "the single-threaded fixture host owns the snapshot from a case to its check" |
 | Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/CollectionsStopTests.jet | 37:5 | "the single-threaded fixture host owns the snapshot from a case to its check" |

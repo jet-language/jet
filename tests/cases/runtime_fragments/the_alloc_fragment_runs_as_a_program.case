@@ -1,0 +1,39 @@
+# The Alloc runtime test fragment (Compiler/JetRuntime/Tests/Fragments.fixture/AllocTests.jet)
+# runs as a program under tests/fixtures/runtime_fragment_host.c: the plain transport's steps
+# (Tools/agent/CompilerRegistries.jet drive), as in
+# the_secret_fragment_runs_as_a_program_and_its_end_scrubs_live_secrets.case. The allocator
+# witness inspects slab metadata and so owns the whole heap: the host runs it `isolated`, on
+# the attached main thread with no jet_rt_main, whose runtime would hold blocks of its own.
+requires: os-name:linux
+requires: tool:cc
+requires: tool:as
+mkdir: native/Source
+mkdir: scratch
+step unit: jet {root}/Compiler/Toolchain/RuntimePack.jet --root {root}/Compiler unit raw --test Alloc
+timeout: 600s
+exit: 0
+write: glue.jet = "\n#Export(c) jet_rt_plain_fixture: fn() { alloc_tests() }\n"
+concat: native/Source/Fixture.jet raw/unit.jet glue.jet
+copy: {root}/Compiler/JetRuntime/package.jet native/package.jet
+copy: {root}/Compiler/JetRuntime/lifecycle.list lifecycle.full
+capture: lifecycle = text file.filter(!^= "jet_rt_alloc_check_init ") lifecycle.full
+write: native/lifecycle.list = "{cap:lifecycle}\n"
+step library: jet doc {work}/native/Source/Fixture.jet
+cwd: native/Source
+env: JET_FRONT_LIBRARY_OBJECT_OUTPUT={work}/native/fixture
+env: JET_FRONT_LIBRARY_LIFECYCLE={work}/native/lifecycle.list
+timeout: 1800s
+exit: 0
+file: native/fixture.issues absent # the front lowered every function of the unit
+file: native/fixture.o exists
+write: fault-report.S = "    .text\n    .globl jet_rt_fault_report\n    .type jet_rt_fault_report, @function\njet_rt_fault_report:\n    .include \"{root}/Compiler/JetRuntime/Assets/FaultReport/report.S\"\n    .size jet_rt_fault_report, . - jet_rt_fault_report\n    .section .note.GNU-stack,\"\",@progbits\n"
+step: as --64 -o fault-report.o fault-report.S
+exit: 0
+step: cc -std=c11 -Wall -Wextra -Werror {root}/tests/fixtures/runtime_fragment_host.c native/fixture.o fault-report.o -lpthread -ldl -lm -o fragment
+exit: 0
+step run: {work}/fragment isolated
+env: TMPDIR={work}/scratch
+timeout: 60s
+exit: 0
+stdout: = "alloc tests: ok\n"
+stderr: empty
