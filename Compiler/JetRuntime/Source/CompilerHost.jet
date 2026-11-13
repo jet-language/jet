@@ -206,6 +206,100 @@ HOST_AT_IMAGE: I64{1246057474}
     }
 }
 
+// The note type of a part the build added to the executable (JetBackend
+// ELF.jet ELF64_JET_PART_NOTE), and its owner "Jet\0" as a little-endian
+// word.
+HOST_NOTE_JET_PART: I64{1246056449}
+HOST_NOTE_JET_OWNER: I64{7628106}
+
+// The bytes before a part's own bytes in its note's descriptor: the part's
+// name (a String), NUL-padded to eight bytes.
+host_image_part_label: fn(name: I64) -> I64 {
+    length: rt_text_len(name)
+    wrapping(length - length % I64{8} + I64{8})
+}
+
+// The note of the part `name` (a String) the build added to this
+// executable (JetBackend ELF.jet x64_executable_add_part), or 0 when it has
+// none: a PT_NOTE whose one note has owner "Jet" and type HOST_NOTE_JET_PART
+// and whose descriptor is the part's name, NUL-padded to eight bytes, then
+// the part's bytes. The program headers are the ones the kernel mapped
+// (AT_PHDR, AT_PHNUM), and a note is read at its link-time address: a Jet
+// executable is fixed-address. No file is read.
+host_image_part: fn(name: I64) -> I64 {
+    table: host_getauxval(I64{3})
+    count: host_getauxval(I64{5})
+    length: rt_text_len(name)
+    data: rt_text_data(name)
+    label: host_image_part_label(name)
+    if (table == I64{0} || length == I64{0}) -> return I64{0}
+    mask: I64{4294967295}
+    index := I64{0}
+    #Unsafe("AT_PHDR lends the program header table the kernel mapped, AT_PHNUM rows of 56 bytes; a PT_NOTE row's p_vaddr and p_filesz bound its mapped read-only notes, and a note is read only inside that bound") {
+        loop index < count {
+            row: wrapping(table + index * I64{56})
+            index = wrapping(index + I64{1})
+            if (os_load_i64(row).bit_and(mask) != I64{4}) -> next
+            note: os_load_i64(wrapping(row + I64{16}))
+            size: os_load_i64(wrapping(row + I64{32}))
+            if (size < wrapping(I64{16} + label)) -> next
+            head: os_load_i64(note)
+            kind: os_load_i64(wrapping(note + I64{8}))
+            descriptor: (head >> I64{32}).bit_and(mask)
+            if (head.bit_and(mask) != I64{4} || kind.bit_and(mask) != HOST_NOTE_JET_PART || (kind >> I64{32}).bit_and(mask) != HOST_NOTE_JET_OWNER) -> next
+            if (descriptor < label || wrapping(I64{16} + descriptor) > size) -> next
+            if (os_load_u8(wrapping(note + wrapping(I64{16} + length))) != I64{0}) -> next
+            at := I64{0}
+            loop at < length && os_load_u8(wrapping(note + wrapping(I64{16} + at))) == os_load_u8(wrapping(data + at)) {
+                at = wrapping(at + I64{1})
+            }
+            if (at == length) -> return note
+        }
+    }
+    I64{0}
+}
+
+// The byte length of the part of `note` (host_image_part), named `name`.
+host_image_part_length: fn(note: I64, name: I64) -> I64 {
+    #Unsafe("note is a mapped part note host_image_part found; its first word holds the descriptor size") {
+        return wrapping((os_load_i64(note) >> I64{32}).bit_and(I64{4294967295}) - host_image_part_label(name))
+    }
+}
+
+// jet_sys_image_part_size_raw: the byte length of the part `name` the build
+// added to this executable (host_image_part), None when it has none.
+#Export(c) jet_sys_image_part_size_raw: fn(name: I64, some: I64) -> I64 {
+    note: host_image_part(name)
+    if (note == I64{0}) -> return I64{0}
+    rt_text_store(some, jet_int_owned_from_i64(host_image_part_length(note, name)))
+    I64{1}
+}
+
+// jet_sys_image_part_raw: a copy of at most `limit` bytes of the part
+// `name` from its byte `offset` (fewer at its end, none past it or for a
+// limit below 1), None when the executable has no such part. Only the bytes
+// asked for are copied; the rest stay unread in the mapping.
+#Export(c) jet_sys_image_part_raw: fn(name: I64, offset: I64, limit: I64, data_out: I64, length_out: I64) -> I64 {
+    start: jet_int_owned_to_i64(offset)
+    wanted: jet_int_owned_to_i64(limit)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    note: host_image_part(name)
+    if (note == I64{0}) -> return I64{0}
+    size: host_image_part_length(note, name)
+    begin := start
+    if (begin < I64{0}) -> begin = I64{0}
+    if (begin > size) -> begin = size
+    taken := I64{0}
+    if (wanted > I64{0}) {
+        taken = wrapping(size - begin)
+        if (wanted < taken) -> taken = wanted
+    }
+    bytes: wrapping(note + wrapping(I64{16} + wrapping(host_image_part_label(name) + begin)))
+    rt_text_store(data_out, host_startup_bytes(bytes, taken))
+    rt_text_store(length_out, taken)
+    I64{1}
+}
+
 // jet_sys_current_dir_raw: std::env::current_dir is getcwd(3), decoded lossily;
 // the error is the io::Error text "<message> (os error N)". The raw syscall
 // reports an unreachable directory as a non-absolute path, which getcwd(3)

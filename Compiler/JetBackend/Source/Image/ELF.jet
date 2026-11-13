@@ -32,3 +32,139 @@ elf64_u64: fn(bytes: &[U8], value: Int) Never! {
     elf64_u32(bytes, value)
     elf64_u32(bytes, value >> 32)
 }
+
+// A named part added to a linked executable (x64_executable_add_part): one
+// note of owner "Jet" and this type in a PT_NOTE of its own, whose
+// descriptor is the part's name, NUL-padded to eight bytes, then the part's
+// bytes. The running program finds it through the program headers the
+// kernel maps (JetRuntime CompilerHost.jet host_image_part).
+ELF64_JET_PART_NOTE: 1246056449
+
+// The static x86-64 executable `image` with the part `name` holding
+// `payload` added: read-only and mapped at load, so the program reads it
+// from memory, with no file read. A new program header table (the old rows,
+// then the part's PT_LOAD and PT_NOTE) and the note go at the end of the
+// file, on a page of their own above every other segment; the old table
+// stays as unreferenced bytes. The new segment keeps the first segment's
+// address-to-offset distance, so the table's address is the first
+// segment's address plus its file offset however the kernel works it out;
+// the file is zero-filled up to that offset when the segments' memory
+// reaches past the end of the file. A PT_PHDR row moves with the table.
+x64_executable_add_part: fn(image: [U8], name: String, payload: [U8]) -> [U8] Err! {
+    plan: x64_image_segments(image)
+    if plan.failure != "" -> return Err(plan.failure)
+    label: name.bytes()
+    if label.len() == 0 || label.contains(U8{0}) -> return Err("an image part's name must be nonempty, with no NUL byte")
+    if x64_executable_part(image, name) != None -> return Err("the image already holds a part named `{name}`")
+    phoff: loader_u64(image, 32)
+    phnum: loader_u16(image, 56)
+    if phnum + 2 > 65535 -> return Err("the image has no room for two more program headers")
+    first: plan.segments[0]
+    distance: first.vaddr - first.offset
+    at := os_page_round(image.len())
+    if distance + at < plan.high -> at = plan.high - distance
+    table := [U8]{}
+    table.extend(image[phoff..<phoff + phnum * 56])
+    table_size: (phnum + 2) * 56
+    note_at: at + table_size
+    descriptor: (label.len() + 8) /% 8 * 8
+    note := [U8]{}
+    elf64_u32(note, 4)
+    elf64_u32(note, descriptor + payload.len())
+    elf64_u32(note, ELF64_JET_PART_NOTE)
+    loop byte in ([U8]{U8{74}, U8{101}, U8{116}, U8{0}}) -> note.push(byte)
+    note.extend(label)
+    loop note.len() < 16 + descriptor -> note.push(U8{0})
+    note.extend(payload.copy())
+    loop k in 0..<phnum {
+        if loader_u32(table, k * 56) != 6 -> next
+        link_put64(table, k * 56 + 8, at)
+        link_put64(table, k * 56 + 16, distance + at)
+        link_put64(table, k * 56 + 24, distance + at)
+        link_put64(table, k * 56 + 32, table_size)
+        link_put64(table, k * 56 + 40, table_size)
+    }
+    link_phdr(table, at, 1, 4, distance + at, table_size + note.len(), table_size + note.len(), OS_PAGE_SIZE)
+    link_phdr(table, note_at, 4, 4, distance + note_at, note.len(), note.len(), 8)
+    out := image.copy()
+    link_pad_to(out, at, 0)
+    out.extend(table)
+    out.extend(note)
+    link_put64(out, 32, at)
+    link_put16(out, 56, phnum + 2)
+    Ok(out)
+}
+
+// The bytes of the part `name` of the executable file `image`
+// (x64_executable_add_part), read through its program headers' file
+// offsets; None when it has no such part.
+x64_executable_part: fn(image: [U8], name: String) -> [U8]? Never! {
+    if image.len() < 64 -> return None
+    phoff: loader_u64(image, 32)
+    phnum: loader_u16(image, 56)
+    if phoff + phnum * 56 > image.len() -> return None
+    label: name.bytes()
+    descriptor: (label.len() + 8) /% 8 * 8
+    loop k in 0..<phnum {
+        row: phoff + k * 56
+        if loader_u32(image, row) != 4 -> next
+        at: loader_u64(image, row + 8)
+        size: loader_u64(image, row + 32)
+        if at + size > image.len() || size < 16 + descriptor -> next
+        if loader_u32(image, at) != 4 || loader_u32(image, at + 8) != ELF64_JET_PART_NOTE || loader_u32(image, at + 12) != 0x0074654a -> next
+        length: loader_u32(image, at + 4)
+        if length < descriptor || 12 + 4 + length > size -> next
+        if image[at + 16 + label.len()] != 0 -> next
+        same := true
+        loop index in 0..<label.len() {
+            if image[at + 16 + index] != label[index] {
+                same = false
+                break
+            }
+        }
+        if !same -> next
+        bytes := [U8]{}
+        bytes.extend(image[at + 16 + descriptor..<at + 16 + length])
+        return Val(bytes)
+    }
+    None
+}
+
+#Test("an image part is a mapped segment above the others that its name reads back") {
+    image := [U8]{}
+    loop byte in ([Int]{0x7f, 0x45, 0x4c, 0x46, 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0}) -> image.push(U8{byte})
+    elf64_u16(image, 2)
+    elf64_u16(image, 62)
+    elf64_u32(image, 1)
+    elf64_u64(image, 0x400078)
+    elf64_u64(image, 64)
+    elf64_u64(image, 0)
+    elf64_u32(image, 0)
+    elf64_u16(image, 64)
+    elf64_u16(image, 56)
+    elf64_u16(image, 1)
+    elf64_u16(image, 64)
+    elf64_u16(image, 0)
+    elf64_u16(image, 0)
+    link_phdr(image, 0, 1, 5, 0x400000, 0x80, 0x3000, OS_PAGE_SIZE)
+    loop image.len() < 0x80 -> image.push(U8{0xc3})
+    payload: [U8]{U8{1}, U8{2}, U8{3}, U8{4}, U8{5}}
+    out: x64_executable_add_part(image, "core", payload) ?? panic("the part adds: {err}")
+    plan: x64_image_segments(out)
+    assert_eq(plan.failure, "")
+    assert_eq(plan.segments.len(), 2)
+    assert_eq(loader_u16(out, 56), 3)
+    // The segments' memory reaches 0x403000, past the 0x80-byte file: the
+    // part starts at offset 0x3000, address 0x403000.
+    assert_eq(loader_u64(out, 32), 0x3000)
+    assert_eq(plan.segments[1].vaddr, 0x403000)
+    assert_eq(plan.segments[1].offset, 0x3000)
+    assert_eq(x64_executable_part(out, "core"), Val(payload))
+    assert_eq(x64_executable_part(out, "cor"), None)
+    assert_eq(x64_executable_part(image, "core"), None)
+    empty: x64_executable_add_part(out, "empty", [U8]{}) ?? panic("an empty part adds: {err}")
+    assert_eq(x64_executable_part(empty, "empty"), Val([U8]{}))
+    assert_eq(x64_executable_part(empty, "core"), Val(payload))
+    assert(x64_executable_add_part(out, "core", payload) == .Err(_), "a second part named core is refused")
+    assert(x64_executable_add_part(image, "", payload) == .Err(_), "an unnamed part is refused")
+}
