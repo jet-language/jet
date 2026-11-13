@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6777,
-    "rev": 101290,
+    "rev": 101291,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -48899,7 +48899,7 @@
       "parentId": "c0j2afiq",
       "needsAcceptance": false,
       "created": "2026-10-05T21:07:58.443Z",
-      "updated": "2026-11-09T19:40:50.377Z",
+      "updated": "2026-11-13T07:31:16.570Z",
       "updatedBy": "Main",
       "goals": [
         "G3"
@@ -195094,6 +195094,204 @@
       "draft": false,
       "status": "open",
       "created": "2026-11-13T07:09:44.859Z"
+    },
+    {
+      "id": "D-GROUP-CANCEL1",
+      "cardId": "c08u6j84",
+      "group": "runtime",
+      "title": "Cancelling a task that has a task group open: cancel the group's children too, let them finish first, or keep today's lost cancel",
+      "situation": "A task group is a block that starts several tasks and waits for all of them at its closing brace. Today, cancelling a task that is waiting at such a brace does not reach the tasks inside the group. Those children run to their end, and then the cancelled task carries on as if nothing happened, so its join reports success and the cancel is lost. A child that waits forever, such as a server loop, makes that cancel hang for good. This matters for anyone who stops a job made of parallel parts: a crawler, a fan-out request, a test that times out. You are asked what a cancel does to the children of a group the cancelled task has open. We recommend that it cancels them, waits for their cleanup, and then the task stops as cancelled.",
+      "gist": "What should cancelling a task do to the tasks inside a group that task has open?",
+      "lesson": "A task group waits for every task it started before its block ends. When the task that opened the group is cancelled, the children can be cancelled with it. They can instead be left to finish before the cancel lands. Or they can be left alone as today, where the cancel is lost.",
+      "explainer": "Words used here. A task is work that runs alongside the rest of the program. A task group is a block, written task.group name { ... }, that starts child tasks and waits for all of them at its closing brace.\n\nCancel asks a task to stop. The task notices at its next wait, such as a sleep, a channel read, a network read or waiting for another task. It then unwinds: it leaves its functions and runs its cleanup on the way out. Join waits for a task and gives back its result, or a failure such as Cancelled.",
+      "story": "Mia's command-line tool fetches twenty pages in a task group, inside a job task. When the user presses Ctrl-C, or her two-second time limit runs out, she cancels the job. Today the twenty fetches keep going to the end. Then the job prints that all pages were fetched, and its join says it succeeded.\n\nUnder A the fetches stop at their next network wait, close their connections, and the job's join reports Cancelled within moments. Under B the job waits for all twenty fetches, then reports Cancelled. Under C nothing changes.",
+      "inWild": "// Swift: cancelling the parent task cancels every child task in its task group.\nlet job = Task {\n    await withTaskGroup(of: Void.self) { group in\n        group.addTask { await fetch(\"a\") }\n        group.addTask { await fetch(\"b\") }\n    }\n}\njob.cancel()   // both fetches see the cancel at their next await",
+      "detail": "What this ballot decides. What happens to the children of a task.group block when the task that opened the block is cancelled while the block is open.\n\nWhat the rules say today. spec.md, Task completion and cancellation: cancellation lands at wait points, and task join is one of them (D-CANCELMODEL1=C). spec.md, Structured tasks and combinators: the group owns and joins every child created in its body (D-CONC-SPAWN1=D). task.all cancels remaining children on a failure, and task.race and task.any cancel the losers.\n\nD-NURSERY1=A says work created inside the scope must finish, be cancelled, or report an error before the scope exits, without choosing which. No ratified rule says whether cancelling the opener reaches the group's children. process.on_signal cancels every live task, which is a separate path.\n\nWhat the code does today. Compiler/JetRuntime/Source/TaskGroup.jet task_group_close cancels the group's children only when the closing task's deadline has expired (status 2). Otherwise it calls task_drain on each child, and task_drain (Task.jet) is a plain futex wait with no cancellation check. So the closing brace is not a stop point for the opener.\n\nThe combinators already cancel their children when the waiting task is cancelled: task_selection_wait_check delivers the cancel and task_selection_drain(handles, count, true) cancels every child.\n\nSeed run. Seed b14, at --optimize=none. A parent task opens a group whose one child sleeps 3 s. run cancels the parent after 100 ms and joins it. Output: child finished its sleep, then parent closed its group, then parent joined Ok, and the join took at least 2 s. The cancel was lost, and the parent's code after the group ran.\n\nRelation to other ballots. D-TASK-SLICE1=A makes loop turns stop points, so under option A a busy child also stops promptly. D-EXIT-TASKS1 covers detached tasks at process exit. Detached tasks are not group children and are untouched here.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Cancel flows down to the group's children",
+          "detail": "Cancelling a task also cancels every child of each task group it has open, and their own groups' children, all the way down. Each child stops at its next wait and runs its cleanup. The group's closing brace still waits for all of them, so no child outlives its group. Then the cancelled task itself unwinds, and its join reports Cancelled.\n\nA child that must finish a step it started puts that step in #Shield, which already delays a cancel until the step is done. This is what task.all, task.race and task.any already do with their children, and what a group already does when its deadline passes.\n\nThe cost of A. A child stopped in the middle of a step that is not in #Shield leaves that step half done: a file half written, a request half sent. Its cleanup still runs, so the file is closed and the connection dropped, but the half-done work is not undone. Steps that must not stop halfway go in #Shield.",
+          "technical": "The cancel of a task walks the groups it has open and cancels each unfinished child (scheduler_control_cancel), recursively. This is what task_group_close already does under an expired deadline. A task records its open groups, so a cancel that arrives while it is already parked at the closing brace still reaches them.\n\ntask_group_close cancels the children when the closer is cancelled and not shielded, waits for all of them, then delivers the pending cancel so the closer unwinds as Cancelled. A closer inside #Shield keeps today's behaviour until the shield ends. spec.md gains one sentence in Task completion and cancellation and one in Structured tasks and combinators.\n\nCost. A cancel walks only the unfinished descendants in open groups: one step per such task, paid once per cancel. Each group's child list is read under that group's own lock, and the cancels are sent after the lock is released, as the deadline path already does. A task that is never cancelled pays one list push and one pop per task.group block, to record the open group.",
+          "code": "use time: core.time\n\nfetch_page: fn(name: String) {\n    time.sleep(3000ms)   // stands in for a slow network read\n    print(\"fetched {name}\")\n}\n\nfetch_all: fn() {\n    task.group pages {\n        task fetch_page(\"a\")\n        task fetch_page(\"b\")\n    }\n    print(\"all pages fetched\")\n}\n\nrun: fn() {\n    job: task fetch_all()\n    time.sleep(100ms)\n    job.cancel()\n    job.join() ?? print(\"job stopped\")\n}\n// A prints: job stopped\n// Both fetches stop at their sleep and clean up; nothing else prints."
+        },
+        {
+          "key": "B",
+          "name": "Children finish first, then the cancel lands",
+          "detail": "The group's children are not cancelled. They run to their own end, the closing brace waits for them as it does today, and then the cancelled task unwinds and its join reports Cancelled. The cancel is no longer lost, but it takes as long as the slowest child. A child that waits forever, such as a server's accept loop, makes the cancel hang, so the author must stop such children by hand through a channel or a flag.\n\nB keeps the ratified rule that waiting for a task is a stop point; it only delays the cancel.",
+          "technical": "task_group_close keeps task_drain without cancelling children, then delivers the closer's pending cancel. Group children differ from task.all, task.race and task.any children, which are cancelled. B does not amend D-CANCELMODEL1=C: the cancel still lands at the closing brace, which is a task join, only after the children end.",
+          "code": "use time: core.time\n\nfetch_page: fn(name: String) {\n    time.sleep(3000ms)   // stands in for a slow network read\n    print(\"fetched {name}\")\n}\n\nfetch_all: fn() {\n    task.group pages {\n        task fetch_page(\"a\")\n        task fetch_page(\"b\")\n    }\n    print(\"all pages fetched\")\n}\n\nrun: fn() {\n    job: task fetch_all()\n    time.sleep(100ms)\n    job.cancel()\n    job.join() ?? print(\"job stopped\")\n}\n// B prints, after 3 seconds: fetched a, fetched b, job stopped"
+        },
+        {
+          "key": "C",
+          "name": "Keep today's behaviour",
+          "detail": "The group's closing brace is not a stop point. The children run to their end, and then the cancelled task carries on with the code after the group as if it had never been cancelled. Its join reports success. A child that waits forever hangs the cancel. Choosing C amends a ratified rule: today waiting for a task is a place where a cancel lands, and C makes the group's closing brace an exception.",
+          "technical": "No change to task_group_close or task_drain. spec.md must then name the group's closing brace as an exception to task join being a wait point. C amends the ratified D-CANCELMODEL1=C, which lists task join among the wait points where a cancel lands.",
+          "code": "use time: core.time\n\nfetch_page: fn(name: String) {\n    time.sleep(3000ms)   // stands in for a slow network read\n    print(\"fetched {name}\")\n}\n\nfetch_all: fn() {\n    task.group pages {\n        task fetch_page(\"a\")\n        task fetch_page(\"b\")\n    }\n    print(\"all pages fetched\")\n}\n\nrun: fn() {\n    job: task fetch_all()\n    time.sleep(100ms)\n    job.cancel()\n    job.join() ?? print(\"job stopped\")\n}\n// C prints, after 3 seconds: fetched a, fetched b, all pages fetched\n// The join succeeds; the cancel was lost."
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Swift",
+          "note": "Cancelling a task cancels every child task in its task groups; children check at their next await.",
+          "code": "job.cancel()   // the group's addTask children are cancelled too"
+        },
+        {
+          "lang": "Kotlin",
+          "note": "Cancelling a parent Job cancels all of its children, and the parent completes only after they finish unwinding.",
+          "code": "val job = launch { coroutineScope { launch { fetch(\"a\") }; launch { fetch(\"b\") } } }\njob.cancel()"
+        },
+        {
+          "lang": "Python Trio",
+          "note": "Cancelling a scope cancels everything inside it, including every task in a nursery opened there.",
+          "code": "with trio.move_on_after(2):\n    async with trio.open_nursery() as n:\n        n.start_soon(fetch, \"a\")\n        n.start_soon(fetch, \"b\")"
+        },
+        {
+          "lang": "Go",
+          "note": "Cancellation is explicit. A context's cancel reaches every context derived from it (pkg.go.dev/context: \"When a Context is canceled, all Contexts derived from it are also canceled\"). But a goroutine sees it only if it was passed that context and checks Done(). A goroutine that was not passed it runs on. This is the strongest case for B or C: nothing stops without being told in the code. Go also has no group that must outlive its children, so a forgotten goroutine is a leak, not a hang.",
+          "code": "ctx, cancel := context.WithCancel(parent)\ngo fetch(ctx, \"a\")   // stops only if fetch checks ctx.Done()\ngo fetch(ctx, \"b\")\ncancel()"
+        },
+        {
+          "lang": "Java 21",
+          "note": "StructuredTaskScope (JEP 453, preview; docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/concurrent/StructuredTaskScope.html). shutdown() interrupts every unfinished subtask, and join() and close() wait for all of them. An owner interrupted while waiting in join() gets InterruptedException, and closing the scope then shuts it down, so the subtasks are interrupted and awaited, as in A.",
+          "code": "try (var scope = new StructuredTaskScope<String>()) {\n    scope.fork(() -> fetch(\"a\"));\n    scope.fork(() -> fetch(\"b\"));\n    scope.join();   // owner interrupted here: close() interrupts both forks\n}"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "A cancel means the whole job stops, children included, and nothing outlives its group. It matches how Jet's own task.all, task.race and task.any already treat their children, and how Swift, Kotlin and Trio treat groups.",
+        "gains": [
+          "A cancelled job stops promptly, with every child's cleanup run.",
+          "The cancel is never lost: the join reports Cancelled.",
+          "A child that waits forever no longer hangs a cancel.",
+          "Groups and task.all, task.race and task.any follow one rule."
+        ],
+        "losses": [
+          {
+            "loss": "A child's unfinished work is cut short when its group's opener is cancelled.",
+            "mitigation": "Work that must outlive the job is started with detach() instead, so it is not a group child."
+          },
+          {
+            "loss": "A child stopped mid-step outside #Shield leaves that step half done, such as a half-written file or a half-sent request.",
+            "mitigation": "Steps that must not stop halfway go in #Shield, which already delays a cancel until the step ends. Cleanup still runs either way, so files close and connections drop."
+          },
+          {
+            "loss": "Each cancel walks the unfinished tasks in open groups.",
+            "mitigation": "The walk is one step per unfinished descendant, paid once per cancel, with each group's lock held only to copy its list. Tasks never cancelled pay one push and pop per group."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B keeps the cancel but makes it wait for the slowest child, and a child that waits forever hangs it. It also gives groups a different rule from task.all, task.race and task.any. Go's explicit style favours B, but Go has no group that must wait for its children, so it never hangs."
+          },
+          {
+            "key": "C",
+            "reason": "C silently loses the cancel and reports success for a job that was asked to stop. It also amends the ratified rule that waiting for a task is a stop point."
+          }
+        ],
+        "tradeoff": "A child's in-progress work stops with its job, and #Shield keeps the steps that must finish."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: Main. Main attacked A against Go explicit contexts and Java StructuredTaskScope, the cancel-walk cost, and work cut mid-step outside Shield; each is now stated as a cost with its mitigation. C is shown to amend D-CANCELMODEL1, and B delays but keeps the cancel."
+      },
+      "checkInstructions": null,
+      "surface": {
+        "gist": "When a task with an open task group is cancelled, what happens to the group's tasks?",
+        "lesson": "A task group waits for all the tasks it started. Today, cancelling the task that opened it does not reach those tasks: they run to the end, and the cancel is then lost. This vote picks what a cancel does to them.",
+        "trio": {
+          "current": {
+            "note": "Today the fetches finish, the job carries on, and its join succeeds.",
+            "code": "job: task fetch_all()     // opens a group of fetches\ntime.sleep(100ms)\njob.cancel()\njob.join() ?? print(\"job stopped\")\n// prints: fetched a, fetched b, all pages fetched"
+          },
+          "wild": {
+            "lang": "Swift",
+            "note": "Cancelling the parent task cancels every task in its group.",
+            "code": "job.cancel()   // the group's child tasks are cancelled too"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Cancel the group's tasks too",
+            "gist": "The cancel reaches every task in the group; then the job stops as cancelled.",
+            "gains": [
+              "The whole job stops promptly, with cleanup.",
+              "The join reports Cancelled."
+            ],
+            "losses": [
+              "Unfinished work inside the group is cut short."
+            ],
+            "proposed": {
+              "code": "job.cancel()\njob.join() ?? print(\"job stopped\")\n// prints: job stopped"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Let them finish first",
+            "gist": "The group's tasks run to their end; then the job stops as cancelled.",
+            "gains": [
+              "The cancel is no longer lost."
+            ],
+            "losses": [
+              "The cancel waits for the slowest task.",
+              "A task that waits forever hangs it."
+            ],
+            "proposed": {
+              "code": "job.cancel()\njob.join() ?? print(\"job stopped\")\n// prints: fetched a, fetched b, job stopped"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Keep today's behaviour",
+            "gist": "The group's tasks finish and the job carries on as if not cancelled.",
+            "gains": [
+              "No change."
+            ],
+            "losses": [
+              "The cancel is lost and the join succeeds.",
+              "A task that waits forever hangs it.",
+              "It amends the rule that joins are stop points."
+            ],
+            "proposed": {
+              "code": "job.cancel()\njob.join() ?? print(\"job stopped\")\n// prints: fetched a, fetched b, all pages fetched"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A cancel stops the whole job, nothing outlives its group, and groups follow the same rule as task.all, task.race and task.any.",
+          "gains": [
+            "Prompt stop with every task's cleanup.",
+            "The cancel is never lost."
+          ],
+          "losses": [
+            {
+              "loss": "A child stopped mid-step can leave half-done work.",
+              "mitigation": "Put steps that must finish in #Shield; cleanup still runs either way."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "The cancel waits for the slowest task and can hang."
+            },
+            {
+              "key": "C",
+              "reason": "The cancel is silently lost, against the rule that joins are stop points."
+            }
+          ],
+          "tradeoff": "Work in progress stops with its job; #Shield keeps the steps that must finish."
+        }
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-13T07:31:16.570Z"
     }
   ],
   "questions": [
@@ -198361,6 +198559,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-13T07:31:16.570Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-GROUP-CANCEL1",
+      "note": "Cancelling a task that has a task group open: cancel the group's children too, let them finish first, or keep today's lost cancel"
+    },
     {
       "at": "2026-11-13T07:29:47.293Z",
       "by": "Main",
