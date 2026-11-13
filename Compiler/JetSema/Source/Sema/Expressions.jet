@@ -1111,29 +1111,44 @@ sema_expr_optional_lift: fn(value: TExpr, required: Type, offered: Type, environ
     Val(sema_tree_node(lifted_type, TExprKind.Present{value: value.copy()}, value.span))
 }
 
-// Whether a value of `ty` can never be None: a built-in value type that is
-// not optional. A named or applied type (an alias, a type parameter, `Dyn`),
-// a trait object and a union stay open, since they may hold None.
-sema_expr_never_none: fn(ty: Type) -> Bool Never! {
-    if sema_expr_unwrap_tag(ty) == {
-        .Int | .Float | .Float32 | .Bool | .String | .Char | .IntN(_, _) | .InlineRange(_, _, _) | .Quantity(_, _) | .Measure(_) -> true
-        .List(_) | .Map(_, _, _) | .Shared(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Tuple(_) | .FixedList(_, _) -> true
-        .Option(_) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tagged(_, _) | .Union(_) | .Case(_, _) -> false
-    }
-}
-
-// Whether `ty` names a struct or an enum declaration through the
-// registration graph. Its values are never None, unlike an alias or a type
-// parameter, which may stand for an optional.
-sema_expr_names_value_declaration: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
-    if program.registration_graph == .Val(graph) {
-        row: sema_type_resolve_nominal_row(graph, sema_expr_unwrap_tag(ty), environment.module_identity) ?? return false
-        // Matched in place: a pattern on the indexed path copies the whole item.
-        if graph.modules[row.module_index].nominals[row.row].source == .SourceAST(item) {
-            if item == .Struct(_) || item == .Enum(_) -> return true
+// Whether a value of `ty` can be None once aliases resolve: an optional, a
+// union with an optional member, and a type whose values are not known here
+// (a type parameter, `Dyn`, a union's named case). Every other type is never
+// None: a struct such as `FileLock`, an enum (no variant can be named `None`),
+// a distinct type, a number, a string, a list.
+sema_expr_can_hold_none: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
+    resolved: sema_expr_expected_type(sema_expr_unwrap_tag(ty), environment, program)
+    if resolved == {
+        .Option(_) | .Case(_, _) -> return true
+        .Tagged(_, inner) -> return sema_expr_can_hold_none(inner, environment, program)
+        .Union(members) -> {
+            loop member in members {
+                if sema_expr_can_hold_none(member, environment, program) -> return true
+            }
         }
+        .Named(_) | .Apply(_, _) -> return sema_expr_nominal_can_hold_none(resolved, environment, program)
+        .Int | .Float | .Float32 | .Bool | .String | .Char | .IntN(_, _) | .InlineRange(_, _, _) | .Quantity(_, _) | .Measure(_) -> {}
+        .List(_) | .Map(_, _, _) | .Shared(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Tuple(_) | .FixedList(_, _) | .TraitObject(_) -> {}
     }
     false
+}
+
+// The nominal side of sema_expr_can_hold_none: a struct, an enum and a
+// distinct type are never None. A type parameter, `Dyn` and a name sema has
+// no struct, enum or distinct row for stay open.
+sema_expr_nominal_can_hold_none: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
+    if ty == .Named(name) {
+        if sema_type_name_is_generic(environment.generic_params, name) || sema_dyn_is_type(ty) -> return true
+    }
+    if program.registration_graph == .Val(graph) {
+        row: sema_type_resolve_nominal_row_at(graph, ty, sema_scope_caller_row(environment, graph)) ?? return true
+        kind: sema_scope_nominal_kind(graph, row.module_index, row.row) ?? return true
+        if kind == {
+            .Struct | .Enum | .Distinct -> return false
+            .Func | .Other -> return true
+        }
+    }
+    true
 }
 
 // The refusal of `value == None` or `value != None` (`equal` tells which)
@@ -1141,7 +1156,7 @@ sema_expr_names_value_declaration: fn(ty: Type, environment: SemaScopeEnvironmen
 // E0109 for both spellings, whether `== None` reached sema as a pattern test
 // or as a comparison.
 sema_expr_none_comparison_refused: fn(ty: Type, equal: Bool, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Diagnostic? {
-    if !sema_expr_never_none(ty) && !sema_expr_names_value_declaration(ty, environment, program) -> return None
+    if sema_expr_can_hold_none(ty, environment, program) -> return None
     answer: if equal -> "false" else -> "true"
     Val(sema_error("E0109", span, "only an optional value can be compared with `None`, but this is {sema_type_show(ty)}", "a value whose type isn't optional is never None, so this comparison is always {answer}", "remove the comparison, or give the value an optional type such as `{type_name(ty)}?` if it can be missing"))
 }

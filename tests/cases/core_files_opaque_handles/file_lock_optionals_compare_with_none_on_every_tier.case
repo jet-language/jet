@@ -1,0 +1,31 @@
+# Only a value that can be None may be compared with None. On O0, O1 and O2,
+# main.jet compares a held and an absent FileLock?, an alias of an optional
+# and a type parameter's optional with None. In refused.jet, each value that
+# can never be None is refused at check with E0109, never an ir.build fault:
+# a struct, an enum, a distinct type, an alias of a struct, a fixed-width
+# number, a String, a list, and the plain FileLock that `??` leaves.
+fixture: file_lock_optionals_compare_with_none_on_every_tier.fixture
+env: NO_COLOR=1
+step O0: jet run --optimize=none main.jet
+exit: 0
+stdout: = file_lock_optionals_compare_with_none_on_every_tier.out
+step O1: jet run --optimize=basic main.jet
+exit: 0
+stdout: = file_lock_optionals_compare_with_none_on_every_tier.out
+step O2: jet run --optimize=full main.jet
+exit: 0
+stdout: = file_lock_optionals_compare_with_none_on_every_tier.out
+step refused: jet run refused.jet
+exit: 1 # the refused comparisons stop the run at check
+stderr: ~ "Only an optional value can be compared with `None`, but this is" # the E0109 headline
+stderr: ~ "refused.jet:19:42" # a struct
+stderr: ~ "refused.jet:21:40" # an enum
+stderr: ~ "refused.jet:23:48" # a distinct type
+stderr: ~ "refused.jet:25:48" # an alias of a struct
+stderr: ~ "refused.jet:27:39" # a fixed-width number
+stderr: ~ "refused.jet:29:34" # a String
+stderr: ~ "refused.jet:31:34" # a list
+stderr: ~ "refused.jet:37:11" # the plain FileLock that ?? leaves
+stderr: ~ "8 problems found" # one problem per comparison and nothing else
+stderr: !~ "PatternTypeMismatch" # `!=` with None is a comparison, not an absent pattern
+stderr: !~ "internal compiler error" # refused at check, never an ir.build fault

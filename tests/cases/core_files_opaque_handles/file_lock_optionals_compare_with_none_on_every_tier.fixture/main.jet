@@ -1,0 +1,26 @@
+use files: core.files
+
+Maybe<T>: T?
+
+// A held lock and an absent one, each a `FileLock?`, compared with `None`.
+held: fn(path: String) -[FS, Env, IO]> IOError! {
+    lock := files.try_lock(path)
+    print(lock != None)
+    print(lock == None)
+    absent: FileLock?{None}
+    print(absent == None)
+}
+
+// An alias of an optional is optional.
+counted: fn(count: Maybe<Int>) -> Bool { count == None }
+
+// So is the optional of a type parameter.
+missing: fn<T>(value: T?) -> Bool { value == None }
+
+run: fn() -[FS, Env, IO]> {
+    held("compare.lk") ?? panic("the lock file is not writable")
+    print(counted(Int?{None}))
+    print(counted(3))
+    print(missing(Int?{None}))
+    print(missing<String>("here"))
+}
