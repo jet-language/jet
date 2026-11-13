@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6779,
-    "rev": 101323,
+    "rev": 101324,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -39434,6 +39434,11 @@
         {
           "at": "2026-11-13",
           "by": "Main",
+          "text": "c9 part d (!Mem.Alloc(above: N) bounds the total heap of any call path) already holds on dev fd72bf4d8d. Main ran it on seed-b14: `jet test Compiler --profile ui --filter arena_bounded` gives PASS 4, REFUSED 0 (arena_bounded_transitive_overflow, unsized_allocation, unsized_transitive_allocation and open_multiplicity). Effects/Checks.jet sema_effect_arena_bound sums arena bytes times executions over the calls, and E0921 refuses an unsized allocation or an open dispatch. Found by G10Safe-1. c9 stays open on parts a, b, c and e."
+        },
+        {
+          "at": "2026-11-13",
+          "by": "Main",
           "text": "Plan (Main, from G10Safe-1): c9 (D-STACKBOUND1=A) lands as five SUBs: (a) jet inspect memory prints worst-case stack per entry point, from frame sizes and the static call graph; (b) worst-case heap per entry point; (c) the !Mem.Stack(above: N) refusal; (d) the !Mem.Alloc(above: N) refusal; (e) recursion without #MaxDepth(n), or a dynamic call without a sealed target set, is refused. c7 (D-AUTOPIN1=A) lands as eight SUBs: (a) the jet inspect choices skeleton plus storage form with its reason; (b) inlining; (c) copies; (d) collection; (e) browser/server placement; (f) update notifications; (g) a marker or effect denial locks a choice, and a later breaking change fails the build naming the changed fact; (h) editor hover shows the choice and its reason. All spellings come from the ratified decision texts. Order: c12 parts 2 and 3, then c9a, c7a, c7b."
         },
         {
@@ -39601,7 +39606,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-09-28T00:46:54.243Z",
-      "updated": "2026-11-13T08:47:51.811Z",
+      "updated": "2026-11-13T09:11:21.566Z",
       "updatedBy": "Main",
       "goals": [
         "G10"
@@ -198913,6 +198918,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-13T09:11:21.566Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0tgtjtu",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-13T08:55:50.588Z",
       "by": "Main",
