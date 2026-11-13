@@ -167,6 +167,9 @@ SemaEffectGraphResult: struct {
     complete: Bool
     memory_declarations: [SemaMemoryFactDeclaration]{[SemaMemoryFactDeclaration]{}}
     memory_projections: [SemaMemoryProjectionRow]{[SemaMemoryProjectionRow]{}}
+    // Solved rows that would have changed a taken seeded module's body
+    // (sema_effects_check_modules `taken`); a final seeded body keeps 0.
+    seeded_writes: Int{0}
 }
 
 // One memory operation a body performs directly (Rust `MemoryEvent`): `kind`
@@ -4520,8 +4523,11 @@ sema_effect_region_add_scoped: fn(inferred: &[String], scoped_calls: [SemaEffect
 // table, which direct callees name. `prep_functions` holds the keys of the
 // functions the build checked to run while compiling (a comptime item's
 // callees, whose call sites no module records): prep code, never a runtime
-// entry (sema_effect_runtime_input_paths).
-sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaEffectModuleInput], prepared: &&SemaEffectPrepared, package_denials: [String], denial_modules: [Bool], file_caps: [[SemaEffectModuleCap]], trait_caps: [String:SemaEffectTypeCap], decls: DeclTable, prep_functions: [String:Bool], threads: CompilerThreads, organization_denials: [String]{[String]{}}, organization_source: String{""}) -> SemaEffectGraphResult {
+// entry (sema_effect_runtime_input_paths). The first `taken` modules are
+// taken seeded ones (sema_finalize_seeded_taken): their bodies keep the rows
+// their finalization solved, and a row this solve would change on one is
+// counted in the result's `seeded_writes`, not stamped.
+sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaEffectModuleInput], prepared: &&SemaEffectPrepared, package_denials: [String], denial_modules: [Bool], file_caps: [[SemaEffectModuleCap]], trait_caps: [String:SemaEffectTypeCap], decls: DeclTable, prep_functions: [String:Bool], threads: CompilerThreads, organization_denials: [String]{[String]{}}, organization_source: String{""}, taken: Int{0}) -> SemaEffectGraphResult {
     owned_prepared := prepared.move()
     diagnostics := owned_prepared.diagnostics.move()
     nodes := owned_prepared.nodes.move()
@@ -4769,17 +4775,26 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
     called: sema_effect_called(nodes, calls.node_by_key)
     heaps: sema_effect_heap_bounds(nodes, calls.node_by_key, called)
     stacks: sema_effect_stack_bounds(stack, frames, nodes, calls.node_by_key, called)
+    seeded_writes := 0
     loop module_row in inputs {
         target: module_row.module_index
         loop function_index in 0..<modules[target].functions.len() {
             node_index: sema_effect_node_index(calls.node_by_key, modules[target].functions[function_index].key) ?? next
-            modules[target].functions[function_index].effects = sema_effect_tfacts(nodes[node_index], solved[node_index])
-            if cap_frames[node_index] != "" && !modules[target].functions[function_index].effect_scope.starts_with(cap_frames[node_index]) {
-                modules[target].functions[function_index].effect_scope = sema_effect_capped_scope(cap_frames[node_index], modules[target].functions[function_index].effect_scope)
+            effects := sema_effect_tfacts(nodes[node_index], solved[node_index])
+            capped: cap_frames[node_index] != "" && !modules[target].functions[function_index].effect_scope.starts_with(cap_frames[node_index])
+            frame_bound: if stack.guarded[node_index] -> frames.own[node_index] else -> -1
+            if target < taken {
+                heap_differs: heaps[node_index] != "" && modules[target].functions[function_index].heap != heaps[node_index]
+                stack_differs: stacks[node_index] != "" && modules[target].functions[function_index].stack != stacks[node_index]
+                bounds_differ: heap_differs || stack_differs || modules[target].functions[function_index].frame_bound != frame_bound
+                if capped || modules[target].functions[function_index].effects != effects || bounds_differ -> seeded_writes += 1
+                next
             }
+            modules[target].functions[function_index].effects = effects.move()
+            if capped -> modules[target].functions[function_index].effect_scope = sema_effect_capped_scope(cap_frames[node_index], modules[target].functions[function_index].effect_scope)
             if heaps[node_index] != "" -> modules[target].functions[function_index].heap = heaps[node_index].copy()
             if stacks[node_index] != "" -> modules[target].functions[function_index].stack = stacks[node_index].copy()
-            modules[target].functions[function_index].frame_bound = if stack.guarded[node_index] -> frames.own[node_index] else -> -1
+            modules[target].functions[function_index].frame_bound = frame_bound
         }
     }
     // e3401 names the first impure call and its chain; the reached row is the
@@ -4790,7 +4805,7 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
         sema_effect_publish_diagnostics(diagnostics, inputs[nodes[node_index].module_index].source_segments, pure_diagnostics)
     }
     complete: !sema_has_error_since(diagnostics, 0)
-    SemaEffectGraphResult{diagnostics: diagnostics.move(), complete: complete, memory_declarations: memory_facts.declarations.move(), memory_projections: memory_facts.projections.move()}
+    SemaEffectGraphResult{diagnostics: diagnostics.move(), complete: complete, memory_declarations: memory_facts.declarations.move(), memory_projections: memory_facts.projections.move(), seeded_writes: seeded_writes}
 }
 
 // The rows of the effect graph each input module contributes on its own:

@@ -793,6 +793,12 @@ SemaRegistrationGraph: struct {
     // (sema_registration_prepare_graph `seeds`): the registration passes
     // that bind, expand or edit a module start after them.
     seeded: Int{0}
+    // The finalized result of each seeded module, in `modules` order, when
+    // the seeds came with them (the Core record's module rows). Finalization
+    // takes these as they are: it checks none of their bodies again and
+    // writes none of them (sema_finalize_seeded_taken). Empty when the seeds
+    // came without results, and then every module is checked.
+    seeded_results: [SemaGraphModuleResult]{[SemaGraphModuleResult]{}}
     edges: [SemaRegistrationImportEdge]
     foreign_providers: [SemaForeignProviderInput]
     core_builtin_owner_facts: [SemaRegistrationCoreBuiltinOwnerFact]

@@ -1694,6 +1694,9 @@ sema_codec_fill_demanded: fn(graph: &SemaRegistrationGraph, trail: &SemaGraphTra
     modules := [Int]{}
     positions := [String:Int]{}
     indexed := [Int:Bool]{}
+    // A taken seeded module's codecs were filled and checked when it was
+    // finalized; its result holds them (sema_finalize_seeded_taken).
+    taken: sema_finalize_seeded_taken(graph)
     loop {
         keys: sema_codec_demand_take(graph.codec_demand)
         if keys.len() == 0 -> break
@@ -1704,6 +1707,7 @@ sema_codec_fill_demanded: fn(graph: &SemaRegistrationGraph, trail: &SemaGraphTra
             rows: sema_registration_impl_rows_named(graph, parts[1])
             loop row_ref in rows {
                 module_index: row_ref.module_index
+                if module_index < taken -> next
                 row: row_ref.row
                 if graph.modules[module_index].impls[row].trait_name != (Val(trait_name)) -> next
                 if !sema_codec_impl_pending(graph.modules[module_index].impls[row]) -> next

@@ -60,7 +60,9 @@ sema_core_demand_index: fn(graph: &SemaRegistrationGraph, enabled: Bool) {
                 loop method in implementation.methods -> eager[method.symbol.id.key] = true
             }
         }
-        loop module_index in 0..<graph.modules.len() {
+        // A taken seeded module's result already holds the bodies its
+        // finalization checked (sema_finalize_seeded_taken): none waits here.
+        loop module_index in sema_finalize_seeded_taken(graph)..<graph.modules.len() {
             identity: graph.modules[module_index].module_identity
             if !sema_module_is_core_source(identity) || identity == graph.entry_module_identity -> next
             loop item in graph.modules[module_index].program.items {

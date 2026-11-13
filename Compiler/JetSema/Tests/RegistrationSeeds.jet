@@ -2,16 +2,21 @@
 // precompiled Core record's, rebased to the graph): they hold the first module
 // indexes, keep the rows registration gave them, and the input modules after
 // them register against them. A check that reports on a module's own
-// declarations doesn't report on a seeded one again.
+// declarations doesn't report on a seeded one again, and a seeded module that
+// comes with its finalized result is taken as it is: finalization checks none
+// of its bodies and writes none of its slot.
 use {
     jet_parser.[parse_source]
     jet_sema.[
-        SemaBuildFacts, SemaForeignProviderInput, SemaGraphModuleResult,
+        SemaBuildFacts, SemaComptimeFunctionResult, SemaComptimeItemValue,
+        SemaForeignProviderInput, SemaGraphModuleResult, SemaGraphResult,
         SemaRegistrationForeignHandleFacts, SemaRegistrationGraph,
-        SemaRegistrationImportEdge, SemaRegistrationModule,
-        SemaRegistrationModuleInput, SemaSourceOrigin, SemaSourceSegment,
-        sema_marker_rules_check_inline_always, sema_registration_module_index,
-        sema_registration_prepare_graph,
+        SemaRegistrationHostHooks, SemaRegistrationImportEdge,
+        SemaRegistrationModule, SemaRegistrationModuleInput,
+        SemaRegistrationPackagePolicy, SemaSourceOrigin, SemaSourceSegment,
+        sema_collect_comptime_declarations, sema_finalize_graph,
+        sema_graph_trail_init, sema_marker_rules_check_inline_always,
+        sema_registration_module_index, sema_registration_prepare_graph,
     ]
     jet_driver.[jet_driver_canonical_effect_module]
     jet_foundation.[Diagnostic, Span, compiler_threads_single, jet_target_machine_hosted]
@@ -21,6 +26,8 @@ SEEDS_EFFECTS: "IO: struct {{\n    impl Effect {{}}\n}}\nPanic: struct {{\n    i
 SEEDS_MAIN: "Point: struct {{\n    x: Int\n}}\n\nmain: fn() {{\n}}\n"
 // A promise E0917 refuses: `#Inline(Always)` on a function that calls itself.
 SEEDS_INLINE: "#Inline(Always)\nspin: fn() {{\n    spin()\n}}\n\nmain: fn() {{\n}}\n"
+// A module whose bodies call one another, for a finalized result to seed.
+SEEDS_CALLS: "Point: struct {{\n    x: Int\n}}\n\nnorm: fn(point: Point) -> Int {{\n    point.x * point.x\n}}\n\nmain: fn() {{\n    _: norm(Point{{x: 3}})\n}}\n"
 
 registration_seeds_input: fn(source: String) -> SemaRegistrationModuleInput {
     parsed := parse_source(source.bytes())
@@ -42,6 +49,44 @@ registration_seeds_take: fn(graph: &&SemaRegistrationGraph) -> [SemaRegistration
         if row.module_identity == "seeds::main" -> seeds.push(row)
     }
     seeds
+}
+
+// `graph` declared and finalized, its registration graph kept on the result.
+registration_seeds_finalize: fn(graph: &&SemaRegistrationGraph) -> SemaGraphResult {
+    stage := sema_collect_comptime_declarations(graph, [SemaRegistrationPackagePolicy]{}, compiler_threads_single(), None) ?? panic("declaration checking failed: {err}")
+    declared := stage.graph.move()
+    stage.graph = None
+    registration := declared.move() ?? panic("the declaration pass lost its registration graph")
+    trail := sema_graph_trail_init()
+    hooks: Shared{SemaRegistrationHostHooks{numeric_unit_conversion_exact: None}}
+    sema_finalize_graph(registration, trail, stage, [SemaComptimeItemValue]{}, [SemaComptimeFunctionResult]{}, hooks, compiler_threads_single(), None, true, None)
+}
+
+// The finalized `seeds::main` module result of `source` checked beside the
+// canonical effect module; its finalized registration row goes to `seeds`.
+registration_seeds_finalized: fn(source: String, seeds: &[SemaRegistrationModule]) -> SemaGraphModuleResult {
+    effects := jet_driver_canonical_effect_module(SEEDS_EFFECTS) ?? panic("the canonical effect source does not parse")
+    effect_identity: effects.module_identity.copy()
+    first := sema_registration_prepare_graph([SemaRegistrationModuleInput]{registration_seeds_input(source), effects}, [SemaRegistrationModule]{}, [SemaRegistrationImportEdge]{}, "seeds", "seeds::main", effect_identity, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), registration_seeds_facts(), false, compiler_threads_single())
+    checked := registration_seeds_finalize(first)
+    assert(checked.complete)
+    finalized := checked.registration_graph.move() ?? panic("finalization kept no registration graph")
+    checked.registration_graph = None
+    index: sema_registration_module_index(finalized, "seeds::main") ?? panic("the main module was not registered")
+    module_result := checked.modules[index].copy()
+    seeds = registration_seeds_take(finalized)
+    module_result
+}
+
+// `seeds` with their finalized `results` taken by a graph of the canonical
+// effect module, finalized.
+registration_seeds_refinalize: fn(seeds: &&[SemaRegistrationModule], results: &&[SemaGraphModuleResult]) -> SemaGraphResult {
+    effects := jet_driver_canonical_effect_module(SEEDS_EFFECTS) ?? panic("the canonical effect source does not parse")
+    effect_identity: effects.module_identity.copy()
+    second := sema_registration_prepare_graph([SemaRegistrationModuleInput]{effects}, seeds, [SemaRegistrationImportEdge]{}, "seeds", "seeds::main", effect_identity, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), registration_seeds_facts(), false, compiler_threads_single())
+    assert_eq(second.seeded, 1)
+    second.seeded_results = results.move()
+    registration_seeds_finalize(second)
 }
 
 #Test("seeded rows take the first module indexes and keep their registration") {
@@ -115,4 +160,31 @@ registration_seeds_take: fn(graph: &&SemaRegistrationGraph) -> [SemaRegistration
     reported_again := [Diagnostic]{}
     assert(!sema_marker_rules_check_inline_always(second, [SemaGraphModuleResult]{}, reported_again))
     assert_eq(reported_again.len(), 0)
+}
+
+#Test("a seeded module's finalized result is taken as it is and not written") {
+    seeds := [SemaRegistrationModule]{}
+    module_result := registration_seeds_finalized(SEEDS_CALLS, seeds)
+    assert(module_result.functions.len() >= 2)
+    taken := [SemaGraphModuleResult]{module_result.copy()}
+    checked := registration_seeds_refinalize(seeds, taken)
+    assert(checked.complete)
+    // Finalizing against the same Core changes nothing on the taken slot.
+    assert_eq(checked.seeded_writes, 0)
+    assert_eq(checked.modules[0].module_identity, "seeds::main")
+    assert_eq("{checked.modules[0].functions:Debug}", "{module_result.functions:Debug}")
+    assert_eq("{checked.modules[0].call_facts:Debug}", "{module_result.call_facts:Debug}")
+}
+
+#Test("a taken seeded slot a finalization would change is counted, not written") {
+    seeds := [SemaRegistrationModule]{}
+    module_result := registration_seeds_finalized(SEEDS_CALLS, seeds)
+    // A stale effect row on a taken body: the solve finds another one.
+    stale := module_result.copy()
+    loop index in 0..<stale.functions.len() -> stale.functions[index].effects.solved.push("Stale")
+    taken := [SemaGraphModuleResult]{stale.copy()}
+    checked := registration_seeds_refinalize(seeds, taken)
+    assert(checked.seeded_writes > 0)
+    // The slot stays as it was given.
+    assert_eq("{checked.modules[0].functions:Debug}", "{stale.functions:Debug}")
 }
