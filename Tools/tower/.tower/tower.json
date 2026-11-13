@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6833,
-    "rev": 101769,
+    "rev": 101770,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -204485,6 +204485,13 @@
   ],
   "events": [
     {
+      "at": "2026-11-13T20:58:17.153Z",
+      "by": "Main",
+      "action": "briefing.post",
+      "ref": "briefing0uqbuo0",
+      "note": "Self-compile cold A/B: 2:32.8 (b15) vs 2:39.7 (sweep2); runtime step is 87 s"
+    },
+    {
       "at": "2026-11-13T20:58:00.016Z",
       "by": "Main",
       "action": "card.update",
@@ -209395,6 +209402,14 @@
     }
   ],
   "briefings": [
+    {
+      "id": "briefing0uqbuo0",
+      "title": "Self-compile cold A/B: 2:32.8 (b15) vs 2:39.7 (sweep2); runtime step is 87 s",
+      "body": "# Self-compile speed, cold A/B (16:15): sweep2 is 4% slower, and the runtime step is half the build\n\nBoth compilers built the same fresh copy of the sweep2 tree, one after the other, on a quiet machine. The command was `jet build --profile dev Compiler`, with no build directory or cache.\n\n||seed-b15 (before)|seed-b16 (sweep2, now on dev)|\n|---|---|---|\n|Wall time|**2:32.8**|**2:39.7**|\n|User CPU|187.0 s|195.9 s|\n|Peak memory|9.22 GB|9.57 GB|\n|The compiler image alone|59.2 s|62.8 s|\n|Runtime step (runtime plus Core library lowering)|84.9 s|87.3 s|\n\nTree: 903,380 lines (Compiler 679,836 + Core 223,544). The compiler image compiles at about 15k lines/s of its own wall time. The earlier 4:30 stage-B figure came from a warm, contended run and does not reproduce.\n\n**Result: no speed gain yet.** The first data-oriented slices (#6793 S1/S2a) only change identifiers. Other sweep2 work added new phases:\n- sema.effects: +1.0 s\n- sema.late: new, 1.1 s\n- comptime.body.recheck: new, 12 s, inside comptime bodies\n- comptime.load: +0.7 s\n- ir.build: +0.4 s\n\nThe net is +6.9 s.\n\n**Where the time goes:**\n- The runtime step: 87 s, more than half of the whole build.\n- sema.finalize, codecs and build.plan: about 33 s.\n- comptime bodies: about 12 s.\n- ir.opt: 12.8 s.\n\n**Being fixed now** (G11Speed-5, #5479/#6793):\n1. Cut the runtime step, which lowers the runtime and the Core library in a separate process.\n2. Remove the new comptime.body.recheck pass, or make it incremental-free and cheap.\n3. Remove the sweep2 additions to sema.effects and sema.late.\n4. Land #6793 S2b, then S3, which replaces maps with dense arrays.\n\nThe proof each time is the same cold A/B. Raw data: `$JET_STATE_ROOT/lander3-tmp/ab/`.\n\n**Landing:** sweep2 is on dev (498ba80dd8), and seed-b16 is cut. Post-sweep batch 1 is landing next (about 25 changes), then batch 2.\n",
+      "by": "Main",
+      "created": "2026-11-13T20:58:17.153Z",
+      "sections": []
+    },
     {
       "id": "briefing0xvr0d9",
       "title": "Self-compile 15:43: 4:31 for 903k lines (not cold); cold A/B next",
