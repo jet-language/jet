@@ -1813,6 +1813,17 @@ disk_ms: fn() -[FS]> Int Never! {
     total
 }
 
+// The owner's hard limit on the scratch disk (AGENTS.md): past it the slow
+// drive stalls the machine, so no build slot opens.
+SCRATCH_FULL_PERCENT: 75.0
+
+// Percent of the scratch file system in use, as `df` prints it; 0 when it
+// cannot be read.
+scratch_used_percent: fn(r: Roots) -[FS]> Float Never! {
+    room: files.space(r.scratch) ?? return 0.0
+    room.used_percent()
+}
+
 // The first ticket of a live waiter; a dead waiter's ticket is removed.
 head_ticket: fn(queue: String) -[FS]> String Never! {
     names := [String]{}
@@ -1831,12 +1842,12 @@ head_ticket: fn(queue: String) -[FS]> String Never! {
 // ticket in $JET_RUN_ROOT/slot-queue and only the first live ticket may take
 // a free slot. Classes: SLOT_PRIORITY=1 with Main's key first, then small
 // jobs (under ~2 min and ~3 GB) and short builds, then the rest, each first
-// come, first served. A slot opens only while MemAvailable > 20 GB and the
-// I/O pressure is below 85% or the NVMe disks were under 50% busy over the
-// last wait (a task parked in iowait holds PSI near 90% while the disks sit
-// idle). A reserved slot ($JET_RUN_ROOT/slot-S-reserved) is taken only with
-// SLOT_RESERVED=1. No slot opens while the release slot is claimed
-// (release_claimed).
+// come, first served. A slot opens only while MemAvailable > 20 GB, the
+// scratch disk is at most SCRATCH_FULL_PERCENT full, and the I/O pressure is
+// below 85% or the NVMe disks were under 50% busy over the last wait (a task
+// parked in iowait holds PSI near 90% while the disks sit idle). A reserved
+// slot ($JET_RUN_ROOT/slot-S-reserved) is taken only with SLOT_RESERVED=1. No
+// slot opens while the release slot is claimed (release_claimed).
 take_slot: fn(r: Roots, small: Bool, short: Bool) -[Env, Exec, FS, IO, Time, Time.Wait]> SlotTaken Never! {
     queue: files.join(r.run, "slot-queue")
     files.create_dir_all(queue) ?? fail("cannot create `{queue}`: {err}")
@@ -1857,6 +1868,7 @@ take_slot: fn(r: Roots, small: Bool, short: Bool) -[Env, Exec, FS, IO, Time, Tim
     busy_then := disk_ms()
     then := time.unix_ns()
     time.sleep(time.duration_seconds(2))
+    told_full := false
     loop {
         mem: mem_available_gb()
         io := io_pressure()
@@ -1867,8 +1879,15 @@ take_slot: fn(r: Roots, small: Bool, short: Bool) -[Env, Exec, FS, IO, Time, Tim
         busy_then = busy_now
         then = now
         if io >= 85 && busy < 50 -> io = 0
+        used: scratch_used_percent(r)
+        full: used > SCRATCH_FULL_PERCENT
+        if full && !told_full {
+            term.eprint("slot: waiting: scratch disk {r.scratch} is {used}% full, over the {SCRATCH_FULL_PERCENT}% limit; free space first")
+            told_full = true
+        }
+        if !full -> told_full = false
         head: head_ticket(queue) == ticket
-        if mem > 20 && io < 85 && (head || short) && !release_claimed(r) {
+        if mem > 20 && io < 85 && !full && (head || short) && !release_claimed(r) {
             loop name in SLOT_NAMES {
                 if name == "D" && !(short && mem > 30) -> next
                 if name != "D" && !head -> next
@@ -1900,7 +1919,8 @@ release_claimed: fn(r: Roots) -[FS]> Bool Never! {
 
 // Wait for the release slot: claim it first, so no other job takes a slot
 // from then on (their waiters queue behind it), then take A, B, C and D one
-// by one as the jobs in them end. One claim at a time: a second release
+// by one as the jobs in them end, and start only while the scratch disk is at
+// most SCRATCH_FULL_PERCENT full. One claim at a time: a second release
 // waits for the first's to end.
 take_release_slot: fn(r: Roots) -[Env, Exec, FS, IO, Time, Time.Wait]> SlotTaken Never! {
     queued: time.unix_ns()
@@ -1922,7 +1942,9 @@ take_release_slot: fn(r: Roots) -[Env, Exec, FS, IO, Time, Time.Wait]> SlotTaken
             locks.push(lock)
             held.push(name.copy())
         }
-        if held.len() == SLOT_NAMES.len() -> return SlotTaken{name: "R", cpus: RELEASE_SLOT_CPUS, queued: queued, locks: locks}
+        if held.len() == SLOT_NAMES.len() && scratch_used_percent(r) <= SCRATCH_FULL_PERCENT {
+            return SlotTaken{name: "R", cpus: RELEASE_SLOT_CPUS, queued: queued, locks: locks}
+        }
         time.sleep(time.duration_seconds(2))
     }
 }

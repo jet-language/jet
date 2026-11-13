@@ -327,8 +327,8 @@ Scratch feeds work into `dev`; it is not an archive. Before removing anything,
 save the work it holds: commit it on `dev`, or record on its Tower card exactly
 what remains unlanded and why. Once the work is on `dev`, delete everything
 that fed it: exports, build trees, staged patches, test scratch and logs. Each
-agent deletes its own scratch when its commit lands. The orchestrator removes
-leftovers at every milestone and whenever the scratch disk passes 75% full.
+agent deletes its own scratch when its commit lands, and keeps at most one
+worktree at a time.
 Keep only the compilers in use: the admitted seed, a candidate under test, and
 the compilers a running job names. Never retire files by moving them elsewhere
 on disk; git history and Tower are the record. Audits and final reports under
@@ -570,9 +570,16 @@ stalls every program on the machine. So:
 - No job traces a whole build (`strace -f`, `perf record -a` and the like), and
   no tool reruns a check in a loop. A measurement takes its own turn in the
   heavy-job slot; it never runs beside a build.
-- Before a heavy job starts, its launcher checks the machine: memory available
-  and unwritten data on disk. It waits, and never starts, while the guard holds
-  the agent slice frozen.
+- Before a heavy job starts, its launcher checks the machine: memory available,
+  unwritten data on disk and scratch disk use. It waits, and never starts, while
+  the guard holds the agent slice frozen or the scratch disk is over 75% full.
+- **The scratch disk never passes 75% full.** This is a hard owner limit, not a
+  cleanup prompt: past it the slow drive slows the whole machine.
+  `Tools/agent/Chain.jet slot` opens no build slot above it. The orchestrator
+  watches the disk at every check-in. When it passes 75%, freeing space comes
+  before all other work, and the orchestrator reports the cause to the owner.
+  Free space by deleting landed or superseded build output first, then
+  worktrees whose work is saved, never by losing unlanded work.
 
 Agent tooling lives in the repository: `Tools/agent/Chain.jet` (the self-host
 chain and the machine build slots), `Tools/agent/Land.jet` (`serve` is the
