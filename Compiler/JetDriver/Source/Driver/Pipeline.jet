@@ -4992,6 +4992,9 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
     }
     load.diagnostics = entry_diagnostics
     jet_driver_trace_step_end(request.trace_sink, "driver.preassemble.entry", -1)
+    // The effect budget, the foreign link facts, the captured lowering
+    // inputs and the compile result, up to jet_driver_trace_result_built.
+    if request.trace_sink == .Val(sink) -> sink.begin("driver.result", "", -1, -1)
     if kg.enabled -> jet_driver_keep_going_diagnostics(kg, "assemble", load.diagnostics)
     if jet_driver_has_errors(load.diagnostics) && !kg.enabled -> return jet_driver_compile_result(load, load.diagnostics, Val(JetDriverStage.Assemble), false, trace)
     // A test run or an evaluation runs no package entry, so only a build or
@@ -5024,6 +5027,7 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
     result.rust_foreign = jet_driver_late_rust_foreign_facts(late_registration)
     result.foreign_link = foreign_link
     result.command_record = command_record
+    jet_driver_trace_result_built(request.trace_sink, result.diagnostics.len())
     result
 }
 
@@ -5403,8 +5407,19 @@ jet_driver_effect_budget_located: fn(load: JetDriverLoadResult, program: EffectB
     diagnostic_with_source_mapping(diagnostic.copy(), location.source_path, location.aggregate_start, location.source_start)
 }
 
+// Ends `driver.result` (items: the result's diagnostics, which the host
+// presents next) and opens `driver.release`: the compile's remaining locals
+// (graphs, load, checked rows) drop as jet_driver_compile_loaded_stages
+// returns, and its caller closes the span (jet_driver_trace_released).
+jet_driver_trace_result_built: fn(trace_sink: CompilerTraceSink?, diagnostics: Int) {
+    if trace_sink == .Val(sink) {
+        sink.end("driver.result", diagnostics)
+        sink.begin("driver.release", "", -1, -1)
+    }
+}
+
 // Closes `driver.release` after jet_driver_compile_loaded_stages returns, and
-// a `driver.result` a route after the optimizer returned from early.
+// a `driver.result` an early return after it opened left open.
 jet_driver_trace_released: fn(trace_sink: CompilerTraceSink?) {
     if trace_sink == .Val(sink) {
         sink.end("driver.release", -1)

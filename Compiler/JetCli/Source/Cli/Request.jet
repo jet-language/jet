@@ -178,6 +178,9 @@ jet_cli_runtime_library: fn(front: &&JetDriverLoweringInputsResult, prefix: Stri
     result := owned.compile.move()
     if !result.complete || result.internal_problem != None -> return result
     checked := owned.inputs.move() ?? return jet_driver_compile_escaped_failure("the runtime front end returned no checked inputs")
+    // The lifecycle list, the export and interface rows and the checked
+    // declarations the IR build reads.
+    if trace_sink == .Val(sink) -> sink.begin("runtime.inputs", "", -1, -1)
     lifecycle_path: lifecycle ?? return jet_driver_compile_escaped_failure("runtime packaging requires the lifecycle list")
     lifecycle_text: cli_files.read(lifecycle_path) ?? return jet_driver_compile_escaped_failure("cannot read runtime lifecycle list: {err}")
     rows: loop row in checked.c_exports if row.exported -> IRLibraryExportRow{key: row.key, symbol: jet_driver_c_symbol(row.name)}
@@ -189,6 +192,7 @@ jet_cli_runtime_library: fn(front: &&JetDriverLoweringInputsResult, prefix: Stri
     }
     interface_text: jet_driver_runtime_interface_file(interface_rows)
     declarations := jet_driver_checked_declarations(checked)
+    if trace_sink == .Val(sink) -> sink.end("runtime.inputs", interface_rows.len())
     if trace_sink == .Val(sink) -> sink.begin("ir.build", "", -1, -1)
     library := ir_build_library(checked.functions.move(), checked.decls, checked.symbols.move(), declarations.type_defs.move(), declarations.impls.move(), checked.sources.move(), declarations.constants.move(), declarations.foreign.move(), rows, lifecycle_text.split("\n").to_list())
     if trace_sink == .Val(sink) -> sink.end("ir.build", library.program.functions.len())
