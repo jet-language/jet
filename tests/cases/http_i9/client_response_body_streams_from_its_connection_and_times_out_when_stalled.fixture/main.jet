@@ -1,0 +1,79 @@
+// A client response body stays on its connection and is read as the
+// program asks for it: a sized, a chunked and a to-the-end body read back
+// whole, a body whose second half the server sends only after the client
+// read the first half arrives in both halves, and a body that stalls fails
+// its read with Timeout once the read timeout passes.
+package: {
+    name: "live_body"
+    authority: { allow: [IO, Mem.Alloc, Net, Time.Wait] }
+}
+
+use {
+    http: core.http
+    http_client: core.http.client
+    net: core.net
+}
+
+answer: fn(listener: TCPListener, head: String, body: String) {
+    stream: listener.accept() ?? panic("accept")
+    _request: stream.read_text(8192) ?? panic("request")
+    stream.write_all("{head}\r\n\r\n{body}".bytes()) ?? panic("write")
+}
+
+run: fn() (Closed | HTTPError | NetError | TaskFailure)! {
+    { sender, receiver: address }: channel<String>()
+    { sender: go_send, receiver: go }: channel<String>()
+    { sender: done_send, receiver: done }: channel<String>()
+    t: task {
+        listener: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
+        sender.send(listener.local_addr() ?? panic("address"))
+        answer(listener, "HTTP/1.1 200 OK\r\nContent-Length: 11", "hello world")
+        answer(listener, "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked", "5\r\nhello\r\n6\r\n world\r\n0\r\n\r\n")
+        answer(listener, "HTTP/1.1 200 OK\r\nConnection: close", "to the end")
+        // The first half of the body, then the rest only once the client
+        // has read that half: a client that buffered the whole body first
+        // would time out instead.
+        half: listener.accept() ?? panic("accept")
+        _half_request: half.read_text(8192) ?? panic("request")
+        half.write_all("HTTP/1.1 200 OK\r\nContent-Length: 10\r\n\r\nfirst".bytes()) ?? panic("write")
+        _ := go.receive() ?? panic("go")
+        half.write_all("-last".bytes()) ?? panic("write")
+        // A body that stalls after three of its ten bytes.
+        stalled: listener.accept() ?? panic("accept")
+        _stalled_request: stalled.read_text(8192) ?? panic("request")
+        stalled.write_all("HTTP/1.1 200 OK\r\nContent-Length: 10\r\n\r\nabc".bytes()) ?? panic("write")
+        _ := done.receive() ?? panic("done")
+    }
+    addr: address.receive() ?? panic("address")
+    sized: http.get("http://{addr}/sized") ?? panic("sized")
+    print("sized: {sized.text() ?? panic("sized text")}")
+    chunked: http.get("http://{addr}/chunked") ?? panic("chunked")
+    pieces := [String]{}
+    loop piece in chunked.body().chunks(4) {
+        raw: piece ?? panic("piece")
+        pieces.push(String.from_bytes(raw) ?? "?")
+    }
+    print("chunked: {pieces.join("|")}")
+    to_end: http.get("http://{addr}/end") ?? panic("end")
+    print("to the end: {to_end.body().text(64) ?? panic("end text")}")
+    half: http_client.request("GET", "http://{addr}/half").read_timeout(5000).send() ?? panic("half")
+    seen := [String]{}
+    loop piece in half.body().chunks(5) {
+        raw: piece ?? panic("half piece")
+        seen.push(String.from_bytes(raw) ?? "?")
+        if seen.len() == 1 -> go_send.send("go")
+    }
+    print("half: {seen.join("|")}")
+    stalled: http_client.request("GET", "http://{addr}/stalled").read_timeout(300).send() ?? panic("stalled")
+    if stalled.text() == {
+        .Ok(text) -> print("stalled: read {text}")
+        .Err(error) -> {
+            if error == {
+                .Timeout(phase) -> print("stalled: Timeout during {phase}")
+                .InvalidMethod | .InvalidURL | .InvalidHeader | .InvalidStatus | .BodyConsumed | .InvalidFraming | .UnsupportedEncoding | .Cancelled | .BodyTooLarge(_) | .Resolve(_) | .Connect(_) | .TLS(_) | .Proxy(_) | .Redirect(_) | .Protocol(_) | .IO(_) | .Policy(_) | .ResourceUnavailable(_) | .Internal(_) | .UnsupportedTarget(_) -> print("stalled: {error}")
+            }
+        }
+    }
+    done_send.send("done")
+    t.join() ?? panic("server")
+}

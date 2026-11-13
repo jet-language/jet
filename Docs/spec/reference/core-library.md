@@ -1543,6 +1543,18 @@ code can neither name the carrier nor build a `Body` by hand; both are E0605.
 Bodies come only from requests, responses, `body_empty`, `body_text`,
 `body_bytes` and the `Body.*` constructors above.
 
+The body of an `http://` response that is not gzip-encoded stays on its
+connection, and the client reads it only as the program asks for it. `bytes`,
+`text`, `json` and `copy_to` read on until they have the body or one byte past
+their limit. Each `chunks` piece reads only what that piece needs. These reads
+run under `-[Net]`. Each socket read is the runtime's deadline-bound net read,
+waiting at most the request's read timeout (capped by its total timeout). A
+read that waits longer fails with `HTTPError.Timeout`. A chunked or
+read-to-close body past 64 MiB is `InvalidFraming`, as is a malformed chunk.
+A connection that ends before the body is complete is `IO`. Under `jet prove`
+capture and replay, the journal holds the whole body, so the client reads it
+before returning the response.
+
 ### `core.http.server` — HTTP serving
 
 `core.http.server` builds a typed multiplexer and serves HTTP/1.1 over

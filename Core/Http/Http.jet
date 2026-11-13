@@ -147,12 +147,14 @@ HeaderValue: struct {
     impl Display { display: fn(self) -> String { self.__text.copy() } }
 }
 
-// What a Body holds. The module is private, so user code can neither name
-// the carrier nor build a Body around one (E0605); Bodies come from
-// requests, responses and the `body_*` constructors.
+// What a Body holds: its bytes, or for a client response still on its
+// connection, the connection it reads from. The module is private, so user
+// code can neither name the carrier nor build a Body around one (E0605);
+// Bodies come from requests, responses and the `body_*` constructors.
 priv body_carrier: module {
     BodyStream: struct {
         held: [U8]
+        live: Shared<provider.__LiveBody>?
     }
 }
 
@@ -188,7 +190,7 @@ Body: struct {
     /// The body in pieces of at most `max_chunk` (1..=1 GiB) bytes.
     chunks: fn(self, max_chunk: Int{C_BODY_CHUNK_BYTES}) -[Net]> HTTPBodyChunks Never! {
         if max_chunk < 1 || max_chunk > C_MAX_CONSUME_BYTES -> return HTTPBodyChunks{__bytes: [U8]{}, __max: 1, __error: Val(HTTPError.BodyTooLarge{limit: 0})}
-        HTTPBodyChunks{__bytes: body_as_bytes(self), __max: max_chunk}
+        HTTPBodyChunks{__bytes: self.stream.held, __max: max_chunk, __live: self.stream.live}
     }
 }
 
@@ -244,13 +246,13 @@ HTTPRequest: struct {
     /// The body as text, at most `limit` bytes; the first read takes the body.
     text: fn(self, limit: Int{C_MAX_BODY_BYTES}) -> String HTTPError! {
         _: __take_body(self.__cell, None) ?? return Err(err)
-        __body_text_within(self.body, limit)
+        __body_text_of(__body_held_within(self.body, limit) ?? return Err(err))
     }
 
     /// The body decoded from JSON (1 MiB bound); the first read takes the body.
     json: fn<Target: Decode>(self) -> Target HTTPError! {
         _: __take_body(self.__cell, None) ?? return Err(err)
-        text: __body_text_within(self.body, C_MAX_BODY_BYTES) ?? return Err(err)
+        text: __body_text_of(__body_held_within(self.body, C_MAX_BODY_BYTES) ?? return Err(err)) ?? return Err(err)
         json_codec.decode<Target>(text) ?? return Err(.InvalidFraming)
     }
 
@@ -456,12 +458,13 @@ HTTPBodyChunks: struct {
     __bytes: [U8]
     __max: Int
     __error: HTTPError?{None}
+    __live: Shared<provider.__LiveBody>?{None}
 
     impl Iterable {
         Iter: __HTTPBodyCursor
 
         iter: fn(&&self) -> __HTTPBodyCursor {
-            __HTTPBodyCursor{bytes: self.__bytes, max: self.__max, at: 0, error: self.__error, done: false}
+            __HTTPBodyCursor{bytes: self.__bytes, max: self.__max, at: 0, error: self.__error, done: false, live: self.__live}
         }
     }
 }
@@ -472,15 +475,33 @@ __HTTPBodyCursor: struct {
     at: Int
     error: HTTPError?
     done: Bool
+    live: Shared<provider.__LiveBody>?
 
     impl Iterator {
         Item: Result<[U8], HTTPError>
 
-        next: fn(&self) -> Result<[U8], HTTPError>? {
+        next: fn(&self) -[Net]> Result<[U8], HTTPError>? {
             if self.done -> return None
             if self.error == .Val(error) {
                 self.done = true
                 return Val(Err(error))
+            }
+            if self.live == .Val(cell) {
+                piece := [U8]{}
+                if provider.__live_next(cell, self.at, self.max, piece) == {
+                    .Ok(count) -> {
+                        if count == 0 {
+                            self.done = true
+                            return None
+                        }
+                        self.at += count
+                        return Val(Ok(piece))
+                    }
+                    .Err(error) -> {
+                        self.done = true
+                        return Val(Err(error))
+                    }
+                }
             }
             if self.at >= self.bytes.len() {
                 self.done = true
@@ -494,15 +515,29 @@ __HTTPBodyCursor: struct {
     }
 }
 
-__body_bytes_within: fn(body: Body, limit: Int) -> [U8] HTTPError! {
-    if limit < 0 || limit > C_MAX_CONSUME_BYTES -> return Err(.BodyTooLarge{limit: limit})
-    raw: body_as_bytes(body)
-    if raw.len() > limit -> return Err(.BodyTooLarge{limit: limit})
-    Ok(raw)
+__body_bytes_within: fn(body: Body, limit: Int) -[Net]> [U8] HTTPError! {
+    if body.stream.live == .Val(cell) {
+        if limit < 0 || limit > C_MAX_CONSUME_BYTES -> return Err(.BodyTooLarge{limit: limit})
+        raw: provider.__live_kept(cell, limit + 1) ?? return Err(err)
+        if raw.len() > limit -> return Err(.BodyTooLarge{limit: limit})
+        return Ok(raw)
+    }
+    __body_held_within(body, limit)
 }
 
-__body_text_within: fn(body: Body, limit: Int) -> String HTTPError! {
-    raw: __body_bytes_within(body, limit) ?? return Err(err)
+// The bytes a body holds, when there are at most `limit`; a request's body
+// is always held.
+__body_held_within: fn(body: Body, limit: Int) -> [U8] HTTPError! {
+    if limit < 0 || limit > C_MAX_CONSUME_BYTES -> return Err(.BodyTooLarge{limit: limit})
+    if body.stream.held.len() > limit -> return Err(.BodyTooLarge{limit: limit})
+    Ok(body.stream.held)
+}
+
+__body_text_within: fn(body: Body, limit: Int) -[Net]> String HTTPError! {
+    __body_text_of(__body_bytes_within(body, limit) ?? return Err(err))
+}
+
+__body_text_of: fn(raw: [U8]) -> String HTTPError! {
     String.from_bytes(raw) ?? return Err(.UnsupportedEncoding)
 }
 
@@ -903,7 +938,10 @@ headers_parse: fn(lines: [String]) -> Headers Never! {
 
 body_empty: fn() -> Body Never! { body_bytes([U8]{}) }
 body_text: fn(text: String) -> Body Never! { body_bytes(text.bytes()) }
-body_bytes: fn(bytes: [U8]) -> Body Never! { Body{stream: body_carrier.BodyStream{held: bytes}} }
+body_bytes: fn(bytes: [U8]) -> Body Never! { Body{stream: body_carrier.BodyStream{held: bytes, live: None}} }
+
+// A client response's body still on its connection.
+__body_live: fn(live: &&provider.__LiveBody) -> Body Never! { Body{stream: body_carrier.BodyStream{held: [U8]{}, live: Val(Shared{live})}} }
 
 // The `http.Body.text(text, media_type)`, `http.Body.form(fields)` and
 // `http.Body.json(value)` constructors: sema checks the call and runs these.
@@ -966,10 +1004,21 @@ __body_multipart: fn(fields: [String:String]) -> Body Never! {
     body_text(provider.__client_multipart(pairs, provider.__client_boundary(pairs)))
 }
 
-body_as_text: fn(body: Body) -> String Never! { String.from_bytes(body.stream.held) ?? "" }
+body_as_text: fn(body: Body) -> String Never! { String.from_bytes(body_as_bytes(body)) ?? "" }
 
-body_as_bytes: fn(body: Body) -> [U8] Never! { body.stream.held }
-body_len: fn(body: Body) -> Int Never! { body.stream.held.len() }
+// The bytes a body holds; for a body still on its connection, the bytes
+// read from it so far.
+body_as_bytes: fn(body: Body) -> [U8] Never! {
+    if body.stream.live == .Val(cell) -> return provider.__live_seen(cell)
+    body.stream.held
+}
+body_len: fn(body: Body) -> Int Never! { body_as_bytes(body).len() }
+
+// All of a body's bytes, reading a body still on its connection to its end.
+__body_all: fn(body: Body) -[Net]> [U8] HTTPError! {
+    if body.stream.live == .Val(cell) -> return provider.__live_kept(cell, C_MAX_CONSUME_BYTES)
+    Ok(body.stream.held)
+}
 
 reason_phrase: fn(code: Int) -> String Never! {
     if code == {

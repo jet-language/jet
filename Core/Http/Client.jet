@@ -1072,12 +1072,14 @@ __ClientPhases: struct {
     end_ns: Int
 }
 
+// A reply's body is `body`, or `live` when it is still on the connection.
 __ClientReply: struct {
     status: Int
     headers: http.Headers
     body: [U8]
     body_error: HTTPError?
     raw_encoding: String?
+    live: __LiveBody?{None}
 }
 
 __send: fn(req: HTTPRequest) -[Net, Time.Wait]> HTTPResponse HTTPError! {
@@ -1458,13 +1460,185 @@ __client_follow: fn(original_method: String, original_url: String, original_fiel
     Err(.Redirect{reason: "limit"})
 }
 
-__client_finish: fn(reply: __ClientReply, history: [String]) -> HTTPResponse Never! {
-    http.__client_response(reply.status, http.body_bytes(reply.body), reply.headers, history, [Int]{}, false, reply.raw_encoding, reply.body_error)
+__client_finish: fn(reply: &&__ClientReply, history: [String]) -> HTTPResponse Never! {
+    out := reply
+    body: if out.live.move() == {
+        .Val(live) -> http.__body_live(live)
+        .None -> http.body_bytes(out.body)
+    }
+    http.__client_response(out.status, body, out.headers, history, [Int]{}, false, out.raw_encoding, out.body_error)
+}
+
+C_LIVE_LENGTH: 0
+C_LIVE_CHUNKED: 1
+C_LIVE_EOF: 2
+C_LIVE_LINE_BYTES: 8192
+
+// A final response body still on its plain TCP connection, read as the
+// program asks for it. `buffer[at..]` holds bytes already read past the
+// head. `framing` is C_LIVE_LENGTH (`left` bytes to go), C_LIVE_CHUNKED
+// (`left` bytes to go in the current chunk, 0 between chunks) or C_LIVE_EOF
+// (to the end of the stream). Each socket read is one deadline-bound Net
+// read of at most `read_ns`; a read that waits longer fails the body with
+// Timeout. A chunked or to-the-end body past the transport bound
+// (C_CLIENT_BODY_BYTES, counted in `total`) is InvalidFraming. `kept` holds
+// what whole-body reads took, so a later read sees it again; `streamed`
+// marks bytes handed out by chunks and not kept.
+__LiveBody: struct {
+    tcp: TCPStream?
+    buffer: [U8]
+    at: Int
+    read_ns: Int
+    framing: Int
+    left: Int
+    total: Int
+    done: Bool
+    failure: HTTPError?
+    kept: [U8]
+    streamed: Bool
+}
+
+// The body's bytes, reading on until `want` of them are kept or the body
+// has ended; a body chunks already streamed past is BodyConsumed.
+__live_kept: fn(cell: Shared<__LiveBody>, want: Int) -[Net]> [U8] HTTPError! {
+    guard := cell.guard_edit()
+    if guard.value.streamed -> return Err(.BodyConsumed)
+    loop guard.value.kept.len() < want {
+        piece := [U8]{}
+        got: __live_take(guard.value, want - guard.value.kept.len(), piece) ?? return Err(err)
+        if got == 0 -> break
+        guard.value.kept.extend(piece)
+    }
+    Ok(guard.value.kept.copy())
+}
+
+// The bytes read so far.
+__live_seen: fn(cell: Shared<__LiveBody>) -> [U8] Never! {
+    guard: cell.guard_read()
+    guard.value.kept.copy()
+}
+
+// The next piece of at most `max` bytes for a chunk cursor `at` bytes in:
+// kept bytes first, then the connection's, which are not kept. The count,
+// 0 once the body has ended.
+__live_next: fn(cell: Shared<__LiveBody>, at: Int, max: Int, &out: [U8]) -[Net]> Int HTTPError! {
+    guard := cell.guard_edit()
+    held: guard.value.kept.len()
+    if at < held {
+        end: if held - at > max -> at + max else -> held
+        loop index in at..<end -> out.push(guard.value.kept[index])
+        return Ok(end - at)
+    }
+    guard.value.streamed = true
+    __live_take(guard.value, max, out)
+}
+
+// Appends at most `max` body bytes to `out`; the count, 0 once the body has
+// ended. The connection closes when the body ends or fails, and a failure
+// is returned again by every later read.
+__live_take: fn(&live: __LiveBody, max: Int, &out: [U8]) -[Net]> Int HTTPError! {
+    if live.failure == .Val(error) -> return Err(error)
+    if live.done -> return Ok(0)
+    if __live_step(live, max, out) == {
+        .Ok(count) -> {
+            if count == 0 {
+                live.done = true
+                live.tcp = None
+            }
+            Ok(count)
+        }
+        .Err(error) -> {
+            live.failure = Val(error)
+            live.done = true
+            live.tcp = None
+            Err(error)
+        }
+    }
+}
+
+__live_step: fn(&live: __LiveBody, max: Int, &out: [U8]) -[Net]> Int HTTPError! {
+    if live.framing == C_LIVE_CHUNKED && live.left == 0 {
+        size: __live_chunk_size(live) ?? return Err(err)
+        if size == 0 -> return Ok(0)
+        live.left = size
+    }
+    if live.framing != C_LIVE_EOF && live.left == 0 -> return Ok(0)
+    ready: __live_fill(live) ?? return Err(err)
+    if ready == 0 {
+        if live.framing == C_LIVE_EOF -> return Ok(0)
+        return Err(.IO{operation: "transport"})
+    }
+    count := if ready < max -> ready else -> max
+    if live.framing != C_LIVE_EOF && live.left < count -> count = live.left
+    loop index in 0..<count -> out.push(live.buffer[live.at + index])
+    live.at += count
+    live.total += count
+    if live.framing != C_LIVE_LENGTH && live.total > C_CLIENT_BODY_BYTES -> return Err(.InvalidFraming)
+    if live.framing != C_LIVE_EOF -> live.left -= count
+    if live.framing == C_LIVE_CHUNKED && live.left == 0 {
+        crlf: __live_line(live) ?? return Err(err)
+        if crlf.len() != 2 || crlf[0] != (U8{13}) -> return Err(.InvalidFraming)
+    }
+    Ok(count)
+}
+
+// A chunk head's size; a head that is not hex or is past Int is
+// InvalidFraming.
+__live_chunk_size: fn(&live: __LiveBody) -[Net]> Int HTTPError! {
+    line: __live_line(live) ?? return Err(err)
+    end := 0
+    loop end < line.len() && line[end] != (U8{59}) -> end += 1
+    span: __build_trim(line, 0, end)
+    number: __build_parse_u64(line, span.from, span.to, 16)
+    if number.state != 0 || number.big -> return Err(.InvalidFraming)
+    Ok(number.value)
+}
+
+// One line through its LF; the end of the stream first is IO.
+__live_line: fn(&live: __LiveBody) -[Net]> [U8] HTTPError! {
+    line := [U8]{}
+    loop {
+        ready: __live_fill(live) ?? return Err(err)
+        if ready == 0 -> return Err(.IO{operation: "transport"})
+        byte: live.buffer[live.at]
+        live.at += 1
+        line.push(byte)
+        if byte == (U8{10}) -> return Ok(line)
+        if line.len() > C_LIVE_LINE_BYTES -> return Err(.InvalidFraming)
+    }
+}
+
+// The count of buffered bytes, reading the socket once when the buffer is
+// drained; 0 at the end of the stream.
+__live_fill: fn(&live: __LiveBody) -[Net]> Int HTTPError! {
+    if live.at < live.buffer.len() -> return Ok(live.buffer.len() - live.at)
+    live.buffer.clear()
+    live.at = 0
+    if live.tcp == {
+        .Val(stream) -> {
+            if stream.read_into(live.buffer, C_BUILD_READ_BYTES, deadline: Duration{ns: live.read_ns}) == {
+                .Ok(count) -> return Ok(count)
+                .Err(error) -> return Err(__live_error(error))
+            }
+        }
+        .None -> return Ok(0)
+    }
+}
+
+// A body read's failure: its deadline passing is Timeout, a task stop is
+// Cancelled, and any other is IO.
+__live_error: fn(error: NetError) -> HTTPError Never! {
+    if error == {
+        .Timeout(_) -> HTTPError.Timeout{phase: "transport"}
+        .Cancelled(_) -> HTTPError.Cancelled
+        .PermissionDenied(_) | .AddressInUse(_) | .AddressUnavailable(_) | .ConnectionRefused(_) | .ConnectionReset(_) | .NotConnected(_) | .Closed(_) | .Other(_) | .InvalidInput(_) | .Unsupported(_) | .TLS(_) | .Protocol(_) | .DNS(_) -> HTTPError.IO{operation: "transport"}
+    }
 }
 
 // One request on a fresh connection: dial (through the proxy when one is
 // set), write the head and body, read the final head and the body. The
-// connection is closed before returning. Under `jet prove` a capture
+// connection is closed before returning, unless the reply's body stays on
+// it (`live`). Under `jet prove` a capture
 // journals the hop (`hop` redirects in) and a replay answers it from the
 // journal instead of the network.
 __client_once: fn(method: String, url: __ClientURL, fields: [http.Header], body: [U8]?, phases: __ClientPhases, proxy: __ClientURL?, hop: Int) -[Net, Time.Wait]> __ClientReply HTTPError! {
@@ -1481,8 +1655,16 @@ __client_once: fn(method: String, url: __ClientURL, fields: [http.Header], body:
     __client_close(wire)
     if prove == C_CLIENT_PROVE_CAPTURE -> build_tls.__prove_net_record(__client_net_tape(hop, method, url, fields, body, wire, reply))
     if failure == .Val(error) -> return Err(error)
-    answered: reply ?? return Err(.IO{operation: "transport"})
+    answered := reply ?? return Err(.IO{operation: "transport"})
+    answered.live = __live_attach(answered.live.move(), wire.tcp.move())
     Ok(answered)
+}
+
+// A body the exchange left on the connection, given the connection.
+__live_attach: fn(pending: &&__LiveBody?, tcp: &&TCPStream?) -> __LiveBody? Never! {
+    body := pending ?? return None
+    body.tcp = tcp
+    Val(body)
 }
 
 // The live hop. Each dial failure leaves its stage and portable name on the
@@ -1768,6 +1950,23 @@ __client_exchange: fn(&wire: __BuildWire, method: String, url: __ClientURL, fiel
     bodyless: method == "HEAD" || reply.status == 204 || reply.status == 304
     payload := [U8]{}
     failure := HTTPError?{None}
+    // Outside `jet prove`, a plain-TCP body that is not gzip stays on the
+    // connection and is read as the program asks for it, each read bound by
+    // the read phase's timeout.
+    plain: if wire.tcp == {
+        .Val(_) -> true
+        .None -> false
+    }
+    read_bound: __build_remaining(wire)
+    if !bodyless && !gzip && plain && wire.prove == 0 && read_bound > 0 {
+        framing: if {
+            transfer.len() > 0 -> C_LIVE_CHUNKED
+            length == None -> C_LIVE_EOF
+            else -> C_LIVE_LENGTH
+        }
+        live: __LiveBody{tcp: None, buffer: wire.buffer.copy(), at: wire.at, read_ns: read_bound, framing: framing, left: length ?? 0, total: 0, done: false, failure: None, kept: [U8]{}, streamed: false}
+        return Ok(__ClientReply{status: reply.status, headers: reply.headers, body: [U8]{}, body_error: None, raw_encoding: raw_encoding, live: Val(live)})
+    }
     if !bodyless {
         if transfer.len() > 0 {
             if __build_chunked_body(wire, C_CLIENT_BODY_BYTES, C_CLIENT_BODY_BYTES + 1, payload) == .Err(error) -> failure = Val(__client_body_error(wire, error))

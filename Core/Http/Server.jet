@@ -1482,7 +1482,7 @@ __response_wire: fn(method: String, reply: HTTPResponse) -[Net, Time]> [U8] HTTP
     }
     if trailer_names.len() > 0 && (no_body || status == 205) -> return Err(.InvalidFraming)
     chunked: trailer_names.len() > 0 && !head_only
-    content: http.body_as_bytes(reply.body)
+    content: http.__body_all(reply.body) ?? return Err(err)
     out := [U8]{}
     __push_text(out, "HTTP/1.1 {status} {http.reason_phrase(status)}\r\n")
     if http.headers_get(reply.headers, "date") == None -> __push_text(out, "Date: {__imf_now()}\r\n")
