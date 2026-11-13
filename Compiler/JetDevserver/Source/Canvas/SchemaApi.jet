@@ -225,14 +225,14 @@ apply_project_transaction_payload: fn(checker: LSPChecker, path: String, request
     touched: required_project_touched_files(request)
     validate_touched_project_files(ctx, touched)
     if op == {
-        "add_dependency" -> return apply_project_add_dependency(ctx, request, touched)
-        "remove_dependency" -> return apply_project_remove_dependency(ctx, request, touched)
-        "edit_pkg_field" -> return apply_project_edit_pkg_field(ctx, request, touched)
-        "edit_game_selection" -> return apply_project_edit_game_selection(ctx, request, touched)
-        "add_target" -> return apply_project_add_target(ctx, request, touched)
-        "create_package" -> return apply_project_create_package(ctx, request, touched)
-        "add_workspace_member" -> return apply_project_add_workspace_member(ctx, request, touched)
-        "add_env_service" -> return apply_project_add_env_service(ctx, request, touched)
+        "add_dependency" -> return apply_project_add_dependency(checker, ctx, request, touched)
+        "remove_dependency" -> return apply_project_remove_dependency(checker, ctx, request, touched)
+        "edit_pkg_field" -> return apply_project_edit_pkg_field(checker, ctx, request, touched)
+        "edit_game_selection" -> return apply_project_edit_game_selection(checker, ctx, request, touched)
+        "add_target" -> return apply_project_add_target(checker, ctx, request, touched)
+        "create_package" -> return apply_project_create_package(checker, ctx, request, touched)
+        "add_workspace_member" -> return apply_project_add_workspace_member(checker, ctx, request, touched)
+        "add_env_service" -> return apply_project_add_env_service(checker, ctx, request, touched)
         "rename_binding" | "rename_function" -> return apply_project_rename(checker, ctx, request, touched)
         else -> {}
     }

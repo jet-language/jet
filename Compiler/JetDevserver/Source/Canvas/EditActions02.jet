@@ -1,948 +1,1098 @@
-
+// Canvas statement edits: reorder, pattern arms, statement states, multi-input
+// lists and execution convergence. Each one finds its target in the checked
+// AST of the file's own module, then writes through write_checked_formatted.
 use {
-    jet_parser.AST.[Stmt, Expr, Item, ProgramBundle, LValue]
-    jet_foundation.[Expr, Item, LValue, Marker, Stmt]
-    jet_driver.Driver.[check_file]
-    jet_fixer.FixEngine.[FixEngine]
-    jet_semindex.[SourceSpan]
-    core.files.[OSPath]
+    jet_canvas.[is_space_byte, line_after, line_start, lvalue_span, pattern_arm_edit_span, snippet, stmt_execution_anchor, stmt_is_terminal, switch_was_classic_if]
+    jet_driver.[JetDriverDocModule, jet_driver_apply_edits, jet_driver_has_errors]
+    jet_foundation.[DIAGNOSTIC_ERROR, Diagnostic, Expr, Func, Item, Span, Stmt, SwitchArm, TextEdit, ast_visit_body, expr_span, type_name]
+    jet_lsp.[LSPChecker, LSPOverlay]
+    jet_parser.[jet_format_source, jfmt_is_subjectless_guard, jfmt_stmt_span, jfmt_uses_classic_if_spelling]
+    jet_semindex.[SemIndex]
 }
-StatementLoc: struct { anchor: SourceSpan; source: SourceSpan; full: SourceSpan; block: [USize]; index: USize; is_guard: Bool; is_expr: Bool; guard_span: SourceSpan? }
-apply_reorder_statements: fn(path: OSPath, src: String, graph_id: String, moved: SourceSpan, anchor: SourceSpan, position: String) -> String Err! {
-    name_span := graph_id_name_span(graph_id) ?? return .Err(edit_error("bad_request", "Canvas graph id is not a function graph"))
-    (diags, checked) := check_file(path.to_string_lossy(), .None, true)
-    errors := diags.iter().filter(fn(d) { d.severity == Severity.Error }).cloned().collect()
-    if !errors.is_empty() -> return .Err(diagnostics_error(path, src, errors))
-    bundle := checked ?? return .Err(edit_error("check", "Canvas could not read checked statement facts"))
-    func := find_func_by_name_span(bundle, name_span) ?? return .Err(edit_error("not_found", "Canvas graph no longer exists"))
-    locs := [StatementLoc]{}; block := [USize]{}
+
+// One function or method of the checked module a Canvas graph draws.
+CanvasFunc: struct {
+    name: String
+    name_span: Span
+    span: Span
+    body: [Stmt]
+    return_type: String?
+}
+
+// One statement of a function body: its execution anchor, its source span,
+// its whole lines, and the branch path of the block that holds it.
+StatementLoc: struct {
+    anchor: Span
+    source: Span
+    full: Span
+    block: [Int]
+    index: Int
+    is_guard: Bool
+    is_expr: Bool
+    guard_span: Span?
+}
+
+// The whole ordinary statements a convergence target selects.
+ExpressionSelection: struct {
+    span: Span
+    full: Span
+}
+
+// Where a convergence step goes: the offset, the text before the step, the
+// span of the statement or branch it follows, and whether that is a branch.
+ExecInsertion: struct {
+    offset: Int
+    indent: String
+    owner: Span
+    branch: Bool
+}
+
+SelectionScan: struct {
+    target: Span
+    found: ExpressionSelection?
+}
+
+InsertionScan: struct {
+    node_span: Span
+    pin_name: String
+    found: ExecInsertion?
+    problem: String?
+}
+
+ArmInsertScan: struct {
+    node_span: Span
+    head: String
+    fresh: String
+    found: TextEdit?
+}
+
+ArmSpanScan: struct {
+    pattern_span: Span
+    found: Bool
+    remove_span: Span
+    only_arm: Bool
+}
+
+SwitchedScan: struct {
+    node_span: Span
+    marker: Span?
+    nested: Bool
+}
+
+ListScan: struct {
+    node_span: Span
+    found: Bool
+    items: [Span]
+}
+
+// ---- Reorder ----
+
+apply_reorder_statements: fn(checker: LSPChecker, path: String, src: String, graph_id: String, moved: Span, anchor: Span, position: String) -> String Err! {
+    func: checked_func_for_graph(checker, path, src, graph_id)
+    locs := [StatementLoc]{}
+    block := [Int]{}
     collect_statement_locs(src, func.body, block, locs)
-    moved_loc := locs.iter().find(fn(loc) { same_span(loc.anchor, moved) }).cloned() ?? return .Err(edit_error("not_found", "Canvas step to move no longer exists"))
-    anchor_loc := locs.iter().find(fn(loc) { same_span(loc.anchor, anchor) }).cloned() ?? return .Err(edit_error("not_found", "Canvas anchor step no longer exists"))
-    if moved_loc.block != anchor_loc.block -> return .Err(edit_error("bad_request", "can't move a step into a different branch yet"))
-    if moved_loc.index == anchor_loc.index -> return .Ok(edit_ok(false, path))
-    if moved_loc.full.start <= anchor_loc.full.start && anchor_loc.full.start < moved_loc.full.end -> return .Err(edit_error("bad_request", "can't anchor a step inside the moved source yet"))
-    insert := if position == {
-        "before" -> anchor_loc.full.start
-        "after" -> anchor_loc.full.end else -> { return .Err(edit_error("bad_request", "Canvas reorder position must be before or after")) }
+    moved_at: loc_by_anchor(locs, moved) ?? return Err(edit_error("not_found", "Canvas step to move no longer exists"))
+    anchor_at: loc_by_anchor(locs, anchor) ?? return Err(edit_error("not_found", "Canvas anchor step no longer exists"))
+    moved_full: locs[moved_at].full
+    anchor_full: locs[anchor_at].full
+    if !same_block(locs[moved_at].block, locs[anchor_at].block) -> return Err(edit_error("bad_request", "can't move a step into a different branch yet"))
+    if locs[moved_at].index == locs[anchor_at].index -> return Ok(edit_ok(false, path))
+    if moved_full.start <= anchor_full.start && anchor_full.start < moved_full.end {
+        return Err(edit_error("bad_request", "can't anchor a step inside the moved source yet"))
     }
-    chunk := src.get(moved_loc.full.start..moved_loc.full.end).ok_or_else(fn() { edit_error("bad_request", "Canvas moved source span is stale") })?.to_string()
-    changed := String.with_capacity(src.len())
-    changed.push_str(src[0..<moved_loc.full.start]); changed.push_str(src[moved_loc.full.end..<src.len()])
-    insert_at := insert
-    if insert_at > moved_loc.full.start -> insert_at = insert_at.saturating_sub(moved_loc.full.end - moved_loc.full.start)
-    insert_at = insert_at.min(changed.len())
-    changed.insert_str(insert_at, chunk)
-    write_checked_formatted(path, src, changed)
+    insert := 0
+    if position == "before" {
+        insert = anchor_full.start
+    } else if position == "after" {
+        insert = anchor_full.end
+    } else {
+        return Err(edit_error("bad_request", "Canvas reorder position must be before or after"))
+    }
+    if moved_full.end > src.len() -> return Err(edit_error("bad_request", "Canvas moved source span is stale"))
+    chunk: src.slice(moved_full.start, moved_full.end)
+    rest: "{src.slice(0, moved_full.start)}{src.slice(moved_full.end, src.len())}"
+    if insert > moved_full.start -> insert -= moved_full.end - moved_full.start
+    if insert < 0 -> insert = 0
+    if insert > rest.len() -> insert = rest.len()
+    write_checked_formatted(checker, path, src, "{rest.slice(0, insert)}{chunk}{rest.slice(insert, rest.len())}")
 }
-apply_exec_convergence: fn(path: OSPath, src: String, graph_id: String, from_span: SourceSpan, target_span: SourceSpan, from_pin_name: String, strategy: String, function: String, helper_name: String?) -> String Err! {
+
+loc_by_anchor: fn(locs: [StatementLoc], anchor: Span) -> Int? Never! {
+    loop (at, loc) in locs {
+        if same_span(loc.anchor, anchor) -> return Val(at)
+    }
+    None
+}
+
+same_block: fn(left: [Int], right: [Int]) -> Bool Never! {
+    if left.len() != right.len() -> return false
+    loop at in 0..<left.len() {
+        if left[at] != right[at] -> return false
+    }
+    true
+}
+
+// ---- Execution convergence ----
+
+apply_exec_convergence: fn(checker: LSPChecker, path: String, src: String, graph_id: String, from_span: Span, target_span: Span, from_pin_name: String, strategy: String, function: String, helper_name: String?) -> String Err! {
     validate_ident(function)
-    if !["extract", "helper", "duplicate"].contains(strategy) -> return .Err(edit_error("bad_request", "Canvas convergence strategy must be extract, helper, or duplicate"))
-    if same_span(from_span, target_span) -> return .Err(edit_error("bad_request", "Canvas convergence needs two different source pins"))
-    func := checked_func_for_graph(path, src, graph_id)
-    target := find_expression_selection(func.body, target_span, src) ?? return .Err(edit_error("not_found", "Canvas convergence target source selection no longer exists"))
-    target_view := src.get(target.span.start..target.span.end).ok_or_else(fn() { edit_error("bad_request", "Canvas convergence target span is stale") })?.trim() // #4303
-    target_text := target_view.to_string()
-    if target_text.is_empty() -> return .Err(edit_error("ambiguous", "Canvas needs one or more complete ordinary source statements to converge"))
-    insertion := find_exec_insertion(src, func.body, from_span, from_pin_name) ?? return .Err(edit_error("not_found", "Canvas convergence source path no longer exists"))
-    if insertion.branch && target.span.start >= insertion.owner.end -> return .Err(edit_error("structured_join", "This source already has a structured join after the branch; keep the downstream step single"))
-    params := convergence_params(path, target.span)
-    args := params.iter().map(fn(param) { param._0.as_str() }).collect().join(", ")
-    call_name := if strategy == "helper" -> helper_name.unwrap_or(function) else -> function
-    call := "{call_name}({args})"
-    incoming_source := if strategy == "duplicate" -> target_text.clone() else -> call.clone()
-    bundle := checked_bundle(path, src)
-    exact_helper := exact_body_helper_name(bundle, src, target_text, func.name)
-    edits := []
-    insertion_text := "{insertion.indent}{incoming_source}\n"
-    edits.push(edit(SourceSpan { start: insertion.offset, end: insertion.offset }, insertion_text))
-    if strategy == {
-        "helper" -> {
-            name := helper_name.filter(fn(name) { !name.is_empty() }) ?? return .Err(edit_error("bad_request", "Canvas exact-body helper choice has no helper name"))
-            validate_ident(name)
-            if exact_helper.as_deref() != .Val(name) -> return .Err(edit_error("stale", "The selected helper body no longer matches the converged source"))
+    if strategy != "extract" && strategy != "helper" && strategy != "duplicate" {
+        return Err(edit_error("bad_request", "Canvas convergence strategy must be extract, helper, or duplicate"))
+    }
+    if same_span(from_span, target_span) -> return Err(edit_error("bad_request", "Canvas convergence needs two different source pins"))
+    name_span: graph_id_name_span(graph_id) ?? return Err(edit_error("bad_request", "Canvas graph id is not a function graph"))
+    checked: checked_source(checker, path, src)
+    doc: checked.modules[checked.at]
+    func: find_func_by_name_span(doc.items, name_span) ?? return Err(edit_error("not_found", "Canvas graph no longer exists"))
+    target: find_expression_selection(func.body, target_span, src) ?? return Err(edit_error("not_found", "Canvas convergence target source selection no longer exists"))
+    if target.full.end > src.len() -> return Err(edit_error("bad_request", "Canvas convergence target span is stale"))
+    target_text: src.slice(target.span.start, target.span.end).trim()
+    if target_text == "" -> return Err(edit_error("ambiguous", "Canvas needs one or more complete ordinary source statements to converge"))
+    scan := InsertionScan{node_span: from_span, pin_name: from_pin_name, found: None, problem: None}
+    find_exec_insertion(src, func.body, scan)
+    if scan.problem == .Val(problem) -> return Err(edit_error("ambiguous", problem))
+    insertion: scan.found ?? return Err(edit_error("not_found", "Canvas convergence source path no longer exists"))
+    if insertion.branch && target.span.start >= insertion.owner.end {
+        return Err(edit_error("structured_join", "This source already has a structured join after the branch; keep the downstream step single"))
+    }
+    index: checked.index ?? return Err(edit_error("check", "Canvas could not resolve convergence captures: the check built no semantic index"))
+    params: convergence_params(index, doc.path, target.span)
+    arg_names: loop param in params -> param.name
+    args: arg_names.join(", ")
+    call_name := function
+    edits := [TextEdit]{}
+    if strategy == "helper" {
+        name: helper_name ?? ""
+        if name == "" -> return Err(edit_error("bad_request", "Canvas exact-body helper choice has no helper name"))
+        validate_ident(name)
+        if (exact_body_helper_name(doc.items, src, target_text, func.name) ?? "") != name {
+            return Err(edit_error("stale", "The selected helper body no longer matches the converged source"))
         }
-        "extract" -> {
-            if function_name_exists(bundle, function) -> return .Err(edit_error("bad_request", "Canvas helper name already exists; choose another name"))
-            signature := params.iter().map(fn(param) { "{param._0}: {param._1}" }).collect().join(", ")
-            body := target_text.lines().map(fn(line) {
-                trimmed := line.trim() // #4303
-                "    {trimmed}\n"
-            }).collect<String>()
-            helper := "{function}: fn({signature}) {{\n{body}}}\n\n"
-            edits.push(edit(SourceSpan { start: 0, end: 0 }, helper))
-        }
-        "duplicate" -> {}
-        else -> unreachable()
+        call_name = name
+    }
+    if strategy == "extract" {
+        if function_name_exists(doc.items, function) -> return Err(edit_error("bad_request", "Canvas helper name already exists; choose another name"))
+        signature_parts: loop param in params -> "{param.name}: {param.ty}"
+        body_lines: loop line in target_text.lines() -> "    {line.trim()}\n"
+        edits.push(edit(Span{start: 0, end: 0}, "{function}: fn({signature_parts.join(", ")}) {{\n{body_lines.join("")}}}\n\n"))
     }
     if strategy != "duplicate" {
-        suffix := src.get(target.span.end..target.full.end).ok_or_else(fn() { edit_error("bad_request", "Canvas convergence target line is stale") })
-        replacement := "{indentation_at(src, target.full.start)}{call}{suffix}"
-        edits.push(edit(target.full, replacement))
+        suffix: src.slice(target.span.end, target.full.end)
+        edits.push(edit(target.full, "{indentation_at(src, target.full.start)}{call_name}({args}){suffix}"))
     }
-    changed := FixEngine.apply_edits(src, edits) ?? return .Err(edit_error("overlap", "Canvas convergence source edits overlapped"))
-    write_checked_formatted(path, src, changed)
+    incoming: if strategy == "duplicate" -> target_text else -> "{call_name}({args})"
+    edits.push(edit(Span{start: insertion.offset, end: insertion.offset}, "{insertion.indent}{incoming}\n"))
+    changed: jet_driver_apply_edits(src, edits) ?? return Err(edit_error("overlap", "Canvas convergence source edits overlapped"))
+    write_checked_formatted(checker, path, src, changed)
 }
-convergence_params: fn(path: OSPath, target: SourceSpan) -> [(String, String)] Err! {
-    index := jet_semindex.open(path) ?? return .Err(edit_error("check", "Canvas could not resolve convergence captures: {err}"))
-    references := index.references().iter().filter(fn(reference) { reference.span.start >= target.start && reference.span.end <= target.end }).collect()
-    references.sort_by_key(fn(reference) { (_0: reference.span.start, _1: reference.span.end) })
-    params := [(String, String)]{}
-    loop reference in references {
-        target_def := reference.target.as_ref() ?? next
-        definition := index.definitions().iter().find(fn(definition) { definition.module_path == target_def.module_path && definition.def_span == target_def.def_span }) ?? next
-        ty := if definition.kind == {
-            .Local { ty: .Val(ty), .. } | .Param { ty } -> ty.clone()
-            .Local { ty: .None, .. } -> { return .Err(edit_error("ambiguous", "Canvas could not preserve a convergence capture type")) }
-            else -> { next }
+
+// The locals and parameters `target` reads, in source order, each with the
+// type its definition records.
+convergence_params: fn(index: SemIndex, module_path: String, target: Span) -> [NamedType] Err! {
+    order := [Int]{}
+    loop (at, reference) in index.references {
+        if reference.module_path == module_path && reference.span.start >= target.start && reference.span.end <= target.end -> order.push(at)
+    }
+    loop at in 1..<order.len() {
+        cursor := at
+        loop cursor > 0 && span_before(index.references[order[cursor]].span, index.references[order[cursor - 1]].span) {
+            held: order[cursor]
+            order[cursor] = order[cursor - 1]
+            order[cursor - 1] = held
+            cursor -= 1
         }
-        if !params.iter().any(fn(param) { param._0 == reference.name }) -> params.push((_0: reference.name.clone(), _1: ty))
     }
-    .Ok(params)
+    params := [NamedType]{}
+    seen := [String:Bool]{}
+    loop at in order {
+        reference: index.references[at]
+        anchor: reference.target ?? next
+        shown := String?{None}
+        loop definition in index.definitions {
+            def: definition.def
+            if def.module_path != anchor.module_path || !same_span(def.def_span, anchor.def_span) -> next
+            if def.kind == .Local(_, local_ty) {
+                found: local_ty ?? return Err(edit_error("ambiguous", "Canvas could not preserve a convergence capture type"))
+                shown = Val(type_name(found))
+            } else if def.kind == .Param(param_ty) {
+                shown = Val(type_name(param_ty))
+            }
+            break
+        }
+        ty: shown ?? next
+        if seen.has_key(reference.name) -> next
+        seen[reference.name] = true
+        params.push(NamedType{name: reference.name, ty: ty})
+    }
+    Ok(params)
 }
-ExpressionSelection: struct { span: SourceSpan; full: SourceSpan }
-ExecInsertion: struct { offset: USize; indent: String; owner: SourceSpan; branch: Bool }
-find_expression_selection: fn(stmts: [Stmt], target: SourceSpan, src: String) -> ExpressionSelection? {
-    if find_expression_selection_in_block(stmts, target, src) == .Val(found) -> return .Val(found)
+
+span_before: fn(left: Span, right: Span) -> Bool Never! {
+    left.start < right.start || (left.start == right.start && left.end < right.end)
+}
+
+find_expression_selection: fn(stmts: [Stmt], target: Span, src: String) -> ExpressionSelection? Never! {
+    if expression_selection_in_block(stmts, target, src) == .Val(found) -> return Val(found)
+    scan := SelectionScan{target: target, found: None}
     loop stmt in stmts {
-        if find_expression_selection_in_children(stmt, target, src) == .Val(found) -> return .Val(found)
+        stmt_each_body(stmt, fn(body: [Stmt]) { note_expression_selection(scan, body, src) })
+        if scan.found != None -> break
     }
-    .None
+    scan.found
 }
-find_expression_selection_in_block: fn(stmts: [Stmt], target: SourceSpan, src: String) -> ExpressionSelection? {
-    first := USize?{.None}; last := USize?{.None}
-    loop (index, stmt) in stmts.iter().enumerate() {
-        expr := if stmt == {
-            .Expr(expr) -> expr
-            else -> { next }
+
+note_expression_selection: fn(scan: &SelectionScan, body: [Stmt], src: String) Never! {
+    if scan.found != None -> return
+    scan.found = find_expression_selection(body, scan.target, src)
+}
+
+// The run of expression statements of this block that `target` touches,
+// first through last; any other statement inside the run refuses it.
+expression_selection_in_block: fn(stmts: [Stmt], target: Span, src: String) -> ExpressionSelection? Never! {
+    first := -1
+    last := -1
+    loop (at, stmt) in stmts {
+        if stmt == .Expr(expression) {
+            anchor: expr_span(expression)
+            span: source_expression_span(src, expression)
+            if same_span(anchor, target) || same_span(span, target) || span_within(target, span) || span_within(span, target) || spans_cross(span, target) {
+                if first < 0 -> first = at
+                last = at
+            }
         }
-        anchor := SourceSpan{expr.span().into()}
-        expr_span := source_expression_span(src, expr)
-        if same_span(anchor, target) || same_span(expr_span, target) || span_contains(expr_span, target) || span_contains(target, expr_span) || source_spans_overlap(expr_span, target) {
-            _: first.get_or_insert(index); last = .Val(index)
+    }
+    if first < 0 -> return None
+    start := 0
+    end := 0
+    stop: last + 1
+    loop at in first..<stop {
+        if stmts[at] == .Expr(expression) {
+            span: source_expression_span(src, expression)
+            if at == first -> start = span.start
+            end = span.end
+        } else {
+            return None
         }
     }
-    begin := first?; end := last
-    selected := [SourceSpan]{[].with_capacity(end - begin + 1)}
-    loop stmt in stmts[begin..end] {
-        expr := if stmt == {
-            .Expr(expr) -> expr
-            else -> { return .None }
-        }
-        selected.push(source_expression_span(src, expr))
-    }
-    span := SourceSpan { start: selected.first()?.start, end: selected.last()?.end }
-    if selected.len() > 1 && (span.start < target.start || span.end > target.end) -> return .None
-    .Val(ExpressionSelection { span: span, full: SourceSpan { start: line_start(src, span.start), end: line_after(src, span.end) } })
+    if stop - first > 1 && (start < target.start || end > target.end) -> return None
+    Val(ExpressionSelection{span: Span{start: start, end: end}, full: Span{start: line_start(src, start), end: line_after(src, end)}})
 }
-source_expression_span: fn(src: String, expr: &Expr) -> SourceSpan {
-    start := if expr == {
-        .Call(call, _) -> call.name_span.start, .MethodCall { receiver, .. } -> source_expression_span(src, receiver).start
-        .Try(inner, ..) | .OrFallback { value: inner, .. } -> source_expression_span(src, inner).start
-        .Paren(_, span, _) -> span.start, _ -> expr.span().start
-    }
-    fallback_end := expr.span().end
-    end := if expr == {
-        .Call(call, _) -> call_source_end(src, call.name_span.end, fallback_end)
-        .MethodCall { method_span, .. } -> call_source_end(src, method_span.end, fallback_end)
-        .Try(inner, span, ..) -> {
-            end := source_expression_span(src, inner).end.max(span.end)
-            if src.as_bytes().get(end) == .Val(U8{'?'}) -> end += 1
-            end
-        }
-        else -> fallback_end
-    }
-    SourceSpan { start: start, end: end.max(start) }
-}
-call_source_end: fn(src: String, name_end: USize, fallback_end: USize) -> USize {
-    open := find_unquoted_char(src, name_end, '(') ?? return fallback_end
-    matching_delimiter(src, open, '(', ')').map_or(fallback_end, fn(close) { close.saturating_add(1) })
-}
-span_contains: fn(outer: SourceSpan, inner: SourceSpan) -> Bool { inner.start >= outer.start && inner.end <= outer.end }
-source_spans_overlap: fn(a: SourceSpan, b: SourceSpan) -> Bool { a.start < b.end && b.start < a.end }
-find_expression_selection_in_children: fn(stmt: Stmt, target: SourceSpan, src: String) -> ExpressionSelection? {
-    if stmt == {
-        .While { body, .. } | .For { body, .. } | .Loop { body, .. } | .CountedLoop { body, .. } | .Unsafe { body, .. } |
-        .Impure { body, .. } | .Reactive { body, .. } | .Shield { body, .. } | .Defer { body, .. } | .Switched { body, .. } |
-        .Region { body, .. } | .Policy { body, .. } | .TaskGroup { body, .. } | .Layout { body, .. } |
-        .AuthorityScope { body, .. } | .ComptimeBlock { body, .. } | .ContextBlock { body, .. } |
-        .Live { body, .. } | .AssumeDet { body, .. } | .Transact { body, .. } | .ScopeMember { body, .. } -> find_expression_selection(body, target, src)
-        .Switch { arms, else_body, .. } | .ComptimeSwitch { arms, else_body, .. } ->
-            arms.iter().find_map(fn(arm) { find_expression_selection(arm.body, target, src) }).or_else(fn() { else_body.as_deref().and_then(fn(body) { find_expression_selection(body, target, src) }) })
-        .ComptimeIf { then_body, else_body, .. } -> find_expression_selection(then_body, target, src).or_else(fn() { else_body.as_deref().and_then(fn(body) { find_expression_selection(body, target, src) }) })
-        else -> .None
-    }
-}
-find_exec_insertion: fn(src: String, stmts: &[Stmt], node_span: SourceSpan, pin_name: String) -> ExecInsertion? Err! {
+
+// Where a convergence step from the node at `scan.node_span` goes: after that
+// statement, or at the end of the branch body its pin names.
+find_exec_insertion: fn(src: String, stmts: [Stmt], scan: &InsertionScan) Never! {
     loop stmt in stmts {
-        if exec_branch_node_matches(stmt, node_span) {
-            body := matching_exec_branch(stmt, node_span, pin_name).ok_or_else(fn() { edit_error("ambiguous", "Canvas convergence pin has no source-backed branch body") })
-            owner := branch_source_span(src, stmt)
-            return branch_exec_insertion(src, body, owner).map(fn(value) { .Val(value) })
+        if scan.found != None || scan.problem != None -> return
+        if exec_branch_node_matches(stmt, scan.node_span) {
+            wanted: exec_branch_index(stmt, scan.pin_name) ?? -1
+            owner: branch_source_span(src, stmt)
+            stmt_each_branch(stmt, fn(branch: Int, body: [Stmt]) { note_branch_insertion(scan, src, body, owner, branch == wanted) })
+            if scan.found == None && scan.problem == None -> scan.problem = Val("Canvas convergence pin has no source-backed branch body")
+            return
         }
-        source := stmt_source_span(stmt)
-        anchor := SourceSpan{stmt_canvas_anchor(stmt).into()}
-        if same_span(source, node_span) || same_span(anchor, node_span) {
-            if execution_terminates(stmt) -> return .Err(edit_error("ambiguous", "Canvas cannot add a convergence step after an early exit"))
-            full := stmt_text_span(src, stmt)
-            return .Val(ExecInsertion { offset: full.end, indent: indentation_at(src, full.start), owner: full, branch: false })
+        if same_span(stmt_source_span(stmt), scan.node_span) || same_span(stmt_execution_anchor(stmt), scan.node_span) {
+            if stmt_is_terminal(stmt) {
+                scan.problem = Val("Canvas cannot add a convergence step after an early exit")
+                return
+            }
+            full: stmt_text_span(src, stmt)
+            scan.found = Val(ExecInsertion{offset: full.end, indent: indentation_at(src, full.start), owner: full, branch: false})
+            return
         }
-        if find_exec_insertion_in_children(src, stmt, node_span, pin_name)? == .Val(found) -> return .Val(found)
-    }
-    .None
-}
-exec_branch_node_matches: fn(stmt: Stmt, node_span: SourceSpan) -> Bool {
-    if stmt == {
-        .Switch { arms, span, .. } | .ComptimeSwitch { arms, span, .. } -> same_span(span.into(), node_span) || arms.iter().any(fn(arm) { same_span(arm.cond.span().into(), node_span) })
-        .ComptimeIf { span, .. } -> same_span(span.into(), node_span), _ -> false
+        stmt_each_body(stmt, fn(body: [Stmt]) { find_exec_insertion(src, body, scan) })
     }
 }
-branch_source_span: fn(src: String, stmt: &Stmt) -> SourceSpan {
-    line := line_start(src, stmt.span().start)
-    keyword := find_word(src, line, "if").unwrap_or(stmt.span().start)
-    open := find_unquoted_char(src, keyword, '{') ?? return stmt.span().into()
-    close := matching_delimiter(src, open, '{', '}').unwrap_or(stmt.span().end)
+
+note_branch_insertion: fn(scan: &InsertionScan, src: String, body: [Stmt], owner: Span, selected: Bool) Never! {
+    if !selected || scan.found != None || scan.problem != None -> return
+    if body.len() == 0 {
+        scan.problem = Val("Canvas needs a non-empty source-backed branch body to converge")
+        return
+    }
+    last: body[body.len() - 1]
+    if stmt_is_terminal(last) || stmt_is_structured(last) {
+        scan.problem = Val("Canvas cannot prove a convergence path after this branch body")
+        return
+    }
+    full: stmt_text_span(src, last)
+    if full.end > owner.end {
+        last_end: if last == .Expr(expression) -> source_expression_span(src, expression).end else -> stmt_source_span(last).end
+        close: find_unquoted_byte(src, last_end, 125) ?? -1
+        if close < 0 || close >= owner.end {
+            scan.problem = Val("Canvas could not locate the source-backed branch body boundary")
+            return
+        }
+        scan.found = Val(ExecInsertion{offset: close, indent: "\n{indentation_at(src, owner.start)}    ", owner: owner, branch: true})
+        return
+    }
+    scan.found = Val(ExecInsertion{offset: full.end, indent: indentation_at(src, full.start), owner: owner, branch: true})
+}
+
+exec_branch_node_matches: fn(stmt: Stmt, node_span: Span) -> Bool Never! {
+    if stmt == .ComptimeIf(_, _, _, _, span, _) -> return same_span(span, node_span)
+    if stmt == .Switch(_, arms, _, span) -> return switch_node_matches(arms, span, node_span)
+    if stmt == .ComptimeSwitch(_, arms, _, span) -> return switch_node_matches(arms, span, node_span)
+    false
+}
+
+switch_node_matches: fn(arms: [SwitchArm], span: Span, node_span: Span) -> Bool Never! {
+    if same_span(span, node_span) -> return true
+    loop arm in arms {
+        if same_span(expr_span(arm.cond), node_span) -> return true
+    }
+    false
+}
+
+// The stmt_each_branch index of the branch a convergence pin names: `then`
+// and `else` of a comptime if, else `then` (the first arm), `armN` and `else`.
+exec_branch_index: fn(stmt: Stmt, pin_name: String) -> Int? Never! {
+    if stmt == .ComptimeIf(_, _, _, _, _, _) {
+        if pin_name == "then" -> return Val(0)
+        if pin_name == "else" -> return Val(1)
+        return None
+    }
+    arm_count := 0
+    if stmt == .Switch(_, arms, _, _) -> arm_count = arms.len()
+    if stmt == .ComptimeSwitch(_, arms, _, _) -> arm_count = arms.len()
+    if pin_name == "else" -> return Val(arm_count)
+    if pin_name == "then" {
+        if arm_count > 0 -> return Val(0)
+        return None
+    }
+    if !pin_name.starts_with("arm") -> return None
+    number: pin_name.slice(3, pin_name.len()).to_int() ?? return None
+    if number < 1 || number > arm_count -> return None
+    Val(number - 1)
+}
+
+// The source of a branch statement from its `if` through the last `else`
+// block's closing brace.
+branch_source_span: fn(src: String, stmt: Stmt) -> Span Never! {
+    stmt_span: jfmt_stmt_span(stmt)
+    keyword: find_word(src, line_start(src, stmt_span.start), "if") ?? stmt_span.start
+    open: find_unquoted_byte(src, keyword, 123) ?? return stmt_span
+    close := matching_delimiter(src, open, 123, 125) ?? stmt_span.end
     loop {
-        else_start := find_word(src, close + 1, "else") ?? break
-        between := src[close + 1..else_start]
-        if !between.chars().all(fn(c) { c.is_whitespace() }) -> break
-        next_open := find_unquoted_char(src, else_start + "else".len(), '{') ?? break
-        next_close := matching_delimiter(src, next_open, '{', '}') ?? break
-        close = next_close
+        else_start: find_word(src, close + 1, "else") ?? break
+        if src.slice(close + 1, else_start).trim() != "" -> break
+        next_open: find_unquoted_byte(src, else_start + 4, 123) ?? break
+        close = matching_delimiter(src, next_open, 123, 125) ?? break
     }
-    SourceSpan { start: keyword, end: close.saturating_add(1) }
+    Span{start: keyword, end: close + 1}
 }
-find_word: fn(src: String, start: USize, word: String) -> USize? {
-    cursor := start.min(src.len())
-    loop {
-        relative := src[cursor..<src.len()].find(word) ?? break
-        found := cursor + relative
-        before := found.checked_sub(1).and_then(fn(i) { src.as_bytes().get(i) })
-        after := src.as_bytes().get(found + word.len())
-        if !before.is_some_and(fn(b) { b.is_ascii_alphanumeric() }) && !before.is_some_and(fn(b) { b == (U8{'_'}) }) &&
-            !after.is_some_and(fn(b) { b.is_ascii_alphanumeric() }) && !after.is_some_and(fn(b) { b == U8{'_'} }) -> return .Val(found)
-        cursor = found + word.len()
-    }
-    .None
-}
-find_unquoted_char: fn(src: String, start: USize, wanted: Char) -> USize? {
-    quote := Char?{.None}; escaped := false; line_comment := false; cursor := start.min(src.len())
-    loop cursor < src.len() {
-        ch := src[cursor..<src.len()].chars().next()
-        width := ch.len_utf8(); next := src[cursor + width..<src.len()].chars().next()
-        if line_comment { if ch == '\n' -> line_comment = false } else if quote == .Val(quoted) {
-            if escaped { escaped = false } else if ch == '\\' { escaped = true } else if ch == quoted { quote = .None }
-        } else if ch == '"' || ch == (Char{39}) { quote = .Val(ch) } else if ch == '/' && next == '/' { line_comment = true; cursor += width } else if ch == wanted { return .Val(cursor) }
-        cursor += width
-    }
-    .None
-}
-matching_delimiter: fn(src: String, open: USize, opening: Char, closing: Char) -> USize? {
-    depth := USize{0}; quote := Char?{.None}; escaped := false; line_comment := false; cursor := open.min(src.len())
-    loop cursor < src.len() {
-        ch := src[cursor..<src.len()].chars().next()
-        width := ch.len_utf8(); next := src[cursor + width..<src.len()].chars().next()
-        if line_comment { if ch == '\n' -> line_comment = false } else if quote == .Val(quoted) {
-            if escaped { escaped = false } else if ch == '\\' { escaped = true } else if ch == quoted { quote = .None }
-        } else if ch == '"' || ch == (Char{39}) { quote = .Val(ch) } else if ch == '/' && next == '/' { line_comment = true; cursor += width } else if ch == opening { depth += 1 } else if ch == closing { depth = depth.saturating_sub(1); if depth == 0 -> { return .Val(cursor) } }
-        cursor += width
-    }
-    .None
-}
-find_exec_insertion_in_children: fn(src: String, stmt: &Stmt, node_span: SourceSpan, pin_name: String) -> ExecInsertion? Err! {
+
+stmt_is_structured: fn(stmt: Stmt) -> Bool Never! {
     if stmt == {
-        .While { body, .. } | .For { body, .. } | .Loop { body, .. } | .CountedLoop { body, .. } | .Unsafe { body, .. } |
-        .Impure { body, .. } | .Reactive { body, .. } | .Shield { body, .. } | .Defer { body, .. } | .Switched { body, .. } |
-        .Region { body, .. } | .Policy { body, .. } | .TaskGroup { body, .. } | .Layout { body, .. } |
-        .AuthorityScope { body, .. } | .ComptimeBlock { body, .. } | .ContextBlock { body, .. } |
-        .Live { body, .. } | .AssumeDet { body, .. } | .Transact { body, .. } | .ScopeMember { body, .. } -> find_exec_insertion(src, body, node_span, pin_name)
-        .Switch { arms, else_body, .. } | .ComptimeSwitch { arms, else_body, .. } -> {
+        .While(_, _, _, _, _) | .For(_, _, _, _, _, _, _, _, _) | .Loop(_, _, _, _) | .CountedLoop(_, _, _, _, _, _, _) | .Switch(_, _, _, _) | .ComptimeSwitch(_, _, _, _) | .ComptimeIf(_, _, _, _, _, _) -> true
+        .Expr(_) | .Val(_) | .Assign(_, _, _, _) | .Return(_, _) | .Break(_) | .BreakValue(_, _) | .Continue(_) | .BreakLabel(_, _) | .BreakLabelValue(_, _, _, _) | .ContinueLabel(_, _) | .Unsafe(_, _, _, _) | .Impure(_, _, _, _) | .Reactive(_, _) | .Shield(_, _) | .Switched(_, _, _) | .Region(_, _, _, _) | .Policy(_, _, _) | .TaskGroup(_, _, _, _, _) | .Layout(_, _, _, _) | .AuthorityScope(_, _, _, _, _) | .ComptimeBlock(_, _, _) | .ContextBlock(_, _, _) | .Live(_, _) | .AssumeDet(_, _, _, _) | .Transact(_, _, _, _, _) | .Yield(_, _) | .ScopeMember(_, _, _, _, _, _, _, _) | .DeferClose(_, _) | .Defer(_, _) -> false
+    }
+}
+
+// The other function of this module whose body is exactly `target`.
+exact_body_helper_name: fn(items: [Item], src: String, target: String, current: String) -> String? Never! {
+    loop item in items {
+        if item == .Func(function) {
+            if function.name != current && body_matches_expression(src, function.body, target) -> return Val(function.name)
+        } else if item == .Struct(structure) {
+            loop method in structure.methods {
+                if method.name != current && body_matches_expression(src, method.body, target) -> return Val(method.name)
+            }
+        } else if item == .Impl(implementation) {
+            loop method in implementation.methods {
+                if method.name != current && body_matches_expression(src, method.body, target) -> return Val(method.name)
+            }
+        } else if item == .CodeModule(code) {
+            if code.body == .Val(body) {
+                if exact_body_helper_name(body, src, target, current) == .Val(found) -> return Val(found)
+            }
+        }
+    }
+    None
+}
+
+body_matches_expression: fn(src: String, body: [Stmt], target: String) -> Bool Never! {
+    text: expression_body_source(src, body) ?? return false
+    formatted_expression_matches(text, target)
+}
+
+expression_body_source: fn(src: String, body: [Stmt]) -> String? Never! {
+    if body.len() == 0 -> return None
+    start := 0
+    end := 0
+    loop (at, stmt) in body {
+        if stmt == .Expr(expression) {
+            span: source_expression_span(src, expression)
+            if at == 0 -> start = span.start
+            end = span.end
+        } else {
+            return None
+        }
+    }
+    if start > end || end > src.len() -> return None
+    Val(src.slice(start, end).trim())
+}
+
+formatted_expression_matches: fn(left: String, right: String) -> Bool Never! {
+    left_text: canvas_match_source(left)
+    right_text: canvas_match_source(right)
+    left_text == right_text || normalized_source_shape(left_text) == normalized_source_shape(right_text)
+}
+
+canvas_match_source: fn(expression: String) -> String Never! {
+    candidate: "canvas_match: fn() {{\n    {expression.trim()}\n}}\n"
+    formatted: jet_format_source(candidate, false)
+    if formatted.ok -> return formatted.text
+    candidate
+}
+
+// `source` without whitespace outside string and character literals.
+normalized_source_shape: fn(source: String) -> String Never! {
+    bytes: source.bytes()
+    parts := [String]{}
+    quote := 0
+    escaped := false
+    run := -1
+    loop at in 0..<bytes.len() {
+        byte: Int{bytes[at]}
+        keep := true
+        if quote != 0 {
+            if escaped {
+                escaped = false
+            } else if byte == 92 {
+                escaped = true
+            } else if byte == quote {
+                quote = 0
+            }
+        } else if byte == 34 || byte == 39 {
+            quote = byte
+        } else if is_space_byte(byte) {
+            keep = false
+        }
+        if keep {
+            if run < 0 -> run = at
+        } else if run >= 0 {
+            parts.push(source.slice(run, at))
+            run = -1
+        }
+    }
+    if run >= 0 -> parts.push(source.slice(run, bytes.len()))
+    parts.join("")
+}
+
+function_name_exists: fn(items: [Item], name: String) -> Bool Never! {
+    loop item in items {
+        if item == .Func(function) {
+            if function.name == name -> return true
+        } else if item == .Struct(structure) {
+            loop method in structure.methods {
+                if method.name == name -> return true
+            }
+        } else if item == .Impl(implementation) {
+            loop method in implementation.methods {
+                if method.name == name -> return true
+            }
+        } else if item == .CodeModule(code) {
+            if code.body == .Val(body) {
+                if function_name_exists(body, name) -> return true
+            }
+        }
+    }
+    false
+}
+
+// ---- Pattern arms ----
+
+apply_add_pattern_arm: fn(checker: LSPChecker, path: String, src: String, graph_id: String, node_span: Span, pattern: String) -> String Err! {
+    func: checked_func_for_graph(checker, path, src, graph_id)
+    head: normalize_pattern_arm_head(pattern)
+    if head == "" -> return Err(edit_error("bad_request", "pattern arm text is empty"))
+    scan := ArmInsertScan{node_span: node_span, head: head, fresh: fresh_arm_body(func.return_type), found: None}
+    find_arm_insert(src, func.body, scan)
+    found: scan.found ?? return Err(edit_error("not_found", "Canvas pattern node no longer exists"))
+    changed: jet_driver_apply_edits(src, [TextEdit]{found}) ?? return Err(edit_error("overlap", "Canvas pattern arm insert overlapped"))
+    write_checked_formatted(checker, path, src, changed)
+}
+
+apply_edit_pattern_arm: fn(checker: LSPChecker, path: String, src: String, graph_id: String, pattern_span: Span, pattern: String) -> String Err! {
+    func: checked_func_for_graph(checker, path, src, graph_id)
+    head: normalize_pattern_arm_head(pattern)
+    if head == "" -> return Err(edit_error("bad_request", "pattern arm text is empty"))
+    scan := ArmSpanScan{pattern_span: pattern_span, found: false, remove_span: Span{start: 0, end: 0}, only_arm: false}
+    find_arm_span(src, func.body, scan)
+    if !scan.found -> return Err(edit_error("not_found", "Canvas pattern arm no longer exists"))
+    changed: jet_driver_apply_edits(src, [TextEdit]{edit(pattern_span, head)}) ?? return Err(edit_error("overlap", "Canvas pattern arm edit overlapped"))
+    write_checked_formatted(checker, path, src, changed)
+}
+
+apply_remove_pattern_arm: fn(checker: LSPChecker, path: String, src: String, graph_id: String, pattern_span: Span) -> String Err! {
+    func: checked_func_for_graph(checker, path, src, graph_id)
+    scan := ArmSpanScan{pattern_span: pattern_span, found: false, remove_span: Span{start: 0, end: 0}, only_arm: false}
+    find_arm_span(src, func.body, scan)
+    if !scan.found -> return Err(edit_error("not_found", "Canvas pattern arm no longer exists"))
+    if scan.only_arm -> return Err(edit_error("bad_request", "can't remove the last pattern arm; the branch would have no path left"))
+    changed: jet_driver_apply_edits(src, [TextEdit]{edit(scan.remove_span, "")}) ?? return Err(edit_error("overlap", "Canvas pattern arm delete overlapped"))
+    write_checked_formatted(checker, path, src, changed)
+}
+
+// The edit that adds an arm to the pattern branch drawn at `scan.node_span`.
+// A classic `if x == .V(…)` branch is rewritten whole into a switch.
+find_arm_insert: fn(src: String, stmts: [Stmt], scan: &ArmInsertScan) Never! {
+    loop stmt in stmts {
+        if scan.found != None -> return
+        if stmt == .Switch(subject, arms, else_body, span) {
+            if jfmt_is_subjectless_guard(subject, span) && switch_was_classic_if(src, arms, span) {
+                first: arms[0]
+                if first.cond == .PatternTest(_, _, _, _) && (same_span(expr_span(first.cond), scan.node_span) || same_span(span, scan.node_span)) {
+                    scan.found = Val(edit(stmt_text_span(src, stmt), classic_switch_source(src, first, else_body, scan.head, scan.fresh)))
+                    return
+                }
+            } else if same_span(span, scan.node_span) {
+                scan.found = Val(switch_arm_insert(src, arms, else_body, span, scan.head, scan.fresh))
+                return
+            }
+        } else if stmt == .ComptimeSwitch(_, arms, else_body, span) {
+            if same_span(span, scan.node_span) {
+                scan.found = Val(switch_arm_insert(src, arms, else_body, span, scan.head, scan.fresh))
+                return
+            }
+        }
+        stmt_each_body(stmt, fn(body: [Stmt]) { find_arm_insert(src, body, scan) })
+    }
+}
+
+switch_arm_insert: fn(src: String, arms: [SwitchArm], else_body: [Stmt]?, span: Span, head: String, fresh: String) -> TextEdit Never! {
+    insert := dispatch_body_insert_offset(src, span)
+    if arms.len() > 0 {
+        insert = line_after(src, arms[arms.len() - 1].span.end)
+    } else if else_body == .Val(body) {
+        insert = if body.len() > 0 -> line_start(src, jfmt_stmt_span(body[0]).start) else -> line_start(src, span.end)
+    }
+    indent: indentation_at(src, insert)
+    edit(Span{start: insert, end: insert}, "{indent}{head} -> {{\n{indent}    {fresh}\n{indent}}}\n")
+}
+
+// `if subject == { head -> then; new_head -> fresh; else -> … }` for a
+// classic single-pattern branch.
+classic_switch_source: fn(src: String, arm: SwitchArm, else_body: [Stmt]?, new_head: String, fresh: String) -> String Never! {
+    subject_src := ""
+    if arm.cond == .PatternTest(subject, _, _, _) -> subject_src = snippet(src, expr_span(subject))
+    head_span: pattern_arm_edit_span(src, arm.cond)
+    head: if head_span.start >= 0 && head_span.end <= src.len() && head_span.start <= head_span.end -> src.slice(head_span.start, head_span.end) else -> snippet(src, expr_span(arm.cond))
+    then_body: block_body_source(src, arm.body, "        ")
+    else_text := ""
+    if else_body == .Val(body) -> else_text = "    else -> {{\n{block_body_source(src, body, "        ")}    }}\n"
+    "if {subject_src} == {{\n    {head} -> {{\n{then_body}    }}\n    {new_head} -> {{\n        {fresh}\n    }}\n{else_text}}}\n"
+}
+
+block_body_source: fn(src: String, stmts: [Stmt], indent: String) -> String Never! {
+    parts := [String]{}
+    loop stmt in stmts {
+        span: stmt_text_span(src, stmt)
+        loop line in src.slice(span.start, span.end).trim().lines() -> parts.push("{indent}{line.trim()}\n")
+    }
+    parts.join("")
+}
+
+dispatch_body_insert_offset: fn(src: String, span: Span) -> Int Never! {
+    end: if span.end < src.len() -> span.end else -> src.len()
+    if span.start > end -> return span.end
+    if src.slice(span.start, end).index_of("{{") == .Val(open) -> return line_after(src, span.start + open)
+    span.end
+}
+
+// The arm whose edit span is `scan.pattern_span`, the lines removing it take,
+// and whether it is the branch's only path.
+find_arm_span: fn(src: String, stmts: [Stmt], scan: &ArmSpanScan) Never! {
+    loop stmt in stmts {
+        if scan.found -> return
+        if stmt == .Switch(subject, arms, else_body, span) {
+            guard: jfmt_is_subjectless_guard(subject, span)
             loop arm in arms {
-                if find_exec_insertion(src, arm.body, node_span, pin_name)? == .Val(found) -> return .Val(found)
+                classic: guard && jfmt_uses_classic_if_spelling(src.bytes(), span, expr_span(arm.cond))
+                arm_span: if classic -> pattern_arm_edit_span(src, arm.cond) else -> expr_span(arm.cond)
+                if same_span(arm_span, scan.pattern_span) {
+                    scan.found = true
+                    scan.remove_span = if classic -> stmt_text_span(src, stmt) else -> arm_text_span(src, arm.span)
+                    scan.only_arm = classic || (arms.len() == 1 && else_body == None)
+                    return
+                }
             }
-            else_body.as_deref().map(fn(body) { find_exec_insertion(src, body, node_span, pin_name) }).transpose().map(fn(found) { found.flatten() })
-        }
-        .ComptimeIf { then_body, else_body, .. } -> {
-            if find_exec_insertion(src, then_body, node_span, pin_name)? == .Val(found) -> return .Val(found)
-            else_body.as_deref().map(fn(body) { find_exec_insertion(src, body, node_span, pin_name) }).transpose().map(fn(found) { found.flatten() })
-        }
-        else -> .None
-    }
-}
-matching_exec_branch: fn(stmt: Stmt, node_span: SourceSpan, pin_name: String) -> [Stmt]? {
-    if stmt == .ComptimeIf { then_body, else_body, span, .. } {
-        if !same_span(span.into(), node_span) -> return .None
-        return if pin_name == {
-            "then" -> .Val(then_body.as_slice())
-            "else" -> else_body.as_deref()
-            else -> .None
-        }
-    }
-    (arms, else_body, span) := if stmt == {
-        .Switch { arms, else_body, span, .. } | .ComptimeSwitch { arms, else_body, span, .. } -> (_0: arms, _1: else_body, _2: span)
-        else -> { return .None }
-    }
-    node_matches := same_span(span.into(), node_span) || arms.iter().any(fn(arm) { same_span(arm.cond.span().into(), node_span) })
-    if !node_matches -> return .None
-    if pin_name == "else" -> return else_body.as_deref()
-    if pin_name == "then" -> return arms.first().map(fn(arm) { arm.body.as_slice() })
-    index := pin_name.strip_prefix("arm")?.parse<USize>().ok()?
-    arms.get(index.checked_sub(1)?).map(fn(arm) { arm.body.as_slice() })
-}
-branch_exec_insertion: fn(src: String, body: &[Stmt], owner: SourceSpan) -> ExecInsertion Err! {
-    last := body.last().ok_or_else(fn() { edit_error("ambiguous", "Canvas needs a non-empty source-backed branch body to converge") })
-    structured := if last == {
-        .While { .. } | .For { .. } | .Loop { .. } | .CountedLoop { .. } | .Switch { .. } | .ComptimeSwitch { .. } | .ComptimeIf { .. } -> true
-        else -> false
-    }
-    if execution_terminates(last) || structured -> return .Err(edit_error("ambiguous", "Canvas cannot prove a convergence path after this branch body"))
-    full := stmt_text_span(src, last)
-    inline := full.end > owner.end
-    (offset, indent) := if {
-        inline -> {
-            last_end := if last == {
-                .Expr(expr) -> source_expression_span(src, expr).end
-                else -> stmt_source_span(last).end
+        } else if stmt == .ComptimeSwitch(_, arms, else_body, _) {
+            loop arm in arms {
+                if same_span(expr_span(arm.cond), scan.pattern_span) {
+                    scan.found = true
+                    scan.remove_span = arm_text_span(src, arm.span)
+                    scan.only_arm = arms.len() == 1 && else_body == None
+                    return
+                }
             }
-            close := find_unquoted_char(src, last_end, '}').filter(fn(offset) { offset < owner.end }).ok_or_else(fn() { edit_error("ambiguous", "Canvas could not locate the source-backed branch body boundary") })
-            (_0: close, _1: "\n{indentation_at(src, owner.start)}    ")
         }
-        else -> { (_0: full.end, _1: indentation_at(src, full.start)) }
-    }
-    .Ok(ExecInsertion { offset: offset, indent: indent, owner: owner, branch: true })
-}
-execution_terminates: fn(stmt: Stmt) -> Bool {
-    if stmt == {
-        .Return(..) | .Break(..) | .BreakValue(..) | .BreakLabel(..) | .BreakLabelValue(..) | .Continue(..) | .ContinueLabel(..) -> true
-        else -> false
+        stmt_each_body(stmt, fn(body: [Stmt]) { find_arm_span(src, body, scan) })
     }
 }
 
-exact_body_helper_name: fn(bundle: ProgramBundle, src: String, target: String, current: String) -> String? {
-    fn in_items(items: [Item], src: String, target: String, current: String) -> String? {
-        loop item in items {
-            if item == {
-                .Func(func) && func.name != current -> {
-                    if expression_body_source(src, func.body).is_some_and(fn(body) { formatted_expression_matches(body, target) }) -> return .Val(func.name.clone())
-                }
-                .Struct(structure) -> {
-                    if structure.methods.iter().find_map(fn(method) {
-                        if method.name == current -> return .None
-                        expression_body_source(src, method.body).and_then(fn(body) { if formatted_expression_matches(body, target) -> .Val(method.name.clone()) else -> .None })
-                    }) == .Val(found) -> return .Val(found)
-                }
-                .Impl(implementation) -> {
-                    if implementation.methods.iter().find_map(fn(method) {
-                        if method.name == current -> return .None
-                        expression_body_source(src, method.body).and_then(fn(body) { if formatted_expression_matches(body, target) -> .Val(method.name.clone()) else -> .None })
-                    }) == .Val(found) -> return .Val(found)
-                }
-                .CodeModule(module_ref) -> {
-                    if module_ref.body == .Val(body) && in_items(body, src, target, current) == .Val(found) -> return .Val(found)
-                }
-                else -> {}
-            }
-        }
-        .None
+arm_text_span: fn(src: String, span: Span) -> Span Never! {
+    Span{start: line_start(src, span.start), end: line_after(src, span.end)}
+}
+
+normalize_pattern_arm_head: fn(pattern: String) -> String Never! {
+    head := pattern.trim()
+    if head.starts_with("==") -> head = head.slice(2, head.len()).trim()
+    loop head.ends_with("->") -> head = head.slice(0, head.len() - 2)
+    head.trim()
+}
+
+fresh_arm_body: fn(return_type: String?) -> String Never! {
+    if return_type == .Val(ret) {
+        if ret != "Void" -> return "return {default_arg_for_type(ret)}"
     }
-    bundle.modules.iter().find_map(fn(module_ref) { in_items(module_ref.items, src, target, current) })
+    "print(\"canvas arm\")"
 }
-expression_body_source: fn(src: String, body: &[Stmt]) -> String? {
-    spans := [SourceSpan]{[].with_capacity(body.len())}
-    loop stmt in body {
-        expr := if stmt == {
-            .Expr(expr) -> expr
-            else -> { return .None }
-        }
-        spans.push(source_expression_span(src, expr))
+
+// ---- Statement state ----
+
+apply_toggle_switch_state: fn(checker: LSPChecker, path: String, src: String, graph_id: String, node_span: Span) -> String Err! {
+    func: checked_func_for_graph(checker, path, src, graph_id)
+    scan := SwitchedScan{node_span: node_span, marker: None, nested: false}
+    find_switched_node(func.body, scan)
+    if scan.marker == .Val(marker_span) {
+        removed: jet_driver_apply_edits(src, [TextEdit]{edit(marker_span, "")}) ?? return Err(edit_error("overlap", "Canvas statement-state toggle overlapped"))
+        return Ok(write_checked_formatted(checker, path, src, removed))
     }
-    start := spans.first()?.start; end := spans.last()?.end
-    text := source_snippet(src, SourceSpan { start: start, end: end }).trim() // #4303
-    .Val(text.to_string())
-}
-source_snippet: fn(src: String, span: SourceSpan) -> String { src.get(span.start..span.end).unwrap_or_default().to_string() }
-formatted_expression_matches: fn(left: String, right: String) -> Bool {
-    wrap := fn(expr: String) {
-        trimmed := expr.trim() // #4303
-        candidate := "canvas_match: fn() {{\n    {trimmed}\n}}\n"
-        jet_driver.Formatter.format_source(candidate).unwrap_or_else(fn(_) { candidate.clone() })
+    if scan.nested -> return Err(edit_error("bad_request", "Canvas node is already inside a statement state"))
+    if !statement_contains_span(func.body, node_span) || same_span(func.name_span, node_span) {
+        return Err(edit_error("not_found", "Canvas statement node no longer exists"))
     }
-    l := wrap(left); r := wrap(right)
-    l == r || normalized_source_shape(l) == normalized_source_shape(r)
+    insert: line_start(src, node_span.start)
+    changed: jet_driver_apply_edits(src, [TextEdit]{edit(Span{start: insert, end: insert}, "#Off ")}) ?? return Err(edit_error("overlap", "Canvas statement-state toggle overlapped"))
+    write_checked_formatted(checker, path, src, changed)
 }
-normalized_source_shape: fn(source: String) -> String {
-    normalized := String.with_capacity(source.len()); quote := Char?{.None}; escaped := false
-    loop ch in source.chars() {
-        if quote == .Val(quoted) {
-            normalized.push(ch)
-            if escaped { escaped = false } else if ch == '\\' { escaped = true } else if ch == quoted { quote = .None }
-        } else if ch == '"' || ch == (Char{39}) { quote = .Val(ch); normalized.push(ch) } else if !ch.is_whitespace() { normalized.push(ch) }
-    }
-    normalized
-}
-function_name_exists: fn(bundle: ProgramBundle, name: String) -> Bool {
-    fn in_items(items: [Item], name: String) -> Bool {
-        items.iter().any(fn(item) { if item == {
-            .Func(func) -> func.name == name
-            .Struct(structure) -> structure.methods.iter().any(fn(method) { method.name == name })
-            .Impl(implementation) -> implementation.methods.iter().any(fn(method) { method.name == name })
-            .CodeModule(module_ref) -> module_ref.body.as_deref().is_some_and(fn(body) { in_items(body, name) }), _ -> false
-        } })
-    }
-    bundle.modules.iter().any(fn(module_ref) { in_items(module_ref.items, name) })
-}
-apply_add_pattern_arm: fn(path: OSPath, src: String, graph_id: String, node_span: SourceSpan, pattern: String) -> String Err! {
-    func := checked_func_for_graph(path, src, graph_id)
-    head := normalize_pattern_arm_head(pattern)
-    if head.is_empty() -> return .Err(edit_error("bad_request", "pattern arm text is empty"))
-    target := PatternTarget?{.None}
-    find_pattern_target(src, func.body, node_span, target)
-    selected := target ?? return .Err(edit_error("not_found", "Canvas pattern node no longer exists"))
-    body := fresh_arm_body(func)
-    changed := if selected == {
-        .Classic { arm, else_body, span } -> add_arm_to_classic_switch(src, arm, else_body, span, head, body)
-        .Switch { arms, else_body, span, .. } -> {
-            insert := if arms.last() == .Val(last) { line_after(src, last.span.end) } else if else_body == .Val(else_body) { line_start(src, first_stmt_start(else_body).unwrap_or(span.end)) } else { dispatch_body_insert_offset(src, span) }
-            indent := indentation_at(src, insert)
-            arm := "{indent}{head} -> {{\n{indent}    {body}\n{indent}}}\n"
-            FixEngine.apply_edits(src, [edit(SourceSpan { start: insert, end: insert }, arm)]) ?? return .Err(edit_error("overlap", "Canvas pattern arm insert overlapped"))
-        }
-    }
-    write_checked_formatted(path, src, changed)
-}
-apply_edit_pattern_arm: fn(path: OSPath, src: String, graph_id: String, pattern_span: SourceSpan, pattern: String) -> String Err! {
-    func := checked_func_for_graph(path, src, graph_id)
-    head := normalize_pattern_arm_head(pattern)
-    if head.is_empty() -> return .Err(edit_error("bad_request", "pattern arm text is empty"))
-    if !pattern_span_belongs_to_graph(src, func.body, pattern_span) -> return .Err(edit_error("not_found", "Canvas pattern arm no longer exists"))
-    changed := FixEngine.apply_edits(src, [edit(pattern_span, head)]) ?? return .Err(edit_error("overlap", "Canvas pattern arm edit overlapped"))
-    write_checked_formatted(path, src, changed)
-}
-apply_remove_pattern_arm: fn(path: OSPath, src: String, graph_id: String, pattern_span: SourceSpan) -> String Err! {
-    func := checked_func_for_graph(path, src, graph_id)
-    arm := RemoveArmInfo?{.None}
-    find_pattern_arm_remove_span(src, func.body, pattern_span, arm)
-    info := arm ?? return .Err(edit_error("not_found", "Canvas pattern arm no longer exists"))
-    if info.only_arm_without_else -> return .Err(edit_error("bad_request", "can't remove the last pattern arm; the branch would have no path left"))
-    changed := FixEngine.apply_edits(src, [edit(info.remove_span, "")]) ?? return .Err(edit_error("overlap", "Canvas pattern arm delete overlapped"))
-    write_checked_formatted(path, src, changed)
-}
-apply_toggle_switch_state: fn(path: OSPath, src: String, graph_id: String, node_span: SourceSpan) -> String Err! {
-    func := checked_func_for_graph(path, src, graph_id)
-    if find_switched_node(func.body, node_span) == {
-        .Val(.Marker(marker_span)) -> {
-            changed := FixEngine.apply_edits(src, [edit(marker_span, "")]) ?? return .Err(edit_error("overlap", "Canvas statement-state toggle overlapped"))
-            write_checked_formatted(path, src, changed)
-        }
-        .Val(.Nested) -> .Err(edit_error("bad_request", "Canvas node is already inside a statement state"))
-        .None && !statement_contains_span(func.body, node_span) || same_span(func.name_span.into(), node_span) -> .Err(edit_error("not_found", "Canvas statement node no longer exists"))
-        .None -> {
-            insert := line_start(src, node_span.start)
-            changed := FixEngine.apply_edits(src, [edit(SourceSpan { start: insert, end: insert }, "#Off ")]) ?? return .Err(edit_error("overlap", "Canvas statement-state toggle overlapped"))
-            write_checked_formatted(path, src, changed)
-        }
-    }
-}
-SwitchedNode: enum { Marker(SourceSpan); Nested }
-find_switched_node: fn(stmts: [Stmt], node_span: SourceSpan) -> SwitchedNode? {
+
+find_switched_node: fn(stmts: [Stmt], scan: &SwitchedScan) Never! {
     loop stmt in stmts {
-        if stmt == {
-            .Switched { marker, body, span } -> {
-                switched_span := SourceSpan{span.into()}
-                if same_span(switched_span, node_span) -> return .Val(.Marker(marker.span.into()))
-                if span_within(node_span, switched_span) -> return .Val(.Nested)
-                if find_switched_node(body, node_span) == .Val(found) -> return .Val(found)
+        if scan.marker != None || scan.nested -> return
+        if stmt == .Switched(marker, _, span) {
+            if same_span(span, scan.node_span) {
+                scan.marker = Val(Span{start: marker.span.start, end: marker.span.end})
+                return
             }
-            else -> { if find_switched_node_in_children(stmt, node_span) == .Val(found) -> return .Val(found) }
-        }
-    }
-    .None
-}
-find_switched_node_in_children: fn(stmt: Stmt, node_span: SourceSpan) -> SwitchedNode? {
-    if stmt == {
-        .While { body, .. } | .For { body, .. } | .Loop { body, .. } | .Unsafe { body, .. } |
-        .Impure { body, .. } | .Reactive { body, .. } | .Shield { body, .. } | .Defer { body, .. } | .Region { body, .. } |
-        .Policy { body, .. } | .TaskGroup { body, .. } | .Layout { body, .. } | .AuthorityScope { body, .. } |
-        .ComptimeBlock { body, .. } | .ContextBlock { body, .. } | .Live { body, .. } | .AssumeDet { body, .. } |
-        .Transact { body, .. } | .ScopeMember { body, .. } -> find_switched_node(body, node_span)
-        .CountedLoop { step, body, .. } -> step.as_deref().and_then(fn(step) { find_switched_node(std.slice.from_ref(step), node_span) }).or_else(fn() { find_switched_node(body, node_span) })
-        .Switch { arms, else_body, .. } | .ComptimeSwitch { arms, else_body, .. } -> {
-            loop arm in arms { if find_switched_node(arm.body, node_span) == .Val(found) -> return .Val(found) }
-            else_body.as_deref().and_then(fn(body) { find_switched_node(body, node_span) })
-        }
-        .ComptimeIf { then_body, else_body, .. } -> find_switched_node(then_body, node_span).or_else(fn() { else_body.as_deref().and_then(fn(body) { find_switched_node(body, node_span) }) })
-        else -> .None
-    }
-}
-statement_contains_span: fn(stmts: [Stmt], node_span: SourceSpan) -> Bool { stmts.iter().any(fn(stmt) { span_within(node_span, stmt.span().into()) }) }
-apply_append_multi_input: fn(path: OSPath, src: String, node_span: SourceSpan, element: String) -> String Err! {
-    target := MultiInputTarget?{.None}
-    func := checked_func_containing_span(path, src, node_span)
-    find_multi_input_target(func.body, node_span, target)
-    selected := target ?? return .Err(edit_error("not_found", "Canvas multi-input node no longer exists"))
-    (span, item_spans) := if selected == { .List { span, item_spans } -> (_0: span, _1: item_spans) }
-    list_source := src.get(span.start..span.end).ok_or_else(fn() { edit_error("bad_request", "Canvas multi-input source span is stale") })
-    insert := if item_spans.last() == .Val(item) { item.end } else {
-        list_source.rfind(']').map(fn(idx) { span.start + idx }).ok_or_else(fn() { edit_error("bad_request", "Canvas multi-input source span is stale") })?
-    }
-    prefix := if item_spans.is_empty() -> "" else -> ", "
-    changed := FixEngine.apply_edits(src, [edit(SourceSpan { start: insert, end: insert }, "{prefix}{element}")]) ?? return .Err(edit_error("overlap", "Canvas multi-input append overlapped"))
-    write_checked_formatted(path, src, changed)
-}
-apply_remove_multi_input_element: fn(path: OSPath, src: String, node_span: SourceSpan, element_span: SourceSpan) -> String Err! {
-    func := checked_func_containing_span(path, src, node_span)
-    if !multi_input_element_belongs_to_graph(func.body, node_span, element_span) -> return .Err(edit_error("not_found", "Canvas multi-input element no longer exists"))
-    remove := comma_separated_remove_span(src, node_span, element_span)
-    changed := FixEngine.apply_edits(src, [edit(remove, "")]) ?? return .Err(edit_error("overlap", "Canvas multi-input delete overlapped"))
-    write_checked_formatted(path, src, changed)
-}
-checked_func_for_graph: fn(path: OSPath, src: String, graph_id: String) -> jet_parser.AST.Func Err! {
-    name_span := graph_id_name_span(graph_id) ?? return .Err(edit_error("bad_request", "Canvas graph id is not a function graph"))
-    checked_func_by_name_span(path, src, name_span)
-}
-checked_func_containing_span: fn(path: OSPath, src: String, span: SourceSpan) -> jet_parser.AST.Func Err! {
-    bundle := checked_bundle(path, src)
-    func := bundle.modules.iter().find_map(fn(module_ref) { find_func_containing_span(module_ref.items, span) }) ?? return .Err(edit_error("not_found", "Canvas source node no longer belongs to a function"))
-    .Ok(func)
-}
-checked_func_by_name_span: fn(path: OSPath, src: String, name_span: SourceSpan) -> jet_parser.AST.Func Err! {
-    bundle := checked_bundle(path, src)
-    func := find_func_by_name_span(bundle, name_span) ?? return .Err(edit_error("not_found", "Canvas graph no longer exists"))
-    .Ok(func)
-}
-checked_bundle: fn(path: OSPath, src: String) -> ProgramBundle Err! {
-    (diags, checked) := check_file(path.to_string_lossy(), .None, true)
-    errors := diags.iter().filter(fn(d) { d.severity == .Error }).cloned().collect()
-    if !errors.is_empty() -> return .Err(diagnostics_error(path, src, errors))
-    bundle := checked ?? return .Err(edit_error("check", "Canvas could not read checked pattern facts"))
-    .Ok(std.box.Box.leak(std.box.Box.new(bundle))) // GATE #4494: retained checked AST allocation.
-}
-PatternTarget: enum {
-    Classic { arm: &jet_parser.AST.SwitchArm; else_body: &[Stmt]?; span: SourceSpan }
-    Switch { arms: &[jet_parser.AST.SwitchArm]; else_body: &[Stmt]?; span: SourceSpan }
-}
-find_pattern_target: fn(src: String, stmts: &[Stmt], node_span: SourceSpan, out: &PatternTarget?) {
-    if out.is_some() -> return
-    loop stmt in stmts {
-        if stmt == {
-            .Switch { subject, arms, else_body, span, .. } -> {
-                classic := jet_parser.AST.is_subjectless_guard(subject, span) && arms.first().is_some_and(fn(arm) { jet_parser.AST.uses_classic_if_spelling(src, span, arm.cond.span()) })
-                if classic {
-                    if arms.first() == .Val(arm) {
-                        pattern_test := if arm.cond == {
-                            .PatternTest { .. } -> true
-                            else -> false
-                        }
-                        if (same_span(arm.cond.span().into(), node_span) || same_span(span.into(), node_span)) && pattern_test {
-                            out = .Val(.Classic { arm: arm, else_body: else_body.as_ref(), span: stmt_text_span(src, stmt) }); return
-                        }
-                    }
-                } else if same_span(span.into(), node_span) {
-                    out = .Val(.Switch { arms: arms, else_body: else_body.as_ref(), span: span.into() }); return
-                }
-                loop arm in arms -> find_pattern_target(src, arm.body, node_span, out)
-                if else_body == .Val(body) -> find_pattern_target(src, body, node_span, out)
+            if span_within(scan.node_span, span) {
+                scan.nested = true
+                return
             }
-            .ComptimeSwitch { arms, else_body, span, .. } -> {
-                if same_span(span.into(), node_span) {
-                    out = .Val(.Switch { arms: arms, else_body: else_body.as_ref(), span: span.into() }); return
-                }
-                loop arm in arms -> find_pattern_target(src, arm.body, node_span, out)
-                if else_body == .Val(body) -> find_pattern_target(src, body, node_span, out)
-            }
-            else -> find_pattern_target_in_children(src, stmt, node_span, out)
         }
+        stmt_each_body(stmt, fn(body: [Stmt]) { find_switched_node(body, scan) })
     }
 }
 
-find_pattern_target_in_children: fn(src: String, stmt: &Stmt, node_span: SourceSpan, out: &PatternTarget?) {
-    if stmt == {
-        .While { body, .. } | .For { body, .. } | .Loop { body, .. } | .CountedLoop { body, .. } | .Unsafe { body, .. } |
-        .Impure { body, .. } | .Reactive { body, .. } | .Shield { body, .. } | .Defer { body, .. } | .Switched { body, .. } |
-        .Region { body, .. } | .Policy { body, .. } | .TaskGroup { body, .. } | .Layout { body, .. } |
-        .AuthorityScope { body, .. } | .ComptimeBlock { body, .. } | .ContextBlock { body, .. } |
-        .Live { body, .. } | .AssumeDet { body, .. } | .Transact { body, .. } | .ScopeMember { body, .. } -> find_pattern_target(src, body, node_span, out)
-        .ComptimeIf { then_body, else_body, .. } -> {
-            find_pattern_target(src, then_body, node_span, out)
-            if else_body == .Val(body) -> find_pattern_target(src, body, node_span, out)
-        }
-        else -> {}
-    }
-}
-RemoveArmInfo: struct { remove_span: SourceSpan; only_arm_without_else: Bool }
-find_pattern_arm_remove_span: fn(src: String, stmts: &[Stmt], pattern_span: SourceSpan, out: &RemoveArmInfo?) {
-    if out.is_some() -> return
+statement_contains_span: fn(stmts: [Stmt], node_span: Span) -> Bool Never! {
     loop stmt in stmts {
-        if stmt == {
-            .Switch { subject, arms, else_body, span } -> {
-                loop arm in arms {
-                    classic := jet_parser.AST.is_subjectless_guard(subject, span) && jet_parser.AST.uses_classic_if_spelling(src, span, arm.cond.span())
-                    if same_span(switch_arm_edit_span(src, subject, span, arm), pattern_span) {
-                        out = .Val(RemoveArmInfo { remove_span: if classic -> stmt_text_span(src, stmt) else -> stmt_arm_text_span(src, arm),
-                            only_arm_without_else: classic || (arms.len() == 1 && else_body.is_none()) }); return
-                    }
-                    find_pattern_arm_remove_span(src, arm.body, pattern_span, out)
-                }
-                if else_body == .Val(body) -> find_pattern_arm_remove_span(src, body, pattern_span, out)
-            }
-            .ComptimeSwitch { arms, else_body, .. } -> {
-                loop arm in arms {
-                    if same_span(arm.cond.span().into(), pattern_span) {
-                        out = .Val(RemoveArmInfo { remove_span: stmt_arm_text_span(src, arm), only_arm_without_else: arms.len() == 1 && else_body.is_none() }); return
-                    }
-                    find_pattern_arm_remove_span(src, arm.body, pattern_span, out)
-                }
-                if else_body == .Val(body) -> find_pattern_arm_remove_span(src, body, pattern_span, out)
-            }
-            else -> find_pattern_arm_remove_span_in_children(src, stmt, pattern_span, out)
-        }
+        if span_within(node_span, jfmt_stmt_span(stmt)) -> return true
     }
+    false
 }
-find_pattern_arm_remove_span_in_children: fn(src: String, stmt: &Stmt, pattern_span: SourceSpan, out: &RemoveArmInfo?) {
-    if stmt == {
-        .While { body, .. } | .For { body, .. } | .Loop { body, .. } | .CountedLoop { body, .. } | .Unsafe { body, .. } |
-        .Impure { body, .. } | .Reactive { body, .. } | .Shield { body, .. } | .Defer { body, .. } | .Switched { body, .. } |
-        .Region { body, .. } | .Policy { body, .. } | .TaskGroup { body, .. } | .Layout { body, .. } |
-        .AuthorityScope { body, .. } | .ComptimeBlock { body, .. } | .ContextBlock { body, .. } |
-        .Live { body, .. } | .AssumeDet { body, .. } | .Transact { body, .. } | .ScopeMember { body, .. } -> find_pattern_arm_remove_span(src, body, pattern_span, out)
-        .ComptimeIf { then_body, else_body, .. } -> {
-            find_pattern_arm_remove_span(src, then_body, pattern_span, out)
-            if else_body == .Val(body) -> find_pattern_arm_remove_span(src, body, pattern_span, out)
-        }
-        else -> {}
+
+// ---- Multi-input lists ----
+
+apply_append_multi_input: fn(checker: LSPChecker, path: String, src: String, node_span: Span, element: String) -> String Err! {
+    func: checked_func_containing_span(checker, path, src, node_span)
+    list: find_list_literal(func.body, node_span)
+    if !list.found -> return Err(edit_error("not_found", "Canvas multi-input node no longer exists"))
+    if node_span.start < 0 || node_span.end > src.len() || node_span.start > node_span.end {
+        return Err(edit_error("bad_request", "Canvas multi-input source span is stale"))
     }
-}
-pattern_span_belongs_to_graph: fn(src: String, stmts: &[Stmt], pattern_span: SourceSpan) -> Bool {
-    found := false; find_pattern_span(src, stmts, pattern_span, found); found
-}
-find_pattern_span: fn(src: String, stmts: &[Stmt], pattern_span: SourceSpan, found: &Bool) {
-    if found -> return
-    loop stmt in stmts {
-        if stmt == {
-            .Switch { subject, arms, else_body, span } -> {
-                loop arm in arms {
-                    if same_span(switch_arm_edit_span(src, subject, span, arm), pattern_span) { found = true; return }
-                    find_pattern_span(src, arm.body, pattern_span, found)
-                }
-                if else_body == .Val(body) -> find_pattern_span(src, body, pattern_span, found)
-            }
-            .ComptimeSwitch { arms, else_body, .. } -> {
-                loop arm in arms {
-                    if same_span(arm.cond.span().into(), pattern_span) { found = true; return }
-                    find_pattern_span(src, arm.body, pattern_span, found)
-                }
-                if else_body == .Val(body) -> find_pattern_span(src, body, pattern_span, found)
-            }
-            else -> find_pattern_span_in_children(src, stmt, pattern_span, found)
-        }
+    insert := 0
+    if list.items.len() > 0 {
+        insert = list.items[list.items.len() - 1].end
+    } else {
+        close: src.slice(node_span.start, node_span.end).last_index_of("]") ?? return Err(edit_error("bad_request", "Canvas multi-input source span is stale"))
+        insert = node_span.start + close
     }
+    prefix: if list.items.len() == 0 -> "" else -> ", "
+    changed: jet_driver_apply_edits(src, [TextEdit]{edit(Span{start: insert, end: insert}, "{prefix}{element}")}) ?? return Err(edit_error("overlap", "Canvas multi-input append overlapped"))
+    write_checked_formatted(checker, path, src, changed)
 }
-find_pattern_span_in_children: fn(src: String, stmt: &Stmt, pattern_span: SourceSpan, found: &Bool) {
-    if stmt == {
-        .While { body, .. } | .For { body, .. } | .Loop { body, .. } | .CountedLoop { body, .. } | .Unsafe { body, .. } |
-        .Impure { body, .. } | .Reactive { body, .. } | .Shield { body, .. } | .Defer { body, .. } | .Switched { body, .. } |
-        .Region { body, .. } | .Policy { body, .. } | .TaskGroup { body, .. } | .Layout { body, .. } |
-        .AuthorityScope { body, .. } | .ComptimeBlock { body, .. } | .ContextBlock { body, .. } |
-        .Live { body, .. } | .AssumeDet { body, .. } | .Transact { body, .. } | .ScopeMember { body, .. } -> find_pattern_span(src, body, pattern_span, found)
-        .ComptimeIf { then_body, else_body, .. } -> {
-            find_pattern_span(src, then_body, pattern_span, found)
-            if else_body == .Val(body) -> find_pattern_span(src, body, pattern_span, found)
-        }
-        else -> {}
-    }
+
+apply_remove_multi_input_element: fn(checker: LSPChecker, path: String, src: String, node_span: Span, element_span: Span) -> String Err! {
+    func: checked_func_containing_span(checker, path, src, node_span)
+    list: find_list_literal(func.body, node_span)
+    if !span_listed(list.items, element_span) -> return Err(edit_error("not_found", "Canvas multi-input element no longer exists"))
+    remove: comma_separated_remove_span(src, node_span, element_span)
+    changed: jet_driver_apply_edits(src, [TextEdit]{edit(remove, "")}) ?? return Err(edit_error("overlap", "Canvas multi-input delete overlapped"))
+    write_checked_formatted(checker, path, src, changed)
 }
-MultiInputTarget: enum { List { span: SourceSpan; item_spans: [SourceSpan] } }
-find_multi_input_target: fn(stmts: &[Stmt], node_span: SourceSpan, out: &MultiInputTarget?) {
-    if out.is_some() -> return
-    loop stmt in stmts -> find_multi_input_in_stmt(stmt, node_span, out)
+
+// The list literal at `node_span` in `body`, with its element spans.
+find_list_literal: fn(body: [Stmt], node_span: Span) -> ListScan Never! {
+    scan := ListScan{node_span: node_span, found: false, items: [Span]{}}
+    ast_visit_body(body, fn(expression: Expr) { note_list_literal(scan, expression) }, true)
+    scan
 }
-find_multi_input_in_stmt: fn(stmt: &Stmt, node_span: SourceSpan, out: &MultiInputTarget?) {
-    if out.is_some() -> return
-    if stmt == {
-        .Val(b) -> find_multi_input_in_expr(b.init, node_span, out)
-        .Assign { target, value, .. } -> { find_multi_input_in_lvalue(target, node_span, out); find_multi_input_in_expr(value, node_span, out) }
-        .Expr(e) | .BreakValue(e, _) | .BreakLabelValue(_, _, e, _) | .Return(.Val(e), _) | .Yield(e, _) -> find_multi_input_in_expr(e, node_span, out)
-        .DeferClose { close, .. } -> find_multi_input_in_expr(close, node_span, out)
-        .Switch { subject, arms, else_body, .. } | .ComptimeSwitch { subject, arms, else_body, .. } -> {
-            find_multi_input_in_expr(subject, node_span, out)
-            loop arm in arms { find_multi_input_in_expr(arm.cond, node_span, out); find_multi_input_target(arm.body, node_span, out) }
-            if else_body == .Val(body) -> find_multi_input_target(body, node_span, out)
-        }
-        .While { cond, body, .. } -> { find_multi_input_in_expr(cond, node_span, out); find_multi_input_target(body, node_span, out) }
-        .For { kind, body, .. } -> {
-            if kind == {
-                .Range { start, end, step, exclusive: _ } -> {
-                    find_multi_input_in_expr(start, node_span, out); find_multi_input_in_expr(end, node_span, out)
-                    if step == .Val(step) -> find_multi_input_in_expr(step, node_span, out)
-                }
-                .In { collection, step } -> {
-                    find_multi_input_in_expr(collection, node_span, out)
-                    if step == .Val(step) -> find_multi_input_in_expr(step, node_span, out)
-                }
-            }
-            find_multi_input_target(body, node_span, out)
-        }
-        .CountedLoop { init, cond, step, body, .. } -> {
-            find_multi_input_in_expr(init.init, node_span, out); find_multi_input_in_expr(cond, node_span, out)
-            if step == .Val(step) -> find_multi_input_in_stmt(step, node_span, out)
-            find_multi_input_target(body, node_span, out)
-        }
-        .Loop { body, .. } | .Unsafe { body, .. } | .Impure { body, .. } | .Reactive { body, .. } |
-        .Shield { body, .. } | .Defer { body, .. } | .Switched { body, .. } | .Region { body, .. } | .Policy { body, .. } |
-        .TaskGroup { body, .. } | .Layout { body, .. } | .AuthorityScope { body, .. } | .ComptimeBlock { body, .. } |
-        .ContextBlock { body, .. } | .Live { body, .. } | .AssumeDet { body, .. } | .Transact { body, .. } |
-        .ScopeMember { body, .. } -> find_multi_input_target(body, node_span, out)
-        .ComptimeIf { cond, then_body, else_body, .. } -> {
-            find_multi_input_in_expr(cond, node_span, out); find_multi_input_target(then_body, node_span, out)
-            if else_body == .Val(body) -> find_multi_input_target(body, node_span, out)
-        }
-        .Return(.None, _) | .Break(_) | .Continue(_) | .BreakLabel(_, _) | .ContinueLabel(_, _) -> {}
-    }
-}
-find_multi_input_in_lvalue: fn(target: &LValue, node_span: SourceSpan, out: &MultiInputTarget?) {
-    if target == {
-        .Index { base, index, .. } -> { find_multi_input_in_expr(base, node_span, out); find_multi_input_in_expr(index, node_span, out) }
-        .Field { base, .. } -> find_multi_input_in_expr(base, node_span, out), _ -> {}
-    }
-}
-find_multi_input_in_expr: fn(expr: &Expr, node_span: SourceSpan, out: &MultiInputTarget?) {
-    if out.is_some() -> return
-    if expr == {
-        .ListLit(items, span, _) && same_span(span.into(), node_span) -> out = .Val(.List { span: span.into(), item_spans: items.iter().map(fn(item) { item.span().into() }).collect() })
-        else -> walk_expr_children_for_multi_input(expr, node_span, out)
-    }
-}
-walk_expr_children_for_multi_input: fn(expr: &Expr, node_span: SourceSpan, out: &MultiInputTarget?) {
-    if expr == {
-        .Call(c, _) -> { loop arg in c.args -> find_multi_input_in_expr(arg.expr, node_span, out) }
-        .MethodCall { receiver, args, .. } -> {
-            find_multi_input_in_expr(receiver, node_span, out)
-            loop arg in args -> find_multi_input_in_expr(arg.expr, node_span, out)
-        }
-        .ListLit(items, _, _) -> { loop item in items -> find_multi_input_in_expr(item, node_span, out) }
-        .Index { base, index, .. } -> { find_multi_input_in_expr(base, node_span, out); find_multi_input_in_expr(index, node_span, out) }
-        .Slice { base, start, end, range, .. } -> {
-            find_multi_input_in_expr(base, node_span, out)
-            if range == .Val(range) { find_multi_input_in_expr(range, node_span, out) } else { find_multi_input_in_expr(start, node_span, out); find_multi_input_in_expr(end, node_span, out) }
-        }
-        .MapLit(items, _, _) -> {
-            loop (key, value) in items { find_multi_input_in_expr(key, node_span, out); find_multi_input_in_expr(value, node_span, out) }
-        }
-        .Binary(_, left, right, _, _) -> { find_multi_input_in_expr(left, node_span, out); find_multi_input_in_expr(right, node_span, out) }
-        .Unary(_, expr, _, _) | .Try(expr, ..) | .Present(expr, _, _) | .Ok(expr, _, _) | .Err(expr, _, _) |
-        .Paren(expr, _, _) | .Copy(expr, _, _) | .Field(expr, _, _, _) | .RawOf(expr, _, _) | .Tainted(expr, _, _, _) -> find_multi_input_in_expr(expr, node_span, out)
-        .PatternTest { subject, .. } -> find_multi_input_in_expr(subject, node_span, out)
-        .If { cond, then_body, then_value, else_body, else_value, .. } -> {
-            find_multi_input_in_expr(cond, node_span, out); find_multi_input_target(then_body, node_span, out)
-            find_multi_input_in_expr(then_value, node_span, out); find_multi_input_target(else_body, node_span, out)
-            find_multi_input_in_expr(else_value, node_span, out)
-        }
-        .TupleLit(items, _, _, _) -> { loop (_, item) in items -> find_multi_input_in_expr(item, node_span, out) }
-        .StructLit { fields, .. } -> { for (_, _, value) in fields -> find_multi_input_in_expr(value, node_span, out) }
-        .EnumLit { args, .. } -> {
-            loop arg in args {
-                if arg == { .Positional(expr) | .Named { expr, .. } -> find_multi_input_in_expr(expr, node_span, out) }
-            }
-        }
-        else -> {}
+
+note_list_literal: fn(scan: &ListScan, expression: Expr) Never! {
+    if scan.found -> return
+    if expression == .ListLit(elements, span, _) {
+        if !same_span(span, scan.node_span) -> return
+        scan.found = true
+        loop element in elements -> scan.items.push(expr_span(element))
     }
 }
 
-multi_input_element_belongs_to_graph: fn(stmts: [Stmt], node_span: SourceSpan, element_span: SourceSpan) -> Bool {
-    target := MultiInputTarget?{.None}; find_multi_input_target(stmts, node_span, target)
-    if target == {
-        .Val(.List { item_spans, .. }) -> item_spans.iter().any(fn(item_span) { same_span(item_span, element_span) })
-        .None -> false
+span_listed: fn(spans: [Span], wanted: Span) -> Bool Never! {
+    loop span in spans {
+        if same_span(span, wanted) -> return true
     }
+    false
 }
-normalize_pattern_arm_head: fn(pattern: String) -> String {
-    trimmed := pattern.trim() // #4303
-    head := trimmed.strip_prefix("==").map(fn(s) { s.trim() }).unwrap_or(trimmed).trim_end_matches("->").trim() // #4303
-    head.to_string()
-}
-fresh_arm_body: fn(func: jet_parser.AST.Func) -> String {
-    if func.return_type.as_ref().map(jet_parser.AST.Type.name) == {
-        .Val(ret) && ret != "Void" -> "return {default_arg_for_type(ret)}", _ -> "print(\"canvas arm\")"
+
+// `element` with the comma after it, or else the comma before it.
+comma_separated_remove_span: fn(src: String, container: Span, element: Span) -> Span Err! {
+    if container.start < 0 || container.end > src.len() || container.start > container.end {
+        return Err(edit_error("bad_request", "Canvas multi-input span is stale"))
     }
-}
-switch_arm_edit_span: fn(src: String, subject: &Expr, switch_span: jet_foundation.Span, arm: &jet_parser.AST.SwitchArm) -> SourceSpan {
-    if jet_parser.AST.is_subjectless_guard(subject, switch_span) && jet_parser.AST.uses_classic_if_spelling(src, switch_span, arm.cond.span()) {
-        if arm.cond == .PatternTest { pattern, .. } -> return span_through_closing_parens(src, pattern.span())
+    text: src.slice(container.start, container.end)
+    rel_start: clamp_offset(element.start - container.start, text.len())
+    rel_end: clamp_offset(element.end - container.start, text.len())
+    if text.slice(rel_end, text.len()).index_of(",") == .Val(comma) {
+        return Ok(Span{start: element.start, end: consume_trailing_space(src, element.end + comma + 1, container.end)})
     }
-    arm.cond.span().into()
-}
-add_arm_to_classic_switch: fn(src: String, arm: &jet_parser.AST.SwitchArm, else_body: &[Stmt]?, span: SourceSpan, new_head: String, fresh_body: String) -> String Err! {
-    (subject, pattern) := if arm.cond == {
-        .PatternTest { subject, pattern, .. } -> (_0: subject, _1: pattern)
-        else -> { return .Err(edit_error("bad_request", "Canvas branch is not a pattern branch")) }
+    before: text.slice(0, rel_start)
+    if before.last_index_of(",") == .Val(comma) {
+        return Ok(Span{start: container.start + consume_leading_space_back(before, comma), end: element.end})
     }
-    subject_src := snippet(src, subject.span())
-    pattern_span := span_through_closing_parens(src, pattern.span())
-    head := src.get(pattern_span.start..pattern_span.end).map(fn(s) { s.to_owned() }).unwrap_or_else(fn() { snippet(src, pattern.span()) })
-    then_body := block_body_source(src, arm.body, 2)
-    else_text := if {
-        else_body == .Val(body) -> {
-            body_text := block_body_source(src, body, 2)
-            "    else -> {{\n{body_text}    }}\n"
-        }
-        else -> { String.new() }
-    }
-    replacement := "if {subject_src} == {{\n    {head} -> {{\n{then_body}    }}\n    {new_head} -> {{\n        {fresh_body}\n    }}\n{else_text}}}\n"
-    FixEngine.apply_edits(src, [edit(span, replacement)]).map_err(fn(_) { edit_error("overlap", "Canvas pattern branch conversion overlapped") })
+    Ok(Span{start: element.start, end: element.end})
 }
-block_body_source: fn(src: String, stmts: &[Stmt], levels: USize) -> String {
-    if stmts.is_empty() -> return String.new()
-    out := String.new(); indent := "    ".repeat(levels)
-    loop stmt in stmts {
-        span := stmt_text_span(src, stmt)
-        text := src.get(span.start..span.end).unwrap_or("").trim_matches('\n').trim() // #4303
-        loop line in text.lines() {
-            trimmed := line.trim() // #4303
-            out.push_str(indent); out.push_str(trimmed); out.push('\n')
-        }
-    }
-    out
-}
-first_stmt_start: fn(stmts: [Stmt]) -> USize? { stmts.first().map(fn(stmt) { stmt.span().start }) }
-dispatch_body_insert_offset: fn(src: String, span: SourceSpan) -> USize {
-    src.get(span.start..span.end).and_then(fn(chunk) { chunk.find('{').map(fn(idx) { line_after(src, span.start + idx) }) }).unwrap_or(span.end)
-}
-stmt_arm_text_span: fn(src: String, arm: &jet_parser.AST.SwitchArm) -> SourceSpan {
-    SourceSpan { start: line_start(src, arm.span.start), end: line_after(src, arm.span.end) }
-}
-comma_separated_remove_span: fn(src: String, container: SourceSpan, element: SourceSpan) -> SourceSpan Err! {
-    container_text := src.get(container.start..container.end) ?? return .Err(edit_error("bad_request", "Canvas multi-input span is stale"))
-    rel_start := element.start.saturating_sub(container.start); rel_end := element.end.saturating_sub(container.start)
-    before := container_text[0..<rel_start.min(container_text.len())]; after := container_text[rel_end.min(container_text.len())..<container_text.len()]
-    if after.find(',') == .Val(pos) {
-        end := element.end + pos + 1
-        return .Ok(SourceSpan { start: element.start, end: consume_trailing_space(src, end, container.end) })
-    }
-    if before.rfind(',') == .Val(pos) {
-        start := container.start + consume_leading_space_back(before, pos)
-        return .Ok(SourceSpan { start: start, end: element.end })
-    }
-    .Ok(element)
-}
-consume_trailing_space: fn(src: String, offset: USize, limit: USize) -> USize {
-    loop offset < limit && src.as_bytes().get(offset).is_some_and(fn(b) { b.is_ascii_whitespace() }) -> offset += 1
+
+clamp_offset: fn(offset: Int, limit: Int) -> Int Never! {
+    if offset < 0 -> return 0
+    if offset > limit -> return limit
     offset
 }
-consume_leading_space_back: fn(before: String, comma: USize) -> USize {
-    start := comma
-    loop start > 0 && before.as_bytes()[start - 1].is_ascii_whitespace() -> start -= 1
-    start
-}
-find_func_containing_span: fn(items: [Item], span: SourceSpan) -> jet_parser.AST.Func? {
-    loop item in items {
-        if item == {
-            .Func(f) && span_within(span, func_source_span(f)) -> { return .Val(f) }
-            .Struct(s) -> { loop method in s.methods { if span_within(span, func_source_span(method)) -> return .Val(method) } }
-            .Impl(i) -> { loop method in i.methods { if span_within(span, func_source_span(method)) -> return .Val(method) } }
-            .CodeModule(m) -> { if m.body == .Val(body) && find_func_containing_span(body, span) == .Val(found) -> return .Val(found) } else -> {}
-        }
-    }
-    .None
-}
-span_within: fn(inner: SourceSpan, outer: SourceSpan) -> Bool { inner.start >= outer.start && inner.end <= outer.end }
-find_func_by_name_span: fn(bundle: ProgramBundle, name_span: SourceSpan) -> jet_parser.AST.Func? {
-    fn find_in_items(items: [Item], name_span: SourceSpan) -> jet_parser.AST.Func? {
-        loop item in items {
-            if item == {
-                .Func(f) && same_span(f.name_span.into(), name_span) -> { return .Val(f) }
-                .Struct(s) -> { loop method in s.methods { if same_span(method.name_span.into(), name_span) -> return .Val(method) } }
-                .Impl(i) -> { loop method in i.methods { if same_span(method.name_span.into(), name_span) -> return .Val(method) } }
-                .CodeModule(m) -> { if m.body == .Val(body) && find_in_items(body, name_span) == .Val(found) -> return .Val(found) } else -> {}
-            }
-        }
-        .None
-    }
-    loop module_ref in bundle.modules { if find_in_items(module_ref.items, name_span) == .Val(found) -> return .Val(found) }
-    .None
-}
-collect_statement_locs: fn(src: String, stmts: &[Stmt], block: &[USize], out: &[StatementLoc]) {
-    loop (index, stmt) in stmts.iter().enumerate() {
-        out.push(StatementLoc { anchor: stmt_canvas_anchor(stmt).into(), source: stmt_source_span(stmt), full: stmt_text_span(src, stmt),
-            block: block.clone(), index: index,
-            is_guard: if stmt == {
-                .Switch { .. } | .ComptimeSwitch { .. } -> true
-                else -> false
-            },
-            is_expr: if stmt == {
-                .Expr(_) -> true
-                else -> false
-            },
-            guard_span: if stmt == {
-                .Switch { arms, .. } | .ComptimeSwitch { arms, .. } -> arms.first().map(fn(arm) { arm.cond.span().into() })
-                else -> .None
-            } })
-        block.push(index); collect_child_statement_locs(src, stmt, block, out); _: block.pop()
-    }
-}
-collect_child_statement_locs: fn(src: String, stmt: &Stmt, block: &[USize], out: &[StatementLoc]) {
-    if stmt == {
-        .While { body, .. } | .For { body, .. } | .Loop { body, .. } | .CountedLoop { body, .. } | .Unsafe { body, .. } |
-        .Impure { body, .. } | .Reactive { body, .. } | .Shield { body, .. } | .Defer { body, .. } | .Switched { body, .. } |
-        .Region { body, .. } | .Policy { body, .. } | .TaskGroup { body, .. } | .Layout { body, .. } |
-        .AuthorityScope { body, .. } | .ComptimeBlock { body, .. } | .ContextBlock { body, .. } |
-        .Live { body, .. } | .AssumeDet { body, .. } | .Transact { body, .. } | .ScopeMember { body, .. } -> {
-            block.push(0); collect_statement_locs(src, body, block, out); _: block.pop()
-        }
-        .Switch { arms, else_body, .. } | .ComptimeSwitch { arms, else_body, .. } -> {
-            loop (i, arm) in arms.iter().enumerate() { block.push(i); collect_statement_locs(src, arm.body, block, out); _: block.pop() }
-            if else_body == .Val(body) { block.push(arms.len()); collect_statement_locs(src, body, block, out); _: block.pop() }
-        }
-        .ComptimeIf { then_body, else_body, .. } -> {
-            block.push(0); collect_statement_locs(src, then_body, block, out); _: block.pop()
-            if else_body == .Val(body) { block.push(1); collect_statement_locs(src, body, block, out); _: block.pop() }
-        }
-        else -> {}
-    }
-}
-stmt_canvas_anchor: fn(stmt: Stmt) -> jet_foundation.Span {
-    if stmt == {
-        .Val(b) -> b.name_span, .Assign { target, .. } -> target.span(), .Expr(e) -> e.span()
-        .Return(_, span) | .Break(span) | .Continue(span) | .BreakLabel(_, span) | .ContinueLabel(_, span) |
-        .BreakValue(_, span) | .BreakLabelValue(_, _, _, span) -> span, _ -> stmt.span()
-    }
-}
-stmt_text_span: fn(src: String, stmt: &Stmt) -> SourceSpan {
-    span := if stmt == {
-        .Expr(expr) -> source_expression_span(src, expr)
-        else -> stmt_source_span(stmt)
-    }
-    SourceSpan { start: line_start(src, span.start), end: line_after(src, span.end) }
-}
-stmt_source_span: fn(stmt: Stmt) -> SourceSpan {
-    if stmt == {
-        .Val(b) -> SourceSpan { start: b.name_span.start, end: b.init.span().end }
-        .Assign { target, value, .. } -> SourceSpan { start: target.span().start, end: value.span().end }
-        .Expr(e) -> e.span().into()
-        .Return(.Val(e), span) | .BreakValue(e, span) | .BreakLabelValue(_, _, e, span) -> SourceSpan { start: span.start, end: e.span().end }
-        else -> stmt.span().into()
-    }
-}
-same_span: fn(a: SourceSpan, b: SourceSpan) -> Bool { a.start == b.start && a.end == b.end }
-write_checked_formatted: fn(path: OSPath, before: String, candidate: String) -> String Err! {
-    formatted := jet_driver.Formatter.format_source(candidate) ?? return .Err(diagnostics_error(path, candidate, err))
-    write_checked_candidate(path, before, formatted)
-}
-write_checked_source: fn(path: OSPath, before: String, candidate: String) -> String Err! { write_checked_candidate(path, before, candidate) }
-write_checked_candidate: fn(path: OSPath, before: String, candidate: String) -> String Err! {
-    abs := canonical_path(path)
-    (diags, _, _) := jet_driver.Driver.check_file_with_effect_facts(path.to_string_lossy(), .Val((_0: abs, _1: candidate)), true)
-    errors := diags.iter().filter(fn(d) { d.severity == .Error }).cloned().collect()
-    if !errors.is_empty() -> return .Err(diagnostics_error(path, candidate, errors))
-    changed := candidate != before
-    if changed {
-        write_source_if_unchanged(path, before, candidate).map_err(fn(error) { if error == {
-            .Conflict -> {
-                current_revision := read_source_without_symlinks(path).map(fn(source) { source_revision(source) }).unwrap_or_else(fn(_) { "missing".to_string() })
-                edit_conflict("source changed while this Canvas edit was prepared", current_revision)
-            }
-            .Io(error) -> edit_error("io", error.to_string())
-        } })? // GATE #4494: atomic retained-descriptor source writer.
-    }
-    .Ok(edit_ok_source(changed, candidate))
+
+consume_trailing_space: fn(src: String, offset: Int, limit: Int) -> Int Never! {
+    bytes: src.bytes()
+    cursor := offset
+    loop cursor < limit && cursor < bytes.len() && is_space_byte(Int{bytes[cursor]}) -> cursor += 1
+    cursor
 }
 
+consume_leading_space_back: fn(before: String, comma: Int) -> Int Never! {
+    bytes: before.bytes()
+    start := comma
+    loop start > 0 && is_space_byte(Int{bytes[start - 1]}) -> start -= 1
+    start
+}
+
+// ---- Checked functions ----
+
+// One checked module of a Canvas file: the check's modules, the position of
+// the file's own, and the semantic index the check built.
+CheckedSource: struct {
+    modules: [JetDriverDocModule]
+    at: Int
+    index: SemIndex?
+}
+
+// Check `src` as `path`; an error diagnostic refuses the edit.
+checked_source: fn(checker: LSPChecker, path: String, src: String) -> CheckedSource Err! {
+    checked: checker.check(path, [LSPOverlay]{LSPOverlay{path: path, source: src}})
+    if jet_driver_has_errors(checked.diagnostics) -> return Err(diagnostics_error(path, src, error_diagnostics(checked.diagnostics)))
+    at: canvas_event_module(path, src, checked.modules) ?? return Err(edit_error("check", "Canvas could not find this file among its checked modules"))
+    Ok(CheckedSource{modules: checked.modules, at: at, index: checked.index})
+}
+
+error_diagnostics: fn(diagnostics: [Diagnostic]) -> [Diagnostic] Never! {
+    errors := [Diagnostic]{}
+    loop at in 0..<diagnostics.len() {
+        if diagnostics[at].severity == DIAGNOSTIC_ERROR -> errors.push(diagnostics[at])
+    }
+    errors
+}
+
+checked_func_for_graph: fn(checker: LSPChecker, path: String, src: String, graph_id: String) -> CanvasFunc Err! {
+    name_span: graph_id_name_span(graph_id) ?? return Err(edit_error("bad_request", "Canvas graph id is not a function graph"))
+    checked: checked_source(checker, path, src)
+    found: find_func_by_name_span(checked.modules[checked.at].items, name_span) ?? return Err(edit_error("not_found", "Canvas graph no longer exists"))
+    Ok(found)
+}
+
+checked_func_containing_span: fn(checker: LSPChecker, path: String, src: String, span: Span) -> CanvasFunc Err! {
+    checked: checked_source(checker, path, src)
+    found: find_func_containing_span(checked.modules[checked.at].items, span) ?? return Err(edit_error("not_found", "Canvas source node no longer belongs to a function"))
+    Ok(found)
+}
+
+canvas_func: fn(function: Func) -> CanvasFunc Never! {
+    return_type := String?{None}
+    if function.return_type == .Val(ty) -> return_type = Val(type_name(ty))
+    CanvasFunc{name: function.name, name_span: function.name_span, span: canvas_func_span(function), body: function.body, return_type: return_type}
+}
+
+canvas_func_span: fn(function: Func) -> Span Never! {
+    start: if function.span.start < function.name_span.start -> function.span.start else -> function.name_span.start
+    Span{start: start, end: function.span.end}
+}
+
+find_func_by_name_span: fn(items: [Item], name_span: Span) -> CanvasFunc? Never! {
+    loop item in items {
+        if item == .Func(function) {
+            if same_span(function.name_span, name_span) -> return Val(canvas_func(function))
+        } else if item == .Struct(structure) {
+            loop method in structure.methods {
+                if same_span(method.name_span, name_span) -> return Val(canvas_func(method))
+            }
+        } else if item == .Impl(implementation) {
+            loop method in implementation.methods {
+                if same_span(method.name_span, name_span) -> return Val(canvas_func(method))
+            }
+        } else if item == .CodeModule(code) {
+            if code.body == .Val(body) {
+                if find_func_by_name_span(body, name_span) == .Val(found) -> return Val(found)
+            }
+        }
+    }
+    None
+}
+
+find_func_containing_span: fn(items: [Item], span: Span) -> CanvasFunc? Never! {
+    loop item in items {
+        if item == .Func(function) {
+            if span_within(span, canvas_func_span(function)) -> return Val(canvas_func(function))
+        } else if item == .Struct(structure) {
+            loop method in structure.methods {
+                if span_within(span, canvas_func_span(method)) -> return Val(canvas_func(method))
+            }
+        } else if item == .Impl(implementation) {
+            loop method in implementation.methods {
+                if span_within(span, canvas_func_span(method)) -> return Val(canvas_func(method))
+            }
+        } else if item == .CodeModule(code) {
+            if code.body == .Val(body) {
+                if find_func_containing_span(body, span) == .Val(found) -> return Val(found)
+            }
+        }
+    }
+    None
+}
+
+// ---- Statement spans ----
+
+collect_statement_locs: fn(src: String, stmts: [Stmt], block: &[Int], out: &[StatementLoc]) Never! {
+    loop (at, stmt) in stmts {
+        path: loop step in block -> step
+        out.push(StatementLoc{anchor: stmt_execution_anchor(stmt), source: stmt_source_span(stmt), full: stmt_text_span(src, stmt), block: path, index: at, is_guard: stmt_is_switch(stmt), is_expr: stmt_is_expr(stmt), guard_span: stmt_guard_span(stmt)})
+        block.push(at)
+        stmt_each_branch(stmt, fn(branch: Int, body: [Stmt]) { collect_branch_locs(src, body, block, out, branch) })
+        _: block.pop()
+    }
+}
+
+collect_branch_locs: fn(src: String, body: [Stmt], block: &[Int], out: &[StatementLoc], branch: Int) Never! {
+    block.push(branch)
+    collect_statement_locs(src, body, block, out)
+    _: block.pop()
+}
+
+stmt_is_switch: fn(stmt: Stmt) -> Bool Never! {
+    if stmt == .Switch(_, _, _, _) -> return true
+    if stmt == .ComptimeSwitch(_, _, _, _) -> return true
+    false
+}
+
+stmt_is_expr: fn(stmt: Stmt) -> Bool Never! {
+    if stmt == .Expr(_) -> return true
+    false
+}
+
+stmt_guard_span: fn(stmt: Stmt) -> Span? Never! {
+    if stmt == .Switch(_, arms, _, _) {
+        if arms.len() > 0 -> return Val(expr_span(arms[0].cond))
+    }
+    if stmt == .ComptimeSwitch(_, arms, _, _) {
+        if arms.len() > 0 -> return Val(expr_span(arms[0].cond))
+    }
+    None
+}
+
+// The whole lines a statement's source takes.
+stmt_text_span: fn(src: String, stmt: Stmt) -> Span Never! {
+    span: if stmt == .Expr(expression) -> source_expression_span(src, expression) else -> stmt_source_span(stmt)
+    Span{start: line_start(src, span.start), end: line_after(src, span.end)}
+}
+
+stmt_source_span: fn(stmt: Stmt) -> Span Never! {
+    if stmt == .Val(binding) -> return Span{start: binding.name_span.start, end: expr_span(binding.init).end}
+    if stmt == .Assign(target, _, _, value) -> return Span{start: lvalue_span(target).start, end: expr_span(value).end}
+    if stmt == .Expr(expression) -> return expr_span(expression)
+    if stmt == .Return(value, span) {
+        if value == .Val(expression) -> return Span{start: span.start, end: expr_span(expression).end}
+    }
+    if stmt == .BreakValue(value, span) -> return Span{start: span.start, end: expr_span(value).end}
+    if stmt == .BreakLabelValue(_, _, value, span) -> return Span{start: span.start, end: expr_span(value).end}
+    jfmt_stmt_span(stmt)
+}
+
+// An expression's source from its first through its last byte: a call
+// through its closing parenthesis, a `?` included.
+source_expression_span: fn(src: String, expression: Expr) -> Span Never! {
+    span: expr_span(expression)
+    start := span.start
+    end := span.end
+    if expression == .Call(call, _) {
+        start = call.name_span.start
+        end = call_source_end(src, call.name_span.end, span.end)
+    } else if expression == .MethodCall(receiver, _, method_span, _, _, _, _) {
+        start = source_expression_span(src, receiver).start
+        end = call_source_end(src, method_span.end, span.end)
+    } else if expression == .Try(value, try_span, _, _, _) {
+        inner: source_expression_span(src, value)
+        start = inner.start
+        end = if inner.end > try_span.end -> inner.end else -> try_span.end
+        bytes: src.bytes()
+        if end < bytes.len() && (Int{bytes[end]}) == 63 -> end += 1
+    } else if expression == .OrFallback(value, _, _, _, _) {
+        start = source_expression_span(src, value).start
+    }
+    Span{start: start, end: if end > start -> end else -> start}
+}
+
+call_source_end: fn(src: String, name_end: Int, fallback_end: Int) -> Int Never! {
+    open: find_unquoted_byte(src, name_end, 40) ?? return fallback_end
+    close: matching_delimiter(src, open, 40, 41) ?? return fallback_end
+    close + 1
+}
+
+// Each statement body directly inside `stmt`.
+stmt_each_body: fn(stmt: Stmt, visit: fn([Stmt]) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+    if stmt == {
+        .While(_, body, _, _, _) | .For(_, _, _, _, body, _, _, _, _) | .Loop(body, _, _, _) | .CountedLoop(_, _, _, body, _, _, _) | .Unsafe(_, _, body, _) | .Impure(_, _, body, _) | .Reactive(body, _) | .Shield(body, _) | .Switched(_, body, _) | .Region(_, _, body, _) | .Policy(_, body, _) | .TaskGroup(_, _, _, body, _) | .Layout(_, _, body, _) | .AuthorityScope(_, _, _, body, _) | .ComptimeBlock(body, _, _) | .ContextBlock(_, body, _) | .Live(body, _) | .AssumeDet(_, _, body, _) | .Transact(_, _, body, _, _) | .ScopeMember(_, _, _, _, body, _, _, _) | .Defer(body, _) -> visit(body)
+        .Switch(_, arms, else_body, _) | .ComptimeSwitch(_, arms, else_body, _) -> {
+            loop arm in arms -> visit(arm.body)
+            if else_body == .Val(body) -> visit(body)
+        }
+        .ComptimeIf(_, _, then_body, else_body, _, _) -> {
+            visit(then_body)
+            if else_body == .Val(body) -> visit(body)
+        }
+        .Expr(_) | .Val(_) | .Assign(_, _, _, _) | .Return(_, _) | .Break(_) | .BreakValue(_, _) | .Continue(_) | .BreakLabel(_, _) | .BreakLabelValue(_, _, _, _) | .ContinueLabel(_, _) | .Yield(_, _) | .DeferClose(_, _) -> {}
+    }
+}
+
+// Each statement body directly inside `stmt` with its branch number: 0 for a
+// single body, the arm's position or the arm count for `else`, 0 and 1 for
+// a comptime if's then and else.
+stmt_each_branch: fn(stmt: Stmt, visit: fn(Int, [Stmt]) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+    if stmt == {
+        .While(_, body, _, _, _) | .For(_, _, _, _, body, _, _, _, _) | .Loop(body, _, _, _) | .CountedLoop(_, _, _, body, _, _, _) | .Unsafe(_, _, body, _) | .Impure(_, _, body, _) | .Reactive(body, _) | .Shield(body, _) | .Switched(_, body, _) | .Region(_, _, body, _) | .Policy(_, body, _) | .TaskGroup(_, _, _, body, _) | .Layout(_, _, body, _) | .AuthorityScope(_, _, _, body, _) | .ComptimeBlock(body, _, _) | .ContextBlock(_, body, _) | .Live(body, _) | .AssumeDet(_, _, body, _) | .Transact(_, _, body, _, _) | .ScopeMember(_, _, _, _, body, _, _, _) | .Defer(body, _) -> visit(0, body)
+        .Switch(_, arms, else_body, _) | .ComptimeSwitch(_, arms, else_body, _) -> {
+            loop (at, arm) in arms -> visit(at, arm.body)
+            if else_body == .Val(body) -> visit(arms.len(), body)
+        }
+        .ComptimeIf(_, _, then_body, else_body, _, _) -> {
+            visit(0, then_body)
+            if else_body == .Val(body) -> visit(1, body)
+        }
+        .Expr(_) | .Val(_) | .Assign(_, _, _, _) | .Return(_, _) | .Break(_) | .BreakValue(_, _) | .Continue(_) | .BreakLabel(_, _) | .BreakLabelValue(_, _, _, _) | .ContinueLabel(_, _) | .Yield(_, _) | .DeferClose(_, _) -> {}
+    }
+}
+
+// ---- Spans and source bytes ----
+
+same_span: fn(left: Span, right: Span) -> Bool Never! {
+    left.start == right.start && left.end == right.end
+}
+
+span_within: fn(inner: Span, outer: Span) -> Bool Never! {
+    inner.start >= outer.start && inner.end <= outer.end
+}
+
+spans_cross: fn(left: Span, right: Span) -> Bool Never! {
+    left.start < right.end && right.start < left.end
+}
+
+// The first `wanted` byte at or after `start` outside quotes and `//` comments.
+find_unquoted_byte: fn(src: String, start: Int, wanted: Int) -> Int? Never! {
+    bytes: src.bytes()
+    quote := 0
+    escaped := false
+    comment := false
+    cursor := if start < 0 -> 0 else -> start
+    loop cursor < bytes.len() {
+        byte: Int{bytes[cursor]}
+        following: if cursor + 1 < bytes.len() -> Int{bytes[cursor + 1]} else -> 0
+        if comment {
+            if byte == 10 -> comment = false
+        } else if quote != 0 {
+            if escaped {
+                escaped = false
+            } else if byte == 92 {
+                escaped = true
+            } else if byte == quote {
+                quote = 0
+            }
+        } else if byte == 34 || byte == 39 {
+            quote = byte
+        } else if byte == 47 && following == 47 {
+            comment = true
+            cursor += 1
+        } else if byte == wanted {
+            return Val(cursor)
+        }
+        cursor += 1
+    }
+    None
+}
+
+// The `closing` byte that balances the `opening` byte at `open`.
+matching_delimiter: fn(src: String, open: Int, opening: Int, closing: Int) -> Int? Never! {
+    bytes: src.bytes()
+    depth := 0
+    quote := 0
+    escaped := false
+    comment := false
+    cursor := if open < 0 -> 0 else -> open
+    loop cursor < bytes.len() {
+        byte: Int{bytes[cursor]}
+        following: if cursor + 1 < bytes.len() -> Int{bytes[cursor + 1]} else -> 0
+        if comment {
+            if byte == 10 -> comment = false
+        } else if quote != 0 {
+            if escaped {
+                escaped = false
+            } else if byte == 92 {
+                escaped = true
+            } else if byte == quote {
+                quote = 0
+            }
+        } else if byte == 34 || byte == 39 {
+            quote = byte
+        } else if byte == 47 && following == 47 {
+            comment = true
+            cursor += 1
+        } else if byte == opening {
+            depth += 1
+        } else if byte == closing {
+            if depth > 0 -> depth -= 1
+            if depth == 0 -> return Val(cursor)
+        }
+        cursor += 1
+    }
+    None
+}
+
+// The first `word` at or after `start` that is not part of a longer name.
+find_word: fn(src: String, start: Int, word: String) -> Int? Never! {
+    bytes: src.bytes()
+    cursor := if start < 0 -> 0 else -> start
+    loop cursor < bytes.len() {
+        relative: src.slice(cursor, bytes.len()).index_of(word) ?? return None
+        found: cursor + relative
+        after: found + word.len()
+        before_ok: found == 0 || !ident_byte(Int{bytes[found - 1]}, false)
+        after_ok: after >= bytes.len() || !ident_byte(Int{bytes[after]}, false)
+        if before_ok && after_ok -> return Val(found)
+        cursor = after
+    }
+    None
+}
