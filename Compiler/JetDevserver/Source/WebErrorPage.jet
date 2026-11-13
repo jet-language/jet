@@ -215,9 +215,9 @@ WebErrorEdit: struct {
     validate: fn(self) WebErrorPageError! {
         validate_source_identity(self.source_id)
         self.span.validate()
-        if self.new_text.bytes().len() > MAX_WEB_ERROR_TEXT_BYTES -> return Err(WebErrorPageError.TextTooLarge(field: "fix edit"))
-        if web_error_has_disallowed_control(self.new_text) -> return Err(WebErrorPageError.ControlCharacter(field: "fix edit"))
-        if contains_sensitive_marker(self.new_text) -> return Err(WebErrorPageError.UnsafeContent(field: "fix edit"))
+        if self.new_text.bytes().len() > MAX_WEB_ERROR_TEXT_BYTES -> return Err(WebErrorPageError.TextTooLarge{field: "fix edit"})
+        if web_error_has_disallowed_control(self.new_text) -> return Err(WebErrorPageError.ControlCharacter{field: "fix edit"})
+        if contains_sensitive_marker(self.new_text) -> return Err(WebErrorPageError.UnsafeContent{field: "fix edit"})
         if self.applicability == .Val(value) -> validate_identity(value, "fix applicability")
         if self.safety == .Val(value) -> validate_identity(value, "fix safety")
     }
@@ -243,7 +243,7 @@ WebErrorInternalFact: struct {
     }
     validate: fn(self) WebErrorPageError! {
         validate_code(self.code)
-        if self.message == "" -> return Err(WebErrorPageError.EmptyField(field: "internal error message"))
+        if self.message == "" -> return Err(WebErrorPageError.EmptyField{field: "internal error message"})
         validate_optional_text(Val(self.message), "internal error message", MAX_WEB_ERROR_TEXT_BYTES)
     }
     json: fn(self) -> String { "{{\"code\":{foundation_json_quote(self.code)},\"message\":{foundation_json_quote(self.message)}}}" }
@@ -333,7 +333,7 @@ WebErrorDiagnosticFact: struct {
     }
     validate: fn(self) WebErrorPageError! {
         if self.code == .Val(code) -> validate_code(code)
-        if self.what == None -> return Err(WebErrorPageError.EmptyField(field: "diagnostic what"))
+        if self.what == None -> return Err(WebErrorPageError.EmptyField{field: "diagnostic what"})
         validate_optional_text(self.what, "diagnostic what", MAX_WEB_ERROR_TEXT_BYTES)
         validate_optional_text(self.why, "diagnostic why", MAX_WEB_ERROR_TEXT_BYTES)
         validate_optional_text(self.fix, "diagnostic fix", MAX_WEB_ERROR_TEXT_BYTES)
@@ -392,8 +392,8 @@ WebErrorPage: struct {
         identity.validate()
         diagnostic.validate()
         if related_cause == .Val(cause) -> cause.validate()
-        if source_excerpts.len() > MAX_WEB_ERROR_SOURCE_EXCERPTS -> return Err(WebErrorPageError.TooManyItems(field: "source excerpts"))
-        if action_links.len() > MAX_WEB_ERROR_ACTION_LINKS -> return Err(WebErrorPageError.TooManyItems(field: "action links"))
+        if source_excerpts.len() > MAX_WEB_ERROR_SOURCE_EXCERPTS -> return Err(WebErrorPageError.TooManyItems{field: "source excerpts"})
+        if action_links.len() > MAX_WEB_ERROR_ACTION_LINKS -> return Err(WebErrorPageError.TooManyItems{field: "action links"})
         loop excerpt in source_excerpts -> excerpt.validate()
         loop link in action_links -> link.validate()
         excerpts := source_excerpts
@@ -435,7 +435,7 @@ WebErrorPage: struct {
         Val(WebErrorPage.new(identity, WebErrorDiagnosticFact.from_dev_status(facts), [WebErrorSourceExcerpt]{}, None, action_links))
     }
     with_edits: fn(self, edits: [WebErrorEdit]) -> WebErrorPage WebErrorPageError! {
-        if edits.len() > MAX_WEB_ERROR_EDITS -> return Err(WebErrorPageError.TooManyItems(field: "fix edits"))
+        if edits.len() > MAX_WEB_ERROR_EDITS -> return Err(WebErrorPageError.TooManyItems{field: "fix edits"})
         loop edit in edits -> edit.validate()
         page := self
         page.edits = edits
@@ -453,7 +453,7 @@ WebErrorPage: struct {
         page
     }
     with_source_excerpts: fn(self, source_excerpts: [WebErrorSourceExcerpt]) -> WebErrorPage WebErrorPageError! {
-        if source_excerpts.len() > MAX_WEB_ERROR_SOURCE_EXCERPTS -> return Err(WebErrorPageError.TooManyItems(field: "source excerpts"))
+        if source_excerpts.len() > MAX_WEB_ERROR_SOURCE_EXCERPTS -> return Err(WebErrorPageError.TooManyItems{field: "source excerpts"})
         loop excerpt in source_excerpts -> excerpt.validate()
         page := self
         page.source_excerpts = source_excerpts
@@ -469,9 +469,9 @@ WebErrorPage: struct {
         self.diagnostic.validate()
         if self.internal == .Val(internal) -> internal.validate()
         if self.related_cause == .Val(cause) -> cause.validate()
-        if self.source_excerpts.len() > MAX_WEB_ERROR_SOURCE_EXCERPTS -> return Err(WebErrorPageError.TooManyItems(field: "source excerpts"))
-        if self.edits.len() > MAX_WEB_ERROR_EDITS -> return Err(WebErrorPageError.TooManyItems(field: "fix edits"))
-        if self.action_links.len() > MAX_WEB_ERROR_ACTION_LINKS -> return Err(WebErrorPageError.TooManyItems(field: "action links"))
+        if self.source_excerpts.len() > MAX_WEB_ERROR_SOURCE_EXCERPTS -> return Err(WebErrorPageError.TooManyItems{field: "source excerpts"})
+        if self.edits.len() > MAX_WEB_ERROR_EDITS -> return Err(WebErrorPageError.TooManyItems{field: "fix edits"})
+        if self.action_links.len() > MAX_WEB_ERROR_ACTION_LINKS -> return Err(WebErrorPageError.TooManyItems{field: "action links"})
         loop edit in self.edits -> edit.validate()
         loop excerpt in self.source_excerpts -> excerpt.validate()
         loop link in self.action_links -> link.validate()
@@ -677,25 +677,25 @@ redact_identity: fn(value: String) -> String {
     value
 }
 validate_identity: fn(value: String, field: String) WebErrorPageError! {
-    if value == "" -> return Err(WebErrorPageError.EmptyField(field: field))
-    if value.bytes().len() > MAX_WEB_ERROR_ID_BYTES -> return Err(WebErrorPageError.TextTooLarge(field: field))
-    if jettrace_has_control(value) -> return Err(WebErrorPageError.ControlCharacter(field: field))
+    if value == "" -> return Err(WebErrorPageError.EmptyField{field: field})
+    if value.bytes().len() > MAX_WEB_ERROR_ID_BYTES -> return Err(WebErrorPageError.TextTooLarge{field: field})
+    if jettrace_has_control(value) -> return Err(WebErrorPageError.ControlCharacter{field: field})
     loop byte in value.bytes() {
         code: Int{byte}
         // Whitespace, `<`, `>`, `"`, `'`, `` ` `` and `\` never name an identity.
-        if code == 32 || code == 60 || code == 62 || code == 34 || code == 39 || code == 96 || code == 92 -> return Err(WebErrorPageError.InvalidIdentity(field: field))
+        if code == 32 || code == 60 || code == 62 || code == 34 || code == 39 || code == 96 || code == 92 -> return Err(WebErrorPageError.InvalidIdentity{field: field})
     }
 }
 validate_source_identity: fn(value: String) WebErrorPageError! {
     validate_identity(value, "source id")
-    if value.starts_with("//") -> return Err(WebErrorPageError.InvalidIdentity(field: "source id"))
+    if value.starts_with("//") -> return Err(WebErrorPageError.InvalidIdentity{field: "source id"})
     loop part in value.split("/") {
-        if part == ".." -> return Err(WebErrorPageError.InvalidIdentity(field: "source id"))
+        if part == ".." -> return Err(WebErrorPageError.InvalidIdentity{field: "source id"})
     }
 }
 validate_code: fn(value: String) WebErrorPageError! { validate_identity(value, "diagnostic code") }
 normalize_required_text: fn(value: String, field: String, limit: Int) -> String WebErrorPageError! {
-    if value == "" -> return Err(WebErrorPageError.EmptyField(field: field))
+    if value == "" -> return Err(WebErrorPageError.EmptyField{field: field})
     normalized: normalize_text(value, field, limit)
     if contains_sensitive_marker(normalized) -> return WEB_ERROR_REDACTED
     normalized
@@ -710,7 +710,7 @@ normalize_optional_text: fn(value: String?, field: String, limit: Int) -> String
 // Controls other than tab, newline and carriage return become U+FFFD.
 normalize_text: fn(value: String, field: String, limit: Int) -> String WebErrorPageError! {
     bytes: value.bytes()
-    if bytes.len() > limit -> return Err(WebErrorPageError.TextTooLarge(field: field))
+    if bytes.len() > limit -> return Err(WebErrorPageError.TextTooLarge{field: field})
     out := [U8]{}
     index := 0
     loop index < bytes.len() {
@@ -747,10 +747,10 @@ web_error_has_disallowed_control: fn(value: String) -> Bool {
 }
 validate_optional_text: fn(value: String?, field: String, limit: Int) WebErrorPageError! {
     text: value ?? return Ok()
-    if text == "" -> return Err(WebErrorPageError.EmptyField(field: field))
-    if text.bytes().len() > limit -> return Err(WebErrorPageError.TextTooLarge(field: field))
-    if web_error_has_disallowed_control(text) -> return Err(WebErrorPageError.ControlCharacter(field: field))
-    if contains_sensitive_marker(text) -> return Err(WebErrorPageError.UnsafeContent(field: field))
+    if text == "" -> return Err(WebErrorPageError.EmptyField{field: field})
+    if text.bytes().len() > limit -> return Err(WebErrorPageError.TextTooLarge{field: field})
+    if web_error_has_disallowed_control(text) -> return Err(WebErrorPageError.ControlCharacter{field: field})
+    if contains_sensitive_marker(text) -> return Err(WebErrorPageError.UnsafeContent{field: field})
 }
 contains_sensitive_marker: fn(value: String) -> Bool {
     lower: value.to_ascii_lower()
@@ -761,8 +761,8 @@ contains_sensitive_marker: fn(value: String) -> Bool {
         || lower.contains("sk_live_") || lower.contains("ghp_") || lower.contains("xoxb-")
 }
 validate_href: fn(value: String) WebErrorPageError! {
-    if value == "" -> return Err(WebErrorPageError.EmptyField(field: "action href"))
-    if value.bytes().len() > MAX_WEB_ERROR_LINK_BYTES -> return Err(WebErrorPageError.TextTooLarge(field: "action href"))
+    if value == "" -> return Err(WebErrorPageError.EmptyField{field: "action href"})
+    if value.bytes().len() > MAX_WEB_ERROR_LINK_BYTES -> return Err(WebErrorPageError.TextTooLarge{field: "action href"})
     if jettrace_has_control(value) || value.contains(" ") || contains_sensitive_marker(value) || value.contains("@") -> return Err(WebErrorPageError.InvalidLink)
     lower: value.to_ascii_lower()
     allowed: (value.starts_with("/") && !value.starts_with("//")) || lower.starts_with("http://") || lower.starts_with("https://") || lower.starts_with("jet://")

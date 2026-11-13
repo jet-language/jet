@@ -379,7 +379,7 @@ terminal_style_parse_value: fn(value: String) -> TerminalStyleValue TerminalStyl
         if code > 255 -> return Err(TerminalStyleValueError{message: "style SGR code exceeds 255"})
         normalized.push("{code}")
     }
-    TerminalStyleValue.Sgr(codes: normalized.join(";"))
+    TerminalStyleValue.Sgr{codes: normalized.join(";")}
 }
 
 TerminalStyleSnapshot: struct {
@@ -613,8 +613,8 @@ TerminalStyleBuildError: enum {
     }
 }
 terminal_style_build_snapshot: fn(edit: TerminalStyleEdit) -> TerminalStyleSnapshot TerminalStyleBuildError! {
-    document: TerminalStyleDocument.parse(edit.source) ?? return Err(TerminalStyleBuildError.Parse(error: err))
-    facts: TerminalStyleFingerprintFacts.new(edit.source_id, edit.source, edit.dependencies, edit.capabilities, edit.layout_fingerprint, edit.type_fingerprint) ?? return Err(TerminalStyleBuildError.Facts(error: err))
+    document: TerminalStyleDocument.parse(edit.source) ?? return Err(TerminalStyleBuildError.Parse{error: err})
+    facts: TerminalStyleFingerprintFacts.new(edit.source_id, edit.source, edit.dependencies, edit.capabilities, edit.layout_fingerprint, edit.type_fingerprint) ?? return Err(TerminalStyleBuildError.Facts{error: err})
     TerminalStyleSnapshot{revision: 0, source_id: edit.source_id, roles: document.roles, facts: facts}
 }
 
@@ -730,11 +730,11 @@ terminal_style_response: fn(outcome: TerminalStyleHostOutcome, snapshot: Termina
     TerminalStyleHostResponse{outcome: outcome, event: terminal_style_outcome_json(outcome, snapshot)}
 }
 terminal_style_parse_request: fn(body: String, source: TerminalStyleHostSource, revision: Int) -> TerminalStyleEdit TerminalStyleHostOutcome! {
-    malformed: TerminalStyleHostOutcome.Unavailable(reason: .MalformedRequest)
+    malformed: TerminalStyleHostOutcome.Unavailable{reason: .MalformedRequest}
     value: foundation_parse_protocol_json_with_limit(body, MAX_TERMINAL_STYLE_REQUEST_BYTES) ?? return Err(malformed)
     fields: recording_object_fields(value) ?? return Err(malformed)
-    source_value: recording_lookup(fields, "source") ?? return Err(TerminalStyleHostOutcome.Unavailable(reason: .MissingSource))
-    style_source: recording_text(source_value) ?? return Err(TerminalStyleHostOutcome.Unavailable(reason: .MissingSource))
+    source_value: recording_lookup(fields, "source") ?? return Err(TerminalStyleHostOutcome.Unavailable{reason: .MissingSource})
+    style_source: recording_text(source_value) ?? return Err(TerminalStyleHostOutcome.Unavailable{reason: .MissingSource})
     edit := TerminalStyleEdit.new(source.source_id, style_source).with_capabilities(source.capabilities)
     if recording_lookup(fields, "layout_fingerprint") == .Val(layout) {
         if recording_text(layout) == .Val(text) -> edit = edit.with_layout_fingerprint(text)
@@ -766,11 +766,11 @@ terminal_style_parse_request: fn(body: String, source: TerminalStyleHostSource, 
 }
 terminal_style_host_outcome: fn(receipt: TerminalStyleReloadReceipt) -> TerminalStyleHostOutcome {
     if receipt.change == {
-        .Initial | .StyleOnly | .CapabilityOnly | .Unchanged -> TerminalStyleHostOutcome.Applied(revision: receipt.revision, change: receipt.change)
-        .RestartRequired(reason) -> TerminalStyleHostOutcome.Rejected(rejection: .RestartRequired(reason: reason))
+        .Initial | .StyleOnly | .CapabilityOnly | .Unchanged -> TerminalStyleHostOutcome.Applied{revision: receipt.revision, change: receipt.change}
+        .RestartRequired(reason) -> TerminalStyleHostOutcome.Rejected{rejection: .RestartRequired(reason: reason)}
         .Invalid -> {
             fact: receipt.error ?? TerminalStyleErrorFact{code: .InvalidStyle, source_id: "", attempted_fingerprint: None, revision: receipt.revision, message: "style candidate was rejected"}
-            TerminalStyleHostOutcome.Rejected(rejection: .Invalid(fact: fact))
+            TerminalStyleHostOutcome.Rejected{rejection: .Invalid(fact: fact)}
         }
     }
 }

@@ -368,15 +368,15 @@ NativeOverlayHost: struct {
         if self.release_build || !frame.open -> return commands
         bounds: frame.bounds
         bottom: bounds.y + bounds.height
-        commands.push(JetDevtoolsNativeDrawCommand.Rectangle(x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height, color: JetDevtoolsNativeColor.new(16, 20, 28, 232)))
-        commands.push(JetDevtoolsNativeDrawCommand.Text(text: "Jet Devtools [{frame.session_id}]", x: bounds.x + 12, y: bounds.y + 22, size: 18, color: JetDevtoolsNativeColor.WHITE))
+        commands.push(JetDevtoolsNativeDrawCommand.Rectangle{x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height, color: JetDevtoolsNativeColor.new(16, 20, 28, 232)})
+        commands.push(JetDevtoolsNativeDrawCommand.Text{text: "Jet Devtools [{frame.session_id}]", x: bounds.x + 12, y: bounds.y + 22, size: 18, color: JetDevtoolsNativeColor.WHITE})
         y := bounds.y + 46
         loop panel in frame.panels {
             if y >= bottom || commands.len() >= MAX_OVERLAY_NODES -> break
-            commands.push(JetDevtoolsNativeDrawCommand.Text(text: panel.title, x: bounds.x + 12, y: overlay_clamp_coordinate(y), size: 15, color: JetDevtoolsNativeColor.new(255, 220, 120, 255)))
+            commands.push(JetDevtoolsNativeDrawCommand.Text{text: panel.title, x: bounds.x + 12, y: overlay_clamp_coordinate(y), size: 15, color: JetDevtoolsNativeColor.new(255, 220, 120, 255)})
             y += 18
             if panel.status != "" && y < bottom {
-                commands.push(JetDevtoolsNativeDrawCommand.Text(text: panel.status, x: bounds.x + 18, y: overlay_clamp_coordinate(y), size: 12, color: JetDevtoolsNativeColor.new(170, 190, 210, 255)))
+                commands.push(JetDevtoolsNativeDrawCommand.Text{text: panel.status, x: bounds.x + 18, y: overlay_clamp_coordinate(y), size: 12, color: JetDevtoolsNativeColor.new(170, 190, 210, 255)})
                 y += 16
             }
             loop node in panel.nodes {
@@ -459,7 +459,7 @@ append_native_node_commands: fn(commands: &[JetDevtoolsNativeDrawCommand], node:
     text := node.label
     if node.value == .Val(value) -> text = "{text}: {value}"
     if node.status == .Val(status) -> text = "{text} [{status}]"
-    commands.push(JetDevtoolsNativeDrawCommand.Text(text: text, x: x + depth * 12, y: overlay_clamp_coordinate(y), size: 12, color: JetDevtoolsNativeColor.new(220, 230, 240, 255)))
+    commands.push(JetDevtoolsNativeDrawCommand.Text{text: text, x: x + depth * 12, y: overlay_clamp_coordinate(y), size: 12, color: JetDevtoolsNativeColor.new(220, 230, 240, 255)})
     y += 16
     loop child in node.children {
         append_native_node_commands(commands, child, x, y, bottom, depth + 1)
@@ -510,9 +510,9 @@ NativeOverlayHostBridge: struct {
                         self.toggle_key_state[code] = pressed
                         edge_pressed = pressed && !was_pressed
                     }
-                    NativeOverlayInput.Key(code: code, pressed: edge_pressed)
+                    NativeOverlayInput.Key{code: code, pressed: edge_pressed}
                 }
-                .Gamepad(gamepad, control, pressed) -> NativeOverlayInput.Gamepad(gamepad: gamepad, control: control, pressed: pressed)
+                .Gamepad(gamepad, control, pressed) -> NativeOverlayInput.Gamepad{gamepad: gamepad, control: control, pressed: pressed}
             }
             self.host.route_input(routed) == .Overlay
         }

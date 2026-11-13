@@ -9,7 +9,7 @@ terminal_style_test_bytes: fn(text: String) -> [U8] {
     loop byte in text.bytes() -> out.push(byte)
     out
 }
-terminal_style_test_sgr: fn(codes: String) -> TerminalStyleValue? { Val(TerminalStyleValue.Sgr(codes: codes)) }
+terminal_style_test_sgr: fn(codes: String) -> TerminalStyleValue? { Val(TerminalStyleValue.Sgr{codes: codes}) }
 terminal_style_test_adapter: fn() -> TerminalStyleHostAdapter {
     adapter := TerminalStyleHostAdapter.new()
     adapter.inject(TerminalStyleHostSource.new("app/style", TERMINAL_CAPABILITY_DEFAULT) ?? panic("host source"))
@@ -89,10 +89,10 @@ terminal_style_test_adapter: fn() -> TerminalStyleHostAdapter {
     assert_eq(capability.change, TerminalStyleChangeKind.CapabilityOnly)
     assert_eq(capability.revision, 2)
     layout: reload.reload(terminal_style_test_edit("accent=green").with_capabilities(plain).with_layout_fingerprint("layout-v2"))
-    assert_eq(layout.change, TerminalStyleChangeKind.RestartRequired(reason: TerminalStyleRestartReason.LayoutFingerprintChanged))
+    assert_eq(layout.change, TerminalStyleChangeKind.RestartRequired{reason: TerminalStyleRestartReason.LayoutFingerprintChanged})
     assert_eq(layout.revision, 2)
     type_change: reload.reload(terminal_style_test_edit("accent=green").with_capabilities(plain).with_type_fingerprint("type-v2"))
-    assert_eq(type_change.change, TerminalStyleChangeKind.RestartRequired(reason: TerminalStyleRestartReason.TypeFingerprintChanged))
+    assert_eq(type_change.change, TerminalStyleChangeKind.RestartRequired{reason: TerminalStyleRestartReason.TypeFingerprintChanged})
     assert_eq(type_change.revision, 2)
 }
 #Test("dependency_order_is_canonical") {
@@ -107,7 +107,7 @@ terminal_style_test_adapter: fn() -> TerminalStyleHostAdapter {
     adapter := TerminalStyleHostAdapter.new()
     assert(adapter.source == None)
     response: adapter.apply_json(`{"source":"accent=red"}`)
-    assert_eq(response.outcome, TerminalStyleHostOutcome.Unavailable(reason: TerminalStyleHostUnavailableReason.SourceNotInjected))
+    assert_eq(response.outcome, TerminalStyleHostOutcome.Unavailable{reason: TerminalStyleHostUnavailableReason.SourceNotInjected})
     assert(response.event.contains(`"outcome":"unavailable"`))
     assert(response.event.contains(`"reason":"source_not_injected"`))
 }
@@ -115,7 +115,7 @@ terminal_style_test_adapter: fn() -> TerminalStyleHostAdapter {
     adapter := terminal_style_test_adapter()
     assert(adapter.source != None)
     response: adapter.apply_json(`{"source":"accent=red\nsuccess=green"}`)
-    assert_eq(response.outcome, TerminalStyleHostOutcome.Applied(revision: 1, change: TerminalStyleChangeKind.Initial))
+    assert_eq(response.outcome, TerminalStyleHostOutcome.Applied{revision: 1, change: TerminalStyleChangeKind.Initial})
     assert(response.event.contains(`"outcome":"applied"`))
     assert(response.event.contains(`"fingerprint"`))
 }
@@ -138,16 +138,16 @@ terminal_style_test_adapter: fn() -> TerminalStyleHostAdapter {
     }
     assert(applied)
     response: adapter.apply_json(`{"source":"accent=green","layout_fingerprint":"layout-v2"}`)
-    assert_eq(response.outcome, TerminalStyleHostOutcome.Rejected(rejection: TerminalStyleHostRejection.RestartRequired(reason: TerminalStyleRestartReason.LayoutFingerprintChanged)))
+    assert_eq(response.outcome, TerminalStyleHostOutcome.Rejected{rejection: TerminalStyleHostRejection.RestartRequired{reason: TerminalStyleRestartReason.LayoutFingerprintChanged}})
     assert(response.event.contains(`"code":"layout_fingerprint_changed"`))
 }
 #Test("host_adapter_current_json_reports_unavailable_then_applied") {
     adapter := TerminalStyleHostAdapter.new()
     before: adapter.current_json()
-    assert_eq(before.outcome, TerminalStyleHostOutcome.Unavailable(reason: TerminalStyleHostUnavailableReason.NoStyleApplied))
+    assert_eq(before.outcome, TerminalStyleHostOutcome.Unavailable{reason: TerminalStyleHostUnavailableReason.NoStyleApplied})
     adapter.inject(TerminalStyleHostSource.new("app/style", TERMINAL_CAPABILITY_DEFAULT) ?? panic("host source"))
     _: adapter.apply_json(`{"source":"accent=red"}`)
     after: adapter.current_json()
-    assert_eq(after.outcome, TerminalStyleHostOutcome.Applied(revision: 1, change: TerminalStyleChangeKind.Unchanged))
+    assert_eq(after.outcome, TerminalStyleHostOutcome.Applied{revision: 1, change: TerminalStyleChangeKind.Unchanged})
     assert(after.event.contains(`"fingerprint"`))
 }

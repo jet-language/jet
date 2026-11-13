@@ -25,7 +25,7 @@ SessionRecordingLimits: struct {
 
     validate: fn(self) RecordingError! {
         if self.max_events < 1 || self.max_events > MAX_RECORDING_EVENTS || self.max_bytes < 1 || self.max_bytes > MAX_RECORDING_BYTES {
-            return Err(RecordingError.InvalidLimits(max_events: self.max_events, max_bytes: self.max_bytes))
+            return Err(RecordingError.InvalidLimits{max_events: self.max_events, max_bytes: self.max_bytes})
         }
     }
 }
@@ -51,11 +51,11 @@ SessionEvent: struct {
             if value == {
                 .Null -> {}
                 .Object(_) -> payload = Val(recording_canonical_json(value))
-                else -> return Err(RecordingError.InvalidEvent(message: "event payload must be an object or null"))
+                else -> return Err(RecordingError.InvalidEvent{message: "event payload must be an object or null"})
             }
         }
         event: SessionEvent{sequence: sequence, timestamp_ms: timestamp_ms, source: source, kind: kind, entity: entity, fields_json: fields, payload_json: payload}
-        if event.wire_len() > MAX_RECORDING_BYTES -> return Err(RecordingError.EventTooLarge(bytes: event.wire_len(), limit: MAX_RECORDING_BYTES))
+        if event.wire_len() > MAX_RECORDING_BYTES -> return Err(RecordingError.EventTooLarge{bytes: event.wire_len(), limit: MAX_RECORDING_BYTES})
         event
     }
     // Bytes of this event's canonical wire object.
@@ -136,7 +136,7 @@ ReplayCursor: struct {
                 break
             }
         }
-        if index < 0 -> return Err(RecordingError.CursorUnavailable(sequence: sequence))
+        if index < 0 -> return Err(RecordingError.CursorUnavailable{sequence: sequence})
         self.position = index + 1
         self.sequence = Val(sequence)
         recording.projection(self)
@@ -145,7 +145,7 @@ ReplayCursor: struct {
         self.check(recording)
         if recording.events.len() > 0 {
             first: recording.events[0]
-            if timestamp_ms < first.timestamp_ms && recording.dropped_events != 0 -> return Err(RecordingError.CursorUnavailable(sequence: first.sequence))
+            if timestamp_ms < first.timestamp_ms && recording.dropped_events != 0 -> return Err(RecordingError.CursorUnavailable{sequence: first.sequence})
         }
         position := 0
         loop (index, event) in recording.events.enumerate() {
@@ -172,7 +172,7 @@ ReplayCursor: struct {
         recording.projection(self)
     }
     check: fn(self, recording: SessionRecording) RecordingError! {
-        if !self.identity.matches(recording.identity) -> return Err(RecordingError.IdentityMismatch(expected: self.identity, found: recording.identity))
+        if !self.identity.matches(recording.identity) -> return Err(RecordingError.IdentityMismatch{expected: self.identity, found: recording.identity})
         if self.generation != recording.generation -> return Err(RecordingError.RecordingChanged)
         if self.position > recording.events.len() -> return Err(RecordingError.CheckpointUnavailable)
     }
@@ -257,7 +257,7 @@ SessionRecording: struct {
         event.sequence
     }
     record_envelope: fn(&self, bytes: [U8]) -> Int RecordingError! {
-        if bytes.len() > MAX_RECORDING_BYTES -> return Err(RecordingError.EnvelopeTooLarge(bytes: bytes.len(), limit: MAX_RECORDING_BYTES))
+        if bytes.len() > MAX_RECORDING_BYTES -> return Err(RecordingError.EnvelopeTooLarge{bytes: bytes.len(), limit: MAX_RECORDING_BYTES})
         events: recording_parse_envelope(bytes, self.identity)
         self.preflight(events)
         loop event in events -> self.append_event_unchecked(event)
@@ -267,7 +267,7 @@ SessionRecording: struct {
     replay_for: fn(self, identity: SessionRecordingIdentity) -> ReplayCursor RecordingError! {
         recording_validate_id(identity.source_id, "source_id")
         recording_validate_id(identity.build_id, "build_id")
-        if !self.identity.matches(identity) -> return Err(RecordingError.IdentityMismatch(expected: self.identity, found: identity))
+        if !self.identity.matches(identity) -> return Err(RecordingError.IdentityMismatch{expected: self.identity, found: identity})
         self.replay()
     }
     projection: fn(self, cursor: ReplayCursor) -> ReplayProjection RecordingError! {
@@ -297,7 +297,7 @@ SessionRecording: struct {
         }
     }
     restore_checkpoint: fn(self, checkpoint: SessionCheckpoint) -> ReplayCursor RecordingError! {
-        if !self.identity.matches(checkpoint.identity) -> return Err(RecordingError.IdentityMismatch(expected: self.identity, found: checkpoint.identity))
+        if !self.identity.matches(checkpoint.identity) -> return Err(RecordingError.IdentityMismatch{expected: self.identity, found: checkpoint.identity})
         if checkpoint.generation != self.generation || checkpoint.position > self.events.len() -> return Err(RecordingError.CheckpointUnavailable)
         if checkpoint.first_retained_sequence != self.first_retained_sequence() || checkpoint.last_retained_sequence != self.last_retained_sequence() {
             return Err(RecordingError.CheckpointUnavailable)
@@ -311,12 +311,12 @@ SessionRecording: struct {
         previous_time := self.last_timestamp_ms
         loop event in events {
             bytes: event.wire_len()
-            if bytes > self.limits.max_bytes -> return Err(RecordingError.EventTooLarge(bytes: bytes, limit: self.limits.max_bytes))
+            if bytes > self.limits.max_bytes -> return Err(RecordingError.EventTooLarge{bytes: bytes, limit: self.limits.max_bytes})
             if previous_sequence == .Val(previous) {
-                if event.sequence <= previous -> return Err(RecordingError.NonMonotonicSequence(previous: previous, next: event.sequence))
+                if event.sequence <= previous -> return Err(RecordingError.NonMonotonicSequence{previous: previous, next: event.sequence})
             }
             if previous_time == .Val(previous) {
-                if event.timestamp_ms < previous -> return Err(RecordingError.NonMonotonicTime(previous: previous, next: event.timestamp_ms))
+                if event.timestamp_ms < previous -> return Err(RecordingError.NonMonotonicTime{previous: previous, next: event.timestamp_ms})
             }
             previous_sequence = Val(event.sequence)
             previous_time = Val(event.timestamp_ms)
@@ -347,52 +347,52 @@ SessionRecording: struct {
     }
 }
 recording_parse_envelope: fn(bytes: [U8], expected_identity: SessionRecordingIdentity) -> [SessionEvent] RecordingError! {
-    text: String.from_bytes(bytes) ?? return Err(RecordingError.InvalidEnvelope(message: "envelope is not UTF-8"))
+    text: String.from_bytes(bytes) ?? return Err(RecordingError.InvalidEnvelope{message: "envelope is not UTF-8"})
     root: recording_parse_json(text, "devtools envelope")
-    fields: recording_object_fields(root) ?? return Err(RecordingError.InvalidEnvelope(message: "envelope must be an object"))
-    protocol_value: recording_lookup(fields, "protocol") ?? return Err(RecordingError.InvalidEnvelope(message: "missing string `protocol`"))
-    protocol: recording_text(protocol_value) ?? return Err(RecordingError.InvalidEnvelope(message: "missing string `protocol`"))
-    if protocol != RECORDING_DEVTOOLS_PROTOCOL -> return Err(RecordingError.InvalidEnvelope(message: "protocol is `{protocol}`, expected `{RECORDING_DEVTOOLS_PROTOCOL}`"))
+    fields: recording_object_fields(root) ?? return Err(RecordingError.InvalidEnvelope{message: "envelope must be an object"})
+    protocol_value: recording_lookup(fields, "protocol") ?? return Err(RecordingError.InvalidEnvelope{message: "missing string `protocol`"})
+    protocol: recording_text(protocol_value) ?? return Err(RecordingError.InvalidEnvelope{message: "missing string `protocol`"})
+    if protocol != RECORDING_DEVTOOLS_PROTOCOL -> return Err(RecordingError.InvalidEnvelope{message: "protocol is `{protocol}`, expected `{RECORDING_DEVTOOLS_PROTOCOL}`"})
     recording_validate_envelope_identity(fields, expected_identity)
-    values: recording_lookup(fields, "events") ?? return Err(RecordingError.InvalidEnvelope(message: "missing `events` array"))
+    values: recording_lookup(fields, "events") ?? return Err(RecordingError.InvalidEnvelope{message: "missing `events` array"})
     if values == {
         .Array(items) -> {
             events := [SessionEvent]{}
             loop item in items -> events.push(recording_parse_event(item))
             events
         }
-        else -> Err(RecordingError.InvalidEnvelope(message: "envelope `events` must be an array"))
+        else -> Err(RecordingError.InvalidEnvelope{message: "envelope `events` must be an array"})
     }
 }
 recording_parse_event: fn(value: Dyn) -> SessionEvent RecordingError! {
-    fields: recording_object_fields(value) ?? return Err(RecordingError.InvalidEvent(message: "event must be an object"))
+    fields: recording_object_fields(value) ?? return Err(RecordingError.InvalidEvent{message: "event must be an object"})
     sequence: recording_required_int(fields, "sequence")
     timestamp_ms: recording_required_int(fields, "timestamp_ms")
     source: recording_required_string(fields, "source")
     kind: recording_required_string(fields, "kind")
     entity: recording_required_string(fields, "entity")
-    event_fields: recording_lookup(fields, "fields") ?? return Err(RecordingError.InvalidEvent(message: "missing event `fields`"))
-    if recording_object_fields(event_fields) == None -> return Err(RecordingError.InvalidEvent(message: "event fields must be an object"))
+    event_fields: recording_lookup(fields, "fields") ?? return Err(RecordingError.InvalidEvent{message: "missing event `fields`"})
+    if recording_object_fields(event_fields) == None -> return Err(RecordingError.InvalidEvent{message: "event fields must be an object"})
     payload_json := String?{None}
     if recording_lookup(fields, "payload") == .Val(payload) {
         if payload == {
             .Null -> {}
             .Object(_) -> payload_json = Val(recording_canonical_json(payload))
-            else -> return Err(RecordingError.InvalidEvent(message: "event payload must be an object or null"))
+            else -> return Err(RecordingError.InvalidEvent{message: "event payload must be an object or null"})
         }
     }
     SessionEvent.new(sequence, timestamp_ms, source, kind, entity, recording_canonical_json(event_fields), payload_json)
 }
 recording_parse_json: fn(text: String, label: String) -> Dyn RecordingError! {
-    if text.bytes().len() > MAX_RECORDING_BYTES -> return Err(RecordingError.InvalidEvent(message: "{label} exceeds the {MAX_RECORDING_BYTES}-byte limit"))
+    if text.bytes().len() > MAX_RECORDING_BYTES -> return Err(RecordingError.InvalidEvent{message: "{label} exceeds the {MAX_RECORDING_BYTES}-byte limit"})
     invalid: "{label} is not valid bounded JSON"
-    value: foundation_json_parse(text) ?? return Err(if label == "devtools envelope" -> RecordingError.InvalidEnvelope(message: invalid) else -> RecordingError.InvalidEvent(message: invalid))
+    value: foundation_json_parse(text) ?? return Err(if label == "devtools envelope" -> RecordingError.InvalidEnvelope{message: invalid} else -> RecordingError.InvalidEvent{message: invalid})
     value
 }
 recording_canonical_object: fn(text: String, label: String) -> String RecordingError! {
-    if text.bytes().len() > MAX_RECORDING_TEXT_BYTES -> return Err(RecordingError.InvalidEvent(message: "{label} exceeds the {MAX_RECORDING_TEXT_BYTES}-byte JSON object limit"))
+    if text.bytes().len() > MAX_RECORDING_TEXT_BYTES -> return Err(RecordingError.InvalidEvent{message: "{label} exceeds the {MAX_RECORDING_TEXT_BYTES}-byte JSON object limit"})
     value: recording_parse_json(text, label)
-    if recording_object_fields(value) == None -> return Err(RecordingError.InvalidEvent(message: "{label} must be an object"))
+    if recording_object_fields(value) == None -> return Err(RecordingError.InvalidEvent{message: "{label} must be an object"})
     recording_canonical_json(value)
 }
 recording_object_fields: fn(value: Dyn) -> [(key: String, value: Dyn)]? {
@@ -416,15 +416,15 @@ recording_text: fn(value: Dyn) -> String? {
     }
 }
 recording_required_string: fn(fields: [(key: String, value: Dyn)], key: String) -> String RecordingError! {
-    value: recording_lookup(fields, key) ?? return Err(RecordingError.InvalidEvent(message: "missing string `{key}`"))
-    text: recording_text(value) ?? return Err(RecordingError.InvalidEvent(message: "missing string `{key}`"))
+    value: recording_lookup(fields, key) ?? return Err(RecordingError.InvalidEvent{message: "missing string `{key}`"})
+    text: recording_text(value) ?? return Err(RecordingError.InvalidEvent{message: "missing string `{key}`"})
     recording_validate_text(text, "event {key}")
     text
 }
 recording_required_int: fn(fields: [(key: String, value: Dyn)], key: String) -> Int RecordingError! {
-    value: recording_lookup(fields, key) ?? return Err(RecordingError.InvalidEvent(message: "missing integer `{key}`"))
-    number: foundation_json_integer(value) ?? return Err(RecordingError.InvalidEvent(message: "event `{key}` must be an exact integer"))
-    if number < 0 -> return Err(RecordingError.InvalidEvent(message: "event `{key}` must be a non-negative integer"))
+    value: recording_lookup(fields, key) ?? return Err(RecordingError.InvalidEvent{message: "missing integer `{key}`"})
+    number: foundation_json_integer(value) ?? return Err(RecordingError.InvalidEvent{message: "event `{key}` must be an exact integer"})
+    if number < 0 -> return Err(RecordingError.InvalidEvent{message: "event `{key}` must be a non-negative integer"})
     number
 }
 // An envelope may name its identity; when it does, both ids must be present and match.
@@ -432,12 +432,12 @@ recording_validate_envelope_identity: fn(fields: [(key: String, value: Dyn)], ex
     source: recording_lookup(fields, "source_id")
     build: recording_lookup(fields, "build_id")
     if source == None && build == None -> return Ok()
-    source_value: source ?? return Err(RecordingError.InvalidEnvelope(message: "envelope `source_id` must be a string"))
-    source_text: recording_text(source_value) ?? return Err(RecordingError.InvalidEnvelope(message: "envelope `source_id` must be a string"))
-    build_value: build ?? return Err(RecordingError.InvalidEnvelope(message: "envelope `build_id` must be a string"))
-    build_text: recording_text(build_value) ?? return Err(RecordingError.InvalidEnvelope(message: "envelope `build_id` must be a string"))
-    found: SessionRecordingIdentity.new(source_text, build_text) ?? return Err(RecordingError.InvalidEnvelope(message: "invalid envelope identity: {err.message()}"))
-    if !expected.matches(found) -> return Err(RecordingError.IdentityMismatch(expected: expected, found: found))
+    source_value: source ?? return Err(RecordingError.InvalidEnvelope{message: "envelope `source_id` must be a string"})
+    source_text: recording_text(source_value) ?? return Err(RecordingError.InvalidEnvelope{message: "envelope `source_id` must be a string"})
+    build_value: build ?? return Err(RecordingError.InvalidEnvelope{message: "envelope `build_id` must be a string"})
+    build_text: recording_text(build_value) ?? return Err(RecordingError.InvalidEnvelope{message: "envelope `build_id` must be a string"})
+    found: SessionRecordingIdentity.new(source_text, build_text) ?? return Err(RecordingError.InvalidEnvelope{message: "invalid envelope identity: {err.message()}"})
+    if !expected.matches(found) -> return Err(RecordingError.IdentityMismatch{expected: expected, found: found})
 }
 recording_validate_id: fn(value: String, label: String) RecordingError! {
     bytes: value.bytes()
@@ -445,10 +445,10 @@ recording_validate_id: fn(value: String, label: String) RecordingError! {
     loop byte in bytes {
         if byte < 32 || byte == 127 -> invalid = true
     }
-    if invalid -> return Err(RecordingError.InvalidIdentity(message: "{label} must contain 1..={MAX_RECORDING_ID_BYTES} bytes and no control characters"))
+    if invalid -> return Err(RecordingError.InvalidIdentity{message: "{label} must contain 1..={MAX_RECORDING_ID_BYTES} bytes and no control characters"})
 }
 recording_validate_text: fn(value: String, label: String) RecordingError! {
-    if value.bytes().len() > MAX_RECORDING_TEXT_BYTES -> return Err(RecordingError.InvalidEvent(message: "{label} exceeds the {MAX_RECORDING_TEXT_BYTES}-byte text limit"))
+    if value.bytes().len() > MAX_RECORDING_TEXT_BYTES -> return Err(RecordingError.InvalidEvent{message: "{label} exceeds the {MAX_RECORDING_TEXT_BYTES}-byte text limit"})
 }
 // Canonical JSON: object keys sorted, the last repeated key kept, no whitespace.
 recording_canonical_json: fn(value: Dyn) -> String {

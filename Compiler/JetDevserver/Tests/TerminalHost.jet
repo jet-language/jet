@@ -62,9 +62,9 @@ terminal_test_diff_id: fn(operation: TerminalDiffOperation) -> String {
     assert(host.events.len() > 0)
     event: host.events[0]
     assert_eq(event.observed_at, 1200)
-    assert_eq(event.facts[0].value, Val(TerminalFactValue.Text(value: `{"accepted":true}`)))
+    assert_eq(event.facts[0].value, Val(TerminalFactValue.Text{value: `{"accepted":true}`}))
     assert_eq(host.focus.item_key, Val("event:revision-a:1:Build:build"))
-    assert_eq(host.handle_key(TerminalKey.Character(text: "r")), TerminalAction.Ignored)
+    assert_eq(host.handle_key(TerminalKey.Character{text: "r"}), TerminalAction.Ignored)
     loop line in frame.lines -> assert(terminal_test_columns(terminal_strip_ansi(line)) <= 32)
 }
 #Test("quiet_suppresses_text_without_dropping_typed_tree") {
@@ -89,7 +89,7 @@ terminal_test_diff_id: fn(operation: TerminalDiffOperation) -> String {
 #Test("keyboard_paths_update_explicit_focus_and_return_actions") {
     host := TerminalHost.new(TerminalHostConfig.standard())
     host.append_event(terminal_test_event(1, JetDevtoolsPanelID.Tests, "Tests", "fails")) ?? panic("event")
-    assert_eq(host.handle_key(TerminalKey.Enter), TerminalAction.Inspect(panel_id: "tests", item_key: "event:revision-a:1:Tests:fails"))
+    assert_eq(host.handle_key(TerminalKey.Enter), TerminalAction.Inspect{panel_id: "tests", item_key: "event:revision-a:1:Tests:fails"})
     assert_eq(host.handle_key(TerminalKey.Escape), TerminalAction.ReturnToPanel)
     assert(host.focus.item_key == None)
 }

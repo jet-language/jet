@@ -120,11 +120,11 @@ TerminalHostFact: struct {
     published: Bool
 
     redacted: fn(key: String) -> TerminalHostFact { TerminalHostFact{key: key, value: None, published: false} }
-    text: fn(key: String, value: String) -> TerminalHostFact { TerminalHostFact{key: key, value: Val(TerminalFactValue.Text(value: value)), published: true} }
+    text: fn(key: String, value: String) -> TerminalHostFact { TerminalHostFact{key: key, value: Val(TerminalFactValue.Text{value: value}), published: true} }
     text_bounded: fn(key: String, value: String) -> TerminalHostFact { TerminalHostFact.text(key, terminal_bounded_text(value, MAX_TERMINAL_TEXT_BYTES)) }
-    integer: fn(key: String, value: Int) -> TerminalHostFact { TerminalHostFact{key: key, value: Val(TerminalFactValue.Integer(value: value)), published: true} }
-    boolean: fn(key: String, value: Bool) -> TerminalHostFact { TerminalHostFact{key: key, value: Val(TerminalFactValue.Boolean(value: value)), published: true} }
-    duration_ms: fn(key: String, value: Int) -> TerminalHostFact { TerminalHostFact{key: key, value: Val(TerminalFactValue.DurationMs(value: value)), published: true} }
+    integer: fn(key: String, value: Int) -> TerminalHostFact { TerminalHostFact{key: key, value: Val(TerminalFactValue.Integer{value: value}), published: true} }
+    boolean: fn(key: String, value: Bool) -> TerminalHostFact { TerminalHostFact{key: key, value: Val(TerminalFactValue.Boolean{value: value}), published: true} }
+    duration_ms: fn(key: String, value: Int) -> TerminalHostFact { TerminalHostFact{key: key, value: Val(TerminalFactValue.DurationMs{value: value}), published: true} }
     validate: fn(self) TerminalHostError! {
         terminal_validate_text(self.key, "fact key", false)
         if !self.published && self.value != None -> return Err(TerminalHostError{message: "terminal fact `{self.key}` is redacted but carries a value"})
@@ -321,11 +321,11 @@ TerminalFrame: struct {
             old: before.get(id)
             new: after.get(id)
             if old == None {
-                if new == .Val(node) -> operations.push(TerminalDiffOperation.Insert(id: id, node: node))
+                if new == .Val(node) -> operations.push(TerminalDiffOperation.Insert{id: id, node: node})
             } else if new == None {
-                operations.push(TerminalDiffOperation.Remove(id: id))
+                operations.push(TerminalDiffOperation.Remove{id: id})
             } else if old != new {
-                if new == .Val(node) -> operations.push(TerminalDiffOperation.Replace(id: id, node: node))
+                if new == .Val(node) -> operations.push(TerminalDiffOperation.Replace{id: id, node: node})
             }
         }
         metadata_changed: previous.protocol != self.protocol || previous.session_id != self.session_id
@@ -356,7 +356,7 @@ TerminalDiff: struct {
         ids.sort_by(fn(left, right) { left <=> right })
         operations := [TerminalDiffOperation]{}
         loop id in ids {
-            if nodes.get(id) == .Val(node) -> operations.push(TerminalDiffOperation.Insert(id: id, node: node))
+            if nodes.get(id) == .Val(node) -> operations.push(TerminalDiffOperation.Insert{id: id, node: node})
         }
         TerminalDiff{
             from_revision: "", to_revision: frame.revision, operations: operations,
@@ -430,7 +430,7 @@ TerminalHost: struct {
         } else if self.focus.panel_id == None {
             self.focus.panel_id = Val(panel_id)
         }
-        self.keyboard.last_action = Val(TerminalAction.FocusPanel(panel_id: self.focus.panel_id ?? panel_id))
+        self.keyboard.last_action = Val(TerminalAction.FocusPanel{panel_id: self.focus.panel_id ?? panel_id})
     }
     // `panel_ids` maps each event sequence to the panel that owns it.
     sync_projection: fn(&self, projection: DevtoolsProjection, panel_ids: [Int: JetDevtoolsPanelID]) -> TerminalFrame TerminalHostError! {
@@ -507,13 +507,13 @@ TerminalHost: struct {
     focus_panel: fn(&self, panel_id: String) -> Bool {
         canonical: terminal_canonical_panel(panel_id) ?? return false
         self.focus = TerminalFocus.panel(canonical)
-        self.keyboard.last_action = Val(TerminalAction.FocusPanel(panel_id: canonical))
+        self.keyboard.last_action = Val(TerminalAction.FocusPanel{panel_id: canonical})
         true
     }
     focus_item: fn(&self, panel_id: String, item_key: String) -> Bool {
         if !self.focus_panel(panel_id) -> return false
         self.focus.item_key = Val(item_key)
-        self.keyboard.last_action = Val(TerminalAction.Inspect(panel_id: self.focus.panel_id ?? "", item_key: item_key))
+        self.keyboard.last_action = Val(TerminalAction.Inspect{panel_id: self.focus.panel_id ?? "", item_key: item_key})
         true
     }
     clear_item_focus: fn(&self) {
@@ -595,11 +595,11 @@ TerminalHost: struct {
         count: panel_ids.len()
         target: ((current + direction) % count + count) % count
         self.focus = TerminalFocus.panel(panel_ids[target])
-        TerminalAction.FocusPanel(panel_id: panel_ids[target])
+        TerminalAction.FocusPanel{panel_id: panel_ids[target]}
     }
     inspect_focused: fn(&self) -> TerminalAction {
         panel_id: self.focus.panel_id ?? first_panel_id()
-        if self.focus.item_key == .Val(item_key) -> return TerminalAction.Inspect(panel_id: panel_id, item_key: item_key)
+        if self.focus.item_key == .Val(item_key) -> return TerminalAction.Inspect{panel_id: panel_id, item_key: item_key}
         ordered: terminal_ordered_events(self.events)
         index := ordered.len()
         loop index > 0 {
@@ -607,10 +607,10 @@ TerminalHost: struct {
             if ordered[index].panel_id.as_str() == panel_id {
                 item_key: ordered[index].key()
                 self.focus.item_key = Val(item_key)
-                return TerminalAction.Inspect(panel_id: panel_id, item_key: item_key)
+                return TerminalAction.Inspect{panel_id: panel_id, item_key: item_key}
             }
         }
-        TerminalAction.FocusPanel(panel_id: panel_id)
+        TerminalAction.FocusPanel{panel_id: panel_id}
     }
     // Steps the time cursor to the next retained sequence, wrapping to the first.
     move_cursor: fn(&self) -> TerminalAction {
@@ -628,7 +628,7 @@ TerminalHost: struct {
             }
         }
         self.time_cursor = Val(target)
-        TerminalAction.MoveCursor(cursor: target)
+        TerminalAction.MoveCursor{cursor: target}
     }
     effective_viewport: fn(self) -> TerminalViewport {
         configured: self.config.viewport

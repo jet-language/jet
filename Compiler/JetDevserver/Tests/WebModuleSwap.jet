@@ -23,7 +23,7 @@ decision_for: fn(before: WebModuleSwapSnapshot, candidate: WebModuleSwapSnapshot
     loop key in sorted_keys {
         if compatible -> state.push(StateRetentionFact.preserve(key)) else -> state.push(StateRetentionFact.fresh(key, "checked state shape changed"))
     }
-    compatibility: if compatible -> HotSwapCompatibility.Compatible else -> HotSwapCompatibility.Incompatible(reason: "checked semantic surface changed")
+    compatibility: if compatible -> HotSwapCompatibility.Compatible else -> HotSwapCompatibility.Incompatible{reason: "checked semantic surface changed"}
     changed: if compatible -> [String]{} else -> [String]{"checked semantic surface changed"}
     HotSwapDecision{module_ref: "app", compatibility, changed, changed_functions, state, schema_migrations: [], rechecked_items: [], change_facts: []}
 }

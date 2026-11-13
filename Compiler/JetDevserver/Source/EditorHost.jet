@@ -351,7 +351,7 @@ EditorHostTransport: struct {
         if cursor == .Val(requested) {
             if self.count != 0 {
                 oldest: self.event_at(0).sequence
-                if editor_saturating_next(requested) < oldest -> return Err(EditorHostError.CursorExpired(requested: requested, oldest: oldest))
+                if editor_saturating_next(requested) < oldest -> return Err(EditorHostError.CursorExpired{requested: requested, oldest: oldest})
             }
         }
         events := [EditorStreamEvent]{}
@@ -380,10 +380,10 @@ EditorHostTransport: struct {
         path: editor_clean_source_path(source_path)
         editor_validate_stable_text(revision, "revision")
         expected: self.session_identity
-        if session_id != expected.session_id -> return Err(EditorHostError.SessionMismatch(expected: expected.session_id.copy(), actual: session_id.copy()))
-        if source_id != expected.source_id -> return Err(EditorHostError.SourceMismatch(expected: expected.source_id.copy(), actual: source_id.copy()))
-        if path != expected.source_path -> return Err(EditorHostError.SourceMismatch(expected: expected.source_path.copy(), actual: path))
-        if revision != expected.revision -> return Err(EditorHostError.RevisionMismatch(expected: expected.revision.copy(), actual: revision.copy()))
+        if session_id != expected.session_id -> return Err(EditorHostError.SessionMismatch{expected: expected.session_id.copy(), actual: session_id.copy()})
+        if source_id != expected.source_id -> return Err(EditorHostError.SourceMismatch{expected: expected.source_id.copy(), actual: source_id.copy()})
+        if path != expected.source_path -> return Err(EditorHostError.SourceMismatch{expected: expected.source_path.copy(), actual: path})
+        if revision != expected.revision -> return Err(EditorHostError.RevisionMismatch{expected: expected.revision.copy(), actual: revision.copy()})
     }
     open: fn(&self, request: EditorWorkbenchOpenRequest) -> EditorWorkbenchSnapshot EditorHostError! {
         self.validate_request(request.host, request.session_id, request.source_id, request.source_path, request.revision)
@@ -423,7 +423,7 @@ EditorHostTransport: struct {
         self.validate_request(request.host, request.session_id, request.source_id, request.source_path, request.revision)
         loop argument in request.arguments -> editor_validate_stable_text(argument, "command argument")
         grant: request.command.required_grant()
-        if !self.grant_set.has_key(grant) -> return Err(EditorHostError.CommandDenied(command: request.command, required_grant: grant))
+        if !self.grant_set.has_key(grant) -> return Err(EditorHostError.CommandDenied{command: request.command, required_grant: grant})
         Ok(EditorCommandReceipt{host: request.host, identity: self.session_identity.copy(), command: request.command, required_grant: grant})
     }
     snapshot: fn(self, host: EditorHost, &&stream: EditorStreamSnapshot) -> EditorWorkbenchSnapshot Never! {
@@ -452,16 +452,16 @@ EditorHostTransport: struct {
         }
     }
     check_projection_identity: fn(&self, session_id: String, source_id: String?, revision: String?) EditorHostError! {
-        if session_id != self.session_identity.session_id -> return Err(EditorHostError.SessionMismatch(expected: self.session_identity.session_id.copy(), actual: session_id.copy()))
+        if session_id != self.session_identity.session_id -> return Err(EditorHostError.SessionMismatch{expected: self.session_identity.session_id.copy(), actual: session_id.copy()})
         if revision == .Val(value) {
-            if value.len() != 0 && value != self.session_identity.revision -> return Err(EditorHostError.RevisionMismatch(expected: self.session_identity.revision.copy(), actual: value.copy()))
+            if value.len() != 0 && value != self.session_identity.revision -> return Err(EditorHostError.RevisionMismatch{expected: self.session_identity.revision.copy(), actual: value.copy()})
         }
         if source_id == .Val(value) {
-            if value != self.session_identity.source_id -> return Err(EditorHostError.SourceMismatch(expected: self.session_identity.source_id.copy(), actual: value.copy()))
+            if value != self.session_identity.source_id -> return Err(EditorHostError.SourceMismatch{expected: self.session_identity.source_id.copy(), actual: value.copy()})
         }
     }
     sync_session: fn(&self, session: ResidentDevSession) EditorHostError! {
-        if session.id() != self.session_identity.session_id -> return Err(EditorHostError.SessionMismatch(expected: self.session_identity.session_id.copy(), actual: session.id().copy()))
+        if session.id() != self.session_identity.session_id -> return Err(EditorHostError.SessionMismatch{expected: self.session_identity.session_id.copy(), actual: session.id().copy()})
         projection: session.devtools_events_since(.None)
         self.replace_projection(projection)
     }
@@ -471,14 +471,14 @@ EditorHostTransport: struct {
         if decoded == {
             .Commands(_) -> { return Err(EditorHostError.InvalidEnvelope("editor host accepts runtime event envelopes, not command envelopes")) }
             .Events(envelope) -> {
-                if envelope.session_id != self.session_identity.session_id -> return Err(EditorHostError.SessionMismatch(expected: self.session_identity.session_id.copy(), actual: envelope.session_id.copy()))
+                if envelope.session_id != self.session_identity.session_id -> return Err(EditorHostError.SessionMismatch{expected: self.session_identity.session_id.copy(), actual: envelope.session_id.copy()})
                 if envelope.source_identity == .Val(identity) {
                     // Wire precedence is source before revision (projection is opposite).
                     if identity.source_id == .Val(source) {
-                        if source != self.session_identity.source_id -> return Err(EditorHostError.SourceMismatch(expected: self.session_identity.source_id.copy(), actual: source.copy()))
+                        if source != self.session_identity.source_id -> return Err(EditorHostError.SourceMismatch{expected: self.session_identity.source_id.copy(), actual: source.copy()})
                     }
                     if identity.revision == .Val(revision) {
-                        if revision.len() != 0 && revision != self.session_identity.revision -> return Err(EditorHostError.RevisionMismatch(expected: self.session_identity.revision.copy(), actual: revision.copy()))
+                        if revision.len() != 0 && revision != self.session_identity.revision -> return Err(EditorHostError.RevisionMismatch{expected: self.session_identity.revision.copy(), actual: revision.copy()})
                     }
                 }
                 replacement := editor_empty_ring()

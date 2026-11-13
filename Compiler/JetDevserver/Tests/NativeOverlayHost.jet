@@ -36,14 +36,14 @@ overlay_test_rejection: fn(host: &NativeOverlayHost, event: NativeOverlayEvent) 
     host := NativeOverlayHost.new()
     host.open()
     inputs: [NativeOverlayInput]{
-        NativeOverlayInput.Key(code: "Space", pressed: true),
-        NativeOverlayInput.Pointer(x: -100, y: -100, pressed: true),
-        NativeOverlayInput.Text(text: "typed"),
-        NativeOverlayInput.Activate(action_id: "inspect")
+        NativeOverlayInput.Key{code: "Space", pressed: true},
+        NativeOverlayInput.Pointer{x: -100, y: -100, pressed: true},
+        NativeOverlayInput.Text{text: "typed"},
+        NativeOverlayInput.Activate{action_id: "inspect"}
     }
     loop input in inputs -> assert_eq(host.route_input(input), NativeOverlayInputRoute.Overlay)
     host.close()
-    assert_eq(host.route_input(NativeOverlayInput.Key(code: "Space", pressed: true)), NativeOverlayInputRoute.Game)
+    assert_eq(host.route_input(NativeOverlayInput.Key{code: "Space", pressed: true}), NativeOverlayInputRoute.Game)
 }
 #Test("headless_projection_is_deterministic") {
     event: overlay_test_event("revision", 7, 99, [NativeOverlayPanelFact]{overlay_test_panel("Traces", 3), overlay_test_panel("Build", 3)})

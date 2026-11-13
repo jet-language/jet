@@ -152,7 +152,7 @@ NativeOverlayAdapter: struct {
     }
     // Retain already-typed nodes/actions without deriving semantics from names.
     set_typed_panels: fn(&self, panels: [NativeOverlayPanelFact]) NativeOverlayAdapterError! {
-        if self.release_build -> return Err(NativeOverlayAdapterError.HostRejected(message: "native overlay is excluded from release builds"))
+        if self.release_build -> return Err(NativeOverlayAdapterError.HostRejected{message: "native overlay is excluded from release builds"})
         self.typed_panels = typed_panel_map(panels)
     }
     apply_projection: fn(&self, projection: DevtoolsProjection) -> NativeOverlayUpdate NativeOverlayAdapterError! {
@@ -163,7 +163,7 @@ NativeOverlayAdapter: struct {
         self.apply_projection_internal(projection, true)
     }
     apply_projection_internal: fn(&self, projection: DevtoolsProjection, retain_typed_panels: Bool) -> NativeOverlayUpdate NativeOverlayAdapterError! {
-        if self.release_build -> return Err(NativeOverlayAdapterError.HostRejected(message: "native overlay is excluded from release builds"))
+        if self.release_build -> return Err(NativeOverlayAdapterError.HostRejected{message: "native overlay is excluded from release builds"})
         validate_projection_identity(projection, self.session_id)
         validate_revision(projection.revision, projection.sequence == 0)
         self.check_projection_order(projection)
@@ -179,10 +179,10 @@ NativeOverlayAdapter: struct {
         previous_sequence := Int?{None}
         loop event in events {
             validate_event(event, projection)
-            if previous_sequence == Val(event.sequence()) -> return Err(NativeOverlayAdapterError.InvalidSequence(sequence: event.sequence()))
+            if previous_sequence == Val(event.sequence()) -> return Err(NativeOverlayAdapterError.InvalidSequence{sequence: event.sequence()})
             if !projection.reset && !revision_changed {
                 if self.sequence == .Val(current_sequence) {
-                    if event.sequence() <= current_sequence -> return Err(NativeOverlayAdapterError.StaleSequence(expected: current_sequence, received: event.sequence()))
+                    if event.sequence() <= current_sequence -> return Err(NativeOverlayAdapterError.StaleSequence{expected: current_sequence, received: event.sequence()})
                 }
             }
             previous_sequence = Val(event.sequence())
@@ -204,7 +204,7 @@ NativeOverlayAdapter: struct {
             rendered: self.render_panels(sequence)
             if rendered.dropped_for_nodes -> unavailable.push(make_unavailable(NATIVE_OVERLAY_EVENT_LOG_PANEL_ID, .NodeLimit))
             current: NativeOverlayEvent.new(JET_DEVTOOLS_PROTOCOL, self.session_id, projection.revision, sequence, projection.observed_at, rendered.panels)
-            _: current.validate() ?? return Err(NativeOverlayAdapterError.HostRejected(message: err.message))
+            _: current.validate() ?? return Err(NativeOverlayAdapterError.HostRejected{message: err.message})
             event = Val(current)
         } else {
             unavailable.push(make_unavailable("session", .EmptyStream))
@@ -226,21 +226,21 @@ NativeOverlayAdapter: struct {
         update
     }
     sync_session: fn(&self, session: ResidentDevSession) -> NativeOverlayUpdate NativeOverlayAdapterError! {
-        if session.id() != self.session_id -> return Err(NativeOverlayAdapterError.SessionMismatch(expected: self.session_id, received: session.id()))
+        if session.id() != self.session_id -> return Err(NativeOverlayAdapterError.SessionMismatch{expected: self.session_id, received: session.id()})
         self.apply_projection(session.devtools_events_since(self.sequence))
     }
     action_request: fn(self, panel_id: String, node_id: String) -> NativeOverlayActionRequest NativeOverlayAdapterError! {
         context: self.current_context()
         node: self.find_node(panel_id, node_id)
-        action: node.action ?? return Err(NativeOverlayAdapterError.ActionUnavailable(node_id: node_id))
+        action: node.action ?? return Err(NativeOverlayAdapterError.ActionUnavailable{node_id: node_id})
         NativeOverlayActionRequest{protocol: JET_DEVTOOLS_PROTOCOL, session_id: self.session_id, revision: context.revision, sequence: context.sequence,
             panel_id: panel_id, node_id: node_id, action_id: action.action_id, required_grant: action.required_grant}
     }
     validate_action_request: fn(self, request: NativeOverlayActionRequest) NativeOverlayAdapterError! {
         self.validate_request_identity(request.protocol, request.session_id, request.revision, request.sequence)
         node: self.find_node(request.panel_id, request.node_id)
-        action: node.action ?? return Err(NativeOverlayAdapterError.ActionUnavailable(node_id: request.node_id))
-        if action.action_id != request.action_id || action.required_grant != request.required_grant -> return Err(NativeOverlayAdapterError.ActionMismatch(action_id: request.action_id))
+        action: node.action ?? return Err(NativeOverlayAdapterError.ActionUnavailable{node_id: request.node_id})
+        if action.action_id != request.action_id || action.required_grant != request.required_grant -> return Err(NativeOverlayAdapterError.ActionMismatch{action_id: request.action_id})
     }
     selection_request: fn(self, panel_id: String, item_key: String) -> NativeOverlaySelectionRequest NativeOverlayAdapterError! {
         validate_text(panel_id, "selection panel id", false)
@@ -254,25 +254,25 @@ NativeOverlayAdapter: struct {
         NativeOverlayContext{revision: revision, sequence: sequence}
     }
     validate_request_identity: fn(self, protocol: String, session_id: String, revision: String, sequence: Int) NativeOverlayAdapterError! {
-        if protocol != JET_DEVTOOLS_PROTOCOL -> return Err(NativeOverlayAdapterError.InvalidProtocol(expected: JET_DEVTOOLS_PROTOCOL, received: protocol))
-        if session_id != self.session_id -> return Err(NativeOverlayAdapterError.SessionMismatch(expected: self.session_id, received: session_id))
+        if protocol != JET_DEVTOOLS_PROTOCOL -> return Err(NativeOverlayAdapterError.InvalidProtocol{expected: JET_DEVTOOLS_PROTOCOL, received: protocol})
+        if session_id != self.session_id -> return Err(NativeOverlayAdapterError.SessionMismatch{expected: self.session_id, received: session_id})
         context: self.current_context()
-        if revision != context.revision -> return Err(NativeOverlayAdapterError.StaleRevision(expected: context.revision, received: revision))
-        if sequence != context.sequence -> return Err(NativeOverlayAdapterError.StaleSequence(expected: context.sequence, received: sequence))
+        if revision != context.revision -> return Err(NativeOverlayAdapterError.StaleRevision{expected: context.revision, received: revision})
+        if sequence != context.sequence -> return Err(NativeOverlayAdapterError.StaleSequence{expected: context.sequence, received: sequence})
     }
     check_projection_order: fn(self, projection: DevtoolsProjection) NativeOverlayAdapterError! {
         current_sequence: self.sequence ?? return Ok()
         if self.revision == .Val(current_revision) {
-            if projection.revision != current_revision && projection.sequence <= current_sequence -> return Err(NativeOverlayAdapterError.StaleRevision(expected: current_revision, received: projection.revision))
+            if projection.revision != current_revision && projection.sequence <= current_sequence -> return Err(NativeOverlayAdapterError.StaleRevision{expected: current_revision, received: projection.revision})
         }
-        if projection.sequence < current_sequence -> return Err(NativeOverlayAdapterError.StaleSequence(expected: current_sequence, received: projection.sequence))
+        if projection.sequence < current_sequence -> return Err(NativeOverlayAdapterError.StaleSequence{expected: current_sequence, received: projection.sequence})
         if projection.sequence == current_sequence && self.revision == Val(projection.revision) && projection.panels.len() > 0 && !projection.reset {
-            return Err(NativeOverlayAdapterError.StaleSequence(expected: current_sequence, received: projection.sequence))
+            return Err(NativeOverlayAdapterError.StaleSequence{expected: current_sequence, received: projection.sequence})
         }
     }
     find_node: fn(self, panel_id: String, node_id: String) -> NativeOverlayNode NativeOverlayAdapterError! {
-        panel: self.typed_panels.get(panel_id) ?? return Err(NativeOverlayAdapterError.UnknownPanel(panel_id: panel_id))
-        find_overlay_node(panel.nodes, node_id) ?? Err(NativeOverlayAdapterError.UnknownNode(node_id: node_id))
+        panel: self.typed_panels.get(panel_id) ?? return Err(NativeOverlayAdapterError.UnknownPanel{panel_id: panel_id})
+        find_overlay_node(panel.nodes, node_id) ?? Err(NativeOverlayAdapterError.UnknownNode{node_id: node_id})
     }
     render_panels: fn(self, sequence: Int) -> NativeOverlayRenderedPanels NativeOverlayAdapterError! {
         typed_node_count := 0
@@ -293,12 +293,12 @@ NativeOverlayAdapter: struct {
             facts: loop index in skip..<self.event_facts.len() -> self.event_facts[index]
             if facts.len() > 0 -> panels.push(event_log_panel(facts, sequence))
         }
-        if panels.len() > MAX_OVERLAY_PANELS -> return Err(NativeOverlayAdapterError.InvalidPanel(message: "native overlay projection exceeds its panel budget"))
+        if panels.len() > MAX_OVERLAY_PANELS -> return Err(NativeOverlayAdapterError.InvalidPanel{message: "native overlay projection exceeds its panel budget"})
         NativeOverlayRenderedPanels{panels: panels, dropped_for_nodes: dropped_for_nodes}
     }
 }
 node_from_event: fn(event: JetDevtoolsEvent) -> NativeOverlayNode NativeOverlayAdapterError! {
-    if event.sequence() == 0 -> return Err(NativeOverlayAdapterError.InvalidSequence(sequence: event.sequence()))
+    if event.sequence() == 0 -> return Err(NativeOverlayAdapterError.InvalidSequence{sequence: event.sequence()})
     validate_event_text(event)
     children := [NativeOverlayNode]{}
     children.push(NativeOverlayNode.text("source", "source").with_value(event.source()))
@@ -310,17 +310,17 @@ node_from_event: fn(event: JetDevtoolsEvent) -> NativeOverlayNode NativeOverlayA
     NativeOverlayNode.new("event-{event.sequence()}", .Status, "event").with_value(event.entity()).with_status(event.kind()).with_children(children)
 }
 event_log_panel: fn(events: [JetDevtoolsEvent], sequence: Int) -> NativeOverlayPanelFact NativeOverlayAdapterError! {
-    if sequence == 0 -> return Err(NativeOverlayAdapterError.InvalidSequence(sequence: sequence))
+    if sequence == 0 -> return Err(NativeOverlayAdapterError.InvalidSequence{sequence: sequence})
     if events.len() > MAX_NATIVE_OVERLAY_EVENTS || events.len() > MAX_OVERLAY_NODES / EVENT_LOG_NODES_PER_EVENT {
-        return Err(NativeOverlayAdapterError.InvalidPanel(message: "native overlay event log exceeds its event or node budget"))
+        return Err(NativeOverlayAdapterError.InvalidPanel{message: "native overlay event log exceeds its event or node budget"})
     }
     nodes := [NativeOverlayNode]{}
     loop event in events -> nodes.push(node_from_event(event))
     NativeOverlayPanelFact.new(NATIVE_OVERLAY_EVENT_LOG_PANEL_ID, NATIVE_OVERLAY_EVENT_LOG_TITLE, sequence, NATIVE_OVERLAY_EVENT_LOG_STATUS, nodes)
 }
 validate_projection_identity: fn(projection: DevtoolsProjection, session_id: String) NativeOverlayAdapterError! {
-    if projection.protocol != JET_DEVTOOLS_PROTOCOL -> return Err(NativeOverlayAdapterError.InvalidProtocol(expected: JET_DEVTOOLS_PROTOCOL, received: projection.protocol))
-    if projection.session_id != session_id -> return Err(NativeOverlayAdapterError.SessionMismatch(expected: session_id, received: projection.session_id))
+    if projection.protocol != JET_DEVTOOLS_PROTOCOL -> return Err(NativeOverlayAdapterError.InvalidProtocol{expected: JET_DEVTOOLS_PROTOCOL, received: projection.protocol})
+    if projection.session_id != session_id -> return Err(NativeOverlayAdapterError.SessionMismatch{expected: session_id, received: projection.session_id})
     validate_text(projection.session_id, "session id", false)
 }
 validate_revision: fn(revision: String, allow_empty: Bool) NativeOverlayAdapterError! {
@@ -328,7 +328,7 @@ validate_revision: fn(revision: String, allow_empty: Bool) NativeOverlayAdapterE
     validate_text(revision, "revision", true)
 }
 validate_event: fn(event: JetDevtoolsEvent, projection: DevtoolsProjection) NativeOverlayAdapterError! {
-    if event.sequence() == 0 || event.sequence() > projection.sequence -> return Err(NativeOverlayAdapterError.InvalidSequence(sequence: event.sequence()))
+    if event.sequence() == 0 || event.sequence() > projection.sequence -> return Err(NativeOverlayAdapterError.InvalidSequence{sequence: event.sequence()})
     validate_event_text(event)
 }
 validate_event_text: fn(event: JetDevtoolsEvent) NativeOverlayAdapterError! {
@@ -339,12 +339,12 @@ validate_event_text: fn(event: JetDevtoolsEvent) NativeOverlayAdapterError! {
     if event.payload_json() == .Val(payload) -> validate_text(payload, "event payload", true)
 }
 typed_panel_map: fn(panels: [NativeOverlayPanelFact]) -> [String: NativeOverlayPanelFact] NativeOverlayAdapterError! {
-    if panels.len() > MAX_OVERLAY_PANELS -> return Err(NativeOverlayAdapterError.InvalidPanel(message: "native overlay typed panels exceed their panel budget"))
+    if panels.len() > MAX_OVERLAY_PANELS -> return Err(NativeOverlayAdapterError.InvalidPanel{message: "native overlay typed panels exceed their panel budget"})
     output := [String: NativeOverlayPanelFact]{}
     count := 0
     loop panel in panels {
-        if panel.panel_id == NATIVE_OVERLAY_EVENT_LOG_PANEL_ID -> return Err(NativeOverlayAdapterError.ReservedPanel(panel_id: panel.panel_id))
-        if output.get(panel.panel_id) != None -> return Err(NativeOverlayAdapterError.DuplicatePanel(panel_id: panel.panel_id))
+        if panel.panel_id == NATIVE_OVERLAY_EVENT_LOG_PANEL_ID -> return Err(NativeOverlayAdapterError.ReservedPanel{panel_id: panel.panel_id})
+        if output.get(panel.panel_id) != None -> return Err(NativeOverlayAdapterError.DuplicatePanel{panel_id: panel.panel_id})
         validate_panel(panel, count)
         output[panel.panel_id] = panel
     }
@@ -358,27 +358,27 @@ validate_panel: fn(panel: NativeOverlayPanelFact, count: &Int) NativeOverlayAdap
     loop node in panel.nodes -> validate_node(node, 0, count, ids)
 }
 validate_node: fn(node: NativeOverlayNode, depth: Int, count: &Int, ids: &[String: Bool]) NativeOverlayAdapterError! {
-    if depth > MAX_OVERLAY_DEPTH -> return Err(NativeOverlayAdapterError.InvalidNode(message: "native overlay node tree exceeds its depth budget"))
+    if depth > MAX_OVERLAY_DEPTH -> return Err(NativeOverlayAdapterError.InvalidNode{message: "native overlay node tree exceeds its depth budget"})
     validate_text(node.id, "node id", false)
     validate_text(node.label, "node label", false)
-    if ids.get(node.id) != None -> return Err(NativeOverlayAdapterError.InvalidNode(message: "native overlay node id `{node.id}` is duplicated"))
+    if ids.get(node.id) != None -> return Err(NativeOverlayAdapterError.InvalidNode{message: "native overlay node id `{node.id}` is duplicated"})
     ids[node.id] = true
     count += 1
-    if count > MAX_OVERLAY_NODES -> return Err(NativeOverlayAdapterError.InvalidNode(message: "native overlay projection exceeds its node budget"))
+    if count > MAX_OVERLAY_NODES -> return Err(NativeOverlayAdapterError.InvalidNode{message: "native overlay projection exceeds its node budget"})
     if node.value == .Val(value) -> validate_text(value, "node value", true)
     if node.status == .Val(status) -> validate_text(status, "node status", true)
     if node.action == .Val(action) {
-        if node.kind != .Action -> return Err(NativeOverlayAdapterError.InvalidNode(message: "native overlay node `{node.id}` carries an action but is not an action node"))
+        if node.kind != .Action -> return Err(NativeOverlayAdapterError.InvalidNode{message: "native overlay node `{node.id}` carries an action but is not an action node"})
         validate_text(action.action_id, "action id", false)
     } else if node.kind == .Action {
-        return Err(NativeOverlayAdapterError.InvalidNode(message: "native overlay action node `{node.id}` has no typed action"))
+        return Err(NativeOverlayAdapterError.InvalidNode{message: "native overlay action node `{node.id}` has no typed action"})
     }
     loop child in node.children -> validate_node(child, depth + 1, count, ids)
 }
 validate_text: fn(value: String, field: String, allow_empty: Bool) NativeOverlayAdapterError! {
-    if (!allow_empty && value == "") || value.bytes().len() > MAX_OVERLAY_TEXT_BYTES -> return Err(NativeOverlayAdapterError.InvalidText(field: field))
+    if (!allow_empty && value == "") || value.bytes().len() > MAX_OVERLAY_TEXT_BYTES -> return Err(NativeOverlayAdapterError.InvalidText{field: field})
     loop byte in value.bytes() {
-        if byte < 32 || byte == 127 -> return Err(NativeOverlayAdapterError.InvalidText(field: field))
+        if byte < 32 || byte == 127 -> return Err(NativeOverlayAdapterError.InvalidText{field: field})
     }
 }
 panel_node_count: fn(panel: NativeOverlayPanelFact) -> Int {
