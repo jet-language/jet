@@ -1739,6 +1739,44 @@ limits; HTML/JSON report renderers escape their output contexts. Provider
 connection, headless, protocol, timeout, closed-state, and cleanup failures
 are `BrowserError` values.
 
+### `core.browser.host` — events and values in the page
+
+`core.browser.host` is the checked surface a web app's code uses inside the
+page. Both operations carry the `Browser` effect and are lowered by the web
+target; native codegen keeps them as inert checked calls.
+
+| Signature | Result | Description |
+|---|---|---|
+| `on(target: String, event: String, handler: fn(WebEvent)) -[Browser]>` | — | Register a DOM event handler on the selected element. |
+| `value(target: String) -[Browser]> String` | text | Read the selected input or element value. |
+
+### `core.browser.storage` — browser storage adapters
+
+`core.browser.storage` names the storage interface used by web applications,
+while `core.browser.storage.local` and `core.browser.storage.session` provide
+browser-backed variants. Values are keyed strings; an adapter owns persistence
+and scope.
+
+| Signature | Result | Description |
+|---|---|---|
+| `local() -> WebStorage` | namespace | Select origin-local storage. |
+| `session() -> WebStorage` | namespace | Select tab-scoped session storage. |
+| `kind_local() -> String` / `kind_session() -> String` | text | Return the namespace labels. |
+| `core.browser.storage.local.get(key: String) -> ?String` | option | Read an origin-local key. |
+| `core.browser.storage.local.set(key: String, value: String)` | — | Write an origin-local key. |
+| `core.browser.storage.local.remove(key: String)` / `clear()` | — | Remove one or all local keys. |
+| `core.browser.storage.local.get_or(key, fallback) -> String` / `has(key) -> Bool` | text/Boolean | Read with a fallback or test local presence. |
+| `core.browser.storage.session.get(key: String) -> ?String` | option | Read a session key. |
+| `core.browser.storage.session.set(key: String, value: String)` | — | Write a session key. |
+| `core.browser.storage.session.remove(key: String)` / `clear()` | — | Remove one or all session keys. |
+| `core.browser.storage.session.get_or(key, fallback) -> String` / `has(key) -> Bool` | text/Boolean | Read with a fallback or test session presence. |
+
+Outside a browser (`jet run`, a native build), each of `local` and `session`
+is one process-wide in-memory store, and the two stay separate: `set`
+replaces a key's value, `remove` and `clear` touch only their own store,
+and the empty key is an ordinary key. The golden
+`Examples/Apps/Web/StorageLocalSession.jet` shows this on O0, O1 and O2.
+
 ### `core.crypto` — nominal cryptography
 
 `core.crypto` is the typed cryptography rung (D-ONCE-LAYER1=B). Hashes,
@@ -5016,9 +5054,7 @@ boundary. The renderer consumes those facts instead of copying the route list.
 | `app() -> App` | app | Create the default application carrier. |
 | `page(title: String, body: String) -> WebPage` | page | Build a server-rendered page. |
 | `form(Model, action: handler) -> WebFormTyped` | form | Derive typed inputs and the named action contract at compile time (D-WEBFORM1=A). |
-| `on(path: String, title: String, handler: fn(WebEvent)) -[Browser]>` | — | Register a browser-facing handler. |
 | `openapi(routes: HTTPMux or HTTPRouter) -> String` | text | Render OpenAPI from the checked facts of the same route value that is served. |
-| `value(key: String) -[Browser]> String` | text | Read a browser value. |
 | `storage() -> String` | text | Select the local storage namespace. |
 | `auth(kind: String) -> Auth` | auth | Build an authentication carrier. |
 | `auth_oauth(auth: Auth, client_id: String) -> Auth` | auth | Add OAuth client identity to an auth carrier. |
@@ -5087,33 +5123,6 @@ generation token, and its observers see one update per transaction, after the
 callback returns. `optimistic` and `patch` keep the value from before the
 callback, and until `patch_commit`, `patch_rollback` returns the store with
 that value restored.
-
-
-### `core.web.storage` — browser storage adapters
-
-`core.web.storage` names the storage interface used by web applications, while
-`core.web.storage.local` and `core.web.storage.session` provide browser-backed
-variants. Values are keyed strings; an adapter owns persistence and scope.
-
-| Signature | Result | Description |
-|---|---|---|
-| `local() -> WebStorage` | namespace | Select origin-local storage. |
-| `session() -> WebStorage` | namespace | Select tab-scoped session storage. |
-| `kind_local() -> String` / `kind_session() -> String` | text | Return the namespace labels. |
-| `core.web.storage.local.get(key: String) -> ?String` | option | Read an origin-local key. |
-| `core.web.storage.local.set(key: String, value: String)` | — | Write an origin-local key. |
-| `core.web.storage.local.remove(key: String)` / `clear()` | — | Remove one or all local keys. |
-| `core.web.storage.local.get_or(key, fallback) -> String` / `has(key) -> Bool` | text/Boolean | Read with a fallback or test local presence. |
-| `core.web.storage.session.get(key: String) -> ?String` | option | Read a session key. |
-| `core.web.storage.session.set(key: String, value: String)` | — | Write a session key. |
-| `core.web.storage.session.remove(key: String)` / `clear()` | — | Remove one or all session keys. |
-| `core.web.storage.session.get_or(key, fallback) -> String` / `has(key) -> Bool` | text/Boolean | Read with a fallback or test session presence. |
-
-Outside a browser (`jet run`, a native build), each of `local` and `session`
-is one process-wide in-memory store, and the two stay separate: `set`
-replaces a key's value, `remove` and `clear` touch only their own store,
-and the empty key is an ordinary key. The golden
-`Examples/Apps/Web/StorageLocalSession.jet` shows this on O0, O1 and O2.
 
 ### `Cell<T>` — local interior mutability
 
@@ -6182,13 +6191,14 @@ The built-module inventory is a source-facing registry, not a missing-domain led
 - `core.watcher`
 - `core.web`
 - `core.browser`
+- `core.browser.host`
+- `core.browser.storage`
+- `core.browser.storage.local`
+- `core.browser.storage.session`
 - `core.web.devserver`
 - `core.web.forms`
 - `core.web.query`
 - `core.web.router`
-- `core.web.storage`
-- `core.web.storage.local`
-- `core.web.storage.session`
 - `core.web.store`
 - `core.web.table`
 - `core.web.virtual`

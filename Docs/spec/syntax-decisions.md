@@ -4141,14 +4141,15 @@ does not discharge or replace the static obligations required by this decision.
 pointer-assignment lvalue spelling is added.
 
 **D-FLAGSHIP-WEBAPI1 — Browser events and storage**: web flagship slices use
-`core.web` for browser-owned state and DOM events. `web.on(selector, event,
-handler)` binds an event listener, `web.value(selector)` reads an element's
-current value/text, and `web.storage.local` / `web.storage.session` expose
-`get`, `set`, `remove`, and `clear`. `get(key)` returns `?String`, so missing
-storage reads use the standard fallback operator: `web.storage.local.get("tasks")
-?? "[]"`. Component-level events are the same mechanism at the compiler level:
-components emit stable selectors/ids, then bind handlers through `web.on(...)`;
-there is no second component-only event language.
+`core.browser.host` for DOM events and `core.browser.storage` for browser-owned
+state. `host.on(selector, event, handler)` binds an event listener,
+`host.value(selector)` reads an element's current value/text, and
+`core.browser.storage.local` / `core.browser.storage.session` expose `get`,
+`set`, `remove`, and `clear`. `get(key)` returns `?String`, so missing storage
+reads use the standard fallback operator: `local.get("tasks") ?? "[]"`.
+Component-level events are the same mechanism at the compiler level: components
+emit stable selectors/ids, then bind handlers through `host.on(...)`; there is
+no second component-only event language.
 
 **D-UNINIT1 — Visible uninitialization**: skips zero-fill for a binding, gated
 behind `use core.mem` (E0424); sema proves write-before-read on all paths

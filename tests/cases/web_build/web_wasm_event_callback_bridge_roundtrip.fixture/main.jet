@@ -1,17 +1,20 @@
 // D-JSBIND1 / #123: JS event callback invokes a #Export(wasm) bridge (JS -> Wasm
 // inside a browser-style handler), proving callback + compute round-trip.
-use web: core.web
+use {
+    host: core.browser.host
+    core.browser.storage.local
+}
 
 #Export(wasm)
 double: fn(n: Int) -> Int { n * 2 }
 
 #Target(JS)
 init: fn() {
-    web.on("#go", "click", fn(ev) {
+    host.on("#go", "click", fn(ev) {
         if double(21) == 42 {
             print("42")
         }
-        web.storage.local.set("clicked", "yes")
+        local.set("clicked", "yes")
     })
 }
 

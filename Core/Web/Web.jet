@@ -27,14 +27,13 @@ use {
 // core.web — server-rendered apps on `core.http`.
 //
 // An `App` owns routes, live-query keys, and session auth. Nested modules
-// own router, store, forms, table, virtual windows and storage. Nothing here
-// talks to a browser; `core.http` is the wire.
+// own router, store, forms, table and virtual windows. Nothing here talks
+// to a browser; `core.http` is the wire.
 
 devserver: module
 forms: module
 query: module
 router: module
-storage: module
 store: module
 table: module
 virtual: module
@@ -673,12 +672,6 @@ __app_facts_json: fn(app: App) -> String Never! {
 }
 
 
-WebEvent: struct {
-    path: String
-    title: String
-    payload: String
-}
-
 Context: struct {
     path: String
     method: String
@@ -734,15 +727,6 @@ LiveRegistry: struct {
 // Web.form(Model, action: handler) is elaborated by sema.
 // It returns the opaque typed-model form boundary, not the source forms
 // module's explicit input/action-name record API.
-
-
-// `jet_web_on` has registry entries but no implementation in this
-// repository: the generated web host binds no DOM route by path. This
-// forwarding declaration is not an implementation or cutover. Native
-// callback admission must keep the actual backend contract.
-on: fn(path: String, title: String, handler: fn(WebEvent)) Never! -[Browser]> {
-    core.web.on(path, title, handler)
-}
 
 // `web.openapi(mux)` checks as `__openapi_mux(mux)` below (sema
 // sema_call_http_web_openapi_mux); a router renders its route table the same way.
@@ -1346,8 +1330,6 @@ __openapi_route_json: fn(route: __OpenAPIRoute) -> String Never! {
     }
     "{out}}}"
 }
-
-value: fn(key: String) -[Browser]> String Never! { core.web.value(key) }
 
 storage: fn() -> String Never! { "local" }
 

@@ -4480,19 +4480,21 @@ browser test controller is [`Core/Browser/Browser.jet`](../../Core/Browser/Brows
 
 ### Browser events, values, and storage
 
-Use `core.web` for the checked browser operations:
+Use `core.browser.host` and `core.browser.storage` for the checked browser
+operations:
 
-- `web.on(target, event, handler)` registers a DOM event handler. The handler
+- `host.on(target, event, handler)` registers a DOM event handler. The handler
   receives `WebEvent`; a handler that does not need it can ignore the argument.
-- `web.value(target) -> String` reads the selected input or element value.
-- `core.web.storage.local.get(key) -> ?String` and
-  `core.web.storage.session.get(key) -> ?String` read origin-local and
+- `host.value(target) -> String` reads the selected input or element value.
+- `core.browser.storage.local.get(key) -> ?String` and
+  `core.browser.storage.session.get(key) -> ?String` read origin-local and
   tab-scoped storage. `set`, `remove`, and `clear` mutate the corresponding
   namespace, and `get_or` composes a missing key with a fallback.
 
-For example, the browser conformance surface uses
-`web.on("#new-task", "input", handler)` and
-`web.storage.local.set("draft", web.value("#new-task"))`. The generated web
+For example, the browser conformance surface imports `host: core.browser.host`
+and `core.browser.storage.local`, then uses
+`host.on("#new-task", "input", handler)` and
+`local.set("draft", host.value("#new-task"))`. The generated web
 runtime uses `addEventListener`, DOM selection, `localStorage`, and
 `sessionStorage`; native codegen provides inert checked routes for the browser
 APIs. The round-trip is exercised by

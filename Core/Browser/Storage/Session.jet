@@ -1,6 +1,6 @@
 use {
     core: core
-    local_storage: core.web.storage.local
+    local_storage: core.browser.storage.local
 }
 
 // The shipped process-default store is separate from local storage. Web is
@@ -42,7 +42,7 @@ get_or: fn(key: String, fallback: String) -> String Never! { get(key) ?? fallbac
 has: fn(key: String) -> Bool Never! { get(key) != None }
 
 test_helper_effects: fn() Never! -[Browser]> {
-    key: "Core.web.storage.session.helper.effects"
+    key: "Core.browser.storage.session.helper.effects"
     remove(key)
     assert_eq(get_or(key, "fallback"), "fallback")
     assert_eq(has(key), false)
@@ -53,7 +53,7 @@ test_helper_effects: fn() Never! -[Browser]> {
 }
 
 #Test("session storage preserves miss, replacement and removal") {
-    key: "Core.web.storage.session.contract"
+    key: "Core.browser.storage.session.contract"
     remove(key)
     assert_eq(get(key), None)
     set(key, "first")
@@ -64,7 +64,7 @@ test_helper_effects: fn() Never! -[Browser]> {
 }
 
 #Test("session clear removes all session entries without clearing local") {
-    key: "Core.web.storage.clear"
+    key: "Core.browser.storage.clear"
     local_storage.set(key, "local")
     set(key, "session")
     set("", "empty key")

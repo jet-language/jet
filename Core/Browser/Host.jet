@@ -1,0 +1,21 @@
+use {
+    core: core
+}
+
+// core.browser.host — the page host's DOM event route and value reads.
+
+WebEvent: struct {
+    path: String
+    title: String
+    payload: String
+}
+
+// `jet_web_on` has registry entries but no implementation in this
+// repository: the generated web host binds no DOM route by path. This
+// forwarding declaration is not an implementation or cutover. Native
+// callback admission must keep the actual backend contract.
+on: fn(path: String, title: String, handler: fn(WebEvent)) Never! -[Browser]> {
+    core.browser.host.on(path, title, handler)
+}
+
+value: fn(key: String) -[Browser]> String Never! { core.browser.host.value(key) }

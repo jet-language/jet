@@ -1,12 +1,15 @@
 #Target(Web)
-use web: core.web
+use {
+    host: core.browser.host
+    core.browser.storage.local
+}
 
 #Target(JS)
 init: fn() {
-    saved: web.storage.local.get("tasks") ?? "[]"
-    web.storage.local.set("tasks", saved)
-    web.on("#new-task", "input", fn(ev) {
-        web.storage.local.set("draft", web.value("#new-task"))
+    saved: local.get("tasks") ?? "[]"
+    local.set("tasks", saved)
+    host.on("#new-task", "input", fn(ev) {
+        local.set("draft", host.value("#new-task"))
     })
 }
 

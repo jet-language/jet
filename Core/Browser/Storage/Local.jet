@@ -1,6 +1,6 @@
 use {
     core: core
-    session_storage: core.web.storage.session
+    session_storage: core.browser.storage.session
 }
 
 // The shipped process-default store survives evaluator runs and reloads. Web is
@@ -43,7 +43,7 @@ has: fn(key: String) -> Bool Never! { get(key) != None }
 
 // An explicit Browser-only caller bounds the inferred effects of both helpers.
 test_helper_effects: fn() Never! -[Browser]> {
-    key: "Core.web.storage.local.helper.effects"
+    key: "Core.browser.storage.local.helper.effects"
     remove(key)
     assert_eq(get_or(key, "fallback"), "fallback")
     assert_eq(has(key), false)
@@ -55,7 +55,7 @@ test_helper_effects: fn() Never! -[Browser]> {
 
 
 #Test("local storage preserves miss, replacement, removal and empty keys") {
-    key: "Core.web.storage.local.contract"
+    key: "Core.browser.storage.local.contract"
     remove(key)
     assert_eq(get(key), None)
     set(key, "first")
@@ -69,7 +69,7 @@ test_helper_effects: fn() Never! -[Browser]> {
 }
 
 #Test("local and session storage keep separate identities") {
-    key: "Core.web.storage.separation"
+    key: "Core.browser.storage.separation"
     set(key, "local")
     session_storage.set(key, "session")
     assert_eq(get(key), Val("local"))
