@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6791,
-    "rev": 101479,
+    "rev": 101481,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -93812,6 +93812,11 @@
         {
           "at": "2026-11-13",
           "by": "Main",
+          "text": "Ballot D-BYTE-TRAITS2 posted (v2, after the adversarial review). It amends D-CORE-FILE-ADAPTERS1=A: how Stdout and Stderr implement Writer (write taking bytes, write_text) and flush on Writer. c11 train 1 (no flush) and train 2 proceed; the term Writer impls and the codec flush wait on it."
+        },
+        {
+          "at": "2026-11-13",
+          "by": "Main",
           "text": "c9 progress: dev 34da8adfd2 (G11Speed-lx1) landed 2026-11-13. The lexer no longer builds diagnostics for a typed head's reading the parser does not pick. Lander5 measured g5-fold6 jet vs g11-c1 jet over 3 cold rounds: a 220 KB byte-asset source sources 0.16-0.17 s -> 0.01 s, parse 0.16 s -> <=0.01 s, peak 166 MB -> 64 MB; Summarize load 0.59-0.64 s -> 0.25-0.29 s; scaling-corpora load 1.05-1.13 s -> 0.42-0.47 s. Second program: the Summarize tool. G11Speed-c1land (comptime bodies spliced) and by1-r2 measured well (c1land: jetc-trace comptime.bodies 0.33-0.41 s -> 0.000 s, peak 291 -> 242 MB; run-cold-context peak 847 -> 669 MB; by1-r2: lookup.jet build 14.4 s / 4.11 GB -> 7.07 s / 0.60 GB), but they did not land. c1land fails under JET_RECHECK_VERIFY (pivot_sum and 6 comptime cases) and gives a new Reflect.jet o1/o2 ICE. by1-r2 is held pending the ICE attribution. Both were sent back to G11Speed-5."
         },
         {
@@ -93979,7 +93984,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-12T04:08:18.925Z",
-      "updated": "2026-11-13T12:16:03.379Z",
+      "updated": "2026-11-13T13:12:21.249Z",
       "updatedBy": "Main",
       "criteriaLastN": 11
     },
@@ -197046,6 +197051,320 @@
       "draft": false,
       "status": "open",
       "created": "2026-11-13T13:04:44.585Z"
+    },
+    {
+      "id": "D-BYTE-TRAITS2",
+      "cardId": "c0ssy5wy",
+      "group": "library",
+      "title": "Amending D-CORE-FILE-ADAPTERS1=A: Stdout and Stderr take Core's byte write names, and the Writer trait gains flush",
+      "situation": "You ratified D-CORE-FILE-ADAPTERS1=A: the JSON, CBOR, CSV and XML writers write through the Prelude's Writer trait, and the screen's Stdout and Stderr are Writers too. Two facts block that as written. Writer's write takes bytes and returns a count, but Stdout's write takes text, and one type cannot have two methods named write. And Writer has no flush, so a codec that owns a buffered file cannot push a record out, and a log watched with tail -f shows nothing until the program ends. We recommend A: Stdout and Stderr use the byte names the rest of Core already uses, and Writer gains flush.",
+      "gist": "How do Stdout and the codecs keep working once the codecs write through the Prelude's Writer trait?",
+      "lesson": "A codec turns values into JSON, CSV, CBOR or XML bytes. Under the ratified plan it writes through a Writer: any value with write and write_all. Two gaps remain. Stdout already has a write that takes text, not bytes. And Writer has no way to say: send what you hold to the file now.",
+      "explainer": "Words used here. Bytes are a list of U8 values, written [U8]; text is a String. A trait is a named set of methods; a type that has them implements the trait, and generic code can accept any such type. The Prelude is the part of Core every program sees without a use line.\n\nA buffered writer collects bytes in memory and hands them to the operating system in large pieces. Flush means: hand over whatever is collected now. tail -f is a Unix command that prints the lines a file gains while another program writes it. A partial write takes some of the bytes and returns how many it took.",
+      "story": "Ana's service logs events to a JSONL file and prints a summary on the screen. Her teammate watches the log with tail -f.\n\nUnder A she writes out.write_text for the summary and calls log.flush() after each event, and tail -f shows each event as a whole line. She can also point a JSONL writer at term.stdout(). Under B the summary line is the same as today, but a codec cannot write to the screen.\n\nUnder C she keeps out.write for text, while a child process's stdin still uses the same name, write, for bytes. Under D she cannot flush mid-stream, so her teammate sees nothing until the log ends. Under E her code matches A, but a writer type must also implement a second trait to reach a codec.\n\nUnder F she keeps out.write for the summary and hands term.stdout().binary() to a codec. Under G her code matches A, but a buffering writer she forgets to give flush still compiles, and the log stalls.",
+      "inWild": "// Rust: Stdout's write takes bytes; text goes through print! or write!.\n// flush is a required method of the Write trait.\n// https://doc.rust-lang.org/std/io/trait.Write.html\nlet mut out = std::io::stdout();\nout.write_all(b\"bytes\\n\")?;\nout.flush()?;\n\n// Go: io.Writer has only Write; flushing is the separate http.Flusher\n// interface or bufio.Writer's own method.\n// https://pkg.go.dev/io#Writer  https://pkg.go.dev/net/http#Flusher\nw := bufio.NewWriter(os.Stdout)\nw.Write([]byte(\"bytes\\n\"))\nw.Flush()\n\n// Python: sys.stdout.write takes text; sys.stdout.buffer is the byte stream\n// beneath it, the shape of F.\n// https://docs.python.org/3/library/sys.html#sys.stdout\nsys.stdout.write(\"hi\\n\")\nsys.stdout.buffer.write(b\"hi\\n\")\n\n// Java: OutputStream.flush is on the base class and does nothing by default.\n// https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/io/OutputStream.html#flush()",
+      "detail": "What this ballot decides. The method names on core.term's Stdout and Stderr, and whether the Prelude's Writer trait has flush. It amends D-CORE-FILE-ADAPTERS1=A and changes nothing else that vote decided.\n\nThe trait today. Compiler/Prelude/Traits.jet:233-236 declares Writer with write: fn(&self, bytes: [U8]) -> Int IOError! and write_all: fn(&self, bytes: [U8]) IOError!. Reader at :228-230 has read(limit). Trait methods may have default bodies (D-LIB2; Examples/Modules/Library.jet:10-17), and a bound naming two traits is written <W: [Writer, Flush]>; Jet has no where clauses.\n\nStdout and Stderr today. Core/Term/Term.jet:80-119 gives each write(&self, text: String) IOError!, write_line(text), write_bytes(bytes: [U8]) IOError!, flush and is_tty. The probe p3 shows out.write(bytes) refused with E0112: write wants String. So Stdout cannot satisfy Writer.write without renaming one of its methods.\n\nThe names the rest of Core already uses. A child process's stdin has write(bytes) returning the count taken, write_all(bytes) and write_text(text) (Compiler/JetSema/Source/Sema/Calls/ProcessHandles.jet:514-545). TCPStream has the same three (NetworkHandles.jet:109-114). FileWriter has write_all, write_line, flush and fsync (StreamHandles.jet:167-171). Stdout is the one byte stream where write means text. No stream has every name: FileWriter lacks write and write_text, and a child's stdin and TCPStream lack flush and write_line.\n\nCall sites. The census script counts calls on Stdout and Stderr values in every tracked .jet file at dev e90053e60e, matching receivers by name. It finds 60 text writes, 18 write_bytes, 15 write_line and 46 flush. A review read all 60 write lines, and each receiver is a Stdout or Stderr handle. The count sizes the work only; it weighs for or against no option.\n\nCore itself has none. The estimate of about 230 byte writes counted files.write_bytes(path, bytes), a whole-file function on a path, which no option touches.\n\nFlush today. Each codec writer's flush calls the file's flush directly. The calls are CborStream.jet:692-694, Csv.jet:727-729, Stream.jet:1523-1525 and Xml.jet:302-304, reached through Cbor.jet:23, Json.jet:252 and Jsonl.jet:33. Under D-CORE-FILE-ADAPTERS1=A the codec holds a generic W, so it can call only the methods the trait declares. FileWriter buffers its writes (core-library.md:1322), so without a trait flush nothing reaches the file until the buffer fills or the program ends.\n\nA second gap the probes found. The JSONL and CSV writers hold back each record's line end until the next write or finish (Stream.jet:1955-2013, Csv.jet:660-671, encoding-decisions.md:1394-1398). Probe p4 runs today's program: after each flush the file holds one whole line fewer than the records written. So even with flush, a tailing reader is always one record behind.\n\nEvery option with a codec flush, all but D, fixes that the same way: a codec's flush first writes the pending line end. The next write then writes none, so a finished file's bytes are the same as today. One thing changes. Today a file cut after a flush lacks its last line end, which marks an unfinished log (Stream.jet:1954-1955); after the change it ends on a whole line.\n\nThe beginner cost. The core.term reference teaches out.write(\"done\") as its stream example (core-library.md:2142). Under A, D, E and G that line is E0112; under B, C and F it still works.\n\nOne write for both kinds cannot keep it. A method whose parameter is String | [U8] does not satisfy a trait method taking [U8]: review probe r1 gets E0907, which wants the exact type. A trait write taking String | [U8] would put a text branch in every writer, and a partial text write could stop inside a character.\n\nReview probe r2 shows an impl may add -[IO]> to a trait method that declares no effect, so Stdout's IO methods can implement Writer.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Stdout and Stderr use Core's byte names: write and write_all take bytes, write_text takes text; Writer gains a required flush",
+          "detail": "Stdout and Stderr read like a child's stdin and a TCPStream: write(bytes) returns the count taken, write_all(bytes) writes every byte, and write_text(text) writes text. write_line(text), flush and is_tty stay. write_bytes goes away. FileWriter gains write and write_text, so the three names mean the same on Stdout, Stderr, FileWriter, a child's stdin and TCPStream. Writer gains flush, and every codec writer's flush ends the pending record line, then flushes its writer.\n\nBeginner path: print and eprint are unchanged. out.write_line(text) is unchanged. A beginner who writes out.write(\"hi\") gets E0112, and its fix line names out.write_text(\"hi\"). The reference example at core-library.md:2142 becomes out.write_text(\"done\"). log.flush() makes each record a whole line on disk.\n\nExpert path: jsonl.writer(term.stdout()) streams records to the screen under the same limits as a file. A user type joins every codec by implementing write, write_all and flush.\n\nEdge cases. Stdout.write accepts every byte into the shared stdout buffer, waiting when the pipe is full, and returns bytes.len(). An empty list returns 0 and writes nothing. write_text writes the String's UTF-8 bytes and adds no line end. print and every Stdout value share stdout's one buffer, and eprint and every Stderr value share stderr's, so each stream keeps call order.\n\nStdout is written before stderr, stdin reads and child starts, as spec.md:428-432 says. A closed pipe is IOError as today. A failed flush is IOError with operation Flush; the codec keeps it as its sticky error. Flushing a codec with no pending record writes no bytes.",
+          "technical": "Compiler/Prelude/Traits.jet: Writer becomes { write: fn(&self, bytes: [U8]) -> Int IOError!; write_all: fn(&self, bytes: [U8]) IOError!; flush: fn(&self) IOError! }. flush is required, with no default body.\n\nCore/Term/Term.jet: Stdout and Stderr declare write(&self, bytes: [U8]) -> Int IOError! -[IO]>, write_all(&self, bytes: [U8]) IOError! -[IO]>, write_text(&self, text: String) IOError! -[IO]>, write_line, flush and is_tty, and impl Writer { } around write, write_all and flush. write_bytes is deleted. The Stdout and Stderr rows of Compiler/JetSema/Source/Sema/Calls/StreamHandles.jet:176-183 follow. write routes to the byte write and returns Int, write_all replaces write_bytes, and write_text is the old text write.\n\nFileWriter gains write(bytes) -> Int IOError!, which buffers every byte and returns the count, so it satisfies Writer. It also gains write_text(text), its text write. JSONLinesPush.flush (Stream.jet:1999) writes the pending LF first, and CSVWriter.flush (Csv.jet:727) calls close_record first. Each codec flush then calls self.output.flush(). encoding-decisions.md:1394-1398 is rewritten to match.\n\nE0112 on a String passed to a byte write or write_all names write_text in its fix line. The 60 text calls become write_text and the 18 write_bytes calls become write_all. core-library.md:2142 and its rows at :2157-2158 take the new names.",
+          "code": "use {\n    files: core.files\n    jsonl: core.encoding.jsonl\n    term: core.term\n}\n\nrun: fn() (EncodingError | IOError)! {\n    out := term.stdout()\n    out.write_text(\"logging to events.jsonl\\n\")\n    file := files.append(\"events.jsonl\")\n    log := jsonl.writer(file)\n    loop n in 0..<3 {\n        log.write(Dyn.Object([\"n\": Dyn.Int(n)]))\n        log.flush()    // tail -f shows record n as a whole line now\n    }\n    log.finish()\n    screen := jsonl.writer(term.stdout())\n    screen.write(Dyn.Object([\"done\": Dyn.Bool(true)]))\n    screen.finish()\n}\n// A user writer joins every codec with three methods:\n// Tally: struct { count: Int\n//     impl Writer {\n//         write: fn(&self, bytes: [U8]) -> Int IOError! { self.count += bytes.len()\n//             Ok(bytes.len()) }\n//         write_all: fn(&self, bytes: [U8]) IOError! { self.count += bytes.len()\n//             Ok() }\n//         flush: fn(&self) IOError! { Ok() } } }"
+        },
+        {
+          "key": "B",
+          "name": "Stdout and Stderr keep today's names and do not implement Writer; Writer gains flush as in A",
+          "detail": "Stdout and Stderr keep write(text) and write_bytes(bytes). They are not Writers, so no codec can write to the screen. Writer gains flush, and the codec flush behaves as in A.\n\nBeginner path: unchanged; out.write(\"hi\") writes text. Expert path: to stream records to the screen, encode each batch to text with jsonl.to_string or json.stringify and write it. That builds the whole batch in memory, outside the codec's size limits. A program on Linux or macOS can instead open /dev/stdout as a file; Windows has no file path for a redirected stdout.\n\nEdge cases: as in A for files. Text written with out.write and a later FileWriter on /dev/stdout use two buffers, so their order on the screen is not call order unless the program flushes between them.",
+          "technical": "Core/Term/Term.jet is unchanged. D-CORE-FILE-ADAPTERS1=A's list of types that implement Writer drops Stdout and Stderr. Traits.jet's Writer gains flush as in A, FileWriter gains write as in A, and the codec flush changes are the same as A's.\n\nNo call site changes. The loss: the generic codec constructors cannot accept term.stdout(), so the streaming encoders cannot write to the screen with their limits and backpressure.",
+          "code": "use {\n    files: core.files\n    jsonl: core.encoding.jsonl\n    term: core.term\n}\n\nrun: fn() (EncodingError | IOError)! {\n    out := term.stdout()\n    out.write(\"logging to events.jsonl\\n\")\n    file := files.append(\"events.jsonl\")\n    log := jsonl.writer(file)\n    loop n in 0..<3 {\n        log.write(Dyn.Object([\"n\": Dyn.Int(n)]))\n        log.flush()\n    }\n    log.finish()\n    // jsonl.writer(term.stdout()) is refused: Stdout is not a Writer.\n    out.write(jsonl.to_string([Dyn.Object([\"done\": Dyn.Bool(true)])]))\n}"
+        },
+        {
+          "key": "C",
+          "name": "The trait's partial write is renamed write_some, so Stdout keeps write for text; write_bytes becomes write_all",
+          "detail": "Writer becomes write_some(bytes) returning the count, write_all(bytes) and flush. Stdout and Stderr keep write(text) and write_line(text), rename write_bytes to write_all, and gain write_some. FileWriter gains write_some. A child's stdin and TCPStream keep write for bytes.\n\nBeginner path: out.write(\"hi\") unchanged. Expert path: as in A, with write_some in a user writer.\n\nEdge cases: as in A. The name write means text on Stdout and Stderr but bytes on a child's stdin and a TCPStream. Moving code from one to the other gives a type error, not wrong output.",
+          "technical": "Traits.jet: Writer { write_some: fn(&self, bytes: [U8]) -> Int IOError!; write_all; flush }. Term.jet: write_bytes renamed write_all; write_some added; write(text) kept. FileWriter gains write_some. The codec flush changes are the same as A's.\n\nThe 18 write_bytes calls become write_all; the 60 text calls stay. A child's stdin and TCPStream would need write_some as a second name for their write before they could ever implement Writer.",
+          "code": "use {\n    files: core.files\n    jsonl: core.encoding.jsonl\n    term: core.term\n}\n\nrun: fn() (EncodingError | IOError)! {\n    out := term.stdout()\n    out.write(\"logging to events.jsonl\\n\")\n    file := files.append(\"events.jsonl\")\n    log := jsonl.writer(file)\n    loop n in 0..<3 {\n        log.write(Dyn.Object([\"n\": Dyn.Int(n)]))\n        log.flush()\n    }\n    log.finish()\n    screen := jsonl.writer(term.stdout())\n    screen.write(Dyn.Object([\"done\": Dyn.Bool(true)]))\n    screen.finish()\n}\n// But a child process's stdin: child.stdin.write(bytes) still takes bytes."
+        },
+        {
+          "key": "D",
+          "name": "flush stays a method of the concrete writers only; codec writers lose flush, and finish hands the writer back",
+          "detail": "Writer keeps write and write_all, and Stdout takes A's names. Codec writers lose their flush method, since a generic codec cannot reach its writer's flush. finish ends the line, writes the closing bytes and hands the writer back, so the program can flush and close it and see that result.\n\nBeginner path: write records, then file := log.finish() and file.flush(). Expert path: as in A.\n\nEdge cases: nothing a codec writes is certain to reach the file before finish. A long-running log fills FileWriter's buffer before any bytes appear, so tail -f sees records in bursts, and none in the last partial buffer until the program ends. A crash loses that buffer.",
+          "technical": "Traits.jet's Writer is unchanged. Term.jet takes A's names. Every codec writer's flush (Cbor.jet:23, Json.jet:252, Jsonl.jet:33, and the four push types) is deleted. Each finish returns W instead of nothing: finish: fn(&self) -> W EncodingError!. The 60 and 18 call-site renames are the same as A's, and each call to a codec's flush is deleted.",
+          "code": "use {\n    files: core.files\n    jsonl: core.encoding.jsonl\n    term: core.term\n}\n\nrun: fn() (EncodingError | IOError)! {\n    out := term.stdout()\n    out.write_text(\"logging to events.jsonl\\n\")\n    log := jsonl.writer(files.append(\"events.jsonl\"))\n    loop n in 0..<3 {\n        log.write(Dyn.Object([\"n\": Dyn.Int(n)]))\n        // no flush: tail -f sees records only as the file buffer fills\n    }\n    file := log.finish()\n    file.flush()\n    screen := jsonl.writer(term.stdout())\n    screen.write(Dyn.Object([\"done\": Dyn.Bool(true)]))\n    screen.finish().flush()\n}"
+        },
+        {
+          "key": "E",
+          "name": "A separate Prelude trait, Flush, and codec writers ask for both traits",
+          "detail": "Writer keeps write and write_all, and Stdout takes A's names. A second Prelude trait, Flush, holds flush. Each codec writer takes W: [Writer, Flush], so its flush works as in A.\n\nBeginner path: identical to A. Expert path: a user writer implements two traits, Writer and Flush, to reach a codec; one with only Writer is refused at the constructor.\n\nEdge cases: as in A. Jet has no where clause, so a codec cannot offer flush only to writers that have it. Every writer passed to a codec needs Flush, which makes the two traits always appear together.",
+          "technical": "Compiler/Prelude/Traits.jet gains Flush: trait { flush: fn(&self) IOError! }. FileWriter, Stdout and Stderr implement Writer and Flush. The codec constructors and types take <W: [Writer, Flush]>. OwnedTraitRows.jet opens Flush as a bound user code can name. The other changes are the same as A's.",
+          "code": "use {\n    files: core.files\n    jsonl: core.encoding.jsonl\n    term: core.term\n}\n\nrun: fn() (EncodingError | IOError)! {\n    out := term.stdout()\n    out.write_text(\"logging to events.jsonl\\n\")\n    file := files.append(\"events.jsonl\")\n    log := jsonl.writer(file)\n    loop n in 0..<3 {\n        log.write(Dyn.Object([\"n\": Dyn.Int(n)]))\n        log.flush()\n    }\n    log.finish()\n    screen := jsonl.writer(term.stdout())\n    screen.write(Dyn.Object([\"done\": Dyn.Bool(true)]))\n    screen.finish()\n}\n// A user writer: impl Writer { write; write_all } and impl Flush { flush }."
+        },
+        {
+          "key": "F",
+          "name": "Stdout and Stderr keep their text names; out.binary() returns a byte Writer over the same buffer, as Python's sys.stdout.buffer",
+          "detail": "Stdout and Stderr keep write(text), write_line(text), flush and is_tty. Bytes move to a view: out.binary() returns StdoutBytes, a Writer with write(bytes) returning the count, write_all and flush over the same stdout buffer. Writer gains flush, and the codec flush works as in A.\n\nBeginner path: out.write(\"hi\") unchanged. Expert path: jsonl.writer(term.stdout().binary()) streams records to the screen; a user writer is as in A.\n\nEdge cases: text and bytes share one buffer, so they keep call order. The name write means text on Stdout but bytes on its own binary view, a child's stdin and TCPStream.",
+          "technical": "Core/Term/Term.jet gains StdoutBytes and StderrBytes, each holding the fd, with write, write_all and flush routed to stdio_bytes and stdio_flush, and impl Writer. Stdout.binary() and Stderr.binary() return them. write_bytes is deleted; its callers write out.binary().write_all(bytes).\n\nD-CORE-FILE-ADAPTERS1=A's list of Writer types names the two views instead of Stdout and Stderr. Traits.jet, FileWriter's write and the codec flush change as in A.",
+          "code": "use {\n    files: core.files\n    jsonl: core.encoding.jsonl\n    term: core.term\n}\n\nrun: fn() (EncodingError | IOError)! {\n    out := term.stdout()\n    out.write(\"logging to events.jsonl\\n\")\n    file := files.append(\"events.jsonl\")\n    log := jsonl.writer(file)\n    loop n in 0..<3 {\n        log.write(Dyn.Object([\"n\": Dyn.Int(n)]))\n        log.flush()\n    }\n    log.finish()\n    screen := jsonl.writer(term.stdout().binary())\n    screen.write(Dyn.Object([\"done\": Dyn.Bool(true)]))\n    screen.finish()\n}"
+        },
+        {
+          "key": "G",
+          "name": "Stdout takes A's names, and Writer gains flush with a default body that does nothing, as Java's OutputStream",
+          "detail": "As A, except Writer declares flush: fn(&self) IOError! { Ok() } with a default body. FileWriter, Stdout and Stderr write their own flush; a user writer may leave it out.\n\nBeginner path: as in A. Expert path: a user writer implements write and write_all, and adds flush only if it buffers.\n\nEdge cases: a buffering user writer that forgets flush compiles. Its codec's flush then returns Ok without pushing bytes, so a tailed log stalls with no error.",
+          "technical": "Compiler/Prelude/Traits.jet: Writer { write; write_all; flush: fn(&self) IOError! { Ok() } }, using D-LIB2's default method bodies (Examples/Modules/Library.jet:10-17). Every other change is A's.",
+          "code": "use {\n    files: core.files\n    jsonl: core.encoding.jsonl\n    term: core.term\n}\n\nrun: fn() (EncodingError | IOError)! {\n    out := term.stdout()\n    out.write_text(\"logging to events.jsonl\\n\")\n    file := files.append(\"events.jsonl\")\n    log := jsonl.writer(file)\n    loop n in 0..<3 {\n        log.write(Dyn.Object([\"n\": Dyn.Int(n)]))\n        log.flush()\n    }\n    log.finish()\n    screen := jsonl.writer(term.stdout())\n    screen.write(Dyn.Object([\"done\": Dyn.Bool(true)]))\n    screen.finish()\n}\n// A user writer: impl Writer { write; write_all }; flush defaults to Ok()."
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "Stdout implements io::Write, whose write takes bytes and returns a count; flush is required. Text goes through print! or write!. Source: https://doc.rust-lang.org/std/io/trait.Write.html",
+          "code": "std::io::stdout().write_all(b\"hi\\n\")?;"
+        },
+        {
+          "lang": "Go",
+          "note": "io.Writer has only Write. Flushing lives on bufio.Writer itself and on the optional http.Flusher interface, which code tests for at run time. E would require it at the bound instead. Source: https://pkg.go.dev/net/http#Flusher",
+          "code": "if f, ok := w.(http.Flusher); ok { f.Flush() }"
+        },
+        {
+          "lang": "Java",
+          "note": "OutputStream carries flush on the base type, with a body that does nothing, so unbuffered streams need not write one. Source: https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/io/OutputStream.html#flush()",
+          "code": "System.out.write(bytes); System.out.flush();"
+        },
+        {
+          "lang": "Python",
+          "note": "sys.stdout.write takes text, and sys.stdout.buffer is the byte stream beneath it, sharing its order; the shape of F. Source: https://docs.python.org/3/library/sys.html#sys.stdout",
+          "code": "sys.stdout.buffer.write(b\"hi\\n\")"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "A gives Stdout, Stderr, FileWriter, a child's stdin and TCPStream one rule: write and write_all take bytes, and write_text takes text. A required flush on Writer lets a codec push each record out, and the codec ends the record's line first, so a tailed log shows every record. The one beginner cost, out.write(\"hi\") on the screen, fails at compile time with a fix that names write_text.",
+        "gains": [
+          "write, write_all and write_text mean the same on all five byte streams in Core.",
+          "Codecs stream straight to the screen with their limits.",
+          "A tailed JSONL or CSV log shows each record after flush.",
+          "A user writer joins every codec with one impl of three methods."
+        ],
+        "losses": [
+          {
+            "loss": "A beginner's out.write(\"hi\") on the screen is E0112, and the core.term reference teaches that line today (core-library.md:2142).",
+            "mitigation": "E0112's fix line names write_text, and the reference example moves to it. print, eprint and write_line still take text, so the usual beginner screen path never meets the change."
+          },
+          {
+            "loss": "Every Writer must write flush, even one with no buffer.",
+            "mitigation": "It is one line, flush: fn(&self) IOError! { Ok() }. A default body, option G, would let a buffering writer forget it and pass silently."
+          },
+          {
+            "loss": "A JSONL or CSV file cut after a flush now ends on a whole line, so a missing last line end no longer marks an unfinished log.",
+            "mitigation": "A program that needs that mark writes a closing record before finish, or writes a temporary file and renames it after finish. A file cut between flushes may still end mid-record."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B leaves the codecs unable to write to the screen except through a whole batch in memory, and the /dev/stdout escape does not exist on Windows."
+          },
+          {
+            "key": "C",
+            "reason": "C keeps write meaning text on Stdout but bytes on a child's stdin and a TCPStream, so one name means two things across Core."
+          },
+          {
+            "key": "D",
+            "reason": "D cannot show a record before the file buffer fills, so a tailed log stalls and a crash loses the last buffer."
+          },
+          {
+            "key": "E",
+            "reason": "E keeps Writer at two methods, but every codec, Core's only generic writer user, asks for both traits, so a user writer needs two impl blocks where A needs one line."
+          },
+          {
+            "key": "F",
+            "reason": "F keeps out.write(\"hi\"), but write then means text on Stdout and bytes on Stdout's own binary view, a child's stdin and TCPStream, and each screen stream needs a second type."
+          },
+          {
+            "key": "G",
+            "reason": "G lets a buffering writer that forgets flush compile, and its codec's flush then pushes nothing, with no error."
+          }
+        ],
+        "tradeoff": "A beginner's screen write becomes write_text and every writer writes flush, for one naming rule across Core's byte streams and logs that show each flushed record."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: BallotReview-3. Verdict holds after repair: call-site counts no longer count as reasons, and the beginner E0112 cost and the lost unfinished-log mark are named with mitigations. FileWriter gains write_text, the buffer and Go claims are corrected, and options F and G are added."
+      },
+      "checkInstructions": "Read Compiler/Prelude/Traits.jet:228-236 for Reader and Writer, and Core/Term/Term.jet:80-119 for Stdout and Stderr. Read Compiler/JetSema/Source/Sema/Calls/StreamHandles.jet:161-183, ProcessHandles.jet:514-545 and NetworkHandles.jet:109-114 for the write names of FileWriter, Stdout, a child's stdin and TCPStream.\n\nRead each codec flush at CborStream.jet:692, Csv.jet:727, Stream.jet:1523 and :1999 and Xml.jet:302. Read the deferred line end at Csv.jet:660-671 and Stream.jet:1955-2013. Recount call sites with probes/D-BYTE-TRAITS2/census.mjs under $JET_SCRATCH_ROOT/lanes/Main/ballots. Run that folder's run.sh for probes p1 to p4, and run the review probes r1 and r2 there with the jet seed.\n\nRead the stream example at Docs/spec/reference/core-library.md:2134-2158. Validate this payload with Tools/agent/ballots/Validate.jet.",
+      "surface": {
+        "gist": "How do Stdout and the codecs keep working once codecs write through the Prelude's Writer?",
+        "lesson": "Under the ratified plan, the JSON, CSV, CBOR and XML writers write through a Writer: anything with write and write_all. Stdout's write takes text, not bytes, and Writer has no flush. So a watched log shows nothing until the program ends.",
+        "trio": {
+          "current": {
+            "note": "Stdout's write takes text; a codec flushes its file directly.",
+            "code": "out.write(\"hi\\n\")\nout.write_bytes(bytes)\nrt.flush(self.output)"
+          },
+          "wild": {
+            "lang": "Rust",
+            "note": "Stdout's write takes bytes; flush is required on Write.",
+            "code": "std::io::stdout().write_all(b\"hi\\n\")?;"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Core's byte names",
+            "gist": "write and write_all take bytes; write_text takes text; Writer gains flush.",
+            "gains": [
+              "One naming rule for every byte stream.",
+              "Codecs can write to the screen."
+            ],
+            "losses": [
+              "out.write(\"hi\") on the screen is now a compile error."
+            ],
+            "proposed": {
+              "code": "out.write_text(\"hi\\n\")\nlog := jsonl.writer(file)\nlog.write(record)\nlog.flush()   // a whole line on disk now\njsonl.writer(term.stdout())"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Screen not a Writer",
+            "gist": "Stdout keeps today's names; codecs cannot write to the screen.",
+            "gains": [
+              "out.write(\"hi\") keeps working."
+            ],
+            "losses": [
+              "Screen output builds whole batches in memory."
+            ],
+            "proposed": {
+              "code": "out.write(\"hi\\n\")\nout.write(jsonl.to_string(records))"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Trait says write_some",
+            "gist": "The trait renames its partial write; Stdout keeps write for text.",
+            "gains": [
+              "out.write(\"hi\") keeps working."
+            ],
+            "losses": [
+              "write means text here, bytes elsewhere."
+            ],
+            "proposed": {
+              "code": "out.write(\"hi\\n\")\nout.write_all(bytes)\nchild.stdin.write(bytes)"
+            }
+          },
+          {
+            "key": "D",
+            "name": "No flush on Writer",
+            "gist": "Codecs lose flush; finish hands the file back.",
+            "gains": [
+              "Writer stays two methods."
+            ],
+            "losses": [
+              "A watched log stalls until the buffer fills."
+            ],
+            "proposed": {
+              "code": "log.write(record)\nfile := log.finish()\nfile.flush()"
+            }
+          },
+          {
+            "key": "E",
+            "name": "Separate Flush trait",
+            "gist": "flush lives in its own trait; codecs ask for both.",
+            "gains": [
+              "Writer stays two methods."
+            ],
+            "losses": [
+              "Two traits that always travel together."
+            ],
+            "proposed": {
+              "code": "writer: fn<W: [Writer, Flush]>(output: &&W)"
+            }
+          },
+          {
+            "key": "F",
+            "name": "Byte view, as Python",
+            "gist": "Stdout keeps text names; out.binary() is the byte Writer.",
+            "gains": [
+              "out.write(\"hi\") keeps working."
+            ],
+            "losses": [
+              "write means text here, bytes elsewhere."
+            ],
+            "proposed": {
+              "code": "out.write(\"hi\\n\")\njsonl.writer(term.stdout().binary())"
+            }
+          },
+          {
+            "key": "G",
+            "name": "Default flush, as Java",
+            "gist": "A's names; Writer's flush does nothing unless overridden.",
+            "gains": [
+              "Unbuffered writers skip flush."
+            ],
+            "losses": [
+              "A buffering writer can forget flush silently."
+            ],
+            "proposed": {
+              "code": "impl Writer { write; write_all }  // flush: Ok()"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "One set of write names across Core, codecs that reach the screen, and logs that show each flushed record.",
+          "gains": [
+            "One naming rule for every byte stream.",
+            "Each flushed record is a whole line."
+          ],
+          "losses": [
+            {
+              "loss": "A beginner's out.write(\"hi\") fails to compile.",
+              "mitigation": "The error names write_text; print and write_line are unchanged."
+            },
+            {
+              "loss": "Every Writer writes flush.",
+              "mitigation": "One line for unbuffered writers; no silent default."
+            },
+            {
+              "loss": "A cut log no longer lacks its last line end.",
+              "mitigation": "Write a closing record, or rename the file after finish."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Codecs cannot stream to the screen."
+            },
+            {
+              "key": "C",
+              "reason": "write means two things across Core."
+            },
+            {
+              "key": "D",
+              "reason": "A watched log stalls."
+            },
+            {
+              "key": "E",
+              "reason": "Two traits every codec needs together."
+            },
+            {
+              "key": "F",
+              "reason": "write means two things across Core."
+            },
+            {
+              "key": "G",
+              "reason": "A forgotten flush passes silently."
+            }
+          ],
+          "tradeoff": "A beginner's screen write becomes write_text, for one naming rule and logs that show each record."
+        }
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-13T13:12:20.023Z"
     }
   ],
   "questions": [
@@ -200391,6 +200710,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-13T13:12:21.249Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0ssy5wy",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-13T13:12:20.023Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-BYTE-TRAITS2",
+      "note": "Amending D-CORE-FILE-ADAPTERS1=A: Stdout and Stderr take Core's byte write names, and the Writer trait gains flush"
+    },
     {
       "at": "2026-11-13T13:08:17.962Z",
       "by": "Main",
