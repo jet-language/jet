@@ -76,6 +76,9 @@ BuildSessionGeneratedModule: struct {
     // (JetDriver BuildQueries.jet).
     authority: String?{None}
     consent: String?{None}
+    // The struct `meta.add_struct` declared in the module, which a later
+    // `meta.find_type` of the same target names (build_session_made_structs).
+    declares: String?{None}
     // The handoffs the `Compiler` value took before the call that made the
     // module, the root's first ("`build` handed it to `install` at
     // main.jet:9"). Empty when the root's own function made it.
@@ -511,14 +514,15 @@ build_session_call: fn(session: &BuildSession, method: String, args: [BuildSessi
     // `name` of this package, as a `b.generate` module does, and a source of
     // the value's target. The Meta effects the add performed (`Meta.Generate`,
     // with `Meta.Types` and `Meta.Raw` for text) are its recorded authority.
+    // `meta.add_struct` also sends the name of the struct it declares.
     if method == "compiler.add" {
-        if args.len() != 4 -> return build_session_fail(state, "`meta.add` takes one `Code` value or source text and `scope:`")
+        if args.len() != 4 && args.len() != 5 -> return build_session_fail(state, "`meta.add` takes one `Code` value or source text and `scope:`")
         compiler: build_session_handle(state, args[0], "Compiler") ?? return build_session_fail(state, "the `Compiler` value does not belong to this build")
         name: build_session_text(args, 1) ?? return build_session_fail(state, "`meta.add`'s scope must be a string")
         source: generated_source ?? return build_session_fail(state, "`meta.add` requires a `#code` item block or source text")
         authority: build_session_text(args, 3) ?? return build_session_fail(state, "`meta.add` lost its Meta effects")
         path: ".jet/generated/{build_session_package_dir(state.package)}/{build_session_safe_name(name)}.jet"
-        added: build_session_add_generated(state, BuildSessionGeneratedModule{name: name, path: path, source: source, source_digest: "", plugin: None, start: start, end: end, producer: build_session_text(args, 2), authority: Val(authority), handoffs: state.compilers[compiler].handoffs.copy()})
+        added: build_session_add_generated(state, BuildSessionGeneratedModule{name: name, path: path, source: source, source_digest: "", plugin: None, start: start, end: end, producer: build_session_text(args, 2), authority: Val(authority), declares: build_session_text(args, 4), handoffs: state.compilers[compiler].handoffs.copy()})
         if added == .Value(_) {
             target: state.compilers[compiler].target
             if !build_session_contains_string(state.targets[target].sources, path) -> state.targets[target].sources.push(path)
@@ -743,6 +747,28 @@ build_session_add_generated: fn(state: &BuildSessionState, generated: BuildSessi
 build_session_compiler_root: fn(state: BuildSessionState, compiler: Int) -> Int Never! {
     root: state.compilers[compiler].root
     if root >= 0 -> root else -> compiler
+}
+
+// A struct `meta.add_struct` declared: its name and its `TypeId` identity,
+// its module and name (`point.Point`).
+BuildSessionMadeStruct: struct {
+    name: String
+    identity: String
+}
+
+// The structs `meta.add_struct` has declared so far in the modules of the
+// target the `Compiler` value `compiler` builds; none for a value of
+// another build.
+build_session_made_structs: fn(session: BuildSession, compiler: BuildSessionValue) -> [BuildSessionMadeStruct] Never! {
+    permit: session.storage.guard_read()
+    made := [BuildSessionMadeStruct]{}
+    index: build_session_handle(permit.value, compiler, "Compiler") ?? return made
+    target: permit.value.compilers[index].target
+    loop generated in permit.value.generated {
+        declared: generated.declares ?? next
+        if build_session_contains_string(permit.value.targets[target].sources, generated.path) -> made.push(BuildSessionMadeStruct{name: declared.copy(), identity: "{generated.name}.{declared}"})
+    }
+    made
 }
 
 // `source` with each line that is `paste` alone replaced by the lines of

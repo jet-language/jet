@@ -1,0 +1,37 @@
+// `meta.find_type` reads a spelling as this module reads it.
+use geo
+
+Seed: struct {
+    x: I64
+}
+
+Carrier: struct {
+    seed: Seed
+    at: geo.Point
+    all: [geo.Point]
+    count: I64
+}
+
+build: fn(b: Build) {
+    app: b.add_executable("app", ["main.jet"], [])
+    meta: b.compiler(app)
+    loop field in Carrier.reflect().fields {
+        found: meta.find_type(field.type.name) ?? panic("`{field.type.name}` names no type")
+        if found.identity != field.type.identity || found.name != field.type.name -> panic("`{field.type.name}` found {found.identity}")
+    }
+    if meta.find_type("Nowhere") != None -> panic("`Nowhere` names a type")
+    if meta.find_type("I64\n    extra: I64") != None -> panic("two fields read as one type")
+    count: meta.find_type("I64") ?? panic("`I64` names no type")
+    meta.add_struct("Made", [CompilerField]{CompilerField{name: "id", type: count}}, scope: "made")
+    made: meta.find_type("[Made]") ?? panic("`[Made]` names no type")
+    if made.identity != "[made.Made]" -> panic("`[Made]` found {made.identity}")
+    seed: meta.find_type("Seed") ?? panic("`Seed` names no type")
+    meta.add_struct("Holder", [CompilerField]{CompilerField{name: "seed", type: seed}, CompilerField{name: "made", type: made}}, scope: "holder")
+    b.default(app)
+}
+
+run: fn() {
+    holder: Holder{seed: Seed{x: I64{4}}, made: [Made]{Made{id: I64{5}}}}
+    print(holder.seed.x)
+    print(holder.made[0].id)
+}

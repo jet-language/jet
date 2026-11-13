@@ -698,6 +698,20 @@ that is not one name or type's spelling (E0357).
 `authority: { deny: [Meta.Generate] }` refuses it wherever the root's build
 reaches it, a dependency's function included, and a dependency's own `allow`
 row widens nothing for its importer.
+`meta.add_struct("Name", fields, scope: "name")` declares the struct `Name`
+of `fields`, a list of `CompilerField{name:, type:}` values, as the
+generated module `name`, and returns the new struct's TypeId. A field's
+name may be computed, and the build host refuses one that is not one
+snake_case identifier (E0357). Its type is a TypeId, which only the
+compiler makes: a reflected field's `type`, the TypeId an earlier
+`meta.add_struct` returned, or one `meta.find_type` found. It uses
+`Meta.Generate` and `Meta.Types`, but not `Meta.Raw`, since no code a build
+computes is written.
+`meta.find_type(text)` reads `text` as one type's spelling and gives its
+TypeId, each type it names read as the root module reads it (`geo.Point`
+through its `use geo`) or as a struct the value's target already made.
+Text that is not one type, or that names a type neither knows, gives
+`None`. It only reads, so it needs no Meta effect.
 `meta.rewrite_body(f, code)` replaces the body of the top-level function `f`
 with the statements of a `#code { statements }` block. `f` is named directly,
 through its package's import (`orm.query`), or by a `FunctionInfo` value such

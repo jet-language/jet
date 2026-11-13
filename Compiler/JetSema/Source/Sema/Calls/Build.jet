@@ -310,7 +310,8 @@ sema_build_code_statements: fn(statements: [Stmt]) -> String {
 // handler)` hands the handler each checked function carrying `m`'s marker,
 // and `meta.events(watch: .Calls{to: f}, handler)` each checked call of `f`.
 // `meta.add_struct(name, fields, scope: module)` declares a struct of
-// `CompilerField{name:, type:}` values.
+// `CompilerField{name:, type:}` values, and `meta.find_type(text)` gives
+// the `TypeId` one type's spelling names.
 // `meta.report(finding, at: c)` raises a Diagnostic finding at such a call.
 sema_call_try_compiler_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     if receiver_value.ty != (Type.Named{name: "Compiler"}) -> return SemaMethodSpecialCheck{handled: false, value: None}
@@ -318,13 +319,14 @@ sema_call_try_compiler_method: fn(receiver: Expr, receiver_value: TExpr, method:
     if method == "rewrite_body" -> return sema_call_compiler_rewrite_body(receiver, receiver_value, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     if method == "allow_rewrite" -> return sema_call_compiler_allow_rewrite(receiver, receiver_value, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     if method == "add_struct" -> return sema_call_compiler_add_struct(receiver, receiver_value, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+    if method == "find_type" -> return sema_call_compiler_find_type(receiver, receiver_value, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     if method == "events" -> return sema_call_compiler_events(receiver, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     if method == "events.functions" || method == "events.calls" -> return sema_call_compiler_events_read(receiver, receiver_value, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     if method == "report" -> return sema_call_compiler_report(receiver, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     if method == "report.finding" -> return sema_call_compiler_report_finding(receiver, receiver_value, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     shape: "meta.add(#code {{ ... }}, scope: \"name\")"
     if method != "add" {
-        diagnostics.push(sema_error("E0102", span, "`Compiler` has no method `{method}`", "`Compiler` is a protected Core type with a closed method surface", "write `{shape}`, `meta.add_struct(\"Name\", fields, scope: \"name\")`, `meta.rewrite_body(f, #code {{ ... }})`, `meta.allow_rewrite(package: \"name\")`, `meta.events(watch: .Functions{{marked: Traced{{}}}}, handler)` or `meta.report(finding, at: c)`"))
+        diagnostics.push(sema_error("E0102", span, "`Compiler` has no method `{method}`", "`Compiler` is a protected Core type with a closed method surface", "write `{shape}`, `meta.add_struct(\"Name\", fields, scope: \"name\")`, `meta.find_type(\"Name\")`, `meta.rewrite_body(f, #code {{ ... }})`, `meta.allow_rewrite(package: \"name\")`, `meta.events(watch: .Functions{{marked: Traced{{}}}}, handler)` or `meta.report(finding, at: c)`"))
         return failed
     }
     code := CallArg?{None}
@@ -464,6 +466,33 @@ sema_call_compiler_add_struct: fn(receiver: Expr, receiver_value: TExpr, args: [
     values.push(sema_tree_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: performed.join(", ")}}}, span))
     value: sema_tree_node(Type.Named{name: "TypeId"}, TExprKind.HostCall{call: THostCall.Method{receiver: receiver_value, method: "add_struct", args: values}}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, diagnostics)}
+}
+
+// `meta.find_type(text)`: the `TypeId` of the one type `text` spells, its
+// names read as the program's root module reads them, or as the structs
+// this build already made with `meta.add_struct`; None when `text` is not
+// one type's spelling or names a type neither knows. The build host reads
+// the value's checked program, so the call only reads and uses no Meta
+// effect.
+sema_call_compiler_find_type: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    failed: SemaMethodSpecialCheck{handled: true, value: None}
+    if args.len() != 1 || args[0].label != None || args[0].spread || args[0].flags.template_items != None {
+        diagnostics.push(sema_error("E0764", span, "`Compiler.find_type` takes one type's spelling", "`meta.find_type` reads one type's spelling as the program's root module reads it", "write `meta.find_type(\"Name\")`"))
+        return failed
+    }
+    ordinary := [CallArg]{args[0].copy()}
+    value: sema_check_expression(args[0].expr, Val(Type.String), environment, program, scopes, state, tail_store, context, diagnostics) ?? return failed
+    fits: sema_call_type_assignable(Type.String, value.ty, environment, program) ?? return failed
+    if !fits {
+        diagnostics.push(sema_type_mismatch(Type.String, value.ty, args[0].span))
+        return failed
+    }
+    params := [SemaCallParam]{SemaCallParam{label: "", name: "", zone: ParamZone.PositionalOnly, default: None, default_ref: None, convention: AccessConvention.Read, ty: Val(Type.String), variadic: false}}
+    ownership: sema_ownership_check_method_call(state, "Compiler.find_type", receiver, AccessConvention.Read, params, ordinary, scopes, span, diagnostics)
+    if !ownership.accepted || !ownership.complete -> return failed
+    if !sema_effect_record_intrinsic_effects(environment, program, scopes, context, "Compiler.find_type", span, [EffectRowEntry]{}, diagnostics) -> return failed
+    call: sema_tree_node(Type.Option{inner: Type.Named{name: "TypeId"}}, TExprKind.HostCall{call: THostCall.Method{receiver: receiver_value, method: "find_type", args: [TExpr]{value}}}, span)
+    SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(call, expected, environment, program, diagnostics)}
 }
 
 // `meta.rewrite_body(f, #code { statements })`: `f` names a top-level
