@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6777,
-    "rev": 101190,
+    "rev": 101193,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -48514,7 +48514,7 @@
     {
       "id": "c04es5yq",
       "num": 4635,
-      "title": "http.serve must route through the Jet-owned server runtime",
+      "title": "The web server must route through the Jet-owned server runtime",
       "body": "http.serve must not bypass the Jet server runtime: requests go through the Core/http Jet port (#3665) for routing and response handling. The Rust-side routes and server paths named in the old body are removed with Rust removal #4717. Criteria: serve() uses the same route table on every tier; a golden request covers routing and a bad-request path.\n\nEarlier text, kept for reference (Rust-era homes such as Rust crates, TIR/MIR/LIR, the JIT and generated Rust are retired):\n\nSource reading on dev 3f64b4fb6 (v3 H2-http-b re-mine of FknTw9bJsXM 181:29-192:02; not executed). Jet has two server runtimes. The mux path bounds admission, wraps handlers and middleware in catch_unwind, keeps connections alive and drains on shutdown with an atomic flag. But http.serve(addr, lambda) and router serve lower to jet_http_serve (routes.rs:8046 to HTTPServer.rs:6898-6941), which spawns one OS thread per connection without bound, has no panic isolation, always sends Connection: close, has no shutdown path and calls process::exit(1) on a bind failure. Accept errors are mishandled on both paths: the mux loop stops serving and force-cancels every active stream on any non-WouldBlock accept error such as EMFILE (HTTPServer.rs:2280-2288), while the lambda loop prints E2801 and retries in a tight loop (6914-6919). The serializer has four divergent reason-phrase tables and falls back to \"OK\", so a 503, 429 or 422 goes out as \"503 OK\" (HTTPServer.rs:5761-5783, 1504-1524, 5025; http.jet:312-381). #3666 (server framing) is done on the board but this policy is still present, and the earlier mining claim that Jet bounds admission holds only for the mux path. Unverified: the default jet run tier's route to jet_http_serve was not traced (the JIT host path is being retired); the AOT route was.\n\nFresh review 2026-10-05: protocol parsing and framing criteria for the same course stay on #3665 (attached there); graceful drain must reuse the App lifecycle of #3078 rather than a second shutdown path.",
       "kind": "bug",
       "track": "sidequest",
@@ -48558,12 +48558,12 @@
       "criteria": [
         {
           "n": 1,
-          "text": "http.serve(addr, handler) and web.app().serve() run through one server runtime: a flood test shows bounded concurrent connections, a panicking handler returns a 500 page while other requests keep being served, and SIGTERM drains in-flight requests, identical on every execution level.",
+          "text": "web.app().serve() and web.app().bind(addr) run through one Jet-owned server runtime: a flood test shows bounded concurrent connections, a panicking handler returns a 500 page while other requests keep being served, and SIGTERM drains in-flight requests, identical on every execution level.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T20:15:37.342Z"
+          "at": "2026-11-13T03:09:10.204Z"
         },
         {
           "n": 2,
@@ -48594,12 +48594,12 @@
         },
         {
           "n": 5,
-          "text": "Keep-alive behavior is the same for http.serve and web.app().serve(); a golden for each is updated.",
+          "text": "Keep-alive behavior is one runtime meaning for web.app().serve() and web.app().bind(addr); a golden for each is updated.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T20:15:39.211Z"
+          "at": "2026-11-13T03:09:11.493Z"
         },
         {
           "n": 6,
@@ -48667,7 +48667,7 @@
       "parentId": "c086hhzb",
       "needsAcceptance": false,
       "created": "2026-10-05T21:07:55.999Z",
-      "updated": "2026-11-10T16:16:08.778Z",
+      "updated": "2026-11-13T03:09:13.282Z",
       "updatedBy": "Main",
       "goals": [
         "G9"
@@ -81156,106 +81156,6 @@
       "updated": "2026-11-09T19:27:43.244Z",
       "updatedBy": "Main",
       "criteriaLastN": 1
-    },
-    {
-      "id": "c0z2nw1h",
-      "num": 6526,
-      "title": "Typed task channels: `Receiver<T>` instead of `Receiver<Int>`",
-      "body": "Every channel function in Core/Tasks/Tasks.jet:17-141 is typed `Receiver<Int>`, so typed pipelines must encode values as integers or go through services.\n\nDone when: `Receiver<T>` carries any sendable type on native, O0/O1/O2 and web; `after`, `interval`, `recv`, `waitall` and `waitany` are generic; a case sends a record through a channel at every tier.\n\nResearch: Docs/research/declarative-jet-2026-10-31.md (card #6513). Citations are at dev 68c87ae07b. Section 3.6.",
-      "kind": "task",
-      "track": "epoch",
-      "epoch": "e14",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P2",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-10",
-          "by": "Main",
-          "text": "Every criterion is met; c3 was met with the waitany precondition case at c057ea659d. Closed by Main."
-        },
-        {
-          "at": "2026-11-09",
-          "by": "Main",
-          "text": "Batch b6c was killed (02:20). G1Lead-13 adds the LibcCensus row \"pthread_getcpuclockid Covered by core.tasks.cpu_ns\" while stacking on SchedLead-4b, which is quarantined and not on dev, so `LibcCensus --check` failed for every SUB carrying that test line. Relaunched as b6d without G1Lead-13 and SqliteLead-4..7 (resubmitted as 4r..7r with the core import). G1Lead-2 is resubmitting 13r with the row not covered yet, until core.tasks.cpu_ns lands. Integration defect to fix: batch stacking must refuse a SUB whose stack names a SUB that is neither in the batch nor on dev."
-        },
-        {
-          "at": "2026-11-09",
-          "by": "Main",
-          "text": "SchedLead-4b and SchedLead-7r were quarantined in batch b6b. The census (b5-built compiler, which carries the 4a rows) reports comptime.bodies E1004 \"`core.tasks` has no item `__task_cpu_ns`\" at Core/Tasks/Tasks.jet:3067..3080 and \"`__task_identity`\" at 2559..2574. 4b also conflicts with CFreeLead-3r2 in CoreHostSignatures.jet (adjacent core.tasks rows). SchedLead is paused; whoever resumes 4b must fix the item resolution and rebase it onto CFreeLead-3r2."
-        },
-        {
-          "at": "2026-11-08",
-          "by": "Main",
-          "text": "Owner ruling 2026-11-08 (Q3): recommended option. interval stays Receiver<Int> tick counts (no interval<T>); waitany on an empty list is a precondition panic."
-        },
-        {
-          "at": "2026-11-08",
-          "by": "Main",
-          "text": "G1Lead landed 9b21994eb3: typed task channels. recv, get, result and wait return T? (None means closed and drained), and the -1 sentinel is gone. waitall returns [T?]; waitany returns (index, T?); after<T> carries any value. interval stays Receiver<Int> pending the owner (c1 question). Case task_state_tiers/typed_task_channels_carry_records_on_every_tier: PASS on O0, O1, O2 and web for a plain channel. The task parts have no web step, because tasks are not available on the web target yet. Finding, not changed: on native, closing a receiver never sets the cancelled flag, so is_cancelled is always false; the web Channel.js sets it. Also, Core in-file #Test blocks cannot run: jet test Core refuses with E1355."
-        },
-        {
-          "at": "2026-11-08",
-          "by": "Main",
-          "text": "Owner ruling 2026-11-08 (asked by Main): a generic `recv` returns `T?`; none means the channel is closed and drained. `waitall` returns `[T?]`; `waitany` returns the index plus `T?`. The -1 closed sentinel is removed, and every existing Int caller, case, example and doc migrates in one cutover on O0/O1/O2 and web. Build scope as scoped by G1Lead 03:50 (runtime after/interval value route, web Channel.js, row regeneration); no ballot needed for the return shape."
-        },
-        {
-          "at": "2026-11-08",
-          "by": "Main",
-          "text": "Main 2026-11-08 03:50 (G1Lead scoping): this is not a Core-only edit. channel<T> is already generic in Core, but the runtime after_value/interval routes carry exact-Int words with a fixed Int element meta (JetRuntime RouteAInterval.jet). A generic after<T>/interval needs an IR special case that passes the value slot and element meta (as ir_channel_new does), a new runtime route, the web Channel.js path, row regeneration, and cases on O0/O1/O2/web. A generic recv/waitall/waitany cannot keep the -1 closed sentinel and must return T?, which changes behaviour for existing Int callers and needs an owner ruling before the build. Several hours plus a compiler rebuild; out of the overnight pareto pass."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "Receiver<T> carries any sendable type; after, recv, waitall and waitany are generic, and interval(period) -> Receiver<Int> delivers tick counts 1, 2, 3 (owner ruling 2026-11-08, Q3 A: a caller wanting a payload maps the tick); a case sends a record through a channel on O0, O1, O2 and web.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "dev 5987d18926 (b1): tests/cases/task_state_tiers/typed_task_channels_carry_records_on_every_tier.case PASS with the b1 s1 compiler (jet test Compiler --profile cases --filter typed_task_channels: PASS 1 FAIL 0); a record crosses a typed channel on O0/O1/O2 and web",
-          "at": "2026-11-08T19:21:08.266Z"
-        },
-        {
-          "n": 2,
-          "text": "Generic `recv` returns `T?` (none = closed and drained), `waitall` returns `[T?]`, `waitany` returns the index plus `T?`; the -1 sentinel and every Int-only channel signature are gone, with all callers migrated in the same cutover (owner 2026-11-08).",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "dev 5987d18926: Core/Tasks/Tasks.jet generic recv -> T?, waitall -> [T?], waitany(receivers: [Receiver<T>]) -> (index: Int, value: T?); callers migrated in the same batch, census clean",
-          "at": "2026-11-08T19:21:09.944Z"
-        },
-        {
-          "n": 3,
-          "text": "waitany on an empty list stops with a precondition panic whose message says waitany needs at least one receiver (owner ruling 2026-11-08, Q3); a case proves it on O0, O1 and O2.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "tests/cases/task_state_tiers/waitany_over_no_receivers_stops_with_its_precondition_panic.case (added in d49fd16299, on dev at c057ea659d) PASSes. Its O0, O1 and O2 steps each exit 70 with the E3001 report \"panic: waitany needs at least one receiver\" from Core/Tasks/Tasks.jet:117. Run with the compiler built from the landed c057ea659d tree, jet test Compiler --profile cases --filter task_state_tiers/waitany, 2026-11-09 22:16.",
-          "at": "2026-11-10T03:08:38.274Z"
-        }
-      ],
-      "refs": [],
-      "tags": [
-        "core",
-        "concurrency",
-        "declarative"
-      ],
-      "goals": [
-        "G3"
-      ],
-      "parentId": "c085f598",
-      "needsAcceptance": false,
-      "created": "2026-11-01T01:15:10.831Z",
-      "updated": "2026-11-10T03:08:47.174Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 3,
-      "completedAt": "2026-11-10T03:08:47.174Z"
     },
     {
       "id": "c0pjwkhn",
@@ -196845,6 +196745,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-13T03:09:13.282Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c04es5yq",
+      "note": "title"
+    },
+    {
+      "at": "2026-11-13T03:09:11.493Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c04es5yq",
+      "note": "#5: D-ROUTE-ONE1=A removes server.mux(); the mux-only core.http.serve(mux, deadline:) goes with it (G9Web-1-2, 6cea1699f9: no handler form of http.serve existed); was: Keep-alive behavior is the same for http.serve and web.app().serve(); a golden for each is updated."
+    },
+    {
+      "at": "2026-11-13T03:09:10.204Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c04es5yq",
+      "note": "#1: D-ROUTE-ONE1=A removes server.mux(); the mux-only core.http.serve(mux, deadline:) goes with it (G9Web-1-2, 6cea1699f9: no handler form of http.serve existed); was: http.serve(addr, handler) and web.app().serve() run through one server runtime: a flood test shows bounded concurrent connections, a panicking handler returns a 500 page while other requests keep bein"
+    },
     {
       "at": "2026-11-13T03:07:29.535Z",
       "by": "Main",
