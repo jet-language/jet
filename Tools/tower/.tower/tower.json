@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6833,
-    "rev": 101790,
+    "rev": 101792,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -59004,6 +59004,11 @@
         {
           "at": "2026-11-13",
           "by": "Main",
+          "text": "Decision (Main): JetDevserver clears its registration errors for c6. The swap paths that use the #6625-gated HotSwapDecision and StateRetentionFact types (NativeSwap, NativeSwap02, WebModuleSwap) keep their modules but drop those uses and return the same explicit not-available refusal as the remaining 501 routes until #6625 lands; then they are restored against the real types. Root of the 854 dependency errors in a keep-going check of JetDevserver: under JET_KEEP_GOING a registration error leaves graph.complete false, and sema_copy_nominal_has_impl (JetSema Ownership/Copy.jet) then answers known: false for every nominal program-wide, so dependency packages that check clean alone report UseAfterMove and comptime closure errors. A checker fix (graph-wide facts stay known for modules without registration errors) is assigned to G5DevX-2."
+        },
+        {
+          "at": "2026-11-13",
+          "by": "Main",
           "text": "Decision (Main, 2026-11-13): JetDevserver imports about 67 names that no package declares (the devtools protocol, the old semindex query API, driver entry points, env-model and repl types). The port takes path (b): the protocol types live in jet_devserver, their only user; semantic queries use the existing SemIndex/SemRef/SemDef API; check, format and render call the current driver entries, adding a minimal public entry in the package that owns the job only where none exists; no duplicated types (I8). Features no #5931 criterion needs are dropped and listed. About 12 wrong import paths move to jet_foundation. G5DevX-2 owns it, in hour-sized SUBs."
         },
         {
@@ -59136,7 +59141,7 @@
       "parentId": "c0bk3yid",
       "needsAcceptance": false,
       "created": "2026-10-24T19:25:14.992Z",
-      "updated": "2026-11-13T15:45:08.874Z",
+      "updated": "2026-11-13T22:32:12.960Z",
       "updatedBy": "Main",
       "goals": [
         "G5"
@@ -86510,6 +86515,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-13",
+          "by": "Main",
+          "text": "Note (Main): until this card lands, JetDevserver swap paths (NativeSwap, NativeSwap02, WebModuleSwap) refuse with an explicit not-available result instead of using HotSwapDecision and StateRetentionFact; they are restored against the real types when this card lands (#5931)."
+        },
+        {
           "at": "2026-11-12",
           "by": "Main",
           "text": "Main, 2026-11-11, #4260 c29 cleanup (G5DevX-dead-codes-3): diagnostic code E2210 is removed from the registry because nothing emits it, and its known-failing cases go with it. When this card builds the behavior, it registers the code again with its emitter, what/why/fix text and a UI snapshot. The behavior the deleted cases expected: tests/cases/dev_parts_routine/{struct_field,enum_variant,fn_signature}_change_emits_e2210.case: a jet dev edit to a type surface restarts instead of swapping."
@@ -86642,7 +86652,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-06T23:25:24.209Z",
-      "updated": "2026-11-12T04:52:20.640Z",
+      "updated": "2026-11-13T22:32:14.074Z",
       "updatedBy": "Main",
       "criteriaLastN": 14
     },
@@ -204269,6 +204279,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-13T22:32:14.074Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c066t33h",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-13T22:32:12.960Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0c209zc",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-13T22:05:58.413Z",
       "by": "Main",
