@@ -61,18 +61,21 @@ PG_TRAP_TABLE: I64{5}
 PG_TRAP_DEFECT: I64{6}
 PG_TRAP_USER: I64{7}
 
-// Budgets: fuel per call, linear-memory pages, table elements, trap frames.
+// Budgets: fuel per call, linear-memory pages, table elements, trap frames,
+// and the bytes one string argument or result may carry across the wire.
 PG_FUEL: I64{10000000}
 PG_MAX_PAGES: I64{256}
 PG_PAGE: I64{65536}
 PG_MAX_TABLE: I64{10000}
 PG_MAX_FRAMES: I64{32}
 PG_MAX_FLAT: I64{16}
+PG_MAX_WIRE: I64{1048576}
 PG_U32: I64{4294967295}
 
 PG_LIMIT_FUEL: I64{0}
 PG_LIMIT_MEMORY: I64{1}
 PG_LIMIT_TABLE: I64{2}
+PG_LIMIT_WIRE: I64{4}
 
 pg_word: fn(address: I64) -> I64 { dyn_word(address) }
 pg_store: fn(address: I64, value: I64) { dyn_store(address, value) }
@@ -1296,6 +1299,16 @@ pg_invoke_loaded: fn(plugin: I64, name: I64, want: I64, error: I64) -> I64 {
             pg_store(error, pg_call_failure(name, PLUGIN_ERROR_GUEST, detail))
             return I64{0}
         }
+        if (pg_word(entry) == I64{3}) {
+            length: rt_text_len(pg_word(wrapping(entry + I64{8})))
+            if (length > PG_MAX_WIRE) {
+                detail: jet_rt_string_builder_new()
+                jet_rt_string_builder_push(detail, rt_static_text("argument "))
+                rt_text_push_number(detail, at + I64{1})
+                pg_store(error, pg_wire_failure(name, detail, length))
+                return I64{0}
+            }
+        }
         flat += if (code == I64{12}) -> I64{2} else -> I64{1}
         at += I64{1}
     }
@@ -1360,7 +1373,16 @@ pg_invoke_loaded: fn(plugin: I64, name: I64, want: I64, error: I64) -> I64 {
     } else if (result_code == I64{6}) {
         value = raw.bit_and(PG_U32)
     } else if (result_code == I64{12}) {
-        lifted: pg_lift_text(instance, pg_word(wrapping(record + I64{64})), raw.bit_and(PG_U32))
+        memory_index: pg_word(wrapping(record + I64{64}))
+        length: pg_text_result_length(instance, memory_index, raw.bit_and(PG_U32))
+        if (length > PG_MAX_WIRE) {
+            pg_store(wrapping(plugin + PG_PLUGIN_ACTIVE), I64{0})
+            detail: jet_rt_string_builder_new()
+            jet_rt_string_builder_push(detail, rt_static_text("the string result"))
+            pg_store(error, pg_wire_failure(name, detail, length))
+            return I64{0}
+        }
+        lifted: pg_lift_text(instance, memory_index, raw.bit_and(PG_U32))
         if (lifted == I64{0}) {
             pg_store(wrapping(plugin + PG_PLUGIN_ACTIVE), I64{0})
             pg_store(error, pg_call_failure(name, PLUGIN_ERROR_GUEST, jet_rt_string_clone(rt_static_text("returned an unsupported Component Model value (string)"))))
@@ -1415,6 +1437,27 @@ pg_lower_text: fn(plugin: I64, record: I64, text: I64) -> I64 {
     }
     rt_text_bytes_copy(wrapping(pg_word(memory) + pointer), rt_text_data(text), length)
     pointer
+}
+
+// The length a canonical (pointer, length) pair in guest memory declares, read
+// before anything is copied out; -1 when the pair itself is out of bounds.
+pg_text_result_length: fn(instance: I64, memory_index: I64, at: I64) -> I64 {
+    if (memory_index < I64{0}) -> return I64{-1}
+    memory: pg_memory(instance, memory_index)
+    if !pg_in_bounds(at, I64{8}, pg_word(wrapping(memory + I64{8}))) -> return I64{-1}
+    pg_u32(wrapping(wrapping(pg_word(memory) + at) + I64{4}))
+}
+
+// Budget(.Wire): a string argument or result over PG_MAX_WIRE bytes fails
+// before the host or the guest allocates room for it. `detail` names the
+// value and is adopted.
+pg_wire_failure: fn(name: I64, detail: I64, length: I64) -> I64 {
+    jet_rt_string_builder_push(detail, rt_static_text(" is "))
+    rt_text_push_number(detail, length)
+    jet_rt_string_builder_push(detail, rt_static_text(" bytes, over the "))
+    rt_text_push_number(detail, PG_MAX_WIRE)
+    jet_rt_string_builder_push(detail, rt_static_text("-byte wire budget"))
+    pg_failure(PLUGIN_ERROR_BUDGET, PG_LIMIT_WIRE, name, true, detail, pg_no_frames())
 }
 
 // The string at a canonical (pointer, length) pair in guest memory, or 0.

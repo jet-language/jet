@@ -1,0 +1,37 @@
+use plugin: core.plugin
+
+// One string argument or result may carry at most 1048576 bytes across the
+// plugin wire. A larger argument fails before the guest's realloc is asked
+// for room, and a larger result fails before the host copies it out; both as
+// PluginError.Budget(.Wire, fault) with no guest frames. Strings within the
+// budget still cross, and the plugin keeps serving calls after a refusal.
+show: fn(label: String, error: plugin.PluginError) {
+    if error == {
+        .Budget(limit, fault) -> {
+            print("{label}: wire budget {limit == .Wire}, export {fault.export}, {fault.frames.len()} frames")
+            print(fault.message)
+        }
+        .Guest(fault) -> print("{label}: guest failure: {fault.message}")
+        .Denied(fault) -> print("{label}: denied: {fault.message}")
+        .Defect(fault) -> print("{label}: defect: {fault.message}")
+    }
+}
+
+run: fn() {
+    policy: Authority.from_rights(["FS.Read(\".\")"])
+    wire: plugin.load("wire.wat", policy)
+    large := "x"
+    loop large.len() <= 1048576 -> large = "{large}{large}"
+    if wire.size(large) == {
+        .Ok(length) -> print("large argument crossed: {length}")
+        .Err(error) -> show("large argument", error)
+    }
+    if wire.big() == {
+        .Ok(text) -> print("large result crossed: {text.len()}")
+        .Err(error) -> show("large result", error)
+    }
+    small_length: wire.size("abc") ?? panic("a small argument failed")
+    print("small argument: {small_length}")
+    small_text: wire.small() ?? panic("a small result failed")
+    print("small result: {small_text}")
+}

@@ -6115,6 +6115,20 @@ host call line through the ordinary failure journey. Loading a
 malformed Component does not stop the host: its first call reports `Guest` with
 export `load` and no frames.
 
+Every call runs under fixed budgets, and running past one fails as
+`Budget(limit, fault)`:
+
+- `.Fuel`: 10,000,000 units per call, spent at each function entry and loop
+  iteration.
+- `.Memory`: 256 pages of 64 KiB for each linear memory.
+- `.Table`: 10,000 elements for each table.
+- `.Wire`: 1,048,576 bytes for each string argument or result crossing the
+  boundary. An argument over it fails before the guest's `realloc` is asked
+  for room, and a result over it fails before the host copies it out. Neither
+  failure has guest frames.
+
+A fault keeps at most 32 guest frames.
+
 The manifest `export:` target names the interface and defaults to the package
 name. The frozen public interface is keyed as `plugin__<export>` in
 `.jet/cache/api/`. Sema resolves a host's calls against that frozen interface,

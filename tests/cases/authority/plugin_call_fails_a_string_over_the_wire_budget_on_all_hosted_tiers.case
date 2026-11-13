@@ -1,0 +1,26 @@
+# Claim: a string argument or result over the 1048576-byte plugin wire budget
+# fails as PluginError.Budget(.Wire, fault) before the host allocates it: the
+# argument before the guest's realloc runs, the result before the host copies
+# it out of guest memory. The result's bytes are in bounds, so only the budget
+# refuses it. Strings within the budget still cross, on jet run and
+# jet run --release.
+fixture: plugin_call_fails_a_string_over_the_wire_budget_on_all_hosted_tiers.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet run main.jet
+exit: 0
+stdout: ~ "large argument: wire budget true, export size, 0 frames\n" # default: an over-budget argument fails as Budget(.Wire) with no guest frames
+stdout: ~ "plugin call `size`: argument 1 is 2097152 bytes, over the 1048576-byte wire budget" # default: the fault names the argument, its size and the budget
+stdout: ~ "large result: wire budget true, export big, 0 frames\n" # default: an over-budget result fails as Budget(.Wire) with no guest frames
+stdout: ~ "plugin call `big`: the string result is 1048577 bytes, over the 1048576-byte wire budget" # default: the fault names the result, its size and the budget
+stdout: ~ "small argument: 3\nsmall result: abc\n" # default: strings within the budget still cross, and the plugin keeps serving calls
+stdout: !~ "crossed" # default: neither over-budget string crossed
+step: jet run --release main.jet
+exit: 0
+stdout: ~ "large argument: wire budget true, export size, 0 frames\n" # release: an over-budget argument fails as Budget(.Wire) with no guest frames
+stdout: ~ "plugin call `size`: argument 1 is 2097152 bytes, over the 1048576-byte wire budget" # release: the fault names the argument, its size and the budget
+stdout: ~ "large result: wire budget true, export big, 0 frames\n" # release: an over-budget result fails as Budget(.Wire) with no guest frames
+stdout: ~ "plugin call `big`: the string result is 1048577 bytes, over the 1048576-byte wire budget" # release: the fault names the result, its size and the budget
+stdout: ~ "small argument: 3\nsmall result: abc\n" # release: strings within the budget still cross, and the plugin keeps serving calls
+stdout: !~ "crossed" # release: neither over-budget string crossed
