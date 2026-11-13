@@ -17,8 +17,8 @@ package: {
 // - Cancelling the consuming task stops the read at its next wait point.
 use {
     encoding: core.encoding
-    json: core.encoding.json
-    jsonl: core.encoding.jsonl
+    core.encoding.json
+    core.encoding.jsonl
     files: core.files
 }
 
@@ -51,8 +51,10 @@ drain: fn(label: String, path: Path, limits: encoding.EncodingLimits) IOError! {
             .Err(error) -> {
                 print("{label}: {error}")
                 if reader.next() == {
-                    .Ok(_) -> print("{label}: read again succeeded")
-                    .Err(again) -> print("{label}: read again {again.kind == error.kind && again.byte_offset == error.byte_offset}")
+                    .Ok(_) -> { print("{label}: read again succeeded") }
+                    .Err(again) -> {
+                        print("{label}: read again {again.kind == error.kind && again.byte_offset == error.byte_offset}")
+                    }
                 }
                 return Ok()
             }
@@ -75,9 +77,15 @@ read_until_cancel: fn(path: Path, started: Sender<Int>, gate: Receiver<Int>) -> 
 
 failure_label: fn(error: TaskFailure) -> String {
     if error == {
-        .Panicked(reason) -> { return "panicked: {reason}" }
-        .DeadlineBlown -> { return "deadline" }
-        .Cancelled -> { return "cancelled" }
+        .Panicked(reason) -> {
+            return "panicked: {reason}"
+        }
+        .DeadlineBlown -> {
+            return "deadline"
+        }
+        .Cancelled -> {
+            return "cancelled"
+        }
     }
 }
 
@@ -109,7 +117,7 @@ run: fn() (EncodingError | IOError)! {
     // Eager splitting: `parse` holds the whole text and returns no records
     // when one fails; the reader above yielded the records before it.
     if jsonl.parse("{{\"a\":1}}\n{{\"b\":2}} {{\"c\":3}}\n") == {
-        .Ok(rows) -> print("eager parse: {rows.len()} records")
+        .Ok(rows) -> { print("eager parse: {rows.len()} records") }
         .Err(error) -> print("eager parse: no records, {error}")
     }
 
@@ -122,7 +130,7 @@ run: fn() (EncodingError | IOError)! {
     print("cancel: read {started_rx.receive() ?? -1} record before cancel")
     worker.cancel()
     if worker.join() == {
-        .Ok(count) -> print("cancel: finished after {count} records")
+        .Ok(count) -> { print("cancel: finished after {count} records") }
         .Err(error) -> print("cancel: {failure_label(error)}")
     }
     gate_tx.close()

@@ -1,6 +1,6 @@
 // core.encoding.toml — full TOML 1.0: `[table]` headers, arrays, typed scalars.
 // Decode a nested document into typed structs, then round-trip it back to text.
-use toml: core.encoding.toml
+use core.encoding.toml
 
 Owner: struct {
     name: String
@@ -30,7 +30,7 @@ comments: fn() {
     commented: toml.parse("# count setting\ncount = 2 # inline\n") ?? panic("toml")
     print("toml commented: {commented}")
     if toml.parse("count = \n") == {
-        .Ok(tree) -> print("toml missing value: accepted {tree}")
+        .Ok(tree) -> { print("toml missing value: accepted {tree}") }
         .Err(e) -> print("toml missing value: rejected")
     }
 }

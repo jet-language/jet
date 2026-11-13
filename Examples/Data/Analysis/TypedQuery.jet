@@ -7,10 +7,11 @@ package: {
 // One typed query collects to an ordinary list.
 use {
     data: core.data
-    csv: core.encoding.csv
+    core.encoding.csv
     files: core.files
     testing: core.testing
 }
+
 #Codable
 Region: enum {
     North
@@ -43,23 +44,21 @@ run: fn() {
     rows: [Sale]{
         Sale{item: "small", cents: 40},
         Sale{item: "large", cents: 125},
-        Sale{item: "medium", cents: 80}
+        Sale{item: "medium", cents: 80},
     }
     list_rows: data.query(rows)
         .filter(s -> s.cents > 50)
         .sort_by(s -> s.item)
         .collect() ?? panic("list query")
-    sql_query: rows.query(SQL{"SELECT * FROM sales WHERE cents > 50 ORDER BY item"})
-        ?? panic("SQL query")
+    sql_query: rows.query(SQL{"SELECT * FROM sales WHERE cents > 50 ORDER BY item"}) ?? panic("SQL query")
     sql_rows: sql_query.collect() ?? panic("SQL collect")
 
     temp: testing.temp_dir("jet-typed-query")
     path: Path.from(temp).join("sales.csv").to_string()
-    files.write(path, "item,cents\nsmall,40\nlarge,125\nmedium,80")
-        ?? panic("CSV fixture")
+    files.write(path, "item,cents\nsmall,40\nlarge,125\nmedium,80") ?? panic("CSV fixture")
     file_query: csv.query<Sale>(
         path,
-        SQL{"SELECT * FROM sales WHERE cents > 50 ORDER BY item"}
+        SQL{"SELECT * FROM sales WHERE cents > 50 ORDER BY item"},
     ) ?? panic("file query")
     file_rows: file_query.collect() ?? panic("file collect")
 
@@ -75,7 +74,7 @@ run: fn() {
     regional: [RegionalSale]{
         RegionalSale{region: .North, cents: 125},
         RegionalSale{region: .South, cents: 80},
-        RegionalSale{region: .North, cents: 75}
+        RegionalSale{region: .North, cents: 75},
     }
     totals: data.query(regional)
         .group_by(s -> s.region)

@@ -4,7 +4,7 @@
 // distinct: a String target reads a binary, or a byte list only under
 // `strings: .UTF8ByteList`; only `Atom` and record keys become atoms.
 use {
-    eetf: core.encoding.eetf
+    core.encoding.eetf
     core.encoding.[EncodingError, EncodingLimits, bytes_to_hex]
 }
 
@@ -83,26 +83,56 @@ run: fn() {
     shallow("item limit", [U8]{131, 109, 0, 0, 0, 5, 104, 101, 108, 108, 111})
 
     // Typed decode keeps atom, binary and byte-list distinctions.
-    if eetf.decode<CountRecord>(atom_key) == .Ok(record) -> print("typed atom key: count {record.count}")
-    if eetf.decode<CountRecord>(binary_key) == .Ok(record) -> print("typed binary key: count {record.count}")
-    if eetf.decode<String>([U8]{131, 109, 0, 0, 0, 2, 104, 105}) == .Ok(text) -> print("binary as String: {text}")
-    if eetf.decode<String>([U8]{131, 107, 0, 2, 104, 105}) == .Err(failures) -> show_failures("byte list as String", failures)
-    if eetf.decode<String>([U8]{131, 107, 0, 2, 104, 105}, strings: .UTF8ByteList) == .Ok(text) -> print("byte list as UTF8ByteList String: {text}")
-    if eetf.decode<[U8]>([U8]{131, 109, 0, 0, 0, 2, 104, 105}) == .Ok(bytes) -> print("binary as [U8]: {bytes}")
-    if eetf.decode<eetf.Atom>([U8]{131, 119, 5, 104, 101, 108, 108, 111}) == .Ok(atom) -> print("atom as Atom: {atom.name}")
-    if eetf.decode<eetf.Atom>([U8]{131, 109, 0, 0, 0, 2, 104, 105}) == .Err(failures) -> show_failures("binary as Atom", failures)
-    if eetf.decode<Bool>([U8]{131, 119, 4, 116, 114, 117, 101}) == .Ok(flag) -> print("atom true as Bool: {flag}")
-    if eetf.decode<Int>([U8]{131, 110, 9, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}) == .Ok(big) -> print("bignum as Int: {big}")
-    if eetf.decode<CountRecord>([U8]{131, 88}) == .Err(failures) -> show_failures("pid as record", failures)
+    if eetf.decode<CountRecord>(atom_key) == .Ok(record) {
+        print("typed atom key: count {record.count}")
+    }
+    if eetf.decode<CountRecord>(binary_key) == .Ok(record) {
+        print("typed binary key: count {record.count}")
+    }
+    if eetf.decode<String>([U8]{131, 109, 0, 0, 0, 2, 104, 105}) == .Ok(text) {
+        print("binary as String: {text}")
+    }
+    if eetf.decode<String>([U8]{131, 107, 0, 2, 104, 105}) == .Err(failures) {
+        show_failures("byte list as String", failures)
+    }
+    if eetf.decode<String>([U8]{131, 107, 0, 2, 104, 105}, strings: .UTF8ByteList) == .Ok(text) {
+        print("byte list as UTF8ByteList String: {text}")
+    }
+    if eetf.decode<[U8]>([U8]{131, 109, 0, 0, 0, 2, 104, 105}) == .Ok(bytes) {
+        print("binary as [U8]: {bytes}")
+    }
+    if eetf.decode<eetf.Atom>([U8]{131, 119, 5, 104, 101, 108, 108, 111}) == .Ok(atom) {
+        print("atom as Atom: {atom.name}")
+    }
+    if eetf.decode<eetf.Atom>([U8]{131, 109, 0, 0, 0, 2, 104, 105}) == .Err(failures) {
+        show_failures("binary as Atom", failures)
+    }
+    if eetf.decode<Bool>([U8]{131, 119, 4, 116, 114, 117, 101}) == .Ok(flag) {
+        print("atom true as Bool: {flag}")
+    }
+    if eetf.decode<Int>([U8]{131, 110, 9, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}) == .Ok(big) {
+        print("bignum as Int: {big}")
+    }
+    if eetf.decode<CountRecord>([U8]{131, 88}) == .Err(failures) {
+        show_failures("pid as record", failures)
+    }
 
     // Typed encode: record keys are atoms, so COUNT-ETF-131's atom form returns.
-    if eetf.encode(CountRecord{count: 2}) == .Ok(bytes) -> print("encode CountRecord: {bytes == atom_key} {bytes_to_hex(bytes)}")
+    if eetf.encode(CountRecord{count: 2}) == .Ok(bytes) {
+        print("encode CountRecord: {bytes == atom_key} {bytes_to_hex(bytes)}")
+    }
     packet: Packet{name: "hi", data: [U8]{1, 2}, status: eetf.Atom.new("ok") ?? panic("atom"), note: None, tags: ["a"]}
     wire: eetf.encode(packet) ?? panic("encode Packet")
     print("encode Packet: {bytes_to_hex(wire)}")
-    if eetf.decode<Packet>(wire) == .Ok(back) -> print("round trip: {back.name} {back.data} {back.status.name} {back.note ?? "(none)"} {back.tags}")
+    if eetf.decode<Packet>(wire) == .Ok(back) {
+        print("round trip: {back.name} {back.data} {back.status.name} {back.note ?? "(none)"} {back.tags}")
+    }
     lists: eetf.encode(packet, layout: .Proplist, strings: .UTF8ByteList, byte_arrays: .List) ?? panic("encode proplist")
     print("encode Packet as proplist of byte lists: {bytes_to_hex(lists)}")
-    if eetf.decode<Packet>(lists, layout: .Proplist, strings: .UTF8ByteList) == .Ok(back) -> print("proplist round trip: {back.name} {back.data} {back.status.name} {back.tags}")
-    if eetf.Atom.new("a".repeat(256)) == .Err(err) -> print("long atom: {kind_name(err)}: {err.reason}")
+    if eetf.decode<Packet>(lists, layout: .Proplist, strings: .UTF8ByteList) == .Ok(back) {
+        print("proplist round trip: {back.name} {back.data} {back.status.name} {back.tags}")
+    }
+    if eetf.Atom.new("a".repeat(256)) == .Err(err) {
+        print("long atom: {kind_name(err)}: {err.reason}")
+    }
 }

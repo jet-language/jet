@@ -6,8 +6,11 @@ package: {
     name: "must_use"
     authority: { allow: [FS.Write, IO] }
 }
-use scope: core.mem.scope
-use fs: core.files
+
+use {
+    core.mem.scope
+    fs: core.files
+}
 
 #MustUse Token: struct {
     id: Int
@@ -22,9 +25,9 @@ run: fn() {
     mint(1).drop("best-effort mint for metrics")
     mint(2).drop("best-effort mint for metrics")
     _g: scope.guard(
-    () -> {
-        print("cleanup")
-    },
+        () -> {
+            print("cleanup")
+        },
     )
     print("must-use ok")
     discard_fallible_lesson()

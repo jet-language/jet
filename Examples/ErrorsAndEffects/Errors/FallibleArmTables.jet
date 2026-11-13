@@ -38,21 +38,17 @@ Step: enum {
 }
 
 // The map's value type is inferred from the argument.
-keys: fn<V>(map: [String: V]) -> [String] {
+keys: fn<V>(map: [String:V]) -> [String] {
     out := [String]{}
-    loop key in map.keys() {
-        out.push(key)
-    }
+    loop key in map.keys() { out.push(key) }
     out
 }
 
 run: fn() {
-    loop code in [1, 2, 3, 4] {
-        print(lookup(code) ?? -1)
-    }
+    loop code in [1, 2, 3, 4] { print(lookup(code) ?? -1) }
     print(relabel(1) ?? -1)
     if relabel(9) == {
-        .Ok(value) -> print(value)
+        .Ok(value) -> { print(value) }
         .Err(_) -> print("relabel failed")
     }
     first: Step.First

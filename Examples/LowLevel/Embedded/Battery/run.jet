@@ -47,17 +47,13 @@ run: fn() {
     // Fill a second queue to exercise the explicit overflow policy, then drain
     // one item to exercise the non-empty task path.
     overflow := embedded.interrupt_queue()
-    loop event in 0..<5 {
-        _queued: embedded.interrupt_enqueue(overflow, event)
-    }
+    loop event in 0..<5 -> _queued: embedded.interrupt_enqueue(overflow, event)
     _drained: embedded.task_drain(overflow) ?? -1
 
     // RX and TX are independent instances of the same fixed-capacity ring.
     rx := embedded.uart_ring()
     tx := embedded.uart_ring()
-    loop byte in 0..<9 {
-        _received: embedded.uart_enqueue(rx, U8{65})
-    }
+    loop byte in 0..<9 -> _received: embedded.uart_enqueue(rx, U8{65})
     first_rx: embedded.uart_dequeue(rx) ?? U8{0}
     _sent: embedded.uart_enqueue(tx, U8{84})
     first_tx: embedded.uart_dequeue(tx) ?? U8{0}
@@ -105,9 +101,7 @@ run: fn() {
     print("peripherals {board.uart.name}@{board.uart.address}")
     if board.dma == .Val(peripheral) {
         print("dma peripheral {peripheral.name}@{peripheral.address}")
-    } else {
-        print("dma peripheral unavailable")
-    }
+    } else { print("dma peripheral unavailable") }
     print("mmio control {registers.uart.control} echo {mmio_echo}")
     print("timer interrupts {interrupt_count} ticks {control.ticks} dropped {interrupts.dropped}")
     print("overflow dropped {overflow.dropped} queue_after_drain {overflow.count}")

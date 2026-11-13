@@ -3,6 +3,7 @@ package: {
     version: "0.1.0"
     authority: { allow: [Exec, FFI, IO, Mem.Alloc] }
 }
+
 use core.mem
 
 #[Unsafe("the operands are scalar registers and the early-written r10 clobber does not overlap live inputs"), FFI(asm)]
@@ -16,7 +17,5 @@ add_registers: fn(a: Int, b: Int) -> Int {
 }
 
 run: fn() {
-    #Unsafe("call the audited register-only assembly contract") {
-        print(add_registers(20, 22))
-    }
+    #Unsafe("call the audited register-only assembly contract") { print(add_registers(20, 22)) }
 }

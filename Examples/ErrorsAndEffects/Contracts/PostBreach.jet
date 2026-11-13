@@ -1,13 +1,10 @@
 // A broken `#Post` stops the program with E3005 at the function that broke
 // its promise about `result`, on every tier: `jet run`, a debug build and a
 // release build all print the same stop, naming `discount`, not its caller.
-#Post(result > cents, "result must exceed the original amount")
-discount: fn(cents: Int) -> Int {
+#Post(result > cents, "result must exceed the original amount") discount: fn(cents: Int) -> Int {
     return cents - 5
 }
 
-run: fn() {
-    print("price: {discount(100)}")
-}
+run: fn() { print("price: {discount(100)}") }
 // --- expected output --------------------------------------------------
 // (nothing on stdout; the E3005 stop in `discount`, on stderr)

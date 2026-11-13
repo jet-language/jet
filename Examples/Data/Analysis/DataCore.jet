@@ -11,9 +11,7 @@ Ticket: struct {
     minutes: Float
 }
 
-Empty: struct {
-
-}
+Empty: struct {}
 
 Box: struct<T> {
     value: T
@@ -65,6 +63,8 @@ json_schema: fn() {
     boxed: [Box<Int>]{}
     loop c in data.schema(boxed) -> print("generic:{c.name}:{c.type_name}")
     loop status in data.status() {
-        if status.step == "core.data.json" || status.step == "core.data.schema" -> print("{status.step}:{status.path}")
+        if status.step == "core.data.json" || status.step == "core.data.schema" {
+            print("{status.step}:{status.path}")
+        }
     }
 }

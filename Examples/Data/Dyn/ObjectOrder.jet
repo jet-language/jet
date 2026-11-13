@@ -8,7 +8,7 @@ package: {
     authority: { allow: [Env, FS.Read, IO] }
 }
 
-use json: core.encoding.json
+use core.encoding.json
 
 run: fn() {
     built: Dyn.Object([(key: "z", value: Dyn.Text("last")), (key: "a", value: Dyn.Text("first"))])
@@ -27,7 +27,9 @@ run: fn() {
             loop field in fields -> keys.push(field.key.copy())
             print("fields: {keys}")
         }
-        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> print("not an object")
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> {
+            print("not an object")
+        }
     }
 
     // A new key appends; a write to an existing key keeps its position.
@@ -44,14 +46,14 @@ run: fn() {
     // A repeated name is a parse error unless duplicates are allowed, which
     // keep the later value at the first name's position.
     if json.parse("{{\"z\":1,\"a\":2,\"z\":3}}") == {
-        .Ok(_) -> print("duplicate: accepted")
+        .Ok(_) -> { print("duplicate: accepted") }
         .Err(error) -> print("duplicate: {error.kind == .Syntax}")
     }
     allowed: json.parse_allow_duplicates("{{\"z\":1,\"a\":2,\"z\":3}}") ?? panic("allow")
     print("allowed: {json.to_string(allowed) ?? panic("json")}")
 
     // Language Maps stay sorted: a Map value contributes its sorted order.
-    map: [String: Dyn]{"z": Dyn.Int(1), "a": Dyn.Int(2)}
+    map: [String:Dyn]{"z": Dyn.Int(1), "a": Dyn.Int(2)}
     print("map keys: {map.keys().to_list()}")
     print("from map: {json.to_string(Dyn.Object(map)) ?? panic("json")}")
 }

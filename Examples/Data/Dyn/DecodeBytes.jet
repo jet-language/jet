@@ -7,12 +7,12 @@ package: {
     authority: { allow: [Env, FS.Read, IO] }
 }
 
-use cbor: core.encoding.cbor
+use core.encoding.cbor
 
 // The reason a decode of `tree` gives, or "ok" when it succeeds.
 reasons: fn(tree: Dyn) -> String {
-    list: if tree.decode<[Int]>() == { .Err(errors) -> errors[0].reason else -> "ok" }
-    flag: if tree.decode<Bool>() == { .Err(errors) -> errors[0].reason else -> "ok" }
+    list: if tree.decode<[Int]>() == { .Err(errors) -> errors[0].reason, else -> "ok" }
+    flag: if tree.decode<Bool>() == { .Err(errors) -> errors[0].reason, else -> "ok" }
     payload: if tree.decode<[U8]>() == {
         .Ok(bytes) -> "{bytes.len()} bytes: {bytes[0]} {bytes[1]}"
         .Err(errors) -> errors[0].reason
@@ -22,7 +22,9 @@ reasons: fn(tree: Dyn) -> String {
 
 // A CBOR byte string of two bytes: major type 2, length 2, then "hi".
 WIRE: #run { [U8]{66, 104, 105} }
+
 AT_BUILD: #run reasons(Dyn.Bytes([U8]{104, 105}))
+
 AT_BUILD_WIRE: #run reasons(cbor.parse(WIRE) ?? panic("a CBOR byte string: {err}"))
 
 run: fn() {

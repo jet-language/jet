@@ -3,13 +3,14 @@ package: {
     version: "0.1.0"
     authority: { allow: [Exec, FS, FS.Read, IO, Mem.Alloc, Time.Wait] }
 }
+
 // Bounded JSON reader/writer lifecycle. CBOR and CSV streams share the same
 // writer/reader shape.
 use {
     encoding: core.encoding
-    cbor: core.encoding.cbor
-    csv: core.encoding.csv
-    json: core.encoding.json
+    core.encoding.cbor
+    core.encoding.csv
+    core.encoding.json
     files: core.files
     testing: core.testing
 }
@@ -48,7 +49,9 @@ run: fn() (EncodingError | IOError)! {
             .ObjectEnd -> { print("event:ObjectEnd") }
             // The writer above emits only the five events handled here. Keep
             // the reader total if the event contract gains another variant.
-            .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .ArrayStart | .ArrayEnd | .Key(_) -> { print("event:unexpected") }
+            .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .ArrayStart | .ArrayEnd | .Key(_) -> {
+                print("event:unexpected")
+            }
         }
         read_count += 1
     }
@@ -95,4 +98,3 @@ other_formats: fn() (EncodingError | IOError)! {
     print("csv records:{csv_records}")
     return Ok()
 }
-

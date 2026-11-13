@@ -3,7 +3,7 @@
 // reaches: `Shape` through a codec trait bound and a decode, `Point` and
 // `Kind` as wire fields of `Shape`, `Box<Point>` through the bound at a
 // generic type. `Unused` is Codable too and never gets a codec body.
-use json: core.encoding.json
+use core.encoding.json
 
 Point: struct {
     x: Int
@@ -31,9 +31,7 @@ Unused: struct {
     count: Int
 }
 
-show: fn<T: Encode>(value: T) -> String {
-    json.to_string(value) ?? "?"
-}
+show: fn<T: Encode>(value: T) -> String { json.to_string(value) ?? "?" }
 
 run: fn() [FieldError]! {
     shape: Shape{kind: Kind.Square, origin: Point{x: 1, y: 2}, size: 3}

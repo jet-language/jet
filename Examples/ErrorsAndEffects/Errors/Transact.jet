@@ -48,9 +48,9 @@ reserve_seat: fn(ok_path: Bool) -> Int Fail! {
     #Transact(booking) {
         print("seat held")
         booking.on_rollback(
-        () -> {
-            print("rollback hook: release seat")
-        },
+            () -> {
+                print("rollback hook: release seat")
+            },
         )
         if !ok_path -> return Err(Fail.Empty)
         print("seat confirmed")

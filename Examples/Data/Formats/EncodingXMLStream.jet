@@ -7,18 +7,18 @@ package: {
 // Bounded XML reader/writer lifecycle.
 use {
     encoding: core.encoding
-    xml: core.encoding.xml
+    core.encoding.xml
     files: core.files
 }
 
 xml_name: fn(local: String) -> Dyn {
     return Dyn.Object(
-    [
-        "raw": Dyn.Text(local.copy()),
-        "prefix": Dyn.Null,
-        "local": Dyn.Text(local.copy()),
-        "namespace_uri": Dyn.Null,
-    ],
+        [
+            "raw": Dyn.Text(local.copy()),
+            "prefix": Dyn.Null,
+            "local": Dyn.Text(local.copy()),
+            "namespace_uri": Dyn.Null,
+        ],
     )
 }
 
@@ -27,29 +27,29 @@ write_catalog: fn(path: Path) -> Bool (EncodingError | IOError)! {
     writer := xml.writer(output, encoding.EncodingLimits.safe()) ?? return Err(err)
     writer.write(Dyn.Object(["$xml_event": Dyn.Text("document_start"), "encoding": Dyn.Null, "bom": Dyn.Array([])])) ?? return Err(err)
     semantic: Dyn.Object(
-    [
-        "name": xml_name("r"),
-        "namespaces": Dyn.Array([]),
-        "attributes": Dyn.Array([]),
-        "empty_style": Dyn.Text("empty"),
-    ],
+        [
+            "name": xml_name("r"),
+            "namespaces": Dyn.Array([]),
+            "attributes": Dyn.Array([]),
+            "empty_style": Dyn.Text("empty"),
+        ],
     )
     open_lexical: Dyn.Object(
-    [
-        "raw_text": Dyn.Null,
-        "raw_bytes": Dyn.Null,
-        "semantic": semantic,
-    ],
+        [
+            "raw_text": Dyn.Null,
+            "raw_bytes": Dyn.Null,
+            "semantic": semantic,
+        ],
     )
     root_event: Dyn.Object(
-    [
-        "$xml_event": Dyn.Text("element_start"),
-        "name": xml_name("r"),
-        "namespaces": Dyn.Array([]),
-        "attributes": Dyn.Array([]),
-        "empty_style": Dyn.Text("empty"),
-        "open_lexical": open_lexical,
-    ],
+        [
+            "$xml_event": Dyn.Text("element_start"),
+            "name": xml_name("r"),
+            "namespaces": Dyn.Array([]),
+            "attributes": Dyn.Array([]),
+            "empty_style": Dyn.Text("empty"),
+            "open_lexical": open_lexical,
+        ],
     )
     writer.write(root_event) ?? return Err(err)
     writer.write(Dyn.Object(["$xml_event": Dyn.Text("document_end")])) ?? return Err(err)

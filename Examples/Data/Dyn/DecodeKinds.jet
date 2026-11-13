@@ -8,13 +8,13 @@ package: {
 }
 
 use {
-    json: core.encoding.json
+    core.encoding.json
     time: core.time
 }
 
 said: fn(target: String, outcome: [FieldError]?) {
     if outcome == {
-        .Val(errors) -> print("  {target}: {errors[0].reason}")
+        .Val(errors) -> { print("  {target}: {errors[0].reason}") }
         .None -> print("  {target}: ok")
     }
 }
@@ -24,32 +24,53 @@ run: fn() {
     // Strict JSON keeps a number as its exact lexeme, the Dyn number variant.
     number: json.parse("2") ?? panic("a JSON number: {err}")
     trees: [(name: String, tree: Dyn)]{
-        (name: "Null", tree: Dyn.Null), (name: "Bool", tree: Dyn.Bool(true)), (name: "Int", tree: Dyn.Int(1)),
-        (name: "Float", tree: Dyn.Float(1.5)), (name: "Number", tree: number), (name: "Text", tree: Dyn.Text("a")),
-        (name: "Bytes", tree: Dyn.Bytes([U8]{104, 105})), (name: "DateTime", tree: stamp),
-        (name: "Array", tree: Dyn.Array([Dyn]{})), (name: "Object", tree: Dyn.object())
+        (name: "Null", tree: Dyn.Null),
+        (name: "Bool", tree: Dyn.Bool(true)),
+        (name: "Int", tree: Dyn.Int(1)),
+        (name: "Float", tree: Dyn.Float(1.5)),
+        (name: "Number", tree: number),
+        (name: "Text", tree: Dyn.Text("a")),
+        (name: "Bytes", tree: Dyn.Bytes([U8]{104, 105})),
+        (name: "DateTime", tree: stamp),
+        (name: "Array", tree: Dyn.Array([Dyn]{})),
+        (name: "Object", tree: Dyn.object()),
     }
     loop entry in trees {
         print(entry.name)
-        said("[Int]", if entry.tree.decode<[Int]>() == {
-            .Err(errors) -> Val(errors)
-            .Ok(_) -> None
-        })
-        said("[String: Int]", if entry.tree.decode<[String: Int]>() == {
-            .Err(errors) -> Val(errors)
-            .Ok(_) -> None
-        })
-        said("Bool", if entry.tree.decode<Bool>() == {
-            .Err(errors) -> Val(errors)
-            .Ok(_) -> None
-        })
-        said("ZonedDateTime", if entry.tree.decode<time.ZonedDateTime>() == {
-            .Err(errors) -> Val(errors)
-            .Ok(_) -> None
-        })
-        said("Decimal", if entry.tree.decode<Decimal>() == {
-            .Err(errors) -> Val(errors)
-            .Ok(_) -> None
-        })
+        said(
+            "[Int]",
+            if entry.tree.decode<[Int]>() == {
+                .Err(errors) -> Val(errors)
+                .Ok(_) -> None
+            },
+        )
+        said(
+            "[String: Int]",
+            if entry.tree.decode<[String:Int]>() == {
+                .Err(errors) -> Val(errors)
+                .Ok(_) -> None
+            },
+        )
+        said(
+            "Bool",
+            if entry.tree.decode<Bool>() == {
+                .Err(errors) -> Val(errors)
+                .Ok(_) -> None
+            },
+        )
+        said(
+            "ZonedDateTime",
+            if entry.tree.decode<time.ZonedDateTime>() == {
+                .Err(errors) -> Val(errors)
+                .Ok(_) -> None
+            },
+        )
+        said(
+            "Decimal",
+            if entry.tree.decode<Decimal>() == {
+                .Err(errors) -> Val(errors)
+                .Ok(_) -> None
+            },
+        )
     }
 }

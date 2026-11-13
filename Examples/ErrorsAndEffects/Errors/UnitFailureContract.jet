@@ -1,4 +1,8 @@
-#Error MyError: enum { X }
+#Error
+MyError: enum {
+    X
+}
+
 f: fn(bad: Bool) MyError! {
     if bad -> return Err(MyError.X)
     Ok()
@@ -6,11 +10,11 @@ f: fn(bad: Bool) MyError! {
 
 run: fn() {
     if f(false) == {
-        .Ok(_) -> print("ok")
+        .Ok(_) -> { print("ok") }
         .Err(error) -> print(error)
     }
     if f(true) == {
-        .Ok(_) -> print("unexpected")
+        .Ok(_) -> { print("unexpected") }
         .Err(error) -> print(error)
     }
     unit_validation_lesson()
@@ -37,7 +41,7 @@ unit_validation_lesson: fn() {
         .Err(error) -> print(error)
     }
     if checked_next(-1) == {
-        .Ok(value) -> print(value)
+        .Ok(value) -> { print(value) }
         .Err(error) -> print(error)
     }
 }

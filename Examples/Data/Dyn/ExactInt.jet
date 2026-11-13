@@ -13,8 +13,8 @@ package: {
 }
 
 use {
-    cbor: core.encoding.cbor
-    json: core.encoding.json
+    core.encoding.cbor
+    core.encoding.json
     files: core.files
 }
 
@@ -48,7 +48,7 @@ run: fn() {
     print("ordered: {Dyn.Int(wide) < Dyn.Int(wide + 1)}")
     print("json: {json.to_string(left) ?? panic("json")}")
     if cbor.to_bytes(Dyn.Int(18446744073709551616)) == {
-        .Ok(bytes) -> print("2^64 as CBOR: {bytes}")
+        .Ok(bytes) -> { print("2^64 as CBOR: {bytes}") }
         .Err(failure) -> print("2^64 as CBOR: {failure}")
     }
 
@@ -73,7 +73,7 @@ run: fn() {
     print("bignum round trip: {(cbor.to_bytes(first) ?? panic("cbor")) == positive}")
     print("negative round trip: {(cbor.to_bytes(below) ?? panic("cbor")) == negative}")
     if cbor.parse([U8]{194, 97, 120}) == {
-        .Ok(tree) -> print("bignum over text: {kind(tree)}")
+        .Ok(tree) -> { print("bignum over text: {kind(tree)}") }
         .Err(failure) -> print("bignum over text: {failure}")
     }
 
@@ -97,7 +97,7 @@ run: fn() {
     output: files.create(files.join(scratch.path, "out.cbor")) ?? panic("create")
     sink := cbor.writer(output) ?? panic("writer")
     if sink.write(DataEvent.Int(18446744073709551616)) == {
-        .Ok(_) -> print("2^64 streamed as CBOR")
+        .Ok(_) -> { print("2^64 streamed as CBOR") }
         .Err(failure) -> print("2^64 stream write: {failure.reason}")
     }
 }

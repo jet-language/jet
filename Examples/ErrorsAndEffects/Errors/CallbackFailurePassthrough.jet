@@ -2,7 +2,7 @@
 // caller with a failure-type parameter. `fn(T) -> String E!` takes the key
 // function's own failure type, so the caller matches `.Missing` directly. A
 // key function that cannot fail makes the whole call unable to fail.
-use table: core.web.table
+use core.web.table
 
 #Error
 PriceError: enum {
@@ -23,14 +23,14 @@ plain_key: fn(name: String) -> String Never! { name.copy() }
 
 run: fn() {
     if first_key(["", "b"], parse_price) == {
-        .Ok(key) -> print(key)
+        .Ok(key) -> { print(key) }
         .Err(.Missing(why)) -> print("missing: {why}")
     }
     print(first_key(["b", ""], plain_key))
     print(first_key([7, 8], n -> "#{n}"))
 
     if table.sort(["b", "", "a"], false, parse_price) == {
-        .Ok(rows) -> print(rows.join(","))
+        .Ok(rows) -> { print(rows.join(",")) }
         .Err(.Missing(why)) -> print("sort stopped: {why}")
     }
     print(table.sort(["b", "c", "a"], false, plain_key).join(","))

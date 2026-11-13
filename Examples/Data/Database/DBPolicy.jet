@@ -14,10 +14,14 @@ run: fn() {
     policy: db.policy("tasks", "owner == user") ?? panic("policy")
     scoped := conn.with_policy(policy, "alice")
     print(db.policy_audit(scoped))
-    _created: db.migrate(scoped, "tasks-v1", [
-        SQL{"CREATE TABLE tasks (owner TEXT, title TEXT)"},
-        SQL{"CREATE TABLE notes (body TEXT)"},
-    ]) ?? panic("create")
+    _created: db.migrate(
+        scoped,
+        "tasks-v1",
+        [
+            SQL{"CREATE TABLE tasks (owner TEXT, title TEXT)"},
+            SQL{"CREATE TABLE notes (body TEXT)"},
+        ],
+    ) ?? panic("create")
     owner: "bob"
     title: "one"
     _one: scoped.execute(SQL{"INSERT INTO tasks (owner, title) VALUES ({owner}, {title})"}) ?? panic("insert")

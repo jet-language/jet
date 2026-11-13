@@ -3,6 +3,7 @@ package: {
     version: "0.1.0"
     authority: { allow: [Exec, IO, Mem.Alloc, Time, Time.Wait] }
 }
+
 // An explicit empty effect bound is reproducible.
 //
 // A `fn … -[]>` rejects ambient wall-clock / OS-RNG (`time.now()`, `random.int()`)
@@ -13,7 +14,7 @@ package: {
 //
 // For the rare case where you KNOW a construct is deterministic but the checker
 // can't prove it, `assume_deterministic { … }` is the expert escape hatch.
-use random: core.math.random
+use core.math.random
 
 // Pure: reads time + randomness only through the injected inputs.
 // `clock` is read-only (`now`); `rng` advances its stream, so it is `&Rng`.
@@ -60,8 +61,6 @@ run: fn() {
     // The expert escape: inside this block the determinism check is suspended.
     // A footgun — use only when you can guarantee reproducibility yourself.
     fixed := 0
-    #Nondeterministic("example deliberately reads ambient state") {
-        fixed = 7
-    }
+    #Nondeterministic("example deliberately reads ambient state") { fixed = 7 }
     print("escape: {fixed}")
 }

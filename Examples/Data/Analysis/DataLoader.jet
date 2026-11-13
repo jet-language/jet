@@ -22,10 +22,18 @@ PARQUET_FIXTURE: #run embed_bytes("Int32WithNullPages.parquet")
 
 loader_kind_name: fn(kind: data.DataLoaderKind) -> String {
     if kind == {
-        .File -> { return "File" }
-        .URL -> { return "URL" }
-        .Database -> { return "Database" }
-        .Value -> { return "Value" }
+        .File -> {
+            return "File"
+        }
+        .URL -> {
+            return "URL"
+        }
+        .Database -> {
+            return "Database"
+        }
+        .Value -> {
+            return "Value"
+        }
     }
 }
 
@@ -62,7 +70,7 @@ run: fn() {
         parquet_path,
         "int32_with_null_pages.parquet",
         "parquet",
-        limits
+        limits,
     ) ?? panic("file member loader")
     if snapshot<[Dyn]>(member_loader) == {
         .Ok(_) -> { print("file_member:unexpected") }
@@ -74,7 +82,7 @@ run: fn() {
         "SELECT service, latency_ms FROM events WHERE service = ?",
         [String]{"api"},
         "local",
-        limits
+        limits,
     ) ?? panic("database loader")
     if snapshot<[Dyn]>(database_loader) == {
         .Ok(_) -> { print("database:unexpected") }
@@ -85,7 +93,7 @@ run: fn() {
         "SELECT service, latency_ms FROM events",
         [String]{},
         "local",
-        limits
+        limits,
     ) ?? panic("bind text loader")
     data_loader.bind_text(text_loader, `[{"service":"bound","latency_ms":3.0}]`) ?? panic("bind text")
     text_snapshot: snapshot<[Event]>(text_loader) ?? panic("bind text snapshot")

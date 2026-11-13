@@ -3,6 +3,7 @@ package: {
     version: "0.1.0"
     authority: { allow: [Exec, FS, FS.Read, IO, Mem.Alloc, Time.Wait] }
 }
+
 // #3280: full versus selective JSON decoding, side by side, on one document
 // with 20 fields. Three paths read it:
 // - `json.parse`: validates and materializes the whole value.
@@ -19,7 +20,7 @@ package: {
 // input text, so the text can end before the value does.
 use {
     encoding: core.encoding
-    json: core.encoding.json
+    core.encoding.json
     files: core.files
     testing: core.testing
 }
@@ -84,7 +85,9 @@ first_key: fn(label: String, path: Path) (EncodingError | IOError)! {
     key: events.next() ?? return Ok()
     if key == {
         .Key(name) -> print("{label} reader: stopped after first key `{name}`; the rest is unread")
-        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .ArrayStart | .ArrayEnd | .ObjectStart | .ObjectEnd -> print("{label} reader: the first event after the root is not a key")
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .ArrayStart | .ArrayEnd | .ObjectStart | .ObjectEnd -> {
+            print("{label} reader: the first event after the root is not a key")
+        }
     }
     Ok()
 }

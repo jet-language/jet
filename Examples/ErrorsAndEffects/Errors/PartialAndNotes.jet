@@ -23,11 +23,11 @@ import_rows: fn(label: String, rows: [String]) -> [String] ImportErr! {
     broken: rows.len() - good.len()
     if broken > 0 {
         return Err(
-        ImportErr{
-            broken: broken,
-            partial: good,
-            notes: ["{label}: {broken} rows were empty"],
-        },
+            ImportErr{
+                broken: broken,
+                partial: good,
+                notes: ["{label}: {broken} rows were empty"],
+            },
         )
     }
     return Ok(good)
@@ -54,8 +54,8 @@ run: fn() {
     // Two spotty imports, alive at the same time. Each one carries its own
     // notes, because the notes are part of the outcome and not of the program.
     report(
-    import_rows("people", ["ada", "", "alan", "", "grace"]),
-    import_rows("ports", ["80", "", "443"]),
-    import_rows("clean", ["ada", "alan"]),
+        import_rows("people", ["ada", "", "alan", "", "grace"]),
+        import_rows("ports", ["80", "", "443"]),
+        import_rows("clean", ["ada", "alan"]),
     )
 }

@@ -3,7 +3,7 @@
 // schema (I8). Every failing `check` accumulates into `[FieldError]` instead
 // of stopping at the first one, so a form can show every problem at once.
 // The generated decode runs the same rules on the value it decodes.
-use json: core.encoding.json
+use core.encoding.json
 
 Signup: struct {
     email: String
@@ -18,7 +18,7 @@ Signup: struct {
 
 report: fn(label: String, signup: Signup) {
     if Signup.validate(signup) == {
-        .Ok(v) -> print("{label}: ok ({v.email})")
+        .Ok(v) -> { print("{label}: ok ({v.email})") }
         .Err(errs) -> {
             print("{label}: {errs.len()} problem(s)")
             loop e in errs -> print("  {e.path}: {e.reason}")
@@ -29,7 +29,7 @@ report: fn(label: String, signup: Signup) {
 
 report_over: fn(label: String, signup: Signup, allow_short: Bool) {
     if Validate.over(signup).check(signup.email.len() > 0, at: email, "email required").check(allow_short || signup.password.len() >= 12, at: password, "needs at least 12 characters").finish() == {
-        .Ok(v) -> print("{label}: ok ({v.email})")
+        .Ok(v) -> { print("{label}: ok ({v.email})") }
         .Err(errs) -> {
             print("{label}: {errs.len()} problem(s)")
             loop e in errs -> print("  {e.path}: {e.reason}")
