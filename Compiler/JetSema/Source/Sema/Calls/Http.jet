@@ -592,18 +592,19 @@ sema_call_http_core_form_descriptor: fn(field: Field, value_variant: String, con
 }
 
 // `web.form(Model, action: submit)` has no Core registry row: sema derives
-// the field descriptors from the model struct and rewrites the call into the
-// Core source functions `core.web.forms.input` and `core.web.forms.typed`.
-// Like `args.decode` it resolves through the import before the registry route.
+// the field descriptors from the model struct, which `#Web.Form` marks, and
+// rewrites the call into the Core source functions `core.web.forms.input`
+// and `core.web.forms.typed`. Like `args.decode` it resolves through the
+// import before the registry route.
 sema_call_try_web_form: fn(module_name: String, member: String, alias: String, alias_span: Span, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
-    if module_name != "core.web" || member != "form" -> return SemaDirectSpecialCheck{handled: false, value: None}
+    if module_name != SEMA_WEB_MARKER_MODULE || member != "form" -> return SemaDirectSpecialCheck{handled: false, value: None}
     imported: sema_call_core_import_target(environment, program, alias) ?? return SemaDirectSpecialCheck{handled: false, value: None}
     if !sema_call_core_record_import_reference(environment, program, scopes, imported, alias_span, context) -> return SemaDirectSpecialCheck{handled: false, value: None}
     sema_call_http_web_form(args, type_args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
 }
 
 sema_call_http_web_form: fn(args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck Never! {
-    if !sema_call_core_check_type_args("core.web", "form", 0, false, type_args, span, diagnostics) -> return SemaDirectSpecialCheck{handled: true, value: None}
+    if !sema_call_core_check_type_args(SEMA_WEB_MARKER_MODULE, "form", 0, false, type_args, span, diagnostics) -> return SemaDirectSpecialCheck{handled: true, value: None}
     if args.len() != 2 {
         diagnostics.push(sema_call_arity_diagnostic("form", 2, args.len(), false, span))
         loop argument in args -> _ := sema_check_expression(argument.expr, None, environment, program, scopes, state, tail_store, context, diagnostics)
@@ -623,6 +624,10 @@ sema_call_http_web_form: fn(args: [CallArg], type_args: [Type], span: Span, expe
     }
     definition: sema_http_route_find_struct(environment, program, Type.Named{name: model_name}, environment.module_identity) ?? {
         diagnostics.push(sema_error("E2474", args[model_index].span, "web.form model `{model_name}` is not a declared struct", "the form field set must come from the model's declared fields", "declare `{model_name}: struct {{ ... }}` before constructing the form"))
+        return SemaDirectSpecialCheck{handled: true, value: None}
+    }
+    if !sema_web_type_marked(Type.Named{name: model_name}, SEMA_WEB_MARKER_FORM, environment, program) {
+        diagnostics.push(sema_error("E2474", args[model_index].span, "the web.form model `{model_name}` is not marked `#Web.Form`", "a form derives its fields only from a model struct the web module's `#Form` marks", "mark the model: `#Web.Form {model_name}: struct {{ ... }}`"))
         return SemaDirectSpecialCheck{handled: true, value: None}
     }
     if program.registration_graph == .Val(graph) {

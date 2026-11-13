@@ -1578,8 +1578,11 @@ sema_call_core_check_source_owned: fn(target: SemaCallDirectTarget, qualified_na
     // publishes them like a direct call, so a binding keeps the view's owner.
     context.call_return_views.push(SemaCallReturnView{span: span, facts: checked.return_view_facts})
     if !sema_expr_record_call_fact(environment, program, scopes, context, span, checked, diagnostics) -> return None
-    // `table.column("name", …)` checks its literal column against the row schema (E2475).
-    if target.symbol.name == "column" && sema_call_core_module_identity(environment, program, "core.web.table") == (Val(target.symbol.module_name)) -> sema_call_web_table_column_schema(args, checked.value, environment, program, diagnostics)
+    // The parameter marked `#ColumnOf` (`table.column("name", …)`) names a
+    // field of the result's row type, checked against it (E2475).
+    if program.registration_graph == .Val(graph) {
+        if sema_web_param_marker(graph, target.symbol.id.key, SEMA_WEB_MARKER_COLUMN_OF) == .Val(param) -> sema_call_web_table_column_schema(args, param, checked.value, environment, program, diagnostics)
+    }
     Val(checked.value)
 }
 

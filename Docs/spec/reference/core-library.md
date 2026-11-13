@@ -5233,7 +5233,9 @@ with its method, address, what answers it, how it was registered (`page`,
 that typed request/response contract rather than opening sockets directly.
 Storage adapters are named below because they are separate built modules.
 The high-level `web.form` value keeps its compiler-owned typed-model identity
-and `.set`/`.render` interface. The source `core.web.forms.typed` API remains
+and `.set`/`.render` interface. Its model is a struct marked with the web
+module's `#Form` (`#Web.Form Checkout: struct { … }`); an unmarked model is
+E2474. The source `core.web.forms.typed` API remains
 separate for callers that explicitly supply `WebFormInput` and an action name.
 The source query carrier exposes the same receiver state/mutation operations as
 its module functions. Mutating source query, form, table, virtual viewport, and

@@ -1926,12 +1926,13 @@ sema_call_check_freeze: fn(call: Call, expected: Type?, environment: SemaScopeEn
     SemaDirectSpecialCheck{handled: true, value: checked_result}
 }
 
-// E2475 (`core.web.table.column`): a literal column name is checked against the
-// one row schema the table sorts, filters and renders.
-sema_call_web_table_column_schema: fn(args: [CallArg], checked: TExpr, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) {
-    if args.len() == 0 -> return
+// E2475 (`#ColumnOf`, on `table.column`'s name): the literal at the marked
+// parameter `param` is checked against the one row schema the table sorts,
+// filters and renders.
+sema_call_web_table_column_schema: fn(args: [CallArg], param: Int, checked: TExpr, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) {
+    if param >= args.len() -> return
     column := String?{None}
-    if sema_registration_cli_without_parens(args[0].expr) == .Str(parts, _, _) {
+    if sema_registration_cli_without_parens(args[param].expr) == .Str(parts, _, _) {
         if parts.len() == 1 && parts[0] == .Lit(text) -> column = Val(text.copy())
     }
     column_name: column ?? return
@@ -1950,7 +1951,7 @@ sema_call_web_table_column_schema: fn(args: [CallArg], checked: TExpr, environme
             break
         }
     }
-    span: args[0].span
+    span: args[param].span
     row_name := ""
     if row == .Named(name) -> row_name = name
     if row == .Apply(name, _) -> row_name = name

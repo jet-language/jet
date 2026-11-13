@@ -237,11 +237,16 @@ sema_policy_has_unsupported_applications: fn(program: Program) -> Bool Never! {
 }
 
 // The applied rules of `program` the checker has no route for, in source
-// order (sema_marker_module_check reports each one).
+// order (sema_marker_module_check reports each one). A source-declared
+// marker (`Name: struct { impl Marker { sites: [...] } }`, bound to its
+// declaring module) has its route: it means only what its declaration
+// states, the vocabulary and site checks judge where it is written, and its
+// consumer reads it from the program (a `#Web.ColumnOf` parameter,
+// sema_web_param_marker).
 sema_policy_unsupported_applications: fn(program: Program) -> [AppliedRuleApplication] Never! {
     unsupported := [AppliedRuleApplication]{}
     loop application in program.applied_rules {
-        if sema_policy_statement_form(application) -> next
+        if sema_policy_statement_form(application) || application.marker.declaration_module != None -> next
         if application.marker.name != MARKER_ALLOW -> unsupported.push(application.copy())
     }
     loop application in program.rule_facts {
@@ -254,7 +259,7 @@ sema_policy_unsupported_applications: fn(program: Program) -> [AppliedRuleApplic
         // conversion became its routine (sema_error_conversion_items), and are
         // checked as every impl's markers are.
         if application.site == .Val(site) && site == RuleSite.Impl -> next
-        if sema_policy_statement_form(application) -> next
+        if sema_policy_statement_form(application) || application.marker.declaration_module != None -> next
         if application.marker.name != MARKER_ALLOW -> unsupported.push(application.copy())
     }
     unsupported

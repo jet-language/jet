@@ -1341,6 +1341,11 @@ sema_call_app_route_registrations: fn(receiver: Expr, receiver_value: TExpr, met
 // Whether `ty` is a struct the web module marks `#RouteTable`, its App. The
 // web rules key on the marker, not on the type's or its module's name.
 sema_app_is_route_table: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool {
+    sema_web_type_marked(ty, SEMA_WEB_MARKER_ROUTE_TABLE, environment, program)
+}
+
+// Whether `ty` is a struct that carries the web marker `name`.
+sema_web_type_marked: fn(ty: Type, name: String, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool {
     graph: program.registration_graph ?? return false
     resolved: sema_call_resolved_type(ty, environment, program)
     row: sema_type_resolve_nominal_row(graph, resolved, environment.module_identity) ?? return false
@@ -1349,7 +1354,7 @@ sema_app_is_route_table: fn(ty: Type, environment: SemaScopeEnvironment, program
     item: sema_registration_nominal_source_item(nominal.source) ?? return false
     if item == .Struct(definition) {
         loop marker in definition.type_markers {
-            if sema_web_marker_is(marker, graph, graph.modules[row.module_index].module_identity, SEMA_WEB_MARKER_ROUTE_TABLE) -> return true
+            if sema_web_marker_is(marker, graph, graph.modules[row.module_index].module_identity, name) -> return true
         }
     }
     false

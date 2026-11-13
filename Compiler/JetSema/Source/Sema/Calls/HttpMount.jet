@@ -47,9 +47,13 @@ sema_http_route_marker_verb: fn(marker: Marker, graph: SemaRegistrationGraph, mo
 }
 
 // The module that declares the web markers. The web rules key on its
-// markers (`#RouteTable` on App), never on another module's same-named ones.
+// markers (`#RouteTable` on App, `#Form` on a form model, `#ColumnOf` on
+// table.column's name), never on another module's same-named ones; its
+// submodules declare theirs.
 SEMA_WEB_MARKER_MODULE: "core.web"
 SEMA_WEB_MARKER_ROUTE_TABLE: "RouteTable"
+SEMA_WEB_MARKER_FORM: "Form"
+SEMA_WEB_MARKER_COLUMN_OF: "ColumnOf"
 
 // Whether `marker`, written in the module `module_identity`, is the web
 // module's marker `name`.
@@ -59,7 +63,37 @@ sema_web_marker_is: fn(marker: Marker, graph: SemaRegistrationGraph, module_iden
     if resolved.status != "found" -> return false
     declaration: resolved.declaration ?? return false
     module_index: sema_registration_module_index(graph, resolved.declaring_module_identity) ?? return false
-    graph.modules[module_index].module_name == SEMA_WEB_MARKER_MODULE && declaration.name == name
+    declaring: graph.modules[module_index].module_name
+    (declaring == SEMA_WEB_MARKER_MODULE || declaring.starts_with("{SEMA_WEB_MARKER_MODULE}.")) && declaration.name == name
+}
+
+// The index of the parameter of the function `key` that carries the web
+// marker `name`. A parameter's marker is an applied rule of its module at
+// the Parameter site, written ahead of the parameter's name; it belongs to
+// the parameter whose name it precedes, after the previous parameter's type.
+sema_web_param_marker: fn(graph: SemaRegistrationGraph, key: String, name: String) -> Int? {
+    row: sema_registration_callable_row(graph, key) ?? return None
+    if row == {
+        .Function(module_index, index) -> {
+            loop application in graph.modules[module_index].program.applied_rules {
+                if application.site != (Val(RuleSite.Parameter)) -> next
+                target: application.target ?? next
+                if !sema_web_marker_is(application.marker, graph, graph.modules[module_index].module_identity, name) -> next
+                if sema_web_param_at(graph.modules[module_index].functions[index].declaration, target) == .Val(param) -> return Val(param)
+            }
+            None
+        }
+        .Foreign(_, _) | .NominalMethod(_, _, _) | .ImplMethod(_, _, _) -> None
+    }
+}
+
+sema_web_param_at: fn(function: Func, target: Span) -> Int? Never! {
+    start := function.name_span.end
+    loop param_index in 0..<function.params.len() {
+        if target.start >= start && target.end <= function.params[param_index].name_span.start -> return Val(param_index)
+        start = function.params[param_index].ty_span.end
+    }
+    None
 }
 
 sema_http_mount_arg: fn(expression: Expr, span: Span) -> CallArg Never! {

@@ -40,6 +40,15 @@ WebTableColumn: struct<T> {
     project: fn(T) -> String Never!
 }
 
+// The compiler's table rule keys on this marker, not on this module's name:
+// the parameter it marks names a field of the row type `T`, and a literal
+// there is checked against that row's fields.
+ColumnOf: struct {
+    impl Marker {
+        sites: [.Parameter]
+    }
+}
+
 WebTableRow: struct<T> {
     key: String
     value: T
@@ -97,7 +106,7 @@ new_keyed: fn<T, E>(name: String, rows: [T], key_fn: fn(T) -> String E!) -> WebT
     WebTable<T>{name: name, columns: [WebTableColumn<T>]{ }, rows: keyed, state: default_state(), server_page: [fn(WebTableState) -> WebTablePage<T> WebTableError!]{ }}
 }
 
-column: fn<T>(name: String, label: String, project: &&fn(T) -> String Never!) -> WebTableColumn<T> Never! {
+column: fn<T>(#ColumnOf name: String, label: String, project: &&fn(T) -> String Never!) -> WebTableColumn<T> Never! {
     WebTableColumn<T>{name: name, label: label, project: project.move()}
 }
 
