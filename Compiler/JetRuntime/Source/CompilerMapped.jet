@@ -248,3 +248,12 @@ compiler_mapped_newline: fn(base: I64, at: I64, total: I64) -> I64 {
     count
 }
 #Export(c) jet_rt_record_get_jet_mapped_file_path: fn(map: I64) -> I64 { jet_rt_string_clone(rt_text_word(wrapping(map + I64{16}))) }
+// The Map56 fields Core's MappedFile reads in place: the path it was opened
+// with, and its bytes as a (length, 0, data) header over the read-only
+// mapping. Both lend storage the map owns; a caller copies them out.
+#Export(c) jet_rt_handle_field_jet_mapped_file_stored_path: fn(map: I64, out: I64) { coll_copy(rt_text_word(wrapping(map + I64{16})), out, I64{24}) }
+#Export(c) jet_rt_handle_field_jet_mapped_file_bytes: fn(map: I64, out: I64) {
+    rt_text_store(out, rt_text_word(wrapping(map + I64{40})))
+    rt_text_store(wrapping(out + I64{8}), I64{0})
+    rt_text_store(wrapping(out + I64{16}), rt_text_word(wrapping(map + I64{32})))
+}

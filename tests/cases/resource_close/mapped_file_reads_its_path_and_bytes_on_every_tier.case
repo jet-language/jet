@@ -1,0 +1,20 @@
+# A MappedFile from files.map reads its computed `path` field and its `bytes`
+# field (the whole read-only mapping, first byte `m` and last byte LF), on
+# every tier, with no internal compiler error.
+fixture: mapped_file_reads_its_path_and_bytes_on_every_tier.fixture
+env: NO_COLOR=1
+step o0: jet run --optimize=none main.jet
+env: JET_STORE_DIR={work}/cache/o0
+exit: 0
+stdout: = "data.txt\n13\n109\n10\ntrue\n"
+stderr: !~ "internal compiler error" # the field reads lower without a backend fault
+step o1: jet run --optimize=basic main.jet
+env: JET_STORE_DIR={work}/cache/o1
+exit: 0
+stdout: = "data.txt\n13\n109\n10\ntrue\n"
+stderr: !~ "internal compiler error" # the field reads lower without a backend fault
+step o2: jet run --optimize=full main.jet
+env: JET_STORE_DIR={work}/cache/o2
+exit: 0
+stdout: = "data.txt\n13\n109\n10\ntrue\n"
+stderr: !~ "internal compiler error" # the field reads lower without a backend fault
