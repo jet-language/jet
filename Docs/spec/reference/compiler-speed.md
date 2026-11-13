@@ -27,10 +27,10 @@ are proven.
 When AOT lowers through a generated backend, backend and toolchain work remains
 an irreducible cost. The two-lens contract requires:
 
-- Fast and optimized profiles use explicit linker, optimization, and LTO
-  settings. Native builds honor explicit `RUSTC_LINKER`/`CC`; otherwise Jet
-  selects an available fast linker without overriding the target's system
-  linker.
+- Fast and optimized profiles use explicit optimization settings. Jet links
+  native images with its own x86-64 image linker; only a program's foreign C
+  closure uses `CC`/`AR` when set, otherwise the C toolchain pack this jet
+  ships.
 - Native AOT may reuse content-addressed Prelude/runtime and reachable-Core
   objects. Keys include emitted source, compiler identity, target/profile flags,
   environment, and runtime dependency identity; invalid objects fail open to
