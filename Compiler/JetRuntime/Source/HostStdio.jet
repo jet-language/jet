@@ -134,6 +134,17 @@ host_stdio_option_cause: fn(failure: I64, some: I64) -> I64 {
     host_stdio_option_cause(host_stdio_flush_failure(stderr), some)
 }
 
+// jet.runtime.term stdio_put_text/stdio_put_bytes: a write asks for no flush
+// of its own; the stdout policy decides, and stdio_flush is the explicit
+// flush.
+#Export(c) jet_term_stdio_put_text_raw: fn(text: I64, newline: Bool, stderr: Bool, some: I64) -> I64 {
+    host_stdio_option_cause(host_stdio_text_failure(text, newline, stderr, false), some)
+}
+
+#Export(c) jet_term_stdio_put_bytes_raw: fn(bytes: I64, length: I64, stderr: Bool, some: I64) -> I64 {
+    host_stdio_option_cause(host_stdio_bytes_failure(bytes, length, stderr, false), some)
+}
+
 // jet.runtime.term stdout_terminal/stderr_terminal and terminal8_*_tty.
 #Export(c) jet_term_stdin_is_terminal: fn() -> Bool { host_is_tty(I64{0}) }
 #Export(c) jet_term_stdout_is_terminal: fn() -> Bool { host_is_tty(I64{1}) }

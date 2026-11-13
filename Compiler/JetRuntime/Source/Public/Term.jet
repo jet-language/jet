@@ -17,6 +17,14 @@ term: module {
     // Flushes stdout, or stderr; the flush's failure, if any.
     #Import(c) stdio_flush: fn(stderr: Bool) -[IO]> String? = "jet_term_stdio_flush_raw"
 
+    // Writes `text` to stdout, or stderr, with a newline when asked; the
+    // write's failure, if any. The runtime's one stdout policy decides when
+    // buffered bytes reach the stream.
+    #Import(c) stdio_put_text: fn(text: String, newline: Bool, stderr: Bool) -[IO]> String? = "jet_term_stdio_put_text_raw"
+
+    // Writes `bytes` to stdout, or stderr, as stdio_put_text does.
+    #Import(c) stdio_put_bytes: fn(bytes: [U8], stderr: Bool) -[IO]> String? = "jet_term_stdio_put_bytes_raw"
+
     // The next stdin line without its trailing LF and CR bytes, None at EOF.
     // `priv`: Core's StdinHandle.read_line calls it after its fault
     // checkpoint.
