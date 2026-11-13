@@ -6,14 +6,6 @@ use jet_foundation.[
     Expr,
     Func,
     Item,
-    MARKER_ALLOW,
-    MARKER_CONTEXT,
-    MARKER_FX,
-    MARKER_INTERRUPT,
-    MARKER_META,
-    MARKER_POLICY,
-    MARKER_TARGET,
-    MARKER_UNSAFE,
     Marker,
     MarkerDecl,
     MarkerDeclParam,
@@ -497,12 +489,13 @@ sema_marker_rules_marker_signature_bindings: fn(marker: Marker, signature: TAppl
     bindings := [SemaMarkerRuleArgumentBinding]{}
     // Rust `rule_signature_bindings`: a bare `#Unsafe` binds nothing; its
     // missing reason is E3112's, not E0930's.
-    if marker.name == MARKER_UNSAFE && marker.args.len() == 0 -> return Val(bindings)
+    if sema_marker_is_hook(marker, MarkerHook.Unsafe) && marker.args.len() == 0 -> return Val(bindings)
     supplied := [Bool]{}
     loop _ in signature.params {
         supplied.push(false)
     }
-    if marker.name == MARKER_META && marker.arg_labels.len() == marker.args.len() {
+    meta: sema_marker_is_hook(marker, MarkerHook.Meta)
+    if meta && marker.arg_labels.len() == marker.args.len() {
         all_named := true
         loop label in marker.arg_labels {
             if label == None {
@@ -524,7 +517,7 @@ sema_marker_rules_marker_signature_bindings: fn(marker: Marker, signature: TAppl
             return Val(bindings)
         }
     }
-    if marker.name == MARKER_POLICY {
+    if sema_marker_is_hook(marker, MarkerHook.Policy) {
         kind: signature.variadic ?? return None
         loop source_index in 0..<marker.args.len() {
             label := sema_marker_rules_label(marker, source_index)
@@ -542,7 +535,7 @@ sema_marker_rules_marker_signature_bindings: fn(marker: Marker, signature: TAppl
     saw_named := false
     loop source_index in 0..<marker.args.len() {
         label := sema_marker_rules_label(marker, source_index)
-        if label == None && marker.name == MARKER_META {
+        if label == None && meta {
             expression: sema_marker_rules_marker_expression(marker, source_index)
             if expression == .Val(value) && value == .Ident(name, _, _) && name == "tunable" {
                 label = Val(name)
@@ -560,7 +553,7 @@ sema_marker_rules_marker_signature_bindings: fn(marker: Marker, signature: TAppl
                     }
                 }
                 index: selected ?? return None
-                if supplied[index] && marker.name != MARKER_META {
+                if supplied[index] && !meta {
                     return None
                 }
                 supplied[index] = true
@@ -973,7 +966,7 @@ sema_marker_rules_validate_argument_signature: fn(marker: Marker, signature: TAp
     loop binding in bindings {
         expression: sema_marker_rules_marker_expression(marker, binding.source_index)
         if expression == None {
-            if marker.name == MARKER_INTERRUPT && binding.source_index == 1 {
+            if sema_marker_is_hook(marker, MarkerHook.Interrupt) && binding.source_index == 1 {
                 pending_facts.push(SemaMarkerRuleArgumentFact{marker_span: marker.name_span, source_index: binding.source_index, parameter_index: binding.parameter_index, kind: binding.kind, ty: None, constant: None, checked: false, comptime_requests: [SemaComptimeRequest]{}})
                 next
             }
@@ -1045,7 +1038,7 @@ sema_marker_rules_validate_argument_signature: fn(marker: Marker, signature: TAp
             !declared && (binding.kind == TAppliedRuleArgKind.Ident || binding.kind == TAppliedRuleArgKind.Any || (binding.kind == TAppliedRuleArgKind.DurationOrString && unit_argument) || (binding.kind == TAppliedRuleArgKind.StringOrMenu && sema_marker_rules_names_menu_word(argument)) || binding.kind == TAppliedRuleArgKind.EffectRoots) -> {
                 observe = false
             }
-            !declared && binding.kind == TAppliedRuleArgKind.Bool && marker.name == MARKER_META && argument == .Ident(name, _, _) && name == "tunable" -> {
+            !declared && binding.kind == TAppliedRuleArgKind.Bool && sema_marker_is_hook(marker, MarkerHook.Meta) && argument == .Ident(name, _, _) && name == "tunable" -> {
                 observation.ty = Val(Type.Bool)
                 observe = false
             }
@@ -1168,7 +1161,7 @@ sema_marker_rules_check_statement_facts: fn(target: Span, environment: SemaScope
             loop index in 0..<graph.modules[row].program.rule_facts.len() {
                 if graph.modules[row].program.rule_facts[index].target != (Val(target)) -> next
                 if graph.modules[row].program.rule_facts[index].site != (Val(RuleSite.Block)) && graph.modules[row].program.rule_facts[index].site != (Val(RuleSite.Statement)) -> next
-                if graph.modules[row].program.rule_facts[index].marker.name == MARKER_META || graph.modules[row].program.rule_facts[index].marker.name == MARKER_CONTEXT -> next
+                if sema_marker_is_hook(graph.modules[row].program.rule_facts[index].marker, MarkerHook.Meta) || sema_marker_is_hook(graph.modules[row].program.rule_facts[index].marker, MarkerHook.Context) -> next
                 if graph.modules[row].program.rule_facts[index].site == (Val(RuleSite.Block)) && sema_marker_rules_block_form_is_bare(registry, graph.modules[row].program.rule_facts[index].marker) -> next
                 _ := sema_marker_rules_check_rule_signature(graph.modules[row].program.rule_facts[index].marker, environment, program, scopes, state, tail_store, context, diagnostics)
             }
@@ -1192,7 +1185,7 @@ sema_marker_rules_check_context_fact: fn(span: Span, environment: SemaScopeEnvir
         row: sema_scope_caller_row(environment, graph)
         if row < 0 -> return true
         loop index in 0..<graph.modules[row].program.rule_facts.len() {
-            if graph.modules[row].program.rule_facts[index].marker.name != MARKER_CONTEXT || graph.modules[row].program.rule_facts[index].target != (Val(span)) -> next
+            if !sema_marker_is_hook(graph.modules[row].program.rule_facts[index].marker, MarkerHook.Context) || graph.modules[row].program.rule_facts[index].target != (Val(span)) -> next
             return sema_marker_rules_check_rule_signature(graph.modules[row].program.rule_facts[index].marker, environment, program, scopes, state, tail_store, context, diagnostics)
         }
     }
@@ -1376,8 +1369,10 @@ sema_marker_rules_fact_allows: fn(rule: TAppliedRule, application: AppliedRuleAp
         return false
     }
     target: application.target ?? return false
+    // The companion is a rule its declaring module also declares, so a fact
+    // meets it only when it binds that module's declaration of that name.
     loop other in facts {
-        if other.target == (Val(target)) && other.marker.name == companion.rule {
+        if other.target == (Val(target)) && other.marker.declaration_module == application.marker.declaration_module && companion.rule == other.marker.name {
             return true
         }
     }
@@ -1425,7 +1420,7 @@ sema_marker_rules_function_applications: fn(function: Func, site: RuleSite, appl
 sema_marker_rules_impl_markers: fn(markers: [Marker], os_target: String?) -> [Marker] Never! {
     kept := [Marker]{}
     loop marker in markers {
-        if marker.name == MARKER_TARGET && os_target != None -> next
+        if sema_marker_is_hook(marker, MarkerHook.Target) && os_target != None -> next
         kept.push(marker.copy())
     }
     kept
@@ -1436,7 +1431,7 @@ sema_marker_rules_impl_markers: fn(markers: [Marker], os_target: String?) -> [Ma
 sema_marker_rules_without_cap: fn(markers: [Marker]) -> [Marker] Never! {
     kept := [Marker]{}
     loop marker in markers {
-        if marker.name != MARKER_FX -> kept.push(marker.copy())
+        if !sema_marker_is_hook(marker, MarkerHook.FX) -> kept.push(marker.copy())
     }
     kept
 }
@@ -1774,7 +1769,7 @@ sema_marker_rules_validate_allow: fn(program: Program, diagnostics: &[Diagnostic
 // An `#Allow(jet.LintName, "why")` records its reason, and the reason check
 // cannot allow itself.
 sema_marker_rules_allow_checks: fn(marker: Marker, diagnostics: &[Diagnostic]) {
-    if marker.name != MARKER_ALLOW -> return
+    if !sema_marker_is_hook(marker, MarkerHook.Allow) -> return
     if marker.args.len() < 2 {
         diagnostics.push(diagnostic_from_registry("L3103", Val(marker.span), "This `#Allow` has no reason.", "Every lint allowance records why the selected lint does not apply at this site.", "Add the reason slot: `#Allow(jet.LintName, \"why this lint does not apply\")`."))
     }
