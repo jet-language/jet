@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6777,
-    "rev": 101291,
+    "rev": 101292,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -65073,12 +65073,12 @@
         },
         {
           "n": 11,
-          "text": "Probes are under $JET_SCRATCH_ROOT/lanes/Main/prep/ until they become repo cases. D-TASK-WINDOW1 A: a task in a `task.group` may capture a read view or a write window into storage whose owner outlives the group. The capture is a loan held until the group's join. Two live tasks holding overlapping windows, where either writes, are refused with the loan diagnostics (E0204/E0212). So is any use of the owner inside the group. The element type must be sendable, and IR holds the window by address (BuildExpr.jet:6297-6300). Proof: prep/c6066/bal/task_a.jet prints 6 on O0, O1 and O2; today it is E0631 at 9:17 and 9:27 (Lambdas.jet:2171-2184). prep/c6066/bal2/task_overlap.jet (both tasks write window `a`) and task_owner.jet (`print(v[0])` inside the group) are refused, each with a UI snapshot. All three become tests/cases cases.",
+          "text": "Probes are under $JET_SCRATCH_ROOT/lanes/Main/prep/ until they become repo cases. D-TASK-WINDOW1 A: a task in a `task.group` may capture a read view or a write window into storage whose owner outlives the group. The capture is a loan held until the group's join. Two live tasks holding overlapping windows, where either writes, are refused with the group-loan diagnostic E1101 (ConcurrentCaptureNotOwned), the one code the existing group-loan rule uses. So is any use of the owner inside the group. The element type must be sendable, and IR holds the window by address (BuildExpr.jet:6297-6300). Proof: prep/c6066/bal/task_a.jet prints 6 on O0, O1 and O2; today it is E0631 at 9:17 and 9:27 (Lambdas.jet:2171-2184). prep/c6066/bal2/task_overlap.jet (both tasks write window `a`) and task_owner.jet (`print(v[0])` inside the group) are refused, each with a UI snapshot. All three become tests/cases cases.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-04T17:30:47.764Z"
+          "at": "2026-11-13T07:31:26.901Z"
         },
         {
           "n": 12,
@@ -65137,7 +65137,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T20:19:27.033Z",
-      "updated": "2026-11-13T07:10:50.483Z",
+      "updated": "2026-11-13T07:31:26.901Z",
       "updatedBy": "Main",
       "goals": [
         "G10"
@@ -198559,6 +198559,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-13T07:31:26.901Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0r02x8n",
+      "note": "#11: One rule keeps one code: the group-loan refusal already exists as E1101, so the task-window overlap reuses it rather than borrowing the sequential loan codes E0204/E0212 (G10Safe-1, Main ruling).; was: Probes are under $JET_SCRATCH_ROOT/lanes/Main/prep/ until they become repo cases. D-TASK-WINDOW1 A: a task in a `task.group` may capture a read view or a write window into storage whose owner outlives"
+    },
     {
       "at": "2026-11-13T07:31:16.570Z",
       "by": "Main",
