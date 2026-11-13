@@ -14,6 +14,7 @@ use {
         FencedStatement,
         ForKind,
         LValue,
+        MARKER_OVERFLOW,
         Marker,
         NameRange,
         NamedSpan,
@@ -27,6 +28,7 @@ use {
         arithmetic_mode_name,
         expr_source_start,
         expr_span,
+        overflow_mode_name,
         type_name,
     ]
     jet_lexer.[
@@ -252,7 +254,11 @@ jfmt_block_marker: fn(stmt: Stmt, policies: [PolicyDeclaration]) -> JetFmtBlockM
         .Reactive(_, _) -> Val(JetFmtBlockMarker{name: "Reactive", negated: false, args: [JetFmtMarkerArgument]{}})
         .Shield(_, _) -> Val(JetFmtBlockMarker{name: "Shield", negated: false, args: [JetFmtMarkerArgument]{}})
         .Region(name, _, _, _) -> Val(JetFmtBlockMarker{name: "Region", negated: false, args: [JetFmtMarkerArgument]{JetFmtMarkerArgument.Ident{value: name}}})
-        .Policy(declarations, _, _) -> Val(JetFmtBlockMarker{name: "Policy", negated: false, args: [JetFmtMarkerArgument]{JetFmtMarkerArgument.Policy{declarations: declarations}}})
+        .Policy(declarations, _, _) -> {
+            // `#Overflow(.Wrapping) { … }` keeps its spelling.
+            if declarations.len() == 1 && declarations[0].source == MARKER_OVERFLOW && declarations[0].value == .Arithmetic(mode) -> return Val(JetFmtBlockMarker{name: MARKER_OVERFLOW, negated: false, args: [JetFmtMarkerArgument]{JetFmtMarkerArgument.Ident{value: ".{overflow_mode_name(mode)}"}}})
+            Val(JetFmtBlockMarker{name: "Policy", negated: false, args: [JetFmtMarkerArgument]{JetFmtMarkerArgument.Policy{declarations: declarations}}})
+        }
         .AuthorityScope(caps, _, binding, _, _) -> {
             values := [String]{}
             loop cap in caps -> values.push(cap.name)

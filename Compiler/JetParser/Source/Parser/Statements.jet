@@ -2242,6 +2242,7 @@ parser_parse_marked_statement: fn(state: &JetParserState) -> Stmt {
         "Off" -> Stmt.Switched{marker: marker, body: body.statements, span: span}
         "FX" -> parser_authority_scope_stmt(state, marker, args, body.statements, span) ?? Stmt.Expr{expr: Expr.Unit{span: hash.span, id: parser_node_id(state)}}
         "Policy" -> parser_policy_block_stmt(state, marker, body.statements, span) ?? Stmt.Expr{expr: Expr.Unit{span: hash.span, id: parser_node_id(state)}}
+        "Overflow" -> parser_overflow_block_stmt(state, marker, body.statements, span)
         "Region" -> {
             region_name := ""
             region_span := name.span

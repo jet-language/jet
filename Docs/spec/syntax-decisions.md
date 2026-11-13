@@ -1281,23 +1281,29 @@ once to `F32`; `to_bits` returns the binary32 bits, and `is_finite`/`cmp`
 classify the `F32` value.
 
 **D-WRAP-SCOPE1=A** *(owner outcome, card #2171; spelling superseded by
-D-POLICY-FILE1)*: `#Policy(arithmetic: .Checked | .Wrapping | .Saturating)` is
-the one lexical policy for fixed-width `+`, `-`, `*`, unary
-negation, and `pow`. It may attach to a function, method, or block; the
-innermost block wins, and a declaration policy does not cross a call boundary.
-`.Checked` is the explicit spelling of the default. Division, remainder,
-shifts, conversions, indexing, slicing, bounds, and exact `Int` keep their
-existing rules and do not inherit this policy. The operation keeps the exact
-source span of its active policy for tooling and diagnostics.
+D-POLICY-FILE1 and then D-FIXED-WRAP1)*: `#Overflow(.Stop | .Wrapping |
+.Saturating)` is the one lexical overflow mode for fixed-width `+`, `-`, `*`,
+unary negation, `pow`, and narrowing `T{x}` conversions. It may attach to a
+function, method, or block; the innermost block wins, and a declaration's mode
+does not cross a call boundary. `.Stop` is the explicit spelling of the
+default. A narrowing conversion written inside `wrapping(…)` or
+`saturating(…)` takes that word's outcome over the active mode. Division,
+remainder, shifts, float-to-integer conversions, indexing, slicing, bounds,
+and exact `Int` keep their existing rules and do not inherit this mode. The
+operation keeps the exact source span of its active mode for tooling and
+diagnostics.
 
-**D-POLICY-FILE1** *(card #4299, carried by #4284 c15)*: arithmetic is a
-`#Policy` setting, `arithmetic: .Mode`, at function, method and block scope.
-Written on the line directly above a declaration, `#Policy(arithmetic: …)`
-belongs to that declaration. Followed by a blank line or the end of the file
-it is a module policy, which is E0355. A package `policy: { arithmetic: … }`
-is an invalid manifest (E1215). A bare `arithmetic` with no mode is E0355, and
-a mode outside the menu is E0930. The standalone `#Arithmetic(mode)` marker is
-retired and is an unknown marker (E0927).
+**D-POLICY-FILE1** *(card #4299, carried by #4284 c15; marker renamed by
+D-FIXED-WRAP1)*: the overflow mode is the `#Overflow(mode)` marker at
+function, method and block scope. Written on the line directly above a
+declaration, it belongs to that declaration. It has no module or package
+site: written at file or module scope it is E0355, and a package
+`policy: { arithmetic: … }` is an invalid manifest (E1215). A mode outside the
+`.Stop | .Wrapping | .Saturating` menu is E0930. The earlier spelling
+`#Policy(arithmetic: .Checked | .Wrapping | .Saturating)` is read the same way
+until its in-repo callers move to `#Overflow`, and is then removed. The
+standalone `#Arithmetic(mode)` marker is retired and is an unknown marker
+(E0927).
 
 **D-INTLIT-WIDTH1=F / D-VERDICT-1304-1 / D-NUMWIDEN-CROSS1=E** *(ratified
 2026-07-28)*: one numeric widening law applies to operators, arguments,

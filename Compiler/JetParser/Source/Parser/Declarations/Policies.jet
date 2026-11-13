@@ -6,8 +6,10 @@
 // `arithmetic` written directly above a declaration.
 use {
     jet_foundation.[
+        MARKER_OVERFLOW,
         Marker,
         PolicyDeclaration,
+        PolicyKey,
         PolicyScope,
         PolicyValue,
         Program,
@@ -15,6 +17,7 @@ use {
         Stmt,
         arithmetic_mode_parse,
         marker_registered_site_bound,
+        overflow_marker_mode,
         policy_key_parse,
         type_name,
     ]
@@ -112,6 +115,27 @@ parser_policy_block_stmt: fn(state: &JetParserState, marker: Marker, body: [Stmt
     loop index in 0..<declarations.len() -> declarations[index].target = Val(span)
     loop declaration in declarations -> state.block_policy_declarations.push(declaration)
     Val(Stmt.Policy{declarations: declarations, body: body, span: span})
+}
+
+// `#Overflow(.Wrapping)` opens one fixed-width overflow mode over a function,
+// method or block body: the arithmetic declaration, sourced to the marker so
+// the formatter writes it back as `#Overflow`. None for any other marker, and
+// for a shape the typed marker-argument check reports.
+parser_overflow_declaration: fn(marker: Marker, scope: PolicyScope, target: Span?) -> PolicyDeclaration? Never! {
+    if marker.name != MARKER_OVERFLOW -> return None
+    mode: overflow_marker_mode(marker) ?? return None
+    Val(PolicyDeclaration{key: PolicyKey.Arithmetic, value: PolicyValue.Arithmetic{mode: mode}, scope: scope, span: marker.span, target: target, source: MARKER_OVERFLOW})
+}
+
+// `#Overflow(.Wrapping) { … }` scopes its mode to the block. A malformed
+// argument still keeps the body, with no mode open.
+parser_overflow_block_stmt: fn(state: &JetParserState, marker: Marker, body: [Stmt], span: Span) -> Stmt {
+    declarations := [PolicyDeclaration]{}
+    if parser_overflow_declaration(marker, PolicyScope.Block, Val(span)) == .Val(declaration) {
+        state.block_policy_declarations.push(declaration.copy())
+        declarations.push(declaration)
+    }
+    Stmt.Policy{declarations: declarations, body: body, span: span}
 }
 
 // `#Unsafe(reason, obligations: .Track)` selects the gate's per-site

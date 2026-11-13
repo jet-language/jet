@@ -109,6 +109,38 @@ arithmetic_mode_parse: fn(name: String) -> ArithmeticMode? Never! {
     }
 }
 
+// The variant name `#Overflow` writes for an arithmetic mode: the checked
+// mode stops the program on overflow.
+overflow_mode_name: fn(mode: ArithmeticMode) -> String Never! {
+    if mode == {
+        .Checked -> "Stop"
+        .Wrapping -> "Wrapping"
+        .Saturating -> "Saturating"
+    }
+}
+
+// The arithmetic mode an `#Overflow` variant name selects.
+overflow_mode_parse: fn(name: String) -> ArithmeticMode? Never! {
+    if name == {
+        "Stop" -> Val(ArithmeticMode.Checked)
+        "Wrapping" -> Val(ArithmeticMode.Wrapping)
+        "Saturating" -> Val(ArithmeticMode.Saturating)
+        else -> None
+    }
+}
+
+// The arithmetic mode an `#Overflow(.Wrapping)` marker opens: its one
+// argument, positional or labeled `mode:`, names an OverflowMode variant.
+// None for any other shape, which the typed marker-argument check reports.
+overflow_marker_mode: fn(marker: Marker) -> ArithmeticMode? Never! {
+    if marker.args.len() != 1 || marker.negated -> return None
+    if marker.arg_labels.len() > 0 && marker.arg_labels[0] == .Val(label) && label.name != "mode" -> return None
+    if marker.args[0] == .Expr(value) {
+        if value == .EnumLit(type_name, variant, _, args, _, _, _) && type_name == "" && args.len() == 0 -> return overflow_mode_parse(variant)
+    }
+    None
+}
+
 // Rust `Authority::Scope::name`.
 policy_scope_name: fn(scope: PolicyScope) -> String Never! {
     if scope == {

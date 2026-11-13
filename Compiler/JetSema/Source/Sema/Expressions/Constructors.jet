@@ -2255,7 +2255,7 @@ sema_expression_typed_literal: fn(head: Type?, body: TypedLitBody, span: Span, e
             })) || (sema_expr_is_integer(checked.ty) && (result_head == Type.Float || result_head == Type.Float32)) || (checked.ty == Type.Float && result_head == Type.Float32) || sema_expression_typed_literal_fixed_conversion(checked.ty, result_head)
             if needs_conversion {
                 converted = sema_expr_numeric_literal_conversion(checked, result_head, value_span, line, diagnostics) ?? return None
-                outcome: sema_expr_narrow_outcome(word)
+                outcome: sema_expr_narrow_outcome(word, context.arithmetic_policy)
                 if outcome != TNarrowOutcome.Stop && sema_expr_is_narrowing(converted) {
                     narrowed: sema_expr_narrowing_with(converted, outcome, line)
                     return sema_expr_expected_owned(narrowed, expected, environment, program, diagnostics)
@@ -2302,7 +2302,7 @@ sema_expression_typed_literal: fn(head: Type?, body: TypedLitBody, span: Span, e
             })) || (sema_expr_is_integer(checked.ty) && (result_head == Type.Float || result_head == Type.Float32)) || (checked.ty == Type.Float && result_head == Type.Float32) || sema_expression_typed_literal_fixed_conversion(checked.ty, result_head)
             if needs_conversion {
                 converted = sema_expr_numeric_literal_conversion(checked, result_head, value_span, line, diagnostics) ?? return None
-                outcome: sema_expr_narrow_outcome(word)
+                outcome: sema_expr_narrow_outcome(word, context.arithmetic_policy)
                 if outcome != TNarrowOutcome.Stop && sema_expr_is_narrowing(converted) {
                     narrowed: sema_expr_narrowing_with(converted, outcome, line)
                     return sema_expr_expected_owned(narrowed, expected, environment, program, diagnostics)
@@ -2372,9 +2372,10 @@ sema_expression_typed_literal_precise_source: fn(head: Type, offered: Type) -> S
 // `Int{x}` over a Decimal or Fraction: a whole value converts exactly, and
 // any other stops with E3010 naming the roundings (the `to_int` helper).
 // Under `checked` it is None instead (`try_int`). An exact value converts
-// whole or not at all, so `saturating` and `wrapping` have nothing to keep.
+// whole or not at all, so `saturating` and `wrapping` have nothing to keep,
+// and an active overflow mode leaves it alone.
 sema_expression_typed_literal_precise_int: fn(precise: String, checked: TExpr, word: String?, span: Span, diagnostics: &[Diagnostic]) -> TExpr? {
-    outcome: sema_expr_narrow_outcome(word)
+    outcome: sema_expr_narrow_outcome(word, None)
     absent: outcome == TNarrowOutcome.Absent
     if word == .Val(name) {
         if !absent {
@@ -2392,7 +2393,8 @@ sema_expression_typed_literal_precise_int: fn(precise: String, checked: TExpr, w
 // value stops (TNumericOp.FloatExact). Under `checked` it is None instead;
 // under `saturating` it truncates, clamps and maps NaN to 0. `Int` has the
 // signed 64-bit range here. A written literal body is checked now, so
-// `Int{2.5}` is refused before it runs.
+// `Int{2.5}` is refused before it runs. Only a written word picks the
+// outcome: an active overflow mode governs integer narrowing, not a Float.
 sema_expression_typed_literal_float_exact: fn(head: Type, checked: TExpr, value: Expr, word: String?, line: Int, diagnostics: &[Diagnostic]) -> TExpr? {
     value_span: expr_span(value)
     shown: type_name(head)
@@ -2402,7 +2404,7 @@ sema_expression_typed_literal_float_exact: fn(head: Type, checked: TExpr, value:
             return None
         }
     }
-    outcome: sema_expr_narrow_outcome(word)
+    outcome: sema_expr_narrow_outcome(word, None)
     if outcome == TNarrowOutcome.Stop {
         if sema_expression_typed_literal_written_float(value) == .Val(number) {
             if !sema_expression_typed_literal_float_fits(head, number, value_span, diagnostics) -> return None

@@ -1696,6 +1696,7 @@ parser_apply_function_markers: fn(state: &JetParserState, func: &Func, markers: 
     } ?? false
     foreign: guest_import || func.inline_foreign != None
     loop marker in markers {
+        if parser_overflow_declaration(marker, PolicyScope.Function, None) == .Val(overflow) -> policy.push(overflow)
         hook: parser_marker_hook(state, marker) ?? next
         if hook == {
             .Unsafe -> {

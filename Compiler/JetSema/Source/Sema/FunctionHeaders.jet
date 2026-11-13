@@ -18,6 +18,7 @@ use jet_foundation.[
     MARKER_KERNEL,
     MARKER_MAX_DEPTH,
     MARKER_MEMO,
+    MARKER_OVERFLOW,
     MARKER_POLICY,
     MARKER_REACTIVE,
     MARKER_STATE,
@@ -33,6 +34,7 @@ use jet_foundation.[
     SymbolKind,
     Type,
     arithmetic_mode_parse,
+    overflow_marker_mode,
 ]
 
 SemaFunctionHeaderMarkerGate: struct {
@@ -317,17 +319,22 @@ sema_function_header_default_idents: fn(value: Expr, found: &[Expr]) {
 // by the lifecycle pass (Edition.jet), `#Scalar` by Core usage, `#Meta` by
 // the marker rules, and `#Policy` by the policy wrappers, the call routes
 // that apply them (CallablePolicies.jet), and the body checker, which reads
-// `#Policy(arithmetic: mode)` as the function's arithmetic policy
-// (sema_function_arithmetic_policy).
+// `#Overflow(mode)` or `#Policy(arithmetic: mode)` as the function's
+// arithmetic policy (sema_function_arithmetic_policy).
 sema_function_header_marker_projected: fn(name: String) -> Bool Never! {
-    name == "Unsafe" || name == "Inline" || name == "MustUse" || name == "Replayable" || name == "Scrub" || name == "Comptime" || name == "FFI" || name == "Pre" || name == "Post" || name == "Job" || name == "Doc" || name == "Deprecated" || name == "Scalar" || name == "Meta" || name == "Policy" || name == MARKER_MAX_DEPTH
+    name == "Unsafe" || name == "Inline" || name == "MustUse" || name == "Replayable" || name == "Scrub" || name == "Comptime" || name == "FFI" || name == "Pre" || name == "Post" || name == "Job" || name == "Doc" || name == "Deprecated" || name == "Scalar" || name == "Meta" || name == "Policy" || name == MARKER_MAX_DEPTH || name == MARKER_OVERFLOW
 }
 
-// The first `#Policy(arithmetic: mode)` of a function or
-// method opens its lexical fixed-width arithmetic mode for the whole body.
-// A mode the menu does not name is the parser's E0930 and opens none.
+// The first `#Overflow(mode)` or `#Policy(arithmetic: mode)` of a function
+// or method opens its lexical fixed-width arithmetic mode for the whole body.
+// A mode the menu does not name is the marker-argument check's or the
+// parser's E0930 and opens none.
 sema_function_arithmetic_policy: fn(markers: [Marker]) -> ArithmeticPolicyFact? Never! {
     loop marker in markers {
+        if marker.name == MARKER_OVERFLOW {
+            overflow: overflow_marker_mode(marker) ?? return None
+            return Val(ArithmeticPolicyFact{mode: overflow, scope_span: marker.span, operation_span: marker.span, operation: None})
+        }
         if marker.name != MARKER_POLICY -> next
         loop index in 0..<marker.args.len() {
             label: if index < marker.arg_labels.len() && marker.arg_labels[index] == .Val(written) -> written.name else -> ""

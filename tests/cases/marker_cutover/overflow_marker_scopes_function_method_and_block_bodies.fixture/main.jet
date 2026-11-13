@@ -1,0 +1,47 @@
+// `#Overflow(mode)` sets the fixed-width overflow of a function, a method and
+// a block body, and a narrowing `T{x}` inside it follows the same mode.
+#Overflow(.Wrapping)
+wrapped: fn(left: U8, right: U8) -> U8 {
+    return left + right
+}
+
+Gauge: struct {
+    value: U8
+
+    #Overflow(.Saturating)
+    raise: fn(self, by: U8) -> U8 {
+        return self.value + by
+    }
+}
+
+#Overflow(.Wrapping)
+low_byte: fn(value: Int) -> U8 {
+    return U8{value}
+}
+
+clamp_byte: fn(value: Int) -> U8 {
+    clamped := U8{0}
+    #Overflow(.Saturating) {
+        clamped = U8{value}
+    }
+    return clamped
+}
+
+// The word written around a conversion wins over the mode.
+#Overflow(.Saturating)
+word_wins: fn(value: Int) -> U8 {
+    return wrapping(U8{value})
+}
+
+run: fn() {
+    left: U8{250}
+    right: U8{10}
+    print(wrapped(left, right))
+    print(Gauge{value: left}.raise(right))
+    #Overflow(.Wrapping) {
+        print(left * U8{2})
+    }
+    print(low_byte(300))
+    print(clamp_byte(300))
+    print(word_wins(300))
+}
