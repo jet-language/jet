@@ -2727,7 +2727,9 @@ ir_plugin_invoke: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiv
     string_row: ir_string_row(m)
     name: ir_temp(m, b, string_row)
     ir_emit(b.f, IROp.ConstText, name, ir_intern_text(m, export_name), -1, -1, b.line)
-    if signature.result == .Tuple(fields) -> return ir_plugin_invoke_words(m, p, b, ty, ok, plugin, name, export_name, fields, span)
+    if signature.result == .Record(record_name, fields) {
+        if record_name == "" -> return ir_plugin_invoke_words(m, p, b, ty, ok, plugin, name, export_name, fields, span)
+    }
     symbol: if ir_unit_type(ok) -> "jet_plugin_call" else -> {
         kind: ir_plugin_value_kind(signature.result) ?? return ir_fail_slot(b, span, "plugin export {export_name} compound Component result")
         "jet_plugin_call_{kind}"
@@ -2751,7 +2753,7 @@ ir_plugin_invoke_words: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, 
             .Float -> IRRouteCarrier.Float
             .Bool -> IRRouteCarrier.Flag
             .String -> IRRouteCarrier.Text
-            .List(_) | .Option(_) | .Result(_, _) | .Record(_, _) | .Tuple(_) -> { return ir_fail_slot(b, span, "plugin export {export_name} tuple field {field.index + 1}") }
+            .List(_) | .Option(_) | .Result(_, _) | .Record(_, _) -> { return ir_fail_slot(b, span, "plugin export {export_name} tuple field {field.index + 1}") }
         }
         items.push(carrier)
         labels.push(field.name)
@@ -2782,7 +2784,7 @@ ir_plugin_value_kind: fn(descriptor: ComponentTypeDescriptor) -> String? Never! 
         .Float -> Val("float")
         .Bool -> Val("bool")
         .String -> Val("text")
-        .List(_) | .Option(_) | .Result(_, _) | .Record(_, _) | .Tuple(_) -> None
+        .List(_) | .Option(_) | .Result(_, _) | .Record(_, _) -> None
     }
 }
 

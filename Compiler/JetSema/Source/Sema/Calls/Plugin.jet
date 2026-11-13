@@ -172,10 +172,10 @@ sema_plugin_result_descriptor: fn(graph: SemaRegistrationGraph, environment: Sem
         descriptor: sema_plugin_component_descriptor(graph, environment, program, member.ty, [String]{}) ?? return None
         if descriptor == {
             .Int | .Float | .Bool | .String -> fields.push(ComponentTypeField{index: index, name: name, ty: descriptor})
-            .List(_) | .Option(_) | .Result(_, _) | .Record(_, _) | .Tuple(_) -> return None
+            .List(_) | .Option(_) | .Result(_, _) | .Record(_, _) -> return None
         }
     }
-    Val(ComponentTypeDescriptor.Tuple{fields: fields})
+    Val(ComponentTypeDescriptor.Record{name: "", fields: fields})
 }
 
 sema_plugin_infer_args: fn(args: [CallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) Never! {
