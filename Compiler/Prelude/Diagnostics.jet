@@ -1043,6 +1043,7 @@ RetiredPredicateArmHead: struct {
 RedundantArmComparison: struct {
     impl Diagnostic {
         code: "E0994"
+        meaning: "An arm head that repeats the comparison its `if` already applies"
         what: fn(self) -> String { "Teaching: a redundant `subject OP` on an arm head — the `if`'s comparison already applies it" }
         why: fn(self) -> String { "`if subject OP` already applies the comparison to every arm head, so repeating it on an arm adds nothing" }
         fix: fn(self) -> String { "Remove the redundant subject operation from the arm head." }
@@ -1053,6 +1054,7 @@ StackedRuleLines: struct {
     impl Diagnostic {
         code: "E0999"
         stage: [.Parse]
+        meaning: "Rules stacked on separate `#[…]` lines instead of one list"
         structured_fix: .GeneratedMarkerGroup
         no_fix: None
         fix_safety: .Formatting
@@ -1340,6 +1342,7 @@ LoopLabelAsValue: struct {
 CompileTimeIfNotConstant: struct {
     impl Diagnostic {
         code: "E0989"
+        meaning: "An `@if` condition that isn't known while compiling"
         what: fn(self) -> String { "`@if` condition is not a comptime expression" }
         why: fn(self) -> String { "The compiler picks an `@if` branch while it builds, so the condition must be known before the program runs" }
         fix: fn(self) -> String { "Make the `@if` condition a comptime expression." }
@@ -2056,6 +2059,7 @@ DynCondition: struct {
 YieldOutsideStream: struct {
     impl Diagnostic {
         code: "E0805"
+        meaning: "`yield` outside a `Stream<T>` function"
         what: fn(self) -> String { "`yield` used outside a function declared `Stream<T>`" }
         why: fn(self) -> String { "`yield` hands a value to a `Stream<T>` consumer, so only a function declared to return `Stream<T>` can use it" }
         fix: fn(self) -> String { "Declare the function as `Stream<T>` before using `yield`." }
@@ -2065,6 +2069,7 @@ YieldOutsideStream: struct {
 GeneratorReturnsValue: struct {
     impl Diagnostic {
         code: "E0806"
+        meaning: "A generator `return` that carries a value"
         what: fn(self) -> String { "A generator's `return` carries a value" }
         why: fn(self) -> String { "A generator produces its values with `yield`; `return` only ends the stream" }
         fix: fn(self) -> String { "Remove the value from a generator `return`." }
@@ -2074,6 +2079,7 @@ GeneratorReturnsValue: struct {
 YieldTypeMismatch: struct {
     impl Diagnostic {
         code: "E0807"
+        meaning: "A yielded value of another type than the stream's elements"
         fix_next: "Yield values of the stream's declared element type."
         what: fn(self) -> String { "A `yield`ed value's type doesn't match the stream's element type" }
         why: fn(self) -> String { "Every value a generator yields must have the stream's element type" }
@@ -4890,6 +4896,7 @@ UsePathEscapesProject: struct {
     impl Diagnostic {
         code: "E0602"
         stage: [.Jet]
+        meaning: "A `use` path that leaves the project's source tree"
         no_fix: .Behavior
         what: fn(self) -> String { "`use` path escapes the project (`..` or outside entry tree)" }
         why: fn(self) -> String { "Imports stay inside the project's source tree, so a build reads only files the project owns" }
@@ -4901,6 +4908,7 @@ UseTargetNotFound: struct {
     impl Diagnostic {
         code: "E0603"
         stage: [.Jet]
+        meaning: "A `use` that names no file or module"
         no_fix: .Ambiguous
         what: fn(self) -> String { "`use` target file / module not found" }
         why: fn(self) -> String { "A `use` must name a file or module that exists where the import looks for it" }
@@ -4912,6 +4920,7 @@ UseCycle: struct {
     impl Diagnostic {
         code: "E0604"
         stage: [.Jet]
+        meaning: "Imports that form a cycle"
         no_fix: .Ambiguous
         what: fn(self) -> String { "`use` cycle (lists the loop)" }
         why: fn(self) -> String { "Imported files are loaded before compiling, so imports can't form a loop" }
@@ -4922,6 +4931,7 @@ UseCycle: struct {
 PrivateItem: struct {
     impl Diagnostic {
         code: "E0605"
+        meaning: "A private item or field used from outside its module"
         what: fn(self) -> String { "Item or field is private to its module (`priv module` or `priv` field)" }
         why: fn(self) -> String { "A `priv module` is usable only by its enclosing module (`priv(package)`: by its package), and a `priv` field only by its type's module" }
         fix: fn(self) -> String { "Use it from inside its enclosing module, or remove `priv` from the module or field." }
@@ -4932,6 +4942,7 @@ AmbiguousModule: struct {
     impl Diagnostic {
         code: "E0606"
         stage: [.Jet]
+        meaning: "A module name that matches more than one file"
         no_fix: .Ambiguous
         fix_next: "Disambiguate the module name by choosing one matching path."
         what: fn(self) -> String { "Ambiguous name: module (lists every matching path)" }
@@ -4944,6 +4955,7 @@ ModuleFileNotFound: struct {
     impl Diagnostic {
         code: "E0607"
         stage: [.Jet]
+        meaning: "A module declaration whose file doesn't exist"
         no_fix: .Ambiguous
         what: fn(self) -> String { "`name: module;` file declaration not found" }
         why: fn(self) -> String { "A module declaration names a file next to this one, and no such file exists" }
@@ -4954,6 +4966,7 @@ ModuleFileNotFound: struct {
 UnknownInlineModuleFunction: struct {
     impl Diagnostic {
         code: "E0608"
+        meaning: "A call to a function the inline code module doesn't define"
         no_fix: .Ambiguous
         what: fn(self) -> String { "Function not defined in inline code module" }
         why: fn(self) -> String { "A call into an inline code module can only reach functions that module defines" }
@@ -4964,6 +4977,7 @@ UnknownInlineModuleFunction: struct {
 UsePrivateModuleItem: struct {
     impl Diagnostic {
         code: "E0609"
+        meaning: "A `use` of an item inside a `priv module`"
         what: fn(self) -> String { "`use alias.item` names an item of a `priv module`" }
         why: fn(self) -> String { "A `priv module` is usable only by its enclosing module (`priv(package)`: by its package)" }
         fix: fn(self) -> String { "Import it from inside its enclosing module, or remove `priv` from the module." }
@@ -4986,6 +5000,7 @@ UseAliasNotModule: struct {
 UseUnknownItem: struct {
     impl Diagnostic {
         code: "E0611"
+        meaning: "A `use` of an item the module doesn't define"
         no_fix: .Ambiguous
         fix_next: "Import an item that the aliased module defines."
         what: fn(self) -> String { "`use alias.item` but item is not defined" }
@@ -4998,6 +5013,7 @@ WildcardImport: struct {
     impl Diagnostic {
         code: "E0612"
         stage: [.Jet]
+        meaning: "A wildcard import (`use name.*`)"
         no_fix: .Behavior
         fix_next: "List explicit imports instead of using a wildcard."
         what: fn(self) -> String { "Wildcard imports (`use math.*`) are not supported" }
@@ -5009,6 +5025,7 @@ WildcardImport: struct {
 UngeneratablePropertyParameter: struct {
     impl Diagnostic {
         code: "E0613"
+        meaning: "A property-test parameter of a type the runner can't generate"
         what: fn(self) -> String { "Property-test (`#Test fn`) parameter has a type the runner can't generate" }
         why: fn(self) -> String { "The property-test runner fills each parameter with generated values, so it needs a type it knows how to generate" }
         fix: fn(self) -> String { "Use only a property-test parameter type the runner can generate." }
@@ -5403,6 +5420,7 @@ ClosedSetElse: struct {
 MissingCrateVersion: struct {
     impl Diagnostic {
         code: "E0701"
+        meaning: "A foreign Rust crate without a pinned version"
         what: fn(self) -> String { "Non-`std` `extern rust` crate missing `@version` pin" }
         why: fn(self) -> String { "A foreign crate must pin an exact version so every build uses the same code" }
         fix: fn(self) -> String { "Add an `@version` pin to the non-`std` `extern rust` crate." }
@@ -5429,6 +5447,7 @@ MissingCargo: struct {
     impl Diagnostic {
         code: "E0703"
         stage: [.Jet]
+        meaning: "No `cargo` to build a foreign Rust crate"
         no_fix: .Behavior
         what: fn(self) -> String { "`cargo` not installed (needed for `extern rust` crates)" }
         why: fn(self) -> String { "A foreign Rust crate is built with `cargo`, and it couldn't be found" }
@@ -5440,6 +5459,7 @@ ForeignCrateBuildFailed: struct {
     impl Diagnostic {
         code: "E0704"
         stage: [.Jet]
+        meaning: "A foreign Rust crate that failed to fetch or build"
         no_fix: .Behavior
         what: fn(self) -> String { "Foreign crate fetch/build failed (cargo detail indented)" }
         why: fn(self) -> String { "Cargo could not fetch or build the foreign crate this program uses" }
@@ -5451,6 +5471,7 @@ ForeignSignatureMismatch: struct {
     impl Diagnostic {
         code: "E0705"
         stage: [.Jet]
+        meaning: "A foreign Rust path whose signature differs from the Jet one"
         no_fix: .Behavior
         what: fn(self) -> String { "`= \"rust::path\"` doesn't match the Jet signature" }
         why: fn(self) -> String { "The Jet signature is the checked contract for the foreign function, so the foreign path must have the same signature" }
@@ -5800,6 +5821,7 @@ InvalidViaParameter: struct {
 ProhibitedEffectReached: struct {
     impl Diagnostic {
         code: "E0749"
+        meaning: "An effect reached past the ceiling or prohibition that governs it"
         what: fn(self) -> String { "A function reaches an effect outside a ceiling it answers to (a package `authority` `allow` row or a module `#FX(…)` cap), or one a `-[!E]>` row, module cap or package `deny` prohibits, including a denied `Panic` stop" }
         why: fn(self) -> String { "An effect ceiling or prohibition holds for everything its scope calls; the report names the effect or panic site, the call chain that reaches it and the scope that set the limit" }
         fix: fn(self) -> String { "Remove the offending effect, return a fallible result, add facts or a `#Pre`/refinement proof, widen the ceiling, or drop the prohibition" }
@@ -6017,6 +6039,7 @@ ContextFieldWithEquals: struct {
     impl Diagnostic {
         code: "E0760"
         stage: [.Parse]
+        meaning: "A `#Context` field set with `=` instead of `:`"
         what: fn(self) -> String { "`#Context` field uses `=` instead of `:`" }
         why: fn(self) -> String { "`=` reassigns an existing name, and a context field is set with `name: value`" }
         fix: fn(self) -> String { "Use `:` rather than `=` for a `#Context` field." }
@@ -6027,6 +6050,7 @@ UnknownContextField: struct {
     impl Diagnostic {
         code: "E0761"
         stage: [.Parse]
+        meaning: "A `#Context` field name outside the fixed set"
         no_fix: .Ambiguous
         what: fn(self) -> String { "Unknown `#Context` field name (v1 allows only `allocator`, `logger`, `deadline`)" }
         why: fn(self) -> String { "The context bundle has a fixed set of fields: `allocator`, `logger` and `deadline`" }
@@ -6037,6 +6061,7 @@ UnknownContextField: struct {
 ContextFieldTypeMismatch: struct {
     impl Diagnostic {
         code: "E0762"
+        meaning: "A `#Context` field given a value of the wrong type"
         no_fix: .Ambiguous
         what: fn(self) -> String { "`#Context` field type mismatch (`allocator` must be an allocator handle; `deadline` must be Int epoch-ms)" }
         why: fn(self) -> String { "Each context field holds one kind of value, so the code under it can rely on that type" }
@@ -6048,6 +6073,7 @@ MisplacedParameterSeparator: struct {
     impl Diagnostic {
         code: "E0763"
         stage: [.Parse]
+        meaning: "A `/` or `*` parameter separator out of place"
         what: fn(self) -> String { "Parameter-zone separator out of place: `/` before any parameter, `/` after `*`, a repeated `/` or `*`, or `*` with nothing after it" }
         why: fn(self) -> String { "`/` ends the positional-only parameters and `*` starts the label-only ones, so each appears once, in that order, with parameters on its side" }
         fix: fn(self) -> String { "Use `/` and `*` once in the declared parameter zones and in the required order." }
@@ -6057,6 +6083,7 @@ MisplacedParameterSeparator: struct {
 UnknownArgumentLabel: struct {
     impl Diagnostic {
         code: "E0764"
+        meaning: "An argument label that names no parameter of the callee"
         what: fn(self) -> String { "Call argument labels a parameter the callee does not have" }
         why: fn(self) -> String { "A label binds an argument to the parameter of that name, and the callee has none by this name" }
         fix: fn(self) -> String { "Pass only labels declared by the callee." }
@@ -6066,6 +6093,7 @@ UnknownArgumentLabel: struct {
 DuplicateArgumentLabel: struct {
     impl Diagnostic {
         code: "E0765"
+        meaning: "A parameter labelled twice in one call"
         what: fn(self) -> String { "The same parameter is labelled twice in one call" }
         why: fn(self) -> String { "Each parameter takes exactly one argument" }
         fix: fn(self) -> String { "Pass each parameter label at most once." }
@@ -6075,6 +6103,7 @@ DuplicateArgumentLabel: struct {
 MissingArgument: struct {
     impl Diagnostic {
         code: "E0766"
+        meaning: "A call that leaves a parameter without a default unfilled"
         what: fn(self) -> String { "A parameter with no default received no argument" }
         why: fn(self) -> String { "A parameter without a default must receive an argument at every call" }
         fix: fn(self) -> String { "Provide an argument or a default for every required parameter." }
@@ -6084,6 +6113,7 @@ MissingArgument: struct {
 LabelOnPositionalParameter: struct {
     impl Diagnostic {
         code: "E0767"
+        meaning: "A label on a positional-only parameter"
         what: fn(self) -> String { "A label was written for a positional-only parameter, declared before `/`" }
         why: fn(self) -> String { "Parameters before `/` are positional only, so their names stay free to change" }
         fix: fn(self) -> String { "Pass positional-only parameters without labels." }
@@ -6093,6 +6123,7 @@ LabelOnPositionalParameter: struct {
 PositionalAfterLabel: struct {
     impl Diagnostic {
         code: "E0768"
+        meaning: "A bare argument after a labelled one"
         what: fn(self) -> String { "A bare argument follows a labelled one, so it names no parameter" }
         why: fn(self) -> String { "Labels bind arguments by name, so a bare argument after one has no parameter to fill" }
         fix: fn(self) -> String { "Place positional arguments before the first labelled argument." }
@@ -6102,6 +6133,7 @@ PositionalAfterLabel: struct {
 LabelOnlyPassedByPosition: struct {
     impl Diagnostic {
         code: "E0769"
+        meaning: "A label-only parameter passed by position"
         what: fn(self) -> String { "A label-only parameter, declared after `*`, was passed by position" }
         why: fn(self) -> String { "Parameters after `*` must be passed by label, so the call says what each value means" }
         fix: fn(self) -> String { "Pass the label-only parameter by name." }
@@ -6112,6 +6144,7 @@ DuplicateParameterLabel: struct {
     impl Diagnostic {
         code: "E0770"
         stage: [.Parse]
+        meaning: "Two parameters with the same call label"
         what: fn(self) -> String { "Two parameters publish the same call label, so the second could never be called" }
         why: fn(self) -> String { "A label binds an argument by name, so a repeated label leaves the second parameter no way to be called" }
         fix: fn(self) -> String { "Give each parameter a unique public call label." }
@@ -6121,6 +6154,7 @@ DuplicateParameterLabel: struct {
 FunctionValueLabelMismatch: struct {
     impl Diagnostic {
         code: "E0771"
+        meaning: "A function value whose labels or parameter zones don't fit the expected function type"
         what: fn(self) -> String { "A function value's public call labels or parameter zones do not satisfy the expected function type" }
         why: fn(self) -> String { "Public labels and parameter zones are part of a function's callable type" }
         fix: fn(self) -> String { "Match the function value's call labels and parameter zones to the expected function type." }
@@ -7432,6 +7466,7 @@ RemoteSourceRefused: struct {
 UnknownLambdaParameterType: struct {
     impl Diagnostic {
         code: "E0801"
+        meaning: "A lambda parameter whose type nothing fixes"
         no_fix: .Ambiguous
         fix_next: "Annotate the lambda parameter type."
         what: fn(self) -> String { "Lambda parameter type unknown" }
@@ -7480,6 +7515,7 @@ AdjacentCallResult: struct {
 RecursiveLambda: struct {
     impl Diagnostic {
         code: "E0804"
+        meaning: "A lambda binding that calls itself"
         what: fn(self) -> String { "Self-recursive lambda binding" }
         why: fn(self) -> String { "A lambda's name is bound only after the lambda is built, so its body can't call it" }
         fix: fn(self) -> String { "Use a named function or a non-recursive lambda binding for recursion." }
@@ -7562,6 +7598,7 @@ ModuleValueNotConstant: struct {
 MissingGenericBound: struct {
     impl Diagnostic {
         code: "E0901"
+        meaning: "A generic method that uses something its type parameter's bound doesn't promise"
         what: fn(self) -> String { "Method needs a generic bound" }
         why: fn(self) -> String { "A method on a generic type can only use what the type parameter's bound promises" }
         fix: fn(self) -> String { "Add the required generic bound to the method." }
@@ -7571,6 +7608,7 @@ MissingGenericBound: struct {
 OrphanImpl: struct {
     impl Diagnostic {
         code: "E0902"
+        meaning: "An impl of a foreign trait for a foreign type"
         no_fix: .Ambiguous
         what: fn(self) -> String { "Orphan `impl` (neither type nor trait local)" }
         why: fn(self) -> String { "If two packages could both implement a trait they don't own for a type they don't own, the two impls would clash" }
@@ -7581,6 +7619,7 @@ OrphanImpl: struct {
 UninferableTypeArgument: struct {
     impl Diagnostic {
         code: "E0904"
+        meaning: "A type argument the call can't infer"
         no_fix: .Ambiguous
         what: fn(self) -> String { "Can't infer a type argument" }
         why: fn(self) -> String { "The call's arguments and the code around it leave a type parameter undecided" }
@@ -7629,6 +7668,7 @@ TraitMethodMismatch: struct {
 DuplicateTraitImpl: struct {
     impl Diagnostic {
         code: "E0908"
+        meaning: "A trait implemented twice for one type"
         no_fix: .Ambiguous
         what: fn(self) -> String { "Duplicate trait impl" }
         why: fn(self) -> String { "A type implements each trait once, so every call has one method to reach" }
@@ -7639,6 +7679,7 @@ DuplicateTraitImpl: struct {
 InstantiationTooDeep: struct {
     impl Diagnostic {
         code: "E0909"
+        meaning: "Generic instantiation past the nesting limit"
         what: fn(self) -> String { "Generic instantiation too deep" }
         why: fn(self) -> String { "Each generic instantiation creates another, and this chain passed the compiler's nesting limit" }
         fix: fn(self) -> String { "Simplify the generic nesting or split the instantiation into smaller bounds." }
@@ -7648,6 +7689,7 @@ InstantiationTooDeep: struct {
 BreakingSchemaChange: struct {
     impl Diagnostic {
         code: "E0910"
+        meaning: "A breaking change to a published schema without a migration"
         what: fn(self) -> String { "`#PublishedSchema` struct made a breaking shape change (drop / type-change / add-without-default) with no migration to bridge it, or a declared migration op is nonsensical" }
         why: fn(self) -> String { "Data saved in a published schema must still load after the change, so a breaking change needs a migration that bridges it" }
         fix: fn(self) -> String { "Restore a compatible published shape or declare a valid migration." }
@@ -7691,6 +7733,7 @@ UnknownInterpolationSelector: struct {
     impl Diagnostic {
         code: "E0914"
         stage: [.Parse]
+        meaning: "An unknown format selector after `:` in an interpolation"
         what: fn(self) -> String { "Unknown interpolation selector after `:`" }
         why: fn(self) -> String { "The text after `:` in an interpolation must name one of the built-in format selectors" }
         fix: fn(self) -> String { "Use `:Debug`, `:Pretty`, `:Fixed(n)`, `:Grouped(n)`, `:Hex(n)`, `:Pad(n[, \"fill\"])`, `:PadLeft(n[, \"fill\"])`, `:Sci(n)`, `:Percent(n)`, `:Bin`, `:Oct`, `:Unit(name)`, or `:Unit(bare)`; bare interpolation is also valid." }
@@ -7702,6 +7745,7 @@ MissingDisplay: struct {
 
     impl Diagnostic {
         code: "E0915"
+        meaning: "A bare interpolation of a type without `Display`"
         what: fn(self) -> String { "Bare `{self.value}` on a type without `Display`" }
         why: fn(self) -> String { "Bare interpolation shows a value through its `Display` implementation" }
         fix: fn(self) -> String { "Implement `Display` for the type or use an explicit formatter." }
@@ -7711,6 +7755,7 @@ MissingDisplay: struct {
 RecursiveInlineAlways: struct {
     impl Diagnostic {
         code: "E0917"
+        meaning: "A recursive `#Inline(Always)` function"
         what: fn(self) -> String { "`#Inline(Always) fn` calls itself — inlining a recursive call has no fixed expansion" }
         why: fn(self) -> String { "Inlining copies the body into each call, and a body that calls itself would be copied without end" }
         fix: fn(self) -> String { "Remove recursion from the `#Inline(Always)` function or relax the marker." }
@@ -7720,6 +7765,7 @@ RecursiveInlineAlways: struct {
 InlineAlwaysAddressTaken: struct {
     impl Diagnostic {
         code: "E0918"
+        meaning: "An `#Inline(Always)` function used as a value"
         what: fn(self) -> String { "`#Inline(Always) fn` had its address taken instead of being called directly" }
         why: fn(self) -> String { "An `#Inline(Always)` function promises to be copied into each call, and a function value has no call site to copy into" }
         fix: fn(self) -> String { "Call the `#Inline(Always)` function directly or relax the marker before taking its address." }
@@ -7729,6 +7775,7 @@ InlineAlwaysAddressTaken: struct {
 InlineAlwaysTooLarge: struct {
     impl Diagnostic {
         code: "E0919"
+        meaning: "An `#Inline(Always)` function body over the size ceiling"
         what: fn(self) -> String { "`#Inline(Always) fn` body exceeds the checked promise's statement ceiling" }
         why: fn(self) -> String { "`#Inline(Always)` promises a small body, and copying a large one into every call grows the program" }
         fix: fn(self) -> String { "Reduce the `#Inline(Always)` body below the checked statement ceiling or relax the marker." }
@@ -7804,6 +7851,7 @@ MisplacedJobMarker: struct {
 InvalidSchedule: struct {
     impl Diagnostic {
         code: "E0926"
+        meaning: "An invalid `#Job(every: …)` schedule"
         what: fn(self) -> String { "`#Job(every: …)` isn't a valid schedule — bad canonical Time unit, non-positive or out-of-range duration, or malformed/out-of-range `\"HH:MM\"`" }
         why: fn(self) -> String { "A job runs on a fixed timetable, so its schedule must be a positive duration in a known time unit or a valid clock time" }
         fix: fn(self) -> String { "Use a positive, in-range duration or canonical `HH:MM` schedule." }
@@ -7842,6 +7890,7 @@ InvalidDeriveBang: struct {
     impl Diagnostic {
         code: "E0931"
         stage: [.Parse]
+        meaning: "`!` on a marker that isn't a structural auto-derived trait"
         what: fn(self) -> String { "`!` is used on a marker other than a structurally auto-derived trait" }
         why: fn(self) -> String { "`!` turns off an automatic derive, and only a trait derived from a type's structure is added automatically" }
         fix: fn(self) -> String { "Use `!` only with a structurally auto-derived trait marker." }
@@ -7851,6 +7900,7 @@ InvalidDeriveBang: struct {
 DeprecatedPrivateItem: struct {
     impl Diagnostic {
         code: "E0932"
+        meaning: "`#Deprecated` on an item that isn't public"
         detail: true
         no_fix: .Ambiguous
         what: fn(self) -> String { "`#Deprecated` requires a public item" }
@@ -7873,6 +7923,7 @@ MissingTraitConstant: struct {
 TraitConstantTypeMismatch: struct {
     impl Diagnostic {
         code: "E0934"
+        meaning: "A trait constant value of another type than declared"
         detail: true
         what: fn(self) -> String { "A trait constant value is not of its declared type" }
         why: fn(self) -> String { "The trait declares each constant's type, and each value has that type" }
@@ -7883,6 +7934,7 @@ TraitConstantTypeMismatch: struct {
 TraitConstantNotCompileTime: struct {
     impl Diagnostic {
         code: "E0935"
+        meaning: "A trait constant value that isn't known while compiling"
         detail: true
         what: fn(self) -> String { "A trait constant value is not known at compile time" }
         why: fn(self) -> String { "A trait constant is read from its type without running code, so its value is a literal, an enum case or a list of them" }
@@ -7893,6 +7945,7 @@ TraitConstantNotCompileTime: struct {
 UnknownTraitConstant: struct {
     impl Diagnostic {
         code: "E0936"
+        meaning: "An impl constant its trait doesn't declare"
         detail: true
         what: fn(self) -> String { "An impl gives a constant its trait does not declare" }
         why: fn(self) -> String { "An implementation gives only the constants its trait declares" }
@@ -7903,6 +7956,7 @@ UnknownTraitConstant: struct {
 AmbiguousTraitConstant: struct {
     impl Diagnostic {
         code: "E0937"
+        meaning: "An ambiguous trait constant name"
         detail: true
         what: fn(self) -> String { "A trait constant name names more than one thing" }
         why: fn(self) -> String { "A trait constant's name names one constant of its trait, and one constant of a type" }
@@ -7913,6 +7967,7 @@ AmbiguousTraitConstant: struct {
 MemoNotPure: struct {
     impl Diagnostic {
         code: "E0938"
+        meaning: "`#Memo` on a function that isn't pure"
         what: fn(self) -> String { "`#Memo` requires a pure function" }
         why: fn(self) -> String { "A cached result is reused for the same arguments, which is safe only when the function always returns the same value and has no effects" }
         fix: fn(self) -> String { "Make the `#Memo` function pure." }
@@ -7922,6 +7977,7 @@ MemoNotPure: struct {
 MemoArgumentNotHashable: struct {
     impl Diagnostic {
         code: "E0939"
+        meaning: "A `#Memo` argument that can't be hashed"
         what: fn(self) -> String { "`#Memo` argument is not hashable" }
         why: fn(self) -> String { "The cache is keyed by the arguments, so each one must support hashing and equality" }
         fix: fn(self) -> String { "Use hashable `#Memo` arguments." }
@@ -7931,6 +7987,7 @@ MemoArgumentNotHashable: struct {
 MemoLazyIter: struct {
     impl Diagnostic {
         code: "E0940"
+        meaning: "`#Memo` on a function that returns a lazy `Iter`"
         what: fn(self) -> String { "`#Memo` cannot cache a lazy `Iter` value" }
         why: fn(self) -> String { "A lazy `Iter` is used up as it is read, so a cached one would be empty the second time" }
         fix: fn(self) -> String { "Materialize the value or remove `#Memo` from the lazy `Iter`." }
@@ -7940,6 +7997,7 @@ MemoLazyIter: struct {
 JobNameConflict: struct {
     impl Diagnostic {
         code: "E0928"
+        meaning: "A `#Job` name that clashes with a command or another job"
         what: fn(self) -> String { "A `#Job fn` clashes with a registered Jet command or repeats a job name in one scope" }
         why: fn(self) -> String { "Top-level commands and jobs must have distinct names, and `jet <name>` must select exactly one function" }
         fix: fn(self) -> String { "Rename the job, e.g. `#Job lint_all: fn()`, or give same-named jobs different scopes." }
@@ -7960,6 +8018,7 @@ RetiredComptimePurity: struct {
 ComptimeFuelExhausted: struct {
     impl Diagnostic {
         code: "E0952"
+        meaning: "Compile-time code that ran out of its budget"
         what: fn(self) -> String { "Comptime budget exhausted (fuel)" }
         why: fn(self) -> String { "Compile-time code runs on a fixed budget, so a runaway loop can't stall the build" }
         fix: fn(self) -> String { "Reduce the comptime work or split it so it fits the fuel budget." }
@@ -7969,6 +8028,7 @@ ComptimeFuelExhausted: struct {
 ComptimePanic: struct {
     impl Diagnostic {
         code: "E0953"
+        meaning: "Compile-time code that called `@panic`"
         what: fn(self) -> String { "@panic: user-authored compile error (message verbatim)" }
         why: fn(self) -> String { "Compile-time code called `@panic`, which stops the build with its author's message" }
         fix: fn(self) -> String { "Remove the `@panic` or change the condition that raises the authored compile error." }
@@ -7989,6 +8049,7 @@ RetiredComptimeBinding: struct {
 ComptimeFileUnreadable: struct {
     impl Diagnostic {
         code: "E0955"
+        meaning: "A compile-time file input that is missing or unreadable"
         what: fn(self) -> String { "Comptime file input missing / unreadable (`embed_file` also: not UTF-8)" }
         why: fn(self) -> String { "A compile-time file input is read while building, so the file must exist and be readable" }
         fix: fn(self) -> String { "Provide a readable UTF-8 file at the comptime path." }
@@ -8010,6 +8071,7 @@ ComptimeConstructNotSupported: struct {
 InvalidEmbedPath: struct {
     impl Diagnostic {
         code: "E0957"
+        meaning: "An `embed_file`, `embed_bytes` or `find` path that isn't a string, is absolute or leaves the project"
         what: fn(self) -> String { "`embed_file`/`embed_bytes` path or `find` glob not a String, absolute, or escaping via `..`" }
         why: fn(self) -> String { "Compile-time inputs read files inside the project, named by a relative path, so a build reads only what the project owns" }
         fix: fn(self) -> String { "Use a relative path or glob, written or computed, that stays inside the project." }
@@ -12927,6 +12989,7 @@ MissingWorkspaceModule: struct {
     impl Diagnostic {
         code: "E0995"
         stage: [.Compile]
+        meaning: "A `workspace.jet` without its `workspace: module` declaration"
         detail: true
         what: fn(self) -> String { "`workspace.jet` has no `workspace: module {{ … }}` declaration." }
         why: fn(self) -> String { "`workspace.jet` is the monorepo index; it must contain exactly one `workspace: module {{ members: … }}` body." }
@@ -12938,6 +13001,7 @@ InvalidMembersList: struct {
     impl Diagnostic {
         code: "E0996"
         stage: [.Compile]
+        meaning: "A workspace `members:` value that isn't a list of strings"
         detail: true
         what: fn(self) -> String { "`members:` evaluated to something other than a list of strings." }
         why: fn(self) -> String { "The `members:` value must evaluate to `[String]` — a list of relative package directory paths." }
@@ -12949,6 +13013,7 @@ MembersDirectoryNotFound: struct {
     impl Diagnostic {
         code: "E0997"
         stage: [.Compile]
+        meaning: "A workspace `find` that names a missing directory"
         detail: true
         what: fn(self) -> String { "`find(\"…\")` in `members:` names a directory that doesn't exist." }
         why: fn(self) -> String { "`find` scans that directory for subdirectories containing `package.jet`; the directory must exist relative to `workspace.jet`." }
