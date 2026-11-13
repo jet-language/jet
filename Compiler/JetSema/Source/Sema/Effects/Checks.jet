@@ -379,11 +379,11 @@ SemaEffectNode: struct {
     nondeterministic_call: Bool{false}
     memo_span: Span?{None}
     kernel: SemaKernelPending?{None}
-    // `module::name` in call paths and the source file name in reports.
+    // `module.name` in call paths and the source file name in reports.
     display_key: String{""}
     source_display: String{""}
-    // The Rust effect key (`name`, or `Owner::name` for a method): the
-    // name a denial's call chain shows for this function.
+    // The name a denial's call chain shows for this function: `name`, or
+    // `Owner.name` for a method (its effect key, dotted).
     chain_name: String{""}
     // The first `#Unsafe` gate this body opens itself outside Core, as
     // `file:line` (sema_effect_record_unsafe_gate); "" when it opens none.
@@ -2139,9 +2139,9 @@ sema_effect_node_from_source: fn(function: FnBody, sources: [SemaEffectFunctionS
         node.maximal = true
         node.maximal_span = Val(function.source_span)
     }
-    node.display_key = "{function.module_name}::{function.name}"
+    node.display_key = "{function.module_name}.{function.name}"
     node.source_display = sema_effect_source_display(function.source_file)
-    node.chain_name = sema_effect_chain_name(function)
+    node.chain_name = sema_effect_chain_name(function).replace("::", ".")
     node.owner_params = sema_effect_owner_params(function.kind)
     node.type_params = node.owner_params.copy()
     loop param in function.generic_params -> sema_effect_set_add(node.type_params, param.name)

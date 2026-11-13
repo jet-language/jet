@@ -1,8 +1,8 @@
-Error [jet.MemoryDenialViolated]: `!Mem.Stack(above: 4096)` cannot be proved for stack_bounded_unknown_size::keep: `T` has no known size in stack_bounded_unknown_size::keep
+Error [jet.MemoryDenialViolated]: `!Mem.Stack(above: 4096)` cannot be proved for stack_bounded_unknown_size.keep: `T` has no known size in stack_bounded_unknown_size.keep
   --> tests/ui/stack_bounded_unknown_size.jet:1:26
     |
   1 | keep: fn<T>(value: T) -[!Mem.Stack(above: 4096)]> T { value }
     |                          ^^^^^^^^^^^^^^^^^^^^^^
- Why: no bound holds for the call path stack_bounded_unknown_size::keep; a stack bound needs every value's size, every call's target, and a `#MaxDepth(n)` function on every call cycle; declaration provenance: signature denial `-[!Mem.Stack(above: 4096)]>` in stack_bounded_unknown_size.jet
+ Why: no bound holds for the call path stack_bounded_unknown_size.keep; a stack bound needs every value's size, every call's target, and a `#MaxDepth(n)` function on every call cycle; declaration provenance: signature denial `-[!Mem.Stack(above: 4096)]>` in stack_bounded_unknown_size.jet
  Fix: Give every value a known size, every call a direct or sealed target (an executable build seals calls through function values) and every call cycle a `#MaxDepth(n)` function, or move the call outside this denial
 More: jet-lang.dev/e/E0921

@@ -511,7 +511,7 @@ pkg_lock_e3513: fn(dependency: String, reach: PackageEffectReach) -> Diagnostic 
         "dependency `{dependency}` now reaches `{reach.effect_name}`, which `.jet/lock` doesn't record for it",
         "`--locked` requires each dependency's inferred effect row to stay within the row the project lock records",
         "review the change to `{dependency}`, then rerun without `--locked` to record its wider row")
-    diagnostic = diagnostic_with_rights(diagnostic, "invocation", reach.chain, [String]{}, None)
+    diagnostic = diagnostic_with_rights(diagnostic, "invocation", pkg_effect_shown_chain(reach.chain), [String]{}, None)
     if reach.witness == .Val(witness) {
         diagnostic.span = Val(witness.span)
         diagnostic = diagnostic_with_source_path(diagnostic, witness.path, 0)
@@ -522,7 +522,7 @@ pkg_lock_e3513: fn(dependency: String, reach: PackageEffectReach) -> Diagnostic 
 // The note a plain build prints for one widened effect: the dependency, the
 // effect, and the call path to it.
 pkg_lock_widened_note: fn(dependency: String, reach: PackageEffectReach) -> String Never! {
-    path: if reach.chain.len() > 0 -> " through {reach.chain.join(" → ")}" else -> ""
+    path: if reach.chain.len() > 0 -> " through {pkg_effect_shown_chain(reach.chain).join(" → ")}" else -> ""
     "note: `{dependency}` now reaches `{reach.effect_name}`{path}; `.jet/lock` records its wider effect row\n"
 }
 
@@ -536,7 +536,7 @@ pkg_e1220_path: fn(dependency: String, effect_name: String, site: String?, chain
         "`{dependency}`{pkg_e1220_location(site)} uses the `{effect_name}` effect, which this package's budget doesn't allow",
         "an `authority` budget fails the build when package code or any dependency reaches an effect you didn't list — supply-chain review as a compile error",
         fix)
-    diagnostic_with_rights(diagnostic, "invocation", chain, [String]{}, None)
+    diagnostic_with_rights(diagnostic, "invocation", pkg_effect_shown_chain(chain), [String]{}, None)
 }
 
 // E1220 under a grant line: the line is the dependency's whole limit, so an
@@ -547,31 +547,42 @@ pkg_e1220_grant: fn(dependency: String, effect_name: String, site: String?, chai
         "`{dependency}`{pkg_e1220_location(site)} uses the `{effect_name}` effect, which its `authority.grants` line doesn't grant",
         "a dependency's grant line is its whole limit, in place of `allow`, so a version that reaches further stops the build",
         "keep the version that fits its line, add `{effect_name}` to `{dependency}`'s line in `authority.grants`, or drop the dependency")
-    diagnostic_with_rights(diagnostic, "invocation", chain, [String]{}, None)
+    diagnostic_with_rights(diagnostic, "invocation", pkg_effect_shown_chain(chain), [String]{}, None)
 }
 
 pkg_e1220_location: fn(site: String?) -> String Never! {
-    if site == .Val(function) -> return " function `{function}`"
+    if site == .Val(function) -> return " function `{pkg_effect_shown(function)}`"
     ""
+}
+
+// A function's effect key as a report names it: its module and owner path
+// dotted (`dep::greet` -> `dep.greet`). The undotted key stays the lookup key.
+pkg_effect_shown: fn(key: String) -> String Never! {
+    key.replace("::", ".")
+}
+
+pkg_effect_shown_chain: fn(chain: [String]) -> [String] Never! {
+    loop key in chain -> pkg_effect_shown(key)
 }
 
 // E0749: the root package's own code reaches an effect its written `allow`
 // row leaves out. `chain` runs from the first reached function that reaches
 // it down to the one that performs it, which the report names.
 pkg_e0749_outside_allow: fn(effect_name: String, chain: [String]) -> Diagnostic Never! {
-    site: if chain.len() > 0 -> chain[chain.len() - 1] else -> "the package's code"
+    site: if chain.len() > 0 -> pkg_effect_shown(chain[chain.len() - 1]) else -> "the package's code"
     diagnostic: diagnostic_from_registry("E0749", None,
         "`{site}` reaches the `{effect_name}` effect, which the package's `authority: {{ allow: […] }}` row doesn't list",
         "a written `allow` row is a ceiling: the package's code and every call it makes may use only the listed effects and the floor every program holds (`IO`, `Mem.Alloc`, `Exec.Args`)",
         "add `{effect_name}` to `authority.allow`, or remove the call that reaches it")
-    diagnostic_with_rights(diagnostic, "invocation", chain, [String]{}, None)
+    diagnostic_with_rights(diagnostic, "invocation", pkg_effect_shown_chain(chain), [String]{}, None)
 }
 
 // E1220 a package denial keeps the panic provenance visible
 // and offers the same exits as function-scope prohibition.
 pkg_e1220_panic: fn(dependency: String, panic_site: String, span: Span?) -> Diagnostic Never! {
+    site: pkg_effect_shown(panic_site)
     diagnostic_from_registry("E1220", span,
-        "`{dependency}` uses the `Panic` effect at `{panic_site}`, which this package's budget doesn't allow",
-        "the package denies stops from `{panic_site}`; a dependency that can stop cannot cross this budget boundary",
+        "`{dependency}` uses the `Panic` effect at `{site}`, which this package's budget doesn't allow",
+        "the package denies stops from `{site}`; a dependency that can stop cannot cross this budget boundary",
         "return a fallible result for expected failure, or add facts or a `#Pre`/refinement proof for a programmer-error stop; `Panic` is deny-only and cannot be allowed or granted")
 }

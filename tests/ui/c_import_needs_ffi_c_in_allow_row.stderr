@@ -1,4 +1,4 @@
-Error [jet.ProhibitedEffectReached]: `c_import_needs_ffi_c_in_allow_row::run` reaches the `FFI.C("c")` effect, which the package's `authority: { allow: […] }` row doesn't list
+Error [jet.ProhibitedEffectReached]: `c_import_needs_ffi_c_in_allow_row.run` reaches the `FFI.C("c")` effect, which the package's `authority: { allow: […] }` row doesn't list
   --> tests/ui/c_import_needs_ffi_c_in_allow_row.jet:12:1
     |
  12 | run: fn() {
@@ -6,5 +6,5 @@ Error [jet.ProhibitedEffectReached]: `c_import_needs_ffi_c_in_allow_row::run` re
  Why: A written `allow` row is a ceiling: the package's code and every call it makes may use only the listed effects and the floor every program holds (`IO`, `Mem.Alloc`, `Exec.Args`)
  Fix: Add `FFI.C("c")` to `authority.allow`, or remove the call that reaches it
  Denial: invocation
- Call chain: c_import_needs_ffi_c_in_allow_row::run
+ Call chain: c_import_needs_ffi_c_in_allow_row.run
 More: jet-lang.dev/e/E0749

@@ -22,11 +22,11 @@ write: dep/dep.jet dep.v2.template
 step: jet build --locked run.jet
 exit: nonzero
 stderr: ~ "Error [jet.LockedEffectRowWidened]: Dependency `dep` now reaches `FS.Read`, which `.jet/lock` doesn't record for it" # the upgrade widened the row
-stderr: ~ "Call chain: dep::greet → dep::load" # the call path to the new effect
+stderr: ~ "Call chain: dep.greet → dep.load" # the call path to the new effect
 file: .jet/lock !~ "FS.Read" # a locked build writes no lock
 step: jet build run.jet
 exit: 0
-stderr: ~ "note: `dep` now reaches `FS.Read` through dep::greet → dep::load; `.jet/lock` records its wider effect row" # a plain build names the path
+stderr: ~ "note: `dep` now reaches `FS.Read` through dep.greet → dep.load; `.jet/lock` records its wider effect row" # a plain build names the path
 file: .jet/lock ~ "FS.Read" # and records the wider row
 file: package.jet !~ "authority" # still no grant line
 step: jet build --locked run.jet

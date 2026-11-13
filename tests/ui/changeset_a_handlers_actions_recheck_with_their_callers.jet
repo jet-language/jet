@@ -17,7 +17,7 @@ load: fn() -> Int { 1 }
 install: fn(meta: Compiler) {
     meta.events(
         watch: .Functions{marked: Traced{}},
-        (event) -> {
+        fn(event) {
             if event == .Checked(.Function(f)) {
                 meta.add(#code { extra: fn() -> Int { 2 } }, scope: "extra")
                 meta.rewrite_body(f, #code {

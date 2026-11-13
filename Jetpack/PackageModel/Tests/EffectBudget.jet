@@ -99,12 +99,12 @@ pkg_test_package_effects: fn(name: String, effects: [String], chains: [String: [
             // leaves email's Rand with email.
             assert_eq(diagnostic.span, Val(Span{start: 3, end: 6}))
             assert_eq(diagnostic.source_path, Val("/workspace/app/run.jet"))
-            assert_eq(diagnostic.call_chain, [String]{"run::run"})
+            assert_eq(diagnostic.call_chain, [String]{"run.run"})
         } else {
             assert_eq(diagnostic.code, "E1220")
             assert_eq(diagnostic.span, Val(Span{start: 22, end: 26}))
             assert_eq(diagnostic.source_path, Val("/workspace/deps/email/src/crypto.jet"))
-            assert(diagnostic.what.contains("crypto::seal"))
+            assert(diagnostic.what.contains("crypto.seal"))
         }
     }
 }
@@ -133,9 +133,9 @@ pkg_test_package_effects: fn(name: String, effects: [String], chains: [String: [
     pinned: pkg_effect_enforce(entries, manifest)
     assert_eq(pinned.len(), 1)
     assert_eq(pinned[0].code, "E1220")
-    assert(pinned[0].what.contains("`dep` function `dep::dial` uses the `Net` effect"))
+    assert(pinned[0].what.contains("`dep` function `dep.dial` uses the `Net` effect"))
     assert(pinned[0].what.contains("authority.grants"))
-    assert_eq(pinned[0].call_chain, [String]{"dep::fetch", "dep::dial"})
+    assert_eq(pinned[0].call_chain, [String]{"dep.fetch", "dep.dial"})
     // A line that covers the effect lets it through even when `allow` doesn't.
     manifest.authority.allow = Val([String]{"FS"})
     manifest.authority.grants = [PackageGrant]{PackageGrant{package: "dep", rights: [String]{"Net"}}}
@@ -152,10 +152,10 @@ pkg_test_package_effects: fn(name: String, effects: [String], chains: [String: [
     diagnostics: pkg_effect_enforce(entries, manifest)
     assert_eq(diagnostics.len(), 1)
     assert_eq(diagnostics[0].code, "E0749")
-    assert(diagnostics[0].what.contains("`run::fetch`"))
+    assert(diagnostics[0].what.contains("`run.fetch`"))
     assert(diagnostics[0].what.contains("Net"))
     assert(diagnostics[0].fix.contains("authority.allow"))
-    assert_eq(diagnostics[0].call_chain, [String]{"run::run", "run::fetch"})
+    assert_eq(diagnostics[0].call_chain, [String]{"run.run", "run.fetch"})
     // A deny over the root's own code is sema's, not the budget's.
     manifest.authority.deny = Val([String]{"Net"})
     manifest.authority.allow = Val([String]{"Net"})
@@ -220,13 +220,13 @@ pkg_test_package_effects: fn(name: String, effects: [String], chains: [String: [
     denied: pkg_effect_enforce(entries, manifest)
     assert_eq(denied.len(), 1)
     assert_eq(denied[0].code, "E1220")
-    assert(denied[0].what.contains("panicdep::parse_port"))
+    assert(denied[0].what.contains("panicdep.parse_port"))
     assert_eq(denied[0].span, Val(span))
     manifest.authority.grants = [PackageGrant]{PackageGrant{package: "panicdep", rights: [String]{"Panic"}}}
     granted: pkg_effect_enforce(entries, manifest)
     assert_eq(granted.len(), 1)
     assert_eq(granted[0].code, "E1220")
-    assert(granted[0].what.contains("panicdep::parse_port"))
+    assert(granted[0].what.contains("panicdep.parse_port"))
     assert_eq(granted[0].span, Val(span))
 }
 
@@ -281,9 +281,9 @@ pkg_test_package_effects: fn(name: String, effects: [String], chains: [String: [
     report: pkg_lock_e3513(refused[0].name, refused[0].reaches[0])
     assert_eq(report.code, "E3513")
     assert_eq(report.what, "Dependency `dep` now reaches `FS.Read`, which `.jet/lock` doesn't record for it")
-    assert_eq(report.call_chain, [String]{"dep::greet", "dep::load"})
+    assert_eq(report.call_chain, [String]{"dep.greet", "dep.load"})
     assert_eq(report.span, Val(Span{start: 40, end: 44}))
-    assert_eq(pkg_lock_widened_note(refused[0].name, refused[0].reaches[0]), "note: `dep` now reaches `FS.Read` through dep::greet → dep::load; `.jet/lock` records its wider effect row\n")
+    assert_eq(pkg_lock_widened_note(refused[0].name, refused[0].reaches[0]), "note: `dep` now reaches `FS.Read` through dep.greet → dep.load; `.jet/lock` records its wider effect row\n")
     widened: pkg_lock_record_effect_rows(root, widening, false) ?? panic("record widened")
     assert_eq(widened.len(), 1)
     wider: files.read(lock_path) ?? panic("read widened")

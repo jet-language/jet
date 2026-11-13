@@ -16,7 +16,7 @@ load: fn() -> Int { 1 }
 install: fn(meta: Compiler) {
     meta.events(
         watch: .Functions{marked: Traced{}},
-        (event) -> {
+        fn(event) {
             if event == .Checked(.Function(f)) {
                 meta.add(#code { broken: fn() -> Int { "not an Int" } }, scope: "broken")
                 refused: #code {
