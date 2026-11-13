@@ -837,18 +837,18 @@ sema_expression_enum_literal: fn(type_name: String, type_args: [Type], variant: 
         core_variants := core_enum_payload_variants(resolved_name)
         if core_variants == None -> core_variants = core_enum_variants(resolved_name)
         if core_variants == .Val(variants) {
-            // A source-owned Core enum is named by its canonical identity.
+            // A source-owned Core enum is named by its dotted path.
             modules: core_type_modules(resolved_name)
-            display_name: if core_source_owns_type(resolved_name) && modules.len() == 1 -> "<corelib>/{modules[0]}::{core_module_type_leaf(resolved_name)}" else -> resolved_name
+            display_name: if core_source_owns_type(resolved_name) && modules.len() == 1 -> "{modules[0]}.{core_module_type_leaf(resolved_name)}" else -> resolved_name
             return sema_expression_core_enum_literal(resolved_name, display_name, variants, variant, args, variant_span, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         }
     }
     if owner_symbol == .Val(core_owner) {
         if sema_expression_core_export_variants(environment, program, core_owner) == .Val(variants) {
             context.name_references.push(SemaNameReferenceFact{span: span, symbol: core_owner, kind: "type"})
-            // A payload diagnostic names a Core enum by its canonical
-            // `<corelib>/module::Name` identity (Rust `display_type_name`).
-            display_name: "{core_owner.module_name}::{core_owner.name}"
+            // A payload diagnostic names a Core enum by its dotted path, such
+            // as `core.term.Color`.
+            display_name: "{core_owner.module_name.removeprefix("<corelib>/")}.{core_owner.name}"
             return sema_expression_core_enum_literal(core_owner.name, display_name, variants, variant, args, variant_span, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         }
     }
@@ -914,9 +914,9 @@ sema_expression_enum_literal: fn(type_name: String, type_args: [Type], variant: 
         return None
     }
     payload := TEnumPayload.Unit
-    // The enum as diagnostics name it: a Core enum by its canonical identity,
-    // a program enum by its declared name.
-    payload_owner: if owner.module_name.starts_with("<corelib>/") -> "{owner.module_name}::{owner.name}" else -> owner.name
+    // The enum as diagnostics name it: a Core enum by its dotted path, a
+    // program enum by its declared name.
+    payload_owner: if owner.module_name.starts_with("<corelib>/") -> "{owner.module_name.removeprefix("<corelib>/")}.{owner.name}" else -> owner.name
     if selected_variant.payload == {
         .Unit -> {
             if args.len() != 0 {

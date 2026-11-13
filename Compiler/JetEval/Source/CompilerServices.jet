@@ -18,7 +18,7 @@ use {
         type_name,
     ]
     jet_foundation.[TAppliedRule, TAppliedRuleArgumentMenu, TAppliedRuleCatalog, record_key_digest]
-    jet_sema.[sema_comptime_reflection_type_info]
+    jet_sema.[sema_compiler_identity, sema_comptime_reflection_type_info]
     jet_lexer.[
         Lexed,
         TOKEN_AMP,
@@ -902,7 +902,7 @@ jet_eval_compiler_services_program_info: fn(registration: SemaRegistrationGraph,
     .Ready(value: TComptimeValue.Struct{type_name: "ProgramInfo", fields: fields})
 }
 
-jet_eval_compiler_services_root_calls: fn(registration: SemaRegistrationGraph, graph: SemaGraphResult, build_keys: [String]) -> [TComptimeValue] Never! {
+jet_eval_compiler_services_root_calls: fn(registration: SemaRegistrationGraph, graph: SemaGraphResult, build_keys: [String]) -> [TComptimeValue] {
     calls := [TComptimeValue]{}
     loop module_row in registration.modules {
         if module_row.package_identity != registration.package_identity -> next
@@ -914,8 +914,8 @@ jet_eval_compiler_services_root_calls: fn(registration: SemaRegistrationGraph, g
                 if call.callee == .Val(id) -> callee = Val(id.key.copy()) // copy: the checked graph keeps its call facts
                 name: callee ?? next
                 calls.push(TComptimeValue.Struct{type_name: "CompilerCall", fields: [TComptimeField]{
-                    {name: "caller", value: jet_eval_compiler_services_string(call.caller_key)},
-                    {name: "callee", value: jet_eval_compiler_services_string(name)},
+                    {name: "caller", value: jet_eval_compiler_services_string(sema_compiler_identity(registration, call.caller_key))},
+                    {name: "callee", value: jet_eval_compiler_services_string(sema_compiler_identity(registration, name))},
                     {name: "module", value: jet_eval_compiler_services_string(checked.module_path)},
                     {name: "span", value: jet_eval_compiler_services_span(call.span, module_row.source_file)},
                 }})

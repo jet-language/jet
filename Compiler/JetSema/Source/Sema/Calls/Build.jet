@@ -633,7 +633,7 @@ sema_call_compiler_events: fn(receiver: Expr, args: [CallArg], span: Span, expec
     }
     watched := ""
     if watch.calls {
-        watched = sema_compiler_events_call_target(watch.value, scopes) ?? {
+        watched = sema_compiler_events_call_target(watch.value, program, scopes) ?? {
             diagnostics.push(sema_error("E0104", expr_span(watch.value), "`.Calls{{to: …}}` takes the name of a function", "a call watch hears the calls whose resolved callee is that function, so it needs a name that resolves to one, or an ambient call such as `print`", "write the function's name, such as `.Calls{{to: print}}`"))
             return failed
         }
@@ -877,7 +877,7 @@ SemaCompilerReportRewriteCheck: struct {
 sema_compiler_report_rewrite_check: fn(rewrite: SemaCompilerReportRewrite, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext) -> SemaCompilerReportRewriteCheck {
     callee_text: sema_trait_constant_callable_path(rewrite.callee) ?? ""
     replacement_text: sema_trait_constant_callable_path(rewrite.replacement) ?? ""
-    identity: sema_compiler_events_call_target(rewrite.callee, scopes) ?? ""
+    identity: sema_compiler_events_call_target(rewrite.callee, program, scopes) ?? ""
     from: sema_compiler_report_callable_type(rewrite.callee, environment, program, scopes, state, tail_store, context)
     to: sema_compiler_report_callable_type(rewrite.replacement, environment, program, scopes, state, tail_store, context)
     refusal: if {
@@ -980,11 +980,12 @@ SEMA_COMPILER_EVENTS_AMBIENT_CALLS: [String]{"print"}
 // The resolved identity of a call watch's callee `f`, the identity a checked
 // call of it records: a function's definition identity, or the name of an
 // ambient call no name in scope hides. None when `f` names neither.
-sema_compiler_events_call_target: fn(target: Expr, scopes: SemaScopeTable) -> String? Never! {
+sema_compiler_events_call_target: fn(target: Expr, program: SemaProgramTables, scopes: SemaScopeTable) -> String? {
     if target == .Ident(name, _, _) {
         if sema_scope_resolve(scopes, name) == .Val(symbol) {
-            if symbol.kind == SymbolKind.Function -> return Val(symbol.id.key.copy())
-            return None
+            if symbol.kind != SymbolKind.Function -> return None
+            graph: program.registration_graph ?? return Val(symbol.id.key.copy())
+            return Val(sema_compiler_identity(graph, symbol.id.key))
         }
         if SEMA_COMPILER_EVENTS_AMBIENT_CALLS.contains(name) -> return Val(name.copy())
     }

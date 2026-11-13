@@ -5804,7 +5804,15 @@ sema_name_add_reference: fn(facts: &NameFacts, filter: &SemaNameReferenceFilter,
         if owner_name == .Val(name) -> declaration_name = "{name}.{symbol.name}"
     }
     semantic_identity := String?{None}
-    if kind != "local" && kind != "param" -> semantic_identity = Val("{source_module.package_identity}::{source_module.module_path}::{declaration_name}")
+    if kind != "local" && kind != "param" {
+        word: if {
+            kind == "function" && owner_key != "" -> "method"
+            kind == "function" -> "fn"
+            kind == "import_alias" -> "import"
+            else -> kind
+        }
+        semantic_identity = Val("{word}:{source_module.module_name}.{declaration_name}")
+    }
     facts.references.push(NameReference{module_path: source_module.module_path, kind: kind, def_span: symbol.span, semantic_identity: semantic_identity})
 }
 

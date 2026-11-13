@@ -13,4 +13,7 @@ json: stdout doc $.compiler.value.semantic_index.definitions[?name="helper"] #>=
 json: stdout doc $.compiler.value.semantic_index.definitions[?name="helper"][0].kind.ret.name = "Int" # an index type is a TypeId
 json: stdout doc $.compiler.value.semantic_index.definitions[?name="helper"][0].kind.ret.identity = "Int"
 json: stdout doc $.compiler.value.semantic_index.calls #= 1
-json: stdout doc $.compiler.value.semantic_index.calls[0].callee ~ "::helper" # a callee is the callee's definition identity, which ends in its name
+json: stdout doc $.compiler.value.semantic_index.calls[0].callee == $.compiler.value.semantic_index.definitions[?name="helper"][0].identity # a callee is the callee's definition identity
+json: stdout doc $.compiler.value.semantic_index.calls[0].callee ^= "fn:" # a definition identity is a kind word and a dotted path
+json: stdout doc $.compiler.value.semantic_index.calls[0].callee ~ ".helper" # the dotted path ends in its name
+stdout: !~ "::" # no identity in the index is spelled with `::`

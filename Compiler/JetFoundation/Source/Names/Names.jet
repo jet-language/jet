@@ -95,11 +95,6 @@ name_ledger_canonical_path: fn(ledger: NameLedger, module_index: Int, name: Stri
     }
     if alias.target.contains(".") -> Val(alias.target) else -> None
 }
-name_ledger_semantic_identity: fn(ledger: NameLedger, module_index: Int, name: String) -> String? Never! {
-    if module_index < 0 || module_index >= ledger.facts.modules.len() -> return None
-    row: ledger.facts.modules[module_index]
-    Val("{row.package}::{row.path}::{name}")
-}
 name_ledger_visible: fn(ledger: NameLedger, from: Int, module_index: Int, name: String) -> Bool Never! {
     if from == module_index -> return true
     if from < 0 || module_index < 0 || from >= ledger.facts.modules.len() || module_index >= ledger.facts.modules.len() -> return false

@@ -2,7 +2,7 @@
 use jet_foundation.[
     NameAlias, NameDeclaration, NameDisplayPath, NameFacts, NameModule,
     NameVisibility, Span, name_ledger_canonical_path, name_ledger_display_path,
-    name_ledger_display_path_at, name_ledger_from_facts, name_ledger_semantic_identity,
+    name_ledger_display_path_at, name_ledger_from_facts,
 ]
 
 names_projection_require: fn(ok: Bool, message: String) Never! {
@@ -20,5 +20,4 @@ names_projection_require: fn(ok: Bool, message: String) Never! {
     facts.display_paths = [NameDisplayPath]{NameDisplayPath{module_index: 0, internal_path: "a.Thing", display_path: "instance.Thing"}}
     projected: name_ledger_from_facts(facts)
     names_projection_require(name_ledger_display_path_at(projected, 0, span, "Thing", None, Val(0)) == (Val("instance.Thing")), "generated member display")
-    names_projection_require(name_ledger_semantic_identity(projected, 0, "Thing") == (Val("p::a::Thing")), "presentation preserves semantic identity")
 }

@@ -133,6 +133,61 @@ sema_compiler_index_module_file: fn(registration: SemaRegistrationGraph, module_
     ""
 }
 
+// The identity a compiler value names the declaration keyed `key` by
+// (`symbol_id`'s `kind:module:owner:name`): a kind word, then the dotted
+// path of its module's name, its owner and its own name, as in
+// `fn:app.helper`, `method:app.Point.area` or `param:app.helper.x`. A text
+// that is no declaration key, such as an ambient call's name, is its own
+// identity.
+sema_compiler_identity: fn(registration: SemaRegistrationGraph, key: String) -> String {
+    kind: (key.split_once(":") ?? return key.copy()).before
+    rest: key.slice(kind.len() + 1, key.len())
+    named: rest.cut_last(":") ?? return key.copy()
+    head: named.before
+    // A module key may hold colons of its own: the shortest prefix of `head`
+    // that keys a registered module is the module, and the rest its owner.
+    declaring := ""
+    owner := ""
+    found := false
+    first := true
+    prefix := ""
+    loop part in head.split(":") {
+        prefix = if first -> part.copy() else -> "{prefix}:{part}"
+        first = false
+        if sema_registration_module_index(registration, prefix) == .Val(row) {
+            declaring = registration.modules[row].module_name.copy()
+            start: prefix.len() + 1
+            owner = if start >= head.len() -> "" else -> head.slice(start, head.len())
+            found = true
+            break
+        }
+    }
+    if !found {
+        split: head.cut_last(":")
+        declaring = if split == .Val(parts) -> parts.before.copy() else -> head.copy()
+        owner = if split == .Val(parts) -> parts.after.copy() else -> ""
+    }
+    nested: owner.contains(":")
+    word: if {
+        kind == "function" && owner != "" && !nested -> "method"
+        kind == "function" -> "fn"
+        kind == "constant" -> "const"
+        kind == "parameter" -> "param"
+        else -> kind
+    }
+    scope: if {
+        owner == "" -> declaring
+        nested -> sema_compiler_identity_path(sema_compiler_identity(registration, owner))
+        else -> "{declaring}.{owner}"
+    }
+    "{word}:{scope}.{named.after}"
+}
+
+// The dotted path of an identity: the text after its kind word.
+sema_compiler_identity_path: fn(identity: String) -> String Never! {
+    (identity.split_once(":") ?? return identity.copy()).after
+}
+
 sema_compiler_index_definition_kind: fn(symbol: Symbol, registration: SemaRegistrationGraph) -> String Never! {
     if symbol.kind == {
         .Module -> return "module"
@@ -308,7 +363,7 @@ sema_compiler_index_view_provenance_values: fn(map: ViewProvenanceMap?) -> TComp
 // `caller` is the row of the module that declares `symbol`.
 sema_compiler_index_definition: fn(registration: SemaRegistrationGraph, caller: Int, symbol: Symbol, view_provenance: TComptimeValue) -> TComptimeValue {
     TComptimeValue.Struct{type_name: "CompilerDefinition", fields: [TComptimeField]{
-        TComptimeField{name: "identity", value: sema_compiler_index_string(symbol.id.key)},
+        TComptimeField{name: "identity", value: sema_compiler_index_string(sema_compiler_identity(registration, symbol.id.key))},
         TComptimeField{name: "name", value: sema_compiler_index_string(symbol.name)},
         TComptimeField{name: "module", value: sema_compiler_index_string(registration.modules[caller].module_path)},
         TComptimeField{name: "span", value: sema_compiler_index_span(symbol.span, registration.modules[caller].source_file)},
@@ -317,16 +372,16 @@ sema_compiler_index_definition: fn(registration: SemaRegistrationGraph, caller: 
     }}
 }
 
-sema_compiler_index_anchor: fn(symbol: Symbol, registration: SemaRegistrationGraph) -> TComptimeValue Never! {
+sema_compiler_index_anchor: fn(symbol: Symbol, registration: SemaRegistrationGraph) -> TComptimeValue {
     TComptimeValue.Struct{type_name: "CompilerDefinitionAnchor", fields: [TComptimeField]{
         TComptimeField{name: "module", value: sema_compiler_index_string(sema_compiler_index_module_path(registration, symbol.module_name))},
         TComptimeField{name: "kind", value: sema_compiler_index_string(sema_compiler_index_definition_kind(symbol, registration))},
-        TComptimeField{name: "semantic_identity", value: sema_compiler_index_option_string(Val(symbol.id.key))},
+        TComptimeField{name: "semantic_identity", value: sema_compiler_index_option_string(Val(sema_compiler_identity(registration, symbol.id.key)))},
         TComptimeField{name: "span", value: sema_compiler_index_span(symbol.span, sema_compiler_index_module_file(registration, symbol.module_name))},
     }}
 }
 
-sema_compiler_index_reference: fn(reference: SemaNameReferenceFact, registration: SemaRegistrationGraph, module_path: String, file: String) -> TComptimeValue Never! {
+sema_compiler_index_reference: fn(reference: SemaNameReferenceFact, registration: SemaRegistrationGraph, module_path: String, file: String) -> TComptimeValue {
     TComptimeValue.Struct{type_name: "CompilerReference", fields: [TComptimeField]{
         TComptimeField{name: "name", value: sema_compiler_index_string(reference.symbol.name)},
         TComptimeField{name: "module", value: sema_compiler_index_string(module_path)},
@@ -336,38 +391,38 @@ sema_compiler_index_reference: fn(reference: SemaNameReferenceFact, registration
     }}
 }
 
-sema_compiler_index_call: fn(call: SemaCallSiteFact, module_path: String, file: String) -> TComptimeValue? {
+sema_compiler_index_call: fn(call: SemaCallSiteFact, registration: SemaRegistrationGraph, module_path: String, file: String) -> TComptimeValue? {
     callee: call.callee ?? return None
     TComptimeValue.Struct{type_name: "CompilerCall", fields: [TComptimeField]{
-        TComptimeField{name: "caller", value: sema_compiler_index_string(call.caller_key)},
-        TComptimeField{name: "callee", value: sema_compiler_index_string(callee.key)},
+        TComptimeField{name: "caller", value: sema_compiler_index_string(sema_compiler_identity(registration, call.caller_key))},
+        TComptimeField{name: "callee", value: sema_compiler_index_string(sema_compiler_identity(registration, callee.key))},
         TComptimeField{name: "module", value: sema_compiler_index_string(module_path)},
         TComptimeField{name: "span", value: sema_compiler_index_span(call.span, file)},
     }}
 }
 
-sema_compiler_index_provenance: fn(function: FnBody, effect_name: String, file: String) -> [TComptimeValue] Never! {
+sema_compiler_index_provenance: fn(function: FnBody, registration: SemaRegistrationGraph, effect_name: String, file: String) -> [TComptimeValue] {
     output := [TComptimeValue]{}
     loop source in function.effects.direct_spans {
         if source.name != effect_name -> next
         output.push(TComptimeValue.Struct{type_name: "CompilerEffectProvenance", fields: [TComptimeField]{
             TComptimeField{name: "effect", value: sema_compiler_index_string(effect_name)},
-            TComptimeField{name: "call_path", value: sema_compiler_index_strings([String]{function.key})},
+            TComptimeField{name: "call_path", value: sema_compiler_index_strings([String]{sema_compiler_identity(registration, function.key)})},
             TComptimeField{name: "spans", value: sema_compiler_index_span_list([Span]{source.span}, file)},
         }})
     }
     output
 }
 
-sema_compiler_index_effect: fn(function: FnBody, file: String) -> TComptimeValue Never! {
+sema_compiler_index_effect: fn(function: FnBody, registration: SemaRegistrationGraph, file: String) -> TComptimeValue {
     provenance := [TComptimeValue]{}
     loop effect_name in function.effects.solved {
-        loop row in sema_compiler_index_provenance(function, effect_name, file) -> provenance.push(row)
+        loop row in sema_compiler_index_provenance(function, registration, effect_name, file) -> provenance.push(row)
     }
     TComptimeValue.Struct{type_name: "CompilerEffect", fields: [TComptimeField]{
-        TComptimeField{name: "function", value: sema_compiler_index_string(function.key)},
+        TComptimeField{name: "function", value: sema_compiler_index_string(sema_compiler_identity(registration, function.key))},
         TComptimeField{name: "direct", value: sema_compiler_index_strings(function.effects.direct)},
-        TComptimeField{name: "callees", value: sema_compiler_index_strings(function.effects.call_edges)},
+        TComptimeField{name: "callees", value: sema_compiler_index_strings(loop callee in function.effects.call_edges -> sema_compiler_identity(registration, callee))},
         TComptimeField{name: "inferred", value: sema_compiler_index_strings(function.effects.solved)},
         TComptimeField{name: "maximal", value: sema_compiler_index_bool(function.effects.maximal)},
         TComptimeField{name: "provenance", value: TComptimeValue.List{values: provenance}},
@@ -1678,7 +1733,7 @@ sema_compiler_semantic_index_from_checked: fn(registration: SemaRegistrationGrap
             references.push(sema_compiler_index_reference(reference, registration, checked_module.module_path, registered_module.source_file))
         }
         loop function in checked_module.functions {
-            effects.push(sema_compiler_index_effect(function, registered_module.source_file))
+            effects.push(sema_compiler_index_effect(function, registration, registered_module.source_file))
             loop parameter in function.params {
                 parameter_id: parameter.local.symbol_id ?? next
                 parameter_symbol := Symbol{id: parameter_id, kind: SymbolKind.Parameter, name: parameter.name, module_name: checked_module.module_identity, owner: Val(function.key), span: parameter.span, ty: Val(parameter.ty), visibility: 0}
@@ -1687,7 +1742,7 @@ sema_compiler_semantic_index_from_checked: fn(registration: SemaRegistrationGrap
             sema_compiler_index_collect_checked_locals(function, checked_module.module_identity, function.key, registration, module_index, function_views, definitions, definition_keys)
         }
         loop call in checked_module.call_facts {
-            value: sema_compiler_index_call(call, checked_module.module_path, registered_module.source_file) ?? next
+            value: sema_compiler_index_call(call, registration, checked_module.module_path, registered_module.source_file) ?? next
             calls.push(value)
         }
     }

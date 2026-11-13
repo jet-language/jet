@@ -15,11 +15,13 @@ exit: nonzero
 stderr: ~ "Heard print from" # the ambient print call is heard, its callee named `print`
 stderr: ~ "shout" # its caller is the function that wrote it
 stderr: !~ "Heard helper" # a call of another function is not heard
+stderr: !~ "::" # the caller is named by its dotted definition identity
 step: jet build helper/main.jet
 exit: nonzero
 stderr: ~ "Heard" # the handler's stop message
-stderr: ~ "helper from" # the callee is helper's definition identity
+stderr: ~ "helper from fn:" # the callee is helper's definition identity, its caller's a kind word and a dotted path
 stderr: !~ "other from" # a call of another function is not heard
+stderr: !~ "::" # neither identity is spelled with `::`
 step: jet build refused/main.jet
 exit: nonzero
 stderr: ~ "E0104" # the call watch's shape refusal
