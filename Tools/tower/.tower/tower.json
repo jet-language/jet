@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6777,
-    "rev": 101254,
+    "rev": 101255,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -72902,7 +72902,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T15:51:10.176Z",
-      "updated": "2026-11-13T04:34:00.923Z",
+      "updated": "2026-11-13T06:10:18.821Z",
       "updatedBy": "Main"
     },
     {
@@ -90231,57 +90231,6 @@
       "criteriaLastN": 3
     },
     {
-      "id": "c0eb35hy",
-      "num": 6699,
-      "title": "Diagnostics from b.generate modules render against the entry file at generated offsets",
-      "body": "Found by MetaLead (2026-11-08). A diagnostic in a module produced by b.generate in a build.jet is rendered with the entry file path and source text at the generated module offsets, so the caret and snippet point at unrelated entry-file lines. Repro: $JET_SCRATCH_ROOT/lanes/MetaLead/p9, jet build run.jet (copy the repro into a fixture). Expected: the diagnostic names the generated module (a stable virtual path) and shows its generated text, with the generating build.jet call as a note.",
-      "kind": "bug",
-      "track": "epoch",
-      "epoch": "e4",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P2",
-      "plan": null,
-      "checkSteps": "a UI snapshot case: a build.jet that generates a module with a type error renders the error against the generated module path and text, with a note at the b.generate call",
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-10",
-          "by": "Main",
-          "text": "c1 met; G1Lead-3-6699 landed in ecf04d985a (train t5b)."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "A diagnostic in a module made by b.generate names the generated module (a stable virtual path) and shows its generated text, with the b.generate call in build.jet as a note; a fixture copied from the MetaLead p9 repro has a UI snapshot.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Landed on dev ecf04d985a (train t5b, 973d760c89..ecf04d985a), SUB G1Lead-3-6699. Every test line of the SUB passes with the compiler built from the landed tree ($JET_SCRATCH_ROOT/lanes/Main/integ/t5b/REPORT.md). ui build_generated_module_type_error PASS.",
-          "at": "2026-11-10T06:06:48.772Z"
-        }
-      ],
-      "refs": [],
-      "tags": [
-        "bug",
-        "diagnostics"
-      ],
-      "goals": [
-        "G6"
-      ],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-11-08T19:22:24.124Z",
-      "updated": "2026-11-10T06:07:31.728Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 1,
-      "completedAt": "2026-11-10T06:07:31.728Z"
-    },
-    {
       "id": "c028lxdd",
       "num": 6700,
       "title": "Core math completeness: correctly rounded results (CORE-MATH grade) and all of C23 math.h",
@@ -92812,87 +92761,6 @@
       "updated": "2026-11-13T05:08:48.024Z",
       "updatedBy": "Main",
       "criteriaLastN": 3
-    },
-    {
-      "id": "c0ccaugz",
-      "num": 6750,
-      "title": "jet run of a loose file walks and vets its whole folder tree, so one unrelated symlink refuses the run",
-      "body": "Owner hit it 2026-11-09: jet run tests/int_ring_witness.jet (a 10-line program that imports nothing) fails E2105 'can't securely read the sources under tests/' because the hostile-fixture symlink tests/compiled_workloads/fixtures/systems-file-index/hostile/links/absolute lives somewhere under the same folder. Compiler/JetCli/Source/Cli/Request.jet jet_cli_prepare_snapshot: a non-script entry outside a package is rooted at its directory (jet_cli_source_root) and jet_cli_walk_sources reads and vets every file below it (tens of thousands under tests/) before compiling. Only a #!/ script gets a one-file snapshot.",
-      "kind": "task",
-      "track": "epoch",
-      "epoch": "e5",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P1",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-10",
-          "by": "Main",
-          "text": "All 3 criteria met; c3 landed in ecf04d985a (train t5b)."
-        },
-        {
-          "at": "2026-11-10",
-          "by": "Main",
-          "text": "Reopened by Main: the 50ece3fe59 reach snapshot regressed three build_entry rows (c3). G6Lead owns the fix."
-        },
-        {
-          "at": "2026-11-10",
-          "by": "Main",
-          "text": "Every criterion is met: dev c057ea659d (train 2, t2c). Closed by Main."
-        },
-        {
-          "at": "2026-11-09",
-          "by": "Main",
-          "text": "BoardPlanner review 2026-11-09 (dev 6a06b917cb). Loose-file jet run is the scripting path: G4."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "A loose (non-package) entry's snapshot holds only the entry and the sources it reaches. An unrelated symlink or unreadable file elsewhere under its folder does not refuse the run, while a reached source that is a symlink is still refused with E2105. There is a cases row for each, plus a timing row showing that jet run tests/<loose file> no longer reads the whole tree.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "50ece3fe59: tests/cases/run_entry/loose_entry_snapshot_holds_only_reached_sources.case PASS. The Lander integrated t2c on e4096a0f3b; landed as dev e4096a0f3b..c057ea659d.",
-          "at": "2026-11-10T02:36:26.459Z"
-        },
-        {
-          "n": 2,
-          "text": "The three loose programs at the tests/ root (int_ring_witness.jet, decimal_perf_witness.jet, http_i9_resident_probe.jet) move to the corpus or Tools/perf folder that owns them, or are deleted if nothing runs them.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "2d8c91a5f1: the three loose programs at the tests/ root are deleted. The SUB check found no tests/*.jet (rc 0). The Lander integrated t2c on e4096a0f3b; landed as dev e4096a0f3b..c057ea659d.",
-          "at": "2026-11-10T02:36:28.197Z"
-        },
-        {
-          "n": 3,
-          "text": "tests/cases build_entry target_listed_second_source_is_compiled, library_listed_second_source_is_checked and generated_module_reads_entry_comptime_constant_and_sibling_function PASS again: the reach snapshot includes every source a loose entry build: lists, and the c1/c2 rows still PASS.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Landed on dev ecf04d985a (train t5b, 973d760c89..ecf04d985a), SUB G6Lead-6750c3. Every test line of the SUB passes with the compiler built from the landed tree ($JET_SCRATCH_ROOT/lanes/Main/integ/t5b/REPORT.md). build_entry/target_listed_second_source_is_compiled, library_listed_second_source_is_checked and generated_module_reads_entry_comptime_constant_and_sibling_function PASS.",
-          "at": "2026-11-10T06:06:21.906Z"
-        }
-      ],
-      "refs": [],
-      "tags": [],
-      "goals": [
-        "G4"
-      ],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-11-09T17:04:20.016Z",
-      "updated": "2026-11-10T06:07:28.526Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 3,
-      "completedAt": "2026-11-10T06:07:28.526Z"
     },
     {
       "id": "c0r9aivl",
@@ -194451,6 +194319,287 @@
       "draft": false,
       "status": "open",
       "created": "2026-11-13T04:02:24.146Z"
+    },
+    {
+      "id": "D-GUARD-LINT1",
+      "cardId": "c06he0ee",
+      "group": "language",
+      "title": "A guard table over one enum: a jet lint report, an error, retire L0302, an error for if tables only, a jet fmt rewrite, or a tidy error",
+      "situation": "L0302 is a warning. It fires when every head of an if table, or of an if/else-if chain, tests the same enum value with a pattern, and it suggests the subject table if value == { … } instead. D-IFGUARD1 ratified it as a recommendation. D-NO-WARNINGS1 then ruled that Jet has no warnings. Card #6326 c4 says L0302 becomes a jet fmt rewrite or a registered error, or is retired. The repository has 18 such sites outside the tests, and 11 of them end in else. A subject table over an enum must name every case and cannot keep an else (E0641). So an error leaves those 11 sites one rewrite: list every remaining case. This vote decides what L0302 becomes.",
+      "gist": "When every branch of an if chain tests the same enum, should Jet say nothing, suggest a table in a report, refuse the code, or rewrite it?",
+      "lesson": "An enum is a type with a fixed list of cases. Jet has two ways to branch on one. A chain of if tests checks the cases one at a time and may end in else. A subject table names the value once and must list every case. Jet suggests the table today with a warning, and Jet is dropping warnings.",
+      "explainer": "Words used here. A guard table is if { … } whose arms are true-or-false tests, tried in order. An if/else-if chain is the same thing written with else if. A subject table is if value == { … }: each arm is a case of value, and over an enum it must name every case, with no else (E0641). A jet lint report is a list that jet lint prints on request; it never fails jet check or jet build.",
+      "story": "Ana writes area(shape) as if shape == .Circle(r) { … } else if shape == .Square(s) { … } else { … }. Today jet check warns L0302 and runs her program. Under A, jet check says nothing and jet lint --dispatch lists the suggestion. Under B, jet check fails until she writes a table naming Circle, Square, Line and Dot. Under C, nothing is ever said. Under D, her chain is fine, but an if { … } table with no else would fail. Under E, jet fmt rewrites chains that have no else.\n\nUnder F, her program runs, but jet check fails until she writes the table or an #Allow with a reason.",
+      "inWild": "// Rust: an if-let chain over one enum gets no lint; a match must be exhaustive.\nif let Shape::Circle(r) = shape { 3 * r * r }\nelse if let Shape::Square(s) = shape { s * s }\nelse { 0 }",
+      "detail": "What this ballot decides. What happens to L0302 (jet.SameEnumGuardTable). It is the warning that suggests a subject table when every head of a guard table or chain tests the same enum value.\n\nThe two rules that meet here. D-IFGUARD1 says the subjectless table is not a lesser way to branch, and has L0302 recommend exhaustive subject dispatch. D-NO-WARNINGS1 says Jet has no warnings. A finding becomes a jet fmt rewrite, a tidy error, or a jet lint report. Card #6326 c4 names a fmt rewrite, a registered error, or retirement.\n\nWhat L0302 fires on today. On the seed, the probe chain/main.jet gets L0302 on all three of its functions. They are an if/else-if chain ending in else, a chain whose first head adds && r > 10, and an if { … } table with no else. A head joined with || is not a pattern test, so it does not fire. Option and result values do not fire: they are not closed enums the rule counts.\n\nWhat the subject table demands. Over an enum, if value == { … } names every case, and an else there is E0641. The probe subject/main.jet shows it. So the subject form of a chain that ends in else names every case the else stood for, and a head with && becomes a nested if.\n\nWhere it fires in the repository. A scan of base 98469bf0cf finds 17 chains and 1 if table outside the tests: 18 sites, 11 ending in else. Two of the others have a head with &&. The seed's check of the JetSema package reports exactly the 5 JetSema sites the scan lists. The enums include Type, Expr, Item and NodeKind, which have dozens of cases. Five test fixtures exist to show L0302.\n\nOne more warning, BranchArmTable, also fires on both chains in the probe. It has its own D-NO-WARNINGS1 cutover, and this ballot does not decide it.\n\nThe same program under each option. chain/main.jet's area function is the program every option's code shows.\n\nBeginner path. A beginner writes the chain they think in. Under A, C, D and E it runs and passes jet check. Under B, jet check fails, and the fix writes the table for them.\n\nExpert path. Under A an expert runs jet lint --dispatch to find chains worth turning into tables. Under B every chain over one enum is a table, so adding a case makes the compiler stop at each one.\n\nWhere F sits. D-NO-WARNINGS1 has three places: a jet fmt rewrite, a tidy error, and a jet lint report. A is the report and F is the tidy error. B is a real error that stops every command. Against A, F makes every chain a to-do item that jet check fails on, so beginners see it too. Against B, F never stops jet run, and #Allow keeps a chain whose else is deliberate. F needs the tidy kind built for compiler diagnostics first.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Move the advice to a jet lint report",
+          "detail": "jet check, jet build and jet run say nothing about a guard table or chain over one enum. jet lint --dispatch <file> lists each one with the subject table it suggests, and fails only when --max is given. This is the place D-NO-WARNINGS1 gives advice that is not about wrong code. No source site changes.",
+          "technical": "L0302 keeps its code, name and texts and leaves the diagnostic stream: sema records the finding for the lint host instead of pushing a warning. jet lint gains a --dispatch category beside --a11y and --complexity. The five L0302 test fixtures become jet lint --dispatch snapshots. The D-IFGUARD1 sentence in syntax-decisions.md names the report. The 18 sites stay as written.",
+          "code": "area: fn(shape: Shape) -> Int {\n    result := 0\n    if shape == .Circle(r) {\n        result = 3 * r * r\n    } else if shape == .Square(s) {\n        result = s * s\n    } else {\n        result = 0\n    }\n    result\n}\n// jet check: ok. jet lint --dispatch: one table suggestion."
+        },
+        {
+          "key": "B",
+          "name": "Make it an error, and name every case",
+          "detail": "A guard table or chain whose every head opens with a pattern test of one enum value is the error E0644 in every command. Its fix rewrites it as if value == { … } naming every case. An else's body goes to the cases it stood for. A head with && becomes a nested if in its case. Adding a case to the enum then stops the compiler at every such site.",
+          "technical": "Register E0644 (jet.GuardTableNeedsSubject) with what, why, fix and a SourceEdit fix that writes the cases, as E0641's does, and retire L0302. Sema reports it through sema_error. Rewrite the 18 sites: 11 name every case their else stood for, over Type, Expr, Item, NodeKind and smaller enums, and 2 move a && condition into a nested if. The five fixtures become E0644 error snapshots.",
+          "code": "area: fn(shape: Shape) -> Int {\n    if shape == {\n        .Circle(r) -> 3 * r * r\n        .Square(s) -> s * s\n        .Line | .Dot -> 0\n    }\n}\n// the chain form is refused with E0644"
+        },
+        {
+          "key": "C",
+          "name": "Retire L0302",
+          "detail": "Nothing is ever said about a guard table or chain over one enum. A chain, an if table and a subject table are equal choices, and only the subject table checks that every case is named. No source site changes.",
+          "technical": "L0302 becomes a Retired registry row that names this decision, and its sema check is deleted. The 18 test, lint-policy and spec files that name L0302 or same_enum_guard_table are deleted or move to another lint. The D-IFGUARD1 sentence about L0302 is removed.",
+          "code": "area: fn(shape: Shape) -> Int {\n    result := 0\n    if shape == .Circle(r) {\n        result = 3 * r * r\n    } else if shape == .Square(s) {\n        result = s * s\n    } else {\n        result = 0\n    }\n    result\n}\n// no finding anywhere"
+        },
+        {
+          "key": "D",
+          "name": "An error only for an if { } table with no else",
+          "detail": "if { … } with no else whose every head tests one enum is the error E0644, with B's fix. if/else-if chains and tables with an else stay legal and silent. The error catches a table that quietly does nothing for the cases it leaves out.",
+          "technical": "B's E0644, raised only for a subjectless table with no else arm; L0302 retires. No source site changes: the one if table outside the tests has an else. The five fixtures become E0644 snapshots, and the rest of L0302's references go as in C.",
+          "code": "area: fn(shape: Shape) -> Int {\n    result := 0\n    if shape == .Circle(r) {\n        result = 3 * r * r\n    } else if shape == .Square(s) {\n        result = s * s\n    } else {\n        result = 0\n    }\n    result\n}\n// legal; if { shape == .Square(s) -> … } alone is E0644"
+        },
+        {
+          "key": "E",
+          "name": "jet fmt rewrites a chain with no else",
+          "detail": "jet fmt turns a chain or if table over one enum that has no else and no && into a subject table, adding the cases it leaves out with an empty body. A chain that ends in else, or whose head adds &&, stays legal as written. Nothing is reported.",
+          "technical": "jet fmt reads the syntax only, so it cannot know which cases an enum has. This rewrite needs the checked program to list them, which makes it a jet fix edit that fmt invokes, not the plain formatter rewrite D-NO-WARNINGS1 describes. L0302 retires. 5 source sites are rewritten; the 11 ending in else and the 2 with && stay.",
+          "code": "area: fn(shape: Shape) -> Int {\n    result := 0\n    if shape == .Circle(r) {\n        result = 3 * r * r\n    } else if shape == .Square(s) {\n        result = s * s\n    } else {\n        result = 0\n    }\n    result\n}\n// has else: jet fmt leaves it as written"
+        },
+        {
+          "key": "F",
+          "name": "A tidy error",
+          "detail": "L0302 becomes a tidy error, D-NO-WARNINGS1's middle place. jet run, jet dev and jet test never stop for it. jet check and jet build list it with its fix and fail. #Allow(jet.SameEnumGuardTable, \"reason\") keeps one chain as written. Each of the 18 sites is either rewritten as a table naming every case or carries an #Allow with its reason.",
+          "technical": "No tidy kind exists in Compiler/Prelude/Diagnostics.jet today. Only package lints raised through meta.report have a Tidy tier. F builds the tidy kind for compiler diagnostics. It shows as an error in the editor and as kind tidy in JSON. Only jet check and jet build list it and fail. D-NO-WARNINGS1 already needs that mechanism for its other L codes, so the cost is shared. Each of the 18 sites then gets an #Allow or the rewrite.",
+          "code": "area: fn(shape: Shape) -> Int {\n    result := 0\n    if shape == .Circle(r) {\n        result = 3 * r * r\n    } else if shape == .Square(s) {\n        result = s * s\n    } else {\n        result = 0\n    }\n    result\n}\n// jet run: runs. jet check: fails, listing L0302 with its fix"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "An if-let chain over one enum gets no lint. Only match must name every case, and match may use _.",
+          "code": "if let Shape::Circle(r) = shape { 3 * r * r } else { 0 }"
+        },
+        {
+          "lang": "Swift",
+          "note": "An if case chain is legal and silent. A switch over an enum must be exhaustive, and default is allowed.",
+          "code": "if case .circle(let r) = shape { return 3 * r * r } else { return 0 }"
+        },
+        {
+          "lang": "Kotlin",
+          "note": "An if chain with is checks is legal. A when used as a value over a sealed class must be exhaustive.",
+          "code": "if (shape is Circle) 3 * shape.r * shape.r else 0"
+        },
+        {
+          "lang": "Jet (D-NO-WARNINGS1 places)",
+          "note": "D-NO-WARNINGS1 gives advice three homes. A uses the report, B a plain error, F a tidy error. Only A leaves a beginner unaware, since she never runs jet lint --dispatch.",
+          "code": "// A: jet lint --dispatch lists it; run, check and build stay quiet\n// B: a plain error; jet run stops until it becomes a match\n// F: kind \"tidy\" in --json; run and dev run, check and build fail\n#Allow(jet.SameEnumGuardTable, \"big circles first, in this order\")\nif shape == .Circle(r) && r > 10 {\n    result = 1\n} else if shape == .Square(s) {\n    result = s * s\n}"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "L0302 is advice about how to write a correct program, and D-NO-WARNINGS1 already sends advice to jet lint reports. A keeps the advice for anyone who asks, fails no build, and changes no source line. An error would fall hardest where the chain is the clearer code.",
+        "gains": [
+          "No source line changes, and no build fails for a style of branching D-IFGUARD1 ratified as equal.",
+          "The advice stays available to an author who wants every enum branch to be a table.",
+          "It follows D-NO-WARNINGS1's own rule for advice."
+        ],
+        "losses": [
+          {
+            "loss": "A chain ending in else still hides a case added to the enum later.",
+            "mitigation": "jet lint --dispatch lists every such chain, and a team that wants them gone can run it with --max in CI."
+          },
+          {
+            "loss": "jet lint gains one more category to build and document.",
+            "mitigation": "It reuses the existing lint host beside --a11y and --complexity, and the finding's texts already exist."
+          },
+          {
+            "loss": "A beginner never runs jet lint --dispatch, so for a beginner A behaves the same as C: the advice is never seen.",
+            "mitigation": "Their chain is still correct code. A subject table is the form the guide teaches, and jet lint --dispatch is there for anyone who wants every chain listed."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Eleven sites would list every case of enums with dozens of cases to replace one else, and the two && heads become nested ifs. A Bool helper such as shape.is_circle() still escapes the rule."
+          },
+          {
+            "key": "C",
+            "reason": "C drops advice D-IFGUARD1 chose to give, when D-NO-WARNINGS1 already has a place for it at no cost to builds."
+          },
+          {
+            "key": "D",
+            "reason": "D is an error for a form no source uses, and it is silent on the chains where a missing case most often hides."
+          },
+          {
+            "key": "E",
+            "reason": "jet fmt cannot list an enum's cases without the checker, and E leaves the 11 else-ended chains, the riskiest ones, untouched."
+          },
+          {
+            "key": "F",
+            "reason": "A chain with an else is correct code, so F fails jet check on code that is not wrong. 18 sites then carry an #Allow or name every case. F also waits on the tidy kind, which does not exist yet."
+          }
+        ],
+        "tradeoff": "Chains over one enum stay legal and silent in builds, in exchange for no forced rewrites and the advice kept on request."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: Main. Main checked the claims against dev code and the seed, and added the missing tidy-error option F with its true cost. A states its loss: a beginner never runs jet lint --dispatch."
+      },
+      "checkInstructions": "The scanner is chainscan.awk in $JET_SCRATCH_ROOT/lanes/Main/ballots/probes/D-GUARD-LINT1. In a checkout of 98469bf0cf, run git ls-files -z -- \"*.jet\" | xargs -0 awk -f chainscan.awk. It prints 17 if/else-if chains, and 10 of them show else=1. None is under tests.\n\nThe one if { } table outside the tests is Compiler/JetIR/Source/BuildRoutes.jet:1374, and it ends in else. That makes 18 sites, 11 ending in else. The chains whose first head adds && are X64Select.jet:2615 in JetIR and Web/Select.jet:1404 in JetWeb.\n\nThe scan agrees with the compiler where both ran. The seed (b14) jet check of Compiler/JetSema/Source/Sema/Statements.jet checks the whole JetSema package. It reports SameEnumGuardTable at exactly the 5 JetSema lines the scan lists.\n\nCount the files that name the lint with git grep -l -e L0302 -e same_enum_guard_table -e SameEnumGuardTable 98469bf0cf. Leave out Docs/site, Docs/audits, Docs/research and Tools/tower. It lists 23 files. Five are the registry pair, the census, the emitter in Statements.jet and a stale agent-eval facts file. The other 18 are tests, lint-policy examples and the spec.\n\nThe probes show what fires on the seed. jet check chain/main.jet reports SameEnumGuardTable at lines 11, 24 and 35. Those are the heads in area, big_area and side, and the check ends ok with warnings. jet run chain/main.jet prints 9, 363 and 1.\n\njet check subject/main.jet is refused with E0641. Its fix reads: Name the cases instead: `.Line | .Dot ->`. jet run table/main.jet prints 9, then 0, and jet check table/main.jet finds no problems.\n\nNo tidy kind exists for compiler diagnostics. git grep -n -w Tidy 98469bf0cf -- Compiler/Prelude/Diagnostics.jet finds nothing. The only Tidy tier is a package lint's finding, raised through meta.report (Compiler/JetSema/Source/Sema/Calls/Build.jet).\n\nValidate this payload with Tools/agent/ballots/Validate.jet.",
+      "surface": {
+        "gist": "When every branch of an if chain tests one enum, should Jet report it, refuse it, drop it, or rewrite it?",
+        "lesson": "An enum has a fixed list of cases. A chain of if tests checks some cases and may end in else. A subject table names the value once and must list every case. Jet suggests the table with a warning, and Jet is dropping warnings.",
+        "trio": {
+          "current": {
+            "note": "jet check warns L0302 and suggests a subject table.",
+            "code": "if shape == .Circle(r) {\n    result = 3 * r * r\n} else if shape == .Square(s) {\n    result = s * s\n} else {\n    result = 0\n}"
+          },
+          "wild": {
+            "lang": "Rust",
+            "note": "An if-let chain gets no lint; only match is exhaustive.",
+            "code": "if let Shape::Circle(r) = shape { 3 * r * r }\nelse if let Shape::Square(s) = shape { s * s }\nelse { 0 }"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "A jet lint report",
+            "gist": "Builds say nothing; jet lint --dispatch lists the suggestion.",
+            "gains": [
+              "No code changes.",
+              "The advice stays on request."
+            ],
+            "losses": [
+              "A later enum case can hide behind else.",
+              "Beginners never see it, as in C."
+            ],
+            "proposed": {
+              "code": "// jet check: ok\n// jet lint --dispatch: use if shape == { … }"
+            }
+          },
+          {
+            "key": "B",
+            "name": "An error",
+            "gist": "The chain is refused until it is a table naming every case.",
+            "gains": [
+              "Every new enum case stops the compiler.",
+              "The fix writes the table."
+            ],
+            "losses": [
+              "18 sites change; 11 list every case."
+            ],
+            "proposed": {
+              "code": "if shape == {\n    .Circle(r) -> 3 * r * r\n    .Square(s) -> s * s\n    .Line | .Dot -> 0\n}"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Retire it",
+            "gist": "Nothing is ever said.",
+            "gains": [
+              "Simplest; no code changes."
+            ],
+            "losses": [
+              "The advice is gone."
+            ],
+            "proposed": {
+              "code": "// chain stays, no finding anywhere"
+            }
+          },
+          {
+            "key": "D",
+            "name": "Error for if { } only",
+            "gist": "Only an if { } table with no else is refused.",
+            "gains": [
+              "No source site changes."
+            ],
+            "losses": [
+              "Chains with else stay silent."
+            ],
+            "proposed": {
+              "code": "if {\n    shape == .Square(s) -> result = s\n}\n// E0644"
+            }
+          },
+          {
+            "key": "E",
+            "name": "jet fmt rewrites",
+            "gist": "jet fmt turns chains with no else into tables.",
+            "gains": [
+              "Automatic; nothing to read."
+            ],
+            "losses": [
+              "fmt needs the checker to list cases.",
+              "Chains with else stay."
+            ],
+            "proposed": {
+              "code": "// has else: left as written"
+            }
+          },
+          {
+            "key": "F",
+            "name": "A tidy error",
+            "gist": "jet run runs it; jet check fails until it is a table or has #Allow.",
+            "gains": [
+              "Every chain is on the to-do list.",
+              "jet run never stops for it."
+            ],
+            "losses": [
+              "Needs the tidy kind built first.",
+              "18 sites get #Allow or a table."
+            ],
+            "proposed": {
+              "code": "// jet run: ok\n// jet check: L0302, use if shape == { … }"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "It is advice about correct code, and D-NO-WARNINGS1 sends advice to jet lint. Nothing breaks and the suggestion stays on request.",
+          "gains": [
+            "No code changes.",
+            "Follows D-NO-WARNINGS1's rule."
+          ],
+          "losses": [
+            {
+              "loss": "A later enum case can hide behind else.",
+              "mitigation": "jet lint --dispatch --max in CI lists them all."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Eleven sites list dozens of cases to replace one else."
+            },
+            {
+              "key": "C",
+              "reason": "Drops advice that has a free place to go."
+            },
+            {
+              "key": "D",
+              "reason": "Refuses a form no source uses."
+            },
+            {
+              "key": "E",
+              "reason": "fmt can't list cases, and else chains stay."
+            },
+            {
+              "key": "F",
+              "reason": "Fails jet check on correct code, and waits on the tidy kind."
+            }
+          ],
+          "tradeoff": "Chains stay legal in builds, for no forced rewrites."
+        }
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-13T06:10:18.821Z"
     }
   ],
   "questions": [
@@ -197718,6 +197867,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-13T06:10:18.821Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-GUARD-LINT1",
+      "note": "A guard table over one enum: a jet lint report, an error, retire L0302, an error for if tables only, a jet fmt rewrite, or a tidy error"
+    },
     {
       "at": "2026-11-13T06:05:42.067Z",
       "by": "Main",

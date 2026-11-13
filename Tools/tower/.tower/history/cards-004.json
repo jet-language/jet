@@ -96423,6 +96423,142 @@
       "completedAt": "2026-11-10T05:07:28.995Z",
       "questions": [],
       "retiredAt": "2026-11-13T05:08:48.170Z"
+    },
+    {
+      "id": "c0eb35hy",
+      "num": 6699,
+      "title": "Diagnostics from b.generate modules render against the entry file at generated offsets",
+      "body": "Found by MetaLead (2026-11-08). A diagnostic in a module produced by b.generate in a build.jet is rendered with the entry file path and source text at the generated module offsets, so the caret and snippet point at unrelated entry-file lines. Repro: $JET_SCRATCH_ROOT/lanes/MetaLead/p9, jet build run.jet (copy the repro into a fixture). Expected: the diagnostic names the generated module (a stable virtual path) and shows its generated text, with the generating build.jet call as a note.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": "a UI snapshot case: a build.jet that generates a module with a type error renders the error against the generated module path and text, with a note at the b.generate call",
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-10",
+          "by": "Main",
+          "text": "c1 met; G1Lead-3-6699 landed in ecf04d985a (train t5b)."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A diagnostic in a module made by b.generate names the generated module (a stable virtual path) and shows its generated text, with the b.generate call in build.jet as a note; a fixture copied from the MetaLead p9 repro has a UI snapshot.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev ecf04d985a (train t5b, 973d760c89..ecf04d985a), SUB G1Lead-3-6699. Every test line of the SUB passes with the compiler built from the landed tree ($JET_SCRATCH_ROOT/lanes/Main/integ/t5b/REPORT.md). ui build_generated_module_type_error PASS.",
+          "at": "2026-11-10T06:06:48.772Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "bug",
+        "diagnostics"
+      ],
+      "goals": [
+        "G6"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-08T19:22:24.124Z",
+      "updated": "2026-11-10T06:07:31.728Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1,
+      "completedAt": "2026-11-10T06:07:31.728Z",
+      "questions": [],
+      "retiredAt": "2026-11-13T06:10:18.969Z"
+    },
+    {
+      "id": "c0ccaugz",
+      "num": 6750,
+      "title": "jet run of a loose file walks and vets its whole folder tree, so one unrelated symlink refuses the run",
+      "body": "Owner hit it 2026-11-09: jet run tests/int_ring_witness.jet (a 10-line program that imports nothing) fails E2105 'can't securely read the sources under tests/' because the hostile-fixture symlink tests/compiled_workloads/fixtures/systems-file-index/hostile/links/absolute lives somewhere under the same folder. Compiler/JetCli/Source/Cli/Request.jet jet_cli_prepare_snapshot: a non-script entry outside a package is rooted at its directory (jet_cli_source_root) and jet_cli_walk_sources reads and vets every file below it (tens of thousands under tests/) before compiling. Only a #!/ script gets a one-file snapshot.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e5",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-10",
+          "by": "Main",
+          "text": "All 3 criteria met; c3 landed in ecf04d985a (train t5b)."
+        },
+        {
+          "at": "2026-11-10",
+          "by": "Main",
+          "text": "Reopened by Main: the 50ece3fe59 reach snapshot regressed three build_entry rows (c3). G6Lead owns the fix."
+        },
+        {
+          "at": "2026-11-10",
+          "by": "Main",
+          "text": "Every criterion is met: dev c057ea659d (train 2, t2c). Closed by Main."
+        },
+        {
+          "at": "2026-11-09",
+          "by": "Main",
+          "text": "BoardPlanner review 2026-11-09 (dev 6a06b917cb). Loose-file jet run is the scripting path: G4."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A loose (non-package) entry's snapshot holds only the entry and the sources it reaches. An unrelated symlink or unreadable file elsewhere under its folder does not refuse the run, while a reached source that is a symlink is still refused with E2105. There is a cases row for each, plus a timing row showing that jet run tests/<loose file> no longer reads the whole tree.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "50ece3fe59: tests/cases/run_entry/loose_entry_snapshot_holds_only_reached_sources.case PASS. The Lander integrated t2c on e4096a0f3b; landed as dev e4096a0f3b..c057ea659d.",
+          "at": "2026-11-10T02:36:26.459Z"
+        },
+        {
+          "n": 2,
+          "text": "The three loose programs at the tests/ root (int_ring_witness.jet, decimal_perf_witness.jet, http_i9_resident_probe.jet) move to the corpus or Tools/perf folder that owns them, or are deleted if nothing runs them.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "2d8c91a5f1: the three loose programs at the tests/ root are deleted. The SUB check found no tests/*.jet (rc 0). The Lander integrated t2c on e4096a0f3b; landed as dev e4096a0f3b..c057ea659d.",
+          "at": "2026-11-10T02:36:28.197Z"
+        },
+        {
+          "n": 3,
+          "text": "tests/cases build_entry target_listed_second_source_is_compiled, library_listed_second_source_is_checked and generated_module_reads_entry_comptime_constant_and_sibling_function PASS again: the reach snapshot includes every source a loose entry build: lists, and the c1/c2 rows still PASS.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev ecf04d985a (train t5b, 973d760c89..ecf04d985a), SUB G6Lead-6750c3. Every test line of the SUB passes with the compiler built from the landed tree ($JET_SCRATCH_ROOT/lanes/Main/integ/t5b/REPORT.md). build_entry/target_listed_second_source_is_compiled, library_listed_second_source_is_checked and generated_module_reads_entry_comptime_constant_and_sibling_function PASS.",
+          "at": "2026-11-10T06:06:21.906Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G4"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-09T17:04:20.016Z",
+      "updated": "2026-11-10T06:07:28.526Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 3,
+      "completedAt": "2026-11-10T06:07:28.526Z",
+      "questions": [],
+      "retiredAt": "2026-11-13T06:10:18.969Z"
     }
   ]
 }
