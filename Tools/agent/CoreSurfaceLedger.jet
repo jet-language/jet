@@ -1118,13 +1118,13 @@ record_name: fn(table: &[String: [String]], key: String, name: String) {
 
 BUILTIN_ROW: Regex{"receiver: BuiltinMethodReceiver\.([A-Za-z]+), name: \x22([^\x22]+)\x22"}
 COLLECTION_ROW: Regex{"receivers: CollectionReceivers\.([A-Za-z]+), name: \x22([^\x22]+)\x22.*status: CollectionStatus\.([A-Za-z]+)"}
-STATIC_ROW: Regex{"\{{module_name: \x22([^\x22]*)\x22, owner: \x22([^\x22]+)\x22, method: \x22([^\x22]+)\x22"}
+STATIC_ROW: Regex{"\x7Bmodule_name: \x22([^\x22]*)\x22, owner: \x22([^\x22]+)\x22, method: \x22([^\x22]+)\x22"}
 CONVERSION_ROW: Regex{"\{{method: \x22([^\x22]+)\x22, source: \x22[^\x22]+\x22\}}"}
 SEMA_LITERAL: Regex{"\x22([A-Za-z_][A-Za-z0-9_]*)\x22"}
 INVENTORY_ROW: Regex{"^(fixed_sig|receivers|methods)\s+(\S+)\s+\{{\s*([^{{}}]*?)\s*\}}$"}
 RECEIVER_SOURCE: Regex{"^(builtin|collection|static|numeric|type):([A-Za-z_][A-Za-z0-9_.]*)$"}
-IMPL_HEADER: Regex{"^(?:impl\s+([A-Za-z_][A-Za-z0-9_]*)(?:<[^>]*>)?(?:\.[A-Za-z_.]+)?|([A-Za-z_][A-Za-z0-9_]*):\s*struct(?:<[^>]*>)?)\s*\{{"}
-METHOD_HEADER: Regex{"^\s+([A-Za-z_][A-Za-z0-9_]*):\s*fn\b.*\{{"}
+IMPL_HEADER: Regex{"^(?:impl\s+([A-Za-z_][A-Za-z0-9_]*)(?:<[^>]*>)?(?:\.[A-Za-z_.]+)?|([A-Za-z_][A-Za-z0-9_]*):\s*struct(?:<[^>]*>)?)\s*\x7B"}
+METHOD_HEADER: Regex{"^\s+([A-Za-z_][A-Za-z0-9_]*):\s*fn\b.*\x7B"}
 
 walk_sema: fn(root: String, directory: String, spelled: &[String: Bool]) -[FS]> Int LedgerError! {
     listed: files.list_dir("{root}/{directory}") ?? return Err(fail("cannot list {directory}: {err}"))
