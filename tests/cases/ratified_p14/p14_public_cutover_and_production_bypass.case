@@ -1,0 +1,41 @@
+# P14 public cutover (#4284 c30): the public product uses only the selected
+# dimension and refinement contracts. One consumer declares an open user
+# dimension and a derived family beside the prelude SI families, proves an
+# index with a `distinct Int(1..6)` refinement, and writes `Int(0..100)` in
+# field, parameter and result positions. It prints the same values at every
+# optimization level. The values come from unit arithmetic, the fallible range
+# conversions and the proved index, so bypassing any of them fails the witness.
+# The retired `#Invariant` marker is an unknown rule (E0927) with no teaching
+# text, `jet fix` has no rule that rewrites it, and `jet explain` doesn't
+# present it as live syntax: the syntax dictionary has no row for it.
+fixture: p14_public_cutover_and_production_bypass.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+step o0: jet run --optimize=none main.jet
+exit: 0
+stdout: = p14_public_cutover_and_production_bypass.stdout.expected
+stderr: empty
+step o1: jet run --optimize=basic main.jet
+exit: 0
+stdout: = p14_public_cutover_and_production_bypass.stdout.expected
+stderr: empty
+step o2: jet run --optimize=full main.jet
+exit: 0
+stdout: = p14_public_cutover_and_production_bypass.stdout.expected
+stderr: empty
+step invariant: jet check invariant/main.jet
+exit: 1
+stderr: ~ "`#Invariant` isn't a known applied rule" # the retired marker is unknown
+stderr: ~ "--> main.jet:1:2" # located at the marker name
+stderr: ~ "jet-lang.dev/e/E0927" # the unknown-marker code
+stderr: !~ "distinct Int(" # no teaching diagnostic for the retired marker
+step fix: jet fix invariant/main.jet --dry-run
+exit: 0
+stdout: empty
+stderr: ~ "no changes made" # no fix rule rewrites the retired marker
+step explain: jet explain '#Invariant'
+exit: 1
+stdout+stderr: ~ "`#Invariant` is not registered Jet syntax" # the dictionary has no row for it
+stdout+stderr: !~ "The marker `#Invariant`" # no essay presents it as live

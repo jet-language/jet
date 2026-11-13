@@ -46,6 +46,13 @@ use {
         found: jet_cli_syntax_lookup(jet_cli_syntax_display(row)) ?? panic("every dictionary display is searchable")
         if JET_CLI_SYNTAX_ROWS[found].token != row.token -> panic("dictionary lookup precedence")
     }
+    // A retired marker has no dictionary row, so `jet explain` never presents
+    // it as live syntax.
+    loop retired in ([String]{"#Invariant", "#InlineAlways", "#Min", "#Max", "#Ref", "#Tag"}) {
+        if jet_cli_syntax_lookup(retired) == .Val(index) {
+            if JET_CLI_SYNTAX_ROWS[index].kind == JetCLISyntaxKind.Marker -> panic("{retired} is retired, so the dictionary has no marker row for it")
+        }
+    }
 }
 
 // Whether `text` names a decision (`D-` and a capital letter at the start of a
