@@ -17,7 +17,7 @@ write_locked: fn(repo: String, entry: Entry) -[FS]> Bool IOError! {
 
 // The read parameters are passed to the call and also captured by its lambda.
 write_entry: fn(repo: String, entry: Entry) IOError! -[FS]> {
-    _: with_lock<Bool>(repo, entry.name, () -> write_locked(repo, entry))
+    _: with_lock<Bool>(repo, entry.name, fn() { write_locked(repo, entry) })
 }
 
 run: fn() {

@@ -327,7 +327,7 @@ build_execute_actions: fn(plan: HermeticBuildPlan, ids: [Int], project_root: Str
 // run_all runs them under their wall-clock limits.
 build_run_actions: fn(runs: [BuildActionRun], jobs: Int) -[FS, Env, Exec, Time, Time.Wait]> [Result<ProcessReceipt, BuildExecutionError>] Never! {
     results := [Result<ProcessReceipt, BuildExecutionError>]{}
-    if !runs.any(run -> run.cpu_limit_ms > 0) {
+    if !runs.any(fn(run) { run.cpu_limit_ms > 0 }) {
         specs: loop run in runs -> run.command.spec
         if process.run_all(specs, jobs) == {
             .Ok(receipts) -> loop index in 0..<runs.len() {

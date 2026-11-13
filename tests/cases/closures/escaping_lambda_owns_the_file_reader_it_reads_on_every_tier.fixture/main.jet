@@ -6,7 +6,7 @@ use files: core.files
 // through the lambda's own reader.
 line_reader: fn(path: String) -[FS.Read]> fn() -[FS.Read]> String {
     reader := files.open(path) ?? panic("open failed")
-    () -> {
+    fn() {
         if reader.read_line() == {
             .Ok(line) -> line ?? "end"
             .Err(_) -> "read failed"

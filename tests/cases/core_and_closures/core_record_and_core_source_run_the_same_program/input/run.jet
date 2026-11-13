@@ -22,7 +22,7 @@ unit: fn() {}
 run: fn() {
     points := [Point{x: 3, name: "c"}, Point{x: 1, name: "a"}, Point{x: 2, name: "b"}]
     seen := ""
-    points.sort_by((p: Point) -> point_key(p, seen)) ?? {
+    points.sort_by(fn(p: Point) { point_key(p, seen) }) ?? {
         print("unexpected {err.code}")
         unit()
     }
@@ -31,7 +31,7 @@ run: fn() {
     stopped := [Point{x: 5, name: "e"}, Point{x: -1, name: "z"}, Point{x: 4, name: "d"}]
     tried := ""
     recovered := false
-    stopped.sort_by((p: Point) -> point_key(p, tried)) ?? {
+    stopped.sort_by(fn(p: Point) { point_key(p, tried) }) ?? {
         print("{err.code}:{err.message}")
         recovered = true
         unit()

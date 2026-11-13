@@ -46,11 +46,11 @@ NarByteSource: struct {
     priv next: fn(Int) -[IO, FS, Net, Env, Time.Wait]> [U8] IOError!
 
     file: fn(&&reader: FileReader) -> NarByteSource Never! {
-        NarByteSource{next: (limit: Int) -> reader.read(limit)}
+        NarByteSource{next: fn(limit: Int) { reader.read(limit) }}
     }
 
     zstd: fn(&&reader: ZstdReader) -> NarByteSource Never! {
-        NarByteSource{next: (limit: Int) -> {
+        NarByteSource{next: fn(limit: Int) {
             if reader.read(limit) == {
                 .Ok(bytes) -> Ok(bytes)
                 .Err(error) -> Err(IOError.InvalidInput(IOContext{operation: .Read, resource: None, os_code: None, cause: Val("zstd stream is corrupt: {error}")}))

@@ -3142,7 +3142,7 @@ exit_code_rows: fn(source: String) -> [ExitCode] GeneratorError! {
         colon: line.find(": ")
         name: if colon > 0 -> byte_slice(line, 0, colon) else -> ""
         value: if colon > 0 -> byte_tail(line, colon + 2) else -> ""
-        if !name.starts_with("EXIT_") || leading_name(name) != name || value == "" || !value.bytes().all(byte -> is_digit_byte(Int.from_u8(byte))) -> return Err(generator_fail("{EXIT_CODES_SOURCE_PATH}: unsupported line `{line}`"))
+        if !name.starts_with("EXIT_") || leading_name(name) != name || value == "" || !value.bytes().all(fn(byte) { is_digit_byte(Int.from_u8(byte)) }) -> return Err(generator_fail("{EXIT_CODES_SOURCE_PATH}: unsupported line `{line}`"))
         rows.push(ExitCode{name: name, value: value, doc: doc.copy()})
         doc = [String]{}
     }
@@ -3408,7 +3408,7 @@ process_grant_rows: fn(source: String) -> [ProcessGrant] GeneratorError! {
         if row.program -> programs += 1
     }
     if programs != 1 -> return Err(generator_fail("{PROCESS_GRANTS_SOURCE_PATH}: exactly one AUTHORITY_PROCESS_GRANTS row grants a program"))
-    if !rows.any(row -> row.workspace) -> return Err(generator_fail("{PROCESS_GRANTS_SOURCE_PATH}: no AUTHORITY_PROCESS_GRANTS row is a workspace right"))
+    if !rows.any(fn(row) { row.workspace }) -> return Err(generator_fail("{PROCESS_GRANTS_SOURCE_PATH}: no AUTHORITY_PROCESS_GRANTS row is a workspace right"))
     Ok(rows)
 }
 

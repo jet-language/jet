@@ -220,7 +220,7 @@ jet_cli_inspect_choices_host: fn(job: JetCLIInspectJob, source: String) -> JetDr
                 jet_cli_inline_choices(decisions.report.inlines, choices)
             }
             // A closure comparator: a compiler older than JetIR's named-comparator fix frees a named one's result twice.
-            choices.sort_by((left: JetCLIChoice, right: JetCLIChoice) -> jet_cli_choice_order(left, right))
+            choices.sort_by(fn(left: JetCLIChoice, right: JetCLIChoice) { jet_cli_choice_order(left, right) })
             report: jet_cli_choices_report(choices, job.scope, job.file, job.profile, job.json)
             jet_cli_inspect_finish(job, JetDriverVerbOutput{stdout: report, stderr: "", exit_code: JET_DRIVER_EXIT_OK})
         }
