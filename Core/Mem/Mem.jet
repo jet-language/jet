@@ -285,7 +285,7 @@ __allocator_handler: fn<A: Allocator>(allocator: &A) -> fn(Int, Int, Int) -> Int
     #Unsafe("the allocator is a place the `#Context(allocator:)` block keeps in place until it ends") {
         address = mem.address_of(allocator)
     }
-    (op: Int, x: Int, y: Int) -> {
+    fn(op: Int, x: Int, y: Int) {
         answer := 0
         #Unsafe("the runtime calls this only inside the block, while the allocator at `address` is live, in place and borrowed by nothing else") {
             #Policy(sentries: .Off) {

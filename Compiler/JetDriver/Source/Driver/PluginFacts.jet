@@ -35,19 +35,19 @@ jet_driver_plugin_facts: fn(request: JetDriverCompileRequest, inputs: [SemaRegis
 // The literal artifacts of every `.load("…")` call in the file, once each.
 jet_driver_plugin_artifacts: fn(artifacts: &[String], program: Program) {
     loop item in program.items {
-        if item == .Func(function) -> ast_visit_body(function.body, (expression: Expr) -> jet_driver_note_plugin_artifact(artifacts, expression), false)
-        if item == .Test(test) -> ast_visit_body(test.body, (expression: Expr) -> jet_driver_note_plugin_artifact(artifacts, expression), false)
+        if item == .Func(function) -> ast_visit_body(function.body, fn(expression: Expr) { jet_driver_note_plugin_artifact(artifacts, expression) }, false)
+        if item == .Test(test) -> ast_visit_body(test.body, fn(expression: Expr) { jet_driver_note_plugin_artifact(artifacts, expression) }, false)
         if item == .Impl(block) {
-            loop method in block.methods -> ast_visit_body(method.body, (expression: Expr) -> jet_driver_note_plugin_artifact(artifacts, expression), false)
+            loop method in block.methods -> ast_visit_body(method.body, fn(expression: Expr) { jet_driver_note_plugin_artifact(artifacts, expression) }, false)
         }
         if item == .Struct(record) {
-            loop method in record.methods -> ast_visit_body(method.body, (expression: Expr) -> jet_driver_note_plugin_artifact(artifacts, expression), false)
+            loop method in record.methods -> ast_visit_body(method.body, fn(expression: Expr) { jet_driver_note_plugin_artifact(artifacts, expression) }, false)
         }
         if item == .Enum(choice) {
-            loop method in choice.methods -> ast_visit_body(method.body, (expression: Expr) -> jet_driver_note_plugin_artifact(artifacts, expression), false)
+            loop method in choice.methods -> ast_visit_body(method.body, fn(expression: Expr) { jet_driver_note_plugin_artifact(artifacts, expression) }, false)
         }
     }
-    ast_visit_body(program.script_body, (expression: Expr) -> jet_driver_note_plugin_artifact(artifacts, expression), false)
+    ast_visit_body(program.script_body, fn(expression: Expr) { jet_driver_note_plugin_artifact(artifacts, expression) }, false)
 }
 
 jet_driver_note_plugin_artifact: fn(artifacts: &[String], expression: Expr) {

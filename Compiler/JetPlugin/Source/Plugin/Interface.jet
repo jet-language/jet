@@ -37,7 +37,7 @@ jet_plugin_component_exports: fn(bytes: &&[U8]) -> [ComponentExportFact] WasmErr
         if func.ok != WASM_CT_NONE {
             tuple: plug_interface_result_tuple(c, func.ok)
             if tuple == .Val(fields) -> result_order = loop field in fields -> field.name
-            result = Val(tuple.map(fields -> Type.Tuple{fields: fields}) ?? plug_interface_type(c, func.ok))
+            result = Val(tuple.map(fn(fields) { Type.Tuple{fields: fields} }) ?? plug_interface_type(c, func.ok))
             if unsupported == "" && tuple == None -> unsupported = plug_interface_gap(c, func.ok)
         }
         exports.push(ComponentExportFact{name: export.name.replace("-", "_"), params: params, result: result, result_order: result_order, unsupported: unsupported})

@@ -60,9 +60,9 @@ returned: fn(reuser: &Reuser) -> [Int] {
 reader: fn(reuser: &Reuser) -> fn() -> Int {
     #Context(allocator: reuser) {
         built: squares(30)
-        if built.len() > 0 -> return () -> total(built)
+        if built.len() > 0 -> return fn() { total(built) }
     }
-    () -> 0
+    fn() { 0 }
 }
 
 // Fills the blocks the earlier blocks released with other values.

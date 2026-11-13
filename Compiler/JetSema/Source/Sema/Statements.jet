@@ -6084,7 +6084,7 @@ sema_stmt_uninit_fill_write: fn(statement: Stmt, index_name: String, index_mutab
     if statement == .Assign(target, op, _, value) {
         if op != None -> return None
         leaves := [Bool]{}
-        ast_visit_expr(value, (expression: Expr) -> sema_stmt_uninit_fill_note_exit(leaves, expression, index_mutable))
+        ast_visit_expr(value, fn(expression: Expr) { sema_stmt_uninit_fill_note_exit(leaves, expression, index_mutable) })
         if leaves.len() > 0 -> return None
         if target == .Index(base, index, _, _) && base == .Ident(root, _, _) && index == .Ident(name, _, _) {
             if name == index_name && root != index_name -> return Val(root)
