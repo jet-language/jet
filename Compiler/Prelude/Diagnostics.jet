@@ -8481,6 +8481,7 @@ ReservedRootShadowed: struct {
     impl Diagnostic {
         code: "E1002"
         stage: [.Load]
+        meaning: "A local module named after a reserved package root"
         no_fix: .Ambiguous
         what: fn(self) -> String { "A local module takes a reserved first-party or foreign root name." }
         why: fn(self) -> String { "`core`, `jet`, the first-party ring names, and the foreign-language roots name packages Jet provides, so a local module can't use them." }
@@ -8492,6 +8493,7 @@ IntegerOutOfRange: struct {
     impl Diagnostic {
         code: "E1003"
         stage: [.Sema, .Runtime]
+        meaning: "An integer value too wide for its destination type"
         what: fn(self) -> String { "Integer value is outside destination width" }
         why: fn(self) -> String { "The destination integer width cannot represent this exact value." }
         fix: fn(self) -> String { "Use a value that fits the destination width, or keep it as an exact `Int`." }
@@ -8501,6 +8503,7 @@ IntegerOutOfRange: struct {
 UnknownCoreItem: struct {
     impl Diagnostic {
         code: "E1004"
+        meaning: "An import of an item the core module doesn't declare"
         structured_fix: .SuggestedSourceEdit
         no_fix: None
         fix_safety: .NeedsReview
@@ -8513,6 +8516,7 @@ UnknownCoreItem: struct {
 InvalidOverflowOptIn: struct {
     impl Diagnostic {
         code: "E1005"
+        meaning: "An overflow opt-in around something other than one integer operation or narrowing conversion"
         what: fn(self) -> String { "Overflow opt-in not wrapping a single integer op or narrowing conversion" }
         why: fn(self) -> String { "An overflow opt-in decides what one integer operation, or one conversion to a narrower fixed width, gives when the result doesn't fit; around anything else it would change nothing." }
         fix: fn(self) -> String { "Apply the overflow opt-in to exactly one integer operation or narrowing conversion." }
@@ -8522,6 +8526,7 @@ InvalidOverflowOptIn: struct {
 RuntimeCeilingExceeded: struct {
     impl Diagnostic {
         code: "E1006"
+        meaning: "A core import or helper past the package's `runtime:` ceiling"
         fix_next: "Lower the core import or helper usage below the package `runtime:` ceiling."
         what: fn(self) -> String { "`use core.*` import or emitted helper exceeds package `runtime:` ceiling" }
         why: fn(self) -> String { "The package's `runtime:` ceiling limits which core runtime its code may use, and this import or helper needs more" }
@@ -8533,6 +8538,7 @@ InvalidBitWidth: struct {
     impl Diagnostic {
         code: "E1007"
         stage: [.Parse]
+        meaning: "A malformed bit width in a binary pattern hole"
         what: fn(self) -> String { "Malformed bit width in an `[U8]{{\"…\"}}` binary pattern hole — not `U<1..64>[be|le]` or `...`" }
         why: fn(self) -> String { "A binary pattern hole names how many bits it reads, from 1 to 64, with an optional byte order" }
         fix: fn(self) -> String { "Use a width `U<1..64>[be|le]` or the `...` hole form." }
@@ -8543,6 +8549,7 @@ InvalidEndianSuffix: struct {
     impl Diagnostic {
         code: "E1008"
         stage: [.Parse]
+        meaning: "A binary pattern read with a missing or misplaced byte-order suffix"
         no_fix: .Ambiguous
         what: fn(self) -> String { "Binary pattern read needs/misuses an endian suffix — multi-byte read without `be`/`le`, or `le`/`be` on a single-byte or non-byte-multiple read" }
         why: fn(self) -> String { "Byte order matters only for a read of several whole bytes, and there it must be written" }
@@ -8554,6 +8561,7 @@ MisplacedRestCapture: struct {
     impl Diagnostic {
         code: "E1009"
         stage: [.Parse]
+        meaning: "A binary pattern rest capture that isn't last"
         what: fn(self) -> String { "A `{{name:...}}` rest capture isn't the last part of a binary pattern" }
         why: fn(self) -> String { "A rest capture takes every remaining byte, so nothing can follow it" }
         fix: fn(self) -> String { "Move the binary rest capture to the final pattern position." }
@@ -8563,6 +8571,7 @@ MisplacedRestCapture: struct {
 BinaryPatternSubjectMismatch: struct {
     impl Diagnostic {
         code: "E1010"
+        meaning: "A binary pattern matched against a value that isn't `[U8]`"
         what: fn(self) -> String { "An `[U8]{{\"…\"}}` binary pattern matched against a subject that isn't `[U8]`" }
         why: fn(self) -> String { "A binary pattern reads bytes, so it can only match a `[U8]` value" }
         fix: fn(self) -> String { "Match the binary pattern against a `[U8]` subject." }
@@ -8572,6 +8581,7 @@ BinaryPatternSubjectMismatch: struct {
 UnalignedBinaryPattern: struct {
     impl Diagnostic {
         code: "E1011"
+        meaning: "Whole bytes in a binary pattern that don't start on a byte boundary"
         what: fn(self) -> String { "Fixed bytes or a rest capture in a binary pattern don't start on a byte boundary" }
         why: fn(self) -> String { "Fixed bytes and a rest capture are matched as whole bytes, so the bits before them must add up to whole bytes" }
         fix: fn(self) -> String { "Align the fixed bytes and rest capture to byte boundaries." }
@@ -8745,6 +8755,7 @@ HangarRootChanged: struct {
     impl Diagnostic {
         code: "E1320"
         stage: [.Jetpack]
+        meaning: "A hangar root changed between reading it and applying a mutation"
         no_fix: .Behavior
         what: fn(self) -> String { "An external hangar root changed between reading its etag and applying a requested mutation" }
         why: fn(self) -> String { "The mutation was planned against the root as it was read, and someone changed the root since then" }
@@ -8857,6 +8868,7 @@ UntrustedLifecycleHook: struct {
     impl Diagnostic {
         code: "E1329"
         stage: [.Jetpack]
+        meaning: "A lifecycle hook that isn't explicitly trusted"
         detail: true
         no_fix: .Ambiguous
         what: fn(self) -> String { "A lifecycle hook is not explicitly trusted" }
@@ -8931,6 +8943,7 @@ EnvironmentIntegrationConflict: struct {
     impl Diagnostic {
         code: "E1335"
         stage: [.Sema, .Jetpack]
+        meaning: "A conflicting, lossy or invalid environment integration or package handoff"
         detail: true
         no_fix: .Ambiguous
         what: fn(self) -> String { "An environment integration, package-generation provider fact, or executable lease handoff is conflicting, lossy, or invalid" }
@@ -8943,6 +8956,7 @@ ImageProjectionFailed: struct {
     impl Diagnostic {
         code: "E1336"
         stage: [.Jetpack]
+        meaning: "An environment image that can't project a service, package output or file"
         detail: true
         no_fix: .Ambiguous
         what: fn(self) -> String { "An environment image cannot project a service, verified package output, or extra file" }
@@ -9431,6 +9445,7 @@ PackageVersionConflict: struct {
     impl Diagnostic {
         code: "E1201"
         stage: [.Jet]
+        meaning: "Two versions of one package required at once"
         no_fix: .Behavior
         fix_next: "Resolve one compatible version for the package."
         what: fn(self) -> String { "Two versions of one package required" }
@@ -9443,6 +9458,7 @@ StaleLockFile: struct {
     impl Diagnostic {
         code: "E1202"
         stage: [.Jet]
+        meaning: "A lock file older than its manifest"
         no_fix: .Behavior
         fix_next: "Regenerate or update the lock file from the manifest."
         what: fn(self) -> String { "Lock file out of date" }
@@ -9455,6 +9471,7 @@ MissingGit: struct {
     impl Diagnostic {
         code: "E1203"
         stage: [.Jet]
+        meaning: "No `git` to fetch a Git dependency"
         no_fix: .Behavior
         what: fn(self) -> String { "`git` not installed" }
         why: fn(self) -> String { "Git dependencies are fetched with `git`, and it couldn't be found" }
@@ -9466,6 +9483,7 @@ StoreEntryTampered: struct {
     impl Diagnostic {
         code: "E1204"
         stage: [.Jet]
+        meaning: "A store entry whose contents no longer match their hash"
         no_fix: .Ambiguous
         what: fn(self) -> String { "Store entry tree-hash mismatch / tamper" }
         why: fn(self) -> String { "A store entry's contents must hash to the value recorded for it, and these don't, so it may have been changed" }
@@ -9521,6 +9539,7 @@ UnresolvedRegistryDependency: struct {
     impl Diagnostic {
         code: "E1207"
         stage: [.Jet]
+        meaning: "A registry dependency that doesn't resolve or fails verification"
         no_fix: .Behavior
         what: fn(self) -> String { "Registry dependency cannot be resolved or its source artifact failed verification" }
         why: fn(self) -> String { "A registry dependency must resolve to a published version whose source matches its recorded checksum" }
@@ -9532,6 +9551,7 @@ ToolchainVersionMismatch: struct {
     impl Diagnostic {
         code: "E1208"
         stage: [.Jet]
+        meaning: "A toolchain outside the package's `jet:` pin"
         no_fix: .Behavior
         what: fn(self) -> String { "Toolchain `jet:` field in `package.jet` incompatible" }
         why: fn(self) -> String { "The package pins the Jet toolchain versions it builds with, and this toolchain is outside that pin" }
@@ -9543,6 +9563,7 @@ ReservedSectionUsed: struct {
     impl Diagnostic {
         code: "E1209"
         stage: [.Jetpack]
+        meaning: "A reserved section in `package.jet`"
         no_fix: .Ambiguous
         what: fn(self) -> String { "`package.jet` uses a reserved section." }
         why: fn(self) -> String { "This section name is reserved for a future Jet feature, so using it now is an error." }
@@ -9554,6 +9575,7 @@ UnknownPackagesTarget: struct {
     impl Diagnostic {
         code: "E1210"
         stage: [.Jetpack]
+        meaning: "An unknown target kind in `packages:`"
         no_fix: .Ambiguous
         what: fn(self) -> String { "`package.jet` lists an unknown target." }
         why: fn(self) -> String { "Each `packages:` entry names its target kind, and Jet builds only the shipped kinds." }
@@ -9575,6 +9597,7 @@ RetiredPackageKind: struct {
 PackageModuleNotFound: struct {
     impl Diagnostic {
         code: "E1212"
+        meaning: "A `packages:` entry with no file declaring its module"
         no_fix: .Behavior
         what: fn(self) -> String { "Package declared in `packages:` but no `module <name>` found in source tree" }
         why: fn(self) -> String { "Each package listed in `packages:` is built from the file that declares its `module <name>`" }
@@ -9586,6 +9609,7 @@ DuplicatePackageModule: struct {
     impl Diagnostic {
         code: "E1213"
         stage: [.Jet]
+        meaning: "A `packages:` entry whose module is declared in several files"
         no_fix: .Ambiguous
         what: fn(self) -> String { "Package declared in `packages:` but `module <name>` found in multiple files" }
         why: fn(self) -> String { "A package's module is declared in exactly one file, so the build knows where it starts" }
@@ -9614,6 +9638,7 @@ UnknownTargetsField: struct {
     impl Diagnostic {
         code: "E1216"
         stage: [.Jet]
+        meaning: "An unknown field in a `targets:` block"
         no_fix: .Ambiguous
         what: fn(self) -> String { "A `targets:` block has an unknown field" }
         why: fn(self) -> String { "A `targets:` block has a fixed set of fields, and this name isn't one of them" }
@@ -10340,6 +10365,7 @@ NixExecutionUnavailable: struct {
     impl Diagnostic {
         code: "E1351"
         stage: [.Jetpack]
+        meaning: "A host that can't run Nix closures in isolation"
         detail: true
         no_fix: .Behavior
         what: fn(self) -> String { "Nix closure execution is unavailable on this host." }
@@ -11798,6 +11824,7 @@ UnknownEnvironmentModule: struct {
     impl Diagnostic {
         code: "E1337"
         stage: [.Compile]
+        meaning: "An environment module the plan doesn't declare"
         detail: true
         what: fn(self) -> String { "The requested environment module is not declared" }
         why: fn(self) -> String { "One environment plan activates one `env.<name>` module; silently merging siblings would mix unrelated packages and variables." }
@@ -11838,6 +11865,7 @@ InvalidDelegationTarget: struct {
     impl Diagnostic {
         code: "E2401"
         stage: [.Compile]
+        meaning: "A delegation target field that is missing or doesn't implement the trait"
         detail: true
         no_fix: .Ambiguous
         fix_next: "Implement the trait on the delegation target or choose a field that already implements it."
@@ -11873,6 +11901,7 @@ ErrorNotPropagatable: struct {
     impl Diagnostic {
         code: "E2404"
         stage: [.Compile]
+        meaning: "A failure with no conversion route into the caller's failure domain"
         detail: true
         structured_fix: .SuggestedSourceEdit
         no_fix: None
@@ -11890,6 +11919,7 @@ DuplicateErrorConversion: struct {
     impl Diagnostic {
         code: "E2405"
         stage: [.Compile]
+        meaning: "An error conversion declared twice"
         detail: true
         what: fn(self) -> String { "`impl {self.source} -> {self.target}` is already declared." }
         why: fn(self) -> String { "There can be at most one declared way to convert a `Source` error into a `Target`; the second block is rejected." }
@@ -11904,6 +11934,7 @@ OrphanErrorConversion: struct {
     impl Diagnostic {
         code: "E2406"
         stage: [.Compile]
+        meaning: "An error conversion between two foreign types"
         detail: true
         no_fix: .Ambiguous
         what: fn(self) -> String { "Can't declare `impl {self.source} -> {self.target}` — neither type is defined in this program." }
@@ -11918,6 +11949,7 @@ FailureDomainNotErrorType: struct {
     impl Diagnostic {
         code: "E2417"
         stage: [.Compile]
+        meaning: "A failure domain that isn't an error type"
         detail: true
         what: fn(self) -> String { "Explicit failure domain `{self.domain}` is not an Error type" }
         why: fn(self) -> String { "A `!` contract may name `Err`, a Core error, a type marked `#Error`, an all-error union, or `Never`; arbitrary value types do not describe failures." }
@@ -11932,6 +11964,7 @@ ErrorConversionCycle: struct {
     impl Diagnostic {
         code: "E2418"
         stage: [.Compile]
+        meaning: "Error conversions that form a cycle"
         detail: true
         no_fix: .Ambiguous
         what: fn(self) -> String { "Error conversion cycle: `impl {self.source} -> {self.target}` would make conversion loop" }
@@ -11947,6 +11980,7 @@ AmbiguousErrorConversion: struct {
     impl Diagnostic {
         code: "E2419"
         stage: [.Compile]
+        meaning: "An error conversion with more than one route"
         detail: true
         no_fix: .Ambiguous
         what: fn(self) -> String { "Error conversion is ambiguous: `{self.source}` already reaches `{self.target}`" }
@@ -11961,6 +11995,7 @@ FlattenNonStruct: struct {
     impl Diagnostic {
         code: "E2408"
         stage: [.Compile]
+        meaning: "`#Flatten` on a field that isn't a struct"
         detail: true
         fix_next: "Give the field a `#Codable` struct type, or remove `#Flatten`."
         what: fn(self) -> String { "`#Flatten` on `{self.field}` needs a struct-typed field." }
@@ -11975,6 +12010,7 @@ UnknownCasingStyle: struct {
     impl Diagnostic {
         code: "E2409"
         stage: [.Compile]
+        meaning: "An unknown casing style in a type's `#Rename`"
         detail: true
         what: fn(self) -> String { "`#Rename({self.style})` on a type isn't a known casing style." }
         why: fn(self) -> String { "On a type, `#Rename` sets the wire casing of every field or variant from the closed NamingCase menu `.Camel`/`.Snake`/`.Pascal`/`.Kebab`/`.Screaming`; anything else is rejected so a typo fails at compile time, not on the wire. A string name renames one field or variant." }
@@ -11988,6 +12024,7 @@ MissingRequiredField: struct {
     impl Diagnostic {
         code: "E2410"
         stage: [.Compile]
+        meaning: "A decoded value missing a required field"
         detail: true
         fix_next: "Mark the field optional, give it a compile-time default, or provide the missing input key."
         what: fn(self) -> String { "`E2410: missing required field `{self.field}`` (runtime `FieldError`)." }
@@ -12002,6 +12039,7 @@ NotSerializable: struct {
     impl Diagnostic {
         code: "E2411"
         stage: [.Compile]
+        meaning: "A type with no codec, or a union member with no known wire shape"
         detail: true
         what: fn(self) -> String { "`{self.type}` can't be serialized / decoded, or a union member has no compiler-known wire shape." }
         why: fn(self) -> String { "Only a structurally qualifying type gets a compiler-generated codec (by default or through `#Codable`/`#Encode`/`#Decode`), unless it supplies a hand-written codec. Anonymous-union decoding also needs each member's outer wire shape; a custom or imported decoder does not declare one." }
@@ -12015,6 +12053,7 @@ UnknownDecodedField: struct {
     impl Diagnostic {
         code: "E2412"
         stage: [.Compile]
+        meaning: "A decoded key the `#DenyUnknownFields` struct doesn't declare"
         detail: true
         no_fix: .Ambiguous
         what: fn(self) -> String { "`E2412: unknown field `{self.field}`` (runtime `FieldError`)." }
@@ -12038,6 +12077,7 @@ RetiredCodableBounds: struct {
 DefaultNotConstant: struct {
     impl Diagnostic {
         code: "E2414"
+        meaning: "A field default that isn't a compile-time constant"
         detail: true
         what: fn(self) -> String { "A field's `{{…}}` default must be a compile-time constant." }
         why: fn(self) -> String { "A decode/CLI/construction default fills a missing field, so it is baked into the program and its value has to be known at compile time. An expression that can only be computed at runtime has no fixed value to bake, and every tier must agree on it. During `jet check`, Jet reports this diagnostic." }
@@ -12054,6 +12094,7 @@ AmbiguousUnionShape: struct {
     impl Diagnostic {
         code: "E2415"
         stage: [.Compile]
+        meaning: "Union members that share one wire shape"
         detail: true
         what: fn(self) -> String { "Union `{self.union}` can't be decoded — `{self.a}` and `{self.b}` share wire shape `{self.shape}`." }
         why: fn(self) -> String { "Anonymous-union decode picks a member by primary wire shape; two members with the same shape would force an arbitrary declaration order." }
@@ -12065,6 +12106,7 @@ EnvDecodeFailed: struct {
     impl Diagnostic {
         code: "E2416"
         stage: [.Runtime]
+        meaning: "An `env.decode` that can't build its typed config"
         moment: .Run
         detail: true
         no_fix: .Ambiguous
@@ -12079,6 +12121,7 @@ UnknownAnalyticsColumn: struct {
 
     impl Diagnostic {
         code: "E2420"
+        meaning: "An analytics query column that isn't a field of the row type"
         detail: true
         no_fix: .Ambiguous
         what: fn(self) -> String { "Unknown analytics column `{self.column}`" }
@@ -12163,6 +12206,7 @@ PrivateFailureMemberExposed: struct {
 
     impl Diagnostic {
         code: "E2421"
+        meaning: "A public fallible function that exposes a non-public failure member"
         detail: true
         structured_fix: .SuggestedSourceEdit
         no_fix: None
@@ -12176,6 +12220,7 @@ PrivateFailureMemberExposed: struct {
 NeverAsValue: struct {
     impl Diagnostic {
         code: "E2422"
+        meaning: "`Never` used as a value type"
         detail: true
         what: fn(self) -> String { "`Never` cannot be used in a value position." }
         why: fn(self) -> String { "`Never` has no values; only a function return slot or function-type return slot may promise it." }
@@ -12188,6 +12233,7 @@ NeverFunctionReachesEnd: struct {
 
     impl Diagnostic {
         code: "E2423"
+        meaning: "A `Never` function that can reach its end"
         detail: true
         what: fn(self) -> String { "Function `{self.function}` promises `Never` but can reach the end." }
         why: fn(self) -> String { "A declared `Never` return means every path must stop; this path falls through instead." }
@@ -12200,6 +12246,7 @@ NeverFunctionBareReturn: struct {
 
     impl Diagnostic {
         code: "E2424"
+        meaning: "A `Never` function with a bare `return`"
         detail: true
         what: fn(self) -> String { "Function `{self.function}` promises `Never` but uses a bare `return`." }
         why: fn(self) -> String { "A declared `Never` return cannot complete with an empty return; every path must diverge." }
@@ -12212,6 +12259,7 @@ NeverFunctionReturnsValue: struct {
 
     impl Diagnostic {
         code: "E2425"
+        meaning: "A `Never` function that returns a value"
         detail: true
         what: fn(self) -> String { "Function `{self.function}` promises `Never` but returns a value." }
         why: fn(self) -> String { "A declared `Never` return has no success value." }
@@ -12222,6 +12270,7 @@ NeverFunctionReturnsValue: struct {
 FunctionValueNotNever: struct {
     impl Diagnostic {
         code: "E2426"
+        meaning: "A returning function used where `fn() Never` is expected"
         detail: true
         what: fn(self) -> String { "Function value does not satisfy `fn() Never`." }
         why: fn(self) -> String { "`fn() Never` promises the callable never completes, so a returning function has the wrong contract." }
@@ -12232,6 +12281,7 @@ FunctionValueNotNever: struct {
 CallerSiteMisplaced: struct {
     impl Diagnostic {
         code: "E2427"
+        meaning: "`#caller` outside a parameter default or an `#Expand` macro"
         detail: true
         what: fn(self) -> String { "`#caller` is legal only as a parameter default or inside an #Expand macro." }
         why: fn(self) -> String { "`#caller` is the place of the call that left the parameter out; anywhere else there is no call to name." }
@@ -12242,6 +12292,7 @@ CallerSiteMisplaced: struct {
 HereSiteDefault: struct {
     impl Diagnostic {
         code: "E2428"
+        meaning: "A `#here` parameter default"
         detail: true
         what: fn(self) -> String { "A `#here` parameter default names the declaration, not the call." }
         why: fn(self) -> String { "`#here` is the place where it is written, so every call that leaves the parameter out would get the default's own line." }
