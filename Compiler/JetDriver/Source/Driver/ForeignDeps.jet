@@ -168,20 +168,46 @@ jet_driver_inline_c_body: fn(source_files: [SourceFile], path: String, start: In
     None
 }
 
-// The 1-based line of byte `offset` in the source file `path`; 0 when the
-// file is not among `source_files`.
-jet_driver_foreign_line: fn(source_files: [SourceFile], path: String, offset: Int) -> Int Never! {
-    loop source_file in source_files {
-        if source_file.path != path -> next
-        bytes: source_file.source.bytes()
-        end: if offset < bytes.len() -> offset else -> bytes.len()
-        line := 1
-        loop at in 0..<end {
-            if bytes[at] == (U8{10}) -> line += 1
+// The newline offsets of each source file a foreign row names, in order,
+// scanned once per file: `files` gives a path's row of `newlines`.
+JetDriverForeignLines: struct {
+    files: [String:Int]{[String:Int]{}}
+    newlines: [[Int]]{[[Int]]{}}
+}
+
+// The 1-based line of byte `offset` in the source file `path` (the first of
+// `source_files` with that path); 0 when the file is not among them. The
+// file's newlines are scanned into `lines` the first time a row names it, so
+// each row is a binary search instead of a scan from the file's start.
+jet_driver_foreign_line: fn(lines: &JetDriverForeignLines, source_files: [SourceFile], path: String, offset: Int) -> Int Never! {
+    slot := lines.files.get(path) ?? -1
+    if slot < 0 {
+        found: loop (index, source_file) in source_files {
+            if source_file.path == path -> break index
+        } ?? -1
+        if found < 0 -> return 0
+        positions := [Int]{}
+        bytes: source_files[found].source.bytes()
+        loop at in 0..<bytes.len() {
+            if bytes[at] == (U8{10}) -> positions.push(at)
         }
-        return line
+        slot = lines.newlines.len()
+        lines.files[path] = slot
+        lines.newlines.push(positions)
     }
-    0
+    // The newlines before `offset`: every newline is inside the file, so
+    // an offset past its end counts them all.
+    low := 0
+    high := lines.newlines[slot].len()
+    loop low < high {
+        middle: (low + high) /% 2
+        if lines.newlines[slot][middle] < offset {
+            low = middle + 1
+            next
+        }
+        high = middle
+    }
+    low + 1
 }
 
 // The foreign link facts of the checked modules `modules`; inline bodies
@@ -221,6 +247,7 @@ jet_driver_foreign_link_facts: fn(modules: [SemaGraphModuleResult], source_files
     order := [Int]{}
     loop position in 0..<ids.len() -> order.push(position)
     order.sort_by(fn(left: Int, right: Int) { if ids[left] != ids[right] -> ids[left] <=> ids[right] else -> keys[left] <=> keys[right] })
+    lines := JetDriverForeignLines{}
     loop (index, position) in order {
         row: modules[modules_of[position]].foreign_functions[rows[position]]
         facts.declarations.push(JetDriverForeignDeclaration{
@@ -228,7 +255,7 @@ jet_driver_foreign_link_facts: fn(modules: [SemaGraphModuleResult], source_files
             language: jet_driver_foreign_language_head(row.language),
             symbol: row.symbol,
             path: row.source_file,
-            line: jet_driver_foreign_line(source_files, row.source_file, row.span.start),
+            line: jet_driver_foreign_line(lines, source_files, row.source_file, row.span.start),
             module_identity: row.module_identity,
         })
         if !row.path.starts_with("jet_ffi_") || row.symbol != "jet_inline_{row.path}" -> next
