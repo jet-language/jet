@@ -1,0 +1,176 @@
+// D-STACKBOUND1's frame model: the bytes a function's x86-64 frame (JetIR
+// X64Alloc.jet ir_x64_allocate) may hold, in terms sema can check. Sema
+// bounds each function's frame by it (`!Mem.Stack(above: N)`, `jet inspect
+// memory`). The backend checks every frame it lays out against that bound,
+// so a frame over the bound is a compiler fault, never a user error.
+
+// The bytes of a frame that no checked value accounts for:
+// - the return address and the saved frame pointer (16);
+// - the five callee-saved registers (40);
+// - the home of an aggregate result's address (8);
+// - the rounding of the frame to 16 bytes (8);
+// - below the frame, the scratch words a selection takes (16) and the pad
+//   word of a call that passes an odd number of words on the stack (8).
+JET_FRAME_ALLOWANCE: 96
+
+// The IR slots counted for each checked value: the value's own slot, plus
+// one for what the IR builder adds around it (a copy, a conversion, a
+// loop's index or length).
+JET_FRAME_VALUE_SLOTS: 2
+
+// The most stack storage a carrier the IR builder lays out itself takes:
+// the header of a Set, Rank, PriorityQueue or Cache. A List or Map header
+// takes 24 bytes.
+JET_FRAME_CARRIER_BYTES: 32
+
+// The type declarations a frame bound sizes nominal types by. A type is
+// found by its key, then by its name where no key names one, as the IR
+// builder finds it (JetIR Build.jet ir_program_declared).
+JetFrameTypes: struct {
+    defs: [TTypeDef]
+    rows: [String:Int]
+}
+
+jet_frame_types: fn(defs: &&[TTypeDef]) -> JetFrameTypes Never! {
+    owned := defs.move()
+    rows := [String:Int]{}
+    loop (index, definition) in owned {
+        if rows.get(definition.key) == None {
+            rows[definition.key.copy()] = index
+        }
+    }
+    loop (index, definition) in owned {
+        if rows.get(definition.name) == None {
+            rows[definition.name.copy()] = index
+        }
+    }
+    JetFrameTypes{defs: owned.move(), rows: rows.move()}
+}
+
+// The frame bytes one value of checked type `ty` may take, counted over
+// JET_FRAME_VALUE_SLOTS slots. Each slot has a home word and a word that
+// passes the value to a call on the stack. A value laid out inline also has
+// its storage, plus up to 8 bytes of padding to 16-byte alignment. None:
+// `ty` names a type with no known size, such as a generic parameter no
+// instance has bound.
+jet_frame_value_bytes: fn(types: JetFrameTypes, ty: Type) -> Int? Never! {
+    storage: jet_frame_storage_bytes(types, ty, [String:Int]{}, [String]{}) ?? return None
+    slot: if storage == 0 -> 16 else -> 24 + storage
+    Val(JET_FRAME_VALUE_SLOTS * slot)
+}
+
+// The stack storage a value of `ty` takes beside its home word, as JetIR
+// BuildTypes.jet ir_value_type lays it out, rounded up to 8 bytes. It is 0
+// for a value carried in one word.
+// - `env` binds each generic parameter of the declaration being sized: a
+//   type parameter to its argument's storage, a number parameter to its
+//   length.
+// - `laying` holds the declarations being sized. A declaration reached
+//   again inline has no finite size.
+jet_frame_storage_bytes: fn(types: JetFrameTypes, ty: Type, env: [String:Int], laying: [String]) -> Int? Never! {
+    if ty == {
+        .Int | .Float | .Bool | .String | .Char | .Float32 | .IntN(_, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Union(_) | .Measure(_) -> Val(0)
+        // A list or map header: its length, capacity and data address.
+        .List(_) | .Map(_, _, _) -> Val(24)
+        .InlineRange(base, _, _) | .Quantity(base, _) -> jet_frame_storage_bytes(types, base, env, laying)
+        .Tagged(_, inner) -> jet_frame_storage_bytes(types, inner, env, laying)
+        .Tuple(fields) -> {
+            total := 0
+            loop field in fields {
+                bytes: jet_frame_storage_bytes(types, field.ty, env, laying) ?? return None
+                total += jet_frame_member_bytes(bytes)
+            }
+            Val(total)
+        }
+        // `[T#N]` is inline, or the List of its N elements.
+        .FixedList(elem, len) -> {
+            count: jet_frame_measure(len, env) ?? return None
+            element: jet_frame_storage_bytes(types, elem, env, laying) ?? return None
+            inline: count * jet_frame_member_bytes(element)
+            Val(if inline > 24 -> inline else -> 24)
+        }
+        .Named(name) -> jet_frame_nominal(types, name, [Type]{}, env, laying)
+        .Apply(name, args) -> jet_frame_nominal(types, name, args, env, laying)
+    }
+}
+
+// The bytes a member of `storage` takes in an aggregate: a one-word value
+// takes its word.
+jet_frame_member_bytes: fn(storage: Int) -> Int Never! {
+    if storage == 0 -> 8 else -> storage
+}
+
+// The length of a fixed list of `measure`, with each number parameter read
+// from `env`.
+jet_frame_measure: fn(measure: Measure, env: [String:Int]) -> Int? Never! {
+    if measure == {
+        .Literal(_, value) -> Val(value)
+        .Symbol(_, name) -> env.get(name)
+        .Combined(_, rule, left, right) -> {
+            l: jet_frame_measure(left, env) ?? return None
+            r: jet_frame_measure(right, env) ?? return None
+            if rule == {
+                .Add -> Val(l + r)
+                .Mul -> Val(l * r)
+                .Match -> None
+            }
+        }
+        .SignedLiteral(_, _) -> None
+    }
+}
+
+// The storage of nominal type `name` applied to `args`:
+// - a parameter bound in `env` takes its argument's storage;
+// - a unit type takes none;
+// - a SharedSnapshot is its owner, its revision and its captured value;
+// - a struct is the sum of its stored members, a boxed one taking a word;
+// - an enum is a word or a box address;
+// - a distinct type or an alias takes the storage of its base.
+// An applied declaration may be a carrier the IR builder lays out itself,
+// so it takes at least JET_FRAME_CARRIER_BYTES. An applied name with no
+// declaration is such a carrier. A bare name with no declaration has no
+// known size.
+jet_frame_nominal: fn(types: JetFrameTypes, name: String, args: [Type], env: [String:Int], laying: [String]) -> Int? Never! {
+    if args.len() == 0 {
+        if env.get(name) == .Val(bound) -> return Val(bound)
+        if name == "Unit" || name == "()" || name == "Never" -> return Val(0)
+    }
+    if name == "SharedSnapshot" && args.len() == 2 {
+        captured: jet_frame_storage_bytes(types, args[1], env, laying) ?? return None
+        return Val(16 + jet_frame_member_bytes(captured))
+    }
+    row: types.rows.get(name) ?? {
+        if args.len() == 0 -> return None
+        return Val(JET_FRAME_CARRIER_BYTES)
+    }
+    definition: types.defs[row]
+    if laying.contains(definition.key) -> return None
+    if definition.generic_params.len() != args.len() -> return None
+    params := [String:Int]{}
+    loop (index, parameter) in definition.generic_params {
+        bound: if args[index] == .Measure(measure) -> jet_frame_measure(measure, env) else -> jet_frame_storage_bytes(types, args[index], env, laying)
+        params[parameter.name.copy()] = bound ?? return None
+    }
+    inner := laying
+    inner.push(definition.key.copy())
+    declared: if definition.kind == {
+        .Struct(fields, _) -> {
+            total := 0
+            loop field in fields {
+                if field.computed -> next
+                if definition.boxed_edges.contains(field.name) {
+                    total += 8
+                    next
+                }
+                bytes: jet_frame_storage_bytes(types, field.ty, params, inner) ?? return None
+                total += jet_frame_member_bytes(bytes)
+            }
+            if total < 8 -> 8 else -> total
+        }
+        .Enum(_, _) | .UnitFamily(_, _) -> 0
+        .Distinct(base, _) -> jet_frame_storage_bytes(types, base, params, inner) ?? return None
+        .Alias(target) -> jet_frame_storage_bytes(types, target, params, inner) ?? return None
+    }
+    if args.len() > 0 && declared < JET_FRAME_CARRIER_BYTES -> return Val(JET_FRAME_CARRIER_BYTES)
+    Val(declared)
+}

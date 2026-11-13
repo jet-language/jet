@@ -1,0 +1,99 @@
+use {
+    jet_foundation.[
+        JetFrameTypes, Measure, Span, SymbolID, TCLIBinding, TDeclarationOwnership, TField,
+        TGenericParam, TSerdeAttribute, TShapeFieldNames, TTypeDef, TTypeDefKind, Type,
+        TypeTupleField, jet_frame_storage_bytes, jet_frame_types, jet_frame_value_bytes,
+    ]
+}
+
+frame_test_field: fn(name: String, ty: Type) -> TField Never! {
+    TField{
+        name: name.copy(),
+        shape_names: TShapeFieldNames{text: name.copy(), json: None, cbor: None, csv: None, toml: None, yaml: None, xml: None, args: name.copy(), env: name.copy(), db: None, layout: None},
+        skip: false,
+        ty: ty,
+        span: Span{start: 0, end: 0},
+        public: true,
+        package_public: false,
+        computed: false,
+        has_default: false,
+        redact: false,
+    }
+}
+
+frame_test_struct: fn(name: String, params: [String], fields: [TField], boxed: [String]) -> TTypeDef Never! {
+    TTypeDef{
+        module_identity: "frame",
+        key: "frame.{name}",
+        name: name.copy(),
+        span: Span{start: 0, end: 0},
+        public: true,
+        package_public: false,
+        generic_params: loop param in params -> TGenericParam{name: param.copy(), bounds: [SymbolID]{}},
+        derives: [String]{},
+        auto_derive_default: false,
+        auto_printable: false,
+        published_schema: false,
+        single_use: false,
+        must_use: false,
+        layout: None,
+        c_layout_tag: None,
+        enum_layout: None,
+        layout_alignment: None,
+        serde: [TSerdeAttribute]{},
+        cli_bindings: [TCLIBinding]{},
+        ownership: TDeclarationOwnership.Owned,
+        boxed_edges: boxed,
+        compiler_builtin: None,
+        kind: TTypeDefKind.Struct{fields: fields, methods: [String]{}},
+    }
+}
+
+frame_test_triple: fn() -> Type Never! {
+    Type.Tuple{fields: [TypeTupleField]{
+        TypeTupleField{name: "0", ty: Type.Int},
+        TypeTupleField{name: "1", ty: Type.Int},
+        TypeTupleField{name: "2", ty: Type.Int},
+    }}
+}
+
+// Point {x: Int, y: Int, tag: (Int, Int, Int)}, Pair<T> {a: T, b: T},
+// Buf<N> {data: [Int#N]} and Node {next: Node, value: Int} with `next`
+// boxed.
+frame_test_types: fn() -> JetFrameTypes Never! {
+    defs := [TTypeDef]{
+        frame_test_struct("Point", [String]{}, [TField]{frame_test_field("x", Type.Int), frame_test_field("y", Type.Int), frame_test_field("tag", frame_test_triple())}, [String]{}),
+        frame_test_struct("Pair", [String]{"T"}, [TField]{frame_test_field("a", Type.Named{name: "T"}), frame_test_field("b", Type.Named{name: "T"})}, [String]{}),
+        frame_test_struct("Buf", [String]{"N"}, [TField]{frame_test_field("data", Type.FixedList{elem: Type.Int, len: Measure.Symbol{kind: "Int", name: "N"}})}, [String]{}),
+        frame_test_struct("Node", [String]{}, [TField]{frame_test_field("next", Type.Named{name: "Node"}), frame_test_field("value", Type.Int)}, [String]{"next"}),
+    }
+    jet_frame_types(defs)
+}
+
+#Test("frame_storage_sizes_each_value_as_the_ir_lays_it_out") {
+    types: frame_test_types()
+    env := [String:Int]{}
+    laying := [String]{}
+    assert_eq(jet_frame_storage_bytes(types, Type.Int, env, laying), Val(0))
+    assert_eq(jet_frame_storage_bytes(types, Type.Option{inner: frame_test_triple()}, env, laying), Val(0))
+    assert_eq(jet_frame_storage_bytes(types, Type.List{element: Type.Int}, env, laying), Val(24))
+    assert_eq(jet_frame_storage_bytes(types, frame_test_triple(), env, laying), Val(24))
+    assert_eq(jet_frame_storage_bytes(types, Type.FixedList{elem: Type.Int, len: Measure.Literal{kind: "Int", value: 2}}, env, laying), Val(24))
+    assert_eq(jet_frame_storage_bytes(types, Type.FixedList{elem: Type.Int, len: Measure.Literal{kind: "Int", value: 5}}, env, laying), Val(40))
+    assert_eq(jet_frame_storage_bytes(types, Type.Named{name: "Point"}, env, laying), Val(40))
+    assert_eq(jet_frame_storage_bytes(types, Type.Named{name: "frame.Point"}, env, laying), Val(40))
+    assert_eq(jet_frame_storage_bytes(types, Type.Apply{name: "Pair", args: [Type]{frame_test_triple()}}, env, laying), Val(48))
+    assert_eq(jet_frame_storage_bytes(types, Type.Apply{name: "Pair", args: [Type]{Type.Int}}, env, laying), Val(32))
+    assert_eq(jet_frame_storage_bytes(types, Type.Apply{name: "Buf", args: [Type]{Type.Measure{measure: Measure.Literal{kind: "Int", value: 6}}}}, env, laying), Val(48))
+    assert_eq(jet_frame_storage_bytes(types, Type.Named{name: "Node"}, env, laying), Val(16))
+    assert_eq(jet_frame_storage_bytes(types, Type.Apply{name: "Set", args: [Type]{Type.Int}}, env, laying), Val(32))
+    assert_eq(jet_frame_storage_bytes(types, Type.Named{name: "Unit"}, env, laying), Val(0))
+}
+
+#Test("frame_value_bytes_count_two_slots_and_no_unknown_size") {
+    types: frame_test_types()
+    assert_eq(jet_frame_value_bytes(types, Type.Int), Val(32))
+    assert_eq(jet_frame_value_bytes(types, Type.List{element: Type.String}), Val(96))
+    assert_eq(jet_frame_value_bytes(types, Type.Named{name: "Point"}), Val(128))
+    assert_eq(jet_frame_value_bytes(types, Type.Named{name: "T"}), None)
+}
