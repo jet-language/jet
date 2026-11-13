@@ -1,0 +1,24 @@
+# A field write below a `Shared` field of a pool element,
+# `scene[id].material.color = c`, edits the cell: the element type of a
+# `Pool<T>` slot is known to the shared-place projection, so the write is not
+# refused as an unknown field (E0302) and every holder of the cell sees it,
+# on every tier and on the web target.
+fixture: a_shared_field_of_a_pool_element_is_written_through_its_cell.fixture
+env: NO_COLOR=1
+step check: jet check pool.jet
+exit: 0
+step o0: jet run --optimize=none pool.jet
+exit: 0
+stdout: = "right is blue\nright is green\npaint is green\n"
+step o1: jet run --optimize=basic pool.jet
+exit: 0
+stdout: = "right is blue\nright is green\npaint is green\n"
+step o2: jet run --optimize=full pool.jet
+exit: 0
+stdout: = "right is blue\nright is green\npaint is green\n"
+step build: jet build --target web pool.jet
+exit: 0
+step web: node app.js
+cwd: .jet/build
+exit: 0
+stdout: = "right is blue\nright is green\npaint is green\n"
