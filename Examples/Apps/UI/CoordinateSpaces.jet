@@ -14,24 +14,24 @@ run: fn() {
     }
 
     screen_to_world: Transform<Screen, World>.affine(
-    1.0,
-    0.0,
-    0.0,
-    1.0,
-    10.0,
-    20.0,
-    1,
-    2,
+        1.0,
+        0.0,
+        0.0,
+        1.0,
+        10.0,
+        20.0,
+        1,
+        2,
     )
     world_to_view: Transform<World, View>.affine(
-    1.0,
-    0.0,
-    0.0,
-    1.0,
-    2.0,
-    3.0,
-    2,
-    3,
+        1.0,
+        0.0,
+        0.0,
+        1.0,
+        2.0,
+        3.0,
+        2,
+        3,
     )
     _screen_to_view: screen_to_world.then(world_to_view) ?? panic("composition")
     world: screen_to_world.point(mouse) ?? panic("point")
@@ -48,14 +48,14 @@ run: fn() {
     print("composition=ok")
 
     bad_view_to_screen: Transform<View, Screen>.affine(
-    1.0,
-    0.0,
-    0.0,
-    1.0,
-    0.0,
-    0.0,
-    4,
-    5,
+        1.0,
+        0.0,
+        0.0,
+        1.0,
+        0.0,
+        0.0,
+        4,
+        5,
     )
     if world_to_view.then(bad_view_to_screen) == {
         .Ok(_) -> { print("frame-composition=unexpected") }
@@ -63,14 +63,14 @@ run: fn() {
     }
 
     stale_transform: Transform<World, View>.affine(
-    1.0,
-    0.0,
-    0.0,
-    1.0,
-    0.0,
-    0.0,
-    3,
-    4,
+        1.0,
+        0.0,
+        0.0,
+        1.0,
+        0.0,
+        0.0,
+        3,
+        4,
     )
     if stale_transform.point(world) == {
         .Ok(_) -> { print("stale-point=unexpected") }
@@ -78,17 +78,17 @@ run: fn() {
     }
 
     singular: Transform<Screen, World>.affine(
-    1.0,
-    2.0,
-    2.0,
-    4.0,
-    0.0,
-    0.0,
-    1,
-    2,
+        1.0,
+        2.0,
+        2.0,
+        4.0,
+        0.0,
+        0.0,
+        1,
+        2,
     )
     if singular.inverse() == {
-        .Ok(_) -> print("singular-inverse=unexpected")
+        .Ok(_) -> { print("singular-inverse=unexpected") }
         .Err(_) -> print("singular-inverse=error")
     }
 }

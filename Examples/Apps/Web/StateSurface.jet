@@ -5,14 +5,14 @@ use {
     http: core.http
     time: core.time
     web: core.web
-    devserver: core.web.devserver
-    forms: core.web.forms
-    query: core.web.query
-    router: core.web.router
-    session: core.web.storage.session
+    core.web.devserver
+    core.web.forms
+    core.web.query
+    core.web.router
+    core.web.storage.session
     web_store: core.web.store
-    table: core.web.table
-    virtual: core.web.virtual
+    core.web.table
+    core.web.virtual
 }
 
 #Error
@@ -35,21 +35,30 @@ rows: fn() -> [Row] {
 }
 
 row_key: fn(row: Row) -> String Never! { "{row.id}" }
+
 row_name: fn(row: Row) -> String Never! { row.name }
+
 row_active: fn(row: Row) -> String Never! { "{row.active}" }
+
 row_is_active: fn(row: Row) -> Bool { row.active }
+
 updated_row: fn(row: Row) -> Row { Row{id: row.id, name: "Updated {row.name}", active: row.active} }
 
 fetch_rows: fn() -> String StateError! { Ok("rows") }
+
 send_mutation: fn(payload: String) -> String StateError! { Ok(payload) }
+
 replay_mutation: fn(_payload: String) {}
+
 validate_name: fn(value: String) {
     if value == "bad" -> return Err("name rejected")
     return Ok()
 }
+
 form_action: fn(_input: WebFormDecodedInput) -> String WebFormActionError! { Ok("saved") }
 
 route_loader: fn(_navigation: WebNavigation) -> String Never! { "route data" }
+
 not_found: fn(path: String) -> String { "not found: {path}" }
 
 load_table_page: fn(state: WebTableState) -> WebTablePage<Row> WebTableError! {
@@ -58,7 +67,9 @@ load_table_page: fn(state: WebTableState) -> WebTablePage<Row> WebTableError! {
 }
 
 store_select: fn(value: Int) -> Int { value + 1 }
+
 store_selected: fn(value: Int) { print(value) }
+
 store_update: fn(value: Int) { print(value) }
 
 user_count: fn(role: String) -[DB.Read]> Int StateError! { role.len() }

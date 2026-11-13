@@ -1,6 +1,11 @@
 // Calls in record fields preserve fixed-width bits, not exact-Int pointer tags.
-Word: struct { value: U64 }
-SignedWord: struct { value: I64 }
+Word: struct {
+    value: U64
+}
+
+SignedWord: struct {
+    value: I64
+}
 
 hash2: fn(namespace: String, identity: String) -> U64 Never! {
     prime: U64{0x100000001b3}
@@ -12,8 +17,11 @@ hash2: fn(namespace: String, identity: String) -> U64 Never! {
 }
 
 wrap: fn(identity: String) -> Word Never! { Word{value: hash2("mir-type", identity)} }
+
 scalar_wrap: fn(identity: String) -> U64 Never! { hash2("mir-type", identity) }
+
 word_bits: fn() -> U64 Never! { U64{0xffffffffffffffff} }
+
 signed_bits: fn() -> I64 Never! { I64{-9223372036854775807} }
 
 run: fn() {

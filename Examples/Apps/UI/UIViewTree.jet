@@ -3,6 +3,7 @@ package: {
     version: "0.1.0"
     authority: { allow: [Browser, Env, Exec, IO, Mem.Alloc] }
 }
+
 // One canonical UiNode tree. A signal change re-runs the render
 // effect, while the diff paints only canonical leaves whose content changed.
 use {
@@ -36,12 +37,12 @@ run: fn() {
     backend := ui.tui_backend()
     render_backend := backend.copy()
     ui.reactive_render(
-    () -> {
-        tree: ui.box(leaves.get())
-        size: render_backend.measure(tree, ui.constraint(0.0, 0.0, 80.0, 24.0))
-        render_backend.layout(tree, ui.rect(0.0, 0.0, size.width, size.height))
-        render_backend.paint(tree)
-    },
+        () -> {
+            tree: ui.box(leaves.get())
+            size: render_backend.measure(tree, ui.constraint(0.0, 0.0, 80.0, 24.0))
+            render_backend.layout(tree, ui.rect(0.0, 0.0, size.width, size.height))
+            render_backend.paint(tree)
+        },
     )
     empty: [UINode]{}
     before: leaves.get()

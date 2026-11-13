@@ -3,15 +3,16 @@ package: {
     version: "0.1.0"
     authority: { allow: [Exec, IO, Mem.Alloc, Rand] }
 }
+
 // Separate PRNG (core.math.random) and CSPRNG (core.crypto.random).
 // core.math.random.bytes — fast, seedable, NOT cryptographically secure.
 // core.crypto.random.bytes — cryptographically secure (/dev/urandom).
 use {
-    random: core.math.random
+    core.math.random
     crypto_rand: core.crypto.random
     // core.crypto is the typed rung; core.crypto.expert is the raw-byte rung.
     crypto: core.crypto
-    expert: core.crypto.expert
+    core.crypto.expert
 }
 
 run: fn() {

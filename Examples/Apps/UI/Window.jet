@@ -48,9 +48,9 @@ run: fn() {
         quit := false
         loop event in frame.events() {
             if event == {
-                .KeyDown(.Escape) -> quit = true
-                .Close -> quit = true
-                .PointerDown(_) -> lit = !lit
+                .KeyDown(.Escape) -> { quit = true }
+                .Close -> { quit = true }
+                .PointerDown(_) -> { lit = !lit }
                 .KeyDown(_) -> lit = !lit
                 .KeyUp(_) | .Text(_) | .PointerMove(_, _) | .PointerUp(_) | .Scroll(_, _) | .Resize(_, _) | .Focus(_) | .Compose(_) -> {}
             }
@@ -124,7 +124,7 @@ background: fn(width: Int, height: Int) -> [U8] {
 }
 
 // Paints or erases the square at `left`, `top`.
-square: fn(&pixels: [U8], width: Int, height: Int, left: Int, top: Int, paint: Paint) {
+square: fn(pixels: &[U8], width: Int, height: Int, left: Int, top: Int, paint: Paint) {
     loop y in top..<top + SIDE {
         if y >= 0 && y < height {
             loop x in left..<left + SIDE {

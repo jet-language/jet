@@ -3,16 +3,21 @@
 // `each`) stops pulling at its answer, so no later item is ever computed.
 run: fn() {
     nums: [3, 1, 4, 1, 5]
-    traced: nums.lazy().map((n: Int) -> {
-        print("pull {n}")
-        n * 10
-    })
+    traced: nums.lazy().map(
+        (n: Int) -> {
+            print("pull {n}")
+            n * 10
+        },
+    )
     // Each item reaches the body before the next one is pulled.
     traced.each((n: Int) -> print("got {n}"))
-    found: nums.lazy().map((n: Int) -> {
-        print("check {n}")
-        n
-    }).find((n: Int) -> n > 3)
+    found: nums.lazy().map(
+        (n: Int) -> {
+            print("check {n}")
+            n
+        },
+    )
+        .find((n: Int) -> n > 3)
     print(found ?? 0)
 
     words: ["pear", "fig", "plum", "kiwi", "apple"]
@@ -41,14 +46,16 @@ shelve: fn(w: String) Err! {
 }
 
 // A fallible `each` stops at the first failure: "kiwi" is never pulled.
-stock: fn(words: [String]) Err! {
-    words.lazy().each(shelve)
-}
+stock: fn(words: [String]) Err! { words.lazy().each(shelve) }
 
 #Test("Iter each sees every item in order") {
     seen := [Int]{}
     values: [3, 1, 4]
-    values.lazy().map((n: Int) -> n * 2).each((n: Int) -> { seen.push(n) })
+    values.lazy().map((n: Int) -> n * 2).each(
+        (n: Int) -> {
+            seen.push(n)
+        },
+    )
     assert_eq(seen, [6, 2, 8])
 }
 
@@ -109,9 +116,7 @@ stock: fn(words: [String]) Err! {
     assert(stopped)
 }
 
-check_all: fn(values: &&Iter<Int>) Err! {
-    values.each(under_thirty)
-}
+check_all: fn(values: &&Iter<Int>) Err! { values.each(under_thirty) }
 
 under_thirty: fn(n: Int) Err! {
     if n > 30 -> return Err("too big: {n}")

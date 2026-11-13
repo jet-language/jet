@@ -12,22 +12,16 @@ package: {
 
 FAR: 4102444800000
 
-deadline_or_none: fn() -> Int {
-    context.deadline ?? -1
-}
+deadline_or_none: fn() -> Int { context.deadline ?? -1 }
 
-on_a_thread: fn() -> Bool {
-    context.thread >= 0
-}
+on_a_thread: fn() -> Bool { context.thread >= 0 }
 
 spawn_under: fn(deadline: Int) -> Task<Int> {
-    #Context(deadline: deadline) {
-        return task deadline_or_none()
-    }
+    #Context(deadline: deadline) { return task deadline_or_none() }
     task deadline_or_none()
 }
 
-report: fn(name: String, &&handle: Task<Int>) {
+report: fn(name: String, handle: &&Task<Int>) {
     if handle.join() == {
         .Ok(value) -> { print("{name}: {value}") }
         .Err(_) -> { print("{name}: failed") }

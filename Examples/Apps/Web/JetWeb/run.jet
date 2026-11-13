@@ -1,3 +1,5 @@
+#Target(Web)
+
 // Jet Web reference loop: one typed application graph with one
 // first-party Router/Query/Forms/Table/Virtual/Store state projection.
 //
@@ -6,15 +8,14 @@
 // model, table renderer, or JavaScript runtime is introduced.
 use {
     web: core.web
-    json: core.encoding.json
-    url: core.net.url
-    query: core.web.query
-    forms: core.web.forms
-    table: core.web.table
-    virtual: core.web.virtual
-    store: core.web.store
+    core.encoding.json
+    core.net.url
+    core.web.query
+    core.web.forms
+    core.web.table
+    core.web.virtual
+    core.web.store
 }
-#Target(Web)
 
 #[Error, Codable]
 OrderError: struct {
@@ -59,13 +60,24 @@ order_rows: fn() -> [Order] {
 }
 
 order_id: fn(order: Order) -> String Never! { "{order.id}" }
+
 order_customer: fn(order: Order) -> String Never! { order.customer }
+
 order_shipped: fn(order: Order) -> String Never! { "{order.shipped}" }
+
 pending_order: fn(order: Order) -> Bool Never! { !order.shipped }
-render_order_row: fn(order: Order) -> String { "<tr><td>{order.id}</td><td>{order.customer}</td><td>{order.total}</td><td>{order.shipped}</td></tr>" }
+
+render_order_row: fn(order: Order) -> String {
+    "<tr><td>{order.id}</td><td>{order.customer}</td><td>{order.total}</td><td>{order.shipped}</td></tr>"
+}
+
 render_order_rows: fn(orders: [Order]) -> String { orders.map(render_order_row).join("") }
+
 render_keyed_order_row: fn(row: WebTableRow<Order>) -> String { render_order_row(row.value) }
-render_keyed_order_rows: fn(rows: [WebTableRow<Order>]) -> String { rows.map(render_keyed_order_row).join("") }
+
+render_keyed_order_rows: fn(rows: [WebTableRow<Order>]) -> String {
+    rows.map(render_keyed_order_row).join("")
+}
 
 // The server loader receives the same typed table state as local pagination.
 // This fixture applies its known sort/filter policy before honoring the
@@ -91,15 +103,19 @@ load_orders: fn(search: OrderSearch) -> [Order] OrderError! {
     return Ok(page.rows)
 }
 
-pending_page: fn() -> WebPage { web.page(
-    "Orders pending",
-    "<main data-state=\"pending\"><h1>Orders</h1><p>Loading orders…</p></main>"
-) }
+pending_page: fn() -> WebPage {
+    web.page(
+        "Orders pending",
+        "<main data-state=\"pending\"><h1>Orders</h1><p>Loading orders…</p></main>",
+    )
+}
 
-error_page: fn() -> WebPage { web.page(
-    "Orders error",
-    "<main data-state=\"error\"><h1>Orders</h1><p>Orders could not be loaded.</p></main>"
-) }
+error_page: fn() -> WebPage {
+    web.page(
+        "Orders error",
+        "<main data-state=\"error\"><h1>Orders</h1><p>Orders could not be loaded.</p></main>",
+    )
+}
 
 add_order_to_cart: fn(cart: Cart) -> Cart {
     ids := cart.ids.copy()
@@ -146,10 +162,15 @@ render_snapshot: fn(id: Int, route_search: OrderSearch, loaded: [Order]) -> Stri
 
     // Query.live seeds the cache with route data and reuses its loader for
     // refreshes. Invalidation exposes stale → fetching → fresh to the panel.
-    orders_query := query.live<OrderError>("orders.list", "orders", json.to_string(loaded) ?? panic("JSON encode"), () -> {
-        refreshed: load_orders(route_search)
-        return Ok(json.to_string(refreshed) ?? return Err(OrderError{message: "orders do not encode as JSON"}))
-    }) ?? panic("orders query: {err.message}")
+    orders_query := query.live<OrderError>(
+        "orders.list",
+        "orders",
+        json.to_string(loaded) ?? panic("JSON encode"),
+        () -> {
+            refreshed: load_orders(route_search)
+            return Ok(json.to_string(refreshed) ?? return Err(OrderError{message: "orders do not encode as JSON"}))
+        },
+    ) ?? panic("orders query: {err.message}")
     stale_generation: orders_query.invalidate()
     query_state: orders_query.state()
     query_text: "{orders_query.show()} status={query_state.status}"
@@ -210,16 +231,29 @@ render_snapshot: fn(id: Int, route_search: OrderSearch, loaded: [Order]) -> Stri
     return "<main data-jet-edit-loop=\"state-preserved\">{nav}<h1>Orders</h1><p data-state=\"edit-loop\">edit-loop: state-preserved</p>{interactions}<p data-state=\"loaded\">loaded: {loaded.len()}</p><p data-state=\"error\">error: route/query/form boundaries</p><p data-route=\"/orders/:id\">route search={search.q}</p><pre data-panel=\"router\">{route_text}</pre>{loader_html}<pre data-panel=\"query\" data-query-refresh=\"{search.refresh}\">{query_text} invalidation={stale_generation}</pre><section data-panel=\"forms\">{form_html}<pre>{form_text} body={submission} no-script={no_script_body}</pre></section>{table_html}{virtual_html}<pre data-panel=\"store\" data-cart-count=\"{search.cart}\">{store_text} transaction={transaction.generation}</pre></main>"
 }
 
-home: fn() -> WebPage { web.page("Orders", render_snapshot(41, OrderSearch{q: "pending", page: 0, cart: 0, refresh: 0}, [Order]{})) }
+home: fn() -> WebPage {
+    web.page("Orders", render_snapshot(41, OrderSearch{q: "pending", page: 0, cart: 0, refresh: 0}, [Order]{}))
+}
+
 // `/orders` binds its typed search record and the loader's decoded data.
-orders_page: fn(search: OrderSearch, data: [Order]) -> WebPage { web.page("Orders", render_snapshot(41, search, data)) }
-order_detail: fn(id: Int, search: OrderSearch) -> WebPage { web.page("Order", render_snapshot(id, search, [Order]{})) }
-settings_page: fn() -> WebPage { web.page("Settings", "<main><h1>Settings</h1><p>Preferences</p></main>") }
+orders_page: fn(search: OrderSearch, data: [Order]) -> WebPage {
+    web.page("Orders", render_snapshot(41, search, data))
+}
+
+order_detail: fn(id: Int, search: OrderSearch) -> WebPage {
+    web.page("Order", render_snapshot(id, search, [Order]{}))
+}
+
+settings_page: fn() -> WebPage {
+    web.page("Settings", "<main><h1>Settings</h1><p>Preferences</p></main>")
+}
 
 // App.action and App.form are the one checked server boundary. ShipForm is
 // Codable so the same input/output contract is available to scripted and
 // progressive requests without a second RPC declaration.
-submit_ship_order: fn(input: ShipForm) -> String { "ship-order submitted for {input.id} via {input.carrier}" }
+submit_ship_order: fn(input: ShipForm) -> String {
+    "ship-order submitted for {input.id} via {input.carrier}"
+}
 
 check_carrier: fn(value: String) {
     if value == "" -> return Err("carrier required")

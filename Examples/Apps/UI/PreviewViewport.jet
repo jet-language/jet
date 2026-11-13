@@ -3,15 +3,14 @@ package: {
     version: "0.1.0"
     authority: { allow: [Browser, IO, Mem.Alloc] }
 }
+
 // A named preview takes its viewport as an optional label-only argument.
 // `ui.preview(name, body, viewport: v)` is the Core preview constructor
 // itself: the callback is a lambda the preview registry retains and renders
 // on demand, and omitting `viewport:` keeps the default desktop viewport.
 use ui: core.ui
 
-card: fn() -> UINode Never! {
-    ui.box([ui.text("Card title"), ui.node("Card body", 160.0, 48.0)])
-}
+card: fn() -> UINode Never! { ui.box([ui.text("Card title"), ui.node("Card body", 160.0, 48.0)]) }
 
 describe: fn(entry: UIPreview) -> String Never! {
     kind: if entry.kind == .Playground -> "playground" else -> "preview"
@@ -33,18 +32,18 @@ run: fn() {
     if ui.previews([phone, fallback]) == {
         .Ok(registry) -> {
             if registry.render("card-phone") == {
-                .Ok(_) -> print("registry renders card-phone")
+                .Ok(_) -> { print("registry renders card-phone") }
                 .Err(error) -> print("registry render failed: {error}")
             }
             if registry.render("card-missing") == {
-                .Ok(_) -> print("registry rendered an unregistered name")
+                .Ok(_) -> { print("registry rendered an unregistered name") }
                 .Err(error) -> print("registry rejects card-missing: {error}")
             }
         }
         .Err(error) -> print("registry failed: {error}")
     }
     if ui.previews([lab, ui.playground("card-lab", () -> card())]) == {
-        .Ok(_) -> print("registry accepted a duplicate name")
+        .Ok(_) -> { print("registry accepted a duplicate name") }
         .Err(error) -> print("registry rejects duplicates: {error}")
     }
 }

@@ -24,7 +24,7 @@ run: fn() {
     key: crypto.pbkdf2_hmac("password".bytes(), "salt".bytes(), 1, 32)
     print(key.len())
     if store(key) == {
-        .Ok(_) -> print("stored")
+        .Ok(_) -> { print("stored") }
         .Err(e) -> print("store: {e.message}")
     }
     // Zero iterations is `CryptoError.Length`; it passes up out of `run`.
@@ -34,6 +34,4 @@ run: fn() {
 
 // A written `0` is a bound the compiler sees (E2702); the count reaches
 // `pbkdf2_hmac` at run time here, as one read from a config would.
-rounds: fn(count: Int) -> Int {
-    count
-}
+rounds: fn(count: Int) -> Int { count }

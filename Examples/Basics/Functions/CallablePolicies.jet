@@ -8,7 +8,9 @@ policy audit(topic: String, prefix: String{"audit"}) {
 
 #Policy(audit("users.load")) audited_load: fn() -> String { "ok" }
 
-#Policy(trace("users.load")) load_user: fn(id: Int, label: String{"user"}) -> String { "{label}:{id}" }
+#Policy(trace("users.load")) load_user: fn(id: Int, label: String{"user"}) -> String {
+    "{label}:{id}"
+}
 
 run: fn() {
     audited: apply(audit("users.load"), audited_load)
@@ -25,7 +27,6 @@ run: fn() {
     print(bare(8))
     user_policies_lesson()
 }
-
 // A package owns a typed callable-policy setting; this one passes the call
 // straight through.
 policy pass_through(topic: String) {

@@ -4,15 +4,23 @@ Counter: struct {
     value: Int
     step: fn(Int) -> Int
     call: fn(Int) -> Int
+
     value: fn(self) -> Int Never! { self.value + 1 }
+
     step: fn(self, amount: Int) -> Int Never! { self.value + amount }
+
     call: fn(self, amount: Int) -> Int Never! { self.value + amount + 100 }
 }
-Callback: struct { step: fn(Int) -> Int }
+
+Callback: struct {
+    step: fn(Int) -> Int
+}
+
 make_callback: fn() -> Callback {
     print("receiver")
     Callback{step: n -> n + 1}
 }
+
 run: fn() {
     counter: Counter{value: 10, step: n -> n * 2, call: n -> n * 3}
     print(counter.value)

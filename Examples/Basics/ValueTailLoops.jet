@@ -40,8 +40,10 @@ log_all: fn(log: &[String], names: [String]) {
 flatten: fn(batch: Batch) -> [Int] {
     out := [Int]{}
     if batch == {
-        .One(value) -> out.push(value)
-        .Many(values) -> loop value in values -> out.push(value)
+        .One(value) -> { out.push(value) }
+        .Many(values) -> {
+            loop value in values -> out.push(value)
+        }
     }
     out
 }
@@ -90,11 +92,11 @@ Shape: enum {
     One(item: Int)
 }
 
-Writer: struct { bytes: [Int] }
-
-put: fn(writer: &Writer, value: Int) {
-    writer.bytes.push(value)
+Writer: struct {
+    bytes: [Int]
 }
+
+put: fn(writer: &Writer, value: Int) { writer.bytes.push(value) }
 
 write_shape: fn(writer: &Writer, value: Shape) {
     if value == {

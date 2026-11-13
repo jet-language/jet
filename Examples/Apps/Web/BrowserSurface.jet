@@ -7,7 +7,8 @@ package: {
 }
 
 #[Target(Web), HTML(Path{"BrowserSurface.html"})]
-use browser: core.web.browser
+
+use core.web.browser
 
 report_surface: fn() {
     if browser.config() == {
@@ -38,11 +39,13 @@ report_surface: fn() {
 // The report case is supplied by the browser runner.  Keeping this adapter in
 // the example makes the report_add_case row executable without manufacturing a
 // private case shape in application code.
-add_case: fn(report: BrowserTestReport, case: BrowserTestCase) -> BrowserTestReport { browser.report_add_case(report, case) }
+add_case: fn(report: BrowserTestReport, case: BrowserTestCase) -> BrowserTestReport {
+    browser.report_add_case(report, case)
+}
 
 report_external: fn(config: BrowserTestConfig, case: BrowserTestCase, server: BrowserTestServer) {
     if browser.server_start(config) == {
-        .Ok(started_server) -> browser.server_stop(started_server)
+        .Ok(started_server) -> { browser.server_stop(started_server) }
         .Err(_) -> {}
     }
     _generated: browser.generate_source("surface_generated", "/BrowserSurface.html", "build/browser_surface_generated.jet")
@@ -158,9 +161,7 @@ browser_session: fn(endpoint: String, page_url: String) {
     main_frame: page.main_frame() ?? return
     _frame_close: main_frame.close()
     frames: page.frames() ?? return
-    loop frame in frames {
-        _closed_frame: frame.close()
-    }
+    loop frame in frames -> _closed_frame: frame.close()
     _closed_page: page.close()
     _closed_context: context.close()
     _closed_browser: b.close()
@@ -169,6 +170,8 @@ browser_session: fn(endpoint: String, page_url: String) {
 run: fn() {
     report_surface()
     endpoint: input.first() ?? return
-    if endpoint.is_empty() -> return
+    if endpoint.is_empty() {
+        return
+    }
     browser_session(endpoint, "http://127.0.0.1:8080/BrowserSurface.html")
 }

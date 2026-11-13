@@ -6,18 +6,21 @@ package: {
         needs: [UI.IME, UI.Shortcuts, UI.Accessibility]
     }
 }
+
 // A UINode's host slots: `.accessibility`, `.shortcut` and `.ime` read back
 // the metadata `ui.node_accessibility`, `ui.node_shortcut` and
 // `ui.text_input` attached, with one meaning on every tier. A plain node has
 // none of them; a text input's width counts Unicode scalars.
 use {
     ui: core.ui
-    host: core.ui.host
+    core.ui.host
 }
 
 run: fn() {
     plain: ui.button("Plain")
-    if plain.accessibility == None && plain.shortcut == None && plain.ime == None -> print("plain: no slots")
+    if plain.accessibility == None && plain.shortcut == None && plain.ime == None {
+        print("plain: no slots")
+    }
     meta: UIAccessibility{name: Val("Save"), description: None, states: [UIAccessibilityState]{.Disabled, .Expanded(true), .Value("draft")}}
     labelled: ui.node_accessibility(ui.button("Save"), meta)
     if labelled.accessibility == .Val(read) {

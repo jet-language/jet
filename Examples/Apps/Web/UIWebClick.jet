@@ -12,11 +12,12 @@ package: {
     authority: { allow: [Browser, Mem.Alloc] }
 }
 
+#[Target(Web), HTML(Path{"UIWebClick.html"})]
+
 use {
     ui: core.ui
     reactive: core.reactive
 }
-#[Target(Web), HTML(Path{"UIWebClick.html"})]
 
 render: fn(n: Int) {
     backend: ui.null_backend()
@@ -32,17 +33,24 @@ render: fn(n: Int) {
 
 run: fn() {
     count: reactive.signal(0)
-    ui.reactive_render(() -> {
-        n := count.get()
-        color := "#e8790c"
-        if n % 2 == 0 -> color = "#3366ff"
-        backend: ui.null_backend()
-        tree: ui.box([
-            ui.node_color("Clicks: {n}", 160.0, 40.0, color),
-            ui.button("Click me", () -> {
-                count.set(count.get() + 1)
-            })
-        ])
-        ui.mount(backend, tree, ui.constraint(0.0, 0.0, 300.0, 120.0))
-    })
+    ui.reactive_render(
+        () -> {
+            n := count.get()
+            color := "#e8790c"
+            if n % 2 == 0 -> color = "#3366ff"
+            backend: ui.null_backend()
+            tree: ui.box(
+                [
+                    ui.node_color("Clicks: {n}", 160.0, 40.0, color),
+                    ui.button(
+                        "Click me",
+                        () -> {
+                            count.set(count.get() + 1)
+                        },
+                    ),
+                ],
+            )
+            ui.mount(backend, tree, ui.constraint(0.0, 0.0, 300.0, 120.0))
+        },
+    )
 }

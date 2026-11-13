@@ -12,20 +12,12 @@ slow: fn(value: Int) -> Int {
     return total
 }
 
-fast: fn(value: Int) -> Int {
-    return value
-}
+fast: fn(value: Int) -> Int { return value }
 
 run: fn() {
-    positional: (task.all {
-        slow(10),
-        fast(20)
-    }) ?? panic("task.all failed")
+    positional: (task.all {slow(10), fast(20)}) ?? panic("task.all failed")
     print("{positional[0]} {positional[1]}")
 
-    named: (task.all {
-        first: slow(10),
-        second: fast(20)
-    }) ?? panic("named task.all failed")
+    named: (task.all {first: slow(10), second: fast(20)}) ?? panic("named task.all failed")
     print("{named.first} {named.second}")
 }
