@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6833,
-    "rev": 101764,
+    "rev": 101765,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -204246,6 +204246,13 @@
   ],
   "events": [
     {
+      "at": "2026-11-13T20:44:01.868Z",
+      "by": "Main",
+      "action": "briefing.post",
+      "ref": "briefing0xvr0d9",
+      "note": "Self-compile 15:43: 4:31 for 903k lines (not cold); cold A/B next"
+    },
+    {
       "at": "2026-11-13T20:43:42.184Z",
       "by": "Main",
       "action": "briefing.post",
@@ -209121,6 +209128,14 @@
     }
   ],
   "briefings": [
+    {
+      "id": "briefing0xvr0d9",
+      "title": "Self-compile 15:43: 4:31 for 903k lines (not cold); cold A/B next",
+      "body": "# Self-compile measured at 15:43: 4 min 31 s; sweep2 is landing\n\n**The first self-compile with the speed slices succeeded.** The stage-A compiler built the full sweep2 tree with `jet build --profile dev Compiler`.\n\n|Measure|Value|\n|---|---|\n|Wall time|4:30.6 (270.6 s)|\n|User CPU|176.1 s|\n|Peak memory|9.06 GiB|\n|Lines|903,323 (Compiler 679,908 + Core 223,415)|\n|Rate|about 3,340 lines/s of wall time|\n\n**This is not a best, and not a clean number.**\n- The run was not cold: earlier failed attempts had already checked some packages.\n- Worker checks shared the machine for its first minutes.\n- It counts more than October's run did: 903k lines against 637k, plus a runtime step of about 90 s.\n- October's comparable run took 19.3 s for 637k lines, so the whole build is now much slower.\n\n**Next:** a cold comparison on a quiet machine. seed-b15 and the new compiler each build the same fresh tree, with a per-phase time table, to find where the time goes. G11Speed-5 owns the fix under #6793. This briefing gets the numbers when they land.\n\n**Landing:** sweep2 (106 commits) is landing on dev now. Seed-b16 follows, then post-sweep batches 1 and 2 back to back.\n\n**Goals (criteria met):** G1, G8 and G12 are done. G4 is at 59/61, G6 at 358/697, G3 at 313/907, G5 at 252/813 and G9 at 21/271. These counts move once sweep2's proofs run.\n",
+      "by": "Main",
+      "created": "2026-11-13T20:44:01.868Z",
+      "sections": []
+    },
     {
       "id": "briefing0wcp2ib",
       "title": "Status 15:45: speed sweep building",
