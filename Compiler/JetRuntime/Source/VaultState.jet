@@ -822,7 +822,7 @@ vault_replace_strings_inner: fn(root: I64, scratch: I64) -> I64 {
     if (rt_text_word(wrapping(scratch + I64{104})) != VAULT_START_V2) -> return vault_error_new(I64{8}, I64{0}, I64{0})
     store: rt_text_word(wrapping(scratch + I64{16}))
     revision: rt_text_word(wrapping(store + VAULT_STORE_REVISION))
-    lock_error: vault_acquire_lock(root, wrapping(store + VAULT_STORE_UUID), revision, wrapping(scratch + I64{40}), wrapping(scratch + I64{32}))
+    lock_error: vault_acquire_lock(root, wrapping(scratch + I64{32}))
     if (lock_error != I64{0}) -> return lock_error
     current_error: vault_read_at_root(root, wrapping(scratch + I64{24}), wrapping(scratch + I64{112}), wrapping(scratch + I64{144}), wrapping(scratch + I64{176}))
     if (current_error != I64{0}) -> return current_error
@@ -1498,7 +1498,7 @@ vault_commit_inner: fn(root: I64, plan: I64, write: I64, expected: I64, key_type
         || rt_text_word(wrapping(write + VAULT_WRITE_USER)) != user
         || rt_text_word(wrapping(write + VAULT_WRITE_SESSION)) != session) -> return vault_error_new(I64{6}, I64{0}, I64{0})
     lock_slot: wrapping(scratch + I64{8200})
-    lock_error: vault_acquire_lock(root, wrapping(plan + VAULT_PLAN_UUID), rt_text_word(wrapping(plan + VAULT_PLAN_REVISION)), wrapping(plan + VAULT_PLAN_START_HASH), lock_slot)
+    lock_error: vault_acquire_lock(root, lock_slot)
     if (lock_error != I64{0}) -> return lock_error
     read_error: vault_read_at_root(root, wrapping(scratch + I64{8192}), wrapping(scratch + I64{8232}), wrapping(scratch + I64{8264}), wrapping(scratch + I64{8296}))
     if (read_error != I64{0}) -> return read_error

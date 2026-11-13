@@ -702,72 +702,6 @@ jet_rt_vault_identity_stream_fixture: fn(root: I64, expected: I64) {
 }
 
 #Export(c)
-jet_rt_vault_uint_fixture: fn(input: I64, narrow: Bool, valid: Bool, value: I64, decimal: I64) {
-    scratch: jet_rt_alloc(I64{40}, I64{8})
-    rt_text_store(scratch, I64{91})
-    parsed: vault_parse_uint(rt_text_data(input), rt_text_len(input), narrow, scratch)
-    vault_fixture_check(parsed == valid)
-    if valid {
-        vault_fixture_check(rt_text_word(scratch) == value)
-        length: vault_decimal_put(scratch + I64{8}, value)
-        vault_fixture_check(length == rt_text_len(decimal))
-        vault_fixture_check(rt_text_equal_bytes(scratch + I64{8}, rt_text_data(decimal), length))
-    } else {
-        vault_fixture_check(rt_text_word(scratch) == I64{91})
-    }
-    jet_rt_free(scratch, I64{40}, I64{8})
-}
-#Export(c)
-jet_rt_vault_proc_parse_fixture: fn(input: I64, valid: Bool, value: I64) {
-    scratch: jet_rt_alloc(I64{8}, I64{8})
-    rt_text_store(scratch, I64{91})
-    parsed: vault_process_start_parse(rt_text_data(input), rt_text_len(input), scratch)
-    vault_fixture_check(parsed == valid)
-    vault_fixture_check(rt_text_word(scratch) == (if valid -> value else -> I64{91}))
-    jet_rt_free(scratch, I64{8}, I64{8})
-}
-#Export(c)
-jet_rt_vault_proc_read_fixture: fn() {
-    scratch: jet_rt_alloc(I64{24}, I64{8})
-    pid: trap_syscall(I64{39}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
-    vault_fixture_check(vault_process_start(pid, scratch))
-    vault_fixture_check(vault_process_start(pid, scratch + I64{8}))
-    vault_fixture_check(rt_text_word(scratch) == rt_text_word(scratch + I64{8}))
-    rt_text_store(scratch + I64{16}, I64{91})
-    vault_fixture_check(!vault_process_start(I64{4294967295}, scratch + I64{16}))
-    vault_fixture_check(rt_text_word(scratch + I64{16}) == I64{91})
-    jet_rt_free(scratch, I64{24}, I64{8})
-}
-
-// Borrowed stale-field parse only: actual recovery is tested by FS fixtures.
-#Export(c)
-jet_rt_vault_lock_fields_fixture: fn(input: I64, revision: I64, valid: Bool, pid: I64, start: I64, nonce: I64) {
-    scratch: jet_rt_alloc(I64{88}, I64{8})
-    thread_zero(scratch, I64{48})
-    at := I64{48}
-    loop at < (I64{80}) {
-        rt_text_store(scratch + at, I64{91})
-        at += I64{8}
-    }
-    parsed: vault_lock_fields(rt_text_data(input), rt_text_len(input), scratch, revision, scratch + I64{16}, scratch + I64{48}, scratch + I64{80})
-    vault_fixture_check(parsed == valid)
-    if valid {
-        vault_fixture_check(rt_text_word(scratch + I64{48}) == pid)
-        vault_fixture_check(rt_text_word(scratch + I64{56}) == start)
-        vault_fixture_check(rt_text_word(scratch + I64{72}) == rt_text_len(nonce))
-        vault_fixture_check(rt_text_equal_bytes(rt_text_word(scratch + I64{64}), rt_text_data(nonce), rt_text_len(nonce)))
-    } else {
-        at = I64{48}
-        loop at < (I64{80}) {
-            vault_fixture_check(rt_text_word(scratch + at) == I64{91})
-            at += I64{8}
-        }
-    }
-    thread_zero(scratch, I64{88})
-    jet_rt_free(scratch, I64{88}, I64{8})
-}
-
-#Export(c)
 jet_rt_vault_lock_guard_fixture: fn(root: I64, fault: I64) {
     scratch: jet_rt_alloc(I64{368}, I64{8})
     name: scratch + I64{336}
@@ -795,41 +729,39 @@ jet_rt_vault_lock_guard_fixture: fn(root: I64, fault: I64) {
     jet_rt_free(scratch, I64{368}, I64{8})
 }
 
+// A held lock is a kernel flock: a second acquire and a fresh descriptor's own
+// flock are both refused while it is held, and release deletes the file.
 #Export(c)
 jet_rt_vault_lock_acquire_fixture: fn(root: I64) {
-    scratch: jet_rt_alloc(I64{464}, I64{8})
-    thread_zero(scratch, I64{464})
-    repo: scratch + I64{336}
-    hash: scratch + I64{352}
-    slot: scratch + I64{384}
+    scratch: jet_rt_alloc(I64{56}, I64{8})
+    thread_zero(scratch, I64{56})
+    slot: scratch + I64{24}
     vault_fixture_check(vault_recover_backup_at_root(root) == I64{0})
-    vault_fixture_check(vault_acquire_lock_mode(root, repo, I64{-1}, hash, false, slot) == I64{0})
+    vault_fixture_check(vault_acquire_lock_mode(root, false, slot) == I64{0})
     guard: rt_text_word(slot)
     vault_fixture_check(!vault_bytes_zero(guard + VAULT_LOCK_NONCE, I64{16}))
     rt_text_store(slot, I64{91})
-    conflict: vault_acquire_lock_mode(root, repo, I64{-1}, hash, false, slot)
+    conflict: vault_acquire_lock_mode(root, false, slot)
     vault_fixture_check(conflict != I64{0} && vault_error_tag(conflict) == I64{6})
     vault_fixture_check(rt_text_word(slot) == I64{91})
     vault_error_drop(conflict)
-    name: scratch + I64{392}
+    name: scratch + I64{32}
     rt_text_store(name, I64{8319385953628418862})
     rt_text_store(name + I64{8}, I64{7165064478695317806})
     rt_text_store(name + I64{16}, I64{107})
     file: vault_linux_openat(rt_text_word(guard + VAULT_LOCK_DIR), name, I64{0}, I64{0}, scratch)
     vault_fixture_check(file >= I64{0})
-    vault_fixture_check(vault_linux_read_file(file, slot, scratch) == I64{0})
+    vault_fixture_check(vault_linux_flock(file) == I64{-11})
     vault_linux_close(file)
-    bytes: rt_text_word(slot)
-    vault_fixture_check(vault_lock_fields(rt_text_word(bytes + DATA_SEQUENCE_DATA), rt_text_word(bytes + DATA_SEQUENCE_LENGTH), repo, I64{-1}, hash, scratch + I64{416}, scratch))
-    pid: trap_syscall(I64{39}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
-    vault_fixture_check(rt_text_word(scratch + I64{416}) == pid)
-    vault_hex_put(scratch, guard + VAULT_LOCK_NONCE, I64{16})
-    vault_fixture_check(rt_text_equal_bytes(scratch, rt_text_word(scratch + I64{432}), I64{32}))
-    thread_zero(rt_text_word(bytes + DATA_SEQUENCE_DATA), rt_text_word(bytes + DATA_SEQUENCE_CAPACITY))
-    data_sequence_drop(bytes, DYN_BYTE_LIST)
     vault_lock_drop(guard)
-    thread_zero(scratch, I64{464})
-    jet_rt_free(scratch, I64{464}, I64{8})
+    thread_zero(scratch, I64{56})
+    jet_rt_free(scratch, I64{56}, I64{8})
+}
+// The killed-writer witness's child takes the real write lock and keeps it
+// until it is killed.
+#Export(c)
+jet_rt_vault_lock_hold_fixture: fn(root: I64, out: I64) {
+    vault_fixture_check(vault_acquire_lock(root, out) == I64{0})
 }
 
 #Export(c)
@@ -1447,7 +1379,7 @@ vault_fixture_stream_hash: fn(stream: I64, expected: I64) {
     jet_rt_vault_clear_test_authorizer()
     jet_rt_free(slots, I64{64}, I64{8})
 }
-#Export(c) stale_lock_requires_age_owner_dead_pid_nonce_and_unchanged_store: fn(root: I64, plan: I64, reason: I64) {
+#Export(c) killed_writers_lock_never_blocks_the_next_write: fn(root: I64, plan: I64, reason: I64) {
     slots: jet_rt_alloc(I64{16}, I64{8})
     write: vault_fixture_authorize(plan, I64{1}, reason, slots)
     vault_fixture_check(vault_commit_at_root(root, plan, write, I64{1}, I64{1}, slots, slots + I64{8}) == I64{0})
@@ -1458,7 +1390,7 @@ vault_fixture_stream_hash: fn(stream: I64, expected: I64) {
     jet_rt_free(slots, I64{16}, I64{8})
 }
 #Export(c) jet_rt_vault_fixture_guard: fn(root: I64, plan: I64, out: I64) {
-    vault_fixture_check(vault_acquire_lock(root, plan + VAULT_PLAN_UUID, rt_text_word(plan + VAULT_PLAN_REVISION), plan + VAULT_PLAN_START_HASH, out) == I64{0})
+    vault_fixture_check(vault_acquire_lock(root, out) == I64{0})
     vault_plan_drop(plan)
 }
 #Export(c) lock_drop_never_unlinks_an_inode_substituted_after_its_check: fn(guard: I64, fault: I64) {

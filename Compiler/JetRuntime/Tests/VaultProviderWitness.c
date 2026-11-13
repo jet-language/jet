@@ -44,12 +44,9 @@ extern void jet_rt_vault_recipients_fixture(const Text *, int64_t, int64_t, cons
 extern void jet_rt_vault_plaintext_fixture(const ByteList *, int64_t, int64_t, int64_t, const void *);
 extern void jet_rt_vault_linux_stream_fixture(int64_t, const Text *);
 extern void jet_rt_vault_identity_stream_fixture(const Text *, const Text *);
-extern void jet_rt_vault_uint_fixture(const Text *, _Bool, _Bool, int64_t, const Text *);
-extern void jet_rt_vault_proc_parse_fixture(const Text *, _Bool, int64_t);
-extern void jet_rt_vault_proc_read_fixture(void);
-extern void jet_rt_vault_lock_fields_fixture(const Text *, int64_t, _Bool, int64_t, int64_t, const Text *);
 extern void jet_rt_vault_lock_guard_fixture(const Text *, const Text *);
 extern void jet_rt_vault_lock_acquire_fixture(const Text *);
+extern void jet_rt_vault_lock_hold_fixture(const Text *, void **);
 extern void jet_rt_vault_lifecycle_strings_fixture(const Text *, const Text *, const Text *);
 extern void jet_rt_vault_reference_fixture(void *, const Text *, const Text *);
 extern void jet_rt_vault_plan_auth_fixture(const Text *, const Text *, const Text *, const Text *, const void *, const void *, _Bool, int64_t (*)(void *, void *, int64_t));
@@ -93,7 +90,7 @@ extern int64_t jet_rt_vault_fixture_join(int64_t, intptr_t *);
 extern int64_t jet_rt_vault_fixture_rotation_worker(const Text *, void *, void *, const Text *);
 extern void jet_rt_vault_fixture_reader_conflict(const Text *, const Text *);
 extern void concurrent_reader_defers_backup_recovery_until_writer_releases_lock(const Text *, const Text *, const ByteList *);
-extern void stale_lock_requires_age_owner_dead_pid_nonce_and_unchanged_store(const Text *, void *, const Text *);
+extern void killed_writers_lock_never_blocks_the_next_write(const Text *, void *, const Text *);
 extern void jet_rt_vault_fixture_guard(const Text *, void *, void **);
 extern void lock_drop_never_unlinks_an_inode_substituted_after_its_check(void *, const Text *);
 extern void anonymous_temp_substitution_never_reaches_the_visible_store(const Text *, const Text *, const Text *, const Text *, const Text *);
@@ -368,48 +365,6 @@ static void canonical_read_fixtures(void) {
     typed[75] ^= 1;
     jet_rt_vault_plaintext_fixture(&plain, 0, 0, 8, NULL);
 }
-static void process_start_fixtures(void) {
-    static const struct { const char *input, *decimal; int narrow, valid; int64_t value; } numbers[] = {
-        {"0", "0", 0, 1, 0}, {"+0", "0", 1, 1, 0}, {"000000000000001", "1", 0, 1, 1},
-        {"4294967295", "4294967295", 1, 1, 4294967295},
-        {"4294967296", NULL, 1, 0, 0}, {"+4294967295", "4294967295", 1, 1, 4294967295},
-        {"9223372036854775807", "9223372036854775807", 0, 1, INT64_MAX},
-        {"9223372036854775808", "9223372036854775808", 0, 1, INT64_MIN},
-        {"+18446744073709551615", "18446744073709551615", 0, 1, -1},
-        {"00018446744073709551615", "18446744073709551615", 0, 1, -1},
-        {"18446744073709551616", NULL, 0, 0, 0}, {"184467440737095516150", NULL, 0, 0, 0},
-        {"", NULL, 0, 0, 0}, {"+", NULL, 0, 0, 0}, {"-0", NULL, 0, 0, 0},
-        {" 1", NULL, 0, 0, 0}, {"1 ", NULL, 0, 0, 0}, {"0x10", NULL, 0, 0, 0},
-        {"\xef\xbc\x91", NULL, 0, 0, 0}
-    };
-    for (size_t i = 0; i < sizeof(numbers) / sizeof(numbers[0]); ++i) {
-        Text input = text(numbers[i].input), decimal = text(numbers[i].decimal ? numbers[i].decimal : "");
-        jet_rt_vault_uint_fixture(&input, numbers[i].narrow, numbers[i].valid, numbers[i].value, &decimal);
-    }
-    char stat[256];
-    const char *values[] = {"+18446744073709551615", "0", "18446744073709551616", "-1", "+"};
-    for (size_t i = 0; i < sizeof(values) / sizeof(values[0]); ++i) {
-        int written = snprintf(stat, sizeof(stat), "9 (has ) ) nested) ");
-        assert(written > 0);
-        size_t at = (size_t)written;
-        for (unsigned field = 0; field < 19; ++field) {
-            written = snprintf(stat + at, sizeof(stat) - at, "%s", field == 7 ? "\xc2\x85x\xe2\x80\xa8" : "x ");
-            assert(written > 0 && (size_t)written < sizeof(stat) - at);
-            at += (size_t)written;
-        }
-        written = snprintf(stat + at, sizeof(stat) - at, "%s tail", values[i]);
-        assert(written > 0 && (size_t)written < sizeof(stat) - at);
-        Text input = text(stat);
-        jet_rt_vault_proc_parse_fixture(&input, i < 2, i == 0 ? -1 : 0);
-    }
-    Text no_close = text("no closing parenthesis"), too_short = text("1 (name) 0 0");
-    jet_rt_vault_proc_parse_fixture(&no_close, 0, 0);
-    jet_rt_vault_proc_parse_fixture(&too_short, 0, 0);
-    unsigned char invalid_bytes[] = {'1',' ','(',0xff,')'};
-    Text invalid = {invalid_bytes, (int64_t)sizeof(invalid_bytes), 0};
-    jet_rt_vault_proc_parse_fixture(&invalid, 0, 0);
-    jet_rt_vault_proc_read_fixture();
-}
 static void lock_guard_fixtures(void) {
     char root[] = "/tmp/jet-vault-guard-XXXXXX", dir[128], lock[160], acquired[160], done[192];
     assert(mkdtemp(root) != NULL);
@@ -433,49 +388,6 @@ static void lock_guard_fixtures(void) {
     assert(stat(lock, &after) == 0 && before.st_dev == after.st_dev && before.st_ino == after.st_ino);
     assert(access(done, F_OK) == -1 && errno == ENOENT);
     assert(unlink(lock) == 0 && unlink(acquired) == 0 && rmdir(dir) == 0 && rmdir(root) == 0);
-}
-static void lock_fields_fixtures(void) {
-    static const char base[] =
-        "repo=00000000000000000000000000000000 revision=0 pid=0 process-start=0 "
-        "nonce=ABCDEF00000000000000000000000000 "
-        "hash=0000000000000000000000000000000000000000000000000000000000000000";
-    static const struct { const char *suffix; int valid; int64_t revision, pid, start; const char *nonce; } cases[] = {
-        {"", 1, 0, 0, 0, "ABCDEF00000000000000000000000000"},
-        {"\xc2\x85pid=+4294967295\xe2\x80\xa8process-start=+18446744073709551615 revision=+18446744073709551615", 1, -1, 4294967295LL, -1, "ABCDEF00000000000000000000000000"},
-        {" pid=17 pid=no", 0, 0, 0, 0, ""},
-        {" revision=1 revision=", 0, 0, 0, 0, ""},
-        {" process-start=1 process-start=18446744073709551616", 0, 0, 0, 0, ""},
-        {" pid=4294967296", 0, 0, 0, 0, ""},
-        {" revision=-0", 0, 0, 0, 0, ""},
-        {" repo=", 0, 0, 0, 0, ""},
-        {" hash=", 0, 0, 0, 0, ""},
-        {" hash=0000000000000000000000000000000000000000000000000000000000000000=extra", 0, 0, 0, 0, ""},
-        {" nonce=00000000000000000000000000000000", 0, 0, 0, 0, ""},
-        {" nonce=GBCDEF00000000000000000000000000", 0, 0, 0, 0, ""},
-        {" nonce=abcdef00000000000000000000000000", 1, 0, 0, 0, "abcdef00000000000000000000000000"},
-        {" pid=no pid=+0 revision=no revision=0 process-start=no process-start=0 ignored=a=b noequals", 1, 0, 0, 0, "ABCDEF00000000000000000000000000"},
-        {" nonce=x nonce=ABCDEF00000000000000000000000000", 1, 0, 0, 0, "ABCDEF00000000000000000000000000"},
-        {"\xff", 0, 0, 0, 0, ""}
-    };
-    char buffer[512];
-    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
-        int n = snprintf(buffer, sizeof(buffer), "%s%s", base, cases[i].suffix);
-        assert(n >= 0 && (size_t)n < sizeof(buffer));
-        Text input = text(buffer), nonce = text(cases[i].nonce);
-        jet_rt_vault_lock_fields_fixture(&input, cases[i].revision, cases[i].valid, cases[i].pid, cases[i].start, &nonce);
-    }
-    // Missing fields independently: remove each entire token from the literal.
-    for (unsigned field = 0; field < 6; ++field) {
-        const char *begin = base;
-        for (unsigned i = 0; i < field; ++i) begin = strchr(begin, ' ') + 1;
-        const char *end = strchr(begin, ' ');
-        if (!end) end = base + strlen(base); else ++end;
-        size_t prefix = (size_t)(begin - base);
-        memcpy(buffer, base, prefix);
-        strcpy(buffer + prefix, end);
-        Text input = text(buffer), nonce = text("");
-        jet_rt_vault_lock_fields_fixture(&input, 0, 0, 0, 0, &nonce);
-    }
 }
 static const char preview_golden[] = "store SigningKey release 0 -> 2 in repository 07070707070707070707070707070707 at revision 9; reason: <none>; authority reason: initial signer; expires_unix_ms: 123456";
 static unsigned authorizer_calls;
@@ -786,13 +698,6 @@ static int64_t fixture_writer(intptr_t raw) {
     VaultWriter *writer = (VaultWriter *)raw;
     return jet_rt_vault_fixture_rotation_worker(writer->root, writer->plan, writer->write, writer->fault);
 }
-static void fixture_hex(char *out, const unsigned char *raw, size_t count) {
-    static const char digits[] = "0123456789abcdef";
-    for (size_t i = 0; i < count; ++i) {
-        out[2 * i] = digits[raw[i] >> 4]; out[2 * i + 1] = digits[raw[i] & 15];
-    }
-    out[2 * count] = '\0';
-}
 static void filesystem_batch_c(void) {
     Text name = text("release"), empty = text(""), initial = text("initial signer");
     Text cancel_before = text("cancel-before-install"), cancel_after = text("cancel-after-install");
@@ -840,24 +745,34 @@ static void filesystem_batch_c(void) {
     jet_rt_vault_test_barrier_drop(entered); jet_rt_vault_test_barrier_drop(release);
     fixture_remove_tree(concurrent);
 
-    char stale[] = "/tmp/jet-vault-stale-lock-XXXXXX", lock_path[512], lock_text[256];
-    root = fixture_scratch(stale, 1); fixture_authorizer(1);
+    // A writer killed while it holds the lock: a live holder refuses a second
+    // writer, and once it is killed the kernel drops its flock, so the next
+    // write proceeds at once over the lock file it left behind.
+    char killed[] = "/tmp/jet-vault-killed-writer-XXXXXX", lock_path[512];
+    root = fixture_scratch(killed, 1); fixture_authorizer(1);
+    int ready[2]; assert(pipe(ready) == 0);
+    pid_t holder = fork(); assert(holder >= 0);
+    if (holder == 0) {
+        void *held; jet_rt_vault_lock_hold_fixture(&root, &held);
+        assert(write(ready[1], "h", 1) == 1);
+        for (;;) pause();
+    }
+    char held_byte; assert(close(ready[1]) == 0 && read(ready[0], &held_byte, 1) == 1 && close(ready[0]) == 0);
+    Text refused = text("second writer while the first holds the lock");
+    void *unused = NULL;
+    jet_rt_vault_fixture_fault_commit(&root, &name, &empty, &refused, NULL, 6, &unused);
+    assert(kill(holder, SIGKILL) == 0);
+    int status; pid_t waited;
+    do { waited = waitpid(holder, &status, 0); } while (waited < 0 && errno == EINTR);
+    assert(waited == holder && WIFSIGNALED(status) && WTERMSIG(status) == SIGKILL);
+    fixture_path(lock_path, sizeof(lock_path), killed, ".jet/.secrets.age.lock");
+    assert(access(lock_path, F_OK) == 0 && "the killed writer left its lock file");
     void *raw_plan; jet_rt_vault_fixture_generate_plan(&root, &name, &empty, &raw_plan);
-    const unsigned char *plan = raw_plan;
-    char uuid[33], hash[65]; fixture_hex(uuid, plan + 40, 16); fixture_hex(hash, plan + 64, 32);
-    int written = snprintf(lock_text, sizeof(lock_text),
-        "repo=%s revision=0 pid=999999 process-start=1 nonce=11111111111111111111111111111111 hash=%s\n", uuid, hash);
-    assert(written > 0 && (size_t)written < sizeof(lock_text));
-    fixture_path(lock_path, sizeof(lock_path), stale, ".jet/.secrets.age.lock");
-    fixture_write(lock_path, (const unsigned char *)lock_text, (size_t)written);
-    struct timespec times[2]; assert(clock_gettime(CLOCK_REALTIME, &times[0]) == 0);
-    times[0].tv_sec -= 601; times[1] = times[0];
-    int fd = open(lock_path, O_RDONLY); assert(fd >= 0 && futimens(fd, times) == 0 && close(fd) == 0);
-    Text recover = text("recover stale lock");
-    stale_lock_requires_age_owner_dead_pid_nonce_and_unchanged_store(&root, raw_plan, &recover);
+    Text next_write = text("write after a killed writer");
+    killed_writers_lock_never_blocks_the_next_write(&root, raw_plan, &next_write);
     assert(access(lock_path, F_OK) == -1 && errno == ENOENT);
-    fixture_no_name(stale, "lock.stale", NULL);
-    fixture_remove_tree(stale);
+    fixture_no_name(killed, ".secrets.age.lock", NULL);
+    fixture_remove_tree(killed);
 
     char substitution[] = "/tmp/jet-vault-lock-substitution-XXXXXX", acquired[512];
     root = fixture_scratch(substitution, 1);
@@ -953,8 +868,6 @@ int main(int argc, char **argv) {
     jet_rt_vault_crypto_fixture(&crypto_plain);
     canonical_read_fixtures();
     stream_read_fixtures();
-    process_start_fixtures();
-    lock_fields_fixtures();
     lock_guard_fixtures();
     Text lifecycle_name = text("."), rollback = text("clock-rollback"), missing_root = text("/proc/jet-vault-no-such-root");
     jet_rt_vault_lifecycle_strings_fixture(&lifecycle_name, &rollback, &missing_root);
