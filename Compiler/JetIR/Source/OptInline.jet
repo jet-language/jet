@@ -157,7 +157,7 @@ ir_opt_inline_size: fn(m: IRModule, bodies: [[IRFunction]], caller: IRFunction, 
         written: ir_x64_write(callee, k)
         if written >= 0 && written < callee.param_count -> return -1
         if callee.source_file != caller.source_file && ir_opt_located(m, callee, k) -> return -1
-        if callee.op[k] == .CallRuntime && m.names[callee.a[k]] == "jet_rt_context_trace" -> return -1
+        if ir_opt_calls_route(m, callee, k, "jet_rt_context_trace") -> return -1
     }
     cost
 }
