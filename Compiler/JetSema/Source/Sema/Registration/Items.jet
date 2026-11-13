@@ -529,10 +529,14 @@ SemaRegistrationNominal: struct {
     generated_provenance: String?
 }
 
+// A module constant's row. `typed` when the binding writes its type: the
+// compile-time run later gives an unwritten one's `ty` and declaration the
+// type of its staged value, so neither tells a written type afterwards.
 SemaRegistrationConstant: struct {
     symbol: Symbol
     declaration: ConstDef
     ty: Type?
+    typed: Bool
     identity_key: String
 }
 
@@ -2348,7 +2352,7 @@ sema_registration_add_root: fn(module_row: &SemaRegistrationModule, item: Item, 
         .Const(value) -> {
             if sema_ownership_is_static_root(value) -> module_row.static_roots.push(symbol.id.key)
             if value.is_persist -> module_row.persist_roots.push(symbol.id.key)
-            module_row.constants.push(SemaRegistrationConstant{symbol: symbol, declaration: value, ty: value.ty, identity_key: "{module_row.module_identity}:{value.name}"})
+            module_row.constants.push(SemaRegistrationConstant{symbol: symbol, declaration: value, ty: value.ty, typed: value.ty != None, identity_key: "{module_row.module_identity}:{value.name}"})
         }
         // Each member type a unit family declared in this module mints
         // registers as its own distinct declaration, so `Usd.from_float(...)`

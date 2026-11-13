@@ -5415,7 +5415,7 @@ sema_expr_check_binary_operands: fn(op: BinOp, left: Expr, right: Expr, span: Sp
     if right_handled && rhs_checked == None -> return None
     if !right_handled -> rhs_checked = sema_check_expression(right, rhs_expected, environment, program, scopes, state, tail_store, context, diagnostics)
     checked_rhs: rhs_checked ?? return None
-    if !sema_expr_number_name_operand(right, scopes) {
+    if !sema_expr_number_name_operand(right, environment, program, scopes) {
         left_number := sema_expr_number_operand_read(left, checked_rhs.ty, true, environment, program, scopes, state, context, diagnostics)
         if left_number.handled -> checked_lhs = left_number.value ?? return None
     }

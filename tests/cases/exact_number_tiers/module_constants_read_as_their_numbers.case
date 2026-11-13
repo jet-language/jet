@@ -1,0 +1,18 @@
+# A module constant bound to a number reads as its number wherever a use in
+# its module refuses its own type, as a local number name does. `LIMIT: 200`
+# passes as a U8 and stays an Int beside `+ 1`. `RATE: 0.5` is a Float
+# constant; an exact Decimal parameter reads it as the Decimal 0.5, and an
+# operator with a Decimal on either side multiplies two Decimals, while a
+# Float beside it keeps the Float. Each tier prints the same values.
+fixture: module_constants_read_as_their_numbers.fixture
+step: jet check run.jet
+exit: 0
+step: jet run --optimize=none run.jet
+exit: 0
+stdout: = module_constants_read_as_their_numbers.out
+step: jet run --optimize=basic run.jet
+exit: 0
+stdout: = module_constants_read_as_their_numbers.out
+step: jet run --optimize=full run.jet
+exit: 0
+stdout: = module_constants_read_as_their_numbers.out

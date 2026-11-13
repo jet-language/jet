@@ -6179,7 +6179,7 @@ sema_stmt_check_local_assignment: fn(name: String, name_span: Span, op: BinOp?, 
     // `total += price`), so a plain write's value is checked on its own and
     // decides it (sema_expr_number_target_retype).
     number_target: sema_expr_number_target_open(index, scopes, context)
-    plain_self_typed: op == None && (sema_stmt_numeric_slot_self_typed(expr, required, scopes) || (number_target && sema_expr_number_target_value_typed(expr, scopes)))
+    plain_self_typed: op == None && (sema_stmt_numeric_slot_self_typed(expr, required, scopes) || (number_target && sema_expr_number_target_value_typed(expr, environment, program, scopes)))
     if op == None && !plain_self_typed -> expected = Val(required)
     // The Rust `Stmt::Assign` feeds the place type into the RHS for compound
     // updates too, so `price *= 2.0` with `price: Float` reads the literal as
