@@ -49,8 +49,8 @@ before selecting its high and low words. Rejection thresholds and stream
 consumption remain identical to the native SplitMix64 seed.
 
 `Fraction` keeps its reduced exact-`Int` parts in private storage, distinct from
-the public `numerator()` and `denominator()` accessors. Field and method names
-share one member namespace; the storage names are not a construction API.
+the public `numerator()` and `denominator()` accessors; the storage names are
+not a construction API.
 
 Manual Core `Debug` implementations use the Prelude's consuming `debug(&&self)`
 contract; `Display` reads `self`. Neither formatting projection changes its text.

@@ -286,8 +286,9 @@ Operator implementation identity includes the left type, trait, and right type
 (D-OPMIX1). Hooks with different right types are distinct trait instantiations,
 not ordinary method-name overloads. Binary operators and explicit calls such as
 `value.mul(rhs)` select the same operand-pair hook; repeating one pair is E0908.
-Fields and ordinary methods still share the hook's member namespace: a field or
-ordinary `mul` beside a `Mul` hook is E0105, regardless of declaration order.
+An ordinary method still shares the hook's method namespace: an ordinary `mul`
+beside a `Mul` hook is E0105, regardless of declaration order. A field named
+`mul` lives in the separate field namespace and stands beside the hook.
 Dot-call RHS inference and ownership checking happen once. Untyped decimal
 operands select their default exact Decimal pair (`price.mul(1.5)`); ordinary
 method parameters may still contextualize a decimal literal as Float.
