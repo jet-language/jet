@@ -665,6 +665,17 @@ sema_call_core_no_os_hint: fn(module_name: String) -> String? Never! {
     }
 }
 
+// E3301: on a no-OS machine a call into a module that needs an OS is refused
+// at the call, whether it names the module by path or through a `use` alias.
+// True when the call was refused.
+sema_call_core_no_os_refused: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, module_name: String, member: String, span: Span, diagnostics: &[Diagnostic]) -> Bool Never! {
+    if !sema_scope_environment_no_os(environment, program) -> return false
+    hint: sema_call_core_no_os_hint(module_name) ?? return false
+    short_name: module_name.slice(module_name.rfind(".") + 1, module_name.len())
+    diagnostics.push(sema_error("E3301", span, "`{short_name}.{member}` is not available on a no-OS target.", "No-OS targets have no OS; only `core`-level APIs are available.", hint))
+    true
+}
+
 // Compiler-owned query contracts resolve before source facades. Other source
 // exports remain ordinary functions ahead of static Core records. A Core record
 // route checks no type-argument count: as in Rust `infer_core_call`, the
@@ -673,12 +684,7 @@ sema_call_core_no_os_hint: fn(module_name: String) -> String? Never! {
 // the count against the typed row.
 sema_call_core_resolve_route: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, module_name: String, member: String, type_args: [Type], actual_arity: Int, configured_client: Bool, span: Span, diagnostics: &[Diagnostic]) -> SemaCoreCallRoute? {
     diagnostic_count := diagnostics.len()
-    if sema_scope_environment_no_os(environment, program) && sema_call_core_no_os_hint(module_name) == .Val(hint) {
-        short_name: module_name.slice(module_name.rfind(".") + 1, module_name.len())
-        api: "{short_name}.{member}"
-        diagnostics.push(sema_error("E3301", span, "`{api}` is not available on a no-OS target.", "No-OS targets have no OS; only `core`-level APIs are available.", hint))
-        return None
-    }
+    if sema_call_core_no_os_refused(environment, program, module_name, member, span, diagnostics) -> return None
     source_identity: if sema_compiler_services_is_compiler_query(module_name, member) || sema_call_core_has_explicit_source_target(module_name, member) || sema_call_core_native_resource_consumer(module_name, member, configured_client) -> None else -> sema_call_core_module_identity(environment, program, module_name)
     source: if source_identity == {
         .Val(identity) -> sema_call_core_source_target(environment, program, identity, member, type_args, span, false, diagnostics)
@@ -722,6 +728,7 @@ sema_call_core_resolve_import_route: fn(environment: SemaScopeEnvironment, progr
     if imported.module_name == "core.mem" {
         if shared_lifetime_core_member(member) == .Val(lifetime) -> return Val(SemaCoreCallRoute.SharedSite{lifetime: lifetime})
     }
+    if sema_call_core_no_os_refused(environment, program, imported.module_name, member, span, diagnostics) -> return None
     diagnostic_count := diagnostics.len()
     // `core.term` owns only the one-argument print, eprint
     // and progress wrappers; other arities keep the fixed Core route.
