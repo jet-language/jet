@@ -1,0 +1,68 @@
+// Cancelling a task cancels the unfinished children of each group it has open,
+// and through their own groups every unfinished descendant: the grandchild
+// never finishes its sleep, and the opener unwinds as Cancelled once every
+// child has ended. A group opened inside #Shield still waits for its children.
+use time: core.time
+
+failure_label: fn(error: TaskFailure) -> String {
+    if error == {
+        .Cancelled -> { return "cancelled" }
+        .DeadlineBlown -> { return "deadline" }
+        .Panicked(_) -> { return "panicked" }
+    }
+}
+
+grandchild: fn(started: Sender<Int>) {
+    started.send(1)
+    time.sleep(5000ms)
+    print("grandchild: finished its sleep")
+}
+
+child: fn(started: Sender<Int>) {
+    task.group inner {
+        task grandchild(started)
+    }
+    print("child: closed its group")
+}
+
+opener: fn(started: Sender<Int>) {
+    task.group outer {
+        task child(started)
+    }
+    print("opener: closed its group")
+}
+
+shielded_opener: fn(started: Sender<Int>) {
+    #Shield {
+        task.group held {
+            task {
+                started.send(1)
+                time.sleep(200ms)
+                print("shielded child: finished its sleep")
+            }
+        }
+    }
+    print("shielded opener: left its shield")
+}
+
+run: fn() {
+    { sender: started, receiver: began }: channel<Int>()
+    start: time.unix_ns()
+    worker: task opener(started)
+    _ := began.receive() ?? panic("the grandchild never started")
+    worker.cancel()
+    if worker.join() == {
+        .Err(error) -> print("opener: {failure_label(error)}")
+        .Ok(_) -> print("opener: finished")
+    }
+    print("opener stopped early: {(time.unix_ns() - start) /% 1_000_000 < 2500}")
+
+    { sender: held_started, receiver: held_began }: channel<Int>()
+    held: task shielded_opener(held_started)
+    _ := held_began.receive() ?? panic("the shielded child never started")
+    held.cancel()
+    if held.join() == {
+        .Err(error) -> print("shielded opener: {failure_label(error)}")
+        .Ok(_) -> print("shielded opener: finished")
+    }
+}

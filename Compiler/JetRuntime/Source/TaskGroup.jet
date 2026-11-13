@@ -1,17 +1,21 @@
 // Lexical groups own shared task states. The state is independent of each
 // consumable handle: explicit join may take an outcome before lexical cleanup.
-// Group80B refs0 mutex8 closing16 limit24 active32 waiterHead40 childrenList48
-// stack72. A limit of zero is unbounded, explicit limits clamp to1. stack is
-// the stack size its tasks' fibers take (Fiber.jet fiber_stack_class; 0, the
-// default size): a new group inherits the running task's, and a `stack:`
-// request (jet_rt_native_task_group_stack) replaces it before any task starts.
+// Group96B refs0 mutex8 closing16 limit24 active32 waiterHead40 childrenList48
+// stack72 openNext80 opener88. A limit of zero is unbounded, explicit limits
+// clamp to1. stack is the stack size its tasks' fibers take (Fiber.jet
+// fiber_stack_class; 0, the default size): a new group inherits the running
+// task's, and a `stack:` request (jet_rt_native_task_group_stack) replaces it
+// before any task starts. opener is the control of the task that opened the
+// group; that control lists its open groups through openNext until the group
+// closes, so a cancel of the opener reaches the group's children.
 // Public Group handles16B: sharedState0 owner8; clone handles never close.
 task_group_new: fn(limit: I64) -> I64 {
-    group: jet_rt_alloc(I64{80}, I64{8})
-    thread_zero(group, I64{80})
+    group: jet_rt_alloc(I64{96}, I64{8})
+    thread_zero(group, I64{96})
     sync_store(group, I64{1})
     sync_store(wrapping(group + I64{24}), limit)
     sync_store(wrapping(group + I64{72}), fiber_stack_current())
+    task_group_open(group)
     task_group_handle(group, true)
 }
 #Export(c) jet_rt_native_task_group_new: fn() -> I64 { task_group_new(I64{0}) }
@@ -35,7 +39,106 @@ task_group_unref: fn(group: I64) {
     header: wrapping(group + I64{48})
     capacity: sync_load(wrapping(header + I64{8}))
     if (capacity != I64{0}) -> jet_rt_free(sync_load(wrapping(header + I64{16})), capacity * I64{8}, I64{8})
-    jet_rt_free(group, I64{80}, I64{8})
+    jet_rt_free(group, I64{96}, I64{8})
+}
+
+// The running task lists the group among its open groups. The listing holds a
+// reference to the group and to the opener's control until the group closes.
+// A group opened inside #Shield is not listed, so a cancel of its opener does
+// not reach its children.
+task_group_open: fn(group: I64) {
+    control: scheduler_control_current()
+    if (control == I64{0} || scheduler_shielded()) -> return
+    scheduler_control_retain(control)
+    task_group_retain(group)
+    sync_store(wrapping(group + I64{88}), control)
+    sync_mutex_lock(wrapping(control + I64{72}))
+    sync_store(wrapping(group + I64{80}), sync_load(wrapping(control + I64{128})))
+    sync_store(wrapping(control + I64{128}), group)
+    sync_mutex_unlock(wrapping(control + I64{72}))
+}
+
+task_group_unlist: fn(group: I64) {
+    control: sync_load(wrapping(group + I64{88}))
+    if (control == I64{0}) -> return
+    sync_mutex_lock(wrapping(control + I64{72}))
+    link := wrapping(control + I64{128})
+    loop sync_load(link) != (I64{0}) {
+        current: sync_load(link)
+        if current == group {
+            sync_store(link, sync_load(wrapping(group + I64{80})))
+            break
+        }
+        link = wrapping(current + I64{80})
+    }
+    sync_mutex_unlock(wrapping(control + I64{72}))
+    sync_store(wrapping(group + I64{88}), I64{0})
+    scheduler_control_drop(control)
+    task_group_unref(group)
+}
+
+task_words_new: fn() -> I64 {
+    header: jet_rt_alloc(I64{24}, I64{8})
+    thread_zero(header, I64{24})
+    header
+}
+
+// Cancels the group's unfinished children, each one once. The child list is
+// copied under the group's lock and the cancels are sent after it is released.
+task_group_cancel_children: fn(group: I64) {
+    children: task_words_new()
+    sync_mutex_lock(wrapping(group + I64{8}))
+    header: wrapping(group + I64{48})
+    count: sync_load(header)
+    data: sync_load(wrapping(header + I64{16}))
+    at := I64{0}
+    loop at < count {
+        child: sync_load(wrapping(data + at * I64{8}))
+        if (sync_load(wrapping(child + I64{152})) == I64{0}) {
+            task_retain(child)
+            scheduler_words_push(children, child)
+        }
+        at += I64{1}
+    }
+    sync_mutex_unlock(wrapping(group + I64{8}))
+    words: sync_load(wrapping(children + I64{16}))
+    at = I64{0}
+    loop at < sync_load(children) {
+        child: sync_load(wrapping(words + at * I64{8}))
+        task_cancel_once(child)
+        task_drop(child)
+        at += I64{1}
+    }
+    scheduler_words_drop(children)
+}
+
+task_cancel_once: fn(child: I64) {
+    control: sync_load(wrapping(child + I64{8}))
+    if (sync_load(wrapping(child + I64{152})) == I64{0} && sync_load(wrapping(control + I64{16})) == I64{0}) -> scheduler_control_cancel(control)
+}
+
+// A cancel of a task reaches the unfinished children of every group it has
+// open, and through their groups every unfinished descendant. The open list is
+// copied under the control's lock and walked after it is released.
+task_groups_cancel_open: fn(control: I64) {
+    groups: task_words_new()
+    sync_mutex_lock(wrapping(control + I64{72}))
+    group := sync_load(wrapping(control + I64{128}))
+    loop group != (I64{0}) {
+        task_group_retain(group)
+        scheduler_words_push(groups, group)
+        group = sync_load(wrapping(group + I64{80}))
+    }
+    sync_mutex_unlock(wrapping(control + I64{72}))
+    words: sync_load(wrapping(groups + I64{16}))
+    at := I64{0}
+    loop at < sync_load(groups) {
+        listed: sync_load(wrapping(words + at * I64{8}))
+        task_group_cancel_children(listed)
+        task_group_unref(listed)
+        at += I64{1}
+    }
+    scheduler_words_drop(groups)
 }
 
 task_group_admit: fn(group: I64) -> I64 {
@@ -119,40 +222,41 @@ task_group_close: fn(group: I64) {
     sync_store(wrapping(group + I64{16}), I64{1})
     task_group_waiters_wake(group)
     sync_mutex_unlock(wrapping(group + I64{8}))
-    cancel_children: jet_scheduler_native_status() == I64{2}
+    cancel_children: jet_scheduler_native_status() == I64{2} || (scheduler_task_cancelled() && !scheduler_shielded())
+    if cancel_children -> task_group_cancel_children(group)
+    // The children stay listed while they drain, so a cancel that reaches the
+    // opener meanwhile still finds them.
+    header: wrapping(group + I64{48})
+    at := I64{0}
     loop {
         sync_mutex_lock(wrapping(group + I64{8}))
-        header: wrapping(group + I64{48})
-        count: sync_load(header)
-        capacity: sync_load(wrapping(header + I64{8}))
-        data: sync_load(wrapping(header + I64{16}))
-        thread_zero(header, I64{24})
+        if (at >= sync_load(header)) -> break
+        child: sync_load(wrapping(sync_load(wrapping(header + I64{16})) + at * I64{8}))
         sync_mutex_unlock(wrapping(group + I64{8}))
-        if (count == I64{0}) {
-            if (capacity != I64{0}) -> jet_rt_free(data, capacity * I64{8}, I64{8})
-            break
-        }
-        if cancel_children {
-            at := I64{0}
-            loop at < count {
-                child: sync_load(wrapping(data + at * I64{8}))
-                if (sync_load(wrapping(child + I64{152})) == I64{0}) -> scheduler_control_cancel(sync_load(wrapping(child + I64{8})))
-                at += I64{1}
-            }
-        }
-        at := I64{0}
-        loop at < count {
-            child: sync_load(wrapping(data + at * I64{8}))
-            task_drain(child)
-            task_drop(child)
-            at += I64{1}
-        }
-        jet_rt_free(data, capacity * I64{8}, I64{8})
+        if cancel_children -> task_cancel_once(child)
+        task_drain(child)
+        at += I64{1}
     }
+    count: sync_load(header)
+    capacity: sync_load(wrapping(header + I64{8}))
+    data: sync_load(wrapping(header + I64{16}))
+    thread_zero(header, I64{24})
+    sync_mutex_unlock(wrapping(group + I64{8}))
+    at = I64{0}
+    loop at < count {
+        task_drop(sync_load(wrapping(data + at * I64{8})))
+        at += I64{1}
+    }
+    if (capacity != I64{0}) -> jet_rt_free(data, capacity * I64{8}, I64{8})
+    task_group_unlist(group)
+    // A closer cancelled and not shielded unwinds as Cancelled once every
+    // child has ended.
+    if (scheduler_task_cancelled() && !scheduler_shielded() && jet_scheduler_native_status() == I64{0}) -> scheduler_deliver_cancel()
 }
 // JetTaskGroup::close(&self): any handle (owner or clone) closes the shared
 // group and joins every registered child, cancelling them first under a pending
-// deadline. Repeated closes (the owner's drop) no-op.
+// deadline or a cancel of the closer outside #Shield. Repeated closes (the
+// owner's drop) no-op.
 #Export(c) jet_rt_native_task_group_close: fn(handle: I64) { task_group_close(sync_load(handle)) }
 #Export(c) jet_rt_handle_clone_jet_task_group: fn(handle: I64) -> I64 {
     state: sync_load(handle)

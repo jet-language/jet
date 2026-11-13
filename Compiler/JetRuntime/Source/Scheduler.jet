@@ -1,8 +1,11 @@
 // L8a scheduler: an OS worker runs each task to completion. A wait returns a
 // delivered stop word; no Jet frame unwinds. Linux synchronization is Sync.jet.
-// Control128: refs0 paused8 cancelled16 attention24 status32 stop40 pending48
+// Control136: refs0 paused8 cancelled16 attention24 status32 stop40 pending48
 // observe56 park64 mutex72 waiters80 callbacks88 inline96 scopeFlags104
-// requestedRootCode112 capture120. StopCleanup's opaque token owns old flags.
+// requestedRootCode112 capture120 openGroups128. StopCleanup's opaque token
+// owns old flags. openGroups heads the task groups the task has open
+// (TaskGroup.jet task_group_open), linked through each group and read under
+// mutex72.
 // Stop56: kind0 jct8 owner16 start24 end32 owned E4 message40 form48 (0 raw,
 // 1 rendered diagnostic); -1 denotes absent optional comptime metadata.
 
@@ -108,8 +111,8 @@ scheduler_control_new: fn() -> I64 {
             trap_root_rail_code = rt_trap_root_address()
         }
     }
-    control: jet_rt_alloc(I64{128}, I64{8})
-    thread_zero(control, I64{128})
+    control: jet_rt_alloc(I64{136}, I64{8})
+    thread_zero(control, I64{136})
     sync_store(control, I64{1})
     sync_store(wrapping(control + I64{64}), sync_park_new())
     control
@@ -167,9 +170,10 @@ scheduler_control_drop: fn(control: I64) {
     scheduler_stop_drop(sync_load(wrapping(control + I64{40})))
     jet_rt_string_drop(scheduler_root_capture_take(control))
     sync_park_drop(sync_load(wrapping(control + I64{64})))
-    // Scoped waiter/callback guards retain the control and unregister first.
-    if (sync_load(wrapping(control + I64{80})) != I64{0} || sync_load(wrapping(control + I64{88})) != I64{0}) -> jet_rt_unreachable(I64{0}, I64{0})
-    jet_rt_free(control, I64{128}, I64{8})
+    // Scoped waiter/callback guards retain the control and unregister first;
+    // an open group retains its opener until it closes.
+    if (sync_load(wrapping(control + I64{80})) != I64{0} || sync_load(wrapping(control + I64{88})) != I64{0} || sync_load(wrapping(control + I64{128})) != I64{0}) -> jet_rt_unreachable(I64{0}, I64{0})
+    jet_rt_free(control, I64{136}, I64{8})
 }
 
 scheduler_control_current: fn() -> I64 { sync_load(wrapping(thread_base() + I64{16})) }
@@ -682,6 +686,7 @@ scheduler_control_cancel: fn(control: I64) {
         scheduler_control_cancel(forwarded)
         scheduler_control_drop(forwarded)
     }
+    task_groups_cancel_open(control)
 }
 
 // Names the control of a task the running task's thread runs inline

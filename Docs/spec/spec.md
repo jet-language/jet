@@ -3694,10 +3694,14 @@ the next wait point or check, whichever comes first, and runs Drop-backed
 cleanup, so a loop that only computes stops at its next iteration. A cancelled
 receive unwinds instead of returning `Closed`. A busy race loser stops at its
 next iteration, so `task.race` returns once its winner does. A cancelled
-`task.all` member reports `Cancelled`. A deadline (`#Context(deadline:)`,
-`task.timeout`) that passes is delivered the same way: at the next wait point
-or check, as E3003, so a handler busy in a loop stops at its deadline. A
-task or root that has set a deadline reads the clock at each check.
+`task.all` member reports `Cancelled`. Cancelling a task also cancels every
+unfinished child of each `task.group` it has open outside `#Shield`, and
+through their own groups every unfinished descendant, even when the cancel
+arrives while the task waits at a group's closing brace (D-GROUP-CANCEL1=A).
+A deadline (`#Context(deadline:)`, `task.timeout`) that passes is delivered
+the same way: at the next wait point or check, as E3003, so a handler busy in
+a loop stops at its deadline. A task or root that has set a deadline reads
+the clock at each check.
 
 `#Shield { ... }` defers cancellation or a blown deadline until the lexical
 critical section exits. It takes no arguments, nests, and always restores its
@@ -3851,7 +3855,10 @@ outside 1 byte to 8 GiB is **E0112**, and any `stack:` on a web target is
 **E-WEB-UNSUPPORTED**, since a browser task has no stack of its own. Both
 arguments may be given, in either order, at most once each
 (D-THREAD-STACK1=A). The group owns and joins every child created in its
-body. A `Group`
+body. When the task that opened a group is cancelled outside `#Shield`, the
+closing brace cancels the group's unfinished children, waits for all of them,
+and then the task unwinds as `Cancelled`; a group opened inside `#Shield` waits
+for its children as before (D-GROUP-CANCEL1=A). A `Group`
 may be passed directly as a free-function or method parameter:
 
 ```jet

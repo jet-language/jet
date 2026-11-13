@@ -1,0 +1,13 @@
+# Cancelling a task cancels the unfinished children of each group it has open, down through their own groups, and the task unwinds as Cancelled once they end. A group opened inside #Shield still waits for its children.
+fixture: a_cancel_reaches_the_children_of_every_open_group_on_every_tier.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet run main.jet
+exit: 0
+stdout: = "opener: cancelled\nopener stopped early: true\nshielded child: finished its sleep\nshielded opener: cancelled\n"
+step: jet build main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = "opener: cancelled\nopener stopped early: true\nshielded child: finished its sleep\nshielded opener: cancelled\n"
