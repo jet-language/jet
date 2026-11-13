@@ -10322,6 +10322,9 @@ sema_finalize_program: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrail
     if trace_sink == .Val(sink) -> sink.end("sema.effects", effect_inputs.len())
     loop diagnostic in effects.diagnostics -> diagnostics.push(diagnostic)
     if !effects.complete -> complete = false
+    // `sema.late`: the partition, target, typestate and compute checks that
+    // read the solved effects, and the publish of those effects.
+    if trace_sink == .Val(sink) -> sink.begin("sema.late", "", -1, -1)
     // The web partition reads the solved effect rows and call edges.
     sema_web_partition_check(modules, final_graph, diagnostics)
     // Code the entry reaches uses only the effects its target provides.
@@ -10382,6 +10385,7 @@ sema_finalize_program: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrail
         diagnostics.push(located[0])
         complete = false
     }
+    if trace_sink == .Val(sink) -> sink.end("sema.late", modules.len())
 
     // Tag dataflow over every checked body (the Rust reference's
     // `check_fact_tags_and_states`): a tagged value reaching a denied

@@ -3,6 +3,7 @@
 // body-site discovery, staging, and the value-fed function recheck boundary.
 use {
     jet_foundation.[
+        CompilerTraceSink,
         Diagnostic,
         FnBody,
     ]
@@ -262,7 +263,9 @@ jet_driver_comptime_body_pass: fn(
         ), registration)
     }
     jet_driver_comptime_diagnostics_add(diagnostics, current_graph.diagnostics)
+    jet_driver_trace_step_begin(request.trace_sink, "comptime.body.pending")
     pending := jet_driver_pending_comptime_body_sources(current_graph.modules, values)
+    jet_driver_trace_step_end(request.trace_sink, "comptime.body.pending", pending.len())
     if request.trace_sink == .Val(sink) -> sink.progress("counters.comptime.bodies_pending", pending.len(), -1)
     if current_graph.complete && pending.len() == 0 && !jet_driver_has_errors(current_graph.diagnostics) {
         return jet_driver_comptime_body_returning(jet_driver_comptime_body_result(current_graph, values, functions, trace, true, false), registration)
@@ -289,7 +292,9 @@ jet_driver_comptime_body_pass: fn(
     body_sources := [SemaComptimeItemSource]{}
     known := [String:Bool]{}
     loop source in pending -> jet_driver_comptime_body_source_add(body_sources, known, source)
+    jet_driver_trace_body_begin(request.trace_sink, "comptime.body.run", body_sources, pass)
     run := jet_driver_comptime_body_run(registration, body_sources, values, functions, refused, request, diagnostics)
+    jet_driver_trace_step_end(request.trace_sink, "comptime.body.run", body_sources.len())
     finished_registration := run.graph.move()
     run.graph = None
     partial_registration := run.partial_graph.move()
@@ -320,11 +325,13 @@ jet_driver_comptime_body_pass: fn(
     // the full recheck runs too, and the two results must agree.
     full_input := SemaGraphResult?{None}
     if request.recheck_verify -> full_input = Val(current_graph.copy())
+    jet_driver_trace_body_begin(request.trace_sink, "comptime.body.splice", body_sources, pass)
     splice := sema_local_value_splice(registration, run.trail, current_graph, body_sources, earlier_values, earlier_functions, values, functions, request.eval_config.host_hooks, request.compiler_threads, request.trace_sink)
+    jet_driver_trace_step_end(request.trace_sink, "comptime.body.splice", body_sources.len())
     registration = splice.graph.move()
     if splice.spliced {
         if full_input.move() == .Val(unspliced) {
-            full := jet_driver_recheck_comptime_bodies(registration, run.trail, stage, unspliced, body_sources, values, functions, request)
+            full := jet_driver_recheck_comptime_bodies(registration, run.trail, stage, unspliced, body_sources, values, functions, request, pass)
             verified := full.registration_graph.move()
             full.registration_graph = None
             registration = verified.move() ?? panic("body finalization lost its registration graph")
@@ -352,7 +359,7 @@ jet_driver_comptime_body_pass: fn(
     // in place instead of copying the registration graph.
     rechecked := jet_driver_recheck_comptime_bodies(
         registration, run.trail, stage, current_graph, body_sources,
-        values, functions, request,
+        values, functions, request, pass,
     )
     restored := rechecked.registration_graph.move()
     rechecked.registration_graph = None
@@ -597,9 +604,23 @@ jet_driver_recheck_comptime_bodies: fn(
     values: [SemaComptimeItemValue],
     comptime_functions: [SemaComptimeFunctionResult],
     request: JetDriverCompileRequest,
+    pass: Int,
 ) -> SemaGraphResult {
+    jet_driver_trace_body_begin(request.trace_sink, "comptime.body.recheck", body_sources, pass)
     body_stage := jet_driver_comptime_body_stage(stage, semantic_graph, body_sources)
-    sema_finalize_graph(graph, trail, body_stage, values, comptime_functions, request.eval_config.host_hooks, request.compiler_threads, None, true, request.trace_sink)
+    rechecked := sema_finalize_graph(graph, trail, body_stage, values, comptime_functions, request.eval_config.host_hooks, request.compiler_threads, None, true, request.trace_sink)
+    jet_driver_trace_step_end(request.trace_sink, "comptime.body.recheck", rechecked.modules.len())
+    rechecked
+}
+
+// Opens a span of body pass `pass` whose detail names the bodies it
+// evaluates, so a trace attributes each pass's run, splice and recheck.
+jet_driver_trace_body_begin: fn(trace_sink: CompilerTraceSink?, name: String, body_sources: [SemaComptimeItemSource], pass: Int) {
+    if trace_sink == .Val(sink) {
+        names := [String]{}
+        loop source in body_sources -> names.push(source.name)
+        sink.begin(name, names.join(", "), pass, -1)
+    }
 }
 
 // Lands each body comptime pass whose pending sites are all local values in

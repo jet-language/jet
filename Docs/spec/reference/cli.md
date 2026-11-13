@@ -855,7 +855,10 @@ won); `--phase-counters` also prints each counter as a `JET_PHASE_COUNTERS`
 line on stderr. The phases are the CLI's
 `sources` walk, the driver's (`load` and its `parse` waves, `register`,
 `sema.check`, `comptime`, `sema.finalize`,
-`comptime.bodies`, `comptime.validate`, `lower`, `assemble`, `optimize`,
+`comptime.bodies` (holding, per body pass, `comptime.body.pending` and the
+`comptime.body.run`, `comptime.body.splice` and `comptime.body.recheck` spans,
+whose detail names the bodies the pass evaluates and whose index is the
+pass), `comptime.validate`, `lower`, `assemble`, `optimize`,
 `driver.result` holding `emit`, `driver.release` as the compile's
 intermediate state drops, and under `--keep-going` `keepgoing.final` and
 `keepgoing.report`), the host's checks of the result (`cli.diagnostics`,
