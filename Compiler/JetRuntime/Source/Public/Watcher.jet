@@ -13,7 +13,9 @@ watcher: module {
     #Import(c) priv set: fn() -> WatchSet = "jet_watcher_set"
 
     // The events since the last poll, three texts each: kind, path, detail.
-    #Import(c) priv poll: fn(handle: WatchHandle) -> [String] = "jet_watcher_poll"
+    // It reads what the watched target did since, so it carries IO, as
+    // core.watcher's WatchHandle.poll does.
+    #Import(c) priv poll: fn(handle: WatchHandle) -[IO]> [String] = "jet_watcher_poll"
 
     // Stops `handle`, and whether it still runs.
     #Import(c) priv cancel: fn(handle: WatchHandle) = "jet_watcher_cancel"

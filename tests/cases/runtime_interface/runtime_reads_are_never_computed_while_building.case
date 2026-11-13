@@ -1,0 +1,39 @@
+# A runtime binding only the running program can answer is run-time only
+# (RUNTIME_ONLY_READS), whatever its row: the SIMD width of the CPU, the UI
+# provider's state, the live registry cell, the running task's identity and
+# the platform family. No build computes one in the compiler's own process. A
+# module value that reaches any of them is a build error (E0643) naming the
+# read; the same reads as local values run when the program does, on every
+# tier.
+fixture: runtime_reads_are_never_computed_while_building.fixture
+env: NO_COLOR=1
+step lanes: jet check lanes.jet
+exit: 1
+stderr: ~ "E0643" # the module value is a build error
+stderr: ~ "`PROFILE` can't be computed while building" # naming the value
+stderr: ~ "reads the f32 SIMD width of the CPU the program runs on" # and the run-time read it reaches
+step caps: jet check caps.jet
+exit: 1
+stderr: ~ "`CAPS` can't be computed while building" # naming the value
+stderr: ~ "reads the UI host provider's live state" # and the run-time read it reaches
+step live: jet check live.jet
+exit: 1
+stderr: ~ "`STATS` can't be computed while building" # naming the value
+stderr: ~ "reads the live registry cell every request shares" # and the run-time read it reaches
+step task: jet check task.jet
+exit: 1
+stderr: ~ "`ID` can't be computed while building" # naming the value
+stderr: ~ "reads the running task's identity" # and the run-time read it reaches
+step platform: jet check platform.jet
+exit: 1
+stderr: ~ "`FAMILY` can't be computed while building" # naming the value
+stderr: ~ "reads the platform family of the machine the program runs on" # and the run-time read it reaches
+step o0: jet run --optimize=none run.jet
+exit: 0
+stdout: = runtime_reads_are_never_computed_while_building.stdout.expected
+step o1: jet run --optimize=basic run.jet
+exit: 0
+stdout: = runtime_reads_are_never_computed_while_building.stdout.expected
+step o2: jet run --optimize=full run.jet
+exit: 0
+stdout: = runtime_reads_are_never_computed_while_building.stdout.expected

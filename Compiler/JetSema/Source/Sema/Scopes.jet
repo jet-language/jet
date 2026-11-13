@@ -179,10 +179,12 @@ SemaCallSiteFact: struct {
     // An intrinsic operation's own name (`Clock.system`), recorded with its
     // effect row when the site has no declared callee.
     intrinsic_api: String?{None}
-    // The intrinsic is a Core call a runtime export answers, which reads the
-    // process it runs in: its row grants authority, it doesn't prove the
-    // call pure, so a local never computes it while compiling.
-    runtime_export: Bool{false}
+    // The runtime export that answers this intrinsic, when it is a Core call
+    // the runtime answers: it reads the process it runs in, so its row grants
+    // authority and doesn't prove the call pure, and a local never computes it
+    // while compiling. A run-time-only export (runtime_only_read) is never
+    // computed while compiling at all.
+    runtime_export: String?{None}
     // The call runs while compiling (a comptime item, a `#run { }` site or
     // a module value), not in the running program. A function only such calls
     // name is prep code, not a runtime entry (sema_effect_runtime_input_paths).

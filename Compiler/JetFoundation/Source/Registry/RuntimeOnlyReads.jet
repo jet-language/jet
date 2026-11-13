@@ -1,0 +1,52 @@
+// The runtime exports that answer from the process they run in, whatever
+// effect row they declare: the running task's identity and cancel state, the
+// process id, whether a standard stream is a terminal, the live registry cell
+// every request shares, the UI host provider's live state, and the platform
+// family, module loader, path syntax and SIMD width of the machine the program
+// runs on. A value computed while building would hold the compiler's own
+// answer (a cross build would bake the build machine's platform into the
+// image), so sema never computes a call that reaches one while compiling, a
+// module value included (sema_comptime_call_facts_impurity). Listing a read
+// here, not giving it a row, keeps it out of its callers' declared rows and
+// package ceilings: a database write invalidating the live cell, or a UI
+// service, does not take on a new effect.
+RuntimeOnlyRead: struct {
+    symbol: String
+    // What the export reads, as the refusal names it.
+    reads: String
+}
+
+RUNTIME_ONLY_READS: #run { [RuntimeOnlyRead]{
+    RuntimeOnlyRead{symbol: "jet_rt_task_identity", reads: "the running task's identity"},
+    RuntimeOnlyRead{symbol: "jet_scheduler_task_cancelled_state", reads: "the running task's cancel state"},
+    RuntimeOnlyRead{symbol: "jet_files_atomic_pid_raw", reads: "the running process's id"},
+    RuntimeOnlyRead{symbol: "jet_term_stdout_is_terminal", reads: "whether the program's standard output is a terminal"},
+    RuntimeOnlyRead{symbol: "jet_term_stderr_is_terminal", reads: "whether the program's standard error is a terminal"},
+    RuntimeOnlyRead{symbol: "jet_term_is_terminal_raw", reads: "whether one of the program's streams is a terminal"},
+    RuntimeOnlyRead{symbol: "jet_std_os_family", reads: "the platform family of the machine the program runs on"},
+    RuntimeOnlyRead{symbol: "jet_files_path_windows_raw", reads: "the path syntax of the machine the program runs on"},
+    RuntimeOnlyRead{symbol: "jet_web_live_store_load", reads: "the live registry cell every request shares"},
+    RuntimeOnlyRead{symbol: "jet_web_live_store_replace", reads: "the live registry cell every request shares"},
+    RuntimeOnlyRead{symbol: "jet_mod_supported_raw", reads: "whether the machine the program runs on loads compiled modules"},
+    RuntimeOnlyRead{symbol: "jet_mod_os_raw", reads: "the OS name of the machine the program runs on"},
+    RuntimeOnlyRead{symbol: "jet_compute_simd_lanes", reads: "the f32 SIMD width of the CPU the program runs on"},
+    RuntimeOnlyRead{symbol: "jet_ui_host_capability", reads: "the UI host provider's live state"},
+    RuntimeOnlyRead{symbol: "jet_ui_host_clipboard_get", reads: "the UI host provider's live state"},
+    RuntimeOnlyRead{symbol: "jet_ui_host_clipboard_set", reads: "the UI host provider's live state"},
+    RuntimeOnlyRead{symbol: "jet_ui_host_event_pop", reads: "the UI host provider's live state"},
+    RuntimeOnlyRead{symbol: "jet_ui_host_key_claim", reads: "the UI host provider's live state"},
+    RuntimeOnlyRead{symbol: "jet_ui_host_dialog_request", reads: "the UI host provider's live state"},
+    RuntimeOnlyRead{symbol: "jet_ui_host_dialog_result", reads: "the UI host provider's live state"},
+} }
+
+// What runtime export `symbol` reads when it is run-time only, else None. A
+// Core row may name its export behind the crate that defines it (the text
+// after the last `:` is the export).
+runtime_only_read: fn(symbol: String) -> String? Never! {
+    parts: symbol.split(":").to_list()
+    bare: if parts.len() > 0 -> parts[parts.len() - 1] else -> symbol
+    loop row in RUNTIME_ONLY_READS {
+        if row.symbol == bare -> return Val(row.reads.copy())
+    }
+    None
+}

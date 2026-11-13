@@ -97,8 +97,10 @@ sys: module {
     // The running program's path, None when it can't be read.
     #Import(c) priv executable: fn() -[Env]> String? = "jet_sys_executable_raw"
 
-    // The host's f32 SIMD dispatch width; a fixed CPU fact read without a
-    // system call, which comptime refuses (ir_comptime_ambient_refusal).
+    // The host's f32 SIMD dispatch width, a fact of the CPU the program runs
+    // on, read without a system call. It is run-time only
+    // (RUNTIME_ONLY_READS), so no build computes it for the machine that
+    // compiled it.
     #Import(c) priv simd_lanes: fn() -> Int = "jet_compute_simd_lanes"
 
     // core.perf's fidelity word: 0 unset, else the f64 bits plus one.

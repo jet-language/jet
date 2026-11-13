@@ -23,6 +23,19 @@ Each row is classified in one of four ways:
 Until every open row is ruled, no page or diagnostic may say that a denial
 blocks every host read of the denied kind.
 
+A read that only the running program can answer is run-time only, whatever
+its row: the running task's identity and cancel state, the process id (H7),
+whether a standard stream is a terminal (H15), the live registry cell every
+request shares, the UI host provider's state (capabilities, clipboard, event
+queues, key claims and dialogs), and the platform family, module loader, OS
+name, path syntax and f32 SIMD width of the machine the program runs on.
+Being run-time only adds no effect, so the callers' rows and package ceilings
+stay as they were.
+`Compiler/JetFoundation/Source/Registry/RuntimeOnlyReads.jet` lists their
+runtime exports. The compiler never computes a value that reaches one while
+building, a module value included, so the image never holds the compiler's
+own answer, or for a cross build another machine's.
+
 Run this census again whenever a runtime `#Import(c)`, an IR route effect or a
 Core host leaf changes. The sources are:
 
@@ -57,7 +70,7 @@ Core host leaf changes. The sources are:
 | H15 | Whether stdout and stderr are terminals | Public/Term.jet `stdout_terminal` and `stderr_terminal` (no row) | Terminal output paths | `IO` | declared: `IO` is in the floor, and a terminal test is a terminal operation. |
 | H16 | The monotonic clock for deadlines and intervals | Public/Time.jet `clock_mono_ns` (`-[Time.Wait]>`) | Every waiting operation | `Time` | ruled: D-AUTH-AMBIENT2=A. Waiting is the deny-only `Time.Wait` leaf. |
 | H17 | Task CPU clock | Public/Tasks.jet `task_cpu_ns`; Core/Tasks/Tasks.jet `cpu_ns` (`-[Time]>`) | `core.tasks.cpu_ns` | `Time` | declared |
-| H18 | Clipboard, dialogs, events and key claims | Public/Ui.jet primitives (no import row) | `core.ui.host`, which carries `UI.<capability>` (E2937) | `UI.<capability>` | declared |
+| H18 | Clipboard, dialogs, events and key claims | Public/Ui.jet primitives (`-[IO]>`) | `core.ui.host`, which carries `UI.<capability>` (E2937) | `UI.<capability>` | declared |
 | H19 | Whatever foreign code reads | `#Import(c)` bindings without a descriptor, unannotated foreign calls | Foreign calls (`FFI`, the maximal set) | any | declared: spec.md, "calls native code, which can do anything". |
 | H20 | Dynamic loader | Runtime RouteMod.jet: the static musl runtime has no dynamic loader, so mapping a payload is Unsupported | `core.mod` `load` (`FS`, `Exec`) | none at run time | declared |
 | H21 | `/proc/self/exe`, after the auxiliary vector, for symbol names in a fault or checked-allocator report | Runtime Alloc.jet `alloc_check_image`, reached from Fault.jet and the checked allocator's report | A fault or allocator defect report (no row) | `FS.Read` | ruled: D-HOST-NONCE1=A. The read inspects the running process's own image. |

@@ -18,6 +18,7 @@ use {
         diagnostic_registry_row,
         ir_runtime_handle_row,
         runtime_c_export,
+        runtime_only_read,
         type_name,
     ]
     jet_parser.[parser_guest_import_symbol]
@@ -279,6 +280,14 @@ sema_guest_runtime_binding: fn(package_identity: String, function: Func) -> Bool
         if package_identity.starts_with(prefix) -> return true
     }
     false
+}
+
+// What runtime binding `function` reads when its export is run-time only
+// (runtime_only_read), else None: a call of it is never computed while
+// compiling, whatever row the binding declares.
+sema_guest_runtime_only_read: fn(package_identity: String, function: Func) -> String? Never! {
+    if !sema_guest_runtime_binding(package_identity, function) -> return None
+    runtime_only_read(parser_guest_import_symbol(function) ?? return None)
 }
 
 // A value a runtime route carries: Int and the machine integers as a Word,

@@ -1125,7 +1125,7 @@ sema_call_core_record_effects: fn(record: CoreCallRecord, span: Span, type_args:
     if accepted && context.call_facts.len() > start {
         last: context.call_facts.len() - 1
         if record.marker != None -> context.call_facts[last].lifecycle = record.marker
-        context.call_facts[last].runtime_export = record.symbol != .SourceOwned
+        if record.symbol == .Prelude(symbol) -> context.call_facts[last].runtime_export = Val(symbol.copy())
     }
     accepted
 }

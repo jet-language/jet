@@ -4,7 +4,10 @@
 // (UiHostProvider.jet). Each is `priv`: only core.ui.host calls them, and the
 // core.ui.host function that reaches a capability's service carries its
 // `UI.<capability>` requirement (Compiler/Prelude/Core.rows
-// `.with_ui_capabilities`, E2937).
+// `.with_ui_capabilities`, E2937). Each reads or writes the provider's live
+// state, so each is run-time only (RUNTIME_ONLY_READS): the compiler never
+// computes one while building, where its answer would stand in for every
+// run's clipboard, events and dialogs.
 ui: module {
     // Whether the provider has the capability with code `code`
     // (core.ui.host UICapability order).

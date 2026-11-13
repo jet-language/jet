@@ -1,0 +1,14 @@
+package: {
+    name: "live_stats_value"
+    authority: { allow: [Env, IO] }
+}
+
+use web: core.web
+
+// The live registry is a cell every request shares: only the running program
+// can read it.
+STATS: web.live_stats()
+
+run: fn() {
+    print(STATS)
+}
