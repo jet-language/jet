@@ -1,19 +1,8 @@
-// `jet.runtime.web` (#6615): app's live-registry byte cell and live
-// publish, in Jet types. Each member is a runtime binding (Guest.jet
-// sema_guest_runtime_binding) of the runtime export that is its one body
-// (RouteACore.jet, WsRoutes.jet). Each is `priv`: only Core calls them; the
-// live registry's rules are app's Jet source (Core/App/App.jet). The cell is
-// process state every request shares, so its load and swap are run-time only
-// (RUNTIME_ONLY_READS): the compiler never computes them while building. They
-// declare no effect because a database write invalidates the cell under its
-// DB row alone.
+// `jet.runtime.web` (#6615): app's live publish, in Jet types. The member
+// is a runtime binding (Guest.jet sema_guest_runtime_binding) of the runtime
+// export that is its one body (WsRoutes.jet). It is `priv`: only Core calls
+// it; the live registry and its rules are app's Jet source (Core/App/App.jet).
 web: module {
-    // The cell's current bytes.
-    #Import(c) priv live_load: fn() -> [U8] = "jet_web_live_store_load"
-
-    // Whether the cell still held `expected` and now holds `replacement`.
-    #Import(c) priv live_replace: fn(expected: [U8], replacement: [U8]) -> Bool = "jet_web_live_store_replace"
-
     // `event` becomes `topic`'s latest and goes to every joined connection.
     #Import(c) priv live_publish: fn(topic: String, event: String) = "jet_web_live_publish"
 }

@@ -202,9 +202,23 @@ LIVE_MAX_PAYLOAD: 4194304
 // generation and document as the record's value.
 LIVE_SYNC_SOURCE: "app.sync"
 
-live_cell_load: fn() -> [U8] { rt_web.live_load() }
+// The encoded registry, in one process-wide cell. A replacement installs only
+// while the cell still holds the bytes its caller read, so a concurrent change
+// makes the caller retry instead of being lost.
+LiveCell: struct {
+    bytes: [U8]
+}
 
-live_cell_replace: fn(expected: [U8], replacement: &&[U8]) -> Bool { rt_web.live_replace(expected, replacement) }
+LIVE_CELL: Shared{LiveCell{bytes: [U8]{}}}
+
+live_cell_load: fn() -> [U8] { LIVE_CELL.bytes }
+
+live_cell_replace: fn(expected: [U8], replacement: &&[U8]) -> Bool {
+    cell := LIVE_CELL.guard_edit()
+    if cell.value.bytes != expected -> return false
+    cell.value.bytes = replacement.move()
+    true
+}
 
 live_key: fn(args: [String]) -> String { "[{args.join(",")}]" }
 

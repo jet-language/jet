@@ -4,8 +4,8 @@
 // may compute it while building, in the compiler's own process; one that
 // reads the running program's clocks or watch handles declares the effect it
 // reads instead, and one only the running program can answer (its task, its
-// process id, its terminal, its live registry cell, its UI provider, its
-// platform, module loader and SIMD width) is run-time only
+// process id, its terminal, its UI provider, its platform, module loader and
+// SIMD width) is run-time only
 // (RUNTIME_ONLY_READS), which sema never computes while compiling. So a new
 // empty row, or a reviewed binding that gained a row, fails here until the
 // list says why.
@@ -101,13 +101,13 @@ runtime_binding_name: fn(row: RuntimeInterfaceRow) -> String Never! {
     assert_eq(violations.join("\n"), "")
 }
 
-#Test("every run-time-only read names a runtime export, and the running task, process, terminal, live cell, UI provider and platform are among them") {
+#Test("every run-time-only read names a runtime export, and the running task, process, terminal, UI provider and platform are among them") {
     loop row in RUNTIME_ONLY_READS {
         assert(runtime_c_export(row.symbol), "RUNTIME_ONLY_READS names `{row.symbol}`, which no runtime export defines")
     }
     running: [String]{
         "tasks.task_identity", "tasks.task_cancelled", "files.atomic_pid", "files.os_family", "files.path_windows", "term.stdout_terminal", "term.stderr_terminal",
-        "web.live_load", "web.live_replace", "mod.supported", "mod.os", "sys.simd_lanes",
+        "mod.supported", "mod.os", "sys.simd_lanes",
         "ui.capability", "ui.clipboard_get", "ui.clipboard_set", "ui.event_pop", "ui.key_claim", "ui.dialog_request", "ui.dialog_result",
     }
     loop name in running {

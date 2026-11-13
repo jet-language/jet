@@ -1,25 +1,6 @@
-// Small raw leaves of app, core.tui, core.jobs and core.tasks. Rust
-// providers: (TUI capability environment bytes), (job-queue devtools event,
-// raw sleep), (task flags):3146-3152 (Condition notify). The app live-query
-// registry (Core/App/App.jet) keeps its state in a byte cell.
-
-// A process-global byte cell. Root32: mutex0, data8, length16 (bytes are
-// packed; capacity == length).
-web_live_store_root := I64{0}
-
-byte_cell_new: fn() -> I64 {
-    root: jet_rt_alloc(I64{32}, I64{8})
-    thread_zero(root, I64{32})
-    root
-}
-
-// runtime-init: 3 when web_live_store_root
-#Export(c) jet_rt_web_live_store_init: fn() {
-    if (web_live_store_root != I64{0}) -> return
-    #Unsafe("runtime-init runs before any other thread exists") {
-        web_live_store_root = byte_cell_new()
-    }
-}
+// Small raw leaves of core.tui, core.jobs and core.tasks. Rust providers:
+// (TUI capability environment bytes), (job-queue devtools event, raw sleep),
+// (task flags):3146-3152 (Condition notify).
 
 // A fresh [U8] copy of `length` packed bytes; its data word, length returned.
 packed_bytes_out: fn(bytes: I64, length: I64, output: I64) -> I64 {
@@ -31,51 +12,6 @@ packed_bytes_out: fn(bytes: I64, length: I64, output: I64) -> I64 {
     }
     rt_text_store(output, data)
     length
-}
-
-// A copy of the cell's current bytes.
-byte_cell_load: fn(root: I64, output: I64) -> I64 {
-    sync_mutex_lock(root)
-    length: packed_bytes_out(rt_text_word(wrapping(root + I64{8})), rt_text_word(wrapping(root + I64{16})), output)
-    sync_mutex_unlock(root)
-    length
-}
-
-// Installs `next` only while the cell still equals `expected`.
-byte_cell_replace: fn(root: I64, expected: I64, expected_length: I64, next: I64, next_length: I64) -> Bool {
-    old_length: if (expected_length < I64{0} || expected == I64{0}) -> I64{0} else -> expected_length
-    new_length: if (next_length < I64{0} || next == I64{0}) -> I64{0} else -> next_length
-    sync_mutex_lock(root)
-    data: rt_text_word(wrapping(root + I64{8}))
-    length: rt_text_word(wrapping(root + I64{16}))
-    same := length == old_length
-    at := I64{0}
-    loop same && at < length {
-        same = rt_text_byte(wrapping(data + at)) == host_u8_get(expected, at)
-        at += I64{1}
-    }
-    if !same {
-        sync_mutex_unlock(root)
-        return false
-    }
-    replacement: if (new_length == I64{0}) -> I64{0} else -> jet_rt_alloc(new_length, I64{1})
-    at = I64{0}
-    loop at < new_length {
-        rt_text_put(wrapping(replacement + at), host_u8_get(next, at))
-        at += I64{1}
-    }
-    if (length != I64{0}) -> jet_rt_free(data, length, I64{1})
-    rt_text_store(wrapping(root + I64{8}), replacement)
-    rt_text_store(wrapping(root + I64{16}), new_length)
-    sync_mutex_unlock(root)
-    true
-}
-
-// core.web's live-query registry (Core/Web/Web.jet), shared by `app`.
-#Export(c) jet_web_live_store_load: fn(output: I64) -> I64 { byte_cell_load(web_live_store_root, output) }
-
-#Export(c) jet_web_live_store_replace: fn(expected: I64, expected_length: I64, next: I64, next_length: I64) -> Bool {
-    byte_cell_replace(web_live_store_root, expected, expected_length, next, next_length)
 }
 
 // std::env::var_os(name) as its encoded bytes, None when unset.

@@ -5213,9 +5213,8 @@ previous one is not a change, so readers wake only when the value changed.
 `Live<T, E>` is an identity, not a snapshot: reads, invalidation and
 statistics always use the one registry. A full registry evicts its oldest
 binding. A signature names the type after `use app.[Live]`. The registry
-lives in one runtime byte cell that only `app` reaches, through the private
-`jet.runtime.web` bindings, and an invalidation goes to the WebSocket live hub
-as topic `live:<source>`.
+lives in one module `Shared` cell of `app`'s source, and an invalidation goes
+to the WebSocket live hub as topic `live:<source>`.
 
 ### `core.web` — server-rendered applications
 
