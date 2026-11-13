@@ -1,17 +1,27 @@
-# The registered lambda-shape1 plan (toolchain a0.0.45, D-LAMBDA-SHAPE1=C)
-# rewrites every arrow lambda in an old-spelling source and in a Markdown
-# file's Jet fence: bare and parenthesized heads, typed parameters, an effect
-# row, a block body, a body on the next line, nested lambdas, a lambda in a
-# record field, in an interpolation hole and in a quoted Jet program. Arms,
-# arrow `if`s, arrow loops and function types keep their arrows, and so does
-# prose. A second run finds nothing left to rewrite.
+# The registered lambda-shape1 plan (toolchain a0.0.45) rewrites every arrow
+# lambda in an old-spelling source, a Markdown file, an expected-output text
+# and a text listed as a Jet source: bare and parenthesized heads, typed
+# parameters, an effect row, a block body, a body on the next line, nested and
+# curried lambdas (in a binding and in a call), a lambda in a record field, a
+# collection literal, a migration's `via` converter, an interpolation hole, a
+# quoted Jet program, a Jet fence, the code spans of prose and of a string
+# literal, a quoted command line with `;`-separated statements, and a block
+# lambda's first line quoted alone. Arms, arrow `if`s, arrow loops, function
+# types, a migration's type change, a bare name heading a code span, a
+# signature text, C's `->`, prose arrows, prose with a stray parenthesis and
+# other fences keep their arrows. A second run finds nothing left to rewrite.
 fixture: lambda_shape1_rewrites_every_arrow_lambda/input
-step: jet run {root}/Compiler/Migrations/Migrate.jet -- lambda-shape1 --write before.jet guide.md
+step: jet run {root}/Compiler/Migrations/Migrate.jet -- lambda-shape1 --write before.jet guide.md notes.txt --source-list sources.txt
 exit: 0
-stdout: = "EDIT before.jet 12\nEDIT guide.md 1\nTOTAL 13 sites in 2 files\n"
+stdout: = "EDIT before.jet 19\nEDIT guide.md 3\nEDIT notes.txt 4\nEDIT shown.out 3\nTOTAL 29 sites in 4 files\n"
 file: before.jet = lambda_shape1_rewrites_every_arrow_lambda/before.out
 file: guide.md = lambda_shape1_rewrites_every_arrow_lambda/guide.out
-step: jet run {root}/Compiler/Migrations/Migrate.jet -- lambda-shape1 --write before.jet guide.md
+file: notes.txt = lambda_shape1_rewrites_every_arrow_lambda/notes.out
+file: shown.out = lambda_shape1_rewrites_every_arrow_lambda/shown.expected
+step: jet run {root}/Compiler/Migrations/Migrate.jet -- lambda-shape1 --write before.jet guide.md notes.txt --source-list sources.txt
 exit: 0
 stdout: = "TOTAL 0 sites in 0 files\n"
 file: before.jet = lambda_shape1_rewrites_every_arrow_lambda/before.out
+file: guide.md = lambda_shape1_rewrites_every_arrow_lambda/guide.out
+file: notes.txt = lambda_shape1_rewrites_every_arrow_lambda/notes.out
+file: shown.out = lambda_shape1_rewrites_every_arrow_lambda/shown.expected

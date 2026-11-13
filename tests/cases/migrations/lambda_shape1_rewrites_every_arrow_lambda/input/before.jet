@@ -8,6 +8,18 @@ Handlers: struct {
     on_point: fn(Point) -> Int
 }
 
+Rank: struct {
+    value: Int
+}
+
+#PublishedSchema Score: struct {
+    rank: Rank
+}
+
+migration Score {
+    change rank: Int -> Rank via { n -> Rank{ value: n } }
+}
+
 total: fn(points: [Point], pick: fn(Point) -> Int) -> Int {
     sum := 0
     loop point in points -> sum += pick(point)
@@ -37,6 +49,11 @@ run: fn() {
     print(square(3))
     notify: (p: Point) -[IO]> print(p.x)
     notify(points[1])
+    adder := (n: Int) -> (m: Int) -> m + n
+    add_one: adder(1)
+    print(add_one(2))
+    makers: [1].map((n: Int) -> (m: Int) -> m + n)
+    print(makers[0](2))
     label: if points.len() == {
         0 -> "none"
         count -> "{count} points"
@@ -46,4 +63,10 @@ run: fn() {
     if done -> print("never")
     source: "run: fn() {{\n    print([1].map(n -> n + 1))\n}}\n"
     print(source)
+    hint: "write `.with(value -> …)` or `scope.guard(() -> {{ cleanup }})`, not `(Int) -> Int`"
+    print(hint)
+    shape: "(item, key) -> value"
+    print(shape)
+    c_check: "if (n->refs != before) ++failures;"
+    print(c_check)
 }

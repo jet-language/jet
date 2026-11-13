@@ -1766,7 +1766,9 @@ parser_parse_assignment_or_expression: fn(state: &JetParserState) -> Stmt {
         return Stmt.Expr{expr: Expr.Unit{span: start.span, id: parser_node_id(state)}}
     }
     named: start.kind == TOKEN_IDENT || start.kind == TOKEN_SELF
-    if !named && !parser_starts_expression(start.kind) && start.kind != TOKEN_AND_AND {
+    // A lambda value opens with `fn(`; a body's last line may be one.
+    lambda: start.kind == TOKEN_KW_FN && parser_kind_at(state, 1) == TOKEN_LPAREN
+    if !named && !lambda && !parser_starts_expression(start.kind) && start.kind != TOKEN_AND_AND {
         parser_report_not_a_statement(state, start)
         // Consume the offending token (as the `in` arm does): every statement
         // loop re-enters here at the same position otherwise, reporting it
