@@ -1191,8 +1191,7 @@ jet_cli_check_settled: fn(jet_argv: [String], args: [String], color: Bool, quiet
     }
     style: jet_argv.contains("--style")
     machine := ""
-    // copy: `name` is a payload view of the parsed flag.
-    if jet_cli_target_flag(jet_argv) == .Named(name) && jet_cli_no_os_machine(name) -> machine = name.copy()
+    if jet_cli_target_flag(jet_argv) == .Named(name) && jet_cli_no_os_machine(name) -> machine = name
     planned: jet_cli_check(jet_argv, args, "check", color, quiet, threads, json)
     if planned == {
         .Check(file, source, _, _, _, project, notice, _, verbose, _, _, _, _) -> {
@@ -1395,8 +1394,7 @@ jet_cli_build_options: fn(jet_argv: [String], command: String, file: String, sou
     if jet_cli_target_flag(jet_argv) == {
         .Named(target) -> {
             if target == "web" -> web = true
-            // copy: `target` is a payload view of the parsed flag.
-            if command == "build" && jet_cli_no_os_machine(target) -> machine = target.copy()
+            if command == "build" && jet_cli_no_os_machine(target) -> machine = target
         }
         .Absent -> {
             if command == "build" && !flags.any(fn(flag) { flag.name == "os" }) && jet_cli_declares_web_target(source) && !jet_cli_declares_web_app(source) {

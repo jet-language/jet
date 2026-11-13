@@ -412,13 +412,19 @@ jet_native_test_settle: fn(outcomes: &[U64:String], streamed: [U64:String], id: 
     outcomes.add(id, kept).drop("only missing tests are retried")
 }
 
-// The failure text of a batch that died while running one of `running`
-// (none of which failed alone): a serial batch's first unreported test, an
-// unserial one's every unreported test.
-jet_native_test_batch_failure: fn(running: [JetNativeTestCase], errors: String) -> String Never! {
-    if running.len() == 1 -> return "the test process died while running `{running[0].name}`, which passed when run alone\n{errors}"
-    names: (loop test in running -> "`{test.name}`").join(", ")
-    "the test process died while running one of {names}, each of which passed when run alone\n{errors}"
+// The failure text of a batch that died with `missing` unreported (none of
+// which failed alone): a serial batch's first unreported test, an unserial
+// one's every unreported test. An isolated test never ran in the batch, so
+// it is never named.
+jet_native_test_batch_failure: fn(missing: [JetNativeTestCase], serial: Bool, errors: String) -> String Never! {
+    names := [String]{}
+    loop test in missing {
+        if test.isolated -> next
+        names.push("`{test.name}`")
+        if serial -> break
+    }
+    if names.len() == 1 -> return "the test process died while running {names[0]}, which passed when run alone\n{errors}"
+    "the test process died while running one of {names.join(", ")}, each of which passed when run alone\n{errors}"
 }
 
 // One test run again alone. Under `jet prove --capture-sensitive` it reads
@@ -587,13 +593,8 @@ jet_cli_native_test_run: fn(spec: ProcessSpec, tests: [JetNativeTestCase], check
     wires := [String]{}
     loop test in tests -> wires.push(outcomes.get(test.id) ?? return Err("native test aggregation lost an outcome"))
     if !fatal_attributed {
-        unreported := [JetNativeTestCase]{}
-        loop test in missing {
-            if !test.isolated -> unreported.push(test.copy())
-        }
-        if serial && unreported.len() > 1 -> unreported = [JetNativeTestCase]{unreported[0].copy()}
         name: if exit_fatal -> "native test process exit" else -> "native test batch"
-        text: if exit_fatal -> batch_errors else -> jet_native_test_batch_failure(unreported, batch_errors)
+        text: if exit_fatal -> batch_errors else -> jet_native_test_batch_failure(missing, serial, batch_errors)
         wires.push("0 {name.bytes().len()} 0 {text.bytes().len()} -\n{name}{text}")
     }
     if !batch_success && check_names.len() > 0 {
@@ -786,6 +787,8 @@ jet_cli_native_test_wire: fn(parts: JetNativeTestWire) -> String Never! {
 
 #Test("a batch that died with no rerun failing names the tests it left unreported") {
     missing: [JetNativeTestCase]{JetNativeTestCase{id: U64{7}, key: "k7", name: "a", expected_failure: false}, JetNativeTestCase{id: U64{8}, key: "k8", name: "b", expected_failure: false}}
-    assert_eq(jet_native_test_batch_failure([JetNativeTestCase]{missing[0].copy()}, "trap\n"), "the test process died while running `a`, which passed when run alone\ntrap\n")
-    assert_eq(jet_native_test_batch_failure(missing, ""), "the test process died while running one of `a`, `b`, each of which passed when run alone\n")
+    assert_eq(jet_native_test_batch_failure(missing, true, "trap\n"), "the test process died while running `a`, which passed when run alone\ntrap\n")
+    assert_eq(jet_native_test_batch_failure(missing, false, ""), "the test process died while running one of `a`, `b`, each of which passed when run alone\n")
+    isolated: [JetNativeTestCase]{JetNativeTestCase{id: U64{7}, key: "k7", name: "a", expected_failure: false, isolated: true}, JetNativeTestCase{id: U64{8}, key: "k8", name: "b", expected_failure: false}}
+    assert_eq(jet_native_test_batch_failure(isolated, false, ""), "the test process died while running `b`, which passed when run alone\n")
 }

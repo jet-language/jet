@@ -467,7 +467,7 @@ kit_ui_outcomes: fn(entry: KitEntry, ctx: KitCtx) -> [KitOutcome] {
     if call.check_core {
         cwd = kit_ui_stage_core(ctx, text, work, call.core_top)
         // The staged tree is the toolchain the check finds around `Core`.
-        overlay.push(KitEnvVar{name: "JET_TOOLCHAIN_ROOT", value: None})
+        overlay.push(KitEnvVar{name: ENV_JET_TOOLCHAIN_ROOT, value: None})
     }
     result: kit_exec_invoke_with_env(ctx.env, args, cwd, ctx.scratch, call.stdin.bytes(), overlay)
     actual: kit_ui_normalize(entry.path, kit_ui_actual(call, result), if call.check_core -> cwd else -> source)

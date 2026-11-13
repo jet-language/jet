@@ -163,10 +163,9 @@ sema_call_unknown_function_in: fn(name: String, span: Span, scopes: SemaScopeTab
 }
 
 // E0311 for `name(value, …)` when `name` is only a method of a type this module
-// declares: a method has one spelling, `value.name(…)`.
+// declares (`owners`, each quoted): a method has one spelling, `value.name(…)`.
 sema_call_method_called_as_function: fn(name: String, owners: [String], span: Span) -> Diagnostic {
-    types: loop owner in owners -> "`{owner}`"
-    sema_error("E0311", span, "`{name}` is a method of {types.join(" and ")}, not a function", "a method is called on its value, which goes before the dot; only a free function whose first parameter is `#Root` takes both spellings", "call it on the value: `value.{name}(…)`")
+    sema_error("E0311", span, "`{name}` is a method of {owners.join(" and ")}, not a function", "a method is called on its value, which goes before the dot; only a free function whose first parameter is `#Root` takes both spellings", "call it on the value: `value.{name}(…)`")
 }
 
 sema_call_not_callable: fn(name: String, ty: Type, span: Span) -> Diagnostic {

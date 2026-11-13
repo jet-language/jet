@@ -46,7 +46,7 @@ use {
         JET_DRIVER_EXIT_USER_ERROR,
         jet_driver_present_diagnostics,
     ]
-    jet_foundation.[diagnostic_render_all]
+    jet_foundation.[ENV_JET_CANVAS_BROWSER, diagnostic_render_all]
 }
 
 // The dev loop checks the sources for a change every this many clock ticks.
@@ -164,7 +164,7 @@ jet_cli_dev_canvas_open_browser: fn(url: String) -[Env, Exec]> String? Never! {
 }
 
 jet_cli_dev_canvas_browser: fn() -[Env]> String Never! {
-    if cli_sys.get("JET_CANVAS_BROWSER") == .Val(explicit) && explicit != "" -> return explicit
+    if cli_sys.get(ENV_JET_CANVAS_BROWSER) == .Val(explicit) && explicit != "" -> return explicit
     if cli_sys.get("BROWSER") == .Val(preferred) && preferred != "" -> return preferred
     os: cli_sys.name()
     if os == "macos" -> return "open"

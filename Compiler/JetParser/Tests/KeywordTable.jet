@@ -16,24 +16,26 @@ keyword_table_refused: fn(word: String) -> Bool {
     parsed.diagnostics.len() > 0
 }
 
+// Words the statement and form parsers open with by spelling, outside the
+// keyword list.
+KEYWORD_TABLE_OPENERS: [String]{"defer", "assert", "task", "next", "group", "race", "all", "any", "close", "panic", "uninit", "match", "ref", "value", "Transition"}
+
+// Stops when the parser and the keyword table disagree about `word`.
+keyword_table_agrees: fn(word: String) {
+    in_table: LEXER_KEYWORD_SPELLINGS.contains(word) || LEXER_RETIRED_SPELLINGS.contains(word)
+    refused: keyword_table_refused(word)
+    if refused && !in_table -> panic("the parser refuses `{word}` as a local's name, but the keyword table does not hold it")
+    if !refused && in_table -> panic("the keyword `{word}` parsed as a local's name")
+}
+
 #Test("every keyword table word is refused as an identifier") {
     loop word in LEXER_KEYWORD_SPELLINGS -> assert(keyword_table_refused(word), "the keyword `{word}` parsed as a local's name")
     loop word in LEXER_RETIRED_SPELLINGS -> assert(keyword_table_refused(word), "the retired keyword `{word}` parsed as a local's name")
 }
 
 #Test("every word the parser refuses as an identifier is in the keyword table") {
-    // Words the statement and form parsers open with by spelling, outside
-    // the keyword list.
-    probes := [String]{"defer", "assert", "task", "next", "group", "race", "all", "any", "close", "panic", "uninit", "match", "ref", "value", "Transition"}
-    // copy: the probe list outlives each borrowed keyword name.
-    loop word in JET_KEYWORD_NAMES -> probes.push(word.copy())
-    // copy: the probe list outlives each borrowed table word.
-    loop word in LEXER_KEYWORD_SPELLINGS -> probes.push(word.copy())
-    // copy: the probe list outlives each borrowed retired word.
-    loop word in LEXER_RETIRED_SPELLINGS -> probes.push(word.copy())
-    loop word in probes {
-        in_table: LEXER_KEYWORD_SPELLINGS.contains(word) || LEXER_RETIRED_SPELLINGS.contains(word)
-        if keyword_table_refused(word) && !in_table -> panic("the parser refuses `{word}` as a local's name, but the keyword table does not hold it")
-        if !keyword_table_refused(word) && in_table -> panic("the keyword `{word}` parsed as a local's name")
-    }
+    loop word in KEYWORD_TABLE_OPENERS -> keyword_table_agrees(word)
+    loop word in JET_KEYWORD_NAMES -> keyword_table_agrees(word)
+    loop word in LEXER_KEYWORD_SPELLINGS -> keyword_table_agrees(word)
+    loop word in LEXER_RETIRED_SPELLINGS -> keyword_table_agrees(word)
 }

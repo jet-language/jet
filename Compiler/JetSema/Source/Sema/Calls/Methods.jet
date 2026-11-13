@@ -1658,28 +1658,35 @@ sema_call_push_instance_method_names: fn(names: &[String], methods: [Func]) Neve
     }
 }
 
-// The types this module declares with an instance method `name`: in the type
-// body, in an `impl`, or as a top-level `Type.name: fn(self)`.
+// The types this module declares with an instance method `name`, each quoted
+// as E0311 names it: in the type body, in an `impl`, or as a top-level
+// `Type.name: fn(self)`.
 sema_call_method_owners: fn(environment: SemaScopeEnvironment, name: String) -> [String] Never! {
     owners := [String]{}
     loop declaration_index in 0..<environment.declarations.len() {
         if environment.declarations[declaration_index].item == {
             .Struct(value) -> {
-                if sema_call_methods_have_instance(value.methods, name) && !owners.contains(value.name) -> owners.push(value.name.copy())
+                if sema_call_methods_have_instance(value.methods, name) -> sema_call_push_method_owner(owners, value.name)
             }
             .Enum(value) -> {
-                if sema_call_methods_have_instance(value.methods, name) && !owners.contains(value.name) -> owners.push(value.name.copy())
+                if sema_call_methods_have_instance(value.methods, name) -> sema_call_push_method_owner(owners, value.name)
             }
             .Impl(value) -> {
-                if sema_call_methods_have_instance(value.methods, name) && !owners.contains(value.type_name) -> owners.push(value.type_name.copy())
+                if sema_call_methods_have_instance(value.methods, name) -> sema_call_push_method_owner(owners, value.type_name)
             }
             .Func(value) -> {
-                if value.external_type == .Val(owner) && value.name == name && value.params.len() > 0 && value.params[0].name == "self" && !owners.contains(owner.name) -> owners.push(owner.name.copy())
+                if value.external_type == .Val(owner) && value.name == name && value.params.len() > 0 && value.params[0].name == "self" -> sema_call_push_method_owner(owners, owner.name)
             }
             .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
     owners
+}
+
+// Adds `owner` to `owners` once, quoted.
+sema_call_push_method_owner: fn(owners: &[String], owner: String) Never! {
+    quoted: "`{owner}`"
+    if !owners.contains(quoted) -> owners.push(quoted)
 }
 
 sema_call_methods_have_instance: fn(methods: [Func], name: String) -> Bool Never! {

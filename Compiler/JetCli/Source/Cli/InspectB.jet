@@ -140,8 +140,8 @@ JetCLIReservedEntry: struct {
     note: String
 }
 
-// What to write instead of each retired keyword. Every lexer-retired word has
-// exactly one row; a test holds the two together.
+// What to write instead of each retired keyword, in the lexer's table order.
+// Every lexer-retired word has exactly one row; a test holds the two together.
 JET_CLI_TEACHING_RESERVED: [JetCLIReservedEntry]{
     {spelling: "mut", kind: "reserved word", note: "borrow for write with the sigil `&`"},
     {spelling: "take", kind: "reserved word", note: "take ownership with the sigil `&&`"},
@@ -177,36 +177,20 @@ jet_cli_inspect_pad: fn(value: String, width: Int) -> String Never! {
     out
 }
 
-// The keyword list's words the lexer does not reserve, in list order.
-jet_cli_contextual_keywords: fn() -> [String] Never! {
-    words := [String]{}
-    loop word in JET_KEYWORD_NAMES {
-        if LEXER_KEYWORD_SPELLINGS.contains(word) || LEXER_RETIRED_SPELLINGS.contains(word) -> next
-        // copy: the list outlives the borrowed keyword name.
-        words.push(word.copy())
-    }
-    words
-}
-
-// The lexer's retired words in table order, each with its teaching row.
-jet_cli_teaching_reserved: fn() -> [JetCLIReservedEntry] Never! {
-    rows := [JetCLIReservedEntry]{}
-    loop word in LEXER_RETIRED_SPELLINGS {
-        loop entry in JET_CLI_TEACHING_RESERVED {
-            // copy: the report keeps its own row.
-            if entry.spelling == word -> rows.push(entry.copy())
-        }
-    }
-    rows
+// Whether a keyword list word is contextual: the lexer does not reserve it.
+jet_cli_contextual_keyword: fn(word: String) -> Bool Never! {
+    !LEXER_KEYWORD_SPELLINGS.contains(word) && !LEXER_RETIRED_SPELLINGS.contains(word)
 }
 
 jet_cli_reserved_text: fn() -> String Never! {
     out := "keywords (not valid identifiers):\n"
     loop word in LEXER_KEYWORD_SPELLINGS -> out = "{out}  {word}\n"
     out = "{out}\nteaching-reserved words (not valid identifiers):\n"
-    loop entry in jet_cli_teaching_reserved() -> out = "{out}  {jet_cli_inspect_pad(entry.spelling, 10)} {entry.note}\n"
+    loop entry in JET_CLI_TEACHING_RESERVED -> out = "{out}  {jet_cli_inspect_pad(entry.spelling, 10)} {entry.note}\n"
     out = "{out}\ncontextual keywords (valid identifiers outside their form):\n"
-    loop word in jet_cli_contextual_keywords() -> out = "{out}  {word}\n"
+    loop word in JET_KEYWORD_NAMES {
+        if jet_cli_contextual_keyword(word) -> out = "{out}  {word}\n"
+    }
     out = "{out}\nsigils:\n"
     loop entry in JET_CLI_RESERVED_SIGILS -> out = "{out}  {jet_cli_inspect_pad(entry.spelling, 10)} {entry.note}\n"
     out
@@ -223,25 +207,29 @@ jet_cli_reserved_entries: fn(entries: [JetCLIReservedEntry]) -> JetCLIStatusValu
 
 jet_cli_reserved: fn(json: Bool) -> JetCLIPlan Never! {
     if !json -> return jet_cli_done(jet_cli_reserved_text(), "", JET_DRIVER_EXIT_OK)
+    contextual := [JetCLIStatusValue]{}
+    loop word in JET_KEYWORD_NAMES {
+        if jet_cli_contextual_keyword(word) -> contextual.push(jet_cli_status_text(word))
+    }
     payload: jet_cli_status_object([JetCLIStatusField]{
         jet_cli_status_field("keywords", jet_cli_status_texts(LEXER_KEYWORD_SPELLINGS)),
-        jet_cli_status_field("teaching_reserved", jet_cli_reserved_entries(jet_cli_teaching_reserved())),
-        jet_cli_status_field("contextual", jet_cli_status_texts(jet_cli_contextual_keywords())),
+        jet_cli_status_field("teaching_reserved", jet_cli_reserved_entries(JET_CLI_TEACHING_RESERVED)),
+        jet_cli_status_field("contextual", jet_cli_status_array(contextual)),
         jet_cli_status_field("sigils", jet_cli_reserved_entries(JET_CLI_RESERVED_SIGILS)),
     })
     jet_cli_done("{jet_cli_status_render("inspect.reserved", true, [JetCLIStatusField]{jet_cli_status_field("reserved", payload)})}\n", "", JET_DRIVER_EXIT_OK)
 }
 
 #Test("inspect reserved prints the lexer's keyword table and a teaching row for every retired word") {
-    loop entry in JET_CLI_TEACHING_RESERVED -> assert(LEXER_RETIRED_SPELLINGS.contains(entry.spelling), "teaching row `{entry.spelling}` names no retired lexer word")
-    taught: jet_cli_teaching_reserved()
-    assert_eq(taught.len(), LEXER_RETIRED_SPELLINGS.len())
+    assert_eq(JET_CLI_TEACHING_RESERVED.len(), LEXER_RETIRED_SPELLINGS.len())
+    loop index in 0..<LEXER_RETIRED_SPELLINGS.len() -> assert_eq(JET_CLI_TEACHING_RESERVED[index].spelling, LEXER_RETIRED_SPELLINGS[index])
     text: jet_cli_reserved_text()
     loop word in LEXER_KEYWORD_SPELLINGS -> assert(text.contains("\n  {word}\n"), "keyword `{word}` is missing")
-    loop entry in taught -> assert(text.contains("\n  {jet_cli_inspect_pad(entry.spelling, 10)} {entry.note}\n"))
-    contextual: jet_cli_contextual_keywords()
-    loop word in contextual -> assert(!LEXER_KEYWORD_SPELLINGS.contains(word) && !LEXER_RETIRED_SPELLINGS.contains(word))
-    assert(contextual.contains("defer") && !contextual.contains("fn"))
+    loop entry in JET_CLI_TEACHING_RESERVED -> assert(text.contains("\n  {jet_cli_inspect_pad(entry.spelling, 10)} {entry.note}\n"))
+    loop word in JET_KEYWORD_NAMES {
+        if jet_cli_contextual_keyword(word) -> assert(text.contains("\n  {word}\n"), "contextual keyword `{word}` is missing")
+    }
+    assert(JET_KEYWORD_NAMES.contains("defer") && jet_cli_contextual_keyword("defer") && !jet_cli_contextual_keyword("fn"))
 }
 
 // ---------------------------------------------------------------------------

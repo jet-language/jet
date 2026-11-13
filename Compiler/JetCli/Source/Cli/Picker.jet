@@ -15,6 +15,7 @@ use {
         DIAGNOSTIC_THEME_DIM,
         DIAGNOSTIC_THEME_WARN,
         DiagnosticExplanation,
+        ENV_JET_HELP_SHELL_PREFILL,
         JET_CLI_COMMANDS,
         JetCLIFlagSpec,
         diagnostic_explanation,
@@ -30,8 +31,6 @@ JET_CLI_PICKER_BORDER: "90"
 JET_CLI_PICKER_CODES: "Error Codes"
 // Frames never get narrower than this many columns.
 JET_CLI_PICKER_MIN_WIDTH: 24
-// The variable a shell hook sets to read the picked line from stdout.
-JET_CLI_PICKER_PREFILL: "JET_HELP_SHELL_PREFILL"
 
 // One palette command, as the picker shows and searches it.
 JetCLIPickerEntry: struct {
@@ -1047,7 +1046,7 @@ jet_cli_picker_close: fn(drawn: Int, height: Int, alternate: Bool) -[Time.Wait]>
 // output is for a machine, or when raw mode can't be entered; the caller
 // prints the static palette then.
 jet_cli_picker: fn(color: Bool) -[IO, Time.Wait]> JetCLIPlan? Never! {
-    prefill: picker_rt.terminal8_env_has(JET_CLI_PICKER_PREFILL)
+    prefill: picker_rt.terminal8_env_has(ENV_JET_HELP_SHELL_PREFILL)
     if picker_rt.terminal8_machine_output() || !picker_rt.terminal8_stdin_tty() -> return None
     if !picker_rt.terminal8_stdout_tty() && !(prefill && picker_rt.terminal8_stderr_tty()) -> return None
     if !picker_rt.terminal8_mode_enter(true) -> return None
