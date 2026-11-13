@@ -271,9 +271,17 @@ entry02_unit_result: fn(ty: Type?, error_name: String) -> Bool {
 #Test("lambda_interface_lookahead_preserves_grouped_multiplication") {
     _: entry02_program("run: fn() {{ print((2) * 3) }}\n")
 }
-#Test("adjacent_call_result_has_the_registered_call_value_fix") {
-    ds: entry02_errors("run: fn() {{ make()() }}\n")
-    assert((entry02_diag(ds, "E-CALL-VALUE").edit ?? panic("call value fix")).new_text == ".call")
+#Test("adjacent_call_result_parses_as_a_value_call") {
+    body: entry02_func(entry02_program("run: fn() {{ make()(1) }}\n"), "run").body
+    assert(body.len() == 1)
+    if body[0] == .Expr(value) {
+        if value == .CallValue(callee, args, _, _) {
+            assert(callee == .Call(_, _))
+            assert(args.len() == 1)
+            return
+        }
+    }
+    panic("`make()(1)` did not parse as a call of the returned value")
 }
 #Test("return_type_question_spacing_disambiguates_option_vs_result") {
     opt: entry02_program("a: fn() -> Int? {{ None }}\nrun: fn() {{}}\n")

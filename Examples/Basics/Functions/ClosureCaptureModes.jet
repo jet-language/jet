@@ -21,18 +21,18 @@ run: fn() {
     read_base: fn() { base }
     kept: [read_base]
     base = 20
-    print("stored copy taken when made: {kept[0].call()}, owner now {base}")
+    print("stored copy taken when made: {kept[0]()}, owner now {base}")
 
     words := ["a", "b"]
     word_count: fn() { words.len() }
     stored: [word_count]
     words.push("c")
-    print("stored clone of a list: {stored[0].call()}, owner now {words.len()}")
+    print("stored clone of a list: {stored[0]()}, owner now {words.len()}")
 
     ticket: Ticket{id: 7, on_use: fn(n: Int) { n * 10 }}
     redeem: fn() { ticket.on_use(ticket.id) }
     later: [redeem]
-    print("non-clonable ticket moved in: {later[0].call()}")
+    print("non-clonable ticket moved in: {later[0]()}")
 
     tick: counter()
     tick()

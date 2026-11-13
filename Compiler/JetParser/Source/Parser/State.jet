@@ -19,7 +19,6 @@ use {
         diagnostic_with_edit,
         diagnostic_with_edit_grade,
         diagnostic_with_label,
-        diagnostic_with_structured_edit,
         name_intern,
         name_text,
     ]
@@ -549,15 +548,6 @@ parser_deletion_edit: fn(state: JetParserState, span: Span) -> TextEdit Never! {
 parser_add_fatal_code: fn(state: &JetParserState, code: String, span: Span, what: String, why: String, fix: String) {
     if parser_aborting(state) -> return
     state.diagnostics.push(diagnostic_from_registry(code, Val(span), what, why, fix))
-    state.abort_mark = state.diagnostics.len()
-    state.abort_position = state.position
-}
-
-// A fatal error carrying its registry-generated structured edit (Rust
-// `Diagnostic::set_structured_edit` on a returned `Err`).
-parser_add_fatal_code_structured_edit: fn(state: &JetParserState, code: String, span: Span, what: String, why: String, fix: String, edit: TextEdit) {
-    if parser_aborting(state) -> return
-    state.diagnostics.push(diagnostic_with_structured_edit(diagnostic_from_registry(code, Val(span), what, why, fix), edit))
     state.abort_mark = state.diagnostics.len()
     state.abort_position = state.position
 }

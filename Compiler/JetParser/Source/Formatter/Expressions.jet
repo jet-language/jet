@@ -1696,8 +1696,7 @@ jfmt_fmt_expr: fn(f: &JetFmt, expr: Expr, prec: Int) {
                     }
                 }
             }
-            // Direct calls on lambdas, fields and indexes keep
-            // their spelling.
+            // Every function value is called with plain parentheses.
             if prec > JFMT_PREC_POSTFIX -> jfmt_write(f, "(")
             jfmt_fmt_expr(f, callee, JFMT_PREC_POSTFIX)
             jfmt_fmt_call_args_with_template(f, args, Val(expr_span(callee).end))

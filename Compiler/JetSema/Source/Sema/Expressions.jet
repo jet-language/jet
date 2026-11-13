@@ -4032,18 +4032,7 @@ sema_expr_function_field: fn(receiver: Type, name: String, method_name: String, 
             return sema_call_type_is_function(run_field)
         }
     }
-    type_name: sema_type_graph_base_name(sema_expr_unwrap_tag(receiver)) ?? return false
-    definition: sema_serde_type_definition(environment, program, type_name) ?? return false
-    callable := false
-    if definition.kind == .Struct(fields, _) {
-        loop field in fields {
-            if field.name == name {
-                callable = sema_call_type_is_function(sema_call_resolved_type(field.ty, environment, program))
-                break
-            }
-        }
-    }
-    if !callable -> return false
+    if !sema_expr_struct_field_callable(receiver, name, environment, program) -> return false
     if sema_expr_declares_nominal_method(environment, program, sema_expr_unwrap_tag(receiver), method_name, false) -> return false
     if program.registration_graph == .Val(graph) {
         if sema_type_resolve_nominal_row_at(graph, receiver, sema_scope_caller_row(environment, graph)) == .Val(row) {
@@ -4075,6 +4064,8 @@ sema_expr_function_field: fn(receiver: Type, name: String, method_name: String, 
             }
         }
     } else {
+        type_name: sema_type_graph_base_name(sema_expr_unwrap_tag(receiver)) ?? return false
+        definition: sema_serde_type_definition(environment, program, type_name) ?? return false
         loop declaration_index in 0..<environment.declarations.len() {
             if environment.declarations[declaration_index].item == {
                 .Struct(value) -> {
@@ -4099,6 +4090,30 @@ sema_expr_function_field: fn(receiver: Type, name: String, method_name: String, 
         }
     }
     true
+}
+
+// Whether `receiver`'s struct declares a field `name` of function type.
+sema_expr_struct_field_callable: fn(receiver: Type, name: String, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool {
+    type_name: sema_type_graph_base_name(sema_expr_unwrap_tag(receiver)) ?? return false
+    definition: sema_serde_type_definition(environment, program, type_name) ?? return false
+    if definition.kind == .Struct(fields, _) {
+        loop field in fields {
+            if field.name == name -> return sema_call_type_is_function(sema_call_resolved_type(field.ty, environment, program))
+        }
+    }
+    false
+}
+
+// `value.field` written as a `.call(…)` receiver, where `value`'s type
+// declares both a callable field and a method named `field`: plain
+// parentheses would select the method, so `.call` selects the field.
+sema_expr_names_shadowed_callable_field: fn(receiver: Expr, receiver_value: TExpr, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool {
+    if receiver == .Field(_, member, _, _) {
+        if receiver_value.kind == .Field(base, _) {
+            return sema_expr_struct_field_callable(base.ty, member, environment, program) && !sema_expr_function_field(base.ty, member, member, environment, program)
+        }
+    }
+    false
 }
 
 // Whether `receiver.method(…)` is an allocator's `alloc`, `try_alloc` or
@@ -4126,7 +4141,6 @@ sema_expr_check_method_call: fn(receiver: Expr, method: String, method_span: Spa
         }
     }
     sema_expr_lint_unit_scalar_rewrap(receiver, method, args, method_span, environment, program, scopes, context, diagnostics)
-    if method == "call" -> sema_expr_lint_inline_autodiff(receiver, environment, program, scopes, context, diagnostics)
     // This rule a=A: `.new(...)` leaves only the static receiver implicit; the
     // ordinary expected type names it (E0356 when there is none).
     if receiver == .Ident(receiver_name, receiver_span, _) && receiver_name == "" {
@@ -4195,11 +4209,16 @@ sema_expr_check_method_call: fn(receiver: Expr, method: String, method_span: Spa
     receiver_value: receiver_checked ?? return None
     if method == "text" -> sema_expr_lint_default_body_text(receiver, receiver_value.ty, args, scopes, diagnostics)
     if method == "replace" -> sema_expr_lint_fixed_cleanup(receiver, receiver_value.ty, args, method_span, diagnostics)
-    // `.call(...)` on a function-typed receiver is the builtin call projection,
-    // checked exactly like calling the value directly (mirrors METHOD_CALL on
-    // Type::Fn).
+    // `.call(…)` on a function value is the one spelling of a callable field
+    // that shares its name with a method. Any other function value is called
+    // with plain parentheses (E0802); it is still checked as that call.
     receiver_signature: sema_call_resolved_type(receiver_value.ty, environment, program)
     if method == "call" && sema_call_type_is_function(receiver_signature) {
+        if !sema_expr_names_shadowed_callable_field(receiver, receiver_value, environment, program) {
+            // Spanned at `.call`, the text its fix removes: the receiver's
+            // own span ends at its name when it is a call.
+            diagnostics.push(sema_error("E0802", Span{start: method_span.start - 1, end: method_span.end}, "this function value is called through `.call(…)`", "a function value is called with plain parentheses; `.call(…)` only selects a callable field that shares its name with a method", "remove `.call` and write `callee(…)`"))
+        }
         call_end := method_span.end
         if args.len() > 0 -> call_end = expr_span(args[args.len() - 1].expr).end
         scopes.ownership_call_depth += 1
@@ -4313,12 +4332,6 @@ sema_expr_check_declared_method: fn(receiver: Expr, receiver_value: TExpr, metho
             .None -> sema_call_local_method_candidates(environment, program, routed_method, owner_type_args, type_args)
         }
     }
-    // `.call(…)` on a value that is neither a function nor declares `call`
-    // is a call of a non-function, not a misspelt method.
-    if method == "call" && !sema_expr_candidates_accept_receiver(candidates, routed_method, receiver_value.ty, environment, program) {
-        diagnostics.push(sema_call_projection_not_callable(receiver, receiver_value.ty, method_span, args))
-        return None
-    }
     candidate: sema_call_resolve_method_with_inference(receiver_value.ty, routed_method, args, argument_types, expected, candidates, environment, program, scopes, method_span, diagnostics) ?? return None
     scopes.ownership_call_depth += 1
     checked := sema_call_check_method_candidate_from_value_owned(state, receiver, receiver_value, candidate, args, [SemaCallDefaultValue]{}, method_span, expected, environment, program, scopes, tail_store, context, diagnostics)
@@ -4327,16 +4340,6 @@ sema_expr_check_declared_method: fn(receiver: Expr, receiver_value: TExpr, metho
     context.call_return_views.push(SemaCallReturnView{span: method_span, facts: value.return_view_facts})
     if !sema_expr_record_call_fact(environment, program, scopes, context, method_span, value, diagnostics) -> return None
     Val(value.value)
-}
-
-sema_expr_candidates_accept_receiver: fn(candidates: [SemaCallMethodCandidate], method: String, receiver: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool {
-    loop candidate in candidates {
-        if candidate.method.name != method -> next
-        if sema_call_method_receiver_candidate_type(candidate) == .Val(expected) {
-            if sema_call_type_assignable(expected, receiver, environment, program) ?? false -> return true
-        }
-    }
-    false
 }
 
 // The secret type `T` of an `ExpiringSecret<T>` receiver.
@@ -5092,7 +5095,7 @@ sema_expr_lint_fixed_cleanup: fn(receiver: Expr, receiver_type: Type, args: [Cal
     }
 }
 
-// L1141: `compute.gradient(f).call(…)` calls the derivative a transform
+// L1141: `compute.gradient(f)(…)` calls the derivative a transform
 // returns without naming it; the report covers the transform call. A direct
 // form (`compute.gradient(f, w)`) returns values, not a callable.
 sema_expr_lint_inline_autodiff: fn(callee: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, context: SemaCheckContext, diagnostics: &[Diagnostic]) {
@@ -6348,7 +6351,10 @@ sema_check_expression_cold: fn(expr: Expr, expected: Type?, environment: SemaSco
             }
             sema_expr_check_direct_call(call, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         }
-        .CallValue(callee, args, span, _) -> sema_expr_check_indirect_call(callee, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+        .CallValue(callee, args, span, _) -> {
+            sema_expr_lint_inline_autodiff(callee, environment, program, scopes, context, diagnostics)
+            sema_expr_check_indirect_call(callee, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+        }
         .ListLit(elements, span, node) -> {
             expanded := sema_expression_list_member_spreads(elements)
             sema_expression_list(Expr.ListLit{elements: expanded, span: span, id: node}, expanded, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)

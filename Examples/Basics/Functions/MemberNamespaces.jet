@@ -1,5 +1,7 @@
 // Fields and methods have separate namespaces.
-// Parentheses select an existing method; `.field.call` selects a callable field.
+// Parentheses select an existing method; `.field.call` selects a callable
+// field only where a method shares its name. Any other function value,
+// a callable field included, is called with plain parentheses.
 Counter: struct {
     value: Int
     step: fn(Int) -> Int
@@ -31,6 +33,7 @@ run: fn() {
     print(counter.call.call(4))
     callback: Callback{step: fn(n) { n + 1 }}
     print(callback.step(4))
-    print(callback.step.call(4))
+    step: callback.step
+    print(step(4))
     print(make_callback().step(4))
 }

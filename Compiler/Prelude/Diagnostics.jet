@@ -8692,6 +8692,22 @@ RetiredLambdaReturnType: struct {
     }
 }
 
+CallOnFunctionValue: struct {
+    impl Diagnostic {
+        code: "E0802"
+        safety_class: .Opinion
+        safety_reason: "The function value would run the same with plain parentheses; Jet keeps one spelling for a call."
+        meaning: "A function value is called through `.call(…)` instead of `(…)`"
+        detail: true
+        structured_fix: .Remove{text: ".call"}
+        no_fix: None
+        fix_safety: .BehaviorPreserving
+        what: fn(self) -> String { "This function value is called through `.call(…)`" }
+        why: fn(self) -> String { "A function value is called with plain parentheses; `.call(…)` only selects a callable field that shares its name with a method" }
+        fix: fn(self) -> String { "Remove `.call` and write `callee(…)`" }
+    }
+}
+
 CalledNonFunction: struct {
     impl Diagnostic {
         code: "E0803"
@@ -8708,17 +8724,11 @@ CalledNonFunction: struct {
 AdjacentCallResult: struct {
     impl Diagnostic {
         code: "E-CALL-VALUE"
-        safety_class: .Opinion
-        safety_reason: "The adjacent call would invoke the returned value, and Jet spells it `.call(…)` so value and invocation stay distinct."
-        stage: [.Parse]
-        meaning: "Function values use `.call(…)`, not an adjacent call `)(`"
-        detail: true
-        structured_fix: .GeneratedCallValue
+        status: .Retired
         no_fix: None
-        fix_safety: .BehaviorPreserving
-        what: fn(self) -> String { "A function value is invoked with an adjacent call `)(`" }
-        why: fn(self) -> String { "Named functions and direct field, index, or lambda calls keep their spelling; a returned call result uses `.call(…)` so the value and invocation stay explicit" }
-        fix: fn(self) -> String { "Write `callee.call(…)`" }
+        what: fn(self) -> String { "*Retired* (was: a returned function value is called with `.call(…)`, not `)(`)" }
+        why: fn(self) -> String { "A returned function value is called with plain parentheses, as in `make_adder(1)(2)`" }
+        fix: fn(self) -> String { "Do not use E-CALL-VALUE" }
     }
 }
 

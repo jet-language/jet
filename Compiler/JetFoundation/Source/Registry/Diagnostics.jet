@@ -12,7 +12,6 @@ DiagnosticRegistryFix: enum {
     GeneratedMarkerGroup
     GeneratedMissingArms
     GeneratedScriptRun
-    GeneratedCallValue
     GeneratedRedundantTailReturn
 }
 
@@ -376,7 +375,7 @@ diagnostic_registry_static_edit: fn(row: DiagnosticRegistryRow, span: Span) -> T
     if fix == {
         .Replace(_, replacement) -> Val(TextEdit{span: span, new_text: replacement})
         .Remove(_) -> Val(TextEdit{span: span, new_text: ""})
-        .SourceEdit | .SuggestedSourceEdit | .CryptoMisuse | .GeneratedMarkerGroup | .GeneratedMissingArms | .GeneratedScriptRun | .GeneratedCallValue | .GeneratedRedundantTailReturn -> None
+        .SourceEdit | .SuggestedSourceEdit | .CryptoMisuse | .GeneratedMarkerGroup | .GeneratedMissingArms | .GeneratedScriptRun | .GeneratedRedundantTailReturn -> None
     }
 }
 
@@ -442,7 +441,7 @@ diagnostic_registry_with_edit: fn(diagnostic: &&Diagnostic, edit: TextEdit) -> D
 diagnostic_registry_is_source_edit: fn(fix: DiagnosticRegistryFix) -> Bool Never! {
     if fix == {
         .SourceEdit | .SuggestedSourceEdit -> true
-        .CryptoMisuse | .Replace(_, _) | .Remove(_) | .GeneratedMarkerGroup | .GeneratedMissingArms | .GeneratedScriptRun | .GeneratedCallValue | .GeneratedRedundantTailReturn -> false
+        .CryptoMisuse | .Replace(_, _) | .Remove(_) | .GeneratedMarkerGroup | .GeneratedMissingArms | .GeneratedScriptRun | .GeneratedRedundantTailReturn -> false
     }
 }
 
@@ -451,7 +450,6 @@ diagnostic_registry_is_generated_edit: fn(fix: DiagnosticRegistryFix) -> Bool Ne
         .GeneratedMarkerGroup
         | .GeneratedMissingArms
         | .GeneratedScriptRun
-        | .GeneratedCallValue
         | .GeneratedRedundantTailReturn -> true
         .SourceEdit | .SuggestedSourceEdit | .CryptoMisuse | .Replace(_, _) | .Remove(_) -> false
     }

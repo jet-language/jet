@@ -583,15 +583,20 @@ need no lock. A checked consuming capture is held in an owned optional slot
 and transferred once, rather than moving directly out of a Rust `Fn` closure.
 
 **D-CALLVALUE1=B — function values use `.call(...)`** *(ratified
-2026-08-05)*: a direct named or method call keeps its ordinary spelling
-(`f(...)` or `value.method(...)`). A call result that is itself a function is
-invoked with `callee.call(...)`. Function-typed receivers gain the builtin
-projection, but a struct field or method literally named `call` shadows it.
-Direct calls on plain names, fields, indexes, and lambdas remain valid. The retired
-adjacent-call spelling `)(` has no compatibility parser; it receives the registered
-diagnostic
-`E-CALL-VALUE` and does not enter sema or the IR. `.call(...)` uses the existing
-function-value binder and one function-value lowering on every execution tier.
+2026-08-05; superseded by D-CALLVALUE2=A)*: a call result that was itself a
+function was invoked with `callee.call(...)`, and the adjacent `)(` spelling
+was rejected as `E-CALL-VALUE`.
+
+**D-CALLVALUE2=A — one call spelling** *(ratified 2026-09-13)*: every call
+uses plain parentheses, including a function value and a call result
+(`make_adder(1)(2)`). The parser builds `)(` as the ordinary value call, and
+`E-CALL-VALUE` is retired. Calling a function value through `.call(...)` is
+E0802, with a safe fix that removes `.call`. Under D-MEMBER-NAMESPACE1=A
+(ratified 2026-10-08), `.call(...)` keeps one meaning: when a function-typed
+field shares its name with a method of the same type, `value.field(...)`
+selects the method and `value.field.call(...)` selects the field. A field or
+method literally named `call` is an ordinary member. Every function value
+call lowers through the one function-value binder on every execution tier.
 
 **D-MEMBER-NAMESPACE1=A — fields and methods have separate namespaces**
 *(ratified 2026-10-08, card #4905)*: a type may declare a field and a method

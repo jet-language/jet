@@ -1367,17 +1367,19 @@ types, and passing one where the other is required reports **E0638**. A
 function type nested in a parameter's type keeps its written contract, as the
 same type does on a binding or a typed literal (#6281 c123).
 
-Direct named and method calls keep their ordinary syntax. A function-valued
-expression is invoked with `.call(...)`; a struct field or method actually
-named `call` shadows that built-in projection. Direct calls on names, fields,
-indexes, and lambdas remain valid; a callable field that shares a method's name
-is called as `value.field.call(...)`, since the direct call selects the method.
-The adjacent `)(` function-value spelling is rejected with **E-CALL-VALUE**
-(D-CALLVALUE1=B).
+Every call uses plain parentheses: named functions, methods, fields, indexes,
+lambdas and function-valued expressions alike, so `make_adder(1)(2)` calls the
+function `make_adder(1)` returns. Calling a function value through `.call(…)`
+is **E0802**, and its safe fix removes `.call`. The one place `.call(…)`
+remains is a function-typed field that shares its name with a method of the
+same type: `value.step(…)` selects the method and `value.step.call(…)` the
+field (D-CALLVALUE2=A, scoped by D-MEMBER-NAMESPACE1=A). The adjacent `)(`
+spelling once reported as E-CALL-VALUE is the ordinary call; that code is
+retired.
 
 ```jet
 apply: fn(f: fn(Int) -> Int, n: Int) -> Int {
-    f.call(n)
+    f(n)
 }
 
 make_adder: fn(base: Int) -> fn(Int) -[]> Int {

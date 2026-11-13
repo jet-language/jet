@@ -700,7 +700,7 @@ sema_expression_lambda_bound_expr_non_direct_use: fn(expr: Expr, name: String) -
         .MethodCall(receiver, method, _, _, _, args, _) | .OptMethodCall(receiver, method, _, _, args, _, _) -> {
             // `name.reflect()` reads the closure's ClosureInfo while compiling;
             // like a direct call, it lets no value of the closure out.
-            direct: method == "call" || (method == "reflect" && args.len() == 0)
+            direct: method == "reflect" && args.len() == 0
             if !(direct && sema_expression_lambda_bound_direct_callee(receiver, name)) && sema_expression_lambda_bound_expr_use(receiver, name) -> return true
             loop argument in args {
                 if sema_expression_lambda_bound_expr_non_direct_use(argument.expr, name) -> return true
