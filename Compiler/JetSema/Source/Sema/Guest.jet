@@ -388,14 +388,15 @@ sema_guest_check_runtime_binding: fn(function: Func, diagnostics: &[Diagnostic])
     valid
 }
 
-// Rust CheckInner `check_guest_import_surface` (every module),
-// `check_guest_export_surface` (the entry module) and
-// `check_guest_symbol_collisions` (the bundle), after registration and
-// before any body is checked.
+// Rust CheckInner `check_guest_import_surface` (every module but the seeded
+// ones, checked when they were finalized), `check_guest_export_surface` (the
+// entry module) and `check_guest_symbol_collisions` (the bundle, seeded
+// modules' symbols included), after registration and before any body is
+// checked.
 sema_guest_check_surfaces: fn(graph: &SemaRegistrationGraph) {
     entry_index: sema_registration_module_index(graph, graph.entry_module_identity) ?? -1
     failed := false
-    loop module_index in 0..<graph.modules.len() {
+    loop module_index in graph.seeded..<graph.modules.len() {
         diagnostics := [Diagnostic]{}
         loop item in graph.modules[module_index].program.items {
             if item == .Func(function) {

@@ -693,11 +693,11 @@ sema_authority_check_items: fn(items: [Item], diagnostics: &[Diagnostic]) {
     }
 }
 
-// E0711 over every source module. Returns true when a diagnostic was
-// reported.
+// E0711 over every source module but the seeded ones, which were checked
+// when they were finalized. Returns true when a diagnostic was reported.
 sema_effect_check_authority_handles: fn(graph: SemaRegistrationGraph, diagnostics: &[Diagnostic]) -> Bool {
     found := false
-    loop source_module_index in 0..<graph.modules.len() {
+    loop source_module_index in graph.seeded..<graph.modules.len() {
         start: diagnostics.len()
         sema_authority_check_items(graph.modules[source_module_index].program.items, diagnostics)
         if diagnostics.len() > start {

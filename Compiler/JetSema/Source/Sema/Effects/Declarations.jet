@@ -288,6 +288,8 @@ sema_effect_leaf_check_items: fn(leaves: [SemaEffectLeaf], items: [Item], diagno
 
 // Validate every effect name written in the source modules against the
 // declared leaves of its root. Returns true when a diagnostic was reported.
+// A seeded module's names were validated when it was finalized; its leaves
+// still declare names the program's own modules write.
 sema_effect_check_declared_leaves: fn(graph: SemaRegistrationGraph, diagnostics: &[Diagnostic]) -> Bool {
     leaves := [SemaEffectLeaf]{}
     loop name in EFFECT_VOCABULARY_LEAVES -> sema_effect_leaf_add(leaves, name)
@@ -297,7 +299,7 @@ sema_effect_check_declared_leaves: fn(graph: SemaRegistrationGraph, diagnostics:
     }
     found := false
     library: sema_library_effects(graph)
-    loop source_module_index in 0..<graph.modules.len() {
+    loop source_module_index in graph.seeded..<graph.modules.len() {
         if graph.modules[source_module_index].module_identity == graph.canonical_effect_module_identity -> next
         start: diagnostics.len()
         sema_effect_leaf_check_cap(leaves, graph.modules[source_module_index].program.file_cap, diagnostics)

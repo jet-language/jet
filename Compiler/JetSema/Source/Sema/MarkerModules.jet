@@ -447,10 +447,12 @@ sema_marker_module_catalog_registry: fn(applied: TAppliedRuleCatalog) -> SemaSco
 // The marker laws of every module. A marker no rule or marker declaration
 // names (E0927) is returned per module row in `unknown_rules`,
 // apart from the other reports: it does not stop registration, and the
-// module's declaration check reports it beside the body errors.
+// module's declaration check reports it beside the body errors. A seeded
+// module's markers were checked when it was finalized, so its row is empty.
 sema_marker_module_check: fn(graph: SemaRegistrationGraph, applied: TAppliedRuleCatalog, catalog: SemaScopeMembersMarkerRegistry, unknown_rules: &[[Diagnostic]]) -> [Diagnostic] {
     diagnostics := [Diagnostic]{}
-    loop module_row_index in 0..<graph.modules.len() {
+    loop _ in 0..<graph.seeded -> unknown_rules.push([Diagnostic]{})
+    loop module_row_index in graph.seeded..<graph.modules.len() {
         start: diagnostics.len()
         unknown := [Diagnostic]{}
         markers: sema_marker_rules_collect_program(graph.modules[module_row_index].program)

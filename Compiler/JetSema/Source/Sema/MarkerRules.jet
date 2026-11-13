@@ -2230,6 +2230,8 @@ sema_inline_always_check_function: fn(function: Func, diagnostics: &[Diagnostic]
 // Every body of the bundle has been checked, so the function references
 // read as values are complete for the whole-program E0918 half. Methods
 // cannot be read as bare values, so E0918 applies to top-level functions.
+// A seeded module's own bodies were checked when it was finalized; only the
+// program's references can take one of its functions' address.
 sema_marker_rules_check_inline_always: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], diagnostics: &[Diagnostic]) -> Bool Never! {
     address_taken := [String:Bool]{}
     loop module_result in modules {
@@ -2239,10 +2241,11 @@ sema_marker_rules_check_inline_always: fn(graph: SemaRegistrationGraph, modules:
     }
     found := false
     loop source_module_index in 0..<graph.modules.len() {
+        own: source_module_index >= graph.seeded
         start: diagnostics.len()
         loop item_index in 0..<graph.modules[source_module_index].program.items.len() {
             if graph.modules[source_module_index].program.items[item_index] == .Func(function) {
-                sema_inline_always_check_function(function, diagnostics)
+                if own -> sema_inline_always_check_function(function, diagnostics)
                 key: symbol_id(SymbolKind.Function, graph.modules[source_module_index].module_identity, "", function.name).key
                 if function.is_inline_always && address_taken.get(key) != None {
                     name: function.name
@@ -2250,11 +2253,13 @@ sema_marker_rules_check_inline_always: fn(graph: SemaRegistrationGraph, modules:
                 }
             }
         }
-        loop nominal_index in 0..<graph.modules[source_module_index].nominals.len() {
-            loop method_index in 0..<graph.modules[source_module_index].nominals[nominal_index].methods.len() -> sema_inline_always_check_function(graph.modules[source_module_index].nominals[nominal_index].methods[method_index].declaration, diagnostics)
-        }
-        loop implementation_index in 0..<graph.modules[source_module_index].impls.len() {
-            loop method_index in 0..<graph.modules[source_module_index].impls[implementation_index].methods.len() -> sema_inline_always_check_function(graph.modules[source_module_index].impls[implementation_index].methods[method_index].declaration, diagnostics)
+        if own {
+            loop nominal_index in 0..<graph.modules[source_module_index].nominals.len() {
+                loop method_index in 0..<graph.modules[source_module_index].nominals[nominal_index].methods.len() -> sema_inline_always_check_function(graph.modules[source_module_index].nominals[nominal_index].methods[method_index].declaration, diagnostics)
+            }
+            loop implementation_index in 0..<graph.modules[source_module_index].impls.len() {
+                loop method_index in 0..<graph.modules[source_module_index].impls[implementation_index].methods.len() -> sema_inline_always_check_function(graph.modules[source_module_index].impls[implementation_index].methods[method_index].declaration, diagnostics)
+            }
         }
         if diagnostics.len() > start -> found = true
         sema_attach_diagnostic_source_locations(diagnostics, start, graph.modules[source_module_index].source_segments)

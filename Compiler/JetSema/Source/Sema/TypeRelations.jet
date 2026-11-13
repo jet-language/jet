@@ -784,10 +784,12 @@ sema_type_alias_cycle_visit: fn(graph: &SemaRegistrationGraph, rows: [SemaTypeAl
     marks[at] = 2
 }
 
+// A seeded module's aliases were checked when it was finalized, and none
+// names an alias of the program's own, so no cycle runs through one.
 sema_type_alias_cycles_check: fn(graph: &SemaRegistrationGraph) Never! {
     rows := [SemaTypeAliasCycleRow]{}
     positions := [String:Int]{}
-    loop module_index in 0..<graph.modules.len() {
+    loop module_index in graph.seeded..<graph.modules.len() {
         loop row in 0..<graph.modules[module_index].nominals.len() {
             // Read in place: binding the row copied every nominal, methods included.
             if graph.modules[module_index].nominals[row].kind != SemaRegistrationNominalKind.TypeAlias -> next

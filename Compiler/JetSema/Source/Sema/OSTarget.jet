@@ -7,11 +7,16 @@
 //   takes or returns a value of a type whose impl is OS-gated. The check reads
 //   signatures only, as the web partition's ABI check does; a `#build.target.os`
 //   dispatch arm that constructs the type is folded before this runs.
+// A seeded module was checked when it was finalized: its gated impls still
+// gate the program's signatures, but neither check reports on it again.
 use jet_foundation.[Diagnostic, Func, Span, WebBucket, diagnostic_registry_row, target_os_name, target_os_parse]
 
 sema_os_target_check: fn(graph: SemaRegistrationGraph, diagnostics: &[Diagnostic]) {
     gate_of_type := [String:String]{}
+    position := 0
     loop graph_module in graph.modules {
+        own: position >= graph.seeded
+        position += 1
         found := [Diagnostic]{}
         loop item in graph_module.program.items {
             if item == {
@@ -38,10 +43,13 @@ sema_os_target_check: fn(graph: SemaRegistrationGraph, diagnostics: &[Diagnostic
                 .Func(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
             }
         }
-        sema_effect_publish_diagnostics(diagnostics, graph_module.source_segments, found)
+        if own -> sema_effect_publish_diagnostics(diagnostics, graph_module.source_segments, found)
     }
     if gate_of_type.len() == 0 -> return
+    position = 0
     loop graph_module in graph.modules {
+        position += 1
+        if position <= graph.seeded -> next
         found := [Diagnostic]{}
         loop item in graph_module.program.items {
             if item == {
