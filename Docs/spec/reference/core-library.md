@@ -341,7 +341,7 @@ use the same names.
 | --- | --- | --- |
 | `ABI`, `FFILanguage`, `Target`, `Track` | enum | Calling convention, foreign language, code-generation target, and tracking policy values |
 | `ArithmeticMode`, `InlineMode`, `JobScope`, `KernelMode`, `Layout`, `MemoBound` | enum | Arithmetic, inlining, publication scope, parallel-kernel, representation, and memoization choices |
-| `Effect`, `Maturity`, `NamingCase`, `ObligationMode`, `PolicySetting`, `TaintKind` | enum | Effect roots, maturity, field naming, proof obligations, policy, and taint values |
+| `Effect`, `NamingCase`, `ObligationMode`, `PolicySetting`, `TaintKind` | enum | Effect roots, field naming, proof obligations, policy, and taint values |
 | `Path`, `State` | struct | Marker path text and compiler-threaded typestate names |
 
 For example, `#Inline` accepts an imported enum value or a dot literal:
@@ -511,7 +511,8 @@ carries only the fields its code reads.
 
 | Type | Fields |
 | --- | --- |
-| `Module` | `name`, `file`, `doc`, `package: Package`, `maturity` (default `.Tested`), `category` (default `""`), `deprecated: Deprecated?` |
+| `Module` | `name`, `file`, `doc`, `package: Package`, `maturity: Maturity` (default `.Tested`), `category` (default `""`), `deprecated: Deprecated?` |
+| `Maturity` | enum `Experimental`, `Tested`, `Hardened`: a module's `maturity` field and the `#Meta(maturity: …)` closed set. |
 | `Deprecated` | `since`, `use`, `removed_in: String?`. A use from another module warns, and the build never fails on it. |
 | `Package` | The `package.jet` fields: `name`, `version` (default `"0.0.0"`), `description`, `license`, `authors`, `edition`, `repository`, `jet` (the self-toolchain pin), `source`, `log` (the `core.log` level filter). Code that reads a dependency's `Package` can't change it. |
 

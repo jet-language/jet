@@ -5970,6 +5970,23 @@ behavior remains. Checked edges enter the `Structure.ImportEdge` and GateLedger
 facts, while manifest policy is erased before native, interpreter, and web
 lowering (D-STRUCT-EDGE1).
 
+### Core layers
+
+`Core/package.jet` orders the Core library's modules into layers, lowest first:
+
+```text
+layers: {
+    prelude: ["core.prelude", "core.mem", "core.sync"]
+    data: ["core.text", "core.collections"]
+    system: ["core.files", "core.net"]
+}
+```
+
+Each key names a layer and lists quoted module names. A listed name also covers
+the modules under it (`core.net` covers `core.net.tls`); the longest listed name
+decides a module's layer, and a module is listed in at most one layer. A Core
+module names only modules of its own layer or a lower one.
+
 ## Inline script dependencies
 
 A manifest-less `.jet` script may begin with an inline dependency:

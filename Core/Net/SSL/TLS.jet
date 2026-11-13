@@ -2779,6 +2779,50 @@ vec_cache_dir: fn() -[Env]> String {
 
 vec_sha256_hex: fn(bytes: [U8]) -> String Never! { core.encoding.bytes_to_hex(hashes.hash(.SHA256, bytes)) }
 
+/// The body of an HTTPS GET of `path` on `host` over this module's own
+/// client. The response must be a 200 with a Content-Length.
+vec_https_get: fn(host: String, path: String) -[Net, Time.Wait]> [U8] {
+    url: "https://{host}{path}"
+    stream := core.net.tls.client(host, 443) ?? panic("Fetching {url}: {err}")
+    _: core.net.tls.write_text(stream, "GET {path} HTTP/1.1\r\nHost: {host}\r\nAccept-Encoding: identity\r\nConnection: close\r\n\r\n") ?? panic("Fetching {url}: {err}")
+    raw := [U8]{}
+    head := -1
+    length := 0
+    loop {
+        if head < 0 {
+            head = vec_head_end(raw)
+            if head >= 0 -> length = vec_body_length(url, ssldefs.ssl_bytes_of(raw, 0, head))
+        }
+        if head >= 0 && raw.len() >= head + length -> break
+        chunk: core.net.tls.read(stream, 65536) ?? panic("Fetching {url}: {err}")
+        if chunk.is_empty() -> panic("Fetching {url}: the connection closed after {raw.len()} bytes")
+        loop b in chunk -> raw.push(b)
+    }
+    _: core.net.tls.close(stream) ?? panic("Fetching {url}: {err}")
+    ssldefs.ssl_bytes_of(raw, head, length)
+}
+
+/// The index just past the blank line that ends a response head in `raw`,
+/// or -1 while the head is incomplete.
+vec_head_end: fn(raw: [U8]) -> Int Never! {
+    loop i in 3..<raw.len() {
+        if raw[i] == 10 && raw[i - 1] == 13 && raw[i - 2] == 10 && raw[i - 3] == 13 -> return i + 1
+    }
+    -1
+}
+
+/// The Content-Length of the response `head`, which must have status 200.
+vec_body_length: fn(url: String, head: [U8]) -> Int {
+    text: String.from_bytes(head) ?? panic("Fetching {url}: the response head is not UTF-8")
+    lines: text.split("\r\n").to_list()
+    if !lines[0].starts_with("HTTP/1.1 200") -> panic("Fetching {url}: {lines[0]}")
+    loop line in lines {
+        parts: line.split(":").to_list()
+        if parts.len() == 2 && parts[0].trim().to_lower() == "content-length" -> return Int.parse(parts[1].trim()) ?? panic("Fetching {url}: Content-Length `{parts[1]}`")
+    }
+    panic("Fetching {url}: the response has no Content-Length")
+}
+
 /// The parsed Wycheproof file testvectors_v1/`name`_test.json, from the
 /// cache when its digest matches the pin, else fetched and cached.
 vec_wycheproof: fn(name: String) -[FS, Env, Net, Time.Wait]> Dyn {
@@ -2792,10 +2836,10 @@ vec_wycheproof: fn(name: String) -[FS, Env, Net, Time.Wait]> Dyn {
         if vec_sha256_hex(cached) == pin -> bytes = cached.copy()
     }
     if bytes.is_empty() {
-        url: "https://raw.githubusercontent.com/C2SP/wycheproof/{VEC_WYCHEPROOF_COMMIT}/testvectors_v1/{name}_test.json"
-        response: core.http.get(url) ?? panic("Fetching {url}: {err}")
-        if response.status != 200 -> panic("Fetching {url}: HTTP {response.status}")
-        body: response.body.bytes(64000000) ?? panic("Fetching {url}: {err}")
+        host: "raw.githubusercontent.com"
+        remote: "/C2SP/wycheproof/{VEC_WYCHEPROOF_COMMIT}/testvectors_v1/{name}_test.json"
+        url: "https://{host}{remote}"
+        body: vec_https_get(host, remote)
         got: vec_sha256_hex(body)
         if got != pin -> panic("{url} has SHA-256 {got}, not the pinned {pin}")
         core.files.create_dir_all(dir) ?? panic("{dir}: {err}")

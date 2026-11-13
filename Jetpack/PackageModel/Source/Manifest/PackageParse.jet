@@ -1,7 +1,7 @@
 // The one structural reader of `package.jet` Package and Config carriers. There
 // is no second, legacy-vocabulary parser.
 use {
-    jet_foundation.[Span, jet_ring_parse_manifest_layer, log_filter_bad_pair]
+    jet_foundation.[ModuleLayer, Span, jet_ring_parse_manifest_layer, log_filter_bad_pair]
     jet_lexer.[
         Lexed, TOKEN_BLOCK_COMMENT, TOKEN_DOT, TOKEN_EOF, TOKEN_LBRACE, TOKEN_LINE_COMMENT, Token, lex,
     ]
@@ -199,6 +199,7 @@ impl PackageFacts {
             "suites" -> self.test_suites = pkg_parse_test_suites(pkg_record_body(value, "suites"))
             MANIFEST_BLOCK_SETTINGS -> self.settings = pkg_parse_settings(value)
             "commands" -> self.commands = pkg_parse_command_settings(value)
+            "layers" -> self.layers = pkg_parse_layers(value)
             "services" -> self.services = pkg_parse_services(value)
             MANIFEST_BLOCK_OUTPUTS -> {
                 parsed: pkg_parse_outputs(value)
@@ -243,7 +244,7 @@ pkg_package_only_field: fn(field: String) -> Bool PackageParseError! {
     if field == MANIFEST_BLOCK_MEMBERS -> return Err(PackageParseError.ConfigMembers)
     Ok(if field == {
         "jet" | "edition" | "description" | "license" | "repository" | "targets" | "allocator" | "log" | "runtime" | "packages" | "dev" | "grants" | "authority" | "policy" | "configs" -> true
-        MANIFEST_BLOCK_BOUNDARIES | MANIFEST_BLOCK_BUILD | MANIFEST_BLOCK_SETTINGS | "commands" | "test" | "suites" -> true
+        MANIFEST_BLOCK_BOUNDARIES | MANIFEST_BLOCK_BUILD | MANIFEST_BLOCK_SETTINGS | "commands" | "layers" | "test" | "suites" -> true
         else -> false
     })
 }
@@ -499,6 +500,24 @@ pkg_parse_command_settings: fn(value: String) -> [ManifestEntry] PackageParseErr
         out.push(ManifestEntry{key: key, value: entry.value.copy()}) // copy: the entry list is dropped here.
     }
     Ok(out)
+}
+
+// `layers: { base: ["core.mem"], values: ["core.text"] }`: the module layer
+// table, lowest layer first, each layer a list of module names. A module is
+// listed in one layer only.
+pkg_parse_layers: fn(value: String) -> [ModuleLayer] PackageParseError! {
+    layers := [ModuleLayer]{}
+    listed := [String]{}
+    loop entry in pkg_record_entries(value, "layers") {
+        modules: pkg_parse_string_list(entry.value) ?? return Err(PackageParseError.InvalidValue{field: "layers.{entry.key}", value: entry.value})
+        loop module_name in modules {
+            if module_name == "" -> return Err(PackageParseError.InvalidValue{field: "layers.{entry.key}", value: entry.value})
+            if listed.contains(module_name) -> return Err(PackageParseError.Composition("module `{module_name}` is listed in more than one layer"))
+            listed.push(module_name.copy())
+        }
+        layers.push(ModuleLayer{name: entry.key.copy(), modules: modules})
+    }
+    Ok(layers)
 }
 
 // The user settings file (`settings.jet` in the user's Jet configuration

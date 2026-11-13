@@ -7,7 +7,7 @@ use {
     jetpack_foundation.[OUTPUT_FIELD_BINDINGS, OUTPUT_FIELD_LOADABLE, OUTPUT_FIELD_NATIVE]
     jet_foundation.[
         EvidenceFacet, EvidenceKind, EvidenceOutcome, EvidenceRecord, AllocatorPolicy,
-        RuntimeLayer, PolicyDeclaration, evidence_outcome_is_failure,
+        ModuleLayer, RuntimeLayer, PolicyDeclaration, evidence_outcome_is_failure,
         evidence_record_is_expected_failure, evidence_record_is_unexpected_pass,
     ]
 }
@@ -465,6 +465,9 @@ PackageFacts: struct {
     // written, in declaration order. The CLI checks them against its flag
     // registry (Compiler/JetCli CommandSettings.jet).
     commands: [ManifestEntry]{[ManifestEntry]{}}
+    // `layers: { base: ["core.mem"], values: ["core.text"] }`: the module
+    // layer table, lowest layer first (jet_foundation ModuleLayers.jet).
+    layers: [ModuleLayer]{[ModuleLayer]{}}
     configs: [String]
     // Resolved file-backed Config paths, relative to the Package root.
     resolved_config_paths: [String]

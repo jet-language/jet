@@ -1,6 +1,7 @@
 // Applied-rule argument menus are projected from the specialized
-// core.compiler.lang declaration in embedded Prelude/Core.rows. The authority
-// roots and builtin taint tags remain inputs from their Source registries.
+// core.compiler.lang declaration in embedded Prelude/Core.rows, and the
+// Maturity menu from core.meta's. The authority roots and builtin taint tags
+// remain inputs from their Source registries.
 
 foundation_core_menu_ascii_lower: fn(text: String) -> String Never! {
     bytes := text.bytes()
@@ -65,7 +66,9 @@ foundation_core_menu_variants: fn(name: String, kind: CoreLeafKind, effect_roots
 // catalog. The generated CORE_MODULE_EXPORTS row names the module's type
 // exports and CORE_ENUM_ROWS carries each enum leaf's variants, both generated
 // from that declaration (the same projection native CoreModuleExports reads);
-// an exported leaf without an enum row is `plain`.
+// an exported leaf without an enum row is `plain`. `#Meta(maturity: …)` takes
+// the Maturity enum of core.meta, which declares it beside the Module record
+// whose `maturity` field it is.
 //
 // IntType is intentionally absent from core.compiler.lang. Its variants come
 // from the canonical Source fixed-width integer registry, which mirrors the
@@ -92,6 +95,12 @@ foundation_core_argument_menus: fn(effect_roots: [String], builtin_tags: [String
             })
         }
     }
+    maturity: core_module_enum_variants("core.meta", "Maturity") ?? return None
+    menus.push(TAppliedRuleArgumentMenu{
+        name: "Maturity",
+        variants: maturity,
+        first_variant_segment: false,
+    })
     int_type_variants := [String]{}
     loop kind in foundation_fixed_integers() -> int_type_variants.push(kind.name)
     menus.push(TAppliedRuleArgumentMenu{
