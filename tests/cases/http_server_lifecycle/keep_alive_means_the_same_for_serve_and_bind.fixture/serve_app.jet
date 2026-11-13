@@ -1,0 +1,15 @@
+// `app.serve()` on JET_APP_PORT, until SIGTERM.
+package: {
+    name: "keep_alive_serve_app"
+    authority: { allow: [Env, Exec, FS.Read, Net, Time] }
+}
+use {
+    server: core.http.server
+    process: core.process
+    web: core.web
+}
+
+run: fn() {
+    process.on_signal(.Term)
+    web.app().get("/", fn() { Ok(server.response(200, "hi")) }).serve()
+}

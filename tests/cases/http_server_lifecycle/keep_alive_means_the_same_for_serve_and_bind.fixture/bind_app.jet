@@ -1,0 +1,18 @@
+// `app.bind(addr)` on KEEP_ALIVE_PORT, served until SIGTERM.
+package: {
+    name: "keep_alive_bind_app"
+    authority: { allow: [Env, Exec, FS.Read, Net, Time] }
+}
+use {
+    server: core.http.server
+    process: core.process
+    sys: core.sys
+    web: core.web
+}
+
+run: fn() {
+    process.on_signal(.Term)
+    port: sys.get("KEEP_ALIVE_PORT") ?? process.fail(2, "missing KEEP_ALIVE_PORT")
+    listening: web.app().get("/", fn() { Ok(server.response(200, "hi")) }).bind("127.0.0.1:{port}") ?? process.fail(2, "bind: {err}")
+    _: listening.serve() ?? process.fail(1, "serve: {err}")
+}

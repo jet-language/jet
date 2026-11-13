@@ -1,0 +1,16 @@
+# Two HTTPResponse.header calls both stay on the response, with the same
+# output on every execution level.
+fixture: response_keeps_both_header_mutations_on_every_tier.fixture
+env: NO_COLOR=1
+step o0: jet run --optimize=none main.jet
+exit: 0
+stderr: empty
+stdout: = response_keeps_both_header_mutations_on_every_tier.stdout.expected
+step o1: jet run --optimize=basic main.jet
+exit: 0
+stderr: empty
+stdout: = response_keeps_both_header_mutations_on_every_tier.stdout.expected
+step o2: jet run --optimize=full main.jet
+exit: 0
+stderr: empty
+stdout: = response_keeps_both_header_mutations_on_every_tier.stdout.expected

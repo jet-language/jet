@@ -14,9 +14,11 @@ use {
 // when bound with `tls: server.tls(cert, key)`.
 //
 // A route table (HTTPMux, which a `web.app()` owns) holds routes and
-// middleware layers; a server owns one listener and answers one request per
-// connection with `Connection: close`. Request framing and limits, routing,
-// CORS, request ids, static files and the Date header are decided here.
+// middleware layers; a server owns one listener, serves each connection on
+// its own task (at most 10000 at once, 256 from one peer address) and
+// answers one request per connection with `Connection: close`. Request
+// framing and limits, routing, CORS, request ids, static files and the Date
+// header are decided here.
 // Static files are read through `core.files` and the Date header through the
 // `core.time` wall clock, so serving needs Net, FS.Read and Time.
 
@@ -93,6 +95,13 @@ C_IO_NS: 30000000000
 C_ACCEPT_ONCE_NS: 5000000000
 C_ACCEPT_POLL_NS: 50000000
 C_MAX_REQUEST_ID_BYTES: 128
+// Connections served at once, and from one peer address: one past either is
+// answered 503 and closed.
+C_MAX_CONNECTIONS: 10000
+C_MAX_PEER_CONNECTIONS: 256
+C_DRAIN_POLL_MS: 5
+C_ACCEPT_BACKOFF_MIN_MS: 5
+C_ACCEPT_BACKOFF_MAX_MS: 1000
 
 HTTPCorsOrigins: enum {
     Any
@@ -247,10 +256,15 @@ __route_stop: fn(code: String, message: String, at: SourceLocation) -> Never {
     core.rt.__coded_stop(code, "{message}\n  --> {at.file}:{at.line} in {at.function}")
 }
 
+// `live` counts the connections being served and `peers` how many of them
+// each peer address holds; each connection's task gives its count back.
 __HTTPServerState: struct {
     phase: Int
     stopping: Bool
     report: HTTPShutdownReport?
+    live: Int{0}
+    completed: Int{0}
+    peers: [String: Int]{}
 }
 
 /// A bound listener and its mux. `serve` answers connections until
@@ -268,18 +282,39 @@ HTTPServer: struct {
         self.__listener.local_addr() ?? return Err(.IO{operation: "local address: {err}"})
     }
 
+    // Each admitted connection is served by its own task, so a held
+    // connection does not hold up the next; one over the connection limits
+    // is answered 503 and closed. A connection's task shields its request
+    // from cancellation, so a delivered signal (which cancels every task)
+    // stops accepting while the requests in flight are answered. Serving
+    // then waits up to one connection deadline for them; the report counts
+    // the connections still open after that as cancelled.
     serve: fn(self) -[Net, FS.Read, Time]> HTTPShutdownReport HTTPError! {
         if !__server_begin(self) -> return Err(.IO{operation: "HTTP server can only be served once"})
         accepted := 0
-        completed := 0
+        overloaded := 0
         failure := HTTPError?{None}
         running := true
+        backoff := 0
         loop running && !__server_stopping(self) {
             if self.__listener.accept(deadline: Duration{ns: C_ACCEPT_POLL_NS}) == {
                 .Ok(stream) -> {
                     accepted = accepted + 1
-                    if __accept_conn(stream, self.__tls, self.__deadline) == .Val(conn) {
-                        if __serve_connection(conn, self.__mux, self.__deadline) -> completed = completed + 1
+                    backoff = 0
+                    peer: __peer_host(stream)
+                    if __admit(self.__state, peer) {
+                        state: self.__state
+                        mux: self.__mux
+                        tls: self.__tls
+                        deadline: self.__deadline
+                        // The stream reaches its task in a one-item list,
+                        // as it reaches the TLS handshake.
+                        handoff: Shared{[TCPStream]{stream}}
+                        connection: task &&handoff { __serve_admitted(state, handoff, peer, tls, mux, deadline) }
+                        connection.detach()
+                    } else {
+                        overloaded = overloaded + 1
+                        __refuse(stream, self.__tls)
                     }
                 }
                 .Err(error) -> {
@@ -288,6 +323,16 @@ HTTPServer: struct {
                     // stops serving as a shutdown does: the report stands.
                     if __accept_cancelled(error) {
                         running = false
+                    } else if __accept_transient(error) {
+                        // A failed accept the listener recovers from waits,
+                        // doubling from 5 ms to 1 s, instead of retrying at
+                        // once; the connections being served go on.
+                        backoff = if {
+                            backoff == 0 -> C_ACCEPT_BACKOFF_MIN_MS
+                            backoff * 2 > C_ACCEPT_BACKOFF_MAX_MS -> C_ACCEPT_BACKOFF_MAX_MS
+                            else -> backoff * 2
+                        }
+                        core.tasks.sleep(backoff)
                     } else if !__accept_timed_out(error) {
                         failure = Val(HTTPError.IO{operation: "accept: {error}"})
                         running = false
@@ -295,7 +340,14 @@ HTTPServer: struct {
                 }
             }
         }
-        report: HTTPShutdownReport{accepted: accepted, overloaded: 0, completed: completed, cancelled: 0}
+        #Shield {
+            budget: if self.__deadline == .Val(limit) -> limit.ns else -> C_IO_NS
+            drain_end: rt.clock_mono_ns() + budget
+            loop __live(self.__state) > 0 && rt.clock_mono_ns() < drain_end {
+                core.tasks.sleep(C_DRAIN_POLL_MS)
+            }
+        }
+        report: HTTPShutdownReport{accepted: accepted, overloaded: overloaded, completed: __completed(self.__state), cancelled: __live(self.__state)}
         __server_finish(self, report)
         self.__done.send(1)
         if failure == .Val(error) -> return Err(error)
@@ -306,8 +358,8 @@ HTTPServer: struct {
         self.serve()
     }
 
-    // Requests are answered one at a time, so the grace period never has an
-    // in-flight request left to cancel; it defaults to none.
+    // `serve` answers the connections in flight before it reports, and
+    // shutdown waits for that report; the grace period defaults to none.
     shutdown: fn(self, grace: Duration{0ms}) -[Net]> HTTPShutdownReport HTTPError! {
         phase: __server_request_stop(self)
         if phase == 0 -> return Ok(HTTPShutdownReport{accepted: 0, overloaded: 0, completed: 0, cancelled: 0})
@@ -348,6 +400,75 @@ __server_report: fn(server: HTTPServer) -> HTTPShutdownReport Never! {
     guard.value.report ?? HTTPShutdownReport{accepted: 0, overloaded: 0, completed: 0, cancelled: 0}
 }
 
+// The peer's address without its port: what the per-peer limit counts.
+__peer_host: fn(stream: TCPStream) -[Net]> String Never! {
+    addr: stream.peer_addr() ?? return ""
+    parts: addr.split(":").to_list()
+    if parts.len() < 2 -> return addr
+    parts.slice(0, parts.len() - 1).join(":")
+}
+
+// Count a connection in, unless the server or its peer is at the limit.
+__admit: fn(state: Shared<__HTTPServerState>, peer: String) -> Bool Never! {
+    guard := state.guard_edit()
+    held: guard.value.peers.get(peer) ?? 0
+    if guard.value.live >= C_MAX_CONNECTIONS || held >= C_MAX_PEER_CONNECTIONS -> return false
+    guard.value.live = guard.value.live + 1
+    guard.value.peers[peer] = held + 1
+    true
+}
+
+// One admitted connection's task: the TLS handshake and its request, then its
+// count given back, all shielded from cancellation so a signal lets the
+// request finish and the count reach the drain.
+__serve_admitted: fn(state: Shared<__HTTPServerState>, handoff: Shared<[TCPStream]>, peer: String, tls: HTTPServerTLS?, mux: HTTPMux, deadline: Duration?) Never! -[Net, FS.Read, Time]> {
+    #Shield {
+        answered: __serve_taken(handoff, tls, mux, deadline)
+        guard := state.guard_edit()
+        guard.value.live = guard.value.live - 1
+        if answered -> guard.value.completed = guard.value.completed + 1
+        held: guard.value.peers.get(peer) ?? 1
+        if held <= 1 {
+            _: guard.value.peers.remove(peer)
+        } else {
+            guard.value.peers[peer] = held - 1
+        }
+    }
+}
+
+// The handed-off stream's handshake and request; true when it was answered.
+__serve_taken: fn(handoff: Shared<[TCPStream]>, tls: HTTPServerTLS?, mux: HTTPMux, deadline: Duration?) -[Net, FS.Read, Time]> Bool Never! {
+    stream: __taken_stream(handoff) ?? return false
+    conn: __accept_conn(stream, tls, deadline) ?? return false
+    __serve_connection(conn, mux, deadline)
+}
+
+// A connection over the limits: a plain one is told 503, then closed.
+__refuse: fn(stream: &&TCPStream, tls: HTTPServerTLS?) Never! -[Net, Time]> {
+    plain := true
+    if tls == .Val(_) -> plain = false
+    if plain {
+        if stream.write_all(__error_wire(503), deadline: Duration{ns: C_ACCEPT_POLL_NS}) == {
+            .Ok(_) -> {}
+            .Err(_) -> {}
+        }
+    }
+    if stream.close() == {
+        .Ok(_) -> {}
+        .Err(_) -> {}
+    }
+}
+
+__live: fn(state: Shared<__HTTPServerState>) -> Int Never! {
+    guard: state.guard_read()
+    guard.value.live
+}
+
+__completed: fn(state: Shared<__HTTPServerState>) -> Int Never! {
+    guard: state.guard_read()
+    guard.value.completed
+}
+
 __accept_timed_out: fn(error: NetError) -> Bool Never! {
     if error == {
         .Timeout(_) -> true
@@ -360,6 +481,24 @@ __accept_cancelled: fn(error: NetError) -> Bool Never! {
         .Cancelled(_) -> true
         .InvalidInput(_) | .PermissionDenied(_) | .AddressInUse(_) | .AddressUnavailable(_) | .ConnectionRefused(_) | .ConnectionReset(_) | .NotConnected(_) | .Closed(_) | .Timeout(_) | .Unsupported(_) | .TLS(_) | .Protocol(_) | .Other(_) | .DNS(_) -> false
     }
+}
+
+// An accept(2) failure the listener recovers from: a connection reset or
+// aborted before it was taken (ECONNABORTED, EPROTO), or the process or
+// system out of descriptors (EMFILE, ENFILE) or buffer memory (ENOBUFS,
+// ENOMEM). Any other failure ends serving.
+__accept_transient: fn(error: NetError) -> Bool Never! {
+    if error == {
+        .ConnectionReset(_) -> true
+        .Other(detail) -> __accept_transient_code(detail.os_code)
+        .Protocol(detail) -> __accept_transient_code(detail.os_code)
+        .InvalidInput(_) | .PermissionDenied(_) | .AddressInUse(_) | .AddressUnavailable(_) | .ConnectionRefused(_) | .NotConnected(_) | .Closed(_) | .Timeout(_) | .Cancelled(_) | .Unsupported(_) | .TLS(_) | .DNS(_) -> false
+    }
+}
+
+__accept_transient_code: fn(os_code: Int?) -> Bool Never! {
+    code: os_code ?? return false
+    code == 12 || code == 23 || code == 24 || code == 71 || code == 105
 }
 
 // An empty route table: a `web.app()`'s, and the one an `http.router()`
@@ -466,14 +605,14 @@ __tls_check: fn(cert_pem: String, key_pem: String) -[Net]> String Never! {
     ""
 }
 
-// The accepted stream, out of the list `__accept_conn` handed over.
-__tls_accepted: fn(accepted: Shared<[TCPStream]>) -> TCPStream? Never! {
+// The stream out of the one-item list it was handed over in.
+__taken_stream: fn(accepted: Shared<[TCPStream]>) -> TCPStream? Never! {
     guard := accepted.guard_edit()
     guard.value.pop()
 }
 
 __tls_accept: fn(accepted: Shared<[TCPStream]>, cert_pem: String, key_pem: String, budget: Duration) -[Net, Time.Wait]> __HTTPSecure? Never! {
-    tcp: __tls_accepted(accepted) ?? return None
+    tcp: __taken_stream(accepted) ?? return None
     secure: server_tls.__server(tcp, cert_pem, key_pem, [String]{}, budget) ?? return None
     staged: Shared{[U8]{}}
     Val(__HTTPSecure{
@@ -627,6 +766,15 @@ __mux_next_seq: fn(mux: HTTPMux) -> Int Never! {
     guard := mux.__state.guard_edit()
     guard.value.request_seq = guard.value.request_seq + 1
     guard.value.request_seq
+}
+
+// A served request's handler run, cancellation deferred until it answers.
+__dispatch_shielded: fn(mux: HTTPMux, request: HTTPRequest) -[Net, FS.Read]> HTTPResponse Never! {
+    reply := __status_page(500)
+    #Shield {
+        reply = __dispatch(mux, request)
+    }
+    reply
 }
 
 __dispatch: fn(mux: HTTPMux, request: HTTPRequest) -[Net, FS.Read]> HTTPResponse Never! {
@@ -1188,7 +1336,12 @@ __serve_connection: fn(stream: __HTTPConn, mux: HTTPMux, deadline: Duration?) -[
             cell: http.__upgrade_cell(fd)
             request := received
             request.__upgrade = Val(cell)
-            reply: __dispatch(mux, request)
+            // The handler runs as its own task, so a panic in it is this
+            // connection's 500 and serving goes on; it is shielded as its
+            // connection is.
+            routed: request.copy()
+            handling: task { __dispatch_shielded(mux, routed) }
+            reply: handling.join() ?? __status_page(500)
             upgraded = http.__upgraded(cell)
             if upgraded {
                 answered = true

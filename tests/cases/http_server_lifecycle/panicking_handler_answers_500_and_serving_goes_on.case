@@ -1,0 +1,13 @@
+# A panicking handler is answered 500 and the next request is served, on
+# every execution level.
+fixture: panicking_handler_answers_500_and_serving_goes_on.fixture
+env: NO_COLOR=1
+step o0: jet run --optimize=none main.jet
+exit: 0
+stdout: = panicking_handler_answers_500_and_serving_goes_on.stdout.expected
+step o1: jet run --optimize=basic main.jet
+exit: 0
+stdout: = panicking_handler_answers_500_and_serving_goes_on.stdout.expected
+step o2: jet run --optimize=full main.jet
+exit: 0
+stdout: = panicking_handler_answers_500_and_serving_goes_on.stdout.expected

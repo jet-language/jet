@@ -1,0 +1,17 @@
+# Linux: EMFILE on accept backs off and recovers without cancelling the
+# connection being served, on every execution level.
+requires: os:linux
+fixture: accept_backs_off_when_descriptors_run_out.fixture
+env: NO_COLOR=1
+step o0: jet run --optimize=none main.jet
+exit: 0
+stderr: empty
+stdout: = accept_backs_off_when_descriptors_run_out.stdout.expected
+step o1: jet run --optimize=basic main.jet
+exit: 0
+stderr: empty
+stdout: = accept_backs_off_when_descriptors_run_out.stdout.expected
+step o2: jet run --optimize=full main.jet
+exit: 0
+stderr: empty
+stdout: = accept_backs_off_when_descriptors_run_out.stdout.expected

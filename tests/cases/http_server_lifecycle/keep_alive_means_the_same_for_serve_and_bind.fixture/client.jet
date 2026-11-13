@@ -1,0 +1,63 @@
+// Asks the server on KEEP_ALIVE_PORT for `/` with `Connection: keep-alive`,
+// without closing its side, and prints the status line, the response's
+// Connection header and whether the server closed the connection after that
+// one response.
+package: {
+    name: "keep_alive_client"
+    authority: { allow: [Env, Net, Time] }
+}
+use {
+    net: core.net
+    sys: core.sys
+    time: core.time
+}
+
+run: fn() {
+    port: sys.get("KEEP_ALIVE_PORT") ?? panic("missing KEEP_ALIVE_PORT")
+    deadline: time.instant() + 120s
+    connected := net.TCPStream?{None}
+    loop {
+        if net.tcp_connect("127.0.0.1:{port}") == {
+            .Ok(stream) -> {
+                connected = Val(stream)
+                break
+            }
+            .Err(error) -> {
+                if time.instant() >= deadline -> panic("server did not listen on {port}: {error}")
+                time.sleep(50ms)
+            }
+        }
+    }
+    stream := connected ?? panic("connected stream")
+    crlf: String.from_bytes([U8]{13, 10}) ?? panic("CRLF")
+    request: "GET / HTTP/1.1{crlf}Host: localhost{crlf}Connection: keep-alive{crlf}{crlf}"
+    stream.write_all(request.bytes()) ?? panic("request write")
+    // A server that kept the connection open would leave this read waiting
+    // until the timeout.
+    net.set_read_timeout(stream, 5000) ?? panic("read timeout")
+    bytes := [U8]{}
+    closed := false
+    loop {
+        if net.tcp_read_bytes(stream, 8192) == {
+            .Ok(part) -> {
+                if part.len() == 0 {
+                    closed = true
+                    break
+                }
+                loop byte in part -> bytes.push(byte)
+            }
+            .Err(_) -> break
+        }
+    }
+    response: String.from_bytes(bytes) ?? panic("response UTF-8")
+    status_line := true
+    loop line in response.split(crlf) {
+        if status_line {
+            print(line)
+            status_line = false
+        } else if line.to_lower().starts_with("connection:") {
+            print(line.to_lower())
+        }
+    }
+    print("closed after one response: {closed}")
+}

@@ -1,0 +1,55 @@
+// Two clients on one server: the first sends half a request and holds its
+// connection open; the second is answered meanwhile, and the first is
+// answered once it finishes its request. A server that answered one
+// connection at a time would leave the second waiting on the first's read
+// deadline.
+package: {
+    name: "second_client_answered"
+    authority: { allow: [FS.Read, Net, Time] }
+}
+
+use {
+    client: core.http.client
+    server: core.http.server
+    net: core.net
+    time: core.time
+    web: core.web
+}
+
+crlf: fn() -> String {
+    String.from_bytes([U8]{13, 10}) ?? panic("CRLF")
+}
+
+read_all: fn(stream: TCPStream) -> String {
+    parts := [String]{}
+    loop {
+        part: stream.read_text(8192) ?? panic("response read")
+        if part == "" -> break
+        parts.push(part)
+    }
+    parts.join("")
+}
+
+run: fn() (HTTPError | NetError | TaskFailure)! {
+    app: web.app().get("/hi", fn() { Ok(server.response(200, "hi")) })
+    listening: app.bind("127.0.0.1:0")
+    addr: listening.local_addr()
+    serving: task {
+        listening.serve() ?? panic("serve")
+    }
+    held: net.tcp_connect(addr)
+    held.write_all("GET /hi HTTP/1.1{crlf()}".bytes())
+    time.sleep(50ms)
+    watch: time.start()
+    second: client.get("http://{addr}/hi")
+    waited: watch.elapsed_millis()
+    print("second: {second.status()} {second.body().text(64) ?? return}")
+    print("second answered while the first was held: {waited < 5000}")
+    held.write_all("Host: test{crlf()}{crlf()}".bytes())
+    first: read_all(held)
+    status_line: first.split_once(crlf()) ?? panic("response framing")
+    print("first: {status_line.before}")
+    report: listening.shutdown(100ms)
+    serving.join()
+    print("accepted {report.accepted} completed {report.completed} overloaded {report.overloaded}")
+}

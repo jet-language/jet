@@ -1,0 +1,61 @@
+// One peer address holds 256 connections open, each with half a request
+// sent; its next connection is answered 503 and closed, and the server keeps
+// serving once the held connections end.
+package: {
+    name: "per_peer_connection_limit"
+    authority: { allow: [FS.Read, Net, Time] }
+}
+
+use {
+    client: core.http.client
+    server: core.http.server
+    net: core.net
+    time: core.time
+    web: core.web
+}
+
+crlf: fn() -> String {
+    String.from_bytes([U8]{13, 10}) ?? panic("CRLF")
+}
+
+read_all: fn(stream: TCPStream) -> String {
+    parts := [String]{}
+    loop {
+        part: stream.read_text(8192) ?? panic("response read")
+        if part == "" -> break
+        parts.push(part)
+    }
+    parts.join("")
+}
+
+status_of: fn(response: String) -> String {
+    line: response.split_once(crlf()) ?? panic("response framing")
+    line.before
+}
+
+run: fn() (HTTPError | NetError | TaskFailure)! {
+    app: web.app().get("/hi", fn() { Ok(server.response(200, "hi")) })
+    listening: app.bind("127.0.0.1:0")
+    addr: listening.local_addr()
+    serving: task {
+        listening.serve() ?? panic("serve")
+    }
+    held := [TCPStream]{}
+    loop _ in 0..<256 {
+        stream: net.tcp_connect(addr)
+        stream.write_all("GET /hi HTTP/1.1{crlf()}".bytes())
+        held.push(stream)
+    }
+    time.sleep(500ms)
+    extra: net.tcp_connect(addr)
+    print("connection 257: {status_of(read_all(extra))}")
+    loop stream in held {
+        stream.write_all("Host: test{crlf()}{crlf()}".bytes())
+        _: read_all(stream)
+    }
+    after: client.get("http://{addr}/hi")
+    print("after the held connections end: {after.status()}")
+    report: listening.shutdown(100ms)
+    serving.join()
+    print("accepted {report.accepted} completed {report.completed} overloaded {report.overloaded}")
+}

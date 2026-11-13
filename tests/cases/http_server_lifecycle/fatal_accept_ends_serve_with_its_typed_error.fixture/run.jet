@@ -1,0 +1,28 @@
+// `#Test(faults: [Net.Accept])` fails each accept the clean run reaches, one
+// rerun per accept. An accept the listener cannot recover from ends `serve`
+// with its `HTTPError.IO`; the clean run serves until it is shut down.
+package: {
+    name: "accept_fault"
+    version: "0.1.0"
+    authority: { allow: [FS.Read, IO, Mem.Alloc, Net, Time] }
+}
+
+use {
+    server: core.http.server
+    time: core.time
+    web: core.web
+}
+
+#Test(faults: [Net.Accept]) fatal_accept_ends_serve_with_its_typed_error: fn() {
+    listening: web.app().get("/hi", fn() { Ok(server.response(200, "hi")) }).bind("127.0.0.1:0") ?? panic("bind: {err}")
+    stopper: task {
+        time.sleep(120ms)
+        _ := listening.shutdown()
+    }
+    if listening.serve() == {
+        .Ok(report) -> assert_eq(report.accepted, 0)
+        .Err(.IO(operation)) -> assert(operation.starts_with("accept: "))
+        .Err(_) -> assert(false)
+    }
+    _ := stopper.join()
+}

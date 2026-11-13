@@ -1,0 +1,24 @@
+// `server.static_file` answers one `HTTPResponse HTTPError!` carrier: the Ok
+// arm holds the file's bytes and content type, the Err arm a typed error.
+package: {
+    name: "static_file_result"
+    authority: { allow: [FS.Read] }
+}
+
+use server: core.http.server
+
+show: fn(path: String) {
+    if server.static_file(path, "text/plain") == {
+        .Ok(response) -> {
+            kind: response.header("content-type") ?? "none"
+            body: response.body().text(256) ?? "unreadable"
+            print("{path}: ok {response.status()} {kind} {body.trim()}")
+        }
+        .Err(error) -> print("{path}: err {error}")
+    }
+}
+
+run: fn() {
+    show("asset.txt")
+    show("missing.txt")
+}

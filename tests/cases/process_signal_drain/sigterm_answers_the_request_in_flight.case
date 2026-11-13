@@ -1,0 +1,47 @@
+# SIGTERM stops accepting, and the request in flight is still answered: a
+# client task holds half a request across the signal and finishes it 300 ms
+# later; it gets 200, and serve reports the connection completed, at O0, O1
+# and O2. Each tier builds into the default directory and its session runs
+# that build, before the next tier replaces it.
+requires: os:unix
+fixture: sigterm_answers_the_request_in_flight.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet build --optimize=none --allow=Exec,Net,Time,FS.Read,IO main.jet
+exit: 0
+
+session o0 raw: built
+recv o0 until = "ready\n" within 30s
+stdout: = "ready\n"
+signal o0: TERM
+repeat while process {pid:o0} alive timeout 5s every 10ms fail "the O0 artifact did not drain within 5 s of SIGTERM"
+end repeat
+close o0
+exit: 0
+stdout: = "in flight: HTTP/1.1 200 OK\ndrained: accepted=1 completed=1 cancelled=0\n"
+
+step: jet build --optimize=basic --allow=Exec,Net,Time,FS.Read,IO main.jet
+exit: 0
+
+session o1 raw: built
+recv o1 until = "ready\n" within 30s
+stdout: = "ready\n"
+signal o1: TERM
+repeat while process {pid:o1} alive timeout 5s every 10ms fail "the O1 artifact did not drain within 5 s of SIGTERM"
+end repeat
+close o1
+exit: 0
+stdout: = "in flight: HTTP/1.1 200 OK\ndrained: accepted=1 completed=1 cancelled=0\n"
+
+step: jet build --optimize=full --allow=Exec,Net,Time,FS.Read,IO main.jet
+exit: 0
+
+session o2 raw: built
+recv o2 until = "ready\n" within 30s
+stdout: = "ready\n"
+signal o2: TERM
+repeat while process {pid:o2} alive timeout 5s every 10ms fail "the O2 artifact did not drain within 5 s of SIGTERM"
+end repeat
+close o2
+exit: 0
+stdout: = "in flight: HTTP/1.1 200 OK\ndrained: accepted=1 completed=1 cancelled=0\n"

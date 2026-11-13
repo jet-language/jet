@@ -1576,11 +1576,25 @@ An `HTTPServer` answers connections from `serve()` (alias `wait()`) until
 `shutdown(grace)`, where `grace` defaults to zero, or until its accept is
 cancelled (the serving task's cancel, or a signal `process.on_signal`
 registered), which ends `serve` with its report as a shutdown does. Each
-request is answered before the next is accepted, so a
-shutdown has no in-flight request to cancel. Every caller of `serve` and
-`shutdown` receives the same `HTTPShutdownReport{accepted, overloaded,
-completed, cancelled}`; a second `serve` is an `HTTPError.IO`. The connection
-deadline bounds each connection's reads and writes (30 seconds by default).
+accepted connection is served by its own task, so a slow or held connection
+does not delay the next one. At most 10000 connections are served at once,
+and at most 256 from one peer address; a connection past either limit is
+answered `503 Service Unavailable` and closed, and counts as `overloaded`.
+A handler that panics answers its request `500` and serving goes on. An
+accept that fails for want of descriptors or buffer memory, or on a
+connection aborted before it was taken, backs off (5 ms doubling to 1 s) and
+tries again; any other accept failure ends `serve` with an `HTTPError.IO`. A
+test's `#Test(faults: [Net.Accept])` schedule fails an accept as a broken
+listener does, so a test can drive that end.
+A connection's request is shielded from cancellation (`#Shield`), so a
+delivered signal, which cancels every task, stops accepting while the
+requests in flight are answered. Once accepting stops, `serve` waits up to one
+connection deadline for the connections in flight before it reports;
+connections still open then count as `cancelled`. Every caller of `serve` and
+`shutdown` receives the same
+`HTTPShutdownReport{accepted, overloaded, completed, cancelled}`; a second
+`serve` is an `HTTPError.IO`. The connection deadline bounds each
+connection's reads and writes (30 seconds by default).
 
 Static files are read through `core.files` and the `Date` field comes from the
 `core.time` wall clock, so serving carries `[Net, FS.Read, Time]`:

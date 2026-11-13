@@ -1,0 +1,24 @@
+// The negative control: a test that stops when `serve` fails. Each injected
+// accept fault ends `serve` with its error, so the test fails and its report
+// names the fault; a schedule that stopped reaching accept would pass here.
+package: {
+    name: "accept_fault_unhandled"
+    version: "0.1.0"
+    authority: { allow: [FS.Read, IO, Mem.Alloc, Net, Time] }
+}
+
+use {
+    server: core.http.server
+    time: core.time
+    web: core.web
+}
+
+#Test(faults: [Net.Accept]) serve_stops_on_a_fatal_accept: fn() {
+    listening: web.app().get("/hi", fn() { Ok(server.response(200, "hi")) }).bind("127.0.0.1:0") ?? panic("bind: {err}")
+    stopper: task {
+        time.sleep(120ms)
+        _ := listening.shutdown()
+    }
+    _: listening.serve() ?? panic("serve ended: {err}")
+    _ := stopper.join()
+}

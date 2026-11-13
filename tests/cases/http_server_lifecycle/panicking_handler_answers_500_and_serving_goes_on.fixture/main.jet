@@ -1,0 +1,30 @@
+// A handler that panics is answered 500, and the server goes on answering
+// the next request.
+package: {
+    name: "panicking_handler"
+    authority: { allow: [FS.Read, Net, Time] }
+}
+
+use {
+    client: core.http.client
+    server: core.http.server
+    web: core.web
+}
+
+run: fn() (HTTPError | NetError | TaskFailure)! {
+    app: web.app()
+        .get("/boom", fn() { panic("handler failed") })
+        .get("/hi", fn() { Ok(server.response(200, "hi")) })
+    listening: app.bind("127.0.0.1:0")
+    addr: listening.local_addr()
+    serving: task {
+        listening.serve() ?? panic("serve")
+    }
+    boom: client.get("http://{addr}/boom")
+    print("boom: {boom.status()}")
+    after: client.get("http://{addr}/hi")
+    print("after: {after.status()} {after.body().text(64) ?? return}")
+    report: listening.shutdown(100ms)
+    serving.join()
+    print("accepted {report.accepted} completed {report.completed}")
+}

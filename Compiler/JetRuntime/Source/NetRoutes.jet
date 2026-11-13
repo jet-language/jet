@@ -402,6 +402,9 @@ net_route_listen_one: fn(address: I64, scratch: I64) -> I64 {
 net_route_accept: fn(listener: I64, operation: I64, output: I64, error: I64) -> I64 {
     jet_rt_world_reject_uncontrolled(I64{1})
     if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    // A test's `#Test(faults: [Net.Accept])` schedule fails this accept as a
+    // broken listener does (EBADF), a failure no accepter recovers from.
+    if jet_fault_should_fail(rt_static_text("Net.Accept")) -> return net_route_errno(operation, I64{0}, I64{9}, error)
     scratch: jet_rt_alloc(I64{32}, I64{8})
     thread_zero(scratch, I64{32})
     state := I64{0}

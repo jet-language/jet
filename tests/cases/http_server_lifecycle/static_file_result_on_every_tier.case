@@ -1,0 +1,17 @@
+# server.static_file returns one Result carrier: a resident file is Ok with
+# its bytes and content type, a missing one a typed error, with the same
+# output on every execution level.
+fixture: static_file_result_on_every_tier.fixture
+env: NO_COLOR=1
+step o0: jet run --optimize=none main.jet
+exit: 0
+stderr: empty
+stdout: = static_file_result_on_every_tier.stdout.expected
+step o1: jet run --optimize=basic main.jet
+exit: 0
+stderr: empty
+stdout: = static_file_result_on_every_tier.stdout.expected
+step o2: jet run --optimize=full main.jet
+exit: 0
+stderr: empty
+stdout: = static_file_result_on_every_tier.stdout.expected

@@ -1,0 +1,33 @@
+# A fatal accept ends `serve` with its typed error: `#Test(faults:
+# [Net.Accept])` fails each accept the clean run reaches, one rerun per
+# accept, as a broken listener does. Every injected run's `serve` returns its
+# `HTTPError.IO`, and the outcome agrees on every optimization level. The
+# negative control stops when `serve` fails: the test fails and its report
+# names the injected fault, so a schedule that stopped reaching accept would
+# turn that FAIL into a pass.
+fixture: fatal_accept_ends_serve_with_its_typed_error.fixture
+env: NO_COLOR=1
+step o0: jet test --show-default --capture=all --serial --optimize=none run.jet
+exit: 0
+stdout: = "fatal_accept_ends_serve_with_its_typed_error: pass\n1 passed, 0 failed, 0 skipped\n"
+step: jet test --show-default --capture=all --serial --optimize=basic run.jet
+exit: == o0
+stdout: == o0
+stderr: == o0
+step: jet test --show-default --capture=all --serial --optimize=full run.jet
+exit: == o0
+stdout: == o0
+stderr: == o0
+step u0: jet test --show-default --capture=all --serial --optimize=none unhandled.jet
+exit: 1
+stdout: = "serve_stops_on_a_fatal_accept: FAIL\n0 passed, 1 failed, 0 skipped\n"
+stderr: ~ "fault injected: Net.Accept call 1" # the failure report heads with the injected fault
+stderr: ~ "serve ended" # the test's stop on serve's typed error
+step: jet test --show-default --capture=all --serial --optimize=basic unhandled.jet
+exit: == u0
+stdout: == u0
+stderr: == u0
+step: jet test --show-default --capture=all --serial --optimize=full unhandled.jet
+exit: == u0
+stdout: == u0
+stderr: == u0

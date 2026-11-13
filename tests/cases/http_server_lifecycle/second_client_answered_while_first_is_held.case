@@ -1,0 +1,16 @@
+# The serve loop answers a second client while the first holds its
+# connection half-sent, on every execution level.
+fixture: second_client_answered_while_first_is_held.fixture
+env: NO_COLOR=1
+step o0: jet run --optimize=none main.jet
+exit: 0
+stderr: empty
+stdout: = second_client_answered_while_first_is_held.stdout.expected
+step o1: jet run --optimize=basic main.jet
+exit: 0
+stderr: empty
+stdout: = second_client_answered_while_first_is_held.stdout.expected
+step o2: jet run --optimize=full main.jet
+exit: 0
+stderr: empty
+stdout: = second_client_answered_while_first_is_held.stdout.expected
