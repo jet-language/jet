@@ -163,6 +163,13 @@ is `INCONCLUSIVE`, never a pass. It prints `speed gate: PASS`, `FAIL` or
 `INCONCLUSIVE` and exits 0, 1 or 3; `--out` records every compile in the
 throughput ledger.
 
+Every release admit (`jet run Tools/release/Main.jet -- admit`) runs the gate:
+its new compiler against the seed that built it, three rounds at the default
+level, where `FAIL` and `INCONCLUSIVE` both fail the admit. The new compiler
+then compiles the corpus once at `check`, `O0` and `release`. Every compile of
+both is a row of the release's `evidence/throughput.tsv`, so each release
+records the cell.
+
 `--lane quick|full` runs the gauntlet's `compile_throughput` cell
 (`Tools/gauntlet/measurement-manifest.json`) with the same tool. The full lane
 builds the generated `bench300k` program and the compiler corpus (`selfhost`);

@@ -1210,6 +1210,28 @@ row_file_verdict: fn(text: String) -> String Never! {
     assert_eq(merge_tree_conflicts("9dca0ae\nDocs/a.md\n\nAuto-merging Docs/a.md\nCONFLICT (add/add): Docs/a.md\n"), [String]{"Docs/a.md"})
 }
 
+#Test("the speed row reads the gate's verdict, each mode's CPU and every quantity that failed or was not judged") {
+    table: [String]{
+        "        mode         run          rc       lines",
+        "seed:default           1           0      924837",
+        "",
+        "        mode     quantity         seed          new       change       spread      verdict",
+        "     default          cpu       180.00       201.60        12.0%          2.0         FAIL",
+        "     default instructions   9000000000   9100000000         1.1%          0.4         pass",
+        "     default phase sema.bodies         4.20         5.00        19.0%         14.0 INCONCLUSIVE (spread)",
+        "     default phase ir.opt         8.90         9.00         1.1%          0.5         pass",
+        "traces: work/<seed|new>-<mode>.<run>/trace.jsonl",
+        "speed gate: FAIL",
+    }
+    failed: speed_detail(table.join("\n"))
+    assert_eq(failed.verdict, "FAIL")
+    assert_eq(failed.detail, "speed gate FAIL, default CPU 180.00 -> 201.60 s (12.0%); default cpu 180.00 201.60 12.0% 2.0 FAIL | default phase sema.bodies 4.20 5.00 19.0% 14.0 INCONCLUSIVE (spread)")
+    passed: speed_detail("        mode     quantity         seed          new       change       spread      verdict\n     default          cpu       180.00       181.80         1.0%          0.5         pass\n\nspeed gate: PASS\n")
+    assert_eq(passed.verdict, "PASS")
+    assert_eq(passed.detail, "speed gate PASS, default CPU 180.00 -> 181.80 s (1.0%)")
+    assert_eq(speed_detail("Throughput.jet: cannot run perf\n").verdict, "")
+}
+
 #Test("build takes its own options and collects every problem at once") {
     built: parse_build_args([String]{"abc123", "--seed", "seed", "--out", "out", "--threads", "4"})
     assert_eq("{built.commit} {built.seed} {built.out} {built.threads}", "abc123 seed out 4")

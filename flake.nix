@@ -174,6 +174,10 @@
             # Zig on perf entries, Go as the services incumbent.
             pkgs.zig
             pkgs.go
+            # The train speed gate (Throughput.jet --against, run by the
+            # release admit) counts each compile's instructions:u with
+            # `perf stat`.
+            pkgs.perf
             # The run tier's interpreter peers next to python3 and node. luajit
             # also installs a `lua`; lua5_4 comes first, so `lua` is Lua 5.4.
             pkgs.lua5_4

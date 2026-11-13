@@ -56,13 +56,22 @@
 //             line, a host skip, an opt-in, or a disposition (a lost row, or a row that fails
 //             with the same status on both columns); a REFUSED row no ledger line owns counts
 //             as untracked. A disposition that tracks no row is a WARN row.
+//   speed     the train speed gate (#5479 c5): Tools/perf/compile-throughput/Throughput.jet
+//             --against the chain's seed, s2 and the seed each compiling COMMIT's compiler
+//             corpus 3 rounds at the default level under `perf stat` (the dev shell's
+//             pkgs.perf). A rise over 10% in CPU, instructions:u or a top-level phase's process
+//             CPU fails, and so does an INCONCLUSIVE verdict.
+//   throughput  s2 compiles the corpus once at check, O0 and release (#5479 c1); a
+//             compile that fails fails the row. Every compile of both is a row of
+//             evidence/throughput.tsv, the throughput ledger each release ships.
 //   gains     rows s2 passes that the release fails, plus Jetpack rows s2 no longer shows;
 //             at least --min-gains (default 10) of them.
 // The candidate's kit suite rows need the jetpack engine that serves them, so they start once
 // the chain, cc-pack and jetpack-engine checks pass, and run beside pack and jetpack; a
 // check that fails then waits for them to end and blocks the suites. The release column's
-// rows follow, picked from the candidate's, then the registries suite. A --reuse run takes
-// only kit rows; the registries suite runs in full on every unfiltered run.
+// rows follow, picked from the candidate's, then the registries suite, then speed and
+// throughput, each with the slot to itself. A --reuse run takes only kit rows; the
+// registries suite, speed and throughput run in full on every unfiltered run.
 //
 // Pass: assembles SEEDS/a0.0.N (the next number) with jet (its Core sources built in),
 // jet-runtime/, jetpack, IDENTITY (`jet@a0.0.N#<sha256 of jet>`), RELEASE, VERSION
@@ -1994,6 +2003,91 @@ registries_verdict: fn(text: String, sha: String) -> (status: String, detail: St
     (status: "FAIL", detail: "{passed} of {total} registry entries pass ({entries.len()} listed, status {text_field(receipt, "status")}){if failing.len() > 0 -> "; not passing: {shown}" else -> ""}")
 }
 
+// The train speed gate (#5479 c5) and the compile-throughput record (#5479
+// c1) of every release, on COMMIT's compiler corpus with
+// Tools/perf/compile-throughput/Throughput.jet, run by s2 in the dev shell.
+// `--against` compiles the corpus SPEED_RUNS rounds at the default level with
+// the chain's seed and with s2, alternating which goes first, and fails a rise
+// over 10% in CPU, user-mode instructions or a top-level phase's process CPU;
+// an INCONCLUSIVE verdict is never a pass. Then s2 compiles the corpus once
+// in each SPEED_CELL_MODES mode. Every compile is a row of
+// evidence/throughput.tsv, the ledger the release ships. A --filter run
+// measures nothing.
+SPEED_TOOL: "Tools/perf/compile-throughput/Throughput.jet"
+SPEED_GATE_MODES: "default"
+SPEED_RUNS: 3
+SPEED_CELL_MODES: "check,O0,release"
+
+speed_stage: fn(ctx: &Ctx) Never! -[Env, Exec, FS, IO, Time, Time.Wait]> {
+    if ctx.options.filter != "" {
+        row(ctx, "speed", "NOTE", "not measured: --filter {ctx.options.filter} narrows the gate, and a filtered run is never a release")
+        return
+    }
+    work: files.join(ctx.work, "speed")
+    log: files.join(ctx.work, "logs/speed.log")
+    tool: files.join(ctx.tree, SPEED_TOOL)
+    vars: with_vars(ctx.vars, [Var]{set_var("JET", ctx.candidate.jet), set_var("JET_COMPILER_IDENTITY", ctx.candidate.identity), set_var("JET_TOOLCHAIN_ROOT", ctx.tree)})
+    shared := [String]{"--tree", ctx.tree.copy(), "--out", files.join(ctx.work, "evidence/throughput.tsv")}
+    if sys.get("SLOT_CPUS") == .Val(cpus) && cpus != "" -> shared.extend([String]{"--cpus", cpus.copy()})
+    gate_args := [String]{ctx.candidate.jet.copy(), tool.copy(), "--against", ctx.release.jet.copy(), "--modes", SPEED_GATE_MODES, "--runs", "{SPEED_RUNS}", "--work", files.join(work, "gate")}
+    gate_args.extend(shared.copy())
+    gate: run_logged(in_dev_shell(ctx.candidate.jet, ctx.tree, true, gate_args), ctx.tree, vars, log, 4 * 3600)
+    text: read_text(log) ?? ""
+    said: speed_detail(text)
+    status: if gate.rc == 0 && said.verdict == "PASS" -> "PASS" else -> "FAIL"
+    timed: if gate.timed_out -> " (timed out)" else -> ""
+    if said.verdict == "" && text.contains("cannot run --perf") {
+        row(ctx, "speed", "FAIL", "no `perf` in the dev shell: the gate counts each compile's instructions:u with `perf stat`, and runs in COMMIT's dev shell (Tools/agent/JetEnv.jet), whose flake.nix default shell must list pkgs.perf; enter it (`nix develop`) and check `perf --version`, then rerun admit; log {log}")
+        remove_tree(work)
+        return
+    }
+    row(ctx, "speed", status, "s2 against {ctx.release.name}, {SPEED_GATE_MODES} level, {SPEED_RUNS} rounds: {if said.verdict == "" -> "no verdict, rc={gate.rc}{timed}: {tail_of(log, 3)}" else -> said.detail}; log {log}")
+    cell_args := [String]{ctx.candidate.jet.copy(), tool.copy(), "--modes", SPEED_CELL_MODES, "--runs", "1", "--work", files.join(work, "cell")}
+    cell_args.extend(shared.copy())
+    cell: run_logged(in_dev_shell(ctx.candidate.jet, ctx.tree, true, cell_args), ctx.tree, vars, log, 2 * 3600, true)
+    passed: if cell.rc == 0 -> "PASS" else -> "FAIL"
+    said_cell: if cell.rc == 0 -> "s2 compiled the compiler corpus once at each of {SPEED_CELL_MODES}; every compile is a row of evidence/throughput.tsv" else -> "a {SPEED_CELL_MODES} compile of the compiler corpus by s2 failed, rc={cell.rc}{if cell.timed_out -> " (timed out)" else -> ""}: {tail_of(log, 3)}"
+    row(ctx, "throughput", passed, said_cell)
+    remove_tree(work)
+}
+
+// The verdict of a Throughput.jet --against log `text` (its last `speed
+// gate:` line, "" when there is none) and the row's detail, from the gate
+// table (the rows under its `mode quantity` header, up to a blank line): the
+// CPU change of each mode, then every quantity that failed or could not be
+// judged.
+speed_detail: fn(text: String) -> (verdict: String, detail: String) Never! {
+    verdict := ""
+    in_gate := false
+    cpu := [String]{}
+    flagged := [String]{}
+    loop line in text.split("\n").to_list() {
+        if line.starts_with("speed gate: ") {
+            verdict = line.slice(12..<line.len()).trim().copy()
+            next
+        }
+        words := [String]{}
+        loop word in line.split(" ") {
+            if word != "" -> words.push(word.copy())
+        }
+        if words.len() >= 2 && words[0] == "mode" && words[1] == "quantity" {
+            in_gate = true
+            next
+        }
+        if words.len() == 0 -> in_gate = false
+        if !in_gate || words.len() < 7 -> next
+        if words[1] == "cpu" -> cpu.push("{words[0]} CPU {words[2]} -> {words[3]} s ({words[4]})")
+        // A phase's quantity is two words (`phase KIND`), so its verdict is one further.
+        status_at: if words[1] == "phase" -> 7 else -> 6
+        if words.len() > status_at && (words[status_at] == "FAIL" || words[status_at] == "INCONCLUSIVE") -> flagged.push(words.join(" "))
+    }
+    shown: if flagged.len() > 6 -> "{flagged[0..<6].join(" | ")} | ..." else -> flagged.join(" | ")
+    detail := "speed gate {if verdict == "" -> "missing" else -> verdict}"
+    if cpu.len() > 0 -> detail = "{detail}, {cpu.join(", ")}"
+    if flagged.len() > 0 -> detail = "{detail}; {shown}"
+    (verdict: verdict, detail: detail)
+}
+
 // The dispositions that track no row, lost or carded: a typo in a case ID
 // or tier must not pass unseen.
 unused_dispositions: fn(dispositions: [Disposition], suites: [SuiteResult]) -> [String] Never! {
@@ -2405,6 +2499,7 @@ run_gate: fn(options: AdmitOptions, pre: Pre) -[Env, Exec, FS, IO, Time, Time.Wa
     files.write(files.join(work, "preflight.json"), "{json.to_string_pretty(Dyn.Object([String: Dyn]{"commit": text_dyn(ctx.sha), "rows": Dyn.Array(preflight)})) ?? "{{}}"}\n") ?? ()
     if failed_rows(ctx).len() > 0 {
         loop suite in ctx.native -> row(ctx, "suite:{suite}", "BLOCKED", "{if launch -> "not judged" else -> "not launched"}: the cheap checks above are not clean (preflight.json)")
+        row(ctx, "speed", "BLOCKED", "not measured: the cheap checks above are not clean (preflight.json)")
     } else {
         if early {
             candidate: suite_rows(ctx, batch, finished)
@@ -2413,8 +2508,10 @@ run_gate: fn(options: AdmitOptions, pre: Pre) -[Env, Exec, FS, IO, Time, Time.Wa
         } else {
             reused_suites(ctx)
         }
-        // Then the registries, with the slot to themselves.
+        // Then the registries, and then the speed gate, each with the slot to
+        // itself.
         registries_stage(ctx)
+        speed_stage(ctx)
     }
     gains: gains_of(ctx)
     if failed_rows(ctx).len() == 0 -> row(ctx, "gains", if gains.total >= options.min_gains -> "PASS" else -> "FAIL", "{gains.total} gains ({gains.suites} suite rows, {gains.jetpack} Jetpack rows); --min-gains {options.min_gains}")

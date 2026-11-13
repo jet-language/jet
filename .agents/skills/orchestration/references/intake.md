@@ -180,11 +180,16 @@ runs and one 39-minute full test pass. These rules bind every train:
     `Tools/agent/` also runs the cheap ratchets of its reach (CoreCoverage,
     CoreSurfaceLedger and DiagnosticRows `--check`) and lands only when
     all pass, so a direct never lands a census red.
-15. **The speed gate.** Every train times the seed's `jet build Compiler`
-    and the built compiler's self-checks in user plus system CPU seconds,
-    with per-phase seconds from the compiler's own trace, beside the
-    previous train's row. A rise over 10% fails the train, and the report
-    names the phases that grew.
+15. **The speed gate.** Every release admit (rule 11) runs the train speed
+    gate on its commit: `Tools/perf/compile-throughput/Throughput.jet
+    --against` the seed that built it, three interleaved rounds of
+    `jet build Compiler` per compiler, judged on user plus system CPU
+    seconds, instructions:u and each top-level phase's CPU from the
+    compiler's own trace. A rise over 10%, or a verdict it can't judge,
+    fails the admit, and its `speed` row names the quantities that grew.
+    The new compiler then compiles the corpus at check, O0 and release.
+    Every compile is a row of the release's `evidence/throughput.tsv`, the
+    throughput ledger of every wave.
 16. **Census by reach, sized to memory.** The census runs check, build and
     the guard shards at once, then self-checks beside the Jetpack areas. It
     runs only the areas a submission's paths reach. The area budget is
