@@ -2,7 +2,9 @@
 // The lexer's keyword spans, made by Compiler/build.jet's `lexer-keywords`
 // step: the canonical keyword table (JetLexer/Data/Lexer/Keywords.jet)
 // projected onto the Syntax literals (the JetFoundation/Data/Syntax folder)
-// as borrowed byte checks, written whole to JetLexer/Source/Lexer/KeywordSpans.jet.
+// as borrowed byte checks, written whole to JetLexer/Source/Lexer/KeywordSpans.jet
+// with the table's spellings as two lists (LEXER_KEYWORD_SPELLINGS, the active
+// rows, and LEXER_RETIRED_SPELLINGS), which `jet inspect reserved` prints.
 // Spellings remain Jet Syntax constants; Jet token tags own the kinds. The
 // step keeps the file in git (`kept: true`), so the build rewrites a stale
 // one and refuses a hand edit of it. Each scanner tag `K_NAME` in
@@ -56,6 +58,7 @@ KeywordRow: struct {
     tag: String
     spelling: String
     bytes: [Int]
+    retired: Bool
 }
 
 rows_fail: fn(message: String) -> KeywordRowsError Never! {
@@ -152,7 +155,7 @@ keyword_rows: fn(mapping: String, syntax: String, tokens: String, tags: String) 
         kinds.push(kind.copy())
         mapped.push(token_tag.copy())
         bytes: loop byte in spelling.bytes() -> Int.from_u8(byte)
-        rows.push(KeywordRow{constant: constant, kind: kind, tag: token_tag, spelling: spelling, bytes: bytes})
+        rows.push(KeywordRow{constant: constant, kind: kind, tag: token_tag, spelling: spelling, bytes: bytes, retired: retired})
     }
     if rows.len() == 0 -> return Err(rows_fail("incomplete keyword mapping/token coverage"))
     loop token_tag in token_tags {
@@ -210,7 +213,17 @@ branches: fn(rows: [KeywordRow], offset: Int, indent: String) -> String Never! {
     "{out}{indent}    else -> K_IDENT\n{indent}}}\n"
 }
 
-// KeywordSpans.jet, whole: its header and `word_kind`.
+// The table's spellings as one generated list: the active rows or the
+// retired ones, in table order, one per line.
+spelling_list: fn(name: String, rows: [KeywordRow], retired: Bool) -> String Never! {
+    out := "{name}: [String]{{\n"
+    loop row in rows {
+        if row.retired == retired -> out = "{out}    \"{row.spelling}\",\n"
+    }
+    "{out}}}\n"
+}
+
+// KeywordSpans.jet, whole: its header, `word_kind`, and the spelling lists.
 render_keyword_spans: fn(rows: [KeywordRow]) -> String Never! {
     order := [Int]{}
     lengths := [Int: [KeywordRow]]{}
@@ -227,7 +240,10 @@ render_keyword_spans: fn(rows: [KeywordRow]) -> String Never! {
         group: lengths.get(length) ?? [KeywordRow]{}
         out = "{out}        {length} -> {{\n{branches(group, 0, "            ")}        }}\n"
     }
-    "{out}        else -> K_IDENT\n    }}\n    // Only exact in becomes a member after a postfix dot.\n    if kind == K_IN && (previous_kind == K_DOT || previous_kind == K_QUESTION_DOT) -> return K_IDENT\n    kind\n}}\n"
+    words: "{out}        else -> K_IDENT\n    }}\n    // Only exact in becomes a member after a postfix dot.\n    if kind == K_IN && (previous_kind == K_DOT || previous_kind == K_QUESTION_DOT) -> return K_IDENT\n    kind\n}}\n"
+    active: spelling_list("LEXER_KEYWORD_SPELLINGS", rows, retired: false)
+    retired: spelling_list("LEXER_RETIRED_SPELLINGS", rows, retired: true)
+    "{words}\n// Every word `word_kind` reads as a keyword, so no identifier may be one:\n// the active keywords, then the retired ones no grammar rule accepts.\n{active}\n{retired}"
 }
 
 keyword_rows_main: fn(args: [String]) -[FS]> String KeywordRowsError! {
@@ -277,6 +293,9 @@ keyword_rows_error: fn(mapping: String, syntax: String, tokens: String, tags: St
         assert(generated.contains(row.tag))
     }
     assert(generated.contains("if byte_at(source, start + 0) == 102 && byte_at(source, start + 1) == 110 -> K_FN else -> K_IDENT // Syntax::KW_FN"))
+    assert(generated.ends_with("\nLEXER_KEYWORD_SPELLINGS: [String]{{\n    \"fn\",\n    \"for\",\n}}\n\nLEXER_RETIRED_SPELLINGS: [String]{{\n}}\n"))
+    retired_spans: render_keyword_spans(keyword_rows(mapping.replace("\"K_FOR\", retired: false", "\"K_FOR\", retired: true"), syntax.replace("    KW_FOR, // loops\n", ""), tokens, tags) ?? panic("the retired table did not parse: {err.message}"))
+    assert(retired_spans.ends_with("\nLEXER_KEYWORD_SPELLINGS: [String]{{\n    \"fn\",\n}}\n\nLEXER_RETIRED_SPELLINGS: [String]{{\n    \"for\",\n}}\n"))
     assert(keyword_rows_error(mapping.replace("\n}}", "\n    invalid row,\n}}"), syntax, tokens, tags).contains("unparsed keyword row"))
     assert(keyword_rows_error("LEXER_KEYWORDS: [LexerKeyword]{{\n}}", syntax, tokens, tags).contains("incomplete"))
     assert(keyword_rows_error(mapping.replace("KwFn", "KwNew"), syntax, tokens, tags).contains("unresolved token kind"))

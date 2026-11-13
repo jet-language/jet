@@ -142,3 +142,40 @@ word_kind: fn(source: [U8], start: Int, end: Int, previous_kind: Int) -> Int Nev
     if kind == K_IN && (previous_kind == K_DOT || previous_kind == K_QUESTION_DOT) -> return K_IDENT
     kind
 }
+
+// Every word `word_kind` reads as a keyword, so no identifier may be one:
+// the active keywords, then the retired ones no grammar rule accepts.
+LEXER_KEYWORD_SPELLINGS: [String]{
+    "true",
+    "false",
+    "None",
+    "self",
+    "break",
+    "return",
+    "fn",
+    "pub",
+    "priv",
+    "if",
+    "else",
+    "in",
+    "struct",
+    "enum",
+    "impl",
+    "trait",
+    "tag",
+    "effect",
+    "derive",
+    "it",
+    "loop",
+    "yield",
+    "use",
+    "extern",
+    "module",
+}
+
+LEXER_RETIRED_SPELLINGS: [String]{
+    "mut",
+    "take",
+    "copy",
+    "const",
+}
