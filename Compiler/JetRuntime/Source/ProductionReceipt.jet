@@ -29,16 +29,16 @@ production_receipt_code: fn(code: I64) -> I64 {
 production_receipt_env: fn(key: I64) -> I64 { host_startup_environment_value(key) }
 
 production_receipt_write: fn(code: I64, file: I64, file_len: I64, line: I64, function: I64, function_len: I64) {
-    directory: production_receipt_env(rt_static_text("JET_DEVELOPMENT_RECEIPT_DIRECTORY"))
+    directory: production_receipt_env(env_name_jet_development_receipt_directory())
     if (directory == I64{0}) -> return
-    present := production_receipt_env(rt_static_text("JET_DEVELOPMENT_RECEIPT_ENTRY")) != I64{0}
-    present = present && production_receipt_env(rt_static_text("JET_DEVELOPMENT_RECEIPT_SOURCE_DIGEST")) != I64{0}
-    present = present && production_receipt_env(rt_static_text("JET_DEVELOPMENT_RECEIPT_CLOSURE_DIGEST")) != I64{0}
-    present = present && production_receipt_env(rt_static_text("JET_DEVELOPMENT_RECEIPT_INPUT_DIGEST")) != I64{0}
-    present = present && production_receipt_env(rt_static_text("JET_DEVELOPMENT_RECEIPT_INPUT_COUNT_DIGEST")) != I64{0}
-    present = present && production_receipt_env(rt_static_text("JET_DEVELOPMENT_RECEIPT_TARGET")) != I64{0}
-    present = present && production_receipt_env(rt_static_text("JET_DEVELOPMENT_RECEIPT_TARGET_DIGEST")) != I64{0}
-    if !(present && production_receipt_count_ok(production_receipt_env(rt_static_text("JET_DEVELOPMENT_RECEIPT_INPUT_COUNT")))) -> return
+    present := production_receipt_env(env_name_jet_development_receipt_entry()) != I64{0}
+    present = present && production_receipt_env(env_name_jet_development_receipt_source_digest()) != I64{0}
+    present = present && production_receipt_env(env_name_jet_development_receipt_closure_digest()) != I64{0}
+    present = present && production_receipt_env(env_name_jet_development_receipt_input_digest()) != I64{0}
+    present = present && production_receipt_env(env_name_jet_development_receipt_input_count_digest()) != I64{0}
+    present = present && production_receipt_env(env_name_jet_development_receipt_target()) != I64{0}
+    present = present && production_receipt_env(env_name_jet_development_receipt_target_digest()) != I64{0}
+    if !(present && production_receipt_count_ok(production_receipt_env(env_name_jet_development_receipt_input_count()))) -> return
     // One scratch mapping: the working directory, the stat fact row, then
     // `directory/receipt` NUL-terminated (the mapping is zero-filled).
     directory_len: host_startup_byte_length(directory)
@@ -97,20 +97,20 @@ production_receipt_render: fn(buffer: I64, code: I64, file: I64, file_len: I64, 
     empty: rt_static_text("")
     at := production_receipt_put_text(buffer, I64{0}, rt_static_text("jet-development-receipt-v1\n"))
     at = production_receipt_line(buffer, at, rt_static_text("act"), empty, rt_static_text("production-failure"))
-    at = production_receipt_env_line(buffer, at, rt_static_text("closure"), empty, rt_static_text("JET_DEVELOPMENT_RECEIPT_CLOSURE_DIGEST"))
+    at = production_receipt_env_line(buffer, at, rt_static_text("closure"), empty, env_name_jet_development_receipt_closure_digest())
     // Ordered by (name, digest) as the renderer sorts them.
-    at = production_receipt_env_line(buffer, at, rt_static_text("input"), rt_static_text("argv"), rt_static_text("JET_DEVELOPMENT_RECEIPT_INPUT_DIGEST"))
-    at = production_receipt_env_line(buffer, at, rt_static_text("input"), rt_static_text("argv-count"), rt_static_text("JET_DEVELOPMENT_RECEIPT_INPUT_COUNT_DIGEST"))
-    at = production_receipt_env_line(buffer, at, rt_static_text("input"), rt_static_text("entry"), rt_static_text("JET_DEVELOPMENT_RECEIPT_SOURCE_DIGEST"))
-    at = production_receipt_env_line(buffer, at, rt_static_text("input"), rt_static_text("target"), rt_static_text("JET_DEVELOPMENT_RECEIPT_TARGET_DIGEST"))
+    at = production_receipt_env_line(buffer, at, rt_static_text("input"), rt_static_text("argv"), env_name_jet_development_receipt_input_digest())
+    at = production_receipt_env_line(buffer, at, rt_static_text("input"), rt_static_text("argv-count"), env_name_jet_development_receipt_input_count_digest())
+    at = production_receipt_env_line(buffer, at, rt_static_text("input"), rt_static_text("entry"), env_name_jet_development_receipt_source_digest())
+    at = production_receipt_env_line(buffer, at, rt_static_text("input"), rt_static_text("target"), env_name_jet_development_receipt_target_digest())
     at = production_receipt_line(buffer, at, rt_static_text("action"), rt_static_text("planned"), rt_static_text("sha256-2baa4c66edeaf54e166ff66bdd4c914c3076a7621a98c90f9a577c9b825be3b3"))
     at = production_receipt_line(buffer, at, rt_static_text("activation-proof"), empty, rt_static_text("sha256-b8846cc6a6dfb698b445cafa1f316a814f70d56520598e8efcdbd42970999378"))
     at = production_receipt_line(buffer, at, rt_static_text("parent-generation"), empty, empty)
     at = production_receipt_open(buffer, at, rt_static_text("witness"), empty)
     at = production_receipt_hex_text(buffer, at, rt_static_text("jet-runtime;target="))
-    at = production_receipt_hex_env(buffer, at, rt_static_text("JET_DEVELOPMENT_RECEIPT_TARGET"))
+    at = production_receipt_hex_env(buffer, at, env_name_jet_development_receipt_target())
     at = production_receipt_hex_text(buffer, at, rt_static_text(";argv-count="))
-    at = production_receipt_hex_env(buffer, at, rt_static_text("JET_DEVELOPMENT_RECEIPT_INPUT_COUNT"))
+    at = production_receipt_hex_env(buffer, at, env_name_jet_development_receipt_input_count())
     at = production_receipt_hex_text(buffer, at, rt_static_text(";redaction=by-construction"))
     at = production_receipt_put_byte(buffer, at, I64{10})
     at = production_receipt_line(buffer, at, rt_static_text("failure-path"), rt_static_text("code"), production_receipt_code(code))
@@ -210,7 +210,7 @@ production_receipt_hex_path: fn(buffer: I64, at: I64, file: I64, file_len: I64, 
     data := file
     length := file_len
     if (length == I64{0}) {
-        data = production_receipt_env(rt_static_text("JET_DEVELOPMENT_RECEIPT_ENTRY"))
+        data = production_receipt_env(env_name_jet_development_receipt_entry())
         length = host_startup_byte_length(data)
     }
     if (length == I64{0}) -> return production_receipt_hex_text(buffer, at, rt_static_text("<unknown>"))

@@ -199,23 +199,23 @@ encoding_hostile_state: fn() -> I64 {
         jet_rt_tls_set(encoding_hostile_key, state)
     }
     if (rt_text_word(state) == I64{0}) {
-        if !encoding_env_flag(rt_static_text("JET_ENC_HOSTILE_IO")) -> return I64{0}
+        if !encoding_env_flag(env_name_jet_enc_hostile_io()) -> return I64{0}
         rt_text_store(state, I64{2})
-        rt_text_store(wrapping(state + I64{8}), if encoding_env_flag(rt_static_text("JET_ENC_HOSTILE_READ_ONE")) -> I64{1} else -> I64{0})
-        chunk: encoding_env_number(rt_static_text("JET_ENC_HOSTILE_WRITE_MAX"), U64{18446744073709551615})
+        rt_text_store(wrapping(state + I64{8}), if encoding_env_flag(env_name_jet_enc_hostile_read_one()) -> I64{1} else -> I64{0})
+        chunk: encoding_env_number(env_name_jet_enc_hostile_write_max(), U64{18446744073709551615})
         rt_text_store(wrapping(state + I64{16}), if (chunk < I64{0}) -> I64{0} else -> chunk)
-        reads: encoding_env_number(rt_static_text("JET_ENC_HOSTILE_INTERRUPT_READS"), U64{255})
+        reads: encoding_env_number(env_name_jet_enc_hostile_interrupt_reads(), U64{255})
         rt_text_store(wrapping(state + I64{24}), if (reads < I64{0}) -> I64{0} else -> reads)
-        writes: encoding_env_number(rt_static_text("JET_ENC_HOSTILE_INTERRUPT_WRITES"), U64{255})
+        writes: encoding_env_number(env_name_jet_enc_hostile_interrupt_writes(), U64{255})
         rt_text_store(wrapping(state + I64{32}), if (writes < I64{0}) -> I64{0} else -> writes)
-        read_after: encoding_env_number(rt_static_text("JET_ENC_HOSTILE_FAIL_READ_AFTER"), U64{9223372036854775807})
+        read_after: encoding_env_number(env_name_jet_enc_hostile_fail_read_after(), U64{9223372036854775807})
         rt_text_store(wrapping(state + I64{40}), if (read_after < I64{0}) -> I64{0} else -> I64{1})
         rt_text_store(wrapping(state + I64{48}), read_after)
-        write_after: encoding_env_number(rt_static_text("JET_ENC_HOSTILE_FAIL_WRITE_AFTER"), U64{9223372036854775807})
+        write_after: encoding_env_number(env_name_jet_enc_hostile_fail_write_after(), U64{9223372036854775807})
         rt_text_store(wrapping(state + I64{56}), if (write_after < I64{0}) -> I64{0} else -> I64{1})
         rt_text_store(wrapping(state + I64{64}), write_after)
-        encoding_env_plan(rt_static_text("JET_ENC_HOSTILE_READ_PLAN"), wrapping(state + I64{136}))
-        encoding_env_plan(rt_static_text("JET_ENC_HOSTILE_WRITE_PLAN"), wrapping(state + I64{168}))
+        encoding_env_plan(env_name_jet_enc_hostile_read_plan(), wrapping(state + I64{136}))
+        encoding_env_plan(env_name_jet_enc_hostile_write_plan(), wrapping(state + I64{168}))
     }
     state
 }

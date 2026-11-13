@@ -264,7 +264,7 @@ process_authority_bwrap_argv: fn(bwrap: I64, source: I64, output: I64, env: I64,
         process_text_list_push(argv, rt_static_text("--chdir"))
         process_text_list_push(argv, rt_static_text("/work/source"))
         process_text_list_push(argv, rt_static_text("--setenv"))
-        process_text_list_push(argv, rt_static_text("JET_BUILD_OUTPUT"))
+        process_text_list_push(argv, env_name_jet_build_output())
         process_text_list_push(argv, rt_static_text("/work/output"))
     } else {
         if (source != I64{0} && source_readable) {
@@ -299,7 +299,7 @@ process_authority_bwrap_argv: fn(bwrap: I64, source: I64, output: I64, env: I64,
 // `sh -c "exit 0"` probe. JETPACK_FAKE_SANDBOX forces it unavailable. Returns
 // the owned bubblewrap path, or 0.
 process_authority_backend: fn() -> I64 {
-    fake: jet_rt_logical_env_get(rt_static_text("JETPACK_FAKE_SANDBOX"))
+    fake: jet_rt_logical_env_get(env_name_jetpack_fake_sandbox())
     if (fake != I64{0}) {
         jet_rt_string_drop(fake)
         return I64{0}

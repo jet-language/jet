@@ -59,7 +59,7 @@ rt_log_start_address: fn() -> I64 {
 // JET_LOG, checked, becomes the process's environment filter; a pair that is
 // not `level` or `module=level` ends the process with an error naming it.
 #Export(c) jet_rt_log_start: fn(_argument: I64) -> I64 {
-    value: rt_env_get(rt_static_text("JET_LOG"))
+    value: rt_env_get(env_name_jet_log())
     if (value == I64{0}) -> return I64{0}
     bad: log_filter_bad_pair(value)
     if (bad != I64{0}) {

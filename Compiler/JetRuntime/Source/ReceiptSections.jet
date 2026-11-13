@@ -19,14 +19,14 @@ RECEIPT_SECTION_STAGE_OPEN: I64{524481}
 }
 
 receipt_section_attach: fn(tree: I64, section: I64, type_name: I64, schema: I64) {
-    directory: rt_env_get(rt_static_text("JET_RECEIPT_DIR"))
+    directory: rt_env_get(env_name_jet_receipt_dir())
     if (directory == I64{0}) -> return
-    claim: rt_env_get(rt_static_text("JET_RECEIPT_CLAIM"))
+    claim: rt_env_get(env_name_jet_receipt_claim())
     if (claim == I64{0}) {
         jet_rt_string_drop(directory)
         return
     }
-    found: rt_env_get(rt_static_text("JET_RECEIPT_DIGEST"))
+    found: rt_env_get(env_name_jet_receipt_digest())
     parent: if (found == I64{0}) -> jet_rt_string_builder_finish(jet_rt_string_builder_new()) else -> found
     if receipt_section_valid(tree, section, type_name, schema, claim, parent) {
         receipt_section_store(tree, section, type_name, schema, directory, claim, parent)

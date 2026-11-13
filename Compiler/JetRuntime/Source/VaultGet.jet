@@ -295,8 +295,8 @@ vault_get_resolve: fn(context: I64, data: I64, length: I64, depth: I64) -> I64 {
 // The first non-empty of JET_TEST_SCRATCH_DIR and JET_STORE_DIR, else
 // env::temp_dir (TMPDIR, else /tmp), appended to `line` as raw bytes.
 vault_get_audit_root: fn(line: I64) {
-    value := host_environment_value(rt_static_text("JET_TEST_SCRATCH_DIR"))
-    if (value == I64{0} || host_startup_byte_length(value) == I64{0}) -> value = host_environment_value(rt_static_text("JET_STORE_DIR"))
+    value := host_environment_value(env_name_jet_test_scratch_dir())
+    if (value == I64{0} || host_startup_byte_length(value) == I64{0}) -> value = host_environment_value(env_name_jet_store_dir())
     if (value == I64{0} || host_startup_byte_length(value) == I64{0}) {
         value = host_environment_value(rt_static_text("TMPDIR"))
         if (value == I64{0}) {

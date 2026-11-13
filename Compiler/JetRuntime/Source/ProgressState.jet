@@ -172,7 +172,7 @@ progress_render: fn(description: I64, format: I64, count: I64, total: I64, elaps
 
 progress_enabled: fn() -> Bool {
     if !host_is_tty(I64{2}) -> return false
-    value: host_environment_value(rt_static_text("JET_MACHINE_OUTPUT"))
+    value: host_environment_value(env_name_jet_machine_output())
     if (value == I64{0}) -> return true
     // Raw var_os equality: invalid UTF-8 never aliases the ASCII value "1".
     rt_text_byte(value) != I64{49} || rt_text_byte(wrapping(value + I64{1})) != I64{0}

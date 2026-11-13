@@ -278,7 +278,7 @@ property_seed_parse: fn(text: I64, seed: I64) -> Bool {
 // The run's seed into ctx+48: JET_PROP_SEED, else fresh entropy below 2^63.
 // Null on success, else the owned failure text.
 property_seed: fn(ctx: I64) -> I64 {
-    value: test_environment(jet_rt_string_clone(rt_static_text("JET_PROP_SEED")))
+    value: test_environment(jet_rt_string_clone(env_name_jet_prop_seed()))
     if (value != I64{0}) {
         parsed: property_seed_parse(value, wrapping(ctx + I64{48}))
         test_text_drop(value)
@@ -295,7 +295,7 @@ property_seed: fn(ctx: I64) -> I64 {
 // text.
 property_budget: fn(ctx: I64) -> I64 {
     trap_store(wrapping(ctx + I64{72}), PROPERTY_CASES)
-    value: test_environment(jet_rt_string_clone(rt_static_text("JET_FUZZ_ITERATIONS")))
+    value: test_environment(jet_rt_string_clone(env_name_jet_fuzz_iterations()))
     if (value == I64{0}) -> return I64{0}
     parsed: property_seed_parse(value, wrapping(ctx + I64{72}))
     test_text_drop(value)

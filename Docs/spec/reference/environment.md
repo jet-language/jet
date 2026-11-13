@@ -148,10 +148,30 @@ the text before it.
 | `JET_COMPILER_EXTENSION` | `Compiler/JetTestKit/Source/Exec.jet` | Kept out of every test-kit child. |
 | `JET_CONFIG_VALUE` | `Compiler/JetFoundation/Source/Encoding/CompilerService.jet` | A configuration value the compiler service hands a child. |
 | `JET_COV_OUT` | `Compiler/JetCli/Source/Cli/TestCoverage.jet` | The file a covered test program writes its coverage counts to. |
-| `JET_DEVELOPMENT_RECEIPT_*` | `Compiler/JetRuntime/Source/ProductionReceipt.jet` | The receipt directory, entry, target and digests a development build hands its program, which writes its production receipt there. |
-| `JET_DEVTOOLS_RELAY_*` | `Compiler/JetCli/Source/Cli/Host.jet` | The session, world, source, build and revision of the devtools relay an observed `jet run` hands its program. |
+| `JET_DEVELOPMENT_RECEIPT_CLOSURE_DIGEST` | `Compiler/JetRuntime/Source/ProductionReceipt.jet` | The digest of the locked closure a development build's production receipt records. |
+| `JET_DEVELOPMENT_RECEIPT_DIRECTORY` | `Compiler/JetRuntime/Source/ProductionReceipt.jet` | The directory a development build's program writes its production receipt to. |
+| `JET_DEVELOPMENT_RECEIPT_ENTRY` | `Compiler/JetRuntime/Source/ProductionReceipt.jet` | The project-relative entry a development build's production receipt names. |
+| `JET_DEVELOPMENT_RECEIPT_INPUT_COUNT` | `Compiler/JetRuntime/Source/ProductionReceipt.jet` | The argument count a development build's production receipt records. |
+| `JET_DEVELOPMENT_RECEIPT_INPUT_COUNT_DIGEST` | `Compiler/JetRuntime/Source/ProductionReceipt.jet` | The digest of the argument count a development build's production receipt records. |
+| `JET_DEVELOPMENT_RECEIPT_INPUT_DIGEST` | `Compiler/JetRuntime/Source/ProductionReceipt.jet` | The digest of the arguments a development build's production receipt records. |
+| `JET_DEVELOPMENT_RECEIPT_SOURCE_DIGEST` | `Compiler/JetRuntime/Source/ProductionReceipt.jet` | The digest of the entry source a development build's production receipt records. |
+| `JET_DEVELOPMENT_RECEIPT_TARGET` | `Compiler/JetRuntime/Source/ProductionReceipt.jet` | The target a development build's production receipt names. |
+| `JET_DEVELOPMENT_RECEIPT_TARGET_DIGEST` | `Compiler/JetRuntime/Source/ProductionReceipt.jet` | The digest of the target a development build's production receipt records. |
+| `JET_DEVTOOLS_RELAY_BUILD_ID` | `Compiler/JetCli/Source/Cli/Host.jet` | The build of the devtools relay an observed `jet run` hands its program. |
+| `JET_DEVTOOLS_RELAY_REVISION` | `Compiler/JetCli/Source/Cli/Host.jet` | The revision of the devtools relay an observed `jet run` hands its program. |
+| `JET_DEVTOOLS_RELAY_SESSION_ID` | `Compiler/JetCli/Source/Cli/Host.jet` | The session of the devtools relay an observed `jet run` hands its program. |
+| `JET_DEVTOOLS_RELAY_SOURCE_ID` | `Compiler/JetCli/Source/Cli/Host.jet` | The source of the devtools relay an observed `jet run` hands its program. |
+| `JET_DEVTOOLS_RELAY_WORLD_ID` | `Compiler/JetCli/Source/Cli/Host.jet` | The world of the devtools relay an observed `jet run` hands its program. |
 | `JET_DEV_PORT` | `Compiler/JetCli/Source/Cli/Host.jet` | The port `jet dev` hands the program it launches. |
-| `JET_ENC_HOSTILE_*` | `Compiler/JetRuntime/Source/RouteAEncoding.jet` | Fault injection: short, interrupted and failing reads and writes for the encoding route's I/O. |
+| `JET_ENC_HOSTILE_FAIL_READ_AFTER` | `Compiler/JetRuntime/Source/RouteAEncoding.jet` | Fault injection: where the encoding route's reads start to fail. |
+| `JET_ENC_HOSTILE_FAIL_WRITE_AFTER` | `Compiler/JetRuntime/Source/RouteAEncoding.jet` | Fault injection: where the encoding route's writes start to fail. |
+| `JET_ENC_HOSTILE_INTERRUPT_READS` | `Compiler/JetRuntime/Source/RouteAEncoding.jet` | Fault injection: how many of the encoding route's reads are interrupted (at most 255). |
+| `JET_ENC_HOSTILE_INTERRUPT_WRITES` | `Compiler/JetRuntime/Source/RouteAEncoding.jet` | Fault injection: how many of the encoding route's writes are interrupted (at most 255). |
+| `JET_ENC_HOSTILE_IO` | `Compiler/JetRuntime/Source/RouteAEncoding.jet` | Turns on fault injection for the encoding route's I/O; the other `JET_ENC_HOSTILE_` variables shape it. |
+| `JET_ENC_HOSTILE_READ_ONE` | `Compiler/JetRuntime/Source/RouteAEncoding.jet` | Fault injection: the encoding route reads one byte at a time. |
+| `JET_ENC_HOSTILE_READ_PLAN` | `Compiler/JetRuntime/Source/RouteAEncoding.jet` | Fault injection: the comma-separated sizes of the encoding route's reads. |
+| `JET_ENC_HOSTILE_WRITE_MAX` | `Compiler/JetRuntime/Source/RouteAEncoding.jet` | Fault injection: the largest write the encoding route makes. |
+| `JET_ENC_HOSTILE_WRITE_PLAN` | `Compiler/JetRuntime/Source/RouteAEncoding.jet` | Fault injection: the comma-separated sizes of the encoding route's writes; the last repeats. |
 | `JET_EVIDENCE_*` | `Compiler/JetFoundation/Source/Evidence/EvidenceIO.jet` | The report path, report id, toolchain, target, profile and revisions an evidence report records. |
 | `JET_FACTS_ANSWER` | `Compiler/JetCli/Source/Cli/InspectFacts.jet` | Where the facts program `jet inspect facts` runs writes its answer. |
 | `JET_FFI_TRACE_WORKSPACE` | `Compiler/JetCli/Source/Cli/RustForeign.jet` | With `1`, keeps the Rust foreign workspace for inspection. |
@@ -165,8 +185,15 @@ the text before it.
 | `JET_OBSERVE` | `Compiler/JetCli/Source/Cli/Host.jet` | Marks a program that an observed run started. |
 | `JET_ORG_UNSAFE_POLICY` | `Compiler/JetFoundation/Data/Syntax/CoreSurface.jet` | CI and admin input naming an organization's unsafe-policy file; a configured file that cannot be read fails closed. |
 | `JET_PROJECT_ROOT` | `Compiler/JetCli/Source/Cli/Host.jet` | The project root `jet test` hands its test child. |
-| `JET_PROVE_*` | `Compiler/JetCli/Source/Cli/ProveReplay.jet` | The capture and replay journals, served trace and wall clock `jet prove` hands the program it captures or replays. |
-| `JET_RECEIPT_*` | `Compiler/JetRuntime/Source/ReceiptSections.jet` | The receipt directory, claim and digest a program's receipt sections attach to; `JET_RECEIPT_BYPASS` runs a check unrecorded. |
+| `JET_PROVE_CAPTURE_JOURNAL` | `Compiler/JetCli/Source/Cli/ProveReplay.jet` | The journal a program `jet prove` captures appends each raw read to. |
+| `JET_PROVE_REPLAY_JOURNAL` | `Compiler/JetCli/Source/Cli/ProveReplay.jet` | The journal of records a program `jet prove` replays reads from. |
+| `JET_PROVE_REPLAY_TIME_MS` | `Compiler/JetCli/Source/Cli/ProveReplay.jet` | The wall clock, in Unix milliseconds, a program `jet prove` replays reads. |
+| `JET_PROVE_REPLAY_TRACE` | `Compiler/JetCli/Source/Cli/ProveReplay.jet` | The served trace a program `jet prove` replays reads from. |
+| `JET_RECEIPT_BYPASS` | `Compiler/JetCli/Source/Cli/CheckReceipt.jet` | When set, `jet check` neither replays nor records a receipt. |
+| `JET_RECEIPT_CLAIM` | `Compiler/JetRuntime/Source/ReceiptSections.jet` | The claim a program's receipt sections attach to. |
+| `JET_RECEIPT_DIGEST` | `Compiler/JetRuntime/Source/ReceiptSections.jet` | The digest of the receipt a program's receipt sections extend. |
+| `JET_RECEIPT_DIR` | `Compiler/JetRuntime/Source/ReceiptSections.jet` | The directory a program's receipt sections are written to. |
+| `JET_RECEIPT_WITNESS` | `Jetpack/TrustRoot/Source/CacheReceipts.jet` | The witness new cache receipts record; without it, `ci` under CI, else the local account. |
 | `JET_RUST_MUSL_*` | `Compiler/JetCli/Source/Cli/RustForeign.jet` | The musl Rust toolchain, linker and archiver of Rust foreign builds. |
 | `JET_SCHEMA_CACHE_DIR` | `Compiler/JetDriver/Source/Driver/Schema.jet` | Isolates the schema cache of repository tests from user state. |
 | `JET_SCRATCH_ROOT` | `Compiler/JetTestKit/Source/Kit.jet` | The disk-backed root under which the test kit keeps its scratch and state. |

@@ -2,11 +2,12 @@ use environment_files: core.files
 
 // Every `JET_*` or `JETPACK_*` variable the compiler names has its one row in
 // JET_ENVIRONMENT_VARIABLES, or is a compiler control's variable
-// (CLIControls.jet); every row's reader still names it. A name is a whole
-// string literal of a compiler source outside its Tests directories, or of the
-// runtime generators. A literal ending in `_` is a prefix the code matches
-// names by; a row starting with it covers it. A row ending in `*` is a family
-// and covers every name starting with the text before the `*`.
+// (CLIControls.jet); every row's reader still names it, by its text or by the
+// runtime accessor Tools/agent/EnvironmentRows.jet generates for it. A name is
+// a whole string literal of a compiler source outside its Tests directories, or
+// of the runtime generators. A literal ending in `_` is a prefix the code
+// matches names by; a row starting with it covers it. A row ending in `*` is a
+// family and covers every name starting with the text before the `*`.
 ENVIRONMENT_REGISTRY: "Compiler/JetFoundation/Source/Registry/EnvironmentVariables.jet"
 ENVIRONMENT_ROOTS: [String]{"Compiler", "Tools/agent/RuntimeGenerators.jet"}
 
@@ -94,6 +95,13 @@ environment_covered: fn(name: String, rows: [(name: String, reader: String)], va
     false
 }
 
+// The runtime accessor of the row `name` (Compiler/JetRuntime/Source/EnvironmentNames.jet).
+environment_accessor: fn(name: String) -> String {
+    text: name.removesuffix("*")
+    if text != name -> return "env_prefix_{text.removesuffix("_").lower()}()"
+    "env_name_{text.lower()}()"
+}
+
 #Test("every environment variable the compiler names has one registry row, and every row's reader names it") {
     guards_enter_root()
     rows: environment_rows()
@@ -105,7 +113,7 @@ environment_covered: fn(name: String, rows: [(name: String, reader: String)], va
         if seen.contains(row.name) -> problems.push("{row.name}: two rows")
         seen.push(row.name.copy())
         text: environment_files.read(row.reader) ?? ""
-        if !text.contains(row.name.removesuffix("*")) -> problems.push("{row.name}: its reader {row.reader} does not name it")
+        if !text.contains(row.name.removesuffix("*")) && !text.contains(environment_accessor(row.name)) -> problems.push("{row.name}: its reader {row.reader} does not name it")
     }
     found := [String]{}
     loop root in ENVIRONMENT_ROOTS {
@@ -129,6 +137,8 @@ environment_covered: fn(name: String, rows: [(name: String, reader: String)], va
     assert(!environment_covered("JET_BX", sample, [String]{}))
     assert(!environment_covered("JET_C", sample, [String]{}))
     assert(environment_covered("JET_C", sample, [String]{"JET_C"}))
+    assert_eq(environment_accessor("JET_B"), "env_name_jet_b()")
+    assert_eq(environment_accessor("JET_A_*"), "env_prefix_jet_a()")
     lits := [String]{}
     environment_literals("f", "a(\"JET_X\") b(\"JET_Y: {{v}}\") \"JETPACK_Z\" \"JETX\"", lits)
     assert_eq(lits.join(","), "f JET_X,f JETPACK_Z")

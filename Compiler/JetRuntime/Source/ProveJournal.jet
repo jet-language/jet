@@ -32,18 +32,18 @@ prove_journal_root := I64{0}
 
 rt_prove_journal_open: fn() {
     if (prove_journal_root != I64{0}) -> return
-    capture_key: jet_rt_string_clone(rt_static_text("JET_PROVE_CAPTURE_JOURNAL"))
+    capture_key: jet_rt_string_clone(env_name_jet_prove_capture_journal())
     capture: rt_env_get(capture_key)
     test_text_drop(capture_key)
     if (capture != I64{0}) {
         rt_prove_journal_publish(rt_prove_journal_root_new(I64{1}, capture))
         return
     }
-    records_key: jet_rt_string_clone(rt_static_text("JET_PROVE_REPLAY_JOURNAL"))
+    records_key: jet_rt_string_clone(env_name_jet_prove_replay_journal())
     records: rt_env_get(records_key)
     test_text_drop(records_key)
     if (records == I64{0}) -> return
-    trace_key: jet_rt_string_clone(rt_static_text("JET_PROVE_REPLAY_TRACE"))
+    trace_key: jet_rt_string_clone(env_name_jet_prove_replay_trace())
     trace: rt_env_get(trace_key)
     test_text_drop(trace_key)
     if (trace == I64{0}) {

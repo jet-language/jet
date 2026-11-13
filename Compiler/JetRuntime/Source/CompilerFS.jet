@@ -33,7 +33,7 @@ compiler_fs_errno: fn(operation: I64, path: I64, code: I64, error: I64) -> I64 {
 compiler_fs_cause: fn(operation: I64, code: I64) -> I64 {
     cause: host_errno_cause(code)
     if (code != I64{13} || operation != HOST_IO_OP_READ) -> return cause
-    scope: rt_env_get(rt_static_text("JET_READ_SCOPE"))
+    scope: rt_env_get(env_name_jet_read_scope())
     if (scope == I64{0}) -> return cause
     jet_rt_string_builder_push(cause, rt_static_text("; E1803: this run may read only "))
     jet_rt_string_builder_push(cause, scope)
