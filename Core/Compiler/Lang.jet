@@ -143,7 +143,10 @@ OverflowMode: enum {
 }
 
 /// Source path named by a marker argument. Empty variant menu: the value is
-/// the path text.
+/// the path text. Sema reads it at compile time; its bare name is the runtime
+/// `Path` handle's, which has no `text` field, so it refuses the Equatable and
+/// Comparable derives rather than build them over that handle.
+#[!Equatable, !Comparable]
 Path: struct {
     text: String
 }

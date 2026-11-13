@@ -24,7 +24,9 @@ use {
 // ANSI SGR parsing is Jet. Byte IO is host (fd 0/1/2).
 // The binary cursor `Reader.over(bytes)`. As the Prelude `Reader` it hands
 // out the bytes not yet read, the same ones `take` would: an empty list once
-// it is at its end.
+// it is at its end. It is the runtime's cursor handle, which has no equality
+// or order, so it refuses the Equatable and Comparable derives.
+#[!Equatable, !Comparable]
 Reader: struct {
     fd: Int
 

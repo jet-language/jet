@@ -64,6 +64,7 @@ ir_build_function: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, function: FnBod
     ir_depth_frame(m, b, function)
     if ir_failed(b) -> return
     ir_entry_check(m, b)
+    if ir_handle_equal_body(m, p, b, function) -> return
     ir_stmts(m, p, b, function.body)
     if ir_failed(b) || b.failures.len() > 0 -> return
     ir_return_fallthrough(m, p, b)
@@ -3853,6 +3854,26 @@ ir_tag_method: fn(m: IRModule, p: IRProgram, row: Int, left: Int, right: Int) ->
     if returned == .Named(name) -> ordered = ir_short_name(name) == "Ordering"
     if (function.name == "equal" && returned != Type.Bool) || (function.name == "compare" && !ordered) -> return ""
     function.name.copy()
+}
+
+// A derived `equal` (the Prelude Equatable derive) of a type the runtime
+// carries as a handle that compares, the default Err among them: the handle
+// has no fields for the derive's body to read, so the body is the runtime's
+// equality of the two handles (ir_equal_handle_symbol), as `==` on such a
+// type is (ir_equal_into). False when `function` is not one.
+ir_handle_equal_body: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, function: FnBody) -> Bool Never! {
+    if !function.synthetic || function.name != "equal" || function.kind == .TopLevel || function.generic_params.len() > 0 -> return false
+    if b.bindings.len() != 2 || b.f.result < 0 || b.bindings[0].indirect >= 0 || b.bindings[1].indirect >= 0 -> return false
+    returned: ir_executable_return(function) ?? return false
+    if returned != Type.Bool -> return false
+    left: b.bindings[0].slot
+    right: b.bindings[1].slot
+    row: b.f.slot_type[left]
+    if b.f.slot_type[right] != row || !ir_is_handle(m, row) -> return false
+    symbol: ir_equal_handle_symbol(p, ir_untag(m.types[row].ty)) ?? return false
+    equal: ir_runtime(m, b, symbol, [Int]{left, right}, b.f.result)
+    ir_return_slot(m, p, b, equal, function.source_span)
+    true
 }
 
 // The value of tag method `role` on discriminant words `left` and `right`:

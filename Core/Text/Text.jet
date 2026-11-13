@@ -42,27 +42,13 @@ use {
     unicode_category.[general_category, is_graphic_cp, punctuation_scalars]
 }
 
-/// Byte-offset cursor into UTF-8 text. Line and column are 1-based.
+/// The consuming text scanner `Cursor.over(text)`: the runtime's cursor
+/// handle (core-library.md, "Cursor — consuming text scanner"). Only the
+/// runtime fills the `priv handle`, and the handle has no equality or order,
+/// so the cursor refuses the Equatable and Comparable derives.
+#[!Equatable, !Comparable]
 Cursor: struct {
-    offset: Int
-    line: Int
-    column: Int
-}
-
-/// Cursor at the start of `text` (offset 0, line 1, column 1).
-cursor: fn(_text: String) -> Cursor Never! {
-    Cursor{offset: 0, line: 1, column: 1}
-}
-
-/// Advance `cur` by one UTF-8 scalar in `text`. Past the end is a no-op.
-cursor_advance: fn(text: String, cur: Cursor) -> Cursor Never! {
-    raw: text.bytes()
-    if cur.offset < 0 -> return Cursor{offset: 0, line: 1, column: 1}
-    if cur.offset >= raw.len() -> return cur.copy()
-    width: text_unicode_string.utf8_width_at(raw, cur.offset)
-    next: cur.offset + width
-    if raw[cur.offset] == (U8{10}) -> return Cursor{offset: next, line: cur.line + 1, column: 1}
-    Cursor{offset: next, line: cur.line, column: cur.column + 1}
+    priv handle: Int
 }
 
 /// Byte length of UTF-8 `text`. Equal to `text.bytes().len()`.

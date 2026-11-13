@@ -3581,7 +3581,7 @@ comparison as `==`; it does not normalize or clone either string.
 | `text.starts_any(value, prefixes)` / `ends_any(value, suffixes)` | `Bool` | Test any of several prefixes or suffixes. |
 | `text.splitn(value, separator, limit)` / `rsplitn(value, separator, limit)` | `[String]` | Split from the left or right with a maximum part count. |
 | `text.inspect(value)` | `[String]` | Return each scalar as `U+XXXX NAME`, using pinned Unicode names (Unicode 1.0 names for controls, `UNASSIGNED` where no name is recorded). |
-| `text.Cursor` / `text.cursor(value)` / `text.cursor_advance(text, cursor)` | type / cursor | Construct and advance a text cursor. |
+| `text.Cursor` | type | The consuming text scanner `Cursor.over(text)` (see "`Cursor` — consuming text scanner"). |
 
 `text.collate` is the Unicode Collation Algorithm (UTS #10) with the CLDR root
 table for Unicode 17.0.0, which is also English order. Variable weighting is

@@ -259,7 +259,10 @@ FileScope: struct {
 // The native file resources below are filled only by Core's own opens:
 // their `priv handle` keeps a literal outside core.files from forging one,
 // and `path` is computed over `priv stored_path`, so it stays readable
-// (core-library.md:635/:701) while no code can write it.
+// (core-library.md:635/:701) while no code can write it. A resource is the
+// runtime's handle, which has no equality or order, so each refuses the
+// Equatable and Comparable derives.
+#[!Equatable, !Comparable]
 MappedFile: struct {
     priv stored_path: String
     path: String -> stored_path
@@ -285,6 +288,7 @@ MappedFile: struct {
     }
 }
 
+#[!Equatable, !Comparable]
 TempDir: struct {
     priv stored_path: String
     path: String -> stored_path
@@ -292,12 +296,14 @@ TempDir: struct {
     priv handle: Int
 }
 
+#[!Equatable, !Comparable]
 TempFile: struct {
     priv stored_path: String
     path: String -> stored_path
     priv handle: Int
 }
 
+#[!Equatable, !Comparable]
 FileLock: struct {
     priv stored_path: String
     path: String -> stored_path
@@ -356,6 +362,7 @@ AdvisoryLock: struct {
 /// to `limit` bytes to `buffer` and returns the count, 0 at end of file.
 /// Only Core's opens fill the `priv handle`, so a literal outside core.files
 /// cannot forge one.
+#[!Equatable, !Comparable]
 FileReader: struct {
     priv stored_path: String
     path: String -> stored_path
@@ -394,6 +401,7 @@ FileReader: struct {
 /// `flush` hands the bytes to the system and `fsync` also makes them durable.
 /// Only Core's opens fill the `priv handle`, so a literal outside core.files
 /// cannot forge one.
+#[!Equatable, !Comparable]
 FileWriter: struct {
     priv stored_path: String
     path: String -> stored_path
