@@ -1,0 +1,17 @@
+Error [jet.ReadDuringWriteWindow]: `counts` cannot be read while `c` has a live exclusive write window into it
+  --> tests/ui/ownership/map_value_window_blocks_map_growth.jet:9:5
+    |
+  9 |     counts["z"] = 1
+    |     ^^^^^^
+ Why: `c` is an exclusive window into `counts`; reading the owner beside that window would be rejected after lowering
+ Fix: Read or edit through `c` instead of `counts`
+More: jet-lang.dev/e/E0220
+
+Error [jet.OwnerMovedWhileViewed]: `counts[…]` cannot be assigned while `c` is still looking into it
+  --> tests/ui/ownership/map_value_window_blocks_map_growth.jet:9:11
+    |
+  9 |     counts["z"] = 1
+    |           ^^^^^
+ Why: `c` is a live exclusive mutable view into `counts`; changing or moving the owner could invalidate that view
+ Fix: Finish using `c` before changing `counts[…]`, narrow the view's scope, or make an owned copy
+More: jet-lang.dev/e/E0212

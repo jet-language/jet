@@ -3712,6 +3712,17 @@ sema_stmt_binding_is_write_window: fn(state: SemaOwnershipState, key: String) ->
     false
 }
 
+// `name: &map[key]` binds a write window over one map value
+// (SemaScopeBinding.map_slot).
+sema_stmt_binds_map_slot: fn(statement: TStmt) -> Bool Never! {
+    if statement == .Let(_, _, init, _, _, _) {
+        if init.kind == .Borrow(place, access) {
+            if access == AccessConvention.Write && place.kind == .Index(_, _, kind, _, _, _) -> return kind == .Map
+        }
+    }
+    false
+}
+
 // Rust `place_from_expr` on a range: `xs[a..b]` over a named place (through
 // fields and indexes) is the source of a read window, and so is `xs[band]`
 // when the local `band` holds a range.
@@ -8067,8 +8078,11 @@ sema_stmt_check_returned_value: fn(value: Expr, return_type: Type?, environment:
     // A named `View<T>` boundary reads every bare place through a window
     // (Rust wraps it before the audit), so only other returns are audited.
     if return_type != None && !sema_stmt_return_is_view_boundary(return_type) -> sema_copy_site_check_borrowed_return(value, environment, program, scopes, context, diagnostics)
-    // Neither a returned window nor its owning copy moves the window's owner.
-    moved := materialized_string_view || string_view_return || (!view_valid) || sema_stmt_move_direct(value, state, scopes, "`return`", diagnostics)
+    // Neither a returned window nor its owning copy moves the window's owner;
+    // nor does a one-value window over a map value, which a `&map[key]` name
+    // turns into at this boundary (sema_expr_check_ident).
+    one_value_window: checked.kind == .Borrow(_, _)
+    moved := materialized_string_view || string_view_return || one_value_window || (!view_valid) || sema_stmt_move_direct(value, state, scopes, "`return`", diagnostics)
     if !view_valid || !moved -> return None
     Val(checked)
 }
@@ -8587,6 +8601,7 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, environment: S
                             }
                         }
                         if !binding.mutable && binding.pattern == None -> sema_scope_mark_lambda_binding(scopes, binding.name, value)
+                        if !binding.mutable && binding.pattern == None && sema_stmt_binds_map_slot(value) -> sema_scope_mark_map_slot(scopes, binding.name)
                         output.push(value)
                         // A bare `None` start can check as a value after its E0308.
                         sema_stmt_empty_start_report(binding, statements, index, return_type, context.value_tail_span, environment, scopes, diagnostics)

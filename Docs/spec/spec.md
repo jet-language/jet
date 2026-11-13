@@ -1817,6 +1817,13 @@ A positional enum constructor preserves the payload's access: with
 `edit: &values[0..1]`, `Choice.First(edit)` fills a declared `ViewMut<Int>`
 payload with that write window. It cannot grant write access to a read-only
 parameter or turn an unmarked owned slice into a write view.
+A name bound to one map value (`w: &m[key]`) reads and writes as that value.
+Where a `ViewMut<V>` of the value's type is expected (a return, a parameter),
+it is a window over that one value, used as `w[0]` like the one-element list
+window `&xs[i..i]`. A `slot: fn(m: &[String: [Int]], key: String) ->
+ViewMut<[Int]> from m` whose body binds `w: &m[key]` and returns `w` lets the
+caller edit the entry by `s[0].push(1)`. A missing key stops as `m[key]` does,
+and while the window lives the map cannot gain or lose entries (E0220, E0212).
 At a string boundary, fill `View<str>` only from `.trim()`, `.after()`,
 `.before()`, or a tracked string-view binding; a plain owned `String` is not a
 borrowed window.

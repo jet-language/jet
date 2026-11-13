@@ -1,0 +1,12 @@
+// A `&m[key]` name passed where a `ViewMut` of the value is expected is the
+// same one-value window.
+bump: fn(w: ViewMut<Int>) {
+    w[0] = w[0] + 1
+}
+
+run: fn() {
+    counts := [String: Int]{"a": 0}
+    w: &counts["a"]
+    bump(w)
+    print(counts["a"])
+}

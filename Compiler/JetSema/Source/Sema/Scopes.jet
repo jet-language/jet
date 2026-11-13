@@ -129,6 +129,11 @@ SemaScopeBinding: struct {
     // A `name: (…) -> …` local bound to a lambda keeps the lambda's
     // ClosureInfo record, which `name.reflect()` reads.
     closure: TComptimeValue?{None}
+    // A `:` name bound to `&map[key]` is a write window over that one map
+    // value: it reads and writes as the value, and where a `ViewMut` of the
+    // value's type is expected it is a one-value window, used as `w[0]`
+    // (sema_expr_check_ident).
+    map_slot: Bool{false}
 }
 
 SemaOriginFact: struct {
@@ -2375,6 +2380,14 @@ sema_scope_declare_local: fn(table: &SemaScopeTable, symbol: Symbol, mutable: Bo
 sema_scope_mark_place_alias: fn(table: &SemaScopeTable, name: String) Never! {
     index: sema_scope_resolve_index(table, name) ?? return
     table.bindings[index].place_alias = true
+}
+
+// Marks the `:` binding `name` just declared as a window over one map value
+// (see SemaScopeBinding.map_slot).
+sema_scope_mark_map_slot: fn(table: &SemaScopeTable, name: String) Never! {
+    index: sema_scope_resolve_index(table, name) ?? return
+    sema_scope_note_binding_edit(table, index)
+    table.bindings[index].map_slot = true
 }
 
 // Keeps `init` on the `:` binding `name` just declared (see

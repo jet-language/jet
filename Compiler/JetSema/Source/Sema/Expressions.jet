@@ -4688,7 +4688,12 @@ sema_expr_check_ident: fn(name: String, span: Span, expected: Type?, environment
         local := checked_symbol_local(name, scopes.bindings[index].symbol.span, scopes.bindings[index].symbol.id, ty)
         local.mutable = scopes.bindings[index].mutable
         local.integer_bounds = scopes.bindings[index].integer_bounds
-        value: TExpr{ty: ty, kind: TExprKind.Local{local: local}, span: span}
+        place: TExpr{ty: ty, kind: TExprKind.Local{local: local}, span: span}
+        // A name bound to `&map[key]` (SemaScopeBinding.map_slot), where a
+        // `ViewMut` of the value's type is expected, is a window over that one
+        // map value, read and written as `w[0]`.
+        window: if scopes.bindings[index].map_slot -> sema_expr_one_value_window(place.ty, expected) else -> None
+        value: if window == .Val(window_ty) -> TExpr{ty: window_ty, kind: TExprKind.Borrow{place: place, access: AccessConvention.Write}, span: span} else -> place
         result = sema_expr_expected(value, expected, environment, program, diagnostics)
     }
     if kind == SymbolKind.Constant || kind == SymbolKind.Function {
@@ -4698,6 +4703,15 @@ sema_expr_check_ident: fn(name: String, span: Span, expected: Type?, environment
         result = sema_expr_expected(value, expected, environment, program, diagnostics)
     }
     result
+}
+
+// The `ViewMut<V>` that `expected` asks for when `V` is `value`'s type.
+sema_expr_one_value_window: fn(value: Type, expected: Type?) -> Type? Never! {
+    required: expected ?? return None
+    if sema_expr_unwrap_tag(required) == .Apply(name, args) {
+        if name == "ViewMut" && args.len() == 1 && args[0] == value -> return Val(required.copy())
+    }
+    None
 }
 
 // E0227: a named function with a `&` or `&&` parameter is a value only where

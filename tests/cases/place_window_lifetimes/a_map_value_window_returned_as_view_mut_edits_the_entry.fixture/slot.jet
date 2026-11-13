@@ -1,0 +1,23 @@
+// `&m[key]` handed back where a `ViewMut` of the value is expected is a
+// window over that one map value: the caller edits the entry through `s[0]`.
+slot: fn(m: &[String: [Int]], key: String) -> ViewMut<[Int]> from m {
+    w: &m[key]
+    w
+}
+
+count: fn(m: &[String: Int], key: String) -> ViewMut<Int> from m {
+    w: &m[key]
+    w
+}
+
+run: fn() {
+    m := [String: [Int]]{"a": [Int]{}}
+    s: slot(m, "a")
+    s[0].push(1)
+    print(m["a"].len())
+    counts := [String: Int]{"a": 0, "b": 5}
+    c: count(counts, "b")
+    c[0] = c[0] + 2
+    n: c.len()
+    print("{n} {counts["b"]} {counts["a"]}")
+}

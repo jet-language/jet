@@ -1,0 +1,40 @@
+# `&m[key]` where a `ViewMut` of the map's value type is expected (a returned
+# window, a `ViewMut` parameter) is a window over that one map value, used as
+# `w[0]` like a one-element list window: edits through it reach the entry on
+# every tier. While it lives the map cannot gain an entry (the loan the list
+# window records), and a missing key stops as `m[key]` does.
+fixture: a_map_value_window_returned_as_view_mut_edits_the_entry.fixture
+env: NO_COLOR=1
+step check: jet check slot.jet
+exit: 0
+step o0: jet run --optimize=none slot.jet
+exit: 0
+stdout: = "1\n1 7 0\n"
+step o1: jet run --optimize=basic slot.jet
+exit: 0
+stdout: = "1\n1 7 0\n"
+step o2: jet run --optimize=full slot.jet
+exit: 0
+stdout: = "1\n1 7 0\n"
+step pass_o0: jet run --optimize=none pass.jet
+exit: 0
+stdout: = "1\n"
+step pass_o2: jet run --optimize=full pass.jet
+exit: 0
+stdout: = "1\n"
+step grow: jet check grow.jet
+exit: 1
+stderr: ~ "Error [jet.ReadDuringWriteWindow]" # the map write is refused; the snapshot is tests/ui/ownership/map_value_window_blocks_map_growth
+stderr: ~ "grow.jet:10:5" # at the map write
+step missing_o0: jet run --optimize=none missing.jet
+exit: 70
+stdout: = ""
+stderr: ~ "the map has no entry for key \"z\"" # the stop message; the stderr also carries the stop's location
+step missing_o1: jet run --optimize=basic missing.jet
+exit: 70
+stdout: = ""
+stderr: ~ "the map has no entry for key \"z\"" # the stop message; the stderr also carries the stop's location
+step missing_o2: jet run --optimize=full missing.jet
+exit: 70
+stdout: = ""
+stderr: ~ "the map has no entry for key \"z\"" # the stop message; the stderr also carries the stop's location

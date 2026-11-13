@@ -7050,6 +7050,10 @@ ir_borrow: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: Int, a
             }
             return ir_slice(m, p, b, ty, base, start, end, range, location, span)
         }
+        // A `ViewMut<V>` over a `V` place (sema_expr_check_ident: a
+        // `&map[key]` name where a `ViewMut` is expected) is a window over
+        // that one value.
+        if ir_view_element(ty) == .Val(element) && ir_untag(element) == ir_untag(value_ty) -> return ir_value_window(m, p, b, ty, value, span)
         // An inline Option is written in place: the window's payload is the
         // word at the place (ir_bind_pending), which a variable keeps in a
         // frame cell (ir_window_cells). The subject is the word read there.
@@ -7084,6 +7088,31 @@ ir_borrow: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: Int, a
         }
     }
     ir_fail_slot(b, span, "borrow {access} of {ir_type_name(value_ty)}")
+}
+
+// The one-value window over a write place: the header ir_write_window builds,
+// with the place's own address as its data and length 1. The capacity -1
+// marks it a window, never counted or freed; the fixed length keeps a callee
+// from growing it. A map value's address is ir_map_place_address's, which
+// stops on a missing key as a read does.
+ir_value_window: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, place: Int, span: Span) -> Int Never! {
+    row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
+    backs := [IRWriteBack]{}
+    address: ir_place_address(m, p, b, place, backs, span)
+    if ir_failed(b) || address < 0 -> return -1
+    place_ty: ir_ty(p, b, place)
+    if backs.len() > 0 -> return ir_fail_slot(b, span, "one-value window into a {ir_type_name(place_ty)} place outside other storage")
+    pointer_row: ir_pointer_row(m)
+    data: ir_temp(m, b, pointer_row)
+    ir_emit(b.f, IROp.Offset, data, address, 0, -1, b.line)
+    window: ir_temp(m, b, row)
+    ir_emit(b.f, IROp.StackAddress, window, 24, 8, -1, b.line)
+    one: ir_word_const(m, b, 1)
+    ir_emit(b.f, IROp.Store, -1, window, 0, one, b.line)
+    unowned: ir_word_const(m, b, -1)
+    ir_emit(b.f, IROp.Store, -1, window, 8, unowned, b.line)
+    ir_emit(b.f, IROp.Store, -1, window, 16, data, b.line)
+    window
 }
 
 // `mem.pin(place)`: the address of the pinned aggregate's own
