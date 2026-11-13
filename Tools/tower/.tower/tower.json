@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6777,
-    "rev": 101197,
+    "rev": 101198,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -71761,7 +71761,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T13:32:14.611Z",
-      "updated": "2026-11-09T19:03:08.340Z",
+      "updated": "2026-11-13T03:42:39.334Z",
       "updatedBy": "Main",
       "criteriaLastN": 5
     },
@@ -193684,6 +193684,217 @@
       "draft": false,
       "status": "open",
       "created": "2026-11-13T03:41:03.966Z"
+    },
+    {
+      "id": "D-ROUND-EVEN1",
+      "cardId": "c0vhdiiv",
+      "group": "library",
+      "title": "Rounding a Float to an Int: make every rounding a Float and convert with Int{}, keep only round_even a Float, or make round_even return an Int",
+      "situation": "D-FLOAT-INT1=A puts math.round_even beside math.round as a way to get an Int, and the card text says round_even(f) returns an Int. Today math.round_even is the C23 roundeven function: it takes a Float and returns the nearest whole Float, ties to even. A test pins it bit for bit against musl, and the libc census maps C's roundeven to it. 42 lines of Jet code call it, 35 of them inside Core/Math/Math.jet. math.trunc, math.floor and math.ceil also return a whole Float, but math.round returns an Int. The exact Int{f} conversion is now built, so Int{math.round_even(f)} already gives the Int. This vote decides which roundings return an Int.",
+      "gist": "Should every rounding return a whole Float that Int{} converts, or should math.round_even return an Int as the card says?",
+      "lesson": "Rounding 2.5 to the nearest whole number has two common rules: ties away from zero gives 3, and ties to even gives 2. Jet's math.round returns an Int with the first rule. trunc, floor, ceil and round_even return a whole Float. This vote picks how a program gets an Int from each.",
+      "explainer": "Words used here. A tie is a value exactly halfway between two whole numbers, such as 2.5. Ties to even picks the even neighbor, so 2.5 becomes 2 and 3.5 becomes 4. Int{f} converts a whole Float to an Int and stops on anything else.",
+      "story": "Bo stores prices in cents and rounds halves to even, as banks do. Under A or B he writes Int{math.round_even(dollars * 100.0)}. Under C he writes math.round_even(dollars * 100.0). Under D he writes math.round_even_int(dollars * 100.0). His layout code places a box at math.round(x) pixels today; under A it writes Int{math.round(x)}, the same shape as Int{math.floor(x)}.",
+      "inWild": "// Rust: every rounding returns f64, and the program converts.\nlet cents = (dollars * 100.0).round_ties_even() as i64;\nlet px = x.round() as i64;",
+      "detail": "What this ballot decides. Which core.math roundings return an Int, now that Int{f} converts a whole Float exactly.\n\nToday's round_even. Core/Math/Math.jet declares round_even: fn(n: Float) -> Float, the C23 roundeven. The musl bit-for-bit case calls it, and Tools/agent/LibcCensus.jet maps rint, nearbyint, lrint, llrint and roundeven to it. 42 non-comment lines of Jet call it: 35 in Core/Math/Math.jet, 2 in Examples/Math/FloatExactOps.jet, 4 in two perf tools and 1 in the musl fixture.\n\nToday's round. math.round is fn(n: Float) -> Int, ties away from zero. 57 non-comment lines call math.round in 27 files, and 6 test lines in Core/Math/Math.jet call it unqualified, 63 lines in all.\n\nWhat the card says. #6313 c5 reads: New math.round_even(f) -> Int rounds ties to even, and math.round and round_even stop on NaN, infinity and out of range.\n\nA makes math.round return a whole Float, ties away, as C's round does, and keeps round_even a Float. Every rounding is then Int{math.X(f)}. The stop on NaN, infinity and out of range lives only in Int{}, so part a's stopping math.round is replaced.\n\nB keeps round_even a Float and keeps round an Int that stops by itself. C renames the Float function to round_ties_even, as Rust names it, and makes round_even return an Int. D keeps round_even and adds round_even_int.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Every rounding is a Float; convert with Int{}",
+          "detail": "math.round_even stays the C23 roundeven. math.round also becomes Float to Float, ties away from zero, as C's round and Rust's f64::round are. trunc, floor, ceil, round and round_even then all return a whole Float, and Int{math.X(f)} is the one Int path. Only Int{} stops on NaN, an infinity or a value out of range.",
+          "technical": "Core/Math/Math.jet: round becomes fn(n: Float) -> Float Never!, ties away, returning NaN and infinities unchanged. Rewrite the 63 call lines that want an Int to Int{math.round(x)}. Update the core-library.md row, the LibcCensus note for lround and llround, and the part a goldens that show round stopping. Card #6313 c5 text: the stops are Int{math.round(f)} and Int{math.round_even(f)}.",
+          "code": "use math: core.math\n\nrun: fn() {\n    dollars: 0.125\n    cents: Int{math.round_even(dollars * 100.0)}\n    print(cents)   // 12\n    print(math.round(2.5))   // 3.0, a Float like floor and ceil\n    print(Int{math.round(2.5)})   // 3\n}"
+        },
+        {
+          "key": "B",
+          "name": "Only round_even stays a Float",
+          "detail": "math.round_even stays the C23 roundeven, Float to Float. The Int path is Int{math.round_even(f)}, which stops on NaN, an infinity or a value out of range, as the card wants. math.round keeps returning an Int and stops by itself. The card's criterion text is corrected to name that spelling.",
+          "technical": "No change to Core/Math/Math.jet, Compiler/Prelude/Core.rows, the musl case or LibcCensus. Card #6313 c5 text: replace `New math.round_even(f) -> Int` with `Int{math.round_even(f)}`; the golden Examples/Math/FloatToInt.jet already prints it.",
+          "code": "use math: core.math\n\nrun: fn() {\n    dollars: 0.125\n    cents: Int{math.round_even(dollars * 100.0)}\n    print(cents)   // 12\n    print(math.round_even(2.5))   // 2.0, still the C23 roundeven\n    print(math.round(2.5))   // 3, still an Int\n}"
+        },
+        {
+          "key": "C",
+          "name": "round_even returns Int; rename the Float op",
+          "detail": "math.round_even(f) returns an Int and stops on NaN, an infinity or a value out of range, as math.round does. The Float function is renamed math.round_ties_even, Rust's name for it. Every caller of the Float function moves to the new name.",
+          "technical": "Core/Math/Math.jet: rename round_even to round_ties_even (35 lines there) and add round_even: fn(n: Float) -> Int Never! that returns Int{round_ties_even(n)}. Move the other 7 call lines (FloatExactOps.jet, two perf tools, the musl fixture). Update both core.math rows in Compiler/Prelude/Core.rows, the core-library.md row and LibcCensus.jet.",
+          "code": "use math: core.math\n\nrun: fn() {\n    dollars: 0.125\n    cents: math.round_even(dollars * 100.0)\n    print(cents)   // 12\n    print(math.round_ties_even(2.5))   // 2.0, the renamed C23 op\n}"
+        },
+        {
+          "key": "D",
+          "name": "Both, under two names",
+          "detail": "math.round_even stays Float to Float. A new math.round_even_int(f) returns an Int and stops on NaN, an infinity or a value out of range. No caller moves, and core.math gains one public function.",
+          "technical": "Core/Math/Math.jet: add round_even_int: fn(n: Float) -> Int Never! that returns Int{round_even(n)}, and export it in both core.math rows of Compiler/Prelude/Core.rows. Add one core-library.md row. New public Core API.",
+          "code": "use math: core.math\n\nrun: fn() {\n    dollars: 0.125\n    cents: math.round_even_int(dollars * 100.0)\n    print(cents)   // 12\n    print(math.round_even(2.5))   // 2.0, unchanged\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "f64::round and f64::round_ties_even both return f64; the program converts with as.",
+          "code": "let cents = (dollars * 100.0).round_ties_even() as i64;"
+        },
+        {
+          "lang": "C",
+          "note": "round and roundeven return double; lround and llrint give the integer.",
+          "code": "long long cents = llrint(dollars * 100.0);"
+        },
+        {
+          "lang": "Python",
+          "note": "round() ties to even and returns an int.",
+          "code": "cents = round(dollars * 100)"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "A is the only option where every rounding has one shape, Int{math.X(f)}, and the stop lives in one place, Int{}. It matches C and Rust, where round returns a Float too. It keeps the C23 name that the musl test and the libc census rely on.",
+        "gains": [
+          "One spelling for every rounding: Int{math.floor(f)}, Int{math.round(f)}, Int{math.round_even(f)}.",
+          "Only Int{} stops on NaN, an infinity or a value out of range.",
+          "C, Rust and musl names and result types keep matching."
+        ],
+        "losses": [
+          {
+            "loss": "63 call lines change from math.round(x) to Int{math.round(x)}.",
+            "mitigation": "Each is the same mechanical rewrite in one commit, and an old use left behind is a type error at build time."
+          },
+          {
+            "loss": "Part a's stopping math.round is replaced.",
+            "mitigation": "Int{math.round(f)} stops on exactly the inputs part a's round stops on."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B leaves math.round the one rounding that returns an Int, so it has no single spelling for every rounding."
+          },
+          {
+            "key": "C",
+            "reason": "C renames a C23 function and moves 42 call lines, and round and round_even still differ from trunc, floor and ceil."
+          },
+          {
+            "key": "D",
+            "reason": "D adds public API whose job Int{math.round_even(f)} already does."
+          }
+        ],
+        "tradeoff": "63 call lines grow by Int{}, in exchange for one shape for every rounding."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: Main. The first draft lacked the option where every rounding is a Float, so its claim of one spelling was false. The revision adds it as A and gives exact grep counts."
+      },
+      "checkInstructions": "In the Jet repository, count the round_even call lines C moves. Run git grep -n -P '^(?!\\s*//).*\\bround_even\\(' 98469bf0cf -- '*.jet'; it lists 42 lines, 35 in Core/Math/Math.jet.\n\nCount the math.round call lines A rewrites. Run git grep -n -P '^(?!\\s*//).*\\bmath\\.round\\(' 98469bf0cf -- '*.jet'; it lists 57 lines in 27 files. Then run git grep -n -P '^(?!\\s*//).*(?<![.\\w])round\\(' 98469bf0cf -- 'Core/Math/*.jet' for the 6 test lines.\n\nRun jet run on option B's program once the Int{f} conversion lands (inbox G3Core2-float-int-exact); it prints 12, 2.0 and 3. Validate this payload with Tools/agent/ballots/Validate.jet.",
+      "surface": {
+        "gist": "Make every rounding a Float that Int{} converts, or make round_even return an Int?",
+        "lesson": "Rounding 2.5 can give 3 (ties away) or 2 (ties to even). math.round gives an Int; trunc, floor, ceil and round_even give a Float. This vote picks how each gets an Int.",
+        "trio": {
+          "current": {
+            "note": "round_even is C23 roundeven: Float in, whole Float out. round returns an Int.",
+            "code": "cents: Int{math.round_even(dollars * 100.0)}\npx: math.round(x)"
+          },
+          "wild": {
+            "lang": "Rust",
+            "note": "Every rounding returns f64; the program converts.",
+            "code": "let cents = (dollars * 100.0).round_ties_even() as i64;"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Every rounding a Float",
+            "gist": "round becomes a Float too; Int{} gives every Int.",
+            "gains": [
+              "One shape for every rounding.",
+              "Only Int{} stops."
+            ],
+            "losses": [
+              "63 call lines gain Int{}."
+            ],
+            "proposed": {
+              "code": "cents: Int{math.round_even(dollars * 100.0)}\npx: Int{math.round(x)}"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Only round_even a Float",
+            "gist": "Int{} gives the Int; round stays an Int.",
+            "gains": [
+              "No code change.",
+              "C23 name kept."
+            ],
+            "losses": [
+              "round differs from the other roundings."
+            ],
+            "proposed": {
+              "code": "cents: Int{math.round_even(dollars * 100.0)}"
+            }
+          },
+          {
+            "key": "C",
+            "name": "round_even returns Int",
+            "gist": "The Float op becomes round_ties_even.",
+            "gains": [
+              "Matches the card text."
+            ],
+            "losses": [
+              "42 call lines move.",
+              "C23 name lost."
+            ],
+            "proposed": {
+              "code": "cents: math.round_even(dollars * 100.0)"
+            }
+          },
+          {
+            "key": "D",
+            "name": "Two names",
+            "gist": "Keep round_even; add round_even_int.",
+            "gains": [
+              "No caller moves."
+            ],
+            "losses": [
+              "New public API."
+            ],
+            "proposed": {
+              "code": "cents: math.round_even_int(dollars * 100.0)"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "One shape, Int{math.X(f)}, for every rounding, with the stop in one place, as in C and Rust.",
+          "gains": [
+            "One shape for every rounding.",
+            "C23 name kept."
+          ],
+          "losses": [
+            {
+              "loss": "63 call lines gain Int{}.",
+              "mitigation": "One mechanical rewrite; old uses fail to build."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "round stays the one Int rounding."
+            },
+            {
+              "key": "C",
+              "reason": "Renames a C23 function; 42 call lines move."
+            },
+            {
+              "key": "D",
+              "reason": "New API for what Int{} already does."
+            }
+          ],
+          "tradeoff": "63 longer call lines, for one shape for every rounding."
+        }
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-13T03:42:39.334Z"
     }
   ],
   "questions": [
@@ -196951,6 +197162,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-13T03:42:39.334Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-ROUND-EVEN1",
+      "note": "Rounding a Float to an Int: make every rounding a Float and convert with Int{}, keep only round_even a Float, or make round_even return an Int"
+    },
     {
       "at": "2026-11-13T03:41:03.966Z",
       "by": "Main",
