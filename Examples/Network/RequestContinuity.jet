@@ -1,0 +1,154 @@
+// Each request keeps its own principal and its own transaction outcome while
+// others run beside it. A rolled-back payment writes nothing. A client that
+// hangs up after its payment committed loses only the reply: the app's ledger
+// and the table both say committed. A request whose deadline passed before
+// dispatch changes nothing. The pool is ready before the app and outlives it:
+// a second app uses the same pool, and the pool drains after both.
+package: {
+    name: "request_continuity"
+    authority: { allow: [DB, DB.Read, DB.Write, FS, IO, Mem.Alloc, Mem.Rc, Net, Time] }
+}
+
+use {
+    db: core.db
+    files: core.files
+    http_server: core.http.server
+    net: core.net
+    time: core.time
+    web: core.web
+}
+
+Ledger: struct { lines: [String] }
+
+note: fn(ledger: Shared<Ledger>, line: String) {
+    guard := ledger.guard_edit()
+    guard.value.lines.push(line.copy())
+}
+
+ledger_size: fn(ledger: Shared<Ledger>) -> Int { ledger.guard_read().value.lines.len() }
+
+// The service: one payment by the request's principal, in its own
+// transaction on its own connection. `rollback` undoes it; `hold` waits
+// before starting, so another request runs in between; `slow` commits after
+// the client has had time to hang up.
+pay: fn(path: String, ledger: Shared<Ledger>, request: HTTPRequest) -> HTTPResponse HTTPError! {
+    who: request.header("x-user") ?? return Ok(http_server.response(401, "no principal"))
+    deadline: Int.parse(request.header("x-deadline-ms") ?? "0") ?? 0
+    if deadline > 0 && time.now().to_unix_ms() > deadline {
+        note(ledger, "{who}: deadline passed before dispatch, nothing written")
+        return Ok(http_server.response(504, "{who}: deadline passed"))
+    }
+    mode: request.text() ?? return Ok(http_server.response(400, "unreadable"))
+    if mode == "hold rollback" || mode == "slow" -> time.sleep(500ms)
+    conn: db.open(path)
+    scoped: conn.with_policy(db.policy("payments", "true") ?? return Ok(http_server.response(503, "policy")), "service")
+    tx: scoped.begin() ?? return Ok(http_server.response(503, "begin"))
+    _: scoped.execute(SQL{"INSERT INTO payments (who) VALUES ({who})"}) ?? return Ok(http_server.response(503, "insert"))
+    outcome := "committed"
+    if mode == "hold rollback" {
+        tx.rollback() ?? return Ok(http_server.response(503, "rollback"))
+        outcome = "rolled back"
+    } else {
+        tx.commit() ?? return Ok(http_server.response(503, "commit"))
+    }
+    _: conn.close()
+    note(ledger, "{who}: {outcome}")
+    Ok(http_server.response(200, "{who}: {outcome}"))
+}
+
+// Every request holds one pool lease while it runs.
+admit: fn(pool: DBPool, path: String, ledger: Shared<Ledger>, request: HTTPRequest) -> HTTPResponse HTTPError! {
+    lease: pool.acquire(deadline: 1s) ?? return Ok(http_server.response(503, "pool busy"))
+    response: pay(path, ledger, request)
+    lease.close() ?? return Ok(http_server.response(500, "lease"))
+    Ok(response)
+}
+
+crlf: fn() -> String { String.from_bytes([U8]{13, 10}) ?? panic("CRLF") }
+
+// Sends one payment request and returns the open connection.
+send: fn(addr: String, who: String, mode: String, deadline: Int) -> TCPStream NetError! {
+    client: net.tcp_connect(addr) ?? return Err(err)
+    limit: if deadline > 0 -> "x-deadline-ms: {deadline}{crlf()}" else -> ""
+    client.write_all("POST /pay HTTP/1.1{crlf()}Host: local{crlf()}x-user: {who}{crlf()}{limit}Content-Length: {mode.bytes().len()}{crlf()}Connection: close{crlf()}{crlf()}{mode}".bytes()) ?? return Err(err)
+    Ok(client)
+}
+
+// The body of the reply on `client`, read until the server closes it.
+reply: fn(client: TCPStream) -> String {
+    parts := [String]{}
+    loop {
+        part: client.read_text(8192) ?? break
+        if part == "" -> break
+        parts.push(part)
+    }
+    sections: parts.join("").split("{crlf()}{crlf()}").to_list()
+    sections[sections.len() - 1]
+}
+
+payments: fn(path: String) -> String {
+    conn: db.open(path)
+    scoped: conn.with_policy(db.policy("payments", "true") ?? panic("policy"), "service")
+    rows: scoped.query(SQL{"SELECT who FROM payments ORDER BY id"}) ?? panic("query")
+    names := [String]{}
+    loop row in rows -> names.push(db.row_text(row, "who") ?? "?")
+    _: conn.close()
+    names.join(" ")
+}
+
+run: fn() (HTTPError | NetError | TaskFailure | IOError)! {
+    scratch: files.temp_dir("request-continuity")
+    path: "{scratch.path}/payments.sqlite"
+    setup: db.open(path)
+    scoped: setup.with_policy(db.policy("payments", "true") ?? panic("policy"), "service")
+    _: db.migrate(scoped, "payments-v1", [SQL{"CREATE TABLE payments (id INTEGER PRIMARY KEY, who TEXT NOT NULL)"}]) ?? panic("migrate")
+    _: setup.close()
+
+    pool: db.pool(path, max: 4) ?? panic("pool")
+    print("pool ready before the app: {pool.ready() ?? false}")
+    ledger: Shared{Ledger{lines: [String]{}}}
+    app: web.app().post("/pay", fn(request: HTTPRequest) { admit(pool.copy(), path.copy(), ledger.copy(), request) })
+    listening: app.bind("127.0.0.1:0")
+    addr: listening.local_addr()
+    serving: task { listening.serve() ?? panic("serve") }
+
+    // ana's request is held while bo's runs start to finish.
+    ana: send(addr, "ana", "hold rollback", 0)
+    bo: send(addr, "bo", "commit", 0)
+    print("first reply: {reply(bo)}")
+    print("second reply: {reply(ana)}")
+
+    // cy hangs up before the reply; the payment still commits.
+    cy: send(addr, "cy", "slow", 0)
+    cy.close() ?? panic("hang up")
+    polls := 0
+    loop ledger_size(ledger) < 3 && polls < 400 {
+        time.sleep(5ms)
+        polls = polls + 1
+    }
+    print("cy hung up before the reply")
+
+    // dee's deadline passed before dispatch.
+    dee: send(addr, "dee", "commit", time.now().to_unix_ms() - 1)
+    print("dee reply: {reply(dee)}")
+
+    _: listening.shutdown()
+    serving.join()
+    loop line in ledger.guard_read().value.lines -> print("ledger: {line}")
+    print("rows: {payments(path)}")
+
+    // The pool outlives the app: a second app uses it, then it drains.
+    after: pool.receipt()
+    print("after the app: pool ready {pool.ready() ?? false}, leased {after.leased}")
+    second: web.app().post("/pay", fn(request: HTTPRequest) { admit(pool.copy(), path.copy(), ledger.copy(), request) })
+    again: second.bind("127.0.0.1:0")
+    again_addr: again.local_addr()
+    again_serving: task { again.serve() ?? panic("serve again") }
+    eve: send(again_addr, "eve", "commit", 0)
+    print("second app reply: {reply(eve)}")
+    _: again.shutdown()
+    again_serving.join()
+    drained: pool.drain(deadline: 2s) ?? panic("drain")
+    print("pool drained after both apps: leased {drained.leased}, acquires {drained.acquires}")
+    print("rows: {payments(path)}")
+}
