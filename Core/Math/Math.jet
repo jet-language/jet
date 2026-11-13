@@ -14372,6 +14372,12 @@ rem_quo: fn(a: Float, b: Float) -> (rem: Float, quo: Int) Never! {
     q = q.bit_and(2147483647)
     (rem: if sx -> -x else -> x, quo: if sx != sy -> -q else -> q)
 }
+// rem_quo of two F32s (an all-F32 call): the Float rem_quo of the exactly
+// widened operands, whose remainder an F32 holds exactly; a NaN stays NaN.
+__rem_quo_f32: fn(a: F32, b: F32) -> (rem: F32, quo: Int) Never! {
+    split: rem_quo(Float.from_f32(a), Float.from_f32(b))
+    (rem: __f32_narrow(split.rem), quo: split.quo)
+}
 // remquo.c: the significand of binary64 `bits` with its leading bit at bit
 // 52, a subnormal's shifted up to it.
 __remquo_significand: fn(bits: Int, biased: Int) -> Int Never! {
@@ -14860,6 +14866,9 @@ __payload_bits_f32: fn(payload: F32) -> Int? Never! {
     split: rem_quo(7.0, -2.0)
     assert_eq(split.rem, -1.0)
     assert_eq(split.quo, -4)
+    f32_split: __rem_quo_f32(F32{6.5}, F32{-2.0})
+    assert_eq(f32_split.rem, F32{0.5})
+    assert_eq(f32_split.quo, -3)
     assert_eq(fdim(5.0, 3.0), 2.0)
     assert_eq(fdim(3.0, 5.0), 0.0)
     assert(is_nan(fdim(NAN, 1.0)))

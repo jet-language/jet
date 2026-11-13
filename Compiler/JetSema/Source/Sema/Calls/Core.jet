@@ -836,8 +836,9 @@ sema_call_try_core_math_float_class: fn(module_name: String, member: String, typ
 // function whose step is the binary32 one (next_up), runs its
 // `__<member>_f32` source instead, whose Float result is already the binary32
 // one; its whole-number exponent stays an Int. A member whose answer is the
-// binary32 bits themselves (to_bits, is_signaling, the payloads) runs its
-// `__<member>_f32` source on the F32 arguments as they are. Any other
+// binary32 bits themselves (to_bits, is_signaling, the payloads), and
+// rem_quo, whose (rem: F32, quo: Int) record rounds only the remainder, runs
+// its `__<member>_f32` source on the F32 arguments as they are. Any other
 // argument list keeps the ordinary source call.
 sema_call_try_core_math_f32: fn(module_name: String, member: String, type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
     unhandled: SemaDirectSpecialCheck{handled: false, value: None}
@@ -873,13 +874,15 @@ sema_call_try_core_math_f32: fn(module_name: String, member: String, type_args: 
 
 // The result type of an F32-width member whose `__<member>_f32` source takes
 // the F32 arguments themselves: widening one would quiet a signaling NaN,
-// move a payload, or make a subnormal normal.
+// move a payload, or make a subnormal normal, and rem_quo's source rounds
+// only the remainder of its record, whose quotient stays an Int.
 sema_call_core_math_f32_kept: fn(member: String) -> Type? Never! {
     if member == {
         "to_bits" -> Val(Type.Int)
         "is_signaling" | "is_normal" | "is_subnormal" | "total_order" | "total_order_mag" -> Val(Type.Bool)
         "canonicalize" | "fabs" | "copysign" -> Val(Type.Float32)
         "get_payload" | "set_payload" | "set_payload_signaling" -> Val(Type.Option{inner: Type.Float32})
+        "rem_quo" -> Val(Type.Tuple{fields: [TypeTupleField]{TypeTupleField{name: "rem", ty: Type.Float32}, TypeTupleField{name: "quo", ty: Type.Int}}})
         else -> None
     }
 }

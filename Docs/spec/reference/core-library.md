@@ -3018,6 +3018,8 @@ a double rounding of the Float one (C23's `f` forms such as `rsqrtf` and
 `scaleb`) returns the exact `F32` result, and `next_up`, `next_down` and
 `next_after` step by one binary32 unit (C23 `fmodf`, `fmaximumf`,
 `nextupf` and the rest); the exponent of `ldexp` and `scaleb` stays an
+`Int`. An all-F32 `rem_quo` returns `(rem: F32, quo: Int)` (C23
+`remquof`): its remainder is exact in `F32` and its quotient stays an
 `Int`. The bit-level calls `fabs`, `copysign`, `canonicalize`,
 `is_signaling`, `is_normal`, `is_subnormal`, `total_order`,
 `total_order_mag`, `get_payload`, `set_payload` and `set_payload_signaling`
@@ -3069,7 +3071,7 @@ payload survive; `is_normal` and `is_subnormal` use the binary32 bound
 | `math.logb(x)` | `Float` | The exponent as a `Float`: `-inf` for a zero, `+inf` for an infinity, NaN for a NaN. |
 | `math.round_even(x)` | `Float` | Round to the nearest integral value, ties to even (C23 `roundeven`, and `rint`/`nearbyint` in the default rounding mode). |
 | `math.round_to_signed(x, mode, bits)` / `math.round_to_unsigned(x, mode, bits)` | `?Int` | Round in `mode` (a `math.Rounding`: `TowardNegative`, `TowardPositive`, `TowardZero`, `TiesToAway` or `TiesToEven`) to an integer that fits a two's-complement or unsigned integer of `bits` bits (C23 `fromfp`/`ufromfp`; widths above 64 read as 64). `None` for an infinity, a NaN, `bits` below 1 or a result outside the width. |
-| `math.remainder(a, b)` / `math.rem_quo(a, b)` | `Float` / `(rem: Float, quo: Int)` | IEEE remainder `a - n * b` for the integer `n` nearest `a / b`, ties to even; `rem_quo` also returns the low 31 bits of `n` with the sign of `a / b` (C `remquo`). |
+| `math.remainder(a, b)` / `math.rem_quo(a, b)` | `Float` / `(rem: Float, quo: Int)`; two `F32`s give `F32` / `(rem: F32, quo: Int)` | IEEE remainder `a - n * b` for the integer `n` nearest `a / b`, ties to even; `rem_quo` also returns the low 31 bits of `n` with the sign of `a / b` (C `remquo`). |
 | `math.fdim(a, b)` | `Float` | `a - b` when `a` is greater, else `+0`; a NaN operand is the result. |
 | `math.min_float(a, b)` / `math.max_float(a, b)` | `Float` | C `fmin`/`fmax`: a NaN operand gives the other, and `-0` orders below `+0`. |
 | `math.minimum(a, b)` / `maximum(a, b)`, `minimum_num(a, b)` / `maximum_num(a, b)`, `minimum_mag(a, b)` / `maximum_mag(a, b)`, `minimum_mag_num(a, b)` / `maximum_mag_num(a, b)` | `Float` | IEEE 754-2019 minimum and maximum (C23 `fminimum` family): `-0` orders below `+0`; the plain and `_mag` forms give a NaN when either operand is one, the `_num` forms give a NaN only when both are; the `_mag` forms compare magnitudes first. |

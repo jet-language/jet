@@ -1,12 +1,12 @@
 // Every corpus row is an all-F32 call of one exact or bit-level core.math
-// function: its argument words, then the C23 binary32 function's result,
-// computed offline. A binary32 value is its 8 hex digit bit pattern, an
-// exponent its 32-bit two's-complement word, a predicate 1 or 0, and
-// "--------" is none. The program prints one line per function with the rows
-// it checked and how many results differ, plus the first differing rows.
-// Where a NaN result's bits are not the function's to choose (an arithmetic
-// NaN), any NaN matches any NaN; the sign-bit, payload and signaling
-// operations must match bit for bit.
+// function: its argument words, then the C23 binary32 function's result
+// (rem_quo's remainder, then its quotient), computed offline. A binary32
+// value is its 8 hex digit bit pattern, an exponent or quotient its 32-bit
+// two's-complement word, a predicate 1 or 0, and "--------" is none. The
+// program prints one line per function with the rows it checked and how many
+// results differ, plus the first differing rows. Where a NaN result's bits
+// are not the function's to choose (an arithmetic NaN), any NaN matches any
+// NaN; the sign-bit, payload and signaling operations must match bit for bit.
 use {
     math: core.math
 }
@@ -37,6 +37,7 @@ MINIMUM_NUM: #run embed_file("corpus/minimum_num.txt")
 NEXT_AFTER: #run embed_file("corpus/next_after.txt")
 NEXT_DOWN: #run embed_file("corpus/next_down.txt")
 NEXT_UP: #run embed_file("corpus/next_up.txt")
+REM_QUO: #run embed_file("corpus/rem_quo.txt")
 REMAINDER: #run embed_file("corpus/remainder.txt")
 ROUND_EVEN: #run embed_file("corpus/round_even.txt")
 SET_PAYLOAD: #run embed_file("corpus/set_payload.txt")
@@ -146,6 +147,16 @@ value: fn(name: String, w: [Int]) -> Int {
     panic("no corpus function {name}")
 }
 
+// The result words of `name` on argument words `w`: rem_quo's F32
+// remainder and Int quotient, or the one result of any other function.
+results: fn(name: String, w: [Int]) -> [Int] {
+    if name == "rem_quo" {
+        split: math.rem_quo(f32_of(w[0]), f32_of(w[1]))
+        return [Int]{bits(split.rem), split.quo.bit_and(0xFFFF_FFFF)}
+    }
+    [Int]{value(name, w)}
+}
+
 // Whether `name` chooses its NaN result's bits: a sign-bit, payload or
 // signaling operation.
 exact_nan: fn(name: String) -> Bool {
@@ -163,22 +174,31 @@ check: fn(name: String, corpus: String) {
             at = at + 1
             next
         }
-        // The row's words: its arguments, then the result.
+        // The row's words: its arguments, then the results.
         words := [Int]{}
         loop {
             words.push(word_at(raw, at))
             at = at + 9
             if raw[at - 1] == (U8{10}) -> break
         }
-        want: words[words.len() - 1]
-        got: value(name, words)
+        got: results(name, words)
+        arguments: words.len() - got.len()
+        differs := false
+        loop i in 0..<got.len() {
+            want: words[arguments + i]
+            if got[i] != want && (exact_nan(name) || i != 0 || !(is_nan_word(got[i]) && is_nan_word(want))) -> differs = true
+        }
         rows = rows + 1
-        if got != want && (exact_nan(name) || !(is_nan_word(got) && is_nan_word(want))) {
+        if differs {
             wrong = wrong + 1
             if wrong <= 3 {
                 shown := [String]{}
-                loop i in 0..<(words.len() - 1) -> shown.push(hex_word(words[i]))
-                print("{name}({shown.join(", ")}) = {hex_word(got)}, C23 {hex_word(want)}")
+                loop i in 0..<arguments -> shown.push(hex_word(words[i]))
+                gave := [String]{}
+                loop i in 0..<got.len() -> gave.push(hex_word(got[i]))
+                wanted := [String]{}
+                loop i in arguments..<words.len() -> wanted.push(hex_word(words[i]))
+                print("{name}({shown.join(", ")}) = {gave.join(" ")}, C23 {wanted.join(" ")}")
             }
         }
     }
@@ -199,6 +219,7 @@ run: fn() {
     check("total_order_mag", TOTAL_ORDER_MAG)
     check("fmod", FMOD)
     check("remainder", REMAINDER)
+    check("rem_quo", REM_QUO)
     check("fdim", FDIM)
     check("max_float", MAX_FLOAT)
     check("min_float", MIN_FLOAT)
