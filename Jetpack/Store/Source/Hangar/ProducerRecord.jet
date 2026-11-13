@@ -142,8 +142,7 @@ store_canonical_producer: fn(provider: String, immutable_source: String, source_
 
 // Whether a producer was built as a private untrusted build.
 store_is_private_untrusted_build: fn(producer: ProducerRecord) -> Bool Never! {
-    // workaround #5940(c): no `== Val(CONST)`.
-    (producer.facts.get("build.trust") ?? "") == STORE_PRIVATE_UNTRUSTED_BUILD
+    producer.facts.get("build.trust") == Val(STORE_PRIVATE_UNTRUSTED_BUILD)
 }
 
 // The signed SLSA-style action identity of one cache admission.

@@ -266,10 +266,7 @@ publication_index_atomic_replace: fn(repo: String, path: String, bytes: [U8]) IO
 publication_write_index_entry: fn(repo: String, entry: PublicationIndexEntry) IOError! -[FS, Env, Time]> {
     publication_validate_index_component(entry.name, "package name")
     publication_validate_index_component(entry.version, "package version")
-    lock_repo: repo.copy()
-    lock_name: entry.name.copy()
-    // workaround #5940(h)
-    _: publication_with_index_lock<Bool>(lock_repo, lock_name, fn() { publication_write_index_entry_locked(repo, entry) })
+    _: publication_with_index_lock<Bool>(repo, entry.name, fn() { publication_write_index_entry_locked(repo, entry) })
 }
 
 publication_write_index_entry_locked: fn(repo: String, entry: PublicationIndexEntry) -[FS, Env, Time]> Bool IOError! {
@@ -305,10 +302,7 @@ publication_write_index_entry_locked: fn(repo: String, entry: PublicationIndexEn
 publication_mark_yanked: fn(repo: String, name: String, version: String) -[FS, Env, Time]> Bool IOError! {
     publication_validate_index_component(name, "package name")
     publication_validate_index_component(version, "package version")
-    lock_repo: repo.copy()
-    lock_name: name.copy()
-    // workaround #5940(h)
-    publication_with_index_lock<Bool>(lock_repo, lock_name, fn() { publication_mark_yanked_locked(repo, name, version) })
+    publication_with_index_lock<Bool>(repo, name, fn() { publication_mark_yanked_locked(repo, name, version) })
 }
 
 publication_mark_yanked_locked: fn(repo: String, name: String, version: String) -[FS, Env, Time]> Bool IOError! {

@@ -686,10 +686,7 @@ provider_luarocks_manifest_versions: fn(raw: String, name: String) -> [String] R
     versions := [String]{}
     cursor := package
     loop {
-        // workaround #5940(b): no `a ?? b ?? break` chain.
-        open := provider_registry_find(cursor, "[\"", 0) ?? -1
-        if open < 0 -> open = provider_registry_find(cursor, "['", 0) ?? -1
-        if open < 0 -> break
+        open: provider_registry_find(cursor, "[\"", 0) ?? provider_registry_find(cursor, "['", 0) ?? break
         cursor = provider_registry_tail(cursor, open + 1)
         quoted: provider_luarocks_parse_quoted(cursor)
         cursor = provider_registry_tail(cursor, quoted.used)

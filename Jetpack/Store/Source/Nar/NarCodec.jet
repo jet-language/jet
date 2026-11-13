@@ -41,40 +41,29 @@ NarDirectoryEntry: struct {
 // A byte source for streaming decode: an open file, a Zstandard stream over
 // one, or a caller's reader (cache sources emit terminal progress while
 // reading). `read(limit)` returns at most `limit` bytes and `[]` at the end of
-// the data.
-// workaround #5940(d,e): an enum, not an escaping closure owning the reader.
-NarByteInput: enum {
-    File(FileReader)
-    Zstd(ZstdReader)
-    Reader(fn(Int) -[IO, FS, Net, Env, Time.Wait]> [U8] IOError!)
-}
-
+// the data. Each form is one reading function that owns its reader.
 NarByteSource: struct {
-    priv input: NarByteInput
+    priv next: fn(Int) -[IO, FS, Net, Env, Time.Wait]> [U8] IOError!
 
     file: fn(&&reader: FileReader) -> NarByteSource Never! {
-        NarByteSource{input: NarByteInput.File(reader)}
+        NarByteSource{next: (limit: Int) -> reader.read(limit)}
     }
 
     zstd: fn(&&reader: ZstdReader) -> NarByteSource Never! {
-        NarByteSource{input: NarByteInput.Zstd(reader)}
+        NarByteSource{next: (limit: Int) -> {
+            if reader.read(limit) == {
+                .Ok(bytes) -> Ok(bytes)
+                .Err(error) -> Err(IOError.InvalidInput(IOContext{operation: .Read, resource: None, os_code: None, cause: Val("zstd stream is corrupt: {error}")}))
+            }
+        }}
     }
 
     reader: fn(read: &&fn(Int) -[IO, FS, Net, Env, Time.Wait]> [U8] IOError!) -> NarByteSource Never! {
-        NarByteSource{input: NarByteInput.Reader(read)}
+        NarByteSource{next: read}
     }
 
     read: fn(&self, limit: Int) -[IO, FS, Net, Env, Time.Wait]> [U8] IOError! {
-        if &self.input == {
-            .File(file) -> file.read(limit)
-            .Zstd(decoder) -> {
-                if decoder.read(limit) == {
-                    .Ok(bytes) -> Ok(bytes)
-                    .Err(error) -> Err(IOError.InvalidInput(IOContext{operation: .Read, resource: None, os_code: None, cause: Val("zstd stream is corrupt: {error}")}))
-                }
-            }
-            .Reader(read) -> read(limit)
-        }
+        self.next(limit)
     }
 }
 

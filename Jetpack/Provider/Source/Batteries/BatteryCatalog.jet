@@ -26,7 +26,8 @@ env_battery_text: fn(path: String, text: String) -> BatteryFile Never! {
     BatteryFile{path, mode: BATTERIES_FILE_MODE, bytes: text.bytes()}
 }
 
-// workaround #5940(g): module-level constants, not inline `#run {}` values.
+// Module-level constants: `#run` evaluates a binding's whole value, so each
+// embedded file is bound here and the packages below read the names.
 BATTERY_BACKEND_JET: #run embed_file("../../Batteries/backend/backend.jet")
 BATTERY_BACKEND_PACKAGE: #run embed_file("../../Batteries/backend/package.jet")
 BATTERY_CLI_JET: #run embed_file("../../Batteries/cli/cli.jet")
