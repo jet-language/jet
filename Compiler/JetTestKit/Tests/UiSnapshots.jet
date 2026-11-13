@@ -107,6 +107,28 @@ kit_ui_test_run: fn(code: Int, stderr: String) -> KitRun {
     assert_eq(kit_ui_arg("// @check_cli\n// @check_cli ignored\n", "check_cli"), Val("ignored"))
 }
 
+#Test("UI check_core checks the staged Core with the project's files and the entry's text on top") {
+    call: kit_ui_invocation("// @check_core Collections/Set.jet\nuse probe: core.files\n", "tests/ui/layers/main.jet", false)
+    assert(call.check_core)
+    assert_eq(call.core_top, "Collections/Set.jet")
+    assert_eq(call.argv, ["check", "Core"])
+    assert_eq(call.exit, "nonzero")
+    assert_eq(kit_ui_invocation("// @check_core\n", "tests/ui/layers/main.jet", false).core_top, "")
+    assert(!kit_ui_invocation("run: fn() {{}}\n", "tests/ui/a.jet", false).check_core)
+    root: kit_ui_test_scratch("check-core")
+    kit_exec_write(files.join(root, "Core/package.jet"), "name: \"core\"\n")
+    kit_exec_write(files.join(root, "Core/Collections/Set.jet"), "set: fn() {{}}\n")
+    kit_exec_write(files.join(root, "Compiler/Prelude/Core.rows"), "rows\n")
+    work: files.join(root, "tests/ui/layers")
+    kit_exec_write(files.join(work, "Core/package.jet"), "layers: {{}}\n")
+    toolchain: kit_ui_stage_core(kit_ui_test_context(root, "case"), "use probe: core.files\n", work, "Collections/Set.jet")
+    assert_eq(files.read(files.join(toolchain, "Core/package.jet")) ?? "", "layers: {{}}\n")
+    assert_eq(files.read(files.join(toolchain, "Core/Collections/Set.jet")) ?? "", "use probe: core.files\nset: fn() {{}}\n")
+    assert_eq(files.read(files.join(toolchain, "Compiler/Prelude/Core.rows")) ?? "", "rows\n")
+    assert_eq(files.read(files.join(root, "Core/Collections/Set.jet")) ?? "", "set: fn() {{}}\n")
+    files.remove_all(root) ?? panic("remove check_core scratch: {err}")
+}
+
 #Test("UI discovery walks groups but stops at project entries and excludes fixed companions") {
     root: kit_ui_test_scratch("discover")
     loop path in ["tests/ui/a.jet", "tests/ui/a.fixed.jet", "tests/ui/group/nested.jet", "tests/ui/group/project/run.jet", "tests/ui/group/project/helper.jet", "tests/ui/main/main.jet", "tests/ui/workspace/workspace.jet", "tests/ui/workspace/member/run.jet", "tests/ui_lint/group/lint.jet"] -> kit_exec_write(files.join(root, path), "run: fn() {{}}\n")

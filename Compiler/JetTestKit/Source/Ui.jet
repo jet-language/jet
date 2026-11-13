@@ -9,6 +9,11 @@ kit_ui_directives: fn() -> [KitUIDirective] {
         {name: "check_cli", argv: ["check", "$base"], parent: true, exit: "any", streams: "check", capability: ""},
         {name: "all_diags", argv: ["check", "$file"], parent: false, exit: "any", streams: "rendered-both", capability: ""},
         {name: "typed_settings_cli", argv: ["check", "$file", "--set", "cli_only=true"], parent: false, exit: "any", streams: "check", capability: ""},
+        // `jet check Core` of a project entry's Core: the repository's Core
+        // and compiler prelude staged as a toolchain, under the project's own
+        // `Core/` files (a layer table), with the entry's text on top of the
+        // Core file the directive names (kit_ui_stage_core).
+        {name: "check_core", argv: ["check", "Core"], parent: false, exit: "nonzero", streams: "rendered", capability: ""},
         {name: "cli_e2101", argv: ["bench"], parent: false, exit: "nonzero", streams: "both", capability: ""},
         {name: "cli_e1219", argv: ["build", "$file", "--profile=turbo"], parent: false, exit: "nonzero", streams: "both", capability: ""},
         {name: "retired_gate_flag", argv: ["run", "$file", "--allow-impure"], parent: false, exit: "nonzero", streams: "both", capability: ""},
@@ -157,6 +162,8 @@ kit_ui_invocation: fn(source: String, file: String, lint: Bool) -> KitUICall {
         call.unlocked_toolchain = row.name == "jetpack_e1250"
         call.hangar_tamper = row.name == "jetpack_hangar_digest_mismatch"
         call.fetch_first = row.name == "fetched_build_locked"
+        call.check_core = row.name == "check_core"
+        if call.check_core -> call.core_top = argument.copy()
         if row.name == "repl_deny" {
             loop line in source.split("\n") {
                 trimmed: line.trim().copy()
@@ -451,14 +458,40 @@ kit_ui_outcomes: fn(entry: KitEntry, ctx: KitCtx) -> [KitOutcome] {
         fetched: kit_exec_invoke_with_env(ctx.env, [ctx.env.jet, "fetch"], work, ctx.scratch, [U8]{}, overlay)
         if fetched.code != 0 -> return [KitOutcome{verdict: kit_expect_verdict("ERROR", "jet fetch exited {fetched.code}: {fetched.stderr}"), run: fetched, tier: "-"}]
     }
-    result: kit_exec_invoke_with_env(ctx.env, args, if call.parent -> work else -> source, ctx.scratch, call.stdin.bytes(), overlay)
-    actual: kit_ui_normalize(entry.path, kit_ui_actual(call, result), source)
+    cwd := if call.parent -> work else -> source
+    if call.check_core {
+        cwd = kit_ui_stage_core(ctx, text, work, call.core_top)
+        // The staged tree is the toolchain the check finds around `Core`.
+        overlay.push(KitEnvVar{name: "JET_TOOLCHAIN_ROOT", value: None})
+    }
+    result: kit_exec_invoke_with_env(ctx.env, args, cwd, ctx.scratch, call.stdin.bytes(), overlay)
+    actual: kit_ui_normalize(entry.path, kit_ui_actual(call, result), if call.check_core -> cwd else -> source)
     verdict: kit_ui_snapshot(entry, call, result, actual, ctx)
     outcomes := [KitOutcome]{KitOutcome{verdict: verdict, run: result, tier: "-"}}
     if verdict.status == "PASS" {
         loop outcome in kit_ui_fixed(entry, ctx, source, overlay) -> outcomes.push(outcome)
     }
     outcomes
+}
+
+// `@check_core [FILE]`'s toolchain, under the entry's scratch: the
+// repository's Core and compiler prelude, the entry project's own `Core/`
+// files over them, and the entry's `text` on top of `Core/FILE` when `top`
+// names one, so the reported lines stay put however the file below grows.
+// Returns the toolchain's directory.
+kit_ui_stage_core: fn(ctx: KitCtx, text: String, work: String, top: String) -> String {
+    toolchain: files.join(ctx.scratch, "check-core")
+    core: files.join(toolchain, "Core")
+    kit_exec_copy_tree(files.join(ctx.root, "Core"), core, false, false)
+    kit_exec_copy_tree(files.join(ctx.root, "Compiler/Prelude"), files.join(toolchain, "Compiler/Prelude"), false, false)
+    own: files.join(work, "Core")
+    if files.is_dir(own) -> kit_exec_copy_tree(own, core, false, false)
+    if top != "" {
+        target: files.join(core, top)
+        below: files.read(target) ?? panic("read {target}: {err}")
+        kit_exec_write(target, "{text}{below}")
+    }
+    toolchain
 }
 
 // Ingests a one-file tree into the case's Hangar root with the real `jetpack
