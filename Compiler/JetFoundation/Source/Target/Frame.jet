@@ -69,7 +69,7 @@ jet_frame_value_bytes: fn(types: JetFrameTypes, ty: Type) -> Int? Never! {
 //   again inline has no finite size.
 jet_frame_storage_bytes: fn(types: JetFrameTypes, ty: Type, env: [String:Int], laying: [String]) -> Int? Never! {
     if ty == {
-        .Int | .Float | .Bool | .String | .Char | .Float32 | .IntN(_, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Union(_) | .Measure(_) -> Val(0)
+        .Int | .Float | .Bool | .String | .Char | .Float32 | .IntN(_, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Union(_) | .Case(_, _) | .Measure(_) -> Val(0)
         // A list or map header: its length, capacity and data address.
         .List(_) | .Map(_, _, _) -> Val(24)
         .InlineRange(base, _, _) | .Quantity(base, _) -> jet_frame_storage_bytes(types, base, env, laying)
