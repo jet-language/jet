@@ -31,6 +31,7 @@ use jet_foundation.[
     TestSettingKind,
     TestSettingRow,
     test_setting_row,
+    module_text,
 ]
 
 sema_dyn_type: fn() -> Type Never! { Type.Named{name: "Dyn"} }
@@ -55,7 +56,7 @@ sema_core_source_type_name: fn(program: SemaProgramTables, module_name: String, 
             loop nominal_index in 0..<graph.modules[module_row_index].nominals.len() {
                 if graph.modules[module_row_index].nominals[nominal_index].symbol.name == leaf {
                     if graph.modules[module_row_index].nominals[nominal_index].compiler_owned -> return "{leaf}"
-                    return "{graph.modules[module_row_index].nominals[nominal_index].symbol.module_name}::{leaf}"
+                    return "{module_text(graph.module_table, graph.modules[module_row_index].nominals[nominal_index].symbol.module_identity)}::{leaf}"
                 }
             }
         }
@@ -1300,11 +1301,11 @@ sema_data_db_names: fn(target: Type, environment: SemaScopeEnvironment, program:
 }
 
 sema_data_is_sys_decode: fn(target: SemaCallDirectTarget, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
-    target.symbol.name == "decode" && sema_call_core_module_is(environment, program, "core.sys", target.symbol.module_name)
+    target.symbol.name == "decode" && sema_call_core_module_is(environment, program, "core.sys", target.symbol.module_identity)
 }
 
 sema_data_is_db_decode: fn(target: SemaCallDirectTarget, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
-    target.symbol.name == "decode" && sema_call_core_module_is(environment, program, "core.db", target.symbol.module_name)
+    target.symbol.name == "decode" && sema_call_core_module_is(environment, program, "core.db", target.symbol.module_identity)
 }
 
 // `json`/`toml`/`yaml` `to_string<T: Encode>(value)`: the `Encode` bound
@@ -1315,7 +1316,7 @@ sema_data_encode_check_value: fn(target: SemaCallDirectTarget, args: [CallArg], 
     if target.symbol.name != "to_string" || args.len() != 1 -> return true
     encoder := false
     loop module_name in ["core.encoding.json", "core.encoding.toml", "core.encoding.yaml"] {
-        if sema_call_core_module_is(environment, program, module_name, target.symbol.module_name) -> encoder = true
+        if sema_call_core_module_is(environment, program, module_name, target.symbol.module_identity) -> encoder = true
     }
     if !encoder -> return true
     value: if checked.kind == {
@@ -2074,7 +2075,7 @@ sema_data_schema_columns: fn(row: Type, environment: SemaScopeEnvironment, progr
     columns := [(name: String, type_name: String)]{}
     loop field in definition.fields {
         if field.computed != None -> next
-        field_type: sema_inference_substitute_type(sema_expression_field_owner_type(environment, program, owner_symbol.module_name, field.ty, names), names, owner_args)
+        field_type: sema_inference_substitute_type(sema_expression_field_owner_type(environment, program, owner_symbol.module_identity, field.ty, names), names, owner_args)
         columns.push((name: field.name, type_name: sema_data_schema_type_name(field_type)))
     }
     columns

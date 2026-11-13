@@ -27,6 +27,7 @@ use jet_foundation.[
     ast_empty_lambda_meta,
     expr_span,
     owned_trait_codec_names,
+    module_text,
 ]
 
 SemaLiveSource: struct {
@@ -229,7 +230,7 @@ sema_live_source: fn(expression: Expr, member: String, environment: SemaScopeEnv
             graph: program.registration_graph ?? return None
             if !sema_live_codable(graph, name, "result", ok, environment, source_span, diagnostics) -> return None
             if !sema_live_codable(graph, name, "error", err, environment, source_span, diagnostics) -> return None
-            return Val(SemaLiveSource{name: name.copy(), wire: "{scopes.bindings[index].symbol.module_name}.{scopes.bindings[index].symbol.name}", params: params.copy(), ok: ok.copy(), err: err.copy()})
+            return Val(SemaLiveSource{name: name.copy(), wire: "{module_text(graph.module_table, scopes.bindings[index].symbol.module_identity)}.{scopes.bindings[index].symbol.name}", params: params.copy(), ok: ok.copy(), err: err.copy()})
         }
         diagnostics.push(sema_error("E0112", source_span, "`{name}` can't fail, so its binding has no error to carry", "a live binding's state is loaded or failed with the source's own error", "declare `{name}` with the error it reports: `-> {sema_type_show(result)} E!`"))
         return None

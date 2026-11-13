@@ -877,7 +877,7 @@ sema_checked_foreign_nominal_type: fn(graph: SemaRegistrationGraph, nominal: Sem
     if sema_checked_foreign_seen(seen, key) -> return false
     next_seen := seen
     next_seen.push(key.copy())
-    nominal_module: sema_registration_module_id(graph, nominal.symbol.module_name)
+    nominal_module: nominal.symbol.module_identity
     if nominal.source == {
         .CompilerBuiltinTrait(_) -> false
         .ForeignHandle(facts) -> c_abi && sema_checked_foreign_handle_source_matches(handles, facts)
@@ -967,7 +967,7 @@ sema_checked_foreign_by_reference_struct: fn(graph: SemaRegistrationGraph, ty: T
         if definition.type_params.len() > 0 -> return false
         loop field in definition.fields {
             if field.computed != None -> next
-            if !sema_checked_foreign_by_reference_field(graph, field.ty, sema_registration_module_id(graph, nominal.symbol.module_name), next_seen) -> return false
+            if !sema_checked_foreign_by_reference_field(graph, field.ty, nominal.symbol.module_identity, next_seen) -> return false
         }
         return true
     }
@@ -1037,8 +1037,8 @@ sema_checked_foreign_c_marshals: fn(graph: SemaRegistrationGraph, ty: Type, modu
                             return false
                         }
                     }
-                    .Distinct(definition) -> return sema_checked_foreign_c_marshals(graph, definition.base, sema_registration_module_id(graph, nominal.symbol.module_name), written)
-                    .TypeAlias(definition) -> return sema_checked_foreign_c_marshals(graph, definition.target, sema_registration_module_id(graph, nominal.symbol.module_name), written)
+                    .Distinct(definition) -> return sema_checked_foreign_c_marshals(graph, definition.base, nominal.symbol.module_identity, written)
+                    .TypeAlias(definition) -> return sema_checked_foreign_c_marshals(graph, definition.target, nominal.symbol.module_identity, written)
                     .Func(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
                 }
             }
@@ -1065,8 +1065,8 @@ sema_checked_foreign_c_array_element: fn(graph: SemaRegistrationGraph, ty: Type,
             if nominal.source == .SourceAST(item) {
                 if item == {
                     .Enum(_) -> return false
-                    .Distinct(definition) -> return sema_checked_foreign_c_array_element(graph, definition.base, sema_registration_module_id(graph, nominal.symbol.module_name))
-                    .TypeAlias(definition) -> return sema_checked_foreign_c_array_element(graph, definition.target, sema_registration_module_id(graph, nominal.symbol.module_name))
+                    .Distinct(definition) -> return sema_checked_foreign_c_array_element(graph, definition.base, nominal.symbol.module_identity)
+                    .TypeAlias(definition) -> return sema_checked_foreign_c_array_element(graph, definition.target, nominal.symbol.module_identity)
                     .Func(_) | .Struct(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
                 }
             }
@@ -2507,7 +2507,7 @@ sema_checked_box_is_node: fn(nominal: SemaRegistrationNominal) -> Bool Never! {
 // One edge per field, single payload (`Variant`) and named payload field
 // (`Variant.field`) of `nominal`, appended to `box_graph`.
 sema_checked_box_node_edges: fn(graph: SemaRegistrationGraph, nominal: SemaRegistrationNominal, nodes: [String:Int], box_graph: &SemaCheckedBoxGraph) Never! {
-    caller: sema_registration_module_id(graph, nominal.symbol.module_name)
+    caller: nominal.symbol.module_identity
     if nominal.source == .SourceAST(item) {
         if item == {
             .Struct(definition) -> {
@@ -3340,8 +3340,7 @@ sema_checked_coherence_local_trait: fn(graph: SemaRegistrationGraph, module_row:
     if owned_trait(trait_name) == .Val(owned) -> return owned.local
     if state.traits.get(trait_name) != None -> return true
     trait_ref: sema_checked_trait_nominal_row(graph, module_row.module_identity, trait_name) ?? return false
-    trait_module: graph.modules[trait_ref.module_index].nominals[trait_ref.row].symbol.module_name
-    trait_module_index: sema_registration_module_index_text(graph, trait_module) ?? return false
+    trait_module_index: sema_registration_module_index(graph, graph.modules[trait_ref.module_index].nominals[trait_ref.row].symbol.module_identity) ?? return false
     graph.modules[trait_module_index].package_identity == module_row.package_identity
 }
 

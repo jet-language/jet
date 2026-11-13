@@ -43,6 +43,7 @@ use jet_foundation.[
     type_identity_equal,
     type_name,
     ModuleID,
+    module_is_core,
     module_is_none,
 ]
 
@@ -62,7 +63,7 @@ sema_call_static_registered_method_exists: fn(graph: SemaRegistrationGraph, nomi
 // statics (no `self` receiver) when `statics`, else its instance methods.
 sema_call_registered_method_names: fn(graph: SemaRegistrationGraph, nominal: SemaRegistrationNominal, statics: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables) -> [String] Never! {
     names := [String]{}
-    nominal_module: sema_registration_module_id(graph, nominal.symbol.module_name)
+    nominal_module: nominal.symbol.module_identity
     owner_module := nominal_module
     owner_package := ""
     if sema_type_graph_nominal_row(graph, nominal.symbol.id.key) == .Val(owner_row) {
@@ -278,7 +279,7 @@ sema_call_static_append_registered: fn(output: &[SemaStaticMethodTarget], graph:
 sema_call_static_registered_targets: fn(graph: SemaRegistrationGraph, nominal: SemaRegistrationNominal, method: String, owner_type_args: [Type], type_args: [Type], args: [CallArg], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, span: Span, diagnostics: &[Diagnostic]) -> [SemaStaticMethodTarget] Never! {
     targets := [SemaStaticMethodTarget]{}
     owner_name := nominal.symbol.name
-    nominal_module: sema_registration_module_id(graph, nominal.symbol.module_name)
+    nominal_module: nominal.symbol.module_identity
     owner_module := nominal_module
     owner_package := ""
     if sema_type_graph_nominal_row(graph, nominal.symbol.id.key) == .Val(owner_row) {
@@ -309,7 +310,7 @@ sema_call_static_local_target: fn(owner_symbol: Symbol, owner_name: String, decl
     method_id: symbol_id(SymbolKind.Function, module_name, owner_name, function.name)
     signature: sema_function_symbol_type(function, false, method_id, environment.source_file, environment.source_origin, environment.source_segments)
     visibility: if function.is_pub -> 2 else -> if function.is_package_pub -> 1 else -> 0
-    method_symbol := Symbol{id: method_id, kind: SymbolKind.Function, name: function.name, module_name: module_name, owner: Val(owner_symbol.id.key), span: function.name_span, ty: Val(signature), visibility: visibility}
+    method_symbol := Symbol{id: method_id, kind: SymbolKind.Function, name: function.name, module_identity: environment.module_identity, owner: Val(owner_symbol.id.key), span: function.name_span, ty: Val(signature), visibility: visibility}
     target := sema_call_static_function_target(method_symbol, signature, sema_inference_type_params(function.type_params), type_args, environment, program, span, diagnostics) ?? return None
     owner_result: sema_call_static_owner_resolution(sema_call_static_unshadowed_params(owner_params, target.generic_params, owner_type_args), owner_type_args, target.signature, args, expected, environment, program, scopes, state, tail_store, context, span, diagnostics) ?? return None
     owner_type: sema_inference_substitute_type_bindings(declared_owner, owner_result.substitutions)
@@ -1146,12 +1147,12 @@ sema_call_try_static_method: fn(receiver: Expr, method: String, method_span: Spa
     static_args: static_owner.owner_type_args
     type_name: owner_symbol.name
     if owner_symbol.kind != SymbolKind.Type -> return SemaMethodSpecialCheck{handled: false, value: None}
-    if method == "new" && args.len() == 3 && type_name == "ExpiringSecret" && sema_module_is_core_source(owner_symbol.module_name) {
+    if method == "new" && args.len() == 3 && type_name == "ExpiringSecret" && module_is_core(owner_symbol.module_identity) {
         if !sema_call_expiring_secret_new_accepts(args, environment, program, scopes, state, tail_store, context, diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     }
     // E2938 (`UIShortcut.cmd`): the command-key
     // constructor fixes its key before code generation.
-    if method == "cmd" && args.len() == 1 && type_name == "UIShortcut" && sema_module_is_core_source(owner_symbol.module_name) {
+    if method == "cmd" && args.len() == 1 && type_name == "UIShortcut" && module_is_core(owner_symbol.module_identity) {
         sema_call_ui_shortcut_cmd_key(args[0], diagnostics)
     }
 
@@ -1188,8 +1189,8 @@ sema_call_try_static_method: fn(receiver: Expr, method: String, method_span: Spa
             if static_args.len() == 0 && sema_call_static_reflect_builtin(type_name, span, expected, environment, program, diagnostics) == .Val(reflected) -> return reflected
         }
         // Declared statics win; a canonical Core or compiler owner then falls back to its built-in rows.
-        if !generic_owner_method && sema_expr_canonical_type_binding(type_name, scopes) {
-            builtin := sema_call_try_builtin_static(type_name, owner_symbol.module_name, method, static_args, type_args, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+        if !generic_owner_method && sema_expr_canonical_type_binding(type_name, environment, program, scopes) {
+            builtin := sema_call_try_builtin_static(type_name, sema_scope_module_text(environment, program, owner_symbol.module_identity), method, static_args, type_args, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
             if builtin.handled -> return builtin
         }
         if {

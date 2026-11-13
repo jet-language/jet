@@ -103,10 +103,10 @@ sema_expression_unknown_type: fn(name: String, span: Span, environment: SemaScop
 // exporting module's catalog row authenticates the enum and its variants; a
 // user module with a Core-like leaf or name never takes this path.
 sema_expression_core_export_variants: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, symbol: Symbol) -> [String]? {
-    if symbol.kind != SymbolKind.Type || !symbol.module_name.starts_with("<corelib>/") -> return None
+    if symbol.kind != SymbolKind.Type || !module_is_core(symbol.module_identity) -> return None
     if sema_scope_declaration_site(environment, program, symbol.id) != None -> return None
     if program.registration_graph == .Val(graph) {
-    module_index: sema_registration_module_index_text(graph, symbol.module_name) ?? return None
+    module_index: sema_registration_module_index(graph, symbol.module_identity) ?? return None
     return core_module_enum_variants(graph.modules[module_index].module_name, symbol.name)
     }
     None
@@ -124,7 +124,7 @@ sema_expression_names_enum: fn(name: String, environment: SemaScopeEnvironment, 
     owner := sema_expression_type_symbol(scopes, environment, program, name)
     if owner == .Val(symbol) {
         if sema_scope_declaration_is(environment, program, symbol.id, SemaScopeDeclarationKind.Enum) -> return true
-        user_declared: !symbol.module_name.starts_with("<corelib>/")
+        user_declared: !module_is_core(symbol.module_identity)
         if user_declared && (sema_scope_declaration_is(environment, program, symbol.id, SemaScopeDeclarationKind.Struct) || sema_scope_declaration_is(environment, program, symbol.id, SemaScopeDeclarationKind.Distinct)) -> return false
         if sema_expression_core_export_variants(environment, program, symbol) != None -> return true
     }
@@ -365,13 +365,13 @@ SemaStructFieldFact: struct {
 }
 
 sema_expression_struct_field_fact: fn(field: Field, owner: Symbol, names: [String], args: [Type], environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaStructFieldFact {
-    field_ty: sema_inference_substitute_type(sema_expression_field_owner_type(environment, program, owner.module_name, field.ty, names), names, args)
-    field_id: symbol_id(SymbolKind.Field, owner.module_name, owner.id.key, field.name)
-    symbol: Symbol{id: field_id, kind: SymbolKind.Field, name: field.name, module_name: owner.module_name, owner: Val(owner.id.key), span: field.name_span, ty: Val(field_ty), visibility: if field.is_pub -> 2 else -> if field.is_package_pub -> 1 else -> 0}
+    field_ty: sema_inference_substitute_type(sema_expression_field_owner_type(environment, program, owner.module_identity, field.ty, names), names, args)
+    field_id: symbol_id(SymbolKind.Field, sema_scope_module_text(environment, program, owner.module_identity), owner.id.key, field.name)
+    symbol: Symbol{id: field_id, kind: SymbolKind.Field, name: field.name, module_identity: owner.module_identity, owner: Val(owner.id.key), span: field.name_span, ty: Val(field_ty), visibility: if field.is_pub -> 2 else -> if field.is_package_pub -> 1 else -> 0}
     holds_view := false
     if program.registration_graph == .Val(graph) {
         seen := [String:Bool]{}
-        holds_view = sema_check_type_contains_view(graph, sema_registration_module_id(graph, owner.module_name), field_ty, seen)
+        holds_view = sema_check_type_contains_view(graph, owner.module_identity, field_ty, seen)
     }
     SemaStructFieldFact{field_ty: field_ty, string_view: sema_stmt_string_view_type(field_ty), symbol: symbol, boxed: sema_scope_environment_boxed_edge(environment, program, owner.id, field.name), holds_view: holds_view}
 }
@@ -469,7 +469,7 @@ sema_expression_struct_inferred_args: fn(names: [String], bindings: [SemaInferen
 // after it.
 sema_expression_struct_field_inferred: fn(field: Field, field_value: Expr, field_reference_span: Span, owner: Symbol, type_params: [TypeParam], bindings: &[SemaInferenceBinding], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TStructFieldValue? {
     names: loop parameter in type_params -> parameter.name
-    declared: sema_inference_substitute_type_bindings(sema_expression_field_owner_type(environment, program, owner.module_name, field.ty, names), bindings)
+    declared: sema_inference_substitute_type_bindings(sema_expression_field_owner_type(environment, program, owner.module_identity, field.ty, names), bindings)
     open: loop parameter in type_params if sema_inference_binding_at(bindings, parameter.name) == None && sema_inference_type_mentions_param(declared, parameter.name) -> parameter
     if open.len() == 0 -> return sema_expression_struct_field_value(field, field_value, field_reference_span, true, owner, names, sema_expression_struct_inferred_args(names, bindings), environment, program, scopes, state, tail_store, context, diagnostics)
     sema_copy_site_check_field(field_value, environment, program, scopes, tail_store, context, diagnostics)
@@ -485,7 +485,7 @@ sema_expression_struct_field_inferred: fn(field: Field, field_value: Expr, field
 // that module's names (sema_default_owner_scope); a problem it reports there is
 // anchored at this literal.
 sema_expression_struct_field_default: fn(field: Field, default_value: Expr, literal_span: Span, owner: Symbol, names: [String], args: [Type], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TStructFieldValue? {
-    owner_scope := sema_default_owner_scope(environment, program, scopes, sema_check_registered_module_id(program, owner.module_name), default_value)
+    owner_scope := sema_default_owner_scope(environment, program, scopes, owner.module_identity, default_value)
     scope := owner_scope.move() ?? {
         return sema_expression_struct_field_value(field, default_value, field.name_span, false, owner, names, args, environment, program, scopes, state, tail_store, context, diagnostics)
     }
@@ -662,7 +662,7 @@ sema_expression_struct_literal: fn(struct_name: String, type_args: [Type], field
         }
         // Only the type's own module writes a `priv` field, so a literal
         // elsewhere cannot forge a value whose invariant that field carries.
-        if !sema_expression_field_visible(struct_def.fields[found].is_pub, struct_def.fields[found].is_package_pub, owner.module_name, struct_def.inline_module, source.name_span, sema_expr_sees_private_fields(context), environment, program) {
+        if !sema_expression_field_visible(struct_def.fields[found].is_pub, struct_def.fields[found].is_package_pub, owner.module_identity, struct_def.inline_module, source.name_span, sema_expr_sees_private_fields(context), environment, program) {
             diagnostics.push(sema_expression_private_field_error(source.name, source.name_span))
             return None
         }
@@ -679,7 +679,7 @@ sema_expression_struct_literal: fn(struct_name: String, type_args: [Type], field
     if computed_written {
         loop (index, field) in struct_def.fields {
             if supplied[index] || field.computed != None -> next
-            if !sema_expression_field_visible(field.is_pub, field.is_package_pub, owner.module_name, struct_def.inline_module, span, sema_expr_sees_private_fields(context), environment, program) {
+            if !sema_expression_field_visible(field.is_pub, field.is_package_pub, owner.module_identity, struct_def.inline_module, span, sema_expr_sees_private_fields(context), environment, program) {
                 diagnostics.push(sema_expression_private_field_omitted_error(struct_name, field.name, span))
                 return None
             }
@@ -735,7 +735,7 @@ sema_expression_struct_literal: fn(struct_name: String, type_args: [Type], field
         if supplied[index] || field.computed != None -> next
         // An omitted `priv` field is still written, by its default or not at
         // all, so only the type's own module may build the value.
-        if !sema_expression_field_visible(field.is_pub, field.is_package_pub, owner.module_name, struct_def.inline_module, span, sema_expr_sees_private_fields(context), environment, program) {
+        if !sema_expression_field_visible(field.is_pub, field.is_package_pub, owner.module_identity, struct_def.inline_module, span, sema_expr_sees_private_fields(context), environment, program) {
             diagnostics.push(sema_expression_private_field_omitted_error(struct_name, field.name, span))
             return None
         }
@@ -888,7 +888,7 @@ sema_expression_enum_literal: fn(type_name: String, type_args: [Type], variant: 
             context.name_references.push(SemaNameReferenceFact{span: span, symbol: core_owner, kind: "type"})
             // A payload diagnostic names a Core enum by its dotted path, such
             // as `core.term.Color`.
-            display_name: "{core_owner.module_name.removeprefix("<corelib>/")}.{core_owner.name}"
+            display_name: "{sema_scope_module_text(environment, program, core_owner.module_identity).removeprefix("<corelib>/")}.{core_owner.name}"
             return sema_expression_core_enum_literal(core_owner.name, display_name, variants, variant, args, variant_span, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         }
     }
@@ -938,8 +938,8 @@ sema_expression_enum_literal: fn(type_name: String, type_args: [Type], variant: 
         diagnostics.push(sema_enum_unknown_variant(resolved_name, variant, variant_names, span, variant_span))
         return None
     }
-    variant_id: symbol_id(SymbolKind.Variant, owner.module_name, owner.id.key, variant)
-    variant_symbol: Symbol{id: variant_id, kind: SymbolKind.Variant, name: variant, module_name: owner.module_name, owner: Val(owner.id.key), span: selected_variant.name_span, ty: sema_registration_variant_type(selected_variant.payload), visibility: owner.visibility}
+    variant_id: symbol_id(SymbolKind.Variant, sema_scope_module_text(environment, program, owner.module_identity), owner.id.key, variant)
+    variant_symbol: Symbol{id: variant_id, kind: SymbolKind.Variant, name: variant, module_identity: owner.module_identity, owner: Val(owner.id.key), span: selected_variant.name_span, ty: sema_registration_variant_type(selected_variant.payload), visibility: owner.visibility}
     context.name_references.push(SemaNameReferenceFact{span: variant_span ?? span, symbol: variant_symbol, kind: "variant"})
     generic_names: loop parameter in enum_def.type_params -> parameter.name
     generic_args := type_args
@@ -956,7 +956,7 @@ sema_expression_enum_literal: fn(type_name: String, type_args: [Type], variant: 
     payload := TEnumPayload.Unit
     // The enum as diagnostics name it: a Core enum by its dotted path, a
     // program enum by its declared name.
-    payload_owner: if owner.module_name.starts_with("<corelib>/") -> "{owner.module_name.removeprefix("<corelib>/")}.{owner.name}" else -> owner.name
+    payload_owner: if module_is_core(owner.module_identity) -> "{sema_scope_module_text(environment, program, owner.module_identity).removeprefix("<corelib>/")}.{owner.name}" else -> owner.name
     if selected_variant.payload == {
         .Unit -> {
             if args.len() != 0 {
@@ -979,7 +979,7 @@ sema_expression_enum_literal: fn(type_name: String, type_args: [Type], variant: 
             }
             // As a struct field: the payload type names types as the enum's
             // module sees them (Rust `owner_type_for_reader`).
-            payload_ty: sema_inference_substitute_type(sema_expression_field_owner_type(environment, program, owner.module_name, ty, generic_names), generic_names, generic_args)
+            payload_ty: sema_inference_substitute_type(sema_expression_field_owner_type(environment, program, owner.module_identity, ty, generic_names), generic_names, generic_args)
             sema_copy_site_check_field(payload_expr, environment, program, scopes, tail_store, context, diagnostics)
             diagnostic_start: diagnostics.len()
             checked: sema_check_expression(payload_expr, Val(payload_ty), environment, program, scopes, state, tail_store, context, diagnostics) ?? {
@@ -1035,7 +1035,7 @@ sema_expression_enum_literal: fn(type_name: String, type_args: [Type], variant: 
                     return None
                 }
                 supplied[found] = true
-                field_ty: sema_inference_substitute_type(sema_expression_field_owner_type(environment, program, owner.module_name, fields[found].ty, generic_names), generic_names, generic_args)
+                field_ty: sema_inference_substitute_type(sema_expression_field_owner_type(environment, program, owner.module_identity, fields[found].ty, generic_names), generic_names, generic_args)
                 sema_copy_site_check_field(payload_expr, environment, program, scopes, tail_store, context, diagnostics)
                 diagnostic_start: diagnostics.len()
                 checked_value: sema_check_expression(payload_expr, Val(field_ty), environment, program, scopes, state, tail_store, context, diagnostics)
@@ -1070,7 +1070,7 @@ sema_expression_enum_literal: fn(type_name: String, type_args: [Type], variant: 
     // The written spelling may be an import alias. The result carries the
     // actual declaration owner's type, just as its payload field types do.
     declared_enum_ty: if generic_args.len() > 0 -> Type.Apply{name: owner.name, args: generic_args} else -> Type.Named{name: owner.name}
-    enum_ty: sema_expression_field_owner_type(environment, program, owner.module_name, declared_enum_ty, generic_names)
+    enum_ty: sema_expression_field_owner_type(environment, program, owner.module_identity, declared_enum_ty, generic_names)
     payload_rows: body_flat_enum_payload(payload, context.arena)
     value: sema_node(context, enum_ty, NodeKind.EnumCtor{owner: owner.id, variant: variant_id, payload: payload_rows}, span)
     sema_expr_expected(value, expected, environment, program, diagnostics)
@@ -1462,7 +1462,7 @@ sema_expression_checked_text_target: fn(head: Type, environment: SemaScopeEnviro
 // string-backed. None when the row is not the head's.
 sema_expression_checked_text_impl_target: fn(graph: SemaRegistrationGraph, module_index: Int, row: Int, owner: Symbol?, identity_key: String, name: String, head_module: String?, string_backed: Bool) -> SemaExpressionCheckedTextTarget? {
     if owner == .Val(nominal) {
-        if graph.modules[module_index].impls[row].target_identity_key != identity_key && (module_is_none(graph.modules[module_index].impls[row].target_module_identity) || module_text(graph.module_table, graph.modules[module_index].impls[row].target_module_identity) != nominal.module_name || graph.modules[module_index].impls[row].target_type_name != nominal.name) -> return None
+        if graph.modules[module_index].impls[row].target_identity_key != identity_key && (module_is_none(graph.modules[module_index].impls[row].target_module_identity) || graph.modules[module_index].impls[row].target_module_identity != nominal.module_identity || graph.modules[module_index].impls[row].target_type_name != nominal.name) -> return None
     } else {
         if module_is_none(graph.modules[module_index].impls[row].target_module_identity) || graph.modules[module_index].impls[row].target_type_name != name || head_module != Val((graph.modules[module_index].module_name)) -> return None
     }

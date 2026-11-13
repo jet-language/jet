@@ -496,12 +496,11 @@ sema_call_core_module_identity: fn(environment: SemaScopeEnvironment, program: S
     }
 }
 
-// Whether the symbol of identity text `symbol_module` belongs to the loaded
-// Core source module `module_name` (sema_call_core_module_identity).
-sema_call_core_module_is: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, module_name: String, symbol_module: String) -> Bool Never! {
+// Whether the symbol of module `symbol_module` belongs to the loaded Core
+// source module `module_name` (sema_call_core_module_identity).
+sema_call_core_module_is: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, module_name: String, symbol_module: ModuleID) -> Bool Never! {
     identity: sema_call_core_module_identity(environment, program, module_name) ?? return false
-    if program.registration_graph == .Val(graph) -> return module_text(graph.module_table, identity) == symbol_module
-    false
+    identity == symbol_module
 }
 
 // Rust `serde_diags::unknown_core_item` (E1004): the one report for a Core
@@ -1526,7 +1525,7 @@ sema_call_core_global_shared: fn(lifetime: SharedLifetime, member: String, type_
 // module keeps its functions as registration-graph rows, not in
 // `environment.declarations`; both are read in place.
 sema_call_core_shared_initializer_declared: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, target: SemaCallDirectTarget) -> Bool Never! {
-    if target.symbol.module_name != sema_scope_environment_module_text(environment, program) -> return false
+    if target.symbol.module_identity != environment.module_identity -> return false
     if program.registration_graph == .Val(graph) {
         if sema_registration_callable_row(graph, target.symbol.id.key) == .Val(row) {
             if row == {
@@ -1565,7 +1564,7 @@ sema_call_core_shared_success: fn(ty: Type) -> Type? Never! {
 }
 
 sema_call_core_check_source_owned: fn(target: SemaCallDirectTarget, qualified_name: String, type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
-    if target.symbol.name == "graph" && sema_call_core_module_is(environment, program, "core.build", target.symbol.module_name) {
+    if target.symbol.name == "graph" && sema_call_core_module_is(environment, program, "core.build", target.symbol.module_identity) {
         if !sema_call_core_check_type_args("core.build", "graph", 0, false, type_args, span, diagnostics) -> return None
         // A body checked on a compiler thread keeps its name in location_function (Control.jet).
         check: sema_compiler_services_check_call("core.build", "graph", args, span, (scopes.location_function ?? environment.function_name) == "build", environment, program, scopes, state, tail_store, context, diagnostics)
@@ -1586,7 +1585,7 @@ sema_call_core_check_source_owned: fn(target: SemaCallDirectTarget, qualified_na
     if sema_call_histories_is_call(target, environment, program) -> call_args = sema_call_histories_args(args, type_args, span, environment, program)
     call := Call{name: qualified_name, name_span: span, type_args: type_args, args: call_args}
     checked: sema_call_check_direct_target_owned(state, target, call, [SemaCallDefaultValue]{}, expected, environment, program, scopes, tail_store, context, diagnostics) ?? return None
-    if target.symbol.name == "to_string" && sema_call_core_module_is(environment, program, "core.encoding.csv", target.symbol.module_name) {
+    if target.symbol.name == "to_string" && sema_call_core_module_is(environment, program, "core.encoding.csv", target.symbol.module_identity) {
         if !sema_data_csv_check_rows(args, checked.value, environment, program, diagnostics) -> return None
     }
     if !sema_data_encode_check_value(target, args, checked.value, environment, program, diagnostics) -> return None

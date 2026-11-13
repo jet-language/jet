@@ -7,7 +7,7 @@ run: fn() {
     state := sema_ownership_state_init()
     span := Span{start: 0, end: 1}
     key := symbol_id(SymbolKind.Local, "frozen-fixture", "run", "snapshot")
-    symbol := Symbol{id: key, kind: SymbolKind.Local, name: "snapshot", module_name: "frozen-fixture", owner: Val("run"), span: span, ty: Val(Type.List{element: Type.Int}), visibility: 0}
+    symbol := Symbol{id: key, kind: SymbolKind.Local, name: "snapshot", module_identity: module_none(), owner: Val("run"), span: span, ty: Val(Type.List{element: Type.Int}), visibility: 0}
     if !sema_scope_declare_local(scopes, symbol, true, AccessConvention.Read, None, false) -> panic("fixture binding was not declared")
     sema_ownership_declare_binding(state, symbol, false)
     site := SemaOwnershipFreezeSite{span: Span{start: 10, end: 16}, line: 3, column: 5}

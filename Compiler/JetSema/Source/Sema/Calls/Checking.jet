@@ -1099,7 +1099,7 @@ sema_call_key_named_elsewhere: fn(key: String, own: Int, starts: [Int], context:
 sema_call_binder_ref_symbol: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, owner: String, site: Int, slot: Int, name: String, ty: Type, span: Span) -> Symbol Never! {
     local_module: sema_scope_environment_module_text(environment, program)
     id: symbol_id(SymbolKind.Local, local_module, owner, "binder_ref_{site}_{slot}")
-    Symbol{id: id, kind: SymbolKind.Local, name: name, module_name: local_module, owner: Val(owner), span: span, ty: Val(ty), visibility: 0}
+    Symbol{id: id, kind: SymbolKind.Local, name: name, module_identity: environment.module_identity, owner: Val(owner), span: span, ty: Val(ty), visibility: 0}
 }
 
 // Opens the default's own frame with each earlier parameter bound to its slot

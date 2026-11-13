@@ -40,8 +40,7 @@ sema_registration_canonicalize_qualified_types: fn(graph: &SemaRegistrationGraph
         // in that module's names.
         loop import_index in 0..<graph.modules[module_index].imports.len() {
             loop binding in 0..<graph.modules[module_index].imports[import_index].bindings.len() {
-                source: graph.modules[module_index].imports[import_index].bindings[binding].symbol.module_name
-                source_index: sema_registration_module_index_text(graph, source) ?? next
+                source_index: sema_registration_module_index(graph, graph.modules[module_index].imports[import_index].bindings[binding].symbol.module_identity) ?? next
                 if module_keys[source_index].len() == 0 -> next
                 sema_registration_canonical_symbol(graph.modules[module_index].imports[import_index].bindings[binding].symbol, module_keys[source_index])
             }

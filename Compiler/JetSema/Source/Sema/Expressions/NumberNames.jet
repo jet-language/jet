@@ -157,7 +157,7 @@ sema_expr_number_constant_reread: fn(name: String, span: Span, index: Int, expec
     unhandled: SemaNumberNameRead{handled: false, value: None}
     wanted: expected ?? return unhandled
     symbol: sema_scope_binding_symbol(environment, scopes, index)
-    if symbol.module_name != sema_scope_environment_module_text(environment, program) -> return unhandled
+    if symbol.module_identity != environment.module_identity -> return unhandled
     own: sema_scope_binding_type(environment, scopes, index) ?? return unhandled
     required: sema_call_resolved_type(wanted, environment, program)
     if sema_call_type_assignable(required, own, environment, program) ?? true -> return unhandled
@@ -179,7 +179,7 @@ sema_expr_number_constant_reread: fn(name: String, span: Span, index: Int, expec
 // run types every constant's declaration with its staged value's type.
 sema_expr_number_constant_literal: fn(symbol: Symbol, program: SemaProgramTables) -> Expr? {
     if program.registration_graph == .Val(graph) {
-        module_index: sema_registration_module_index_text(graph, symbol.module_name) ?? return None
+        module_index: sema_registration_module_index(graph, symbol.module_identity) ?? return None
         loop constant in graph.modules[module_index].constants {
             if constant.symbol.id.key != symbol.id.key -> next
             if constant.typed || constant.declaration.mutable || constant.declaration.is_persist || constant.declaration.is_comptime || constant.declaration.ct != None -> return None
@@ -196,7 +196,7 @@ sema_expr_number_constant_row: fn(name: String, environment: SemaScopeEnvironmen
     index: sema_scope_resolve_index(scopes, name) ?? return None
     if scopes.bindings[index].symbol.kind != SymbolKind.Constant -> return None
     symbol: sema_scope_binding_symbol(environment, scopes, index)
-    if symbol.module_name != sema_scope_environment_module_text(environment, program) -> return None
+    if symbol.module_identity != environment.module_identity -> return None
     if sema_expr_number_constant_literal(symbol, program) == None -> return None
     Val(index)
 }

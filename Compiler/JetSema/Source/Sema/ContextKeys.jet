@@ -169,7 +169,7 @@ sema_context_key_resolve: fn(name: String, environment: SemaScopeEnvironment, pr
 // its declaring module's row.
 sema_context_key_symbol: fn(program: SemaProgramTables, symbol: Symbol) -> Bool Never! {
     if program.registration_graph == .Val(graph) {
-        module_index: sema_registration_module_index_text(graph, symbol.module_name) ?? return false
+        module_index: sema_registration_module_index(graph, symbol.module_identity) ?? return false
         loop constant in graph.modules[module_index].constants {
             if constant.symbol.id.key == symbol.id.key -> return sema_context_key_declared(constant.declaration)
         }

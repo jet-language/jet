@@ -29,6 +29,7 @@ use jet_foundation.[
     body_each_expr_child,
     body_each_stmt_child,
     body_node,
+    module_text,
 ]
 
 SemaServiceCoreMethodContract: struct {
@@ -593,7 +594,7 @@ sema_core_module_nominal: fn(program: SemaProgramTables, module_name: String, le
             // Read in place: binding the row copied each module nominal.
             if graph.modules[module_index].nominals[nominal_index].symbol.name == leaf {
                 if graph.modules[module_index].nominals[nominal_index].compiler_owned -> return leaf.copy()
-                return "{graph.modules[module_index].nominals[nominal_index].symbol.module_name}::{leaf}"
+                return "{module_text(graph.module_table, graph.modules[module_index].nominals[nominal_index].symbol.module_identity)}::{leaf}"
             }
         }
     }

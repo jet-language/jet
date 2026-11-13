@@ -96,7 +96,9 @@ SemWalk: struct {
     // while span i is unclaimed; a claimed span points past itself. One sentinel slot at the end.
     block_next: [Int]
     references: [SemaNameReferenceFact]
-    module_paths: [String: String]
+    // A reference's module id -> the path of the doc module whose name is
+    // that module's identity text.
+    module_paths: [Int: String]
     // Top-level function span start -> its written return type span, for a
     // function whose checked row lost it (semindex_written_returns).
     written_returns: [Int: Span]
@@ -385,7 +387,7 @@ semindex_scoped_ref: fn(name: String, span: Span, ctx: SemWalk) -> SemRef {
     target := SemAnchor?{None}
     loop reference in ctx.references {
         if reference.span.start != span.start || reference.span.end != span.end -> next
-        module_path: ctx.module_paths.get(reference.symbol.module_name) ?? break
+        module_path: ctx.module_paths.get(Int.from_u32(reference.symbol.module_identity.id)) ?? break
         target = Val(SemAnchor{module_path: module_path, kind: reference.kind, def_span: reference.symbol.span, semantic_identity: None})
         break
     }
@@ -2402,8 +2404,12 @@ semindex_convert_defs: fn(db: SemDB, modules: [JetDriverDocModule]) -> [SemDefin
 // same program.
 semindex_build: fn(modules: [JetDriverDocModule], effect_projection: SemEffectProjection) -> SemIndex {
     db := semindex_db()
-    module_paths := [String: String]{}
-    loop doc_module in modules -> module_paths[doc_module.module_name] = doc_module.path
+    named_paths := [String: String]{}
+    loop doc_module in modules -> named_paths[doc_module.module_name] = doc_module.path
+    module_paths := [Int: String]{}
+    loop doc_module in modules {
+        if named_paths.get(doc_module.module_identity) == .Val(path) -> module_paths[Int.from_u32(doc_module.module_id.id)] = path
+    }
     summaries: semindex_summaries(modules)
     loop doc_module in modules {
         // copy: `doc_module.block_spans` stays in the iterated collection (`doc_module` is a view

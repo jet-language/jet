@@ -46,6 +46,7 @@ use {
         foundation_named_type,
         ModuleID,
         module_is_core,
+        module_text,
     ]
     jet_parser.[
         parse_source,
@@ -493,7 +494,7 @@ sema_inject_prelude_error_conversions: fn(module_identity: String, environment: 
             reasons.push("{label}: its Prelude declaration did not parse into one conversion")
             next
         }
-        symbol: sema_item_symbol(Item.Func{value: conversion}, module_identity, environment.source_file, environment.source_origin, environment.source_segments) ?? {
+        symbol: sema_item_symbol(Item.Func{value: conversion}, environment.module_identity, module_identity, environment.source_file, environment.source_origin, environment.source_segments) ?? {
             complete = false
             reasons.push("{label}: its routine has no module symbol")
             next
@@ -758,7 +759,7 @@ sema_expiring_secret_declared_by: fn(graph: SemaRegistrationGraph, caller: Int) 
     if caller < 0 -> return false
     loop row in 0..<graph.modules[caller].nominals.len() {
         if graph.modules[caller].nominals[row].symbol.name != "ExpiringSecret" -> next
-        if sema_is_expiring_secret_name("{graph.modules[caller].nominals[row].symbol.module_name}::ExpiringSecret") -> return true
+        if sema_is_expiring_secret_name("{module_text(graph.module_table, graph.modules[caller].nominals[row].symbol.module_identity)}::ExpiringSecret") -> return true
     }
     false
 }

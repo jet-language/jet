@@ -738,7 +738,7 @@ sema_contract_result_binding_symbol: fn(environment: SemaScopeEnvironment, progr
     result_owner: "{owner}/post"
     module_name: sema_scope_environment_module_text(environment, program)
     id: symbol_id(SymbolKind.Local, module_name, result_owner, "result")
-    Symbol{id: id, kind: SymbolKind.Local, name: "result", module_name: module_name, owner: Val(result_owner), span: span, ty: Val(ty), visibility: 0}
+    Symbol{id: id, kind: SymbolKind.Local, name: "result", module_identity: environment.module_identity, owner: Val(result_owner), span: span, ty: Val(ty), visibility: 0}
 }
 
 sema_contract_check_function: fn(func: Func, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaContractDeclaration {
@@ -929,7 +929,7 @@ sema_contract_generated_argument_symbol: fn(environment: SemaScopeEnvironment, p
     name: "contract_arg_{span.start}_{index}"
     module_name: sema_scope_environment_module_text(environment, program)
     id: symbol_id(SymbolKind.Local, module_name, owner, name)
-    Symbol{id: id, kind: SymbolKind.Local, name: parameter_name, module_name: module_name, owner: Val(owner), span: span, ty: Val(ty), visibility: 0}
+    Symbol{id: id, kind: SymbolKind.Local, name: parameter_name, module_identity: environment.module_identity, owner: Val(owner), span: span, ty: Val(ty), visibility: 0}
 }
 
 sema_contract_pin_argument: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, owner: String, index: Int, parameter_name: String, convention: AccessConvention, argument: &TCallArg, call_span: Span, scopes: &SemaScopeTable, state: &SemaOwnershipState, bindings: &[TStmt]) -> TLocal Never! {

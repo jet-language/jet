@@ -29,6 +29,7 @@ use jet_foundation.[
     symbol_id,
     ModuleID,
     type_name,
+    module_text,
 ]
 
 SemaCallFacts: struct {
@@ -498,7 +499,7 @@ sema_call_trait_row_for_bound: fn(graph: SemaRegistrationGraph, bound: String) -
     loop (module_index, graph_module) in graph.modules {
         loop (row, nominal) in graph_module.nominals {
             if nominal.kind != SemaRegistrationNominalKind.Trait -> next
-            canonical: "{nominal.symbol.module_name}::{nominal.symbol.name}"
+            canonical: "{module_text(graph.module_table, nominal.symbol.module_identity)}::{nominal.symbol.name}"
             if bound == canonical {
                 return Val(SemaRegistrationRowRef{module_index: module_index, row: row})
             }
@@ -535,7 +536,7 @@ sema_call_generic_receiver_name: fn(ty: Type) -> String? {
 
 sema_call_trait_visible: fn(graph: SemaRegistrationGraph, nominal: SemaRegistrationNominal, caller_module: ModuleID, caller_package: String) -> Bool Never! {
     owner_package := ""
-    if sema_registration_module_index_text(graph, nominal.symbol.module_name) == .Val(owner_index) {
+    if sema_registration_module_index(graph, nominal.symbol.module_identity) == .Val(owner_index) {
         if graph.modules[owner_index].module_identity == caller_module -> return true
         owner_package = graph.modules[owner_index].package_identity
     }
@@ -769,7 +770,7 @@ sema_call_implemented_trait_method_candidates: fn(graph: SemaRegistrationGraph, 
                 if function.name == method -> written = true
             }
             if written -> next
-            trait_row: sema_checked_trait_nominal_row(graph, sema_registration_module_id(graph, nominal.symbol.module_name), block.trait_name) ?? next
+            trait_row: sema_checked_trait_nominal_row(graph, nominal.symbol.module_identity, block.trait_name) ?? next
             sema_call_unwritten_trait_method_candidates(graph, trait_row, block.delegation_field != None, receiver_type, method, type_args, caller_module, caller_package, generic_params, span, diagnostics, candidates)
         }
     }

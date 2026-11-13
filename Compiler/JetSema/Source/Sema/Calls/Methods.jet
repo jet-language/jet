@@ -1011,7 +1011,7 @@ sema_app_handler_adapter: fn(method: String, name: String, function: SemaRegistr
             handler_args.push(sema_app_arg(sema_app_call_method(call, "__path", [Type]{}, [CallArg]{}, span), AccessConvention.Read, span))
             next
         }
-        ty: sema_type_resolve_declared(graph, parameter.ty, sema_registration_module_id(graph, function.symbol.module_name))
+        ty: sema_type_resolve_declared(graph, parameter.ty, function.symbol.module_identity)
         optional: if ty == {
             .Option(inner) -> Val(inner)
             .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> None
@@ -1035,7 +1035,7 @@ sema_app_handler_adapter: fn(method: String, name: String, function: SemaRegistr
     // into the adapter's `Err`; it answers the request as a failed reply,
     // which the route's error boundary renders.
     typed_failure: if function.declaration.return_type == {
-        .Val(declared) -> sema_app_typed_failure(sema_type_resolve_declared(graph, declared, sema_registration_module_id(graph, function.symbol.module_name)))
+        .Val(declared) -> sema_app_typed_failure(sema_type_resolve_declared(graph, declared, function.symbol.module_identity))
         .None -> false
     }
     failure_text: Expr.Str{parts: [StrPart]{StrPart.Lit{text: "the `{name}` handler failed: "}, StrPart.Interp{expr: sema_app_ident("err", span), format: StrFormat.Display}}, span: span, id: AST_NODE_GENERATED}
@@ -1048,7 +1048,7 @@ sema_app_handler_adapter: fn(method: String, name: String, function: SemaRegistr
         wrap: if method == "loader" || server -> "__json" else -> "__page"
         // `__json` encodes the handler's success value; naming it keeps a
         // failing handler (`-> T E!`) from leaving `Value` uninferred.
-        wrap_types: if wrap == "__json" && function.declaration.return_type == .Val(declared) -> [Type]{sema_app_success_type(sema_type_resolve_declared(graph, declared, sema_registration_module_id(graph, function.symbol.module_name)))} else -> [Type]{}
+        wrap_types: if wrap == "__json" && function.declaration.return_type == .Val(declared) -> [Type]{sema_app_success_type(sema_type_resolve_declared(graph, declared, function.symbol.module_identity))} else -> [Type]{}
         reply = sema_app_call_method(call, wrap, wrap_types, [CallArg]{sema_app_arg(handler_call, AccessConvention.Read, span)}, span)
     }
     body.push(Stmt.Expr{expr: reply})
@@ -1472,7 +1472,7 @@ sema_call_try_app_method: fn(receiver: Expr, receiver_value: TExpr, method: Stri
             _: sema_app_named_handler(method, args[0], environment, program, scopes, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
             target = "__loader"
             data_type: if handler.function.declaration.return_type == {
-                .Val(declared) -> type_name(sema_app_success_type(sema_type_resolve_declared(graph, declared, sema_registration_module_id(graph, handler.function.symbol.module_name))))
+                .Val(declared) -> type_name(sema_app_success_type(sema_type_resolve_declared(graph, declared, handler.function.symbol.module_identity)))
                 .None -> "Unit"
             }
             preload: if args.len() == 3 -> args[2].copy() else -> sema_app_arg(Expr.Bool{value: false, span: span, id: AST_NODE_GENERATED}, AccessConvention.Read, span)

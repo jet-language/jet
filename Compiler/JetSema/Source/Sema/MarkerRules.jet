@@ -724,14 +724,13 @@ sema_marker_rules_constant_for_reference: fn(symbol: Symbol, references: [SemaNa
     if !found {
         return None
     }
-    symbol_module: sema_check_registered_module_id(program, symbol.module_name)
     loop value in values {
-        if value.kind == SemaComptimeItemKind.Constant && value.module_identity == symbol_module && value.key == symbol.id.key {
+        if value.kind == SemaComptimeItemKind.Constant && value.module_identity == symbol.module_identity && value.key == symbol.id.key {
             return Val(value.value)
         }
     }
     if program.registration_graph == .Val(graph) {
-        module_index: sema_registration_module_index(graph, symbol_module) ?? return None
+        module_index: sema_registration_module_index(graph, symbol.module_identity) ?? return None
         loop constant_index in 0..<graph.modules[module_index].constants.len() {
             if graph.modules[module_index].constants[constant_index].symbol.id.key == symbol.id.key {
                 value: graph.modules[module_index].constants[constant_index].declaration.ct ?? return None

@@ -1935,7 +1935,7 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, e
         parameter_owner := sema_scope_local_owner_key(lambda_scopes)
         parameter_module := sema_scope_environment_module_text(environment, program)
         parameter_id := symbol_id(SymbolKind.Parameter, parameter_module, parameter_owner, parameter.name)
-        parameter_symbol := Symbol{id: parameter_id, kind: SymbolKind.Parameter, name: parameter.name, module_name: parameter_module, owner: Val(parameter_owner), span: parameter.name_span, ty: Val(parameter_type), visibility: 0}
+        parameter_symbol := Symbol{id: parameter_id, kind: SymbolKind.Parameter, name: parameter.name, module_identity: environment.module_identity, owner: Val(parameter_owner), span: parameter.name_span, ty: Val(parameter_type), visibility: 0}
         if !sema_scope_declare_local(lambda_scopes, parameter_symbol, (host_callback && host_write) || convention == AccessConvention.Write, convention, None, false) {
             diagnostics.push(sema_already_defined(parameter.name, parameter.name_span))
             return None

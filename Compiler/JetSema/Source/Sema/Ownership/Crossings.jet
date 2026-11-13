@@ -14,6 +14,7 @@ use jet_foundation.[
     core_record_literal_fields,
     core_type_modules,
     type_name,
+    module_text,
 ]
 
 SemaSendCrossing: enum {
@@ -127,7 +128,7 @@ sema_ownership_crossing_intrinsic_apply: fn(ty: Type, name: String, environment:
         nominal_row := sema_type_resolve_nominal_row_at(graph, ty, sema_scope_caller_row(environment, graph))
         if nominal_row == .Val(row) {
             value: graph.modules[row.module_index].nominals[row.row]
-            return value.symbol.name == name && (value.compiler_owned || value.symbol.module_name.starts_with("core."))
+            return value.symbol.name == name && (value.compiler_owned || module_text(graph.module_table, value.symbol.module_identity).starts_with("core."))
         }
         if !allow_without_nominal -> return false
         return if ty == {
@@ -138,9 +139,9 @@ sema_ownership_crossing_intrinsic_apply: fn(ty: Type, name: String, environment:
     false
 }
 
-sema_ownership_crossing_named_builtin_problem: fn(nominal: SemaRegistrationNominal, cell_only: Bool) -> SemaSendabilityProblem? {
-    // A Core source module's symbols carry its identity (`<corelib>/core.browser`).
-    sema_ownership_crossing_core_confined(nominal.symbol.module_name.removeprefix("<corelib>/"), nominal.symbol.name, cell_only)
+sema_ownership_crossing_named_builtin_problem: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, nominal: SemaRegistrationNominal, cell_only: Bool) -> SemaSendabilityProblem? {
+    // A Core source module's identity reads `<corelib>/core.browser`.
+    sema_ownership_crossing_core_confined(sema_scope_module_text(environment, program, nominal.symbol.module_identity).removeprefix("<corelib>/"), nominal.symbol.name, cell_only)
 }
 
 // The Core handles bound to the thread that made them: the allocators and
@@ -162,7 +163,7 @@ sema_ownership_crossing_named: fn(ty: Type, nominal: SemaRegistrationNominal, cr
     if nominal.kind == SemaRegistrationNominalKind.Trait {
         return Val(sema_ownership_crossing_new_problem(SemaSendProblemKind.TraitValue{name: nominal.symbol.name}))
     }
-    if sema_ownership_crossing_named_builtin_problem(nominal, cell_only) == .Val(problem) -> return Val(problem)
+    if sema_ownership_crossing_named_builtin_problem(environment, program, nominal, cell_only) == .Val(problem) -> return Val(problem)
     if nominal.kind == SemaRegistrationNominalKind.ForeignHandle {
         if nominal.source == {
             .ForeignHandle(facts) -> {

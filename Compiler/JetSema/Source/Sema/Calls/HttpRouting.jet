@@ -30,6 +30,7 @@ use jet_foundation.[
     expr_span,
     type_identity_equal,
     type_name,
+    module_text,
 ]
 
 SemaHTTPRouteParameter: struct {
@@ -142,13 +143,13 @@ sema_http_route_shape: fn(expression: Expr, environment: SemaScopeEnvironment, p
             if program.registration_graph == .Val(graph) {
             params := [SemaHTTPRouteParameter]{}
             loop parameter in function.declaration.params {
-                resolved := sema_type_resolve_declared(graph, parameter.ty, sema_registration_module_id(graph, function.symbol.module_name))
+                resolved := sema_type_resolve_declared(graph, parameter.ty, function.symbol.module_identity)
                 params.push(SemaHTTPRouteParameter{name: parameter.name, ty: resolved})
             }
             // Named-handler metadata reads another raw body, not merely
             // its callable header. The accepted logical query must recompute.
             sema_body_check_mark_foreign_raw_body(host_hooks)
-            return Val(SemaHTTPRouteShape{params: params, body: LambdaBody.Block{body: function.declaration.body}, module_identity: sema_registration_module_id(graph, function.symbol.module_name)})
+            return Val(SemaHTTPRouteShape{params: params, body: LambdaBody.Block{body: function.declaration.body}, module_identity: function.symbol.module_identity})
             } else {
                 return None
             }
@@ -722,7 +723,7 @@ sema_http_route_response_adapter_returns_response: fn(method: String, args: [Cal
     if program.registration_graph == .Val(graph) {
     response_row: sema_type_resolve_nominal_row(graph, Type.Named{name: "HTTPResponse"}, module_identity) ?? return false
     response_nominal: graph.modules[response_row.module_index].nominals[response_row.row]
-    routed: core_source_receiver_method("{response_nominal.symbol.module_name}::{response_nominal.symbol.name}", method, updated_args.len())
+    routed: core_source_receiver_method("{module_text(graph.module_table, response_nominal.symbol.module_identity)}::{response_nominal.symbol.name}", method, updated_args.len())
     probe_diagnostics := [Diagnostic]{}
     candidates := sema_expr_registration_method_candidates(graph, module_identity, response_nominal.ty, routed, [Type]{}, type_args, span, environment, program, probe_diagnostics)
     if candidates.len() == 0 -> return false

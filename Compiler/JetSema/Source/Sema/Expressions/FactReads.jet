@@ -1131,7 +1131,7 @@ sema_fact_type_info: fn(symbol: Symbol?, name: String, args: [Type], environment
     if program.registration_graph == .Val(graph) {
         if symbol == .Val(resolved) {
             if resolved.kind != SymbolKind.Type -> return None
-            return sema_comptime_reflection_type_info(graph, sema_registration_module_id(graph, resolved.module_name), name, catalog, args)
+            return sema_comptime_reflection_type_info(graph, resolved.module_identity, name, catalog, args)
         }
         row: sema_type_resolve_nominal_row(graph, Type.Named{name: name}, environment.module_identity) ?? return None
         return sema_comptime_reflection_type_info(graph, graph.modules[row.module_index].module_identity, graph.modules[row.module_index].nominals[row.row].symbol.name, catalog, args)
@@ -1145,7 +1145,7 @@ sema_fact_type_info: fn(symbol: Symbol?, name: String, args: [Type], environment
 // type per type parameter, else E0119 at `span` and None. With no `args` it
 // is the declaration.
 sema_fact_function_info: fn(symbol: Symbol, graph: SemaRegistrationGraph, args: [Type]?, span: Span, diagnostics: &[Diagnostic]) -> TComptimeValue? {
-    index: sema_registration_module_index_text(graph, symbol.module_name) ?? return None
+    index: sema_registration_module_index(graph, symbol.module_identity) ?? return None
     registered_module: graph.modules[index]
     catalog: TAppliedRuleCatalog{rows: [TAppliedRule]{}, argument_menus: [TAppliedRuleArgumentMenu]{}}
     registry := SemaScopeMembersMarkerRegistry?{None}
@@ -1206,7 +1206,7 @@ sema_fact_state_infos: fn(definition: StructDef, symbol: Symbol, environment: Se
     if definition.state == None -> return None
     graph_fact := SemaStateGraphFact?{None}
     if program.registration_graph == .Val(graph) {
-        module_index: sema_registration_module_index_text(graph, symbol.module_name)
+        module_index: sema_registration_module_index(graph, symbol.module_identity)
         if module_index == .Val(index) {
             loop fact in sema_state_graph_facts(graph.modules[index].program.items) {
                 if fact.type_name == definition.name {
@@ -1343,7 +1343,7 @@ sema_fact_uses_check: fn(name: String, symbol: Symbol?, span: Span, expected: Ty
 // marker spelling (`routes.Route` is `#Routes.Route`).
 sema_fact_uses_marker: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, name: String, symbol: Symbol?) -> SemaMarkerModuleResolution {
     if symbol == .Val(found) && found.kind == SymbolKind.Type {
-        found_module: sema_registration_module_id(graph, found.module_name)
+        found_module: found.module_identity
         index: sema_registration_module_index(graph, found_module) ?? return SemaMarkerModuleResolution{status: "unknown", declaring_module_identity: found_module, declaration: None}
         return sema_marker_module_resolve_items(graph.modules[index].program.items, SemaMarkerModuleTarget{status: "found", module_identity: found_module, name: found.name, require_export: false})
     }

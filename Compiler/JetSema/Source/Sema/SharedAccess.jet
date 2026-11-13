@@ -352,7 +352,7 @@ sema_shared_access_field_type: fn(owner_ty: Type, member: String, environment: S
     definition: sema_scope_declaration_struct(environment, program, owner_symbol.id) ?? return None
     names: loop parameter in definition.type_params -> parameter.name
     loop field in definition.fields {
-        if field.name == member -> return Val(sema_inference_substitute_type(sema_expression_field_owner_type(environment, program, owner_symbol.module_name, field.ty, names), names, owner_args))
+        if field.name == member -> return Val(sema_inference_substitute_type(sema_expression_field_owner_type(environment, program, owner_symbol.module_identity, field.ty, names), names, owner_args))
     }
     None
 }

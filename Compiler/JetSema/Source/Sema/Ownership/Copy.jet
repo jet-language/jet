@@ -24,6 +24,7 @@ use jet_foundation.[
     core_record_field_types,
     ir_host_value_name,
     ir_runtime_handle_row,
+    module_is_core,
 ]
 
 SemaCopyIntent: enum {
@@ -724,7 +725,7 @@ sema_copy_nominal_facts: fn(
     resource_impl: sema_copy_nominal_close(graph, table, nominal, row)
     resource := resource_impl.value
     if !resource_impl.known -> complete = false
-    if sema_module_is_core_source(nominal.symbol.module_name) && sema_copy_named_is_builtin_resource(nominal.symbol.name) -> resource = true
+    if module_is_core(nominal.symbol.module_identity) && sema_copy_named_is_builtin_resource(nominal.symbol.name) -> resource = true
     distinct: nominal.kind == SemaRegistrationNominalKind.Distinct
     declared_types := sema_copy_nominal_declared_types(nominal, bindings, graph)
     result := sema_copy_nominal_combine(actual, declared_types, distinct, resource, complete, graph, table, caller, generic_params, walk)

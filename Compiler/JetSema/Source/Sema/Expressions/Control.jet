@@ -52,6 +52,7 @@ use jet_foundation.[
     checked_symbol_local,
     type_identity_equal,
     type_name,
+    ModuleID,
 ]
 
 // The source location of a panic at `span` (Rust capture_panic_loc), naming the
@@ -631,8 +632,9 @@ SemaFailureProvenance: struct {
 
 sema_failure_definition_location: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, symbol: Symbol) -> String? {
     if program.registration_graph == .Val(graph) {
+    symbol_text: module_text(graph.module_table, symbol.module_identity)
     loop module_row_index in 0..<graph.modules.len() {
-        if module_text(graph.module_table, graph.modules[module_row_index].module_identity) != symbol.module_name && graph.modules[module_row_index].module_name != symbol.module_name -> next
+        if graph.modules[module_row_index].module_identity != symbol.module_identity && graph.modules[module_row_index].module_name != symbol_text -> next
         if graph.modules[module_row_index].module_path == "" -> return None
         line: sema_source_line_at(graph.modules[module_row_index].source_segments, symbol.span) ?? return None
         loop segment_index in 0..<graph.modules[module_row_index].source_segments.len() {
@@ -1540,7 +1542,7 @@ sema_expression_or_fallback_route: fn(fallback: OrFallback, span: Span, subject_
         // enclosing `err` (as the refutable fallback's `err` already does).
         owner: sema_scope_local_owner_key(scopes)
         local_module: sema_scope_environment_module_text(environment, program)
-        symbol: Symbol{id: symbol_id(SymbolKind.Local, local_module, owner, "err"), kind: SymbolKind.Local, name: "err", module_name: local_module, owner: Val(owner), span: span, ty: Val(error_type), visibility: 0}
+        symbol: Symbol{id: symbol_id(SymbolKind.Local, local_module, owner, "err"), kind: SymbolKind.Local, name: "err", module_identity: environment.module_identity, owner: Val(owner), span: span, ty: Val(error_type), visibility: 0}
         frame: scopes.current
         sema_scope_push_binding(scopes, SemaScopeBinding{frame: frame, symbol: symbol, mutable: false, access: AccessConvention.Read, integer_bounds: None, string_view: false, compiler_builtin: false})
         sema_ownership_declare_ambient_binding(fallback_state, symbol)
@@ -1822,7 +1824,7 @@ sema_expression_if_bind_subject: fn(subject: Expr, condition: Expr, else_value: 
     owner: sema_scope_local_owner_key(scopes)
     local_module: sema_scope_environment_module_text(environment, program)
     id: symbol_id(SymbolKind.Local, local_module, owner, name)
-    symbol: Symbol{id: id, kind: SymbolKind.Local, name: name, module_name: local_module, owner: Val(owner), span: subject_span, ty: Val(init.ty), visibility: 0}
+    symbol: Symbol{id: id, kind: SymbolKind.Local, name: name, module_identity: environment.module_identity, owner: Val(owner), span: subject_span, ty: Val(init.ty), visibility: 0}
     // (#3974): a hoisted `&place` subject aliases its place, so
     // the arm patterns that test it bind write windows.
     window: if init.kind == {
@@ -2071,12 +2073,12 @@ sema_expression_check_pattern_condition: fn(subject: Expr, pattern: Pattern, spa
     checked_subject: subject_value ?? {
         names := [BindName]{}
         sema_pattern_test_binding_names(pattern, names)
-        return sema_expression_condition_failed(sema_expression_unchecked_condition_bindings(names, [SemaConditionBinding]{}, sema_scope_local_owner_key(scopes), sema_scope_environment_module_text(environment, program)))
+        return sema_expression_condition_failed(sema_expression_unchecked_condition_bindings(names, [SemaConditionBinding]{}, sema_scope_local_owner_key(scopes), sema_scope_environment_module_text(environment, program), environment.module_identity))
     }
     if sema_pattern_tests_absence(pattern) {
         if sema_expr_none_comparison_refused(checked_subject.ty, true, span, environment, program) == .Val(refused) {
             diagnostics.push(refused)
-            return sema_expression_condition_failed(sema_expression_unchecked_condition_bindings([BindName]{}, [SemaConditionBinding]{}, sema_scope_local_owner_key(scopes), sema_scope_environment_module_text(environment, program)))
+            return sema_expression_condition_failed(sema_expression_unchecked_condition_bindings([BindName]{}, [SemaConditionBinding]{}, sema_scope_local_owner_key(scopes), sema_scope_environment_module_text(environment, program), environment.module_identity))
         }
     }
     source: sema_expression_window_source(subject, scopes)
@@ -2085,7 +2087,7 @@ sema_expression_check_pattern_condition: fn(subject: Expr, pattern: Pattern, spa
     checked_pattern := sema_check_pattern(checked_subject, pattern, TPatternPosition.Arm, false, false, environment, program, scopes, state, tail_store, context, diagnostics)
     owner: sema_scope_local_owner_key(scopes)
     local_module: sema_scope_environment_module_text(environment, program)
-    checked: checked_pattern.checked ?? return sema_expression_condition_failed(sema_expression_recovery_condition_bindings(checked_pattern.bindings, window_names, owner, local_module))
+    checked: checked_pattern.checked ?? return sema_expression_condition_failed(sema_expression_recovery_condition_bindings(checked_pattern.bindings, window_names, owner, local_module, environment.module_identity))
     facts := [TPatternBindingFact]{}
     bindings := [SemaConditionBinding]{}
     loop fact in checked.bindings {
@@ -2095,7 +2097,7 @@ sema_expression_check_pattern_condition: fn(subject: Expr, pattern: Pattern, spa
             id: symbol_id(SymbolKind.Local, local_module, owner, fact.name)
             updated.symbol_id = Val(id)
             if window -> updated.mutable = true
-            symbol: Symbol{id: id, kind: SymbolKind.Local, name: fact.name, module_name: local_module, owner: Val(owner), span: fact.span, ty: Val(fact.ty), visibility: 0}
+            symbol: Symbol{id: id, kind: SymbolKind.Local, name: fact.name, module_identity: environment.module_identity, owner: Val(owner), span: fact.span, ty: Val(fact.ty), visibility: 0}
             sources := [Expr]{}
             sema_expression_pattern_binding_sources(checked.pattern.shape, checked_subject.ty, source ?? subject, fact.name, environment, program, sources, diagnostics)
             if !window && !sema_expression_subject_moved(subject) -> sema_expression_reject_read_write_view_payload(state, subject, checked_subject.ty, fact.ty, scopes, diagnostics)
@@ -2124,12 +2126,12 @@ sema_expression_check_pattern_condition: fn(subject: Expr, pattern: Pattern, spa
 
 // The bindings a failed pattern test still declares: each named recovery
 // binding with its recovered type and no payload sources.
-sema_expression_recovery_condition_bindings: fn(facts: [TPatternBindingFact], window_names: [String], owner: String, local_module: String) -> [SemaConditionBinding] {
+sema_expression_recovery_condition_bindings: fn(facts: [TPatternBindingFact], window_names: [String], owner: String, local_module: String, module_identity: ModuleID) -> [SemaConditionBinding] {
     bindings := [SemaConditionBinding]{}
     loop fact in facts {
         if fact.name == "" || fact.name == "_" -> next
         id: symbol_id(SymbolKind.Local, local_module, owner, fact.name)
-        symbol: Symbol{id: id, kind: SymbolKind.Local, name: fact.name, module_name: local_module, owner: Val(owner), span: fact.span, ty: Val(fact.ty), visibility: 0}
+        symbol: Symbol{id: id, kind: SymbolKind.Local, name: fact.name, module_identity: module_identity, owner: Val(owner), span: fact.span, ty: Val(fact.ty), visibility: 0}
         bindings.push(SemaConditionBinding{symbol: symbol, window: window_names.contains(fact.name), sources: [Expr]{}})
     }
     bindings
@@ -2141,7 +2143,7 @@ sema_expression_recovery_condition_bindings: fn(facts: [TPatternBindingFact], wi
 // binding is (sema_stmt_declare_unchecked_binding). Reads of them check to
 // nothing and add no report, so the subject's own fault is the only one
 // instead of an E0107 per name. Names `bound` already declares are skipped.
-sema_expression_unchecked_condition_bindings: fn(names: [BindName], bound: [SemaConditionBinding], owner: String, local_module: String) -> [SemaConditionBinding] {
+sema_expression_unchecked_condition_bindings: fn(names: [BindName], bound: [SemaConditionBinding], owner: String, local_module: String, module_identity: ModuleID) -> [SemaConditionBinding] {
     bindings := [SemaConditionBinding]{}
     loop name in names {
         if name.name == "" || name.name == "_" -> next
@@ -2151,7 +2153,7 @@ sema_expression_unchecked_condition_bindings: fn(names: [BindName], bound: [Sema
         }
         if declared -> next
         id: symbol_id(SymbolKind.Local, local_module, owner, name.name)
-        symbol: Symbol{id: id, kind: SymbolKind.Local, name: name.name, module_name: local_module, owner: Val(owner), span: name.span, ty: None, visibility: 0}
+        symbol: Symbol{id: id, kind: SymbolKind.Local, name: name.name, module_identity: module_identity, owner: Val(owner), span: name.span, ty: None, visibility: 0}
         bindings.push(SemaConditionBinding{symbol: symbol, window: false, sources: [Expr]{}})
     }
     bindings
@@ -2167,7 +2169,7 @@ sema_expression_check_condition_inner: fn(condition: Expr, environment: SemaScop
                 left_checked: left_check.checked ?? {
                     names := [BindName]{}
                     sema_expression_condition_binding_names(right, names)
-                    unchecked: sema_expression_unchecked_condition_bindings(names, left_check.bindings, sema_scope_local_owner_key(scopes), sema_scope_environment_module_text(environment, program))
+                    unchecked: sema_expression_unchecked_condition_bindings(names, left_check.bindings, sema_scope_local_owner_key(scopes), sema_scope_environment_module_text(environment, program), environment.module_identity)
                     bindings := left_check.bindings
                     loop binding in unchecked -> bindings.push(binding)
                     return sema_expression_condition_failed(bindings)

@@ -1055,6 +1055,15 @@ sema_scope_environment_module_text: fn(environment: SemaScopeEnvironment, progra
     environment.module_name
 }
 
+// The identity text of module `module_identity` as the environment's checks
+// spell it (sema_scope_environment_module_text); "" for another module of a
+// graphless check, which has none.
+sema_scope_module_text: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, module_identity: ModuleID) -> String Never! {
+    if program.registration_graph == .Val(graph) -> return module_text(graph.module_table, module_identity)
+    if module_identity == environment.module_identity -> return environment.module_name
+    ""
+}
+
 // The boxed field edges of `graph`, read in place through the `.Val(…)`
 // pattern on the parameter; binding `value: graph ?? …` copies the whole
 // graph.
@@ -2263,7 +2272,7 @@ sema_scope_light_copy: fn(source: SemaScopeTable) -> SemaScopeTable Never! {
         if function_type {
             bindings.push(SemaScopeBinding{
                 frame: binding.frame,
-                symbol: Symbol{id: binding.symbol.id, kind: binding.symbol.kind, name: binding.symbol.name, module_name: binding.symbol.module_name, owner: binding.symbol.owner, span: binding.symbol.span, ty: Val(sema_scope_light_function_type()), visibility: binding.symbol.visibility},
+                symbol: Symbol{id: binding.symbol.id, kind: binding.symbol.kind, name: binding.symbol.name, module_identity: binding.symbol.module_identity, owner: binding.symbol.owner, span: binding.symbol.span, ty: Val(sema_scope_light_function_type()), visibility: binding.symbol.visibility},
                 mutable: binding.mutable,
                 access: binding.access,
                 integer_bounds: binding.integer_bounds,

@@ -124,7 +124,7 @@ sema_output_path: fn(value: Expr) -> (root: String, root_span: Span, members: [E
 sema_output_import_reference: fn(graph: SemaRegistrationGraph, owner: SemaRegistrationModule, target_identity: ModuleID, name: String, span: Span, visibility: Int) -> SemaNameReferenceFact Never! {
     // An alias use names the declaring module's alias, not the target function.
     owner_text: module_text(graph.module_table, owner.module_identity)
-    symbol: Symbol{id: symbol_id(SymbolKind.Import, owner_text, module_text(graph.module_table, target_identity), name), kind: SymbolKind.Import, name: name.copy(), module_name: owner_text, owner: None, span: span, ty: None, visibility: visibility}
+    symbol: Symbol{id: symbol_id(SymbolKind.Import, owner_text, module_text(graph.module_table, target_identity), name), kind: SymbolKind.Import, name: name.copy(), module_identity: owner.module_identity, owner: None, span: span, ty: None, visibility: visibility}
     SemaNameReferenceFact{span: span, symbol: symbol.move(), kind: "import_alias"}
 }
 

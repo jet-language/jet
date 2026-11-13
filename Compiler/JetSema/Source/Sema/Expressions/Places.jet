@@ -48,6 +48,8 @@ use {
         ModuleID,
         module_is_core,
         module_none,
+        module_is_none,
+        module_text,
     ]
     jet_lexer.[Token]
     jet_parser.[jfmt_fmt_expr, jfmt_new, jfmt_out_text]
@@ -339,13 +341,13 @@ sema_expression_shared_guard_value: fn(ty: Type) -> SemaCallMemoryGuard? {
 // Rust `owner_type_for_reader`: a field's declared type names types as its
 // owning module sees them, so it resolves there (the owner's type parameters
 // stay parameters) before the owner's type arguments are substituted.
-sema_expression_field_owner_type: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, owner_module: String, declared: Type, generic_names: [String]) -> Type Never! {
+sema_expression_field_owner_type: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, owner_module: ModuleID, declared: Type, generic_names: [String]) -> Type Never! {
     if program.registration_graph == .Val(graph) {
     // copy: the owner type is a new owned Type. Without an owner module it equals `declared`, the
     // field's declared type (a read parameter), which stays in the nominal.
-    if owner_module == "" -> return declared.copy()
+    if module_is_none(owner_module) -> return declared.copy()
     generics: loop name in generic_names -> TGenericParam{name: name, bounds: [SymbolID]{}}
-    return sema_type_resolve_declared_with_generics(graph, declared, sema_registration_module_id(graph, owner_module), generics)
+    return sema_type_resolve_declared_with_generics(graph, declared, owner_module, generics)
     }
     // copy: the owner type is a new owned Type. When nothing applies it equals `declared`, the
     // field's declared type (a read parameter), which stays in the nominal.
@@ -359,12 +361,12 @@ sema_expression_field_owner_type: fn(environment: SemaScopeEnvironment, program:
 // own functions, methods and child modules lie inside it. The spans of one
 // module's source segments never overlap. Compiler-generated bodies (derives,
 // codecs) belong to the type.
-sema_expression_field_visible: fn(is_pub: Bool, is_package_pub: Bool, owner_module: String, inline_module: Span?, use_span: Span, generated: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
+sema_expression_field_visible: fn(is_pub: Bool, is_package_pub: Bool, owner_module: ModuleID, inline_module: Span?, use_span: Span, generated: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
     if is_pub -> return true
     owner_package := ""
     owner_id := module_none()
     if program.registration_graph == .Val(graph) {
-        owner_id = sema_registration_module_id(graph, owner_module)
+        owner_id = owner_module
         if sema_registration_module_index(graph, owner_id) == .Val(owner_index) -> owner_package = graph.modules[owner_index].package_identity
     }
     visibility: if is_package_pub -> 1 else -> 0
@@ -397,7 +399,7 @@ sema_expression_field_checked: fn(base: TExpr, member: String, span: Span, expec
         tuple_field: sema_expression_tuple_field(base, member, span, diagnostics) ?? return None
         tuple_owner: type_name(base.ty)
         tuple_field_id: symbol_id(SymbolKind.Field, "", tuple_owner, member)
-        tuple_field_symbol: Symbol{id: tuple_field_id, kind: SymbolKind.Field, name: member, module_name: "", owner: None, span: span, ty: Val(tuple_field.ty), visibility: 0}
+        tuple_field_symbol: Symbol{id: tuple_field_id, kind: SymbolKind.Field, name: member, module_identity: module_none(), owner: None, span: span, ty: Val(tuple_field.ty), visibility: 0}
         context.name_references.push(SemaNameReferenceFact{span: span, symbol: tuple_field_symbol, kind: "field"})
         return sema_expr_expected_owned(tuple_field, expected, environment, program, diagnostics)
     }
@@ -454,13 +456,13 @@ sema_expression_field_checked: fn(base: TExpr, member: String, span: Span, expec
                 names: loop param in struct_def.type_params -> param.name
                 loop field in struct_def.fields {
                     if field.name == member {
-                        if !sema_expression_field_visible(field.is_pub, field.is_package_pub, owner_symbol.module_name, struct_def.inline_module, span, sema_expr_sees_private_fields(context), environment, program) {
+                        if !sema_expression_field_visible(field.is_pub, field.is_package_pub, owner_symbol.module_identity, struct_def.inline_module, span, sema_expr_sees_private_fields(context), environment, program) {
                             diagnostics.push(sema_expression_private_field_error(member, Span{start: span.end - member.len(), end: span.end}))
                             return None
                         }
-                        field_ty: sema_inference_substitute_type(sema_expression_field_owner_type(environment, program, owner_symbol.module_name, field.ty, names), names, owner_args)
-                        field_id: symbol_id(SymbolKind.Field, owner_symbol.module_name, owner_symbol.id.key, field.name)
-                        field_symbol: Symbol{id: field_id, kind: SymbolKind.Field, name: field.name, module_name: owner_symbol.module_name, owner: Val(owner_symbol.id.key), span: field.name_span, ty: Val(field_ty), visibility: if field.is_pub -> 2 else -> if field.is_package_pub -> 1 else -> 0}
+                        field_ty: sema_inference_substitute_type(sema_expression_field_owner_type(environment, program, owner_symbol.module_identity, field.ty, names), names, owner_args)
+                        field_id: symbol_id(SymbolKind.Field, sema_scope_module_text(environment, program, owner_symbol.module_identity), owner_symbol.id.key, field.name)
+                        field_symbol: Symbol{id: field_id, kind: SymbolKind.Field, name: field.name, module_identity: owner_symbol.module_identity, owner: Val(owner_symbol.id.key), span: field.name_span, ty: Val(field_ty), visibility: if field.is_pub -> 2 else -> if field.is_package_pub -> 1 else -> 0}
                         context.name_references.push(SemaNameReferenceFact{span: span, symbol: field_symbol, kind: "field"})
                         reference := sema_expression_field_ref(field_symbol, Val(owner_symbol.id), field_ty)
                         reference.boxed = sema_scope_environment_boxed_edge(environment, program, owner_symbol.id, member)
@@ -557,13 +559,13 @@ sema_expression_as_field: fn(offered: Type, required: Type, use_span: Span, envi
     if struct_def.type_params.len() != owner_args.len() -> return None
     loop field in struct_def.fields {
         if field.computed != None || sema_registration_as_marker(field.serde_markers) == None -> next
-        if !sema_expression_field_visible(field.is_pub, field.is_package_pub, owner_symbol.module_name, struct_def.inline_module, use_span, false, environment, program) -> return None
+        if !sema_expression_field_visible(field.is_pub, field.is_package_pub, owner_symbol.module_identity, struct_def.inline_module, use_span, false, environment, program) -> return None
         names: loop param in struct_def.type_params -> param.name
-        field_ty: sema_inference_substitute_type(sema_expression_field_owner_type(environment, program, owner_symbol.module_name, field.ty, names), names, owner_args)
+        field_ty: sema_inference_substitute_type(sema_expression_field_owner_type(environment, program, owner_symbol.module_identity, field.ty, names), names, owner_args)
         fits: sema_expr_expected_assignable(required, sema_expr_expected_type(field_ty, environment, program), environment, program) ?? return None
         if !fits -> return None
-        field_id: symbol_id(SymbolKind.Field, owner_symbol.module_name, owner_symbol.id.key, field.name)
-        field_symbol: Symbol{id: field_id, kind: SymbolKind.Field, name: field.name, module_name: owner_symbol.module_name, owner: Val(owner_symbol.id.key), span: field.name_span, ty: Val(field_ty), visibility: if field.is_pub -> 2 else -> if field.is_package_pub -> 1 else -> 0}
+        field_id: symbol_id(SymbolKind.Field, sema_scope_module_text(environment, program, owner_symbol.module_identity), owner_symbol.id.key, field.name)
+        field_symbol: Symbol{id: field_id, kind: SymbolKind.Field, name: field.name, module_identity: owner_symbol.module_identity, owner: Val(owner_symbol.id.key), span: field.name_span, ty: Val(field_ty), visibility: if field.is_pub -> 2 else -> if field.is_package_pub -> 1 else -> 0}
         reference := sema_expression_field_ref(field_symbol, Val(owner_symbol.id), field_ty)
         reference.boxed = sema_scope_environment_boxed_edge(environment, program, owner_symbol.id, field.name)
         return Val(SemaExpressionAsField{ty: field_ty, field: reference})
@@ -1085,7 +1087,7 @@ sema_expression_module_constant_read: fn(graph: SemaRegistrationGraph, resolved:
         signature: symbol.ty ?? return SemaMethodSpecialCheck{handled: false, value: None}
         context.name_references.push(SemaNameReferenceFact{span: span, symbol: symbol, kind: "function"})
         if sema_expr_marked_function_value(label, symbol.id, span, expected, environment, program, diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
-        value_type: sema_function_value_type(program, signature, symbol.module_name, expected)
+        value_type: sema_function_value_type(program, signature, symbol.module_identity, expected)
         // A C `#Import` function crosses only by a direct call: as a value it
         // would be a Jet function type, which has no C ABI (Rust `e3203`).
         if sema_registration_callable_row(graph, symbol.id.key) == .Val(.Foreign(module_index, index)) && graph.modules[module_index].foreign_functions[index].owner == SemaRegistrationForeignOwner.CModule {
@@ -1171,7 +1173,7 @@ sema_expression_core_vector_name: fn(ty: Type, environment: SemaScopeEnvironment
     if leaf != "Vec2" && leaf != "Vec3" && leaf != "Vec4" && leaf != "F32x4" && leaf != "F64x2" -> return None
     if program.registration_graph == .Val(graph) {
         row: sema_type_resolve_nominal_row(graph, ty, environment.module_identity) ?? return None
-        if core_source_owns_type("{graph.modules[row.module_index].nominals[row.row].symbol.module_name}::{graph.modules[row.module_index].nominals[row.row].symbol.name}") -> return Val(leaf)
+        if core_source_owns_type("{module_text(graph.module_table, graph.modules[row.module_index].nominals[row.row].symbol.module_identity)}::{graph.modules[row.module_index].nominals[row.row].symbol.name}") -> return Val(leaf)
     }
     None
 }
@@ -1273,7 +1275,7 @@ sema_expression_secret_declared_by: fn(graph: SemaRegistrationGraph, ty: Type, c
     leaf: sema_call_reflection_leaf_name(name)
     loop row in 0..<graph.modules[caller].nominals.len() {
         if graph.modules[caller].nominals[row].symbol.name != leaf -> next
-        if sema_call_reflection_secret_bearing(Type.Named{name: "{graph.modules[caller].nominals[row].symbol.module_name}::{leaf}"}) -> return true
+        if sema_call_reflection_secret_bearing(Type.Named{name: "{module_text(graph.module_table, graph.modules[caller].nominals[row].symbol.module_identity)}::{leaf}"}) -> return true
     }
     false
 }
@@ -1324,7 +1326,7 @@ sema_expression_optional_method_call: fn(receiver: Expr, method: String, method_
         id: symbol_id(SymbolKind.Local, module_name, owner, name),
         kind: SymbolKind.Local,
         name: name,
-        module_name: module_name,
+        module_identity: environment.module_identity,
         owner: Val(owner),
         span: receiver_span,
         ty: Val(inner_ty),

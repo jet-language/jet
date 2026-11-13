@@ -1476,7 +1476,7 @@ sema_check_struct_contains_view: fn(graph: SemaRegistrationGraph, module_identit
     nominal: graph.modules[nominal_row.module_index].nominals[nominal_row.row]
     if nominal.kind != SemaRegistrationNominalKind.Struct -> return false
     loop field in nominal.fields {
-        if sema_check_type_contains_view(graph, sema_registration_module_id(graph, nominal.symbol.module_name), field.ty, seen) -> return true
+        if sema_check_type_contains_view(graph, nominal.symbol.module_identity, field.ty, seen) -> return true
     }
     false
 }
@@ -1571,7 +1571,7 @@ sema_check_view_rounds_equal: fn(left: [ViewProvenanceMap?], right: [ViewProvena
     true
 }
 
-sema_item_symbol: fn(item: Item, module_name: String, fallback_source_file: String, fallback_source_origin: SemaSourceOrigin, source_segments: [SemaSourceSegment]) -> Symbol? {
+sema_item_symbol: fn(item: Item, module_identity: ModuleID, module_name: String, fallback_source_file: String, fallback_source_origin: SemaSourceOrigin, source_segments: [SemaSourceSegment]) -> Symbol? {
     if item == {
         .Func(func) -> {
             id: symbol_id(SymbolKind.Function, module_name, "", func.name)
@@ -1579,30 +1579,31 @@ sema_item_symbol: fn(item: Item, module_name: String, fallback_source_file: Stri
             visibility := 0
             if func.is_package_pub -> visibility = 1
             if func.is_pub -> visibility = 2
-            Val(Symbol{id: id, kind: SymbolKind.Function, name: func.name, module_name: module_name, owner: None, span: func.name_span, ty: Val(ty), visibility: visibility})
+            Val(Symbol{id: id, kind: SymbolKind.Function, name: func.name, module_identity: module_identity, owner: None, span: func.name_span, ty: Val(ty), visibility: visibility})
         }
-        .Struct(value) -> Val(sema_named_type_symbol(module_name, value.name, value.name_span, value.is_pub, value.is_package_pub))
-        .Enum(value) -> Val(sema_named_type_symbol(module_name, value.name, value.name_span, value.is_pub, value.is_package_pub))
-        .Distinct(value) -> Val(sema_named_type_symbol(module_name, value.name, value.name_span, value.is_pub, value.is_package_pub))
-        .TypeAlias(value) -> Val(sema_named_type_symbol(module_name, value.name, value.name_span, value.is_pub, value.is_package_pub))
+        .Struct(value) -> Val(sema_named_type_symbol(module_identity, module_name, value.name, value.name_span, value.is_pub, value.is_package_pub))
+        .Enum(value) -> Val(sema_named_type_symbol(module_identity, module_name, value.name, value.name_span, value.is_pub, value.is_package_pub))
+        .Distinct(value) -> Val(sema_named_type_symbol(module_identity, module_name, value.name, value.name_span, value.is_pub, value.is_package_pub))
+        .TypeAlias(value) -> Val(sema_named_type_symbol(module_identity, module_name, value.name, value.name_span, value.is_pub, value.is_package_pub))
         .Trait(value) -> {
             id: symbol_id(SymbolKind.Trait, module_name, "", value.name)
             visibility := 0
             if value.is_package_pub -> visibility = 1
             if value.is_pub -> visibility = 2
-            Val(Symbol{id: id, kind: SymbolKind.Trait, name: value.name, module_name: module_name, owner: None, span: value.name_span, ty: None, visibility: visibility})
+            Val(Symbol{id: id, kind: SymbolKind.Trait, name: value.name, module_identity: module_identity, owner: None, span: value.name_span, ty: None, visibility: visibility})
         }
-        .Tag(value) -> Val(sema_named_type_symbol(module_name, value.name, value.name_span, value.is_pub, value.is_package_pub))
+        .Tag(value) -> Val(sema_named_type_symbol(module_identity, module_name, value.name, value.name_span, value.is_pub, value.is_package_pub))
         .Const(value) -> {
             id: symbol_id(SymbolKind.Constant, module_name, "", value.name)
-            Val(Symbol{id: id, kind: SymbolKind.Constant, name: value.name, module_name: module_name, owner: None, span: value.name_span, ty: value.ty, visibility: 0})
+            Val(Symbol{id: id, kind: SymbolKind.Constant, name: value.name, module_identity: module_identity, owner: None, span: value.name_span, ty: value.ty, visibility: 0})
         }
-        .UnitFamily(value) -> Val(sema_named_type_symbol(module_name, value.family, value.family_span, value.is_pub, value.is_package_pub))
+        .UnitFamily(value) -> Val(sema_named_type_symbol(module_identity, module_name, value.family, value.family_span, value.is_pub, value.is_package_pub))
         .EffectDecl(_) | .Impl(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> None
     }
 }
+// A snapshot has no module table: its symbols carry the none module id.
 sema_register_item: fn(scopes: &SemaScopeTable, declarations: &[SemaScopeDeclaration], item: Item, module_name: String, source_file: String, source_origin: SemaSourceOrigin, source_segments: [SemaSourceSegment], diagnostics: &[Diagnostic]) -> Bool {
-    symbol: sema_item_symbol(item, module_name, source_file, source_origin, source_segments) ?? return false
+    symbol: sema_item_symbol(item, module_none(), module_name, source_file, source_origin, source_segments) ?? return false
     if sema_scope_add_module_symbol(scopes, symbol) {
         declarations.push(SemaScopeDeclaration{symbol_id: symbol.id, item: item})
         return true
@@ -1617,12 +1618,12 @@ sema_append_function: fn(functions: &[FnBody], value: &&FnBody?) -> Bool Never! 
     true
 }
 
-sema_named_type_symbol: fn(module_name: String, name: String, span: Span, is_pub: Bool, is_package_pub: Bool) -> Symbol Never! {
+sema_named_type_symbol: fn(module_identity: ModuleID, module_name: String, name: String, span: Span, is_pub: Bool, is_package_pub: Bool) -> Symbol Never! {
     visibility := 0
     if is_package_pub -> visibility = 1
     if is_pub -> visibility = 2
     id: symbol_id(SymbolKind.Type, module_name, "", name)
-    Symbol{id: id, kind: SymbolKind.Type, name: name, module_name: module_name, owner: None, span: span, ty: Val(Type.Named{name: name}), visibility: visibility}
+    Symbol{id: id, kind: SymbolKind.Type, name: name, module_identity: module_identity, owner: None, span: span, ty: Val(Type.Named{name: name}), visibility: visibility}
 }
 
 sema_failure_carrier: fn(return_type: Type?) -> TFailureCarrier Never! {
@@ -1742,7 +1743,7 @@ sema_function_owner_generic_params: fn(graph: SemaRegistrationGraph, owner_type:
         if nominal.generic_params.len() > 0 || owner_args.len() > 0 -> complete = false
         return [TGenericParam]{}
     }
-    owner_module_index: sema_registration_module_index_text(graph, nominal.symbol.module_name) ?? {
+    owner_module_index: sema_registration_module_index(graph, nominal.symbol.module_identity) ?? {
         if nominal.generic_params.len() > 0 -> complete = false
         return [TGenericParam]{}
     }
@@ -2208,7 +2209,7 @@ sema_function_check_pass: fn(func: Func, owner_id: SymbolID, function_kind: TFun
             id: symbol_id(SymbolKind.Parameter, module_text, owner_id.key, func.params[param_index].name),
             kind: SymbolKind.Parameter,
             name: func.params[param_index].name,
-            module_name: module_text,
+            module_identity: updated.module_identity,
             owner: Val(owner_id.key),
             span: func.params[param_index].name_span,
             ty: Val(parameter_ty),
@@ -3853,13 +3854,6 @@ sema_check_registered_module_identity: fn(environment: SemaScopeEnvironment, pro
 sema_check_registered_module_text: fn(program: SemaProgramTables, module_identity: ModuleID) -> String {
     if program.registration_graph == .Val(graph) -> return module_text(graph.module_table, module_identity)
     panic("an owning registered-module pass lost its registration graph")
-}
-
-// The registered module whose identity text is `text`; none without a graph
-// or for a text no module has (a symbol's `module_name` until #6793 S2).
-sema_check_registered_module_id: fn(program: SemaProgramTables, text: String) -> ModuleID {
-    if program.registration_graph == .Val(graph) -> return sema_registration_module_id(graph, text)
-    module_none()
 }
 
 sema_check_registered_keep_going: fn(environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool {
@@ -5683,8 +5677,8 @@ sema_check_soft_public_uses: fn(program: SemaProgramTables, module_index: Int, g
         loop (index, reference) in module_result.name_references {
             loop skipped < generated_references.len() && generated_references[skipped].end <= index -> skipped += 1
             if skipped < generated_references.len() && index >= generated_references[skipped].start -> next
-            owner: reference.symbol.module_name
-            if owner == "" || owner == module_identity -> next
+            owner: reference.symbol.module_identity
+            if module_is_none(owner) || owner == graph.modules[module_index].module_identity -> next
             leaf: sema_soft_public_written_leaf(raw, codes, reference.span) ?? next
             sema_soft_public_warn(leaf, seen, module_result.diagnostics)
         }
@@ -5725,7 +5719,7 @@ sema_check_module_value_consumers: fn(program: SemaProgramTables, module_index: 
         if diagnostic.severity == DIAGNOSTIC_ERROR -> break true
     } ?? false
     if !has_error -> return
-    module_identity: module_text(graph.module_table, graph.modules[module_index].module_identity)
+    module_identity: graph.modules[module_index].module_identity
     raw: graph.modules[module_index].source.bytes()
     segments: graph.modules[module_index].source_segments
     reads := [SemaModuleValueRead]{}
@@ -5734,8 +5728,8 @@ sema_check_module_value_consumers: fn(program: SemaProgramTables, module_index: 
         loop skipped < generated_references.len() && generated_references[skipped].end <= index -> skipped += 1
         if skipped < generated_references.len() && index >= generated_references[skipped].start -> next
         if reference.kind != "const" -> next
-        owner: reference.symbol.module_name
-        if owner != "" && owner != module_identity -> next
+        owner: reference.symbol.module_identity
+        if !module_is_none(owner) && owner != module_identity -> next
         consumer: sema_module_value_consumer(graph.modules[module_index].declarations, reference.span) ?? next
         reads.push(SemaModuleValueRead{key: reference.symbol.id.key.copy(), name: reference.symbol.name.copy(), consumer: consumer, span: reference.span})
     }
@@ -5978,7 +5972,7 @@ SemaNameReferenceFilter: struct {
 }
 
 sema_name_add_reference: fn(facts: &NameFacts, filter: &SemaNameReferenceFilter, graph: SemaRegistrationGraph, owner_names: [String:String], module_indices: &[Int], span: Span, symbol: Symbol, kind: String) Never! {
-    module_index: sema_registration_cached_module_index(graph, sema_registration_module_id(graph, symbol.module_name), module_indices) ?? return
+    module_index: sema_registration_cached_module_index(graph, symbol.module_identity, module_indices) ?? return
     owner_key: symbol.owner ?? ""
     kind_part: name_index(name_intern(filter.parts, kind))
     owner_part: name_index(name_intern(filter.parts, owner_key))
@@ -7049,8 +7043,8 @@ sema_comptime_module_apply_values: fn(module_row: &SemaRegistrationModule, modul
     }
 }
 
-sema_comptime_constant_has_ast_value: fn(graph: SemaRegistrationGraph, module_identity: String, key: String) -> Bool Never! {
-    module_index: sema_registration_module_index_text(graph, module_identity) ?? return false
+sema_comptime_constant_has_ast_value: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, key: String) -> Bool Never! {
+    module_index: sema_registration_module_index(graph, module_identity) ?? return false
     loop constant_index in 0..<graph.modules[module_index].constants.len() {
         if graph.modules[module_index].constants[constant_index].symbol.id.key == key -> return graph.modules[module_index].constants[constant_index].declaration.ct != None
     }
@@ -7529,20 +7523,20 @@ sema_comptime_dependencies_from_references: fn(graph: SemaRegistrationGraph, ref
         if reference.symbol.kind == SymbolKind.Constant -> wanted[reference.symbol.id.key] = true
     }
     if wanted.len() == 0 -> return dependencies
-    // "{module identity text}|{key}" of every staged constant value a
-    // reference can name: a reference's symbol names its module by text.
+    // "{module id}|{key}" of every staged constant value a reference can
+    // name.
     staged := [String:Bool]{}
     loop value in values {
         if value.kind != SemaComptimeItemKind.Constant -> next
         if wanted.get(value.key) == None -> next
-        staged["{module_text(graph.module_table, value.module_identity)}|{value.key}"] = true
+        staged["{value.module_identity.id}|{value.key}"] = true
     }
     seen := [String:Bool]{}
     loop reference in references {
         if reference.symbol.kind != SymbolKind.Constant -> next
         if seen.get(reference.symbol.id.key) != None -> next
-        if staged.get("{reference.symbol.module_name}|{reference.symbol.id.key}") != None -> next
-        if sema_comptime_constant_has_ast_value(graph, reference.symbol.module_name, reference.symbol.id.key) -> next
+        if staged.get("{reference.symbol.module_identity.id}|{reference.symbol.id.key}") != None -> next
+        if sema_comptime_constant_has_ast_value(graph, reference.symbol.module_identity, reference.symbol.id.key) -> next
         seen[reference.symbol.id.key] = true
         dependencies.push(reference.symbol.id.key)
     }
@@ -8717,14 +8711,14 @@ sema_check_comptime_item: fn(environment: &SemaScopeEnvironment, program: &SemaP
 
 // A body site's prepared locals read as their finished values in the staged
 // check, as they do in the owner body (sema_stmt_check_prepared_binding).
-// `module_name` is the source module's identity text, the locals' symbol
-// module.
-sema_comptime_declare_prepared_locals: fn(source: SemaComptimeItemSource, module_name: String, table: &SemaScopeTable, state: &SemaOwnershipState) Never! {
+// `module_identity` is the source module, the locals' symbol module;
+// `module_name` its identity text for the locals' keys.
+sema_comptime_declare_prepared_locals: fn(source: SemaComptimeItemSource, module_identity: ModuleID, module_name: String, table: &SemaScopeTable, state: &SemaOwnershipState) Never! {
     _ := sema_scope_enter(table, state, "{source.key}#prepared")
     owner: sema_scope_local_owner_key(table)
     loop local in source.prepared {
         id: symbol_id(SymbolKind.Local, module_name, owner, local.name)
-        symbol := Symbol{id: id, kind: SymbolKind.Local, name: local.name, module_name: module_name, owner: Val(owner), span: local.span, ty: Val(local.ty), visibility: 0}
+        symbol := Symbol{id: id, kind: SymbolKind.Local, name: local.name, module_identity: module_identity, owner: Val(owner), span: local.span, ty: Val(local.ty), visibility: 0}
         if !sema_scope_declare_local(table, symbol, false, AccessConvention.Read, None, false) -> next
         last: table.bindings.len() - 1
         sema_scope_note_binding_edit(table, last)
@@ -8764,7 +8758,7 @@ sema_check_comptime_item_in: fn(environment: SemaScopeEnvironment, program: Sema
         // intrinsic call sites are recorded (sema_effect_record_intrinsic_fact
         // records only under an owner) and its purity can be read.
         if source.module_value || source.runtime_check -> _ := sema_scope_enter(probe.table, state, "{source.key}#init")
-        if source.prepared.len() > 0 -> sema_comptime_declare_prepared_locals(source, module_text(resolved_graph.module_table, source.module_identity), probe.table, state)
+        if source.prepared.len() > 0 -> sema_comptime_declare_prepared_locals(source, source.module_identity, module_text(resolved_graph.module_table, source.module_identity), probe.table, state)
         probe.table.comptime_runtime_locals = source.runtime_locals.copy()
         checked := if source.kind == SemaComptimeItemKind.TypeLevel -> sema_comptime_check_discriminant(source, environment, program, probe.table, state, tail_store, context, diagnostics) else -> sema_check_expression(source.expression, source.expected_type, environment, program, probe.table, state, tail_store, context, diagnostics)
         probe.table.comptime_runtime_locals = [String]{}

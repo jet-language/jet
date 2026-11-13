@@ -126,7 +126,7 @@ sema_call_http_mount: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg],
     local_module: sema_scope_environment_module_text(environment, program)
     mux_id: symbol_id(SymbolKind.Local, local_module, owner, mux_name)
     mux_symbol: Symbol{id: mux_id, kind: SymbolKind.Local, name: mux_name,
-        module_name: local_module, owner: Val(owner), span: span,
+        module_identity: environment.module_identity, owner: Val(owner), span: span,
         ty: Val(receiver_value.ty), visibility: 0}
     _ := sema_scope_declare_local(scopes, mux_symbol, false, AccessConvention.Read, None, false)
     sema_ownership_declare_binding(state, mux_symbol, false)

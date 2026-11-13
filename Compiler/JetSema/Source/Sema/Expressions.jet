@@ -116,6 +116,7 @@ use {
         TextEdit,
         IR_RUNTIME_HANDLES,
         ir_runtime_handle_row,
+        module_text,
     ]
 }
 
@@ -1801,7 +1802,7 @@ sema_expr_quantity_raw_base: fn(ty: Type, environment: SemaScopeEnvironment, pro
     owner: sema_expression_type_symbol(scopes, environment, program, name) ?? return None
     definition_value: sema_scope_declaration_distinct(environment, program, owner.id) ?? return None
     if definition_value.quantity == None -> return None
-    if program.registration_graph == .Val(graph) -> return Val(sema_type_resolve_declared(graph, definition_value.base, sema_registration_module_id(graph, owner.module_name)))
+    if program.registration_graph == .Val(graph) -> return Val(sema_type_resolve_declared(graph, definition_value.base, owner.module_identity))
     Val(definition_value.base)
 }
 
@@ -1824,7 +1825,7 @@ sema_expr_declared_distinct_facts: fn(ty: Type, admit_quantity: Bool, environmen
     // Imported projections retain nominal bases from the declaring module.
     base := definition_value.base
     if program.registration_graph == .Val(graph) {
-        base = sema_type_resolve_declared(graph, base, sema_registration_module_id(graph, owner.module_name))
+        base = sema_type_resolve_declared(graph, base, owner.module_identity)
     }
     numeric := false
     loop marker in definition_value.derives {
@@ -3138,7 +3139,7 @@ sema_expr_impl_conditions_check: fn(graph: SemaRegistrationGraph, function: Sema
         }
         if found < 0 -> next
         loop bound in condition.bounds {
-            met: sema_type_bound_satisfied_with_generics(graph, substitutions[found].ty, bound, sema_registration_module_id(graph, function.symbol.module_name), generic_params) ?? next
+            met: sema_type_bound_satisfied_with_generics(graph, substitutions[found].ty, bound, function.symbol.module_identity, generic_params) ?? next
             if met -> next
             shown: type_name(substitutions[found].ty)
             row: diagnostic_registry_row("E0905") ?? panic("E0905 must have a registry row")
@@ -3184,13 +3185,13 @@ sema_expr_receiver_nominal_identity: fn(environment: SemaScopeEnvironment, progr
     if program.registration_graph == .Val(graph) {
     if sema_type_resolve_nominal_row_at(graph, receiver_type, sema_scope_caller_row(environment, graph)) == .Val(row) {
         nominal: graph.modules[row.module_index].nominals[row.row]
-        return "{nominal.symbol.module_name}::{nominal.symbol.name}"
+        return "{module_text(graph.module_table, nominal.symbol.module_identity)}::{nominal.symbol.name}"
     }
     found := String?{None}
     loop row in sema_registration_nominal_rows_named(graph, sema_expr_operator_row_name(base_name)) {
         nominal: graph.modules[row.module_index].nominals[row.row]
         if nominal.kind == SemaRegistrationNominalKind.TypeAlias -> next
-        identity: "{nominal.symbol.module_name}::{nominal.symbol.name}"
+        identity: "{module_text(graph.module_table, nominal.symbol.module_identity)}::{nominal.symbol.name}"
         if base_name.contains("::") && base_name != identity -> next
         if found != None -> return base_name
         found = Val(identity)
@@ -3686,11 +3687,12 @@ sema_expr_take_place_form: fn(expr: Expr, scopes: SemaScopeTable) -> Expr? Never
     None
 }
 
-sema_expr_canonical_type_binding: fn(name: String, scopes: SemaScopeTable) -> Bool Never! {
+sema_expr_canonical_type_binding: fn(name: String, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> Bool Never! {
     index: sema_scope_resolve_index(scopes, name) ?? return false
     binding := scopes.bindings[index]
     if binding.symbol.kind != SymbolKind.Type -> return false
-    if binding.symbol.module_name == "" || binding.symbol.module_name.starts_with("core.") -> return true
+    owner_text: sema_scope_module_text(environment, program, binding.symbol.module_identity)
+    if owner_text == "" || owner_text.starts_with("core.") -> return true
     sema_scope_binding_is_compiler_builtin(binding, name)
 }
 
@@ -3859,7 +3861,7 @@ sema_expr_try_method_static_routes: fn(receiver: Expr, method: String, method_sp
     // Rust `core_type_known`: a prelude core type (`Reader`, `Dyn`, …)
     // needs no `use`, so an unbound owner reaches the reserved constructors
     // too; each route matches only its own owner names.
-    if owner != "" && (qualified_owner || sema_scope_resolve_index(scopes, owner) == None || sema_expr_canonical_type_binding(owner, scopes)) {
+    if owner != "" && (qualified_owner || sema_scope_resolve_index(scopes, owner) == None || sema_expr_canonical_type_binding(owner, environment, program, scopes)) {
         stream := sema_call_try_stream_handle_static(owner, method, args, method_span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         if stream.handled -> return stream
         time := sema_call_try_time_static_method(owner, method, args, method_span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
@@ -4448,12 +4450,13 @@ sema_expr_check_site_root: fn(name: String, span: Span, expected: Type?, environ
         // A `Phase` that is not the enum reports as the written `Phase.Runtime` would.
         owner: sema_expression_type_symbol(scopes, environment, program, "Phase") ?? return sema_check_expression(written, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         if !sema_scope_declaration_is(environment, program, owner.id, SemaScopeDeclarationKind.Enum) -> return sema_check_expression(written, expected, environment, program, scopes, state, tail_store, context, diagnostics)
-        phase_ty: sema_expression_field_owner_type(environment, program, owner.module_name, Type.Named{name: owner.name}, [String]{})
+        phase_ty: sema_expression_field_owner_type(environment, program, owner.module_identity, Type.Named{name: owner.name}, [String]{})
+        owner_text: sema_scope_module_text(environment, program, owner.module_identity)
         copy_phase: NodeKind.CopyPhase{
             owner: owner.id,
-            preparation: symbol_id(SymbolKind.Variant, owner.module_name, owner.id.key, "Preparation"),
-            build: symbol_id(SymbolKind.Variant, owner.module_name, owner.id.key, "Build"),
-            runtime: symbol_id(SymbolKind.Variant, owner.module_name, owner.id.key, "Runtime"),
+            preparation: symbol_id(SymbolKind.Variant, owner_text, owner.id.key, "Preparation"),
+            build: symbol_id(SymbolKind.Variant, owner_text, owner.id.key, "Build"),
+            runtime: symbol_id(SymbolKind.Variant, owner_text, owner.id.key, "Runtime"),
         }
         return sema_expr_expected(sema_node(context, phase_ty, copy_phase, span), expected, environment, program, diagnostics)
     }
@@ -4722,7 +4725,7 @@ sema_expr_check_ident: fn(name: String, span: Span, expected: Type?, environment
     }
     if kind == SymbolKind.Constant || kind == SymbolKind.Function {
         if kind == SymbolKind.Function && sema_expr_marked_function_value(name, scopes.bindings[index].symbol.id, span, expected, environment, program, diagnostics) -> return None
-        value_ty: if kind == SymbolKind.Function -> sema_function_value_type(program, ty, scopes.bindings[index].symbol.module_name, expected) else -> ty
+        value_ty: if kind == SymbolKind.Function -> sema_function_value_type(program, ty, scopes.bindings[index].symbol.module_identity, expected) else -> ty
         value: sema_node(context, value_ty, NodeKind.ConstRef{symbol: scopes.bindings[index].symbol.id}, span)
         result = sema_expr_expected(value, expected, environment, program, diagnostics)
     }
@@ -4767,8 +4770,8 @@ sema_expr_marked_function_value: fn(name: String, id: SymbolID, span: Span, expe
 // with a closed effect bound (`fn(T) -[]> U`) takes that bound: a body's row is
 // known only once every body is solved, so the effect phase holds the
 // function to it then (E0747), not the type check.
-sema_function_value_type: fn(program: SemaProgramTables, ty: Type, module_name: String, expected: Type?) -> Type Never! {
-    resolved: if program.registration_graph == .Val(graph) -> sema_type_resolve_declared(graph, ty, sema_registration_module_id(graph, module_name)) else -> ty.copy()
+sema_function_value_type: fn(program: SemaProgramTables, ty: Type, module_identity: ModuleID, expected: Type?) -> Type Never! {
+    resolved: if program.registration_graph == .Val(graph) -> sema_type_resolve_declared(graph, ty, module_identity) else -> ty.copy()
     if expected == .Val(required) && required == .Fn(_, _, bound, _, _, _) && bound == .Val(row) {
         open: loop entry in row {
             if entry.name.starts_with("..") -> break true

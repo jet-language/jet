@@ -656,7 +656,7 @@ sema_call_http_web_form: fn(args: [CallArg], type_args: [Type], span: Span, expe
     }
     action_accepts_model := false
     if action_function.declaration.params.len() == 1 {
-        action_module: sema_registration_module_id(graph, action_function.symbol.module_name)
+        action_module: action_function.symbol.module_identity
         action_parameter_type := sema_type_resolve_declared(graph, action_function.declaration.params[0].ty, action_module)
         action_row: sema_type_resolve_nominal_row(graph, action_parameter_type, action_module)
         if action_row == .Val(action_type) -> action_accepts_model = model_nominal.symbol.id.key == graph.modules[action_type.module_index].nominals[action_type.row].symbol.id.key
@@ -808,7 +808,7 @@ sema_call_http_transport: fn(record: CoreCallRecord, args: [CallArg], type_args:
 sema_call_http_web_openapi_mux: fn(target: SemaCallDirectTarget, qualified_name: String, type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     if target.symbol.name != "openapi" || args.len() != 1 -> return SemaMethodSpecialCheck{handled: false, value: None}
     identity: sema_call_core_module_identity(environment, program, "core.web") ?? return SemaMethodSpecialCheck{handled: false, value: None}
-    if identity != sema_check_registered_module_id(program, target.symbol.module_name) -> return SemaMethodSpecialCheck{handled: false, value: None}
+    if identity != target.symbol.module_identity -> return SemaMethodSpecialCheck{handled: false, value: None}
     probe_diagnostics := [Diagnostic]{}
     probed: sema_probe_expression(args[0].expr, None, environment, program, scopes, state, tail_store, context, probe_diagnostics) ?? return SemaMethodSpecialCheck{handled: false, value: None}
     if !sema_app_is_route_table(probed.ty, environment, program) -> return SemaMethodSpecialCheck{handled: false, value: None}
