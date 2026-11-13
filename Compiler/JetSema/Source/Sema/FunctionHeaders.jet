@@ -16,6 +16,7 @@ use jet_foundation.[
     MARKER_ALLOW,
     MARKER_DEV_PANEL,
     MARKER_KERNEL,
+    MARKER_MAX_DEPTH,
     MARKER_MEMO,
     MARKER_POLICY,
     MARKER_REACTIVE,
@@ -308,7 +309,8 @@ sema_function_header_default_idents: fn(value: Expr, found: &[Expr]) {
 }
 
 // The function rules whose meaning the parser projects onto `Func` fields
-// that the checker, foreign stage and lowering read.
+// that the checker, foreign stage and lowering read (`#MaxDepth(n)` is
+// `Func.max_depth`, which the stack bound and the IR builder read).
 // The descriptive rules are read by their own passes, never by the body
 // check: `#Job` and its `every:` schedule by the job artifact and name
 // checks (Jobs.jet), `#Doc` by the job and CLI schema docs, `#Deprecated`
@@ -318,7 +320,7 @@ sema_function_header_default_idents: fn(value: Expr, found: &[Expr]) {
 // `#Policy(arithmetic: mode)` as the function's arithmetic policy
 // (sema_function_arithmetic_policy).
 sema_function_header_marker_projected: fn(name: String) -> Bool Never! {
-    name == "Unsafe" || name == "Inline" || name == "MustUse" || name == "Replayable" || name == "Scrub" || name == "Comptime" || name == "FFI" || name == "Pre" || name == "Post" || name == "Job" || name == "Doc" || name == "Deprecated" || name == "Scalar" || name == "Meta" || name == "Policy"
+    name == "Unsafe" || name == "Inline" || name == "MustUse" || name == "Replayable" || name == "Scrub" || name == "Comptime" || name == "FFI" || name == "Pre" || name == "Post" || name == "Job" || name == "Doc" || name == "Deprecated" || name == "Scalar" || name == "Meta" || name == "Policy" || name == MARKER_MAX_DEPTH
 }
 
 // The first `#Policy(arithmetic: mode)` of a function or

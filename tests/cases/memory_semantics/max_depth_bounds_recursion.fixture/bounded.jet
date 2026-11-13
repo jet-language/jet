@@ -1,0 +1,16 @@
+// `even` and `odd` call each other. Only `even` is marked, so at most 16
+// `even` calls are live, and the cycle's stack is bounded.
+#MaxDepth(16)
+even: fn(n: Int) -> Bool {
+    if n == 0 -> return true
+    odd(n - 1)
+}
+
+odd: fn(n: Int) -> Bool {
+    if n == 0 -> return false
+    even(n - 1)
+}
+
+run: fn() -[!Mem.Stack(above: 65536)]> {
+    _ := even(10)
+}

@@ -739,6 +739,10 @@ FnBody: struct {
     // backend checks its real frame against that. -1 when no stack denial
     // reaches it or a value in it has no known size.
     frame_bound: Int{-1}
+    // `#MaxDepth(n)`: at most n calls of this function wait at once on one
+    // thread, which the IR builder enforces and the stack bound counts on a
+    // recursive path; 0 when unmarked.
+    max_depth: Int{0}
     body: [Int]
     kind: TFuncKind
     origin_facts: [TOriginProjection]{[TOriginProjection]{}}

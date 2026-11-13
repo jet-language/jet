@@ -288,6 +288,10 @@ IRFunction: struct {
     // (OptInline.jet ir_opt_splice); -1 none. Selection checks the frame it
     // lays out against it (X64Select.jet ir_x64_compile_body).
     frame_bound: Int{-1}
+    // `#MaxDepth(n)` (FnBody.max_depth): at most n calls of the function are
+    // live at once on one thread; 0 when unmarked. The stack report counts a
+    // call cycle through it n times (X64Stack.jet).
+    max_depth: Int{0}
 }
 
 // The frame bound of a function with a body of bound `inlined` spliced into

@@ -4079,10 +4079,12 @@ sema_effect_heap_bounds: fn(nodes: [SemaEffectNode], node_by_key: NameRows, call
 // (jet_foundation Target/Frame.jet), stamped as FnBody.frame_bound: the
 // frame allowance plus the slots of every parameter and checked value. -1
 // with `why` naming the type that has no known size, or with `why` empty
-// when the node has no checked body.
+// when the node has no checked body. `depth` is the node's `#MaxDepth(n)`,
+// 0 when unmarked.
 SemaStackFrames: struct {
     own: [Int]
     why: [String]
+    depth: [Int]
 }
 
 sema_effect_stack_frames: fn(modules: [SemaGraphModuleResult], inputs: [SemaEffectModuleInput], nodes: [SemaEffectNode], node_by_key: NameRows) -> SemaStackFrames {
@@ -4091,10 +4093,11 @@ sema_effect_stack_frames: fn(modules: [SemaGraphModuleResult], inputs: [SemaEffe
         loop definition in graph.declarations.type_defs -> defs.push(definition.copy())
     }
     types: jet_frame_types(defs)
-    frames := SemaStackFrames{own: (loop _ in nodes -> -1), why: (loop _ in nodes -> "")}
+    frames := SemaStackFrames{own: (loop _ in nodes -> -1), why: (loop _ in nodes -> ""), depth: (loop _ in nodes -> 0)}
     loop module_row in inputs {
         loop function in modules[module_row.module_index].functions {
             node_index: sema_effect_node_index(node_by_key, function.key) ?? next
+            frames.depth[node_index] = function.max_depth
             sema_effect_stack_own(types, function, node_index, frames)
         }
     }
@@ -4127,11 +4130,16 @@ sema_effect_stack_own: fn(types: JetFrameTypes, function: FnBody, node_index: In
 
 // The worst-case stack of every call path from each node: its own frame
 // bound plus its deepest callee's path. A node is unbounded when one of its
-// values has no known size, when it calls through an open dispatch, a trait
-// value or a function value, or when it is on a cycle. Each node is settled
-// once, as SemaHeapWalk is.
+// values has no known size or it calls through an open dispatch, a trait
+// value or a function value. The walk settles each strongly connected part
+// of the call graph once, callees first (Tarjan). A part with a cycle is
+// bounded only when every cycle in it passes through a function marked
+// `#MaxDepth(n)`. Its stack is then a run of segments, each a call path
+// inside the part that calls no marked function: one per waiting marked
+// call, at most the sum of the depths, plus the entry's own when it is not
+// marked; under the last, the deepest callee outside the part.
 SemaStackWalk: struct {
-    // 0 not seen, 1 on the walk, 2 settled.
+    // 0 not seen, 1 visited with its part not settled, 2 settled.
     state: [Int]
     // The node's path bytes; -1 unbounded.
     bytes: [Int]
@@ -4140,6 +4148,18 @@ SemaStackWalk: struct {
     why: [String]
     // The callee the node's deepest or unbounded path goes through; -1 none.
     next: [Int]
+    // Each node's visit order and the lowest order it reaches back to, and
+    // the visited nodes whose part is not settled yet.
+    order: [Int]
+    low: [Int]
+    pending: [Int]
+    visited: Int
+    // The settled part each node is in, named by its first visited node;
+    // -1 before.
+    part: [Int]
+    // The deepest segment from each node of a part with a cycle: -2 not
+    // measured, -3 being measured.
+    segment: [Int]
     // Whether a `!Mem.Stack(above: N)` denial reaches the node: only these
     // nodes' frames are stamped with their bound (FnBody.frame_bound), which
     // the backend then holds each laid-out frame to.
@@ -4147,7 +4167,19 @@ SemaStackWalk: struct {
 }
 
 sema_effect_stack_walk: fn(nodes: [SemaEffectNode]) -> SemaStackWalk Never! {
-    SemaStackWalk{state: (loop _ in nodes -> 0), bytes: (loop _ in nodes -> 0), why: (loop _ in nodes -> ""), next: (loop _ in nodes -> -1), guarded: (loop _ in nodes -> false)}
+    SemaStackWalk{
+        state: (loop _ in nodes -> 0),
+        bytes: (loop _ in nodes -> 0),
+        why: (loop _ in nodes -> ""),
+        next: (loop _ in nodes -> -1),
+        order: (loop _ in nodes -> -1),
+        low: (loop _ in nodes -> -1),
+        pending: [Int]{},
+        visited: 0,
+        part: (loop _ in nodes -> -1),
+        segment: (loop _ in nodes -> -2),
+        guarded: (loop _ in nodes -> false),
+    }
 }
 
 // Mark every node `root` reaches, itself included, as guarded.
@@ -4166,55 +4198,158 @@ sema_effect_stack_guard: fn(walk: &SemaStackWalk, nodes: [SemaEffectNode], node_
     }
 }
 
-sema_effect_stack_open: fn(walk: &SemaStackWalk, index: Int, why: String, next: Int) Never! {
-    walk.bytes[index] = -1
-    walk.why[index] = why.copy()
-    walk.next[index] = next
-    walk.state[index] = 2
+// Why the node's own body has no stack bound; "" when it has one.
+sema_effect_stack_own_why: fn(frames: SemaStackFrames, node: SemaEffectNode, index: Int) -> String Never! {
+    if frames.own[index] < 0 {
+        if frames.why[index] == "" -> return "{node.display_key} has no checked body"
+        return "{frames.why[index]} in {node.display_key}"
+    }
+    if node.memory_opens.len() > 0 -> return "{node.memory_opens[0].reason} at {node.memory_opens[0].source}"
+    if node.dispatches.len() > 0 -> return "a call through a trait value in {node.display_key}"
+    if node.value_edges.len() > 0 -> return "`{node.value_edges[0]}` taken as a value in {node.display_key}, whose calls have no sealed target set"
+    ""
 }
 
 sema_effect_stack_visit: fn(walk: &SemaStackWalk, frames: SemaStackFrames, nodes: [SemaEffectNode], node_by_key: NameRows, index: Int) Never! {
+    walk.order[index] = walk.visited
+    walk.low[index] = walk.visited
+    walk.visited += 1
     walk.state[index] = 1
-    node: nodes[index]
-    if frames.own[index] < 0 {
-        why: if frames.why[index] == "" -> "{node.display_key} has no checked body" else -> "{frames.why[index]} in {node.display_key}"
-        sema_effect_stack_open(walk, index, why, -1)
+    walk.pending.push(index)
+    walk.why[index] = sema_effect_stack_own_why(frames, nodes[index], index)
+    if walk.why[index] == "" {
+        loop edge in nodes[index].call_edges {
+            target: sema_effect_node_index(node_by_key, edge) ?? next
+            if walk.state[target] == 0 {
+                sema_effect_stack_visit(walk, frames, nodes, node_by_key, target)
+                if walk.low[target] < walk.low[index] -> walk.low[index] = walk.low[target]
+            } else if walk.state[target] == 1 && walk.order[target] < walk.low[index] {
+                walk.low[index] = walk.order[target]
+            }
+        }
+    }
+    if walk.low[index] == walk.order[index] -> sema_effect_stack_settle(walk, frames, nodes, node_by_key, index)
+}
+
+// Settle the part `root` was visited first in: every node visited after it
+// that is still pending.
+sema_effect_stack_settle: fn(walk: &SemaStackWalk, frames: SemaStackFrames, nodes: [SemaEffectNode], node_by_key: NameRows, root: Int) Never! {
+    members := [Int]{}
+    loop {
+        member := walk.pending.pop() ?? { break }
+        walk.part[member] = root
+        walk.state[member] = 2
+        members.push(member)
+        if member == root -> break
+    }
+    // A member unbounded by its own body or by a callee outside the part
+    // leaves the whole part unbounded: each member reaches it.
+    open := -1
+    loop member in members {
+        if walk.why[member] != "" {
+            open = member
+            break
+        }
+        loop edge in nodes[member].call_edges {
+            target: sema_effect_node_index(node_by_key, edge) ?? next
+            if walk.part[target] != root && walk.bytes[target] < 0 {
+                open = member
+                walk.next[member] = target
+                break
+            }
+        }
+        if open >= 0 -> break
+    }
+    if open >= 0 {
+        loop member in members {
+            walk.bytes[member] = -1
+            if member != open -> walk.next[member] = open
+        }
         return
     }
-    if node.memory_opens.len() > 0 {
-        open: node.memory_opens[0]
-        sema_effect_stack_open(walk, index, "{open.reason} at {open.source}", -1)
+    outside := 0
+    cyclic := false
+    loop member in members {
+        loop edge in nodes[member].call_edges {
+            target: sema_effect_node_index(node_by_key, edge) ?? next
+            if walk.part[target] == root {
+                cyclic = true
+                next
+            }
+            if walk.next[member] < 0 || walk.bytes[target] > walk.bytes[walk.next[member]] -> walk.next[member] = target
+            if walk.bytes[target] > outside -> outside = walk.bytes[target]
+        }
+    }
+    if !cyclic {
+        walk.bytes[root] = frames.own[root] + outside
         return
     }
-    if node.dispatches.len() > 0 {
-        sema_effect_stack_open(walk, index, "a call through a trait value in {node.display_key}", -1)
-        return
+    depths := 0
+    widest := 0
+    loop member in members {
+        depths = sema_effect_stack_saturate(depths + frames.depth[member])
+        if walk.segment[member] == -2 {
+            closed: sema_effect_stack_segment(walk, frames, nodes, node_by_key, root, member)
+            if closed >= 0 {
+                walk.why[closed] = "recursion through {nodes[closed].display_key} with no `#MaxDepth(n)` on its cycle"
+                loop other in members {
+                    walk.bytes[other] = -1
+                    if other != closed -> walk.next[other] = closed
+                }
+                return
+            }
+        }
+        if walk.segment[member] > widest -> widest = walk.segment[member]
     }
-    if node.value_edges.len() > 0 {
-        sema_effect_stack_open(walk, index, "`{node.value_edges[0]}` taken as a value in {node.display_key}, whose calls have no sealed target set", -1)
-        return
+    loop member in members {
+        runs: if frames.depth[member] > 0 -> depths else -> depths + 1
+        walk.bytes[member] = sema_effect_stack_saturate(sema_effect_stack_times(runs, widest) + outside)
     }
+}
+
+// The deepest call path from `index` inside the part of `root` that calls
+// no `#MaxDepth` function, in walk.segment; returns the node where a cycle
+// of unmarked functions closes, or -1. The path's next step replaces the
+// node's deepest outside callee in walk.next, and a call into a marked
+// function of the part stands in when the node has neither.
+sema_effect_stack_segment: fn(walk: &SemaStackWalk, frames: SemaStackFrames, nodes: [SemaEffectNode], node_by_key: NameRows, root: Int, index: Int) -> Int Never! {
+    walk.segment[index] = -3
     deepest := 0
-    through := -1
-    loop edge in node.call_edges {
+    marked := -1
+    loop edge in nodes[index].call_edges {
         target: sema_effect_node_index(node_by_key, edge) ?? next
-        if walk.state[target] == 1 {
-            sema_effect_stack_open(walk, index, "recursion through {nodes[target].display_key}", -1)
-            return
+        if walk.part[target] != root -> next
+        if frames.depth[target] > 0 {
+            if marked < 0 -> marked = target
+            next
         }
-        if walk.state[target] == 0 -> sema_effect_stack_visit(walk, frames, nodes, node_by_key, target)
-        if walk.bytes[target] < 0 {
-            sema_effect_stack_open(walk, index, "", target)
-            return
+        if walk.segment[target] == -3 -> return target
+        if walk.segment[target] == -2 {
+            closed: sema_effect_stack_segment(walk, frames, nodes, node_by_key, root, target)
+            if closed >= 0 -> return closed
         }
-        if walk.bytes[target] > deepest {
-            deepest = walk.bytes[target]
-            through = target
+        if walk.segment[target] > deepest {
+            deepest = walk.segment[target]
+            walk.next[index] = target
         }
     }
-    walk.bytes[index] = frames.own[index] + deepest
-    walk.next[index] = through
-    walk.state[index] = 2
+    if walk.next[index] < 0 -> walk.next[index] = marked
+    walk.segment[index] = frames.own[index] + deepest
+    return -1
+}
+
+// Stack byte counts stop at 2^56, far above any bound a target can grant,
+// so a large `#MaxDepth(n)` cannot overflow the sum.
+SEMA_STACK_BYTES_CEILING: 72057594037927936
+
+sema_effect_stack_saturate: fn(bytes: Int) -> Int Never! {
+    if bytes > SEMA_STACK_BYTES_CEILING -> return SEMA_STACK_BYTES_CEILING
+    bytes
+}
+
+sema_effect_stack_times: fn(count: Int, bytes: Int) -> Int Never! {
+    if bytes > 0 && count > SEMA_STACK_BYTES_CEILING /% bytes -> return SEMA_STACK_BYTES_CEILING
+    count * bytes
 }
 
 // The path a stack walk settled a node by, each step with its own frame
@@ -4231,7 +4366,8 @@ sema_effect_stack_trail: fn(walk: SemaStackWalk, frames: SemaStackFrames, nodes:
     row := index
     loop row >= 0 && seen.get(row) == None {
         seen[row] = true
-        step: if frames.own[row] < 0 -> nodes[row].display_key.copy() else -> "{nodes[row].display_key} ({frames.own[row]} B)"
+        depth: if frames.depth[row] > 0 -> ", up to {frames.depth[row]} deep" else -> ""
+        step: if frames.own[row] < 0 -> nodes[row].display_key.copy() else -> "{nodes[row].display_key} ({frames.own[row]} B{depth})"
         steps.push(step)
         if walk.bytes[row] < 0 && walk.why[row] != "" {
             why = walk.why[row].copy()
@@ -4271,7 +4407,7 @@ sema_effect_check_stack: fn(walk: &SemaStackWalk, frames: SemaStackFrames, nodes
     span: if denial.span.start == denial.span.end -> nodes[root].name_span else -> denial.span
     trail: sema_effect_stack_trail(walk, frames, nodes, root)
     if walk.bytes[root] < 0 {
-        diagnostics.push(sema_error("E0921", span, "`{fact}` cannot be proved for {display}: {trail.why}", "no bound holds for the call path {trail.path}; a stack bound needs every value's size and every call's target; declaration provenance: {provenance}", "give every value a known size and every call a direct target, or move the call outside this denial"))
+        diagnostics.push(sema_error("E0921", span, "`{fact}` cannot be proved for {display}: {trail.why}", "no bound holds for the call path {trail.path}; a stack bound needs every value's size, every call's target, and a `#MaxDepth(n)` function on every call cycle; declaration provenance: {provenance}", "give every value a known size, every call a direct target and every call cycle a `#MaxDepth(n)` function, or move the call outside this denial"))
         return
     }
     diagnostics.push(sema_error("E0921", span, "{display} may take {walk.bytes[root]} bytes of stack, above the effective `{fact}` declared at {nodes[root].source_display}", "the deepest call path is {trail.path}; each frame counts {JET_FRAME_ALLOWANCE} bytes of call linkage and saved registers plus two slots for every parameter and checked value; declaration provenance: {provenance}", "raise the bound, shorten the call path, or keep large values in a heap list"))

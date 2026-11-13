@@ -771,6 +771,7 @@ sema_incremental_function_header: fn(function: Func) -> Func Never! {
         pre: function.pre, post: function.post, inline_foreign: function.inline_foreign,
         undo: function.undo, markers: function.markers,
         compiler_generated: function.compiler_generated, body: [Stmt]{},
+        max_depth: function.max_depth,
     }
 }
 
@@ -2392,6 +2393,7 @@ sema_function_check_pass: fn(func: Func, owner_id: SymbolID, function_kind: TFun
         is_scalar: scalar,
         kernel_proof: None,
         uses_stack_sentry: false,
+        max_depth: func.max_depth,
         kind: function_kind,
         origin_facts: context.origin_facts.move(),
         typed_goals: context.typed_goals.move(),

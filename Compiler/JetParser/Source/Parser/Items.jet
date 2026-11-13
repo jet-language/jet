@@ -1832,6 +1832,26 @@ parser_apply_function_markers: fn(state: &JetParserState, func: &Func, markers: 
                 partition: parser_function_web_partition(state, marker) ?? return
                 func.web_marker = Val(partition)
             }
+            // `#MaxDepth(n)` limits the function's waiting calls to n, a
+            // whole number above 0, once per function.
+            .MaxDepth -> {
+                if func.max_depth > 0 {
+                    parser_add_fatal_code(state, "E0003", marker.span, "a function may have only one `#MaxDepth` marker", "the depth is one limit on the function's waiting calls", "keep one `#MaxDepth(n)` marker")
+                    return
+                }
+                values: parser_marker_bindings(marker, [String]{"depth"}) ?? [Expr?]{None}
+                depth := -1
+                if values[0] == .Val(written) && written == .Int(value, _, _, _, _) -> depth = value
+                if depth < 0 {
+                    parser_marker_shape_fatal(state, marker)
+                    return
+                }
+                if depth == 0 {
+                    parser_add_fatal_code(state, "E0930", marker.span, "`#MaxDepth(0)` allows no call of the function", "the depth counts the function's calls waiting at once, the first included, so it is at least 1", "write the most calls of the function that may wait at once, such as `#MaxDepth(1000)`")
+                    return
+                }
+                func.max_depth = depth
+            }
             // C declarations select their calling convention; foreign bodies
             // never reach this applicator in Rust.
             .ABI -> {

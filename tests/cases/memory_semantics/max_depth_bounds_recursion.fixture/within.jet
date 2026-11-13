@@ -1,0 +1,13 @@
+// `descend` may have 8 calls live at once. Each call of 5 levels has 6 live
+// at most and counts them all off as it returns, so 100 of them run.
+#MaxDepth(8)
+descend: fn(level: Int) -> Int {
+    if level == 0 -> return 0
+    descend(level - 1) + 1
+}
+
+main: fn() {
+    total := 0
+    loop _ in 0..<100 -> total += descend(5)
+    print("total {total}")
+}

@@ -1,0 +1,28 @@
+# `#MaxDepth(n)` lets at most n calls of a function be live at once on one
+# thread, counting the first. Calls count off as they return. Call n + 1
+# stops with the stack overflow report (E3012, exit 70) before its body runs.
+# For `!Mem.Stack(above: N)`, a call cycle with a marked function on it has a
+# bound, and only the marked function is counted. A cycle with none has no
+# bound. A depth of 0 is refused.
+fixture: max_depth_bounds_recursion.fixture
+env: NO_COLOR=1
+step within: jet run within.jet
+exit: 0
+stdout: ~ "total 500" # 100 calls of 6 live levels each fit under 8 and count off
+step over: jet run over.jet
+exit: 70
+stdout: ~ "before" # the program runs until the ninth live call
+stderr: ~ "Stop [E3012]: Stack overflow in `descend`" # call 9 of descend stops with the stack overflow report
+stderr: ~ "More: jet-lang.dev/e/E3012" # with the registered row's footer
+stdout: !~ "depth " # the over-deep call never returns
+step bounded: jet check bounded.jet
+exit: 0
+stderr: !~ "Error [" # the even/odd cycle passes the marked even, so its stack is bounded
+step unmarked: jet check unmarked.jet
+exit: nonzero
+stderr: ~ "`!Mem.Stack(above: 65536)` cannot be proved for unmarked::run: recursion through unmarked::" # the same cycle unmarked has no bound
+stderr: ~ " with no `#MaxDepth(n)` on its cycle" # the report says what would bound it
+step zero: jet check zero.jet
+exit: nonzero
+stderr: ~ "E0930" # a depth of 0 allows no call
+stderr: ~ "`#MaxDepth(0)` allows no call of the function" # and says so

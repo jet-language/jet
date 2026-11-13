@@ -1,0 +1,16 @@
+use jet_foundation.[FnBody]
+
+// `#MaxDepth(n)` (FnBody.max_depth): before the body runs, the call counts
+// itself among the function's live calls on this thread, and call n + 1
+// stops with the stack overflow report, E3012 (JetRuntime Depth.jet
+// jet_rt_depth_enter). Every return and stop edge counts the call off
+// (IRTxFrame.depth_site, ir_tx_leave_scopes). The message is the registry
+// row's `what` with the function's name, built here as static bytes.
+ir_depth_frame: fn(m: &IRModule, b: &IRBuilder, function: FnBody) Never! {
+    if function.max_depth <= 0 -> return
+    site: ir_shared_site_word(m, b, "depth:{function.key}")
+    limit: ir_word_const(m, b, function.max_depth)
+    message: ir_static_text(m, b, "Stack overflow in `{function.name}`")
+    _: ir_runtime(m, b, "jet_rt_depth_enter", [Int]{site, limit, message[0], message[1]}, -1)
+    b.transactions.push(IRTxFrame{handle: -1, stm: -1, snapshots: [IRTxSnapshot]{}, loops: 0, shield: false, deadline: -1, depth_site: site})
+}

@@ -1,0 +1,14 @@
+// The same cycle with no `#MaxDepth(n)` on it has no stack bound.
+even: fn(n: Int) -> Bool {
+    if n == 0 -> return true
+    odd(n - 1)
+}
+
+odd: fn(n: Int) -> Bool {
+    if n == 0 -> return false
+    even(n - 1)
+}
+
+run: fn() -[!Mem.Stack(above: 65536)]> {
+    _ := even(10)
+}

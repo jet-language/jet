@@ -1123,6 +1123,7 @@ ir_function_row_id: fn(m: &IRModule, p: IRProgram, row: Int, type_args: [Type]) 
         made := ir_function_new(function.name, function.key, ir_symbol_name(function), function.source_file, function.line)
         made.inline_always = function.is_inline_always
         made.frame_bound = function.frame_bound
+        made.max_depth = function.max_depth
         m.functions.push(made)
         name_rows_set(m.function_rows, function.key, id)
         m.ids[row] = id
@@ -1138,6 +1139,7 @@ ir_function_row_id: fn(m: &IRModule, p: IRProgram, row: Int, type_args: [Type]) 
     id: m.functions.len()
     made := ir_hashed_function(function.name, instance, "{ir_symbol_name(function)}__", function.source_file, function.line)
     made.inline_always = function.is_inline_always
+    made.max_depth = function.max_depth
     m.functions.push(made)
     name_rows_set(m.function_rows, instance, id)
     name_rows_set(m.instances, instance, id)
@@ -2539,6 +2541,7 @@ ir_route_can_stop: fn(symbol: String) -> Bool Never! {
         "jet_term_mode_enter" | "jet_term_mode_leave" -> false
         "jet_rt_sentry_scope_enter" | "jet_rt_sentry_policy_enter" | "jet_rt_sentry_scope_leave" | "jet_rt_sentry_frame_enter" | "jet_rt_sentry_frame_leave" | "jet_rt_sentry_register_stack_allocation" -> false
         "jet_rt_effect_scope_enter" | "jet_rt_effect_scope_leave" -> false
+        "jet_rt_depth_leave" -> false
         "jet_rt_coverage_function" -> false
         "jet_rt_native_closure_retain" | "jet_rt_native_closure_unref" -> false
         "jet_rt_native_shared_downgrade" | "jet_rt_native_shared_weak_upgrade" | "jet_rt_shared_owner_strong_count" -> false

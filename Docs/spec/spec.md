@@ -2162,14 +2162,32 @@ integrate: fn(e: &Entity, dt: Float) -[!Mem.Alloc]> {
 (D-STACKBOUND1). Sema bounds each frame by a fixed allowance for call linkage
 and saved registers plus two slots for every parameter and checked value, each
 slot sized by the value's layout, and adds the deepest callee's path. A path
-through recursion, a function value, a trait value, an open dispatch or a
-value of unknown size, such as an unbound generic parameter, has no bound, so
-the denial is E0921. `Mem.Stack` has no unbounded form: `!Mem.Stack` alone is
-E0119. The backend checks every frame it lays out for a function a
-`!Mem.Stack(above: N)` denial reaches against sema's bound for that function,
-with the bounds of the bodies inlined into it added; a frame over it is a
-compiler fault, an ICE (exit 101). Frames no stack denial reaches are not
-checked.
+through a call cycle with no `#MaxDepth(n)` function on it, a function value,
+a trait value, an open dispatch or a value of unknown size, such as an unbound
+generic parameter, has no bound, so the denial is E0921. `Mem.Stack` has no
+unbounded form: `!Mem.Stack` alone is E0119. The backend checks every frame it
+lays out for a function a `!Mem.Stack(above: N)` denial reaches against sema's
+bound for that function, with the bounds of the bodies inlined into it added;
+a frame over it is a compiler fault, an ICE (exit 101). Frames no stack denial
+reaches are not checked.
+
+`#MaxDepth(n)` on a function or method bounds its recursion: at most n calls of
+it are live at once on one thread, the first call included
+(D-RESOURCE-LIMIT1). Call n + 1 stops with the stack overflow report, E3012,
+exit 70, before its body runs. Calls that return or stop count off, so the
+function may be called again. `#MaxDepth(0)` is E0930. In mutual recursion
+only the marked functions are counted. For `!Mem.Stack(above: N)`, every call
+cycle needs a marked function on it. Sema then counts the cycle's deepest pass
+between marked calls once per call the marks allow: the sum of their n, plus
+one pass when the path enters the cycle at an unmarked function.
+
+```jet
+#MaxDepth(64)
+descend: fn(level: Int) -[!Mem.Stack(above: 65536)]> Int {
+    if level == 0 -> return 0
+    descend(level - 1) + 1
+}
+```
 
 The human aliasing rule is: while something is being changed, nobody else may be
 looking at it. Foreign `read` and `write` spellings are not Jet access syntax;

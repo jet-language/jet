@@ -105,6 +105,19 @@ Inline: struct {
     }
 }
 
+// `#MaxDepth(n)` on a function or method: at most n calls of it wait at
+// once on one thread, counting the first. The call after n stops with the
+// stack-overflow report on every build level, and the stack bound
+// (`!Mem.Stack(above: N)`, `jet inspect memory`) counts n calls of it on a
+// recursive path. Depth 0 is invalid.
+MaxDepth: struct {
+    depth: Int
+
+    impl Marker {
+        sites: [.Function, .Method]
+    }
+}
+
 // Native auto-vectorization is the safe default; this explicit
 // function/method marker keeps scalar codegen available for reproducibility or
 // a workload whose measured result favors scalar execution.

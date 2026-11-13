@@ -1,9 +1,14 @@
 // Worst-case stack per entry point (`jet inspect memory`): each compiled
 // function's own stack (X64FunctionDebug.stack) added up along its deepest
-// chain of calls, the Function targets of its relocations. A chain that
-// comes back to a function on it (recursion) or reaches a call through a
-// function value has no bound. The runtime's own frames (the Runtime
-// targets) are not counted; each bound names the runtime symbols it reaches.
+// chain of calls, the Function targets of its relocations. Functions that
+// call each other in a cycle form one part. A part is bounded when every
+// cycle in it passes a `#MaxDepth(n)` function (IRFunction.max_depth): its
+// deepest pass between marked calls counts once per call the marks allow,
+// the sum of their n, plus one pass when the chain enters the part at an
+// unmarked function. A cycle with no marked function (recursion), or a call
+// through a function value, has no bound. The runtime's own frames (the
+// Runtime targets) are not counted; each bound names the runtime symbols it
+// reaches.
 
 use {
     jet_backend.[X64RelocTarget]
@@ -25,15 +30,29 @@ IRX64StackBound: struct {
     runtime: [String]
 }
 
-// Per function row of one walk: 0 not seen, 1 on the chain being walked,
-// 2 done; its deepest bytes (-1 unbounded), the callee that chain goes
-// through (-1 none), and why it is unbounded.
+// Per function row of one walk: 0 not seen, 1 visited with its part not
+// settled, 2 settled; its deepest bytes (-1 unbounded), the callee that
+// chain goes through (-1 none), and why it is unbounded. Each row's visit
+// order and the lowest order it reaches back to, the visited rows whose part
+// is not settled, the part each row settled in (named by its first visited
+// row; -1 before), and the deepest pass from each row of a part with a cycle
+// (-2 not measured, -3 being measured).
 IRX64StackWalk: struct {
     state: [Int]
     deep: [Int]
     next: [Int]
     open: [String]
+    order: [Int]
+    low: [Int]
+    pending: [Int]
+    visited: Int
+    part: [Int]
+    segment: [Int]
 }
+
+// Stack byte counts stop at 2^56, far above any stack a target grants, so a
+// large `#MaxDepth(n)` cannot overflow the sum.
+IR_X64_STACK_CEILING: 72057594037927936
 
 // The entry rows: the module's entry, then the roots its build kept
 // (IRModule.kept).
@@ -50,12 +69,16 @@ ir_x64_stack_entries: fn(compiled: IRX64Result) -> [Int] Never! {
 
 // The worst-case stack bound of every entry (ir_x64_stack_entries).
 ir_x64_stack_bounds: fn(compiled: IRX64Result) -> [IRX64StackBound] Never! {
-    walk := IRX64StackWalk{state: [Int]{}, deep: [Int]{}, next: [Int]{}, open: [String]{}}
+    walk := IRX64StackWalk{state: [Int]{}, deep: [Int]{}, next: [Int]{}, open: [String]{}, order: [Int]{}, low: [Int]{}, pending: [Int]{}, visited: 0, part: [Int]{}, segment: [Int]{}}
     loop _ in compiled.functions {
         walk.state.push(0)
         walk.deep.push(0)
         walk.next.push(-1)
         walk.open.push("")
+        walk.order.push(-1)
+        walk.low.push(-1)
+        walk.part.push(-1)
+        walk.segment.push(-2)
     }
     bounds := [IRX64StackBound]{}
     loop entry in ir_x64_stack_entries(compiled) {
@@ -74,43 +97,167 @@ ir_x64_stack_bounds: fn(compiled: IRX64Result) -> [IRX64StackBound] Never! {
     bounds
 }
 
-// Settles `row`'s deepest bytes after its callees'.
-ir_x64_stack_visit: fn(walk: &IRX64StackWalk, compiled: IRX64Result, row: Int) Never! {
-    walk.state[row] = 1
-    if compiled.debug[row].dynamic {
-        walk.deep[row] = -1
-        walk.open[row] = "dynamic"
-        walk.state[row] = 2
-        return
+// The callee row a relocation calls, or -1 when it calls no compiled
+// function.
+ir_x64_stack_callee: fn(walk: IRX64StackWalk, target: X64RelocTarget) -> Int Never! {
+    if target == .Function(id) {
+        if id.value >= 0 && id.value < walk.state.len() -> return id.value
     }
-    best := 0
-    loop reloc in compiled.functions[row].relocs {
-        if reloc.target == .Function(id) {
-            callee: id.value
-            if callee < 0 || callee >= walk.state.len() -> next
-            if walk.state[callee] == 1 {
-                walk.deep[row] = -1
-                walk.next[row] = callee
-                walk.open[row] = "recursion"
-                walk.state[row] = 2
-                return
-            }
-            if walk.state[callee] == 0 -> ir_x64_stack_visit(walk, compiled, callee)
-            if walk.deep[callee] < 0 {
-                walk.deep[row] = -1
-                walk.next[row] = callee
-                walk.open[row] = walk.open[callee].copy()
-                walk.state[row] = 2
-                return
-            }
-            if walk.deep[callee] > best {
-                best = walk.deep[callee]
-                walk.next[row] = callee
+    return -1
+}
+
+// Visits `row` and its callees, settling each part once all its rows are
+// visited (Tarjan's strongly connected components).
+ir_x64_stack_visit: fn(walk: &IRX64StackWalk, compiled: IRX64Result, row: Int) Never! {
+    walk.order[row] = walk.visited
+    walk.low[row] = walk.visited
+    walk.visited += 1
+    walk.state[row] = 1
+    walk.pending.push(row)
+    if compiled.debug[row].dynamic {
+        walk.open[row] = "dynamic"
+    } else {
+        loop reloc in compiled.functions[row].relocs {
+            callee: ir_x64_stack_callee(walk, reloc.target)
+            if callee < 0 -> next
+            if walk.state[callee] == 0 {
+                ir_x64_stack_visit(walk, compiled, callee)
+                if walk.low[callee] < walk.low[row] -> walk.low[row] = walk.low[callee]
+            } else if walk.state[callee] == 1 && walk.order[callee] < walk.low[row] {
+                walk.low[row] = walk.order[callee]
             }
         }
     }
-    walk.deep[row] = compiled.debug[row].stack + best
-    walk.state[row] = 2
+    if walk.low[row] == walk.order[row] -> ir_x64_stack_settle(walk, compiled, row)
+}
+
+// Settles the part `root` was visited first in: every row visited after it
+// that is still pending.
+ir_x64_stack_settle: fn(walk: &IRX64StackWalk, compiled: IRX64Result, root: Int) Never! {
+    members := [Int]{}
+    loop {
+        member := walk.pending.pop() ?? { break }
+        walk.part[member] = root
+        walk.state[member] = 2
+        members.push(member)
+        if member == root -> break
+    }
+    // A member that calls through a function value, or calls an unbounded
+    // row outside the part, leaves the whole part unbounded: each member
+    // reaches it.
+    open := -1
+    loop member in members {
+        if walk.open[member] != "" {
+            open = member
+            break
+        }
+        loop reloc in compiled.functions[member].relocs {
+            callee: ir_x64_stack_callee(walk, reloc.target)
+            if callee < 0 || walk.part[callee] == root || walk.deep[callee] >= 0 -> next
+            open = member
+            walk.next[member] = callee
+            walk.open[member] = walk.open[callee].copy()
+            break
+        }
+        if open >= 0 -> break
+    }
+    if open >= 0 {
+        loop member in members {
+            walk.deep[member] = -1
+            if member == open -> next
+            walk.next[member] = open
+            walk.open[member] = walk.open[open].copy()
+        }
+        return
+    }
+    outside := 0
+    cyclic := false
+    loop member in members {
+        loop reloc in compiled.functions[member].relocs {
+            callee: ir_x64_stack_callee(walk, reloc.target)
+            if callee < 0 -> next
+            if walk.part[callee] == root {
+                cyclic = true
+                next
+            }
+            if walk.next[member] < 0 || walk.deep[callee] > walk.deep[walk.next[member]] -> walk.next[member] = callee
+            if walk.deep[callee] > outside -> outside = walk.deep[callee]
+        }
+    }
+    if !cyclic {
+        walk.deep[root] = compiled.debug[root].stack + outside
+        return
+    }
+    depths := 0
+    widest := 0
+    loop member in members {
+        depths = ir_x64_stack_saturate(depths + compiled.program.functions[member].max_depth)
+        if walk.segment[member] == -2 {
+            closed: ir_x64_stack_segment(walk, compiled, root, member)
+            if closed >= 0 {
+                // A cycle with no marked function: the chain runs into it
+                // and around it back to `closed`.
+                loop other in members {
+                    walk.deep[other] = -1
+                    walk.open[other] = "recursion"
+                    if walk.segment[other] != -3 -> walk.next[other] = closed
+                }
+                return
+            }
+        }
+        if walk.segment[member] > widest -> widest = walk.segment[member]
+    }
+    loop member in members {
+        runs: if compiled.program.functions[member].max_depth > 0 -> depths else -> depths + 1
+        walk.deep[member] = ir_x64_stack_saturate(ir_x64_stack_times(runs, widest) + outside)
+    }
+}
+
+// The deepest chain from `row` inside the part of `root` that calls no
+// `#MaxDepth` function, in walk.segment; returns the row where a cycle of
+// unmarked functions closes, or -1. The chain's next step replaces the row's
+// deepest outside callee in walk.next, and a call into a marked function of
+// the part stands in when the row has neither.
+ir_x64_stack_segment: fn(walk: &IRX64StackWalk, compiled: IRX64Result, root: Int, row: Int) -> Int Never! {
+    walk.segment[row] = -3
+    outside: walk.next[row]
+    deepest := 0
+    step := -1
+    marked := -1
+    loop reloc in compiled.functions[row].relocs {
+        callee: ir_x64_stack_callee(walk, reloc.target)
+        if callee < 0 || walk.part[callee] != root -> next
+        if compiled.program.functions[callee].max_depth > 0 {
+            if marked < 0 -> marked = callee
+            next
+        }
+        if walk.segment[callee] == -3 {
+            walk.next[row] = callee
+            return callee
+        }
+        if walk.segment[callee] == -2 {
+            walk.next[row] = callee
+            closed: ir_x64_stack_segment(walk, compiled, root, callee)
+            if closed >= 0 -> return closed
+        }
+        if walk.segment[callee] > deepest {
+            deepest = walk.segment[callee]
+            step = callee
+        }
+    }
+    walk.next[row] = if step >= 0 -> step else if outside >= 0 -> outside else -> marked
+    walk.segment[row] = compiled.debug[row].stack + deepest
+    return -1
+}
+
+ir_x64_stack_saturate: fn(bytes: Int) -> Int Never! {
+    if bytes > IR_X64_STACK_CEILING -> return IR_X64_STACK_CEILING
+    bytes
+}
+
+ir_x64_stack_times: fn(count: Int, bytes: Int) -> Int Never! {
+    if bytes > 0 && count > IR_X64_STACK_CEILING /% bytes -> return IR_X64_STACK_CEILING
+    count * bytes
 }
 
 // The runtime symbols the functions `entry` reaches call, sorted.

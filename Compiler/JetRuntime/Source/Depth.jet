@@ -1,0 +1,38 @@
+// `#MaxDepth(n)` (JetIR BuildDepth.jet): a marked function counts its live
+// calls on each thread. Its static site word holds the TLS key of that
+// count, made on its first call; the count is the key's value (no
+// destructor: it is a plain word). Call n + 1 stops with the stack overflow
+// report (E3012) before the body runs, and the count is left as it was.
+
+depth_key: fn(site: I64) -> I64 {
+    existing: sync_load(site)
+    if (existing != I64{0}) { return existing }
+    sync_mutex_lock(thread_tls_registry)
+    key := sync_load(site)
+    if (key == I64{0}) {
+        key = thread_tls_key_new_locked(I64{0}, I64{0})
+        sync_store(site, key)
+    }
+    sync_mutex_unlock(thread_tls_registry)
+    key
+}
+
+// A call of a `#MaxDepth(limit)` function: one more live call on this
+// thread, or past `limit` the E3012 stop with `message` (static bytes, the
+// registry row's `what` naming the function). In a task the stop is
+// published and this returns; the caller's stop check takes the edge.
+#Export(c) jet_rt_depth_enter: fn(site: I64, limit: I64, message: I64, message_len: I64) {
+    key: depth_key(site)
+    depth: jet_rt_tls_get(key) + I64{1}
+    if (depth > limit) {
+        jet_rt_coded_stop(rt_static_text("E3012"), jet_rt_string_from_static(message, message_len))
+        return
+    }
+    jet_rt_tls_set(key, depth)
+}
+
+// The return or stop of a call jet_rt_depth_enter counted.
+#Export(c) jet_rt_depth_leave: fn(site: I64) {
+    key: sync_load(site)
+    jet_rt_tls_set(key, jet_rt_tls_get(key) - I64{1})
+}

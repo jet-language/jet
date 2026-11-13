@@ -24,8 +24,9 @@ use jet_foundation.[Span, SymbolID, BodyCallArg, BodyContextGuard, NodeKind, Bod
 // replaced, and a function taking raw addresses one with only
 // `sentry_frame`, its sentry stack frame (BuildSentry.jet). A function with
 // an effect-scope descriptor (FnBody.effect_scope) is a frame with only
-// `effect_scope`, the effect-scope frame its entry replaced: an early exit
-// leaves them.
+// `effect_scope`, the effect-scope frame its entry replaced, and a
+// `#MaxDepth(n)` function one with only `depth_site`, the site word its
+// count lives under (BuildDepth.jet): an early exit leaves them.
 IRTxFrame: struct {
     handle: Int
     stm: Int
@@ -40,6 +41,7 @@ IRTxFrame: struct {
     gate: Bool{false}
     terminal: Bool{false}
     effect_scope: Int{-1}
+    depth_site: Int{-1}
 }
 
 // A saved value: `local` gets `saved` (of type `saved_ty`) back on an early
@@ -442,7 +444,8 @@ ir_tx_unwind: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, loops: Int, span: Sp
 
 // The runtime scopes an early exit out of `frame` leaves: the session
 // Shield, the replaced deadline, the replaced sentry gate, the sentry
-// stack frame, the replaced terminal mode and the replaced effect scope.
+// stack frame, the replaced terminal mode, the replaced effect scope and a
+// `#MaxDepth(n)` call's count.
 ir_tx_leave_scopes: fn(m: &IRModule, b: &IRBuilder, frame: IRTxFrame) Never! {
     if frame.shield {
         _: ir_runtime(m, b, "jet_rt_session_shield_leave", [Int]{}, -1)
@@ -461,6 +464,9 @@ ir_tx_leave_scopes: fn(m: &IRModule, b: &IRBuilder, frame: IRTxFrame) Never! {
     }
     if frame.effect_scope >= 0 {
         _: ir_runtime(m, b, "jet_rt_effect_scope_leave", [Int]{frame.effect_scope}, -1)
+    }
+    if frame.depth_site >= 0 {
+        _: ir_runtime(m, b, "jet_rt_depth_leave", [Int]{frame.depth_site}, -1)
     }
 }
 

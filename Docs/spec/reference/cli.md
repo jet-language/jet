@@ -1468,7 +1468,9 @@ point (the program entry and every kept function), the worst-case stack in
 bytes and the deepest call path, for example `stack: 96 B via run -> step ->
 leaf`. Each function's frame is its return address, saved frame pointer,
 saved registers, locals, and the largest outgoing argument area. A call cycle
-reports `stack: unbounded, recursion via ...` and asks for `#MaxDepth(n)`; a
+with a `#MaxDepth(n)` function on it counts that function's n allowed calls
+and stays bounded; a cycle with none reports `stack: unbounded, recursion via
+...` and asks for `#MaxDepth(n)`; a
 call through a function value reports `stack: unbounded, a call through a
 function value via ...` until its targets are sealed. Runtime frames are not
 counted; they are named on a `runtime frames not counted:` line. Under the
