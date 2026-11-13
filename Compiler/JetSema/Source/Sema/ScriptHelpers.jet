@@ -3,7 +3,7 @@
 // types the script's own statements give them, which only a check of the
 // generated `run: fn` (sema_script_entry) knows, and a parameter is `&` when
 // a check of the function's body finds it written.
-use jet_foundation.[AST_NODE_GENERATED, AccessConvention, BodyTree, Diagnostic, Expr, FnBody, Func, Item, Span, TFuncKind, TLocal, TTypeDef, Type, ast_visit_body, body_node, body_stmt, compiler_transfer_rows, diagnostic_with_label]
+use jet_foundation.[AST_NODE_GENERATED, AccessConvention, BodyTree, Diagnostic, Expr, FnBody, Func, Item, Span, TFuncKind, TLocal, TTypeDef, Type, ast_visit_body, body_node, body_stmt, checked_builtin_mutates_receiver, compiler_transfer_rows, diagnostic_with_label]
 
 // A script variable as the script's own statements bind it: its checked type,
 // and whether it is a `:=` binding a function may change.
@@ -121,7 +121,8 @@ sema_script_entry_bound_types: fn(function: FnBody, names: [String], found: &[St
 
 // Whether `tree` writes a place rooted at `parameter`: an assignment, or a
 // write borrow (a `&` argument, a changing method's receiver, a written
-// index), lambdas included. The reads in `passed` don't count.
+// index), a changing built-in method's receiver (`words.push(…)`), lambdas
+// included. The reads in `passed` don't count.
 sema_script_body_writes: fn(tree: BodyTree, parameter: TLocal, passed: [Int]) -> Bool Never! {
     loop statement in tree.stmts {
         if statement == .Assign(place, _, _, _, _) {
@@ -134,6 +135,7 @@ sema_script_body_writes: fn(tree: BodyTree, parameter: TLocal, passed: [Int]) ->
     loop node in tree.nodes {
         if node.kind == .Borrow(place, access) && access == AccessConvention.Write && sema_script_place_rooted_at(tree, place, parameter, passed) -> return true
         if node.kind == .Index(base, _, _, access, _, _) && access == AccessConvention.Write && sema_script_place_rooted_at(tree, base, parameter, passed) -> return true
+        if node.kind == .BuiltinMethod(receiver, operation, _) && checked_builtin_mutates_receiver(operation) && sema_script_place_rooted_at(tree, receiver, parameter, passed) -> return true
     }
     false
 }
@@ -362,4 +364,27 @@ sema_script_lines_hold: fn(items: [Item], span: Span) -> Bool Never! {
         if declared.start <= span.start && span.end <= declared.end -> return false
     }
     true
+}
+
+// E0227 for a script function that changes script variable `variable`, used
+// as a function value: the value has no place for the variable.
+sema_script_value_diagnostic: fn(helper: String, variable: String, span: Span) -> Diagnostic {
+    sema_error("E0227", span, "`{helper}` changes the script's `{variable}`, so it can't be used as a function value", "each call of `{helper}` passes the script's `{variable}` to its extra `&` parameter `{variable}:`, and a function value has no place for it", "call `{helper}` directly, or pass a lambda that makes that call")
+}
+
+// E1101 for a call in a task to a script function that changes script
+// variable `variable`: the task would change it beside the script.
+sema_script_task_diagnostic: fn(helper: String, variable: String, span: Span) -> Diagnostic {
+    sema_error("E1101", span, "`{helper}` changes the script's `{variable}`, so it can't be called in a task", "each call of `{helper}` passes the script's `{variable}` to its extra `&` parameter `{variable}:`, and a task runs beside the script, so the change would race it", "call `{helper}` outside the task, or pass the task's own value by name: `{helper}(…, {variable}: …)`")
+}
+
+// E0204 for a call whose extra parameter for a script variable overlaps an
+// argument the call already passes.
+sema_script_alias_diagnostic: fn(helper: String, parameter: SemaCallParam, active_write: Bool, span: Span) -> Diagnostic {
+    variable: parameter.name
+    writes: parameter.convention == AccessConvention.Write
+    through: if writes -> "change it through its extra `&` parameter `{variable}:`" else -> "read it through its extra parameter `{variable}:`"
+    passes: if writes -> "`{helper}` changes the script's `{variable}`, so each call passes it as an extra `&` parameter" else -> "`{helper}` reads the script's `{variable}`, so each call passes it as an extra parameter"
+    if active_write -> return sema_error("E0204", span, "`{variable}` is being changed in this call, so `{helper}` can't also {through}", "{passes}, and while something is being changed through a write parameter, nobody else may be looking at it", "pass `{variable}` only once, or pass a copy of it")
+    sema_error("E0204", span, "`{variable}` is already shared in this call, so `{helper}` can't also {through}", "{passes}, and while something is being looked at, nobody else may be changing it", "drop the extra use of `{variable}`, or pass a copy of it there")
 }

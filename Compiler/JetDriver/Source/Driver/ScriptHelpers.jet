@@ -7,7 +7,7 @@
 // writes is a `&` parameter, from a second probe that checks each function
 // with its `:=` variables as `&` (sema_script_helper_writes).
 use {
-    jet_foundation.[AST_NODE_GENERATED, AccessConvention, Diagnostic, Expr, Item, Param, ParamZone, Span, TargetMachine]
+    jet_foundation.[AST_NODE_GENERATED, AccessConvention, Diagnostic, Expr, Item, Param, ParamZone, Program, Span, TargetMachine]
     jet_sema.[
         SemaComptimeDeclarationStage, SemaForeignProviderInput, SemaRegistrationPackagePolicy, SemaScriptVariable,
         sema_collect_comptime_declarations, sema_registration_prepare_graph, sema_script_entry_local_types, sema_script_function, sema_script_function_hides,
@@ -211,6 +211,36 @@ jet_driver_script_settle_writes: fn(load: &JetDriverLoadResult, written: [String
         }
         return
     }
+}
+
+// A compiler query checks its own parse of the entry in place of the loaded
+// program; that parse takes the script-variable parameters the loaded entry's
+// functions gained.
+jet_driver_script_carry_parameters: fn(load: JetDriverLoadResult, program: &Program) {
+    loop entry in load.modules {
+        if entry.module_identity != load.entry_module_identity -> next
+        loop item_index in 0..<program.items.len() {
+            if program.items[item_index] == .Func(function) && sema_script_function(function) {
+                loaded_index: jet_driver_script_function_index(entry.program.items, function.name) ?? next
+                updated := function
+                if entry.program.items[loaded_index] == .Func(loaded) {
+                    loop parameter in loaded.params {
+                        // copy: the loaded program keeps its parameter
+                        if parameter.script_variable -> updated.params.push(parameter.copy())
+                    }
+                }
+                program.items[item_index] = Item.Func{value: updated}
+            }
+        }
+        return
+    }
+}
+
+jet_driver_script_function_index: fn(items: [Item], name: String) -> Int? Never! {
+    loop (index, item) in items {
+        if item == .Func(function) && function.name == name -> return Val(index)
+    }
+    None
 }
 
 // A registration and declaration pass over copies of the loaded programs.

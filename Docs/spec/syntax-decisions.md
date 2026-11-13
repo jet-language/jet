@@ -415,7 +415,13 @@ local it names, `&` when its body changes the local and a read otherwise, with
 the local itself as the default: each call in the file passes the caller's
 binding, and a call from elsewhere, such as a `#Test`, passes it by name. The
 function's own parameter or top-level local of the same spelling hides the
-file's local; a method gets no such parameter and keeps E0107.
+file's local; a method gets no such parameter and keeps E0107. A function also
+takes the locals the functions it calls reach. A call before a needed local is
+set is E0107 naming the function, the call chain and the binding line. A
+function that changes a local is E0227 as a function value and E1101 in a
+task, and an argument overlapping one of its extra parameters is E0204; each
+text names the extra parameter. Hover and `jet inspect expand --facts
+callable-signature` show the extra parameters.
 
 **D-MODULE-BUILD1=A — module values are built, never computed at startup**
 *(owner ruling 2026-11-09, #6281 c132; amends D-MODULE-VALUE1)*: a module-level

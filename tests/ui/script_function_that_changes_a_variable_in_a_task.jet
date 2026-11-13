@@ -1,0 +1,11 @@
+// E1101: `bump` changes the script's `count`, so a task can't call it: the
+// task would change `count` beside the script.
+count := 0
+bump: fn() {
+    count += 1
+}
+task.group jobs {
+    child: task { bump() }
+    child.join() ?? panic("task failed")
+}
+print(count)

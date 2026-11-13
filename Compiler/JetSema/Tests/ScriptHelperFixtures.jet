@@ -73,7 +73,8 @@ show()
     assert_eq(type_name(type_unqualified_nominals(script_helper_variable(shaped, "origin").ty)), "Point")
     assert_eq(type_name(type_unqualified_nominals(script_helper_variable(shaped, "words").ty)), "[String]")
     assert(script_helper_variable(shaped, "words").mutable, "`words := …` may change")
-    assert_eq(type_name(script_helper_variable(shaped, "ratio").ty), "Float")
+    // An untyped decimal literal checks as an exact Decimal.
+    assert_eq(type_name(script_helper_variable(shaped, "ratio").ty), "Decimal")
 }
 
 #Test("a function's `&` script parameters stay `&` only where its body writes them") {
@@ -83,7 +84,7 @@ limit: 3
 print(count)
 note: fn(word: String, *, count: &Int, words: &[String], limit: Int) {
     count += 1
-    words.push(word)
+    words.push("{word}")
     print("{count}/{limit}")
 }
 show: fn(*, count: &Int, words: &[String]) {

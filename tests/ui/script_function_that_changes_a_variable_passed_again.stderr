@@ -1,0 +1,8 @@
+Error [jet.UseWhileWriteActive]: `items` is already shared in this call, so `add_all` can't also change it through its extra `&` parameter `items:`
+  --> tests/ui/script_function_that_changes_a_variable_passed_again.jet:7:1
+    |
+  7 | add_all(items)
+    | ^^^^^^^
+ Why: `add_all` changes the script's `items`, so each call passes it as an extra `&` parameter, and while something is being looked at, nobody else may be changing it
+ Fix: Drop the extra use of `items`, or pass a copy of it there
+More: jet-lang.dev/e/E0204

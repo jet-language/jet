@@ -391,6 +391,9 @@ jet_driver_compiler_check: fn(input: JetDriverCompilerCheckInput) -> JetDriverCo
     target_option := jet_driver_selected_target_machine(input.request, load.diagnostics)
     if target_option == None -> return jet_driver_compiler_check_failure(load, JetDriverStage.Check, None)
     target: target_option ?? return jet_driver_compiler_check_failure(load, JetDriverStage.Check, None)
+    // A script's functions take the script variables they name, as a build's
+    // do, so the query's facts show the same parameters.
+    jet_driver_script_helpers(input.request, load, providers, target)
     registration_inputs_option := jet_driver_registration_module_inputs(load.modules, load.source_units, load.source_files, load.packages, providers, load.diagnostics, input.request.core_sources, false)
     registration_inputs := registration_inputs_option ?? return jet_driver_compiler_check_failure(load, JetDriverStage.Load, None)
     canonical_identity := canonical.module_identity
@@ -398,6 +401,7 @@ jet_driver_compiler_check: fn(input: JetDriverCompilerCheckInput) -> JetDriverCo
     loop index in 0..<registration_inputs.len() {
         if registration_inputs[index].module_identity == load.entry_module_identity {
             registration_inputs[index].program = input.parsed.parsed.program
+            jet_driver_script_carry_parameters(load, registration_inputs[index].program)
         }
     }
     registration_count: registration_inputs.len()

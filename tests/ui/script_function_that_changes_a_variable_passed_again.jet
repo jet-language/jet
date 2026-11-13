@@ -1,0 +1,8 @@
+// E0204: `add_all` changes the script's `items`, so each call passes it as an
+// extra `&` parameter, which overlaps the `items` the call also reads.
+items := [1, 2]
+add_all: fn(extra: [Int]) {
+    loop x in extra -> items.push(x)
+}
+add_all(items)
+print(items)

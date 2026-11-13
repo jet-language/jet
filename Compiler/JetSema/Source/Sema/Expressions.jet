@@ -4665,6 +4665,10 @@ sema_expr_marked_function_value: fn(name: String, id: SymbolID, span: Span, expe
         } ?? true
         if same -> return false
     }
+    if param.script_variable {
+        diagnostics.push(sema_script_value_diagnostic(name, param.name, span))
+        return true
+    }
     mark: access_sigil(param.convention)
     diagnostics.push(sema_error("E0227", span, "`{name}` can't be used as a function value because its parameter `{param.name}` is `{mark}`", "a function type gives each parameter plain read access unless it marks a write (`fn(&T)`) or a take (`fn(&&T)`), so a value of `{name}` would drop the `{mark}` its parameter declares", "call `{name}` directly, mark the parameter in the function type (`fn({mark}T)`), or pass a lambda that makes that call"))
     true

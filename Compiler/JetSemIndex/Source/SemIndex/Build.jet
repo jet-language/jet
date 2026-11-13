@@ -197,6 +197,13 @@ semindex_call_label: fn(parameter: Param) -> String Never! {
     parameter.name
 }
 
+// A script variable's parameter defaults to the variable; its generated
+// default is spanned at the function's name, so its text is the name.
+semindex_default_text: fn(parameter: Param, source: String, span: Span) -> String {
+    if parameter.script_variable -> return parameter.name
+    semindex_source_text(source, span)
+}
+
 semindex_params: fn(params: [Param], source: String, skip_self: Bool) -> [SemParam] {
     output := [SemParam]{}
     loop parameter in params {
@@ -204,7 +211,7 @@ semindex_params: fn(params: [Param], source: String, skip_self: Bool) -> [SemPar
         default := SemDefault?{None}
         if parameter.default == .Val(value) {
             span: expr_span(value)
-            default = Val(SemDefault{source_text: semindex_source_text(source, span), source: span})
+            default = Val(SemDefault{source_text: semindex_default_text(parameter, source, span), source: span})
         }
         output.push(SemParam{
             name: parameter.name,

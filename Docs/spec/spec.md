@@ -384,7 +384,12 @@ in the file may use them: the checker gives it one label-only parameter per loca
 when its body changes the local, whose default is the local itself, so each call in the file
 passes the caller's binding and a call from elsewhere, such as a `#Test`, passes it by name
 (`note("x", count: c)`). The function's own parameter or top-level local of the same spelling
-hides the file's local. A method gets no such parameter and keeps E0107. A file with top-level
+hides the file's local. A method gets no such parameter and keeps E0107. A function also takes the
+locals the functions it calls reach. A call made before a local it needs is set is E0107, naming
+the function, the chain of calls and the line that sets the local. A function that changes a local
+is E0227 when used as a function value and E1101 when called in a task, and an argument that
+overlaps one of its extra parameters is E0204; each text names the extra parameter. Hover and
+`jet inspect expand --facts callable-signature` show the extra parameters. A file with top-level
 statements and a `run: fn` is E0621.
 The `const` keyword is retired and is recognized only to teach its replacement
 (E0146). A compile-time constant is an ordinary ALL_CAPS name, `NAME: value`,

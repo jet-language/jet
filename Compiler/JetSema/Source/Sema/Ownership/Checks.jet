@@ -3446,7 +3446,11 @@ sema_ownership_check_call_arguments_with_accesses: fn(state: &SemaOwnershipState
             loop actual in places {
                 if sema_ownership_call_access_conflict(accesses, actual, arg.convention, false, holds) == .Val(active) {
                     accepted = false
-                    diagnostics.push(sema_ownership_diag_alias(sema_ownership_place_name(actual), active == AccessConvention.Write, expr_span(arg.expr)))
+                    if sema_script_variable_default(arg.expr, param) != None {
+                        diagnostics.push(sema_script_alias_diagnostic(sema_call_reflection_leaf_name(callee), param, active == AccessConvention.Write, expr_span(arg.expr)))
+                    } else {
+                        diagnostics.push(sema_ownership_diag_alias(sema_ownership_place_name(actual), active == AccessConvention.Write, expr_span(arg.expr)))
+                    }
                 }
             }
             if !binder_rooted {

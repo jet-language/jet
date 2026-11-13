@@ -481,10 +481,16 @@ sema_call_typecheck_bound_arguments: fn(callee: String, params: [SemaCallParam],
         // A `#caller` default is the place of this call.
         if binding.sources[index] == .Default(_) && sema_site_is_caller(args[index].expr) -> args[index].expr = sema_site_location_expr("", environment, program, scopes, span)
         // A script variable's default reads the caller's binding at the
-        // call; a caller that hasn't bound it is refused.
+        // call; a caller that hasn't bound it is refused, and so is a task
+        // that would change it beside the script.
         if binding.sources[index] == .Default(_) && sema_script_variable_default(args[index].expr, parameter) == .Val(declared) {
             if sema_scope_resolve_index_at(scopes, parameter.name, span) == None {
                 diagnostics.push(sema_script_unbound_variable(declared, parameter.name, span, environment, program, scopes))
+                complete = false
+                next
+            }
+            if context.taskgroups.in_spawn && parameter.convention == AccessConvention.Write {
+                diagnostics.push(sema_script_task_diagnostic(sema_call_reflection_leaf_name(callee), parameter.name, span))
                 complete = false
                 next
             }
