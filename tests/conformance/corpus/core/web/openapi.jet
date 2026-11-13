@@ -5,5 +5,8 @@ use {
 }
 
 run: fn() {
-    print(api.openapi(http.router()))
+    print(api.openapi(http.router()) ?? panic("openapi: {err}"))
+    fault: api.OpenAPIError{message: "OpenAPI route contract is missing `method`"}
+    print(fault.display())
+    print(fault.debug())
 }

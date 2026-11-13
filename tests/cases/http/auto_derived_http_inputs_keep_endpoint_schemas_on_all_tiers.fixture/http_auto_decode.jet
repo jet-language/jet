@@ -14,6 +14,6 @@ run: fn() {
     mux: server.mux()
     mux.get("/direct/:id", fn(id: JokeID) { Ok(server.response(200, "joke={id.value}")) })
     mux.mount(Jokes{})
-    schema: web.openapi(mux)
+    schema: web.openapi(mux) ?? panic("openapi: {err}")
     print(schema.contains("\"value\"") && schema.contains("/mounted/") && schema.contains("/direct/"))
 }

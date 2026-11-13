@@ -5168,16 +5168,18 @@ records. The registered constructors and App builder methods retain the checked
 route graph and its typed handlers across both compiler implementations.
 The selected Apps runtime part emits their native implementations together with
 the development-server and shared web-router dependencies.
-`openapi` remains infallible at its public boundary: failures while collecting
-checked route facts or rendering the document stop at the existing contract
-boundary. The renderer consumes those facts instead of copying the route list.
+`openapi` returns `String OpenAPIError!`: a route contract that does not parse
+or match its route, or routes that do not form one valid document, come back
+as an `OpenAPIError` whose `message` names the problem; nothing stops the
+program. The renderer consumes the checked route facts instead of copying the
+route list.
 
 | Signature | Result | Description |
 |---|---|---|
 | `app() -> App` | app | Create the default application carrier. |
 | `page(title: String, body: String) -> WebPage` | page | Build a server-rendered page. |
 | `form(Model, action: handler) -> WebFormTyped` | form | Derive typed inputs and the named action contract at compile time (D-WEBFORM1=A). |
-| `openapi(routes: HTTPMux or HTTPRouter) -> String` | text | Render OpenAPI from the checked facts of the same route value that is served. |
+| `openapi(routes: HTTPMux or HTTPRouter) -> String OpenAPIError!` | text | Render OpenAPI from the checked facts of the same route value that is served. |
 | `storage() -> String` | text | Select the local storage namespace. |
 | `auth(kind: String) -> Auth` | auth | Build an authentication carrier. |
 | `auth_oauth(auth: Auth, client_id: String) -> Auth` | auth | Add OAuth client identity to an auth carrier. |

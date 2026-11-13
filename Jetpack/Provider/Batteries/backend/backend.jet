@@ -11,6 +11,7 @@ use {
     service: core.service
     json: core.encoding.json
     web: core.web
+    core.web.[OpenAPIError]
     time: core.time
 }
 
@@ -366,8 +367,8 @@ core_gates: fn() -> [CoreGate] {
 }
 
 
-openapi_document: fn(router: HTTPRouter) -> String {
-    return web.openapi(router)
+openapi_document: fn(router: HTTPRouter) -> String OpenAPIError! {
+    web.openapi(router)
 }
 
 load_one: fn(address: String) -> LoadSample {

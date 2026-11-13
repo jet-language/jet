@@ -341,7 +341,7 @@ store_surface: fn() {
 support_surface: fn() {
     // OpenAPI consumes the checked HTTP router, not the visual WebRouter.
     http_router: http.router()
-    _openapi: web.openapi(http_router)
+    _openapi: web.openapi(http_router) ?? panic("openapi: {err}")
     _devserver: devserver.app()
     _file_server: devserver.for_app("Examples/Apps/Web/StateSurface.jet")
     _session_value: session.get("surface")

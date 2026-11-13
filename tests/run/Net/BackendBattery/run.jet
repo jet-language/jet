@@ -90,7 +90,7 @@ run: fn() {
             queued: true,
         }))
     })
-    openapi: backend.openapi_document(router)
+    openapi: backend.openapi_document(router) ?? panic("openapi: {err}")
     if !openapi.contains("/health") || !openapi.contains("/orders") || !openapi.contains("\"get\"") || !openapi.contains("\"post\"") || !openapi.contains("\"200\"") || !openapi.contains("\"202\"") || !openapi.contains("application/json") || !openapi.contains("\"quantity\"") -> panic("openapi validation")
     in_process_request: http.parse("GET /health HTTP/1.1\nHost: localhost\nx-request-id: in-process\n\n")
     in_process_response: http.dispatch(router, in_process_request) ?? panic("in-process dispatch")

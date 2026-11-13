@@ -38,7 +38,7 @@ run: fn() (HTTPError | NetError | TaskFailure)! {
     region: "eu"
     mux.custom("PURGE", Path{"/region/{region}/:key"}, fn(key: String) { Ok(server.response(200, "purged {key} in {region}")) })
     mux.mount(CacheRoutes{})
-    print(web.openapi(mux))
+    print(web.openapi(mux) ?? panic("openapi: {err}"))
     listener: net.tcp_listen("127.0.0.1:0")
     addr: listener.local_addr()
     sends: [(method: String, path: String)]{

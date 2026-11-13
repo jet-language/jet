@@ -24,7 +24,7 @@ use {
 
 // core.web — server-rendered apps on `core.http`.
 //
-// An `App` owns routes, live-query keys, and session auth. Nested modules
+// An `App` owns routes and session auth. Nested modules
 // own router, store, forms, table and virtual windows. Nothing here talks
 // to a browser; `core.http` is the wire.
 
@@ -697,7 +697,7 @@ Session: struct {
 
 // `web.openapi(mux)` checks as `__openapi_mux(mux)` below (sema
 // sema_call_http_web_openapi_mux); a router renders its route table the same way.
-openapi: fn(router: HTTPRouter) -> String Never! {
+openapi: fn(router: HTTPRouter) -> String OpenAPIError! {
     __openapi_mux(web_http.__router_mux(router))
 }
 
@@ -706,20 +706,26 @@ openapi: fn(router: HTTPRouter) -> String Never! {
 // (jet_openapi_contract_input) and checked against the route registered, then
 // the routes are canonicalized and checked as one document
 // (JetOpenApiDocument::with_openapi) and rendered (::json).
-__openapi_mux: fn(routes: HTTPMux) -> String Never! {
-    __openapi_mux_document(routes) ?? core.web.__contract_stop(err.message)
+__openapi_mux: fn(mux: HTTPMux) -> String OpenAPIError! {
+    routes := [__OpenAPIRoute]{}
+    loop route in http_server.__mux_routes(mux) {
+        routes.push(__openapi_route_input(route.contract, route.method, route.pattern) ?? return Err(err))
+    }
+    __openapi_document(routes, "Jet HTTP Router", "1")
 }
 
-// An OpenAPI contract or document problem: `web.openapi` stops with it.
+// Why `web.openapi` could not render a document: a route's checked contract
+// does not parse or match its route, or the routes do not form one valid
+// OpenAPI document.
 #Error
-__OpenAPIFault: struct {
+OpenAPIError: struct {
     message: String
 
     impl Display { display: fn(self) -> String { self.message.copy() } }
 
     impl Debug { debug: fn(&&self) -> String { self.message } }
 }
-__openapi_fault: fn(message: String) -> __OpenAPIFault Never! { __OpenAPIFault{message: message} }
+__openapi_fault: fn(message: String) -> OpenAPIError Never! { OpenAPIError{message: message} }
 
 __OpenAPIParameter: struct {
     // Index into __openapi_locations(): path, query, header, cookie.
@@ -822,17 +828,9 @@ __openapi_problem: fn(path: String, reason: String) -> String Never! {
     "{path}: {reason}"
 }
 
-__openapi_mux_document: fn(mux: HTTPMux) -> String __OpenAPIFault! {
-    routes := [__OpenAPIRoute]{}
-    loop route in http_server.__mux_routes(mux) {
-        routes.push(__openapi_route_input(route.contract, route.method, route.pattern) ?? return Err(err))
-    }
-    __openapi_document(routes, "Jet HTTP Router", "1")
-}
-
-__openapi_pattern: fn(pattern: String) -> __OpenAPIPattern __OpenAPIFault! {
+__openapi_pattern: fn(pattern: String) -> __OpenAPIPattern OpenAPIError! {
     parsed: http_server.__route_parse(pattern)
-    if parsed.problem != "" -> return Err(__openapi_fault("E2805: invalid HTTP route `{pattern}`: {parsed.problem}"))
+    if parsed.problem != "" -> return Err(__openapi_fault("invalid HTTP route `{pattern}`: {parsed.problem}"))
     key := ""
     names := [String]{}
     catch_alls := [String]{}
@@ -853,7 +851,7 @@ __openapi_pattern: fn(pattern: String) -> __OpenAPIPattern __OpenAPIFault! {
     Ok(__OpenAPIPattern{path: http_server.__route_openapi_path(parsed.segments), key: key, names: names, catch_alls: catch_alls})
 }
 
-__openapi_object: fn(value: Dyn) -> [(key: String, value: Dyn)] __OpenAPIFault! {
+__openapi_object: fn(value: Dyn) -> [(key: String, value: Dyn)] OpenAPIError! {
     if value == {
         .Object(members) -> return Ok(members)
         .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> return Err(__openapi_fault("OpenAPI route contract must be an object"))
@@ -874,12 +872,12 @@ __openapi_member: fn(fields: [(key: String, value: Dyn)], name: String) -> Dyn? 
     None
 }
 
-__openapi_field: fn(fields: [(key: String, value: Dyn)], name: String) -> Dyn __OpenAPIFault! {
+__openapi_field: fn(fields: [(key: String, value: Dyn)], name: String) -> Dyn OpenAPIError! {
     value: __openapi_member(fields, name) ?? return Err(__openapi_fault("OpenAPI route contract is missing `{name}`"))
     Ok(value)
 }
 
-__openapi_text: fn(fields: [(key: String, value: Dyn)], name: String) -> String __OpenAPIFault! {
+__openapi_text: fn(fields: [(key: String, value: Dyn)], name: String) -> String OpenAPIError! {
     value: __openapi_field(fields, name) ?? return Err(err)
     if value == {
         .Text(text) -> return Ok(text)
@@ -887,7 +885,7 @@ __openapi_text: fn(fields: [(key: String, value: Dyn)], name: String) -> String 
     }
 }
 
-__openapi_optional_text: fn(fields: [(key: String, value: Dyn)], name: String) -> String? __OpenAPIFault! {
+__openapi_optional_text: fn(fields: [(key: String, value: Dyn)], name: String) -> String? OpenAPIError! {
     value: __openapi_field(fields, name) ?? return Err(err)
     if value == {
         .Null -> return Ok(String?{None})
@@ -896,7 +894,7 @@ __openapi_optional_text: fn(fields: [(key: String, value: Dyn)], name: String) -
     }
 }
 
-__openapi_bool: fn(fields: [(key: String, value: Dyn)], name: String) -> Bool __OpenAPIFault! {
+__openapi_bool: fn(fields: [(key: String, value: Dyn)], name: String) -> Bool OpenAPIError! {
     value: __openapi_field(fields, name) ?? return Err(err)
     if value == {
         .Bool(flag) -> return Ok(flag)
@@ -904,7 +902,7 @@ __openapi_bool: fn(fields: [(key: String, value: Dyn)], name: String) -> Bool __
     }
 }
 
-__openapi_array: fn(fields: [(key: String, value: Dyn)], name: String) -> [Dyn] __OpenAPIFault! {
+__openapi_array: fn(fields: [(key: String, value: Dyn)], name: String) -> [Dyn] OpenAPIError! {
     value: __openapi_field(fields, name) ?? return Err(err)
     if value == {
         .Array(items) -> return Ok(items)
@@ -912,7 +910,7 @@ __openapi_array: fn(fields: [(key: String, value: Dyn)], name: String) -> [Dyn] 
     }
 }
 
-__openapi_integer: fn(fields: [(key: String, value: Dyn)], name: String) -> Int __OpenAPIFault! {
+__openapi_integer: fn(fields: [(key: String, value: Dyn)], name: String) -> Int OpenAPIError! {
     value: __openapi_field(fields, name) ?? return Err(err)
     if value == {
         .Int(number) -> return Ok(number)
@@ -927,7 +925,7 @@ __openapi_integer: fn(fields: [(key: String, value: Dyn)], name: String) -> Int 
 // jet_openapi_contract_schema then render_json: the schema rendered canonically
 // (object properties by name). Definition problems (validate_definition) are
 // collected in `errors` under `path`.
-__openapi_schema: fn(value: Dyn, path: String, errors: &[String]) -> String __OpenAPIFault! {
+__openapi_schema: fn(value: Dyn, path: String, errors: &[String]) -> String OpenAPIError! {
     fields: __openapi_object(value) ?? return Err(err)
     if __openapi_member(fields, "type") == .Val(kind) -> return __openapi_typed_schema(kind, fields, path, errors)
     if __openapi_member(fields, "anyOf") == .Val(any_of) {
@@ -959,7 +957,7 @@ __openapi_schema: fn(value: Dyn, path: String, errors: &[String]) -> String __Op
     Ok("{{}}")
 }
 
-__openapi_typed_schema: fn(kind: Dyn, fields: [(key: String, value: Dyn)], path: String, errors: &[String]) -> String __OpenAPIFault! {
+__openapi_typed_schema: fn(kind: Dyn, fields: [(key: String, value: Dyn)], path: String, errors: &[String]) -> String OpenAPIError! {
     name: if kind == {
         .Text(text) -> text
         .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> { return Err(__openapi_fault("OpenAPI schema `type` must be text")) }
@@ -1011,7 +1009,7 @@ __openapi_typed_schema: fn(kind: Dyn, fields: [(key: String, value: Dyn)], path:
     Ok("{out}}}")
 }
 
-__openapi_parameter: fn(value: Dyn) -> __OpenAPIParameter __OpenAPIFault! {
+__openapi_parameter: fn(value: Dyn) -> __OpenAPIParameter OpenAPIError! {
     fields: __openapi_object(value) ?? return Err(err)
     location_text: __openapi_text(fields, "in") ?? return Err(err)
     location: __openapi_index(__openapi_locations(), location_text) ?? return Err(__openapi_fault("unsupported OpenAPI parameter location `{location_text}`"))
@@ -1024,7 +1022,7 @@ __openapi_parameter: fn(value: Dyn) -> __OpenAPIParameter __OpenAPIFault! {
     Ok(__OpenAPIParameter{location: location, name: name, schema: schema, schema_errors: schema_errors, required: required, catch_all: catch_all})
 }
 
-__openapi_body: fn(value: Dyn) -> __OpenAPIBody __OpenAPIFault! {
+__openapi_body: fn(value: Dyn) -> __OpenAPIBody OpenAPIError! {
     fields: __openapi_object(value) ?? return Err(err)
     required: __openapi_bool(fields, "required") ?? return Err(err)
     content_type: __openapi_text(fields, "content_type") ?? return Err(err)
@@ -1034,7 +1032,7 @@ __openapi_body: fn(value: Dyn) -> __OpenAPIBody __OpenAPIFault! {
     Ok(__OpenAPIBody{required: required, content_type: content_type, schema: schema, schema_errors: schema_errors})
 }
 
-__openapi_response: fn(value: Dyn) -> __OpenAPIResponse __OpenAPIFault! {
+__openapi_response: fn(value: Dyn) -> __OpenAPIResponse OpenAPIError! {
     fields: __openapi_object(value) ?? return Err(err)
     status: __openapi_integer(fields, "status") ?? return Err(err)
     if status < 0 || status > 65535 -> return Err(__openapi_fault("OpenAPI response status is outside the u16 range"))
@@ -1050,7 +1048,7 @@ __openapi_response: fn(value: Dyn) -> __OpenAPIResponse __OpenAPIFault! {
     Ok(__OpenAPIResponse{status: status, description: description, schema: schema, schema_errors: schema_errors, content_type: content_type})
 }
 
-__openapi_security: fn(value: Dyn) -> __OpenAPISecurity __OpenAPIFault! {
+__openapi_security: fn(value: Dyn) -> __OpenAPISecurity OpenAPIError! {
     fields: __openapi_object(value) ?? return Err(err)
     listed: __openapi_array(fields, "scopes") ?? return Err(err)
     scopes := [String]{}
@@ -1066,7 +1064,7 @@ __openapi_security: fn(value: Dyn) -> __OpenAPISecurity __OpenAPIFault! {
 
 // jet_openapi_contract_input and JetOpenApiRouteFact::from_input, checked
 // against the method and pattern the mux registered.
-__openapi_route_input: fn(contract: String, method: String, pattern: String) -> __OpenAPIRoute __OpenAPIFault! {
+__openapi_route_input: fn(contract: String, method: String, pattern: String) -> __OpenAPIRoute OpenAPIError! {
     value: live_json.parse(contract) ?? return Err(__openapi_fault("invalid checked OpenAPI route contract: {err.reason}"))
     fields: __openapi_object(value) ?? return Err(err)
     method_text: __openapi_text(fields, "method") ?? return Err(err)
@@ -1161,7 +1159,7 @@ __openapi_canonical: fn(route: __OpenAPIRoute) -> __OpenAPIRoute Never! {
 
 // JetOpenApiDocument::with_openapi then ::json, with no security schemes: a mux
 // declares none.
-__openapi_document: fn(inputs: [__OpenAPIRoute], title: String, version: String) -> String __OpenAPIFault! {
+__openapi_document: fn(inputs: [__OpenAPIRoute], title: String, version: String) -> String OpenAPIError! {
     routes := [__OpenAPIRoute]{}
     loop input in inputs -> routes.push(__openapi_canonical(input))
     routes.sort_by(fn(left: __OpenAPIRoute, right: __OpenAPIRoute) {
@@ -1317,4 +1315,22 @@ auth_show: fn(auth: Auth) -> String Never! { "{auth.kind}:{auth.client_id}" }
 
 sync: fn(key: String, data: String) -> String Never! {
     "{key}:{data}"
+}
+
+#Test("an OpenAPI route contract that does not parse or match comes back as an OpenAPIError") {
+    not_json: if __openapi_route_input("{{", "GET", "/a") == {
+        .Ok(_) -> ""
+        .Err(fault) -> fault.message
+    }
+    assert(not_json.starts_with("invalid checked OpenAPI route contract: "))
+    not_object: if __openapi_route_input("[]", "GET", "/a") == {
+        .Ok(_) -> ""
+        .Err(fault) -> fault.message
+    }
+    assert(not_object == "OpenAPI route contract must be an object")
+    bad_route: if __openapi_pattern("/a/*rest/b") == {
+        .Ok(_) -> ""
+        .Err(fault) -> "{fault}"
+    }
+    assert(bad_route.starts_with("invalid HTTP route `/a/*rest/b`: "))
 }
