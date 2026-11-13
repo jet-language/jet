@@ -15595,20 +15595,21 @@ RetiredForeignPowerOperator: struct {
     }
 }
 
-LogicalNotOnNonBool: struct {
+BitArithmeticNeedsMethod: struct {
     impl Diagnostic {
         code: "E0398"
         safety_class: .Soundness
-        safety_reason: "`!` is defined only on Bool, so on another type it has no operation to run."
-        expert_path: "none: `bit_not()` flips integer bits"
-        meaning: "`!` applied to a non-Bool value"
+        safety_reason: "`!` is defined only on Bool and `&=`, `|=` and `^=` are no operators, so the code has no operation to run."
+        expert_path: "none: `bit_not()` flips integer bits and an update assigns the method result back"
+        stage: [.Parse, .Sema]
+        meaning: "Arithmetic written with a retired sign: `!` on a non-Bool value, or a `&=`, `|=` or `^=` update"
         detail: true
         structured_fix: .SourceEdit
         no_fix: None
         fix_safety: .BehaviorPreserving
-        what: fn(self) -> String { "`!` needs a Bool operand." }
-        why: fn(self) -> String { "`!` negates a Bool; integer bits use named methods." }
-        fix: fn(self) -> String { "Write `value.bit_not()` to flip integer bits." }
+        what: fn(self) -> String { "Bit arithmetic and power use named methods, not signs." }
+        why: fn(self) -> String { "`!` negates a Bool and `&`, `|` and `^` mark ownership; integer bits and powers use named methods." }
+        fix: fn(self) -> String { "Write `value.bit_not()` to flip integer bits; for an update, assign the method result back: `x = x.bit_and(m)`, `x = x.bit_or(m)` or `x = x.pow(n)`." }
     }
 }
 

@@ -40,11 +40,13 @@ use {
     ]
     jet_lexer.[
         TOKEN_AMP,
+        TOKEN_AMP_EQ,
         TOKEN_AND_AND,
         TOKEN_AT,
         TOKEN_BANG,
         TOKEN_BREAK,
         TOKEN_CARET,
+        TOKEN_CARET_EQ,
         TOKEN_CHAR,
         TOKEN_COLON,
         TOKEN_COLON_EQ,
@@ -81,6 +83,7 @@ use {
         TOKEN_OR_OR,
         TOKEN_PERCENT_EQ,
         TOKEN_PERCENT_PERCENT_EQ,
+        TOKEN_PIPE_EQ,
         TOKEN_PLUS_EQ,
         TOKEN_PREP,
         TOKEN_RAW_STRING,
@@ -1805,6 +1808,18 @@ parser_parse_assignment_or_expression: fn(state: &JetParserState) -> Stmt {
         return Stmt.Val{binding: binding}
     }
     operator: parser_current_kind(state)
+    // `&=` and `|=` were retired with infix bit arithmetic, `^=` with infix
+    // power (S17): an update assigns the named method's result back. The
+    // right side is consumed with the operator, so the line reports once.
+    retired_method: parser_retired_bit_update_method(operator)
+    if retired_method != "" {
+        op_token: parser_bump(state)
+        parser_parse_expression(state, 1, 0)
+        parser_finish_statement(state)
+        spelling: parser_retired_bit_update_spelling(operator)
+        parser_add_error_code(state, "E0398", op_token.span, "`{spelling}` is retired; assign the `{retired_method}` result back", "marks express ownership and outcomes; arithmetic uses named methods", "write `x = x.{retired_method}(m)` in place of `x {spelling} m`")
+        return Stmt.Expr{expr: left.expr}
+    }
     if parser_is_assignment_operator(operator) {
         op_token: parser_bump(state)
         right: parser_parse_expression(state, 1, 0)
@@ -1930,6 +1945,26 @@ parser_refutable_test_binding: fn(expr: Expr) -> Binding? {
 
 parser_is_assignment_operator: fn(kind: Int) -> Bool Never! {
     kind == TOKEN_EQ || kind == TOKEN_PLUS_EQ || kind == TOKEN_MINUS_EQ || kind == TOKEN_STAR_EQ || kind == TOKEN_SLASH_EQ || kind == TOKEN_SLASH_PERCENT_EQ || kind == TOKEN_PERCENT_EQ || kind == TOKEN_PERCENT_PERCENT_EQ || kind == TOKEN_SHL_EQ || kind == TOKEN_SHR_EQ
+}
+
+// The method a retired compound update names (`^` was power), or "" for any
+// other token.
+parser_retired_bit_update_method: fn(kind: Int) -> String Never! {
+    if kind == {
+        TOKEN_AMP_EQ -> "bit_and"
+        TOKEN_PIPE_EQ -> "bit_or"
+        TOKEN_CARET_EQ -> "pow"
+        else -> ""
+    }
+}
+
+parser_retired_bit_update_spelling: fn(kind: Int) -> String Never! {
+    if kind == {
+        TOKEN_AMP_EQ -> "&="
+        TOKEN_PIPE_EQ -> "|="
+        TOKEN_CARET_EQ -> "^="
+        else -> ""
+    }
 }
 
 parser_assignment_binop: fn(kind: Int) -> BinOp? {
