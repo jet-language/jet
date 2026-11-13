@@ -20,6 +20,7 @@ use jet_foundation.[
     TagMarker,
     Type,
     TypeTupleField,
+    ast_empty_call_arg_flags,
     expr_span,
     measure_literal_value,
 ]
@@ -574,6 +575,8 @@ sema_call_memory_shared_guard_method: fn(receiver: Expr, receiver_value: TExpr, 
 sema_call_try_memory_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     allocator: sema_call_memory_allocator_name(receiver_value.ty)
     if allocator != None -> return sema_call_memory_allocator_method(receiver, receiver_value, allocator, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+    step: sema_call_try_raw_pointer_step(receiver, receiver_value, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+    if step.handled -> return step
     guard: sema_call_memory_guard_shape(receiver, receiver_value.ty, scopes)
     if guard != None -> return sema_call_memory_shared_guard_method(receiver, receiver_value, guard, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     // `Condition.notify_one()` and `.notify_all()` wake one or every waiter; the value is Unit.
@@ -585,4 +588,44 @@ sema_call_try_memory_method: fn(receiver: Expr, receiver_value: TExpr, method: S
         }
     }
     sema_call_try_shared_owner_method(receiver, receiver_value, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+}
+
+// `p.offset(n)` / `p.byte_offset(n)` on a raw pointer `*T`: the pointer `n`
+// elements (at T's List stride) or `n` bytes on, of the same type. A step
+// can leave the storage `p` names, so it is E3101 outside `#Unsafe`; the
+// sentry checks the new pointer where it is read or written. The method is
+// checked as a call of core.mem's reserved `__ptr_offset<T>` /
+// `__ptr_byte_offset<T>`, which the compiler builds inline.
+sema_call_try_raw_pointer_step: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    unhandled: SemaMethodSpecialCheck{handled: false, value: None}
+    rejected: SemaMethodSpecialCheck{handled: true, value: None}
+    member: if method == {
+        "offset" -> "__ptr_offset"
+        "byte_offset" -> "__ptr_byte_offset"
+        else -> return unhandled
+    }
+    receiver_type: sema_expr_unwrap_tag(receiver_value.ty)
+    element := Type.Int
+    if receiver_type == .Apply(name, type_args) {
+        if name != "Ptr" || type_args.len() != 1 -> return unhandled
+        element = type_args[0].copy()
+    } else {
+        return unhandled
+    }
+    if !sema_expr_require_unsafe(method, span, context, diagnostics) -> return rejected
+    if args.len() != 1 {
+        diagnostics.push(sema_call_arity_diagnostic(method, 1, args.len(), false, span))
+        return rejected
+    }
+    identity: sema_call_core_module_identity(environment, program, "core.mem") ?? {
+        diagnostics.push(sema_error("E3102", span, "`{method}` on a raw pointer is part of the low-level tier", "stepping a `Ptr` needs the discovery gate", "add `use core.mem;`"))
+        return rejected
+    }
+    target: sema_call_core_source_target(environment, program, identity, member, [Type]{element.copy()}, span, true, diagnostics) ?? return rejected
+    call_args := [CallArg]{CallArg{convention: AccessConvention.Read, expr: receiver, span: expr_span(receiver), flags: ast_empty_call_arg_flags(), label: None, spread: false}}
+    loop argument in args -> call_args.push(argument.copy())
+    scopes.ownership_call_depth += 1
+    value := sema_call_core_check_source_owned(target, method, [Type]{element}, call_args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+    scopes.ownership_call_depth -= 1
+    SemaMethodSpecialCheck{handled: true, value: value}
 }

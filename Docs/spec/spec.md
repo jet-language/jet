@@ -3010,6 +3010,16 @@ itself, with no box to unwrap. See
 `tests/cases/unsafe_and_runtime/an_optional_raw_pointer_is_none_when_null.case`.
 (D-RAWPTR2=A)
 
+`p.offset(n)` is the pointer `n` elements of `T` past `p`, at `T`'s List
+stride, and `p.byte_offset(n)` the pointer `n` bytes past it; `n` may be
+negative, and either way the result is a `*T`. Both are E3101 outside
+`#Unsafe`, since a step can leave the storage `p` names. A step is not checked
+where it is made. Under the memory sentry (D-MEM-SENTRY1), a read or write
+through the stepped pointer is checked like any raw access, so a read that
+runs past the end of a live local is a located R0801 fault. See
+`tests/cases/unsafe_and_runtime/a_raw_pointer_steps_by_elements_or_bytes.case`.
+(D-RAWPTR2=A)
+
 ### Allocator families
 
 `core.mem` exposes `Arena`, `Bump`, `Pool`, and `Fixed`; constructing and using

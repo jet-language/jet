@@ -1,0 +1,29 @@
+# `p.offset(n)` steps a raw pointer by `n` elements and `p.byte_offset(n)` by
+# `n` bytes, either way, to a pointer of the same type, on every tier. A step
+# is not checked where it is made: a read through a pointer stepped past its
+# storage is a located R0801 sentry fault.
+fixture: a_raw_pointer_steps_by_elements_or_bytes.fixture
+env: NO_COLOR=1
+step check: jet check main.jet
+exit: 0
+step o0: jet run --optimize=none main.jet
+exit: 0
+stdout: = "30\n20\n40\n30\n"
+step o1: jet run --optimize=basic main.jet
+exit: 0
+stdout: = "30\n20\n40\n30\n"
+step o2: jet run --optimize=full main.jet
+exit: 0
+stdout: = "30\n20\n40\n30\n"
+step pastnone: jet run --optimize=none past.jet
+exit: 70
+stdout: = "7\n"
+stderr: ~ "Runtime fault [R0801]" # the report also carries the gate and the obligation
+stderr: ~ "past.jet:6, in #Unsafe gate" # the fault is located at its gate, whose audit text follows
+stderr: ~ "raw `read` outside" # the gate's audit text follows; R0801's report does not print the range detail
+step pastfull: jet run --optimize=full past.jet
+exit: 70
+stdout: = "7\n"
+stderr: ~ "Runtime fault [R0801]" # the report also carries the gate and the obligation
+stderr: ~ "past.jet:6, in #Unsafe gate" # the fault is located at its gate, whose audit text follows
+stderr: ~ "raw `read` outside" # the gate's audit text follows; R0801's report does not print the range detail

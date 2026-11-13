@@ -2351,6 +2351,40 @@ ir_ptr_from_addr: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, addres
     result
 }
 
+// `p.offset(n)` / `p.byte_offset(n)` (core.mem `__ptr_offset<T>` and
+// `__ptr_byte_offset<T>`): the address `n` T elements, at T's List stride, or
+// `n` bytes past `p`, as a pointer of the same type. The step wraps and is
+// not checked here: the sentry checks the new pointer where it is read or
+// written (ir_sentry_access).
+ir_core_ptr_step: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, bytes: Bool, args: [Int], type_args: [Type], span: Span) -> Int Never! {
+    if type_args.len() != 1 || args.len() != 2 -> return ir_fail_slot(b, span, "a raw pointer step without its checked element type and arguments")
+    element_ty: type_args[0].copy()
+    element: ir_value_type(m, p, element_ty) ?? return ir_type_fail(b, span, element_ty)
+    pointer_ty: Type.Apply{name: "Ptr", args: [Type]{element_ty}}
+    row: ir_value_type(m, p, pointer_ty) ?? return ir_type_fail(b, span, pointer_ty)
+    pointer: ir_expr(m, p, b, args[0])
+    if ir_failed(b) || pointer < 0 -> return -1
+    count: ir_expr(m, p, b, args[1])
+    if ir_failed(b) || count < 0 -> return -1
+    native: ir_native_index(m, b, count, span)
+    if ir_failed(b) -> return -1
+    ir_release(m, b, count)
+    distance := native
+    if !bytes {
+        width: ir_list_stride(m, element)
+        stride: ir_word_const(m, b, width)
+        distance = ir_word_op(m, b, IROp.Mul, native, stride)
+    }
+    // Arithmetic reads words, not pointers (Lint.jet IR_LINT_NUMERIC).
+    word_row: ir_word_row(m)
+    start: ir_temp(m, b, word_row)
+    ir_emit(b.f, IROp.Copy, start, pointer, -1, -1, b.line)
+    address: ir_word_op(m, b, IROp.Add, start, distance)
+    result: ir_temp(m, b, row)
+    ir_emit(b.f, IROp.Copy, result, address, -1, -1, b.line)
+    result
+}
+
 // `consume(x)` (a Drop of `x.move()`, a move to nowhere): the value's cleanup runs
 // now. An owned variable's binding stops owning it, so its scope-end drop
 // does not run a second time; a fresh value closes (ir_close_fresh) and drops
