@@ -891,10 +891,14 @@ sema_check_failure_contract_type: fn(ty: Type, span: Span, in_return: Bool, gene
             sema_check_expiring_secret_declared_type(ty, span, generic_names, environment, program, diagnostics)
             loop arg in args -> sema_check_failure_contract_type(arg, span, false, generic_names, environment, program, diagnostics)
         }
-        // E0363: only concrete closed member types.
-        .Union(members) -> loop member in members {
-            if sema_union_member_open(member, generic_names) -> diagnostics.push(sema_error("E0363", span, "`{type_name(member)}` can't be a union member", "anonymous unions hold concrete closed types — not type parameters, trait objects, or function types", "use a named enum when a member needs an open shape"))
-            sema_check_failure_contract_type(member, span, false, generic_names, environment, program, diagnostics)
+        // E0363: only concrete closed member types, and no named case that
+        // another member's name takes (sema_type_union_case_conflicts).
+        .Union(members) -> {
+            sema_type_union_case_conflicts(members, span, diagnostics)
+            loop member in members {
+                if sema_union_member_open(member, generic_names) -> diagnostics.push(sema_error("E0363", span, "`{type_name(member)}` can't be a union member", "anonymous unions hold concrete closed types — not type parameters, trait objects, or function types", "use a named enum when a member needs an open shape"))
+                sema_check_failure_contract_type(member, span, false, generic_names, environment, program, diagnostics)
+            }
         }
         .Tuple(fields) -> loop field in fields -> sema_check_failure_contract_type(field.ty, span, false, generic_names, environment, program, diagnostics)
         .Int | .Float | .Bool | .String | .Char | .TraitObject(_) | .IntN(_, _) | .Float32 | .Measure(_) -> {}
