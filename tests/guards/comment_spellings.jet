@@ -1,0 +1,166 @@
+// Comment spellings come from the syntax registry: COMMENT_PREFIX,
+// DOC_COMMENT_PREFIX, BLOCK_COMMENT_OPEN and BLOCK_COMMENT_CLOSE in
+// Compiler/JetFoundation/Data/Syntax/CoreSurface.jet. A Jet source in the
+// compiler, Core, Jetpack or Tools that types one of them as a string
+// literal (`"//"`, `"///"`, `"/*"` or `"*/"`) fails here. The files below keep
+// theirs: the text they read is not Jet (C, Rust, R, JavaScript, URLs, file
+// and archive paths), or the file has no route to the registry (a standalone
+// script, or a package without deps). Component tests (a `Tests` folder),
+// build output and installed packages are left out, and so are the registry
+// and the two copies Tools/agent/JetpackSyntax.jet generates from it.
+use cs_files: core.files
+
+CS_ROOTS: [String]{"Compiler", "Core", "Jetpack", "Tools"}
+
+CS_SKIPPED: [String]{"Tests", ".jet", "target", "node_modules"}
+
+CS_REGISTRY: [String]{
+    "Compiler/JetFoundation/Data/Syntax/",
+    "Compiler/JetFoundation/Source/Registry/SyntaxRegistry.jet",
+    "Jetpack/Foundation/Source/SyntaxRegistry.jet",
+}
+
+CS_SPELLINGS: [String]{"//", "///", "/*", "*/"}
+
+CommentSpellingRow: struct {
+    path: String
+    count: Int
+    // Why the file keeps its literals.
+    reason: String
+}
+
+CS_ALLOWED: [CommentSpellingRow]{
+    CommentSpellingRow{path: "Compiler/JetCli/Source/Cli/ImportBindings.jet", count: 3, reason: "C and Pascal header comments, read by `jet import`"},
+    CommentSpellingRow{path: "Compiler/JetCli/Source/Cli/ImportHeaders.jet", count: 4, reason: "C header comments, read by `jet import`"},
+    CommentSpellingRow{path: "Compiler/JetDevserver/Source/EditorHost.jet", count: 1, reason: "URL path check"},
+    CommentSpellingRow{path: "Compiler/JetDevserver/Source/WatchService.jet", count: 1, reason: "protocol-relative URL in served HTML"},
+    CommentSpellingRow{path: "Compiler/JetDevserver/Source/WebErrorPage.jet", count: 2, reason: "source id and link path checks"},
+    CommentSpellingRow{path: "Compiler/JetFoundation/Source/RustSource/RustSource.jet", count: 1, reason: "Rust doc comments in Rust sources"},
+    CommentSpellingRow{path: "Compiler/JetRuntime/Source/CompilerNeededURL.jet", count: 1, reason: "URL authority separator"},
+    CommentSpellingRow{path: "Compiler/JetTestKit/Source/Ui.jet", count: 4, reason: "jet_testkit has no package deps, so it cannot import jet_foundation"},
+    CommentSpellingRow{path: "Compiler/Toolchain/RuntimePack.jet", count: 2, reason: "standalone script; it imports no package"},
+    CommentSpellingRow{path: "Core/Files/Files.jet", count: 1, reason: "path normalization test"},
+    CommentSpellingRow{path: "Core/Http/Client.jet", count: 1, reason: "protocol-relative redirect URL"},
+    CommentSpellingRow{path: "Core/Net/Url.jet", count: 2, reason: "URL authority separator"},
+    CommentSpellingRow{path: "Core/Service/Service.jet", count: 1, reason: "state path test"},
+    CommentSpellingRow{path: "Jetpack/Bootstrap/Assemble.jet", count: 2, reason: "standalone script that builds the Jetpack unit; it imports no package"},
+    CommentSpellingRow{path: "Jetpack/Foundation/Source/FindFolder.jet", count: 1, reason: "the ar archive long-name member"},
+    CommentSpellingRow{path: "Jetpack/Integrations/Source/Foreign/Binders/R.jet", count: 1, reason: "R source text"},
+    CommentSpellingRow{path: "Jetpack/PackageModel/Source/Envelope/OutputHash.jet", count: 1, reason: "Nix store path check"},
+    CommentSpellingRow{path: "Jetpack/Provider/Source/Registries/RegistryFetch.jet", count: 1, reason: "protocol-relative redirect URL"},
+    CommentSpellingRow{path: "Jetpack/Recipe/Source/Toolchain/UpdateTransport.jet", count: 1, reason: "protocol-relative redirect URL"},
+    CommentSpellingRow{path: "Jetpack/Store/Source/Archive/HangarArchiveFormat.jet", count: 1, reason: "archive path check"},
+    CommentSpellingRow{path: "Jetpack/Store/Source/Nar/NarInfo.jet", count: 3, reason: "NAR URL and store path checks"},
+    CommentSpellingRow{path: "Jetpack/Store/Source/NixCache/NixCacheTransport.jet", count: 2, reason: "Nix cache path checks"},
+    CommentSpellingRow{path: "Tools/agent/BodyHostCallRows.jet", count: 1, reason: "standalone script; it imports no package"},
+    CommentSpellingRow{path: "Tools/agent/CompilerPackages.jet", count: 1, reason: "standalone script; it imports no package"},
+    CommentSpellingRow{path: "Tools/agent/CompilerRegistries.jet", count: 6, reason: "standalone script; it imports no package"},
+    CommentSpellingRow{path: "Tools/agent/CoreCoverage.jet", count: 6, reason: "standalone script; it imports no package"},
+    CommentSpellingRow{path: "Tools/agent/CoreSourceRows.jet", count: 1, reason: "standalone script; it imports no package"},
+    CommentSpellingRow{path: "Tools/agent/CoreSurfaceLedger.jet", count: 2, reason: "standalone script; it imports no package"},
+    CommentSpellingRow{path: "Tools/agent/DiagnosticRows.jet", count: 2, reason: "standalone script; it imports no package"},
+    CommentSpellingRow{path: "Tools/agent/FmtCorpus.jet", count: 1, reason: "standalone script; it imports no package"},
+    CommentSpellingRow{path: "Tools/agent/JetpackSyntax.jet", count: 1, reason: "standalone script; it imports no package"},
+    CommentSpellingRow{path: "Tools/agent/LaneCheck.jet", count: 1, reason: "standalone script; it imports no package"},
+    CommentSpellingRow{path: "Tools/agent/OwnedTraitRows.jet", count: 2, reason: "standalone script; it imports no package"},
+    CommentSpellingRow{path: "Tools/agent/RuntimeCCensus.jet", count: 1, reason: "the ar archive long-name member"},
+    CommentSpellingRow{path: "Tools/agent/ScriptPairing.jet", count: 1, reason: "JavaScript comments in .mjs sources"},
+    CommentSpellingRow{path: "Tools/gauntlet/kit/Source/Stage.jet", count: 2, reason: "comments in the corpus languages' sources, counted per language"},
+    CommentSpellingRow{path: "Tools/jetpack-infra/StageIndexCache.jet", count: 2, reason: "URL authority separator"},
+    CommentSpellingRow{path: "Tools/perf/compile-throughput/Throughput.jet", count: 1, reason: "standalone script; it imports no package"},
+    CommentSpellingRow{path: "Tools/perf/scaling/corpora/Source/Packages.jet", count: 1, reason: "jet_scaling_corpora has no package deps, so it cannot import jet_foundation"},
+}
+
+// Whether the text of one string literal spells a comment.
+cs_spells_comment: fn(text: String) -> Bool Never! {
+    CS_SPELLINGS.contains(text)
+}
+
+// The string literals of `line` that spell a comment. A `//` outside a string
+// ends the code of the line.
+cs_line_count: fn(line: String) -> Int Never! {
+    bytes: line.bytes()
+    count := 0
+    at := 0
+    loop at < bytes.len() {
+        code: Int.from_u8(bytes[at])
+        if code == 47 && at + 1 < bytes.len() && Int.from_u8(bytes[at + 1]) == 47 -> break
+        if code != 34 {
+            at += 1
+            next
+        }
+        start: at + 1
+        at = start
+        loop at < bytes.len() && Int.from_u8(bytes[at]) != 34 {
+            at += if Int.from_u8(bytes[at]) == 92 -> 2 else -> 1
+        }
+        end: if at < bytes.len() -> at else -> bytes.len()
+        if cs_spells_comment(String.from_bytes(bytes[start..<end]) ?? "") -> count += 1
+        at += 1
+    }
+    count
+}
+
+cs_count: fn(source: String) -> Int Never! {
+    count := 0
+    loop line in source.lines() -> count += cs_line_count(line)
+    count
+}
+
+cs_walk: fn(path: String, out: &[String]) {
+    if !cs_files.is_dir(path) {
+        if path.ends_with(".jet") -> out.push(path.copy())
+        return
+    }
+    loop child in (cs_files.list_dir(path) ?? panic("list {path}: {err}")) {
+        if !CS_SKIPPED.contains(child.name) -> cs_walk(child.path, out)
+    }
+}
+
+// The census against the closed list: one line per file whose count differs.
+cs_findings: fn(found: [String:Int]) -> [String] Never! {
+    findings := [String]{}
+    allowed := [String:Int]{}
+    loop row in CS_ALLOWED -> allowed[row.path] = row.count
+    loop path in found.keys() {
+        count: found[path]
+        if allowed.get(path) == .Val(expected) {
+            if count != expected -> findings.push("{path}: {count} comment spellings, the list allows {expected}; update its CS_ALLOWED row")
+        } else {
+            findings.push("{path}: {count} comment spellings and no CS_ALLOWED row; read COMMENT_PREFIX, DOC_COMMENT_PREFIX, BLOCK_COMMENT_OPEN or BLOCK_COMMENT_CLOSE from the syntax registry")
+        }
+    }
+    loop row in CS_ALLOWED {
+        if found.get(row.path) == None -> findings.push("{row.path}: no comment spellings left; delete its CS_ALLOWED row")
+    }
+    findings.sort()
+    findings
+}
+
+#Test("comment spellings come from the syntax registry") {
+    guards_enter_root()
+    sources := [String]{}
+    loop root in CS_ROOTS -> cs_walk(root, sources)
+    assert(sources.len() > 1000, "the census found only {sources.len()} Jet sources")
+    found := [String:Int]{}
+    loop path in sources {
+        registry := false
+        loop prefix in CS_REGISTRY {
+            if path.starts_with(prefix) -> registry = true
+        }
+        if registry -> next
+        count: cs_count(cs_files.read(path) ?? panic("read {path}: {err}"))
+        if count > 0 -> found[path] = count
+    }
+    assert_eq(cs_findings(found).join("\n"), "")
+}
+
+#Test("the census counts comment literals, not comments") {
+    source: "a: x.starts_with(\"//\")\nb: \"/*\".bytes() // \"//\" in a comment\nc: \"// generated by: \"\nd: \"*/\" + \"///\"\ne: \"{{PREFIX}} x\"\nf: \"a//b\"\ng: \"\\\"//\"\n"
+    assert_eq(cs_count(source), 4)
+    found := [String:Int]{}
+    found["Compiler/New.jet"] = 1
+    findings: cs_findings(found)
+    assert(findings.len() == CS_ALLOWED.len() + 1)
+    assert(findings.contains("Compiler/New.jet: 1 comment spellings and no CS_ALLOWED row; read COMMENT_PREFIX, DOC_COMMENT_PREFIX, BLOCK_COMMENT_OPEN or BLOCK_COMMENT_CLOSE from the syntax registry"))
+}
