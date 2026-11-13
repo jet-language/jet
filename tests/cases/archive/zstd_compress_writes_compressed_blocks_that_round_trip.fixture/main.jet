@@ -1,0 +1,41 @@
+// zstd.compress codes repeated text and a repeating pattern as compressed
+// blocks, a one-byte run as an RLE block and noise as a raw block, and every
+// frame decodes back to its input.
+use zstd: core.archive.zstd
+
+// The type of a frame's first block (0 raw, 1 RLE, 2 compressed): its header
+// follows the magic, the descriptor and the 8-byte content size.
+first_block: fn(frame: [U8]) -> Int {
+    (Int.from_u8(frame[13]) >> 1).bit_and(3)
+}
+
+report: fn(name: String, data: [U8]) {
+    frame: zstd.compress(data) ?? panic("compress {name}")
+    back: zstd.decompress(frame) ?? panic("decompress {name}")
+    print("{name}: block {first_block(frame)}, smaller {frame.len() < data.len()}, round trip {back == data}")
+}
+
+run: fn() {
+    words: [String]{"alpha", "bravo", "charlie", "delta", "echo"}
+    text := [U8]{}
+    loop i in 0..<20000 {
+        line: "line {i}: {words[i * 3 % 5]} {words[i * 7 % 5]}\n"
+        loop byte in line.bytes() -> text.push(byte)
+    }
+    report("text", text)
+    same := [U8]{}
+    loop _ in 0..<200000 -> same.push(U8{7})
+    report("same", same)
+    noise := [U8]{}
+    seed := 12345
+    loop _ in 0..<5000 {
+        seed = (seed * 1103515245 + 12345) % 2147483648
+        noise.push(wrapping(U8{seed >> 16}))
+    }
+    report("noise", noise)
+    pattern := [U8]{}
+    loop i in 0..<300000 -> pattern.push(wrapping(U8{i % 61}))
+    report("pattern", pattern)
+    report("empty", [U8]{})
+    report("hello", [U8]{72, 101, 108, 108, 111})
+}

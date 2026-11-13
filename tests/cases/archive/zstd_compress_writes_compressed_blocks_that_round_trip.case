@@ -1,0 +1,18 @@
+# core.archive.zstd compress writes compressed blocks (text, a repeating
+# pattern), RLE blocks (one repeated byte) and raw blocks (noise, tiny input),
+# and each frame round-trips through zstd.decompress, on O0, O2 and the binary.
+fixture: zstd_compress_writes_compressed_blocks_that_round_trip.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step none: jet run --optimize=none main.jet
+exit: 0
+stdout: = "text: block 2, smaller true, round trip true\nsame: block 1, smaller true, round trip true\nnoise: block 0, smaller false, round trip true\npattern: block 2, smaller true, round trip true\nempty: block 0, smaller false, round trip true\nhello: block 0, smaller false, round trip true\n"
+step full: jet run --optimize=full main.jet
+exit: 0
+stdout: == none
+step build: jet build --optimize=full main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: == none

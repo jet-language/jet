@@ -5979,15 +5979,18 @@ checksum failures. The output limit is 64 MiB.
 
 ### `core.archive.zstd` — bounded Zstandard files
 
-`core.archive.zstd` handles the supported subset of Zstandard whole-buffer
-streams and file adapters. It emits standards-valid single-segment raw blocks;
-compressed blocks and dictionaries are rejected explicitly. The source is
+`core.archive.zstd` handles Zstandard whole-buffer streams, incremental
+decoding and file adapters. `compress` emits standards-valid single-segment
+frames: each block is compressed (raw literals plus greedy 4-byte matches as
+sequences under the predefined FSE tables), RLE when it repeats one byte, or
+raw when compression would not shrink it. The decoder reads raw, RLE and
+compressed blocks; dictionaries are rejected explicitly. The source is
 [`Core/Archive/Zstd.jet`](../../../Core/Archive/Zstd.jet).
 
 | Signature | Result | Description |
 |---|---|---|
 | `compress(data: [U8]) -> [U8] ZstdFileError!` | bytes | Encode a Zstandard buffer; input over 64 MiB is `Unsupported`. |
-| `decompress(data: [U8]) -> [U8] ZstdFileError!` | bytes | Decode supported raw or RLE blocks. |
+| `decompress(data: [U8]) -> [U8] ZstdFileError!` | bytes | Decode raw, RLE and compressed blocks; output over 64 MiB is `Unsupported`. |
 | `is_zstd(data: [U8]) -> Bool` | Boolean | Test the Zstandard magic. |
 | `magic() -> [U8]` | bytes | Return the Zstandard magic bytes. |
 | `compress_text(text: String) -> [U8] ZstdFileError!` | bytes | Encode UTF-8 text. |

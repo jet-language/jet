@@ -5,7 +5,10 @@ use {
 
 // core.archive.zstd — Zstandard frames (RFC 8878).
 //
-// The encoder writes standards-valid single-segment frames with raw blocks.
+// The encoder writes standards-valid single-segment frames. Each block is
+// compressed (raw literals and greedy hash matches coded as sequences under
+// the predefined FSE tables), an RLE block when it repeats one byte, or a raw
+// block when compression would not make it smaller.
 // The decoder reads every frame form: raw, RLE and compressed blocks (Huffman
 // literals, FSE-coded sequences, repeat offsets and repeated tables), skippable
 // frames, declared content sizes and content checksums. Dictionaries are
@@ -51,8 +54,9 @@ xxh_p3: fn() -> U64 Never! { U64{1609587929392839161} }
 xxh_p4: fn() -> U64 Never! { U64{9650029242287828579} }
 xxh_p5: fn() -> U64 Never! { U64{2870177450012600261} }
 
-/// Encode one single-segment frame of raw blocks. Input above the 64 MiB codec
-/// budget is `ZstdFileError.Unsupported`, never an empty buffer.
+/// Encode one single-segment frame: compressed, RLE or raw blocks, whichever
+/// is smallest per block. Input above the 64 MiB codec budget is
+/// `ZstdFileError.Unsupported`, never an empty buffer.
 compress: fn(data: [U8]) -> [U8] ZstdFileError! {
     if data.len() > C_OUTPUT_MAX -> return Err(ZstdFileError.Unsupported)
     out := [U8]{}
@@ -61,27 +65,240 @@ compress: fn(data: [U8]) -> [U8] ZstdFileError! {
     out.push(U8{0xE0})
     n: data.len()
     loop k in 0..<8 -> out.push(wrapping(U8{n >> (k * 8)}))
-    i := 0
-    loop i < data.len() {
-        left := data.len() - i
-        chunk_len := left
-        if chunk_len > C_BLOCK_MAX -> chunk_len = C_BLOCK_MAX
-        last := 0
-        if i + chunk_len >= data.len() -> last = 1
-        bh := chunk_len << 3
-        if last != 0 -> bh = (bh).bit_or(1)
-        out.push(wrapping(U8{bh}))
-        out.push(wrapping(U8{bh >> 8}))
-        out.push(wrapping(U8{bh >> 16}))
-        loop k in 0..<chunk_len -> out.push(data[i + k])
-        i = i + chunk_len
+    if n == 0 {
+        zenc_header(out, 0, 0, 1)
+        return Ok(out)
     }
-    if data.len() == 0 {
-        out.push(U8{1})
-        out.push(U8{0})
-        out.push(U8{0})
+    tables: zenc()
+    heads := zfill(C_HASH_SIZE, -1)
+    i := 0
+    loop i < n {
+        stop: zmin(n, i + C_BLOCK_MAX)
+        zenc_block(data, i, stop, stop == n, heads, tables, out)
+        i = stop
     }
     Ok(out)
+}
+
+// ── Encoder ──
+
+C_HASH_SIZE: 65536
+C_MATCH_MIN: 4
+
+// The predefined sequence tables and, per table, the state that leads to each
+// next state for each symbol: `prev[symbol * size + next]`. A symbol's
+// states cover every next state exactly once (RFC 8878 4.1.1), so the encoder
+// can choose states backward from the last sequence.
+ZEnc: struct {
+    ll: ZFse
+    of: ZFse
+    ml: ZFse
+    ll_prev: [Int]
+    of_prev: [Int]
+    ml_prev: [Int]
+}
+
+zenc: fn() -> ZEnc ZstdFileError! {
+    ll: zfse_build(C_LL_DEFAULT, 6, 0)
+    of: zfse_build(C_OF_DEFAULT, 5, 0)
+    ml: zfse_build(C_ML_DEFAULT, 6, 0)
+    ll_prev: zfse_prev(ll, C_LL_DEFAULT.len())
+    of_prev: zfse_prev(of, C_OF_DEFAULT.len())
+    ml_prev: zfse_prev(ml, C_ML_DEFAULT.len())
+    Ok(ZEnc{ll: ll, of: of, ml: ml, ll_prev: ll_prev, of_prev: of_prev, ml_prev: ml_prev})
+}
+
+zfse_prev: fn(table: ZFse, symbols: Int) -> [Int] Never! {
+    size: 1 << table.log
+    prev := zfill(symbols * size, 0)
+    loop i in 0..<size {
+        from: table.base[i]
+        row: table.symbols[i] * size
+        loop state in from..<from + (1 << table.bits[i]) -> prev[row + state] = i
+    }
+    prev
+}
+
+// A forward bit writer whose output a backward stream (`zback`) reads in
+// reverse: the last field written is the first read.
+ZBits: struct {
+    acc: Int
+    count: Int
+
+    put: fn(&self, out: &[U8], value: Int, n: Int) Never! {
+        self.acc = self.acc.bit_or(value << self.count)
+        self.count += n
+        loop self.count >= 8 {
+            out.push(wrapping(U8{self.acc}))
+            self.acc = self.acc >> 8
+            self.count -= 8
+        }
+    }
+
+    // The end marker bit, then the last partial byte.
+    close: fn(&self, out: &[U8]) Never! {
+        self.put(out, 1, 1)
+        if self.count > 0 -> out.push(wrapping(U8{self.acc}))
+    }
+}
+
+zenc_header: fn(out: &[U8], size: Int, kind: Int, last: Int) Never! {
+    header: (size << 3).bit_or(kind << 1).bit_or(last)
+    out.push(wrapping(U8{header}))
+    out.push(wrapping(U8{header >> 8}))
+    out.push(wrapping(U8{header >> 16}))
+}
+
+zhash4: fn(data: [U8], at: Int) -> Int Never! {
+    ((read_u32le(data, at) * 506832829) >> 45).bit_and(C_HASH_SIZE - 1)
+}
+
+// One block of `data[start..<end]` onto `out`: RLE when it repeats one byte,
+// else compressed when that is smaller than the bytes, else raw.
+zenc_block: fn(data: [U8], start: Int, end: Int, last: Bool, heads: &[Int], tables: ZEnc, out: &[U8]) Never! {
+    size: end - start
+    flag: if last -> 1 else -> 0
+    run := size > 1
+    k := start + 1
+    loop run && k < end {
+        if data[k] != data[start] -> run = false
+        k += 1
+    }
+    if run {
+        zenc_header(out, size, 1, flag)
+        out.push(data[start])
+        return
+    }
+    body: zenc_compressed(data, start, end, heads, tables)
+    if body.len() < size {
+        zenc_header(out, body.len(), 2, flag)
+        loop byte in body -> out.push(byte)
+        return
+    }
+    zenc_header(out, size, 0, flag)
+    loop at in start..<end -> out.push(data[at])
+}
+
+// A compressed block's content (RFC 8878 3.1.1.3): the literals raw, then
+// greedy matches of at least 4 bytes found through `heads` (the latest
+// position of each 4-byte hash, across the frame), coded as sequences with
+// the predefined tables. Every offset is coded as a new offset, never a
+// repeat.
+zenc_compressed: fn(data: [U8], start: Int, end: Int, heads: &[Int], tables: ZEnc) -> [U8] Never! {
+    literals := [U8]{}
+    lengths := [Int]{}
+    matches := [Int]{}
+    offsets := [Int]{}
+    anchor := start
+    p := start
+    loop p + C_MATCH_MIN <= end {
+        hash: zhash4(data, p)
+        candidate: heads[hash]
+        heads[hash] = p
+        if candidate < 0 || read_u32le(data, candidate) != read_u32le(data, p) {
+            p += 1
+            next
+        }
+        length := C_MATCH_MIN
+        loop p + length < end && data[candidate + length] == data[p + length] -> length += 1
+        loop at in anchor..<p -> literals.push(data[at])
+        lengths.push(p - anchor)
+        matches.push(length)
+        offsets.push(p - candidate + 3)
+        indexed: zmin(p + length, end - C_MATCH_MIN + 1)
+        loop q in p + 1..<indexed -> heads[zhash4(data, q)] = q
+        p += length
+        anchor = p
+    }
+    loop at in anchor..<end -> literals.push(data[at])
+    body := [U8]{}
+    zenc_literals(body, literals.len())
+    loop byte in literals -> body.push(byte)
+    count: lengths.len()
+    if count < 128 {
+        body.push(wrapping(U8{count}))
+    } else if count < 32512 {
+        body.push(wrapping(U8{(count >> 8) + 128}))
+        body.push(wrapping(U8{count}))
+    } else {
+        body.push(U8{255})
+        body.push(wrapping(U8{count - 32512}))
+        body.push(wrapping(U8{(count - 32512) >> 8}))
+    }
+    if count == 0 -> return body
+    // Symbol_Compression_Modes: predefined literal length, offset and match
+    // length tables.
+    body.push(U8{0})
+    zenc_sequences(body, lengths, matches, offsets, tables)
+    body
+}
+
+// The raw literals section header (RFC 8878 3.1.1.3.1.1).
+zenc_literals: fn(out: &[U8], size: Int) Never! {
+    if size < 32 {
+        out.push(wrapping(U8{size << 3}))
+    } else if size < 4096 {
+        out.push(wrapping(U8{(size << 4).bit_or(4)}))
+        out.push(wrapping(U8{size >> 4}))
+    } else {
+        out.push(wrapping(U8{(size << 4).bit_or(12)}))
+        out.push(wrapping(U8{size >> 4}))
+        out.push(wrapping(U8{size >> 12}))
+    }
+}
+
+// The sequences bitstream (RFC 8878 3.1.1.3.2.2), written last sequence
+// first: the decoder reads the initial states, then per sequence the offset,
+// match and literal extra bits, then the literal, match and offset state
+// updates, so each sequence writes those in the reverse order.
+zenc_sequences: fn(out: &[U8], lengths: [Int], matches: [Int], offsets: [Int], tables: ZEnc) Never! {
+    bits := ZBits{acc: 0, count: 0}
+    ll_state := 0
+    of_state := 0
+    ml_state := 0
+    i := lengths.len() - 1
+    loop i >= 0 {
+        ll_code: zll_code(lengths[i])
+        ml_code: zml_code(matches[i])
+        of_code: zhigh(offsets[i])
+        if i + 1 == lengths.len() {
+            ll_state = tables.ll_prev[ll_code * 64]
+            of_state = tables.of_prev[of_code * 32]
+            ml_state = tables.ml_prev[ml_code * 64]
+        } else {
+            ll_next: ll_state
+            of_next: of_state
+            ml_next: ml_state
+            ll_state = tables.ll_prev[ll_code * 64 + ll_next]
+            of_state = tables.of_prev[of_code * 32 + of_next]
+            ml_state = tables.ml_prev[ml_code * 64 + ml_next]
+            bits.put(out, of_next - tables.of.base[of_state], tables.of.bits[of_state])
+            bits.put(out, ml_next - tables.ml.base[ml_state], tables.ml.bits[ml_state])
+            bits.put(out, ll_next - tables.ll.base[ll_state], tables.ll.bits[ll_state])
+        }
+        bits.put(out, lengths[i] - C_LL_BASE[ll_code], C_LL_BITS[ll_code])
+        bits.put(out, matches[i] - C_ML_BASE[ml_code], C_ML_BITS[ml_code])
+        bits.put(out, offsets[i] - (1 << of_code), of_code)
+        i -= 1
+    }
+    bits.put(out, ml_state, 6)
+    bits.put(out, of_state, 5)
+    bits.put(out, ll_state, 6)
+    bits.close(out)
+}
+
+zll_code: fn(length: Int) -> Int Never! {
+    if length < 16 -> return length
+    code := 35
+    loop C_LL_BASE[code] > length -> code -= 1
+    code
+}
+
+zml_code: fn(length: Int) -> Int Never! {
+    if length < 35 -> return length - 3
+    code := 52
+    loop C_ML_BASE[code] > length -> code -= 1
+    code
 }
 
 /// Decode a whole buffer of Zstandard frames (skippable frames are skipped).
