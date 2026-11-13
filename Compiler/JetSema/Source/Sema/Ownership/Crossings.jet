@@ -68,6 +68,17 @@ sema_ownership_crossing_prepend: fn(root: String, field: String, problem: SemaSe
 SemaCrossingWalk: struct {
     active: [String]
     finished: [String:Bool]
+    // The checked function's own type parameters the walk reached: what
+    // crosses there is decided by each call's type argument
+    // (Ownership/GenericCrossings.jet).
+    generic: [SemaCrossingGenericReach]{[SemaCrossingGenericReach]{}}
+}
+
+// A type parameter a crossing reaches, and whether it is the crossing value's
+// whole type (not a field, element, or payload of it).
+SemaCrossingGenericReach: struct {
+    param: String
+    whole: Bool
 }
 
 sema_ownership_crossing_walk_key: fn(identity: String, type_args: [Type]) -> String Never! {
@@ -225,7 +236,6 @@ sema_ownership_crossing_members: fn(nominal: SemaRegistrationNominal, type_args:
 }
 
 sema_ownership_crossing_named_type: fn(ty: Type, name: String, crossing: SemaSendCrossing, strict_callable: Bool, cell_only: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, context: SemaCheckContext, walk: &SemaCrossingWalk) -> SemaSendabilityProblem? {
-    if sema_type_name_is_generic(context.generic_params, name) -> return None
     if program.registration_graph == .Val(graph) {
         caller: sema_scope_caller_row(environment, graph)
         nominal_row := sema_type_resolve_nominal_row_at(graph, ty, caller)
@@ -315,7 +325,16 @@ sema_ownership_crossing_type_inner: fn(ty: Type, crossing: SemaSendCrossing, clo
                 }
             }
         }
-        .Named(name) -> sema_ownership_crossing_named_type(ty, name, crossing, strict_callable, cell_only, environment, program, context, walk)
+        .Named(name) -> {
+            // A type parameter's argument crosses in its place; a query that
+            // starts with `closure_taken` false reaches it as the whole value
+            // exactly when it still carries that false.
+            if sema_type_name_is_generic(context.generic_params, name) {
+                sema_ownership_crossing_note_generic(walk, name, !closure_taken)
+                return None
+            }
+            sema_ownership_crossing_named_type(ty, name, crossing, strict_callable, cell_only, environment, program, context, walk)
+        }
         .Apply(name, args) -> {
             if sema_ownership_crossing_core_builtin(ty, "Task", environment, program) || sema_ownership_crossing_core_builtin(ty, "Receiver", environment, program) || sema_ownership_crossing_core_builtin(ty, "Sender", environment, program) {
                 if cell_only -> return None
@@ -370,11 +389,28 @@ sema_ownership_crossing_type_inner: fn(ty: Type, crossing: SemaSendCrossing, clo
     }
 }
 
+sema_ownership_crossing_note_generic: fn(walk: &SemaCrossingWalk, param: String, whole: Bool) Never! {
+    loop reach in walk.generic {
+        if reach.param == param && reach.whole == whole -> return
+    }
+    walk.generic.push(SemaCrossingGenericReach{param: param.copy(), whole: whole})
+}
+
 sema_ownership_crossing_problem: fn(ty: Type, crossing: SemaSendCrossing, closure_taken: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, context: SemaCheckContext) -> SemaSendabilityProblem? {
     strict_callable: sema_ownership_crossing_strict_callable(crossing)
     cell_only := crossing == SemaSendCrossing.SharedStorage
     walk := SemaCrossingWalk{active: [String]{}, finished: [String:Bool]{}}
     sema_ownership_crossing_type_inner(ty, crossing, closure_taken, strict_callable, cell_only, environment, program, context, walk)
+}
+
+// The checked function's own type parameters that `ty` reaches crossing
+// `crossing`. The walk stops at a concrete problem, which the site reports
+// itself.
+sema_ownership_crossing_generic_reach: fn(ty: Type, crossing: SemaSendCrossing, environment: SemaScopeEnvironment, program: SemaProgramTables, context: SemaCheckContext) -> [SemaCrossingGenericReach] {
+    if context.generic_params.len() == 0 || !sema_ownership_type_mentions_generic(ty, context.generic_params) -> return [SemaCrossingGenericReach]{}
+    walk := SemaCrossingWalk{active: [String]{}, finished: [String:Bool]{}}
+    _ := sema_ownership_crossing_type_inner(ty, crossing, false, sema_ownership_crossing_strict_callable(crossing), crossing == SemaSendCrossing.SharedStorage, environment, program, context, walk)
+    walk.generic.move()
 }
 
 sema_ownership_crossing_problem_for_name: fn(name: String, ty: Type, crossing: SemaSendCrossing, closure_taken: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, state: SemaOwnershipState, context: SemaCheckContext) -> SemaSendabilityProblem? {

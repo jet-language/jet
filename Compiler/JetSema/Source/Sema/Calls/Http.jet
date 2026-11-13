@@ -398,9 +398,13 @@ sema_call_http_check_middleware_callback: fn(value: TExpr, environment: SemaScop
                 loop name in updated_lambda.capture_facts.mutable { if name == capture.source -> mutable = true }
                 if mutable -> next
                 closure_taken: sema_ownership_crossing_capture_taken(updated_lambda, capture, environment, program, context.generic_params)
-                problem: sema_ownership_crossing_problem_for_name(capture.source, capture.ty, SemaSendCrossing.HTTPHandler, closure_taken, environment, program, scopes, state, context) ?? next
-                diagnostics.push(sema_ownership_crossing_diagnostic(capture.source, capture.ty, problem, SemaSendCrossing.HTTPHandler, updated_lambda.source_span))
-                valid = false
+                problem := sema_ownership_crossing_problem_for_name(capture.source, capture.ty, SemaSendCrossing.HTTPHandler, closure_taken, environment, program, scopes, state, context)
+                if problem == .Val(found) {
+                    diagnostics.push(sema_ownership_crossing_diagnostic(capture.source, capture.ty, found, SemaSendCrossing.HTTPHandler, updated_lambda.source_span))
+                    valid = false
+                    next
+                }
+                sema_generic_crossing_note(capture.ty, SemaSendCrossing.HTTPHandler, sema_taskgroup_contains_name(updated_lambda.capture_facts.moved, capture.source), true, environment, program, context)
             }
             updated_lambda.is_move = true
             return valid

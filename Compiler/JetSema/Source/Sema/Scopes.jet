@@ -616,6 +616,10 @@ SemaCheckContext: struct {
     comptime_body_source_rows: [[String:Int]]
     compute_calls: [SemaComputeCallFact]
     autodiff_obligations: [SemaAutodiffObligation]
+    // Ownership/GenericCrossings.jet: what this body's type parameters cross,
+    // and the generic calls whose arguments decide it.
+    generic_crossings: [SemaGenericCrossing]
+    generic_calls: [SemaGenericCall]
     autodiff_safe_panic: Bool
     autodiff_unsafe_panic: Bool
     autodiff_safe_panic_context: Bool
@@ -1151,6 +1155,8 @@ sema_check_context_init: fn() -> SemaCheckContext Never! {
         comptime_body_source_rows: [[String:Int]]{},
         compute_calls: [SemaComputeCallFact]{},
         autodiff_obligations: [SemaAutodiffObligation]{},
+        generic_crossings: [SemaGenericCrossing]{},
+        generic_calls: [SemaGenericCall]{},
         autodiff_safe_panic: false,
         autodiff_unsafe_panic: false,
         autodiff_safe_panic_context: false,
@@ -1220,6 +1226,8 @@ sema_check_context_snapshot: fn(source: SemaCheckContext) -> SemaCheckContext Ne
         comptime_body_source_rows: [[String:Int]]{},
         compute_calls: source.compute_calls.copy(),
         autodiff_obligations: source.autodiff_obligations.copy(),
+        generic_crossings: source.generic_crossings.copy(),
+        generic_calls: source.generic_calls.copy(),
         autodiff_safe_panic: source.autodiff_safe_panic,
         autodiff_unsafe_panic: source.autodiff_unsafe_panic,
         autodiff_safe_panic_context: source.autodiff_safe_panic_context,
@@ -1294,6 +1302,8 @@ SemaCheckContextMark: struct {
     comptime_body_sources: Int
     compute_calls: Int
     autodiff_obligations: Int
+    generic_crossings: Int
+    generic_calls: Int
     copy_events: Int
     noelse_chain_starts: Int
     failure_edges: Int
@@ -1329,6 +1339,8 @@ sema_check_context_save: fn(context: SemaCheckContext) -> SemaCheckContextMark N
         comptime_body_sources: context.comptime_body_sources.len(),
         compute_calls: context.compute_calls.len(),
         autodiff_obligations: context.autodiff_obligations.len(),
+        generic_crossings: context.generic_crossings.len(),
+        generic_calls: context.generic_calls.len(),
         copy_events: context.copy_events.len(),
         noelse_chain_starts: context.noelse_chain_starts.len(),
         failure_edges: context.failure_edges.len(),
@@ -1371,6 +1383,8 @@ sema_check_context_save: fn(context: SemaCheckContext) -> SemaCheckContextMark N
             comptime_body_source_rows: [[String:Int]]{},
             compute_calls: [SemaComputeCallFact]{},
             autodiff_obligations: [SemaAutodiffObligation]{},
+            generic_crossings: [SemaGenericCrossing]{},
+            generic_calls: [SemaGenericCall]{},
             autodiff_safe_panic: context.autodiff_safe_panic,
             autodiff_unsafe_panic: context.autodiff_unsafe_panic,
             autodiff_safe_panic_context: context.autodiff_safe_panic_context,
@@ -1441,6 +1455,8 @@ sema_check_context_rollback: fn(context: &SemaCheckContext, mark: &&SemaCheckCon
     sema_comptime_body_sources_truncate(context, mark.comptime_body_sources)
     loop context.compute_calls.len() > mark.compute_calls -> _ := context.compute_calls.pop()
     loop context.autodiff_obligations.len() > mark.autodiff_obligations -> _ := context.autodiff_obligations.pop()
+    loop context.generic_crossings.len() > mark.generic_crossings -> _ := context.generic_crossings.pop()
+    loop context.generic_calls.len() > mark.generic_calls -> _ := context.generic_calls.pop()
     loop context.copy_events.len() > mark.copy_events -> _ := context.copy_events.pop()
     loop context.origin_facts.len() > mark.origin_facts -> _ := context.origin_facts.pop()
     loop context.typed_goals.len() > mark.typed_goals -> _ := context.typed_goals.pop()

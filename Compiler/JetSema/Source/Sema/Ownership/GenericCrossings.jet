@@ -1,0 +1,199 @@
+// Generic code crosses a value of a type parameter into a task, a channel, a
+// parallel worker or an HTTP handler without knowing its type. Each generic
+// body records the crossings its type parameters reach, and each call that
+// settles type arguments records what every argument would meet crossing.
+// After every body is checked, crossings flow from callee to caller (a generic
+// caller that passes its own type parameter on inherits the callee's
+// crossing), and a call whose argument can't cross where its callee takes it
+// is E1102 at the call. So no instantiation carries a thread-confined value,
+// or a closure it never gave away, across threads.
+use jet_foundation.[
+    Diagnostic,
+    Span,
+    Type,
+    type_name,
+]
+
+// A crossing one of the checked function's type parameters reaches.
+SemaGenericCrossing: struct {
+    param: String
+    crossing: SemaSendCrossing
+    // The parameter is the crossing value's whole type, not a field or
+    // element of it (a part always crosses as a value given away).
+    whole: Bool
+    // The site gives the whole value away (`.move()`, a moved send) ...
+    moved: Bool
+    // ... or captures it, which gives it away exactly when the argument's
+    // type can't be cloned.
+    captured: Bool
+}
+
+// One settled type argument of a generic call, with what it meets crossing:
+// given away, kept by its owner, and at a boundary that refuses every
+// function value. `reaches` are the caller's own type parameters it holds.
+SemaGenericCallArgument: struct {
+    param: String
+    ty: Type
+    given: SemaSendabilityProblem?
+    kept: SemaSendabilityProblem?
+    strict: SemaSendabilityProblem?
+    cloneable: Bool
+    reaches: [SemaCrossingGenericReach]
+}
+
+SemaGenericCall: struct {
+    callee: String
+    name: String
+    span: Span
+    arguments: [SemaGenericCallArgument]
+}
+
+SemaGenericCrossingReport: struct {
+    module_index: Int
+    diagnostic: Diagnostic
+}
+
+sema_generic_crossing_same: fn(left: SemaGenericCrossing, right: SemaGenericCrossing) -> Bool Never! {
+    left.param == right.param && left.crossing == right.crossing && left.whole == right.whole && left.moved == right.moved && left.captured == right.captured
+}
+
+// Adds `crossing` unless `crossings` holds it; true when it was new.
+sema_generic_crossing_add: fn(crossings: &[SemaGenericCrossing], crossing: &&SemaGenericCrossing) -> Bool Never! {
+    loop existing in crossings {
+        if sema_generic_crossing_same(existing, crossing) -> return false
+    }
+    crossings.push(crossing)
+    true
+}
+
+// A crossing site in a generic body: `ty` crosses `crossing`, and the site
+// either gives the value away (`moved`) or captures it (`captured`).
+sema_generic_crossing_note: fn(ty: Type, crossing: SemaSendCrossing, moved: Bool, captured: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, context: &SemaCheckContext) {
+    if context.generic_params.len() == 0 -> return
+    loop reach in sema_ownership_crossing_generic_reach(ty, crossing, environment, program, context) {
+        _ := sema_generic_crossing_add(context.generic_crossings, SemaGenericCrossing{param: reach.param.copy(), crossing: crossing, whole: reach.whole, moved: moved, captured: captured})
+    }
+}
+
+// A scalar argument crosses everywhere and holds no type parameter.
+sema_generic_crossing_plain: fn(ty: Type) -> Bool Never! {
+    if ty == {
+        .Int | .Float | .Bool | .String | .Char | .IntN(_, _) | .Float32 | .InlineRange(_, _, _) | .Quantity(_, _) | .Measure(_) -> true
+        .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .Tagged(_, _) | .Union(_) -> false
+    }
+}
+
+// A call to generic function `callee` whose type arguments are settled.
+sema_generic_call_note: fn(callee: String, name: String, substitutions: [SemaInferenceBinding], span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, context: &SemaCheckContext) {
+    arguments := [SemaGenericCallArgument]{}
+    loop binding in substitutions {
+        if sema_generic_crossing_plain(binding.ty) -> next
+        given: sema_ownership_crossing_problem(binding.ty, SemaSendCrossing.TaskCapture, true, environment, program, scopes, context)
+        kept: sema_ownership_crossing_problem(binding.ty, SemaSendCrossing.TaskCapture, false, environment, program, scopes, context)
+        strict: sema_ownership_crossing_problem(binding.ty, SemaSendCrossing.ParallelWorker, true, environment, program, scopes, context)
+        reaches: sema_ownership_crossing_generic_reach(binding.ty, SemaSendCrossing.TaskCapture, environment, program, context)
+        if given == None && kept == None && strict == None && reaches.len() == 0 -> next
+        cloneable: sema_copy_classify(binding.ty, SemaCopyIntent.Clone, environment, program, context.generic_params, false).cloneable
+        arguments.push(SemaGenericCallArgument{param: binding.name.copy(), ty: binding.ty.copy(), given: given, kept: kept, strict: strict, cloneable: cloneable, reaches: reaches})
+    }
+    if arguments.len() == 0 -> return
+    context.generic_calls.push(SemaGenericCall{callee: callee, name: name, span: span, arguments: arguments})
+}
+
+// What `argument` meets at `crossing` in its callee.
+sema_generic_crossing_problem: fn(crossing: SemaGenericCrossing, argument: SemaGenericCallArgument) -> SemaSendabilityProblem? {
+    if sema_ownership_crossing_strict_callable(crossing.crossing) -> return argument.strict
+    if !crossing.whole || crossing.moved || (crossing.captured && !argument.cloneable) -> return argument.given
+    argument.kept
+}
+
+sema_generic_crossing_boundary: fn(crossing: SemaSendCrossing) -> String Never! {
+    if crossing == {
+        .TaskCapture -> "into a task"
+        .TaskResult -> "out of a task"
+        .ChannelSend -> "through a channel"
+        .ParallelWorker -> "into a parallel worker"
+        .HTTPHandler -> "into an HTTP handler"
+        .Kernel -> "into a kernel worker"
+        .InterruptCallback -> "into an interrupt callback"
+        .SharedStorage -> "into shared storage"
+        .FrozenSnapshot -> "into a frozen snapshot"
+    }
+}
+
+sema_generic_crossing_diagnostic: fn(call: SemaGenericCall, argument: SemaGenericCallArgument, crossing: SemaGenericCrossing, problem: SemaSendabilityProblem) -> Diagnostic {
+    boundary: sema_generic_crossing_boundary(crossing.crossing)
+    reason := if crossing.crossing == SemaSendCrossing.ParallelWorker || crossing.crossing == SemaSendCrossing.Kernel -> "this concurrent boundary moves owned values between workers" else -> "tasks and channels move owned values between threads"
+    fix := if problem.kind == {
+        .ClosureNeedsTake -> "have `{call.name}` give the closure away with `.move()` where it moves `{argument.param}` {boundary}, or pass plain owned data"
+        .ClosureCaptures | .CallableValue | .TraitValue(_) | .ThreadConfined(_) | .LocalReactive(_) | .ViewBorrow | .SharedMutation | .UnknownType(_) -> "call `{call.name}` with plain owned data, or share state through `Shared<T>`"
+    }
+    sema_error(
+        "E1102",
+        call.span,
+        "`{call.name}` moves its `{argument.param}` {boundary}, and here `{argument.param}` is `{type_name(argument.ty)}`, which isn't sendable",
+        "{sema_ownership_crossing_describe(problem)}; {reason}",
+        fix,
+    )
+}
+
+// The crossings of every checked function, keyed by function, with each
+// generic caller's inherited ones, then one report per call argument that
+// meets a problem.
+sema_generic_crossings_validate: fn(modules: [SemaGraphModuleResult]) -> [SemaGenericCrossingReport] {
+    reports := [SemaGenericCrossingReport]{}
+    crossings := [String:[SemaGenericCrossing]]{}
+    has_calls := false
+    loop module_row in modules {
+        loop facts in module_row.compute_facts {
+            if facts.generic_calls.len() > 0 -> has_calls = true
+            if facts.generic_crossings.len() == 0 -> next
+            rows := crossings.get(facts.function_key) ?? [SemaGenericCrossing]{}
+            loop crossing in facts.generic_crossings -> _ := sema_generic_crossing_add(rows, crossing.copy())
+            crossings[facts.function_key.copy()] = rows
+        }
+    }
+    if !has_calls || crossings.len() == 0 -> return reports
+    // A generic caller inherits each crossing it passes one of its own type
+    // parameters to, until no crossing is new.
+    changed := true
+    loop changed {
+        changed = false
+        loop module_row in modules {
+            loop facts in module_row.compute_facts {
+                loop call in facts.generic_calls {
+                    callee_rows: crossings.get(call.callee) ?? next
+                    loop crossing in callee_rows {
+                        loop argument in call.arguments {
+                            if argument.param != crossing.param -> next
+                            loop reach in argument.reaches {
+                                rows := crossings.get(facts.function_key) ?? [SemaGenericCrossing]{}
+                                inherited := SemaGenericCrossing{param: reach.param.copy(), crossing: crossing.crossing, whole: crossing.whole && reach.whole, moved: crossing.moved, captured: crossing.captured}
+                                if sema_generic_crossing_add(rows, inherited.move()) {
+                                    crossings[facts.function_key.copy()] = rows
+                                    changed = true
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    loop (module_index, module_row) in modules {
+        loop facts in module_row.compute_facts {
+            loop call in facts.generic_calls {
+                callee_rows: crossings.get(call.callee) ?? next
+                loop argument in call.arguments {
+                    loop crossing in callee_rows {
+                        if argument.param != crossing.param -> next
+                        problem: sema_generic_crossing_problem(crossing, argument) ?? next
+                        reports.push(SemaGenericCrossingReport{module_index: module_index, diagnostic: sema_generic_crossing_diagnostic(call, argument, crossing, problem)})
+                        break
+                    }
+                }
+            }
+        }
+    }
+    reports.move()
+}

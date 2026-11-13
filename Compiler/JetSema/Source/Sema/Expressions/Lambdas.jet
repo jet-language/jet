@@ -1864,6 +1864,8 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, e
     body_source_start := lambda_context.comptime_body_sources.len()
     compute_call_start := lambda_context.compute_calls.len()
     autodiff_obligation_start := lambda_context.autodiff_obligations.len()
+    generic_crossing_start := lambda_context.generic_crossings.len()
+    generic_call_start := lambda_context.generic_calls.len()
     failure_edge_start := lambda_context.failure_edges.len()
     failure_union_edge_start := lambda_context.failure_union_edges.len()
     module_write_start := lambda_context.module_writes.len()
@@ -2543,6 +2545,9 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, e
         context.callback_return_row = lambda_context.callback_return_row
     }
     sema_expression_lambda_merge_context_facts(lambda_context, context, call_fact_start, name_reference_start, comptime_request_start, body_source_start, compute_call_start, autodiff_obligation_start, copy_event_start)
+    // A crossing or generic call in the body is the enclosing function's.
+    loop crossing_index in generic_crossing_start..<lambda_context.generic_crossings.len() -> _ := sema_generic_crossing_add(context.generic_crossings, lambda_context.generic_crossings[crossing_index].copy())
+    loop call_index in generic_call_start..<lambda_context.generic_calls.len() -> context.generic_calls.push(lambda_context.generic_calls[call_index])
     // A state write in the body belongs to the function that writes the
     // lambda, as its effects do: the body runs on the function's behalf, so
     // a pure function may not hide a write in a lambda (E3401).

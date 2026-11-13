@@ -1147,6 +1147,8 @@ sema_function_compute_facts: fn(function_key: String, context: SemaCheckContext)
         autodiff_obligations: context.autodiff_obligations.copy(),
         autodiff_safe_panic: context.autodiff_safe_panic,
         autodiff_unsafe_panic: context.autodiff_unsafe_panic,
+        generic_crossings: context.generic_crossings.copy(),
+        generic_calls: context.generic_calls.copy(),
     }
 }
 
@@ -10112,6 +10114,16 @@ sema_finalize_program: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrail
                 diagnostics.push(diagnostic)
             }
         }
+        complete = false
+    }
+    // A generic call whose type argument can't cross threads where its
+    // callee, or a generic it passes the argument on to, moves it.
+    loop report in sema_generic_crossings_validate(modules) {
+        located := [Diagnostic]{report.diagnostic}
+        if sema_registration_module_index(final_graph, modules[report.module_index].module_identity) == .Val(found_index) {
+            sema_attach_diagnostic_source_locations(located, 0, final_graph.modules[found_index].source_segments)
+        }
+        diagnostics.push(located[0])
         complete = false
     }
 

@@ -1694,6 +1694,9 @@ sema_call_direct_checked_from_target: fn(state: &SemaOwnershipState, target: Sem
         binding = sema_call_bind_direct(call.name, candidate.signature, args, call.name_span, diagnostics) ?? return None
     }
     if !sema_call_direct_target_generic_ready(candidate, diagnostics, call.name_span) -> return None
+    // The settled type arguments decide what the callee's crossings carry
+    // across threads (Ownership/GenericCrossings.jet).
+    if candidate.generic_substitutions.len() > 0 -> sema_generic_call_note(candidate.symbol.id.key, call.name, candidate.generic_substitutions, call.name_span, environment, program, scopes, context)
     resolved_binding := binding
     resolved_defaults := defaults
     if binding.default_refs.len() > 0 {

@@ -1,0 +1,13 @@
+keep: fn<T>(c: T) -> Int { 1 }
+
+spawn_with: fn<T>(c: &&T) -> Int {
+    t: task keep(c)
+    t.join() ?? 0
+}
+
+forward: fn<U>(c: &&U) -> Int { spawn_with(c) }
+
+run: fn() {
+    greet: fn() { print("hi") }
+    print(forward(greet))
+}

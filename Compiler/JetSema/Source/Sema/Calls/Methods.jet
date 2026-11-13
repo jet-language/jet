@@ -749,6 +749,9 @@ sema_call_method_checked_from_value: fn(state: &SemaOwnershipState, receiver: Ex
         binding = sema_call_bind_method(resolved_candidate.method.name, resolved_candidate.signature, resolved_candidate.receiver_offset, checked_args, span, diagnostics) ?? return None
     }
     if !sema_call_method_candidate_ready(resolved_candidate, diagnostics, span) -> return None
+    // The settled type arguments decide what the method's crossings carry
+    // across threads (Ownership/GenericCrossings.jet).
+    if resolved_candidate.generic_substitutions.len() > 0 -> sema_generic_call_note(resolved_candidate.method.symbol.key, resolved_candidate.method.name, resolved_candidate.generic_substitutions, span, environment, program, scopes, context)
     receiver_type: sema_call_method_receiver_candidate_type(resolved_candidate) ?? return None
     receiver_compatible: sema_call_type_assignable(receiver_type, receiver_value.ty, environment, program) ?? return None
     if !receiver_compatible {

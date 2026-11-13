@@ -546,6 +546,9 @@ sema_taskgroup_check_lambda_captures: fn(lambda: TLambda, span: Span, environmen
             diagnostics.push(sema_ownership_crossing_diagnostic(capture.source, capture.ty, value, SemaSendCrossing.TaskCapture, span))
             next
         }
+        // A capture of the function's own type parameter crosses as each
+        // call's type argument (Ownership/GenericCrossings.jet).
+        sema_generic_crossing_note(capture.ty, SemaSendCrossing.TaskCapture, sema_taskgroup_contains_name(lambda.capture_facts.moved, capture.source), true, environment, program, context)
         // A capture the body writes is refused: the task runs beside its
         // owner. A `.move()` or a frozen snapshot removes the outer alias, a shared
         // handle orders its own crossing, and the owner of a window the task
@@ -808,6 +811,8 @@ sema_taskgroup_check_spawn: fn(args: [CallArg], span: Span, expected: Type?, env
     if problem == .Val(value) {
         sema_taskgroup_note_detach_problem(context, value.kind == SemaSendProblemKind.ViewBorrow)
         diagnostics.push(sema_ownership_crossing_diagnostic("this task", task_result_ty, value, SemaSendCrossing.TaskResult, spawned_span))
+    } else {
+        sema_generic_crossing_note(task_result_ty, SemaSendCrossing.TaskResult, false, false, environment, program, context)
     }
     group := TExpr?{None}
     if sema_taskgroup_spawn_group_index(context) != None {

@@ -3537,6 +3537,15 @@ cannot cross. Give ownership to a child with `task &&name`, make an immutable ow
 snapshot with `freeze`, or use `Shared` and a lock for deliberate shared
 mutation (D-CONC-CROSS1).
 
+Generic code is held to the same rule through its type arguments. A generic
+function that moves a value of its type parameter into a task, out of one,
+through a channel, into a parallel worker, or into an HTTP handler, directly
+or by passing it on to another generic function that does, crosses that
+boundary with each call's type argument. A call whose argument can't cross
+there is **E1102** at the call, naming the function and the parameter: a
+thread-confined value such as `Cell<T>`, or a closure the generic code
+captures without giving it away.
+
 ### Frozen snapshots and consuming captures
 
 `freeze(x)` creates one deeply immutable, owned snapshot. A task may read it

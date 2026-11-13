@@ -93,9 +93,15 @@ sema_call_concurrency_success_type: fn(ty: Type) -> Type Never! {
     }
 }
 
-sema_call_concurrency_reject_parallel_type: fn(role: String, ty: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, context: SemaCheckContext, diagnostics: &[Diagnostic]) {
-    problem: sema_ownership_crossing_problem(ty, SemaSendCrossing.ParallelWorker, true, environment, program, scopes, context) ?? return
-    diagnostics.push(sema_ownership_crossing_diagnostic("parallel {role}", ty, problem, SemaSendCrossing.ParallelWorker, span))
+sema_call_concurrency_reject_parallel_type: fn(role: String, ty: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) {
+    problem := sema_ownership_crossing_problem(ty, SemaSendCrossing.ParallelWorker, true, environment, program, scopes, context)
+    if problem == .Val(found) {
+        diagnostics.push(sema_ownership_crossing_diagnostic("parallel {role}", ty, found, SemaSendCrossing.ParallelWorker, span))
+        return
+    }
+    // An item or result of the function's own type parameter crosses as each
+    // call's type argument, given away (Ownership/GenericCrossings.jet).
+    sema_generic_crossing_note(ty, SemaSendCrossing.ParallelWorker, true, false, environment, program, context)
 }
 
 sema_call_concurrency_check_parallel_callback: fn(value: TExpr, source: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
@@ -112,9 +118,13 @@ sema_call_concurrency_check_parallel_callback: fn(value: TExpr, source: Expr, en
                 loop name in updated_lambda.capture_facts.mutable { if name == capture.source -> mutable = true }
                 if mutable -> next
                 closure_taken := sema_ownership_crossing_capture_taken(updated_lambda, capture, environment, program, context.generic_params)
-                problem: sema_ownership_crossing_problem_for_name(capture.source, capture.ty, SemaSendCrossing.ParallelWorker, closure_taken, environment, program, scopes, state, context) ?? next
-                diagnostics.push(sema_ownership_crossing_diagnostic(capture.source, capture.ty, problem, SemaSendCrossing.ParallelWorker, updated_lambda.source_span))
-                valid = false
+                problem := sema_ownership_crossing_problem_for_name(capture.source, capture.ty, SemaSendCrossing.ParallelWorker, closure_taken, environment, program, scopes, state, context)
+                if problem == .Val(found) {
+                    diagnostics.push(sema_ownership_crossing_diagnostic(capture.source, capture.ty, found, SemaSendCrossing.ParallelWorker, updated_lambda.source_span))
+                    valid = false
+                    next
+                }
+                sema_generic_crossing_note(capture.ty, SemaSendCrossing.ParallelWorker, false, true, environment, program, context)
             }
             sema_function_reactive_note_parallel_lambda(context, updated_lambda)
             updated_lambda.is_move = true
@@ -246,6 +256,7 @@ sema_call_concurrency_check_sender: fn(receiver: Expr, receiver_value: TExpr, ar
         diagnostics.push(sema_ownership_crossing_diagnostic(value_name, payload_ty, problem, SemaSendCrossing.ChannelSend, updated_args[0].span))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
+    sema_generic_crossing_note(payload_ty, SemaSendCrossing.ChannelSend, updated_args[0].convention == AccessConvention.Move, false, environment, program, context)
     params := [SemaCallParam]{SemaCallParam{label: "value", name: "value", zone: ParamZone.Either, default: None, default_ref: None, convention: AccessConvention.Move, ty: Val(payload_ty), variadic: false}}
     ownership := sema_ownership_check_method_call(state, "send", receiver, AccessConvention.Read, params, updated_args, scopes, span, diagnostics)
     if !ownership.accepted || !ownership.complete -> return SemaMethodSpecialCheck{handled: true, value: None}

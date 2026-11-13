@@ -18,12 +18,18 @@ SemaAutodiffObligation: struct {
     span: Span
 }
 
+// One checked function's proof obligations that only the whole program can
+// discharge: its compute/autodiff facts, and the task crossings its type
+// parameters reach with the generic calls that decide them
+// (Ownership/GenericCrossings.jet).
 SemaComputeFunctionFacts: struct {
     function_key: String
     compute_calls: [SemaComputeCallFact]
     autodiff_obligations: [SemaAutodiffObligation]
     autodiff_safe_panic: Bool
     autodiff_unsafe_panic: Bool
+    generic_crossings: [SemaGenericCrossing]{[SemaGenericCrossing]{}}
+    generic_calls: [SemaGenericCall]{[SemaGenericCall]{}}
 }
 
 // Positions loan the already solved module products; no function body or
