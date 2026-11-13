@@ -222,14 +222,13 @@ function commandEnvironment(runRoot) {
   environment.JET_STORE_DIR = join(runRoot, "store");
   environment.JET_PACKAGE_STORE_DIR = join(runRoot, "package-store");
   environment.JET_FFI_CACHE_DIR = join(runRoot, "ffi");
-  environment.JET_DEV_ORACLE_CACHE_DIR = join(runRoot, "oracle-cache");
   environment.JET_TEST_SCRATCH_DIR = join(runRoot, "test-scratch");
   environment.CARGO_INCREMENTAL = "0";
   environment.NO_COLOR = "1";
   environment.TMPDIR = join(runRoot, "tmp");
   environment.TMP = environment.TMPDIR;
   environment.TEMP = environment.TMPDIR;
-  for (const directory of [environment.JET_STORE_DIR, environment.JET_PACKAGE_STORE_DIR, environment.JET_FFI_CACHE_DIR, environment.JET_DEV_ORACLE_CACHE_DIR, environment.JET_TEST_SCRATCH_DIR, environment.TMPDIR]) {
+  for (const directory of [environment.JET_STORE_DIR, environment.JET_PACKAGE_STORE_DIR, environment.JET_FFI_CACHE_DIR, environment.JET_TEST_SCRATCH_DIR, environment.TMPDIR]) {
     mkdirSync(directory, { recursive: true });
   }
   return environment;
