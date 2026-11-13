@@ -1,45 +1,16 @@
-// The canonical Canvas projection of one checked program: function graphs,
-// the edit anchors and node references the actions read, and the blueprint
-// facts the editor panels show.
+// Blueprint, game, interface, event, task, and reasoning facts beside the
+// Canvas graphs, and the callable exports Canvas actions run.
 use {
+    jet_canvas.[json_bool, json_optional_str, json_str, json_strs, snippet, span_json]
     jet_driver.[JetDriverDocModule]
-    jet_foundation.[DerivationRecord, EnumDef, Expr, Func, ImportDecl, Item, NameDeclaration, NameLedger, NamedType, Span, TraitDef, TraitMethodSig, access_sigil, ast_visit_body, derivation_record_json, expr_span, name_facts_leaf, name_ledger_display_path, name_ledger_display_path_at, name_ledger_visible, type_name]
-    jet_parser.[jfmt_format_source_in]
-    jet_semindex.[SEMINDEX_SCHEMA_VERSION, SemAnchor, SemDef, SemIndex, SemOutput, SemRef, SemStateGraph]
-}
-
-InlineExpr: struct {
-    id: String
-    span: Span
-}
-
-GraphEditAnchor: struct {
-    graph_id: String
-    insert_offset: Int
-    fallible: Bool
-}
-
-NodeQueryRef: struct {
-    graph_id: String
-    node_id: String
-    kind: String
-    title: String
-    span: Span
+    jet_foundation.[DerivationRecord, Expr, Func, ImportDecl, Item, NameDeclaration, NameLedger, NamedType, Span, TraitDef, TraitMethodSig, ast_visit_body, derivation_record_json, expr_span, name_facts_leaf, name_ledger_display_path, name_ledger_display_path_at, name_ledger_visible, type_name]
+    jet_semindex.[SemAnchor, SemDef, SemIndex, SemOutput, SemRef, SemStateGraph]
 }
 
 CanvasCallableExport: struct {
     module_path: String
     span: Span
     callee: String
-}
-
-Projection: struct {
-    json: String
-    inline_exprs: [InlineExpr]
-    graph_anchors: [GraphEditAnchor]
-    node_refs: [NodeQueryRef]
-    callable_exports: [CanvasCallableExport]
-    game_facts: [CanvasGameFact]
 }
 
 CanvasGameFact: struct {
@@ -51,75 +22,6 @@ CanvasGameFact: struct {
     source_span: Span
     field_span: Span?
     authored_instance_id: String
-}
-
-GraphBuilder: struct {
-    graph_id: String{""}
-    nodes: [NodeRec]{[NodeRec]{}}
-    pins: [PinRec]{[PinRec]{}}
-    wires: [WireRec]{[WireRec]{}}
-    regions: [String]{[String]{}}
-    inline_exprs: [InlineRec]{[InlineRec]{}}
-    local_pins: [String:String]{[String:String]{}}
-    local_types: [String:String]{[String:String]{}}
-    getter_pins: [String:String]{[String:String]{}}
-    next_wire: Int{0}
-}
-
-NodeRec: struct {
-    id: String
-    kind: String
-    archetype: String
-    title: String
-    span: Span
-    x: Int
-    y: Int
-    badges: [String]
-    affordances: [String]
-    meta_json: String?
-}
-
-PinRec: struct {
-    id: String
-    node_id: String
-    name: String
-    direction: String
-    ty: String
-    role: String?
-    pattern_source: String?
-    ability: String
-    fallible: Bool
-    effect_grant_need: String?
-    span: Span
-    pattern_source_span: Span?
-    append_op: String?
-    element_index: Int?
-}
-
-WireRec: struct {
-    id: String
-    from_pin: String
-    to_pin: String
-    kind: String
-    span: Span?
-    from_span: Span?
-    to_span: Span?
-}
-
-InlineRec: struct {
-    id: String
-    node_id: String
-    role: String
-    source: String
-    span: Span
-}
-
-// Everything the function graphs of a program add to the projection.
-CanvasGraphSink: struct {
-    graphs: [String]
-    inline_exprs: [InlineExpr]
-    anchors: [GraphEditAnchor]
-    node_refs: [NodeQueryRef]
 }
 
 // One reasoning lens and the words in a derivation that place it there.
@@ -194,39 +96,6 @@ canvas_reasoning_json: fn(source_path: String, index: SemIndex) -> String {
     "{{\"kind\":\"jet.reasoning/v1\",\"source\":{json_str(shown_path)},\"selection\":\"all\",\"records\":[{records.join(",")}],\"lenses\":[{lenses.join(",")}],\"limits\":{{\"records\":{index.derivations.len()},\"records_truncated\":false,\"expanded\":true}}}}"
 }
 
-// The position in `modules` of the module read from `path`, else of the one
-// whose text is `src`, else the first.
-canvas_entry_module: fn(path: String, src: String, modules: [JetDriverDocModule]) -> Int {
-    loop (position, doc_module) in modules {
-        if doc_module.physical_path == path || doc_module.path == path -> return position
-    }
-    loop (position, doc_module) in modules {
-        if doc_module.source == src -> return position
-    }
-    0
-}
-
-project_checked: fn(path: String, source_id: String, src: String, modules: [JetDriverDocModule], index: SemIndex, runtime_events: String?) -> Projection {
-    entry: canvas_entry_module(path, src, modules)
-    sink := CanvasGraphSink{graphs: [String]{}, inline_exprs: [InlineExpr]{}, anchors: [GraphEditAnchor]{}, node_refs: [NodeQueryRef]{}}
-    loop (position, doc_module) in modules {
-        collect_item_graphs(sink, index, src, doc_module, position == entry, doc_module.items, None)
-    }
-    callable_exports: canvas_callable_exports(modules, entry)
-    game_facts: if entry < modules.len() -> canvas_game_facts(source_id, src, modules[entry]) else -> [CanvasGameFact]{}
-    formatted: jfmt_format_source_in(src, false, false)
-    fmt: if formatted.ok -> formatted.text else -> src
-    blueprint: canvas_blueprint_facts_json(path, src, modules, index, runtime_events, game_facts)
-    enums := [EnumDef]{}
-    loop doc_module in modules -> collect_enums(doc_module.items, enums)
-    enums.sort_by(fn(left: EnumDef, right: EnumDef) { left.name <=> right.name })
-    projection: index.effect_projection
-    effect_projection: "{{\"required_effects\":[{json_strs(projection.required)}],\"granted_effects\":[{json_strs(projection.granted)}],\"denied_effects\":[{json_strs(projection.denied)}],\"authority\":{json_str(projection.authority)}}}"
-    reasoning: canvas_reasoning_json(path, index)
-    json: "{{\"protocol\":\"jet.canvas.graph\",\"schema_version\":{GRAPH_SCHEMA_VERSION},\"source_id\":{json_str(source_id)},\"revision\":{json_str(source_revision(src))},\"fmt_fingerprint\":{json_str(source_revision(fmt))},\"source_text\":{json_str(src)},\"node_descriptors\":{catalog_json()},\"graphs\":[{sink.graphs.join(",")}],\"diagnostics\":[],\"facts\":{{\"semindex_schema_version\":{SEMINDEX_SCHEMA_VERSION},\"handles\":[\"definitions\",\"references\",\"calls\",\"effects\",\"members\",\"outputs\",\"state_graphs\",\"assets\",\"components\"],\"effect_projection\":{effect_projection},\"enum_variants\":{enum_catalog_json(enums)},\"pattern_variants\":{pattern_catalog_json(enums)},\"blueprint\":{blueprint},\"reasoning\":{reasoning}}}}}"
-    Projection{json: json, inline_exprs: sink.inline_exprs, graph_anchors: sink.anchors, node_refs: sink.node_refs, callable_exports: callable_exports, game_facts: game_facts}
-}
-
 // The module of `modules` the name ledger numbers `name_index`.
 canvas_module_at_name_index: fn(modules: [JetDriverDocModule], name_index: Int) -> JetDriverDocModule? {
     loop doc_module in modules {
@@ -271,106 +140,6 @@ canvas_callable_callee: fn(ledger: NameLedger, entry_index: Int, declaration: Na
         }
     }
     "{prefix_alias}.{source_path}"
-}
-
-// The program's enums, the first declaration of each name only.
-collect_enums: fn(items: [Item], enums: &[EnumDef]) {
-    loop item in items {
-        if item == {
-            .Enum(definition) -> {
-                known := false
-                loop seen in enums {
-                    if seen.name == definition.name -> known = true
-                }
-                if !known -> enums.push(definition)
-            }
-            .CodeModule(module_value) -> {
-                if module_value.body == .Val(body) -> collect_enums(body, enums)
-            }
-            else -> {}
-        }
-    }
-}
-
-// Each enum's payload-free variants, keyed by enum name.
-enum_catalog_json: fn(enums: [EnumDef]) -> String {
-    entries: loop definition in enums -> {
-        variants := [String]{}
-        loop variant in definition.variants {
-            if variant.payload == .Unit {
-                variants.push("{{\"name\":{json_str(variant.name)},\"source\":{json_str("{definition.name}.{variant.name}")}}}")
-            }
-        }
-        "{json_str(definition.name)}:[{variants.join(",")}]"
-    }
-    "{{{entries.join(",")}}}"
-}
-
-// Each enum's variants with their payload arity, keyed by enum name.
-pattern_catalog_json: fn(enums: [EnumDef]) -> String {
-    entries: loop definition in enums -> {
-        variants: loop variant in definition.variants -> {
-            arity: if variant.payload == {
-                .Unit -> 0
-                .Single(_, _) -> 1
-                .Named(fields) -> fields.len()
-            }
-            "{{\"name\":{json_str(variant.name)},\"arity\":{arity}}}"
-        }
-        "{json_str(definition.name)}:[{variants.join(",")}]"
-    }
-    "{{{entries.join(",")}}}"
-}
-
-collect_item_graphs: fn(sink: &CanvasGraphSink, index: SemIndex, entry_src: String, doc_module: JetDriverDocModule, is_entry: Bool, items: [Item], owner: String?) {
-    loop item in items {
-        if item == {
-            .Func(function) -> {
-                ledger_name: if owner == .Val(name) -> "{name}.{function.name}" else -> function.name
-                collect_function_graph(sink, index, entry_src, doc_module, is_entry, function, ledger_name)
-            }
-            .Struct(structure) -> {
-                loop method in structure.methods {
-                    collect_function_graph(sink, index, entry_src, doc_module, is_entry, method, "{structure.name}.{method.name}")
-                }
-            }
-            .Impl(implementation) -> {
-                loop method in implementation.methods {
-                    collect_function_graph(sink, index, entry_src, doc_module, is_entry, method, "{implementation.type_name}.{method.name}")
-                }
-            }
-            .CodeModule(module_value) -> {
-                if module_value.body == .Val(body) {
-                    collect_item_graphs(sink, index, entry_src, doc_module, is_entry, body, Val(module_value.name))
-                }
-            }
-            else -> {}
-        }
-    }
-}
-
-collect_function_graph: fn(sink: &CanvasGraphSink, index: SemIndex, entry_src: String, doc_module: JetDriverDocModule, is_entry: Bool, function: Func, ledger_name: String) {
-    graph: project_func(index, doc_module.path, doc_module.source, function)
-    loop inline in graph.inline_exprs {
-        sink.inline_exprs.push(InlineExpr{id: inline.id, span: inline.span})
-    }
-    if is_entry {
-        sink.anchors.push(GraphEditAnchor{graph_id: graph.graph_id, insert_offset: insert_offset(entry_src, function), fallible: function_is_fallible(function)})
-    }
-    collect_node_refs(graph, sink.node_refs)
-    sink.graphs.push(graph_to_json(graph, function, doc_module.source, canvas_function_visibility(doc_module, ledger_name)))
-}
-
-// `private`, `package` or `public`, as the module's name ledger declares it.
-canvas_function_visibility: fn(doc_module: JetDriverDocModule, name: String) -> String {
-    storage: doc_module.name_ledger ?? return "private"
-    permit: storage.guard_read()
-    ledger_function_visibility(permit.value, doc_module.name_module_index, name)
-}
-
-function_is_fallible: fn(f: Func) -> Bool {
-    ty: f.return_type ?? return false
-    if ty == .Result(_, _) -> true else -> false
 }
 
 canvas_blueprint_facts_json: fn(path: String, src: String, modules: [JetDriverDocModule], index: SemIndex, runtime_events: String?, game_facts: [CanvasGameFact]) -> String {
@@ -861,55 +630,4 @@ task_flow_facts: fn(src: String) -> [String] {
         }
     }
     facts
-}
-
-project_func: fn(index: SemIndex, module_display: String, module_src: String, f: Func) -> GraphBuilder {
-    id: graph_id(module_display, f)
-    g := GraphBuilder{graph_id: id}
-    entry_id: "{id}:entry"
-    entry_descriptor: descriptor_for_id("entry")
-    g.nodes.push(
-        NodeRec{
-            id: entry_id,
-            kind: entry_descriptor.kind,
-            archetype: entry_descriptor.archetype,
-            title: f.name,
-            span: f.name_span,
-            x: 40,
-            y: 40,
-            badges: effect_badges(index, f.name),
-            affordances: [String]{"source_jump", "insert_call", "rename_function", "edit_function_signature", "create_function"},
-            meta_json: meta_attr_json(f.meta),
-        },
-    )
-    loop param in f.params {
-        pin_id: "{entry_id}:out:{param.name}"
-        ty: type_name(param.ty)
-        g.local_pins[param.name] = pin_id
-        g.local_types[param.name] = ty
-        g.pins.push(PinRec{id: pin_id, node_id: entry_id, name: param.name, direction: "output", ty: ty, role: None, pattern_source: None, ability: access_sigil(param.convention), fallible: false, effect_grant_need: None, span: param.name_span, pattern_source_span: None, append_op: None, element_index: None})
-    }
-    loop definition in index.definitions {
-        found: definition.def
-        if found.kind == {
-            .Local(_, ty) -> {
-                if ty == .Val(written) -> g.local_types[found.name] = type_name(written)
-            }
-            .Param(ty) -> g.local_types[found.name] = type_name(ty)
-            else -> {}
-        }
-    }
-    project_stmt_block(g, index, module_src, f.body, 0, 220, 170)
-    add_source_comment_regions(g, module_src, f)
-    add_execution_overlay(g, module_src, f.body)
-    g
-}
-
-collect_node_refs: fn(graph: GraphBuilder, out: &[NodeQueryRef]) {
-    loop node in graph.nodes {
-        out.push(NodeQueryRef{graph_id: graph.graph_id, node_id: node.id, kind: node.kind, title: node.title, span: node.span})
-    }
-    loop inline in graph.inline_exprs {
-        out.push(NodeQueryRef{graph_id: graph.graph_id, node_id: inline.node_id, kind: "inline:{inline.role}", title: inline.source, span: inline.span})
-    }
 }

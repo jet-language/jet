@@ -1,0 +1,291 @@
+// `jet dev <file> --canvas`: the checked entry served to the Canvas IDE
+// (JetCanvas Host/CanvasHost.jet) instead of run. The session listens on
+// `--canvas-host` (127.0.0.1) and `--canvas-port` (0: the listener picks
+// one), prints `Canvas: <url>` with the session secret on stdout, opens that
+// URL in a browser, and checks and projects the entry again on every change
+// to the package's sources. A failed check keeps the last good graph and puts
+// the session in its error state. The dev loop also applies the source
+// transactions the page posts, one at a time: each candidate text is checked
+// before it replaces the entry. The session ends only when its server stops,
+// or with the process on Ctrl-C.
+use {
+    cli_files: core.files
+    cli_process: core.process
+    cli_server: core.http.server
+    cli_sys: core.sys
+    cli_term: core.term
+    cli_time: core.time
+    jet_canvas.[
+        CanvasEdit,
+        CanvasHostEdit,
+        CanvasHostState,
+        CanvasProjectFile,
+        canvas_graph_projection,
+        canvas_host_bound,
+        canvas_host_edit_accept,
+        canvas_host_edit_admit,
+        canvas_host_edit_refuse,
+        canvas_host_edit_refuse_check,
+        canvas_host_edit_write,
+        canvas_host_mux,
+        canvas_host_new,
+        canvas_host_publish_failure,
+        canvas_host_publish_graph,
+        canvas_host_publish_project,
+        canvas_host_tick,
+        canvas_host_url,
+        canvas_host_url_host,
+        source_revision,
+    ]
+    jet_driver.[
+        JetDriverAuthorizedSourceSnapshot,
+        JetDriverCompileMode,
+        JetDriverCompileResult,
+        JetDriverVerbOutput,
+        JET_DRIVER_EXIT_USAGE,
+        JET_DRIVER_EXIT_USER_ERROR,
+        jet_driver_present_diagnostics,
+    ]
+    jet_foundation.[diagnostic_render_all]
+}
+
+// The dev loop checks the sources for a change every this many clock ticks.
+JET_CLI_CANVAS_STAMP_TICKS: 3
+
+// The plan of `jet dev <file> --canvas`: its own flags, the project
+// environment boundary, then the entry check `jet dev` makes. A refused check
+// (a missing file among them) is the plan, and no Canvas starts.
+jet_cli_dev_canvas_plan: fn(jet_argv: [String], args: [String], color: Bool, quiet: Bool, threads: Int?) -[FS, Env, Exec]> JetCLIPlan Never! {
+    loop argument in jet_argv {
+        if argument == "--" -> break
+        if !argument.starts_with("-") || argument == "-" -> next
+        head: argument.partition("=").head
+        if head == "--canvas" || head == "--canvas-host" || head == "--canvas-port" || jet_cli_run_control(head, "dev") -> next
+        if !jet_cli_is_known_flag(head) -> return jet_cli_unknown_flag(head, "dev", color)
+        return jet_cli_not_ported("dev {head}", color)
+    }
+    host: jet_cli_option_value(jet_argv, "--canvas-host") ?? "127.0.0.1"
+    if host == "" || host.starts_with("-") {
+        return jet_cli_fail("E2104", "`--canvas-host` needs a host name or address", jet_cli_why("E2104"), "write `--canvas-host=127.0.0.1`, or leave it out to listen on loopback", color, JET_DRIVER_EXIT_USAGE)
+    }
+    port: jet_cli_dev_canvas_port(jet_argv) ?? return jet_cli_fail("E2104", "`--canvas-port` needs a TCP port number from 0 to 65535", jet_cli_why("E2104"), "write `--canvas-port=8080`, or leave it out to let the Canvas listener choose a port", color, JET_DRIVER_EXIT_USAGE)
+    target: if args.len() > 1 -> args[1] else -> "."
+    if jet_cli_env_boundary_refusal(target, jet_argv, color) == .Val(refusal) -> return refusal
+    entry: jet_cli_check(jet_argv, args, "dev", color, quiet, threads, false)
+    if entry == .Check(file, source, _, _, _, _, notice, _, _, _, _, _, _) -> return JetCLIPlan.DevCanvas{file: file, source: source, color: color, host: host, port: port, notice: notice}
+    entry
+}
+
+// `--canvas-port`: 0 when absent, None when it is not a TCP port number.
+jet_cli_dev_canvas_port: fn(jet_argv: [String]) -> Int? Never! {
+    word: jet_cli_option_value(jet_argv, "--canvas-port") ?? return Val(0)
+    port: Int.parse(word) ?? return None
+    if port < 0 || port > 65535 || "{port}" != word -> return None
+    Val(port)
+}
+
+// `--canvas-host` or `--canvas-port` on a `jet dev` without `--canvas`: a
+// listener flag with no Canvas to listen for is refused, never ignored.
+jet_cli_dev_canvas_flag_alone: fn(jet_argv: [String], color: Bool) -> JetCLIPlan? Never! {
+    loop argument in jet_argv {
+        if argument == "--" -> break
+        head: argument.partition("=").head
+        if head != "--canvas-host" && head != "--canvas-port" -> next
+        return Val(jet_cli_fail("E2102", "`{head}` is only valid with `jet dev --canvas`", jet_cli_why("E2102"), "add `--canvas`: `jet dev <file.jet> --canvas {argument}`", color, JET_DRIVER_EXIT_USAGE))
+    }
+    None
+}
+
+// The Canvas session of `jet dev <file> --canvas`: the first check and
+// projection, the listener, then the dev clock (an 80 ms tick that ages the
+// session's clients and applies the transactions taken since the last tick)
+// and the change watch until the server stops.
+jet_cli_dev_canvas_loop: fn(file: String, color: Bool, host: String, port: Int) -> JetDriverVerbOutput {
+    parent: jet_cli_parent(file) ?? "."
+    root: jet_cli_manifest_root(parent) ?? parent
+    source_id: jet_cli_dev_canvas_source_id(root, file)
+    fix: "pass a free port with `--canvas-port=N`, or leave `--canvas-port` out to let the Canvas listener choose one"
+    state: canvas_host_new(file, source_id, host) ?? return JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2105", err.message, jet_cli_why("E2105"), "run `jet dev {file} --canvas` again", color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
+    stamp := jet_cli_dev_stamp(root, [String]{})
+    jet_cli_dev_canvas_project(state, file, source_id)
+    listen: "{canvas_host_url_host(host)}:{port}"
+    { sender: edits, receiver: taken }: channel<CanvasHostEdit>()
+    bound: cli_server.bind(listen, canvas_host_mux(state, edits)) ?? return JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2105", "couldn't listen for Canvas on {listen}: {err}", jet_cli_why("E2105"), fix, color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
+    address: bound.local_addr() ?? listen
+    parts: address.split(":").to_list()
+    canvas_host_bound(state, Int.parse(parts[parts.len() - 1]) ?? port)
+    url: canvas_host_url(state)
+    cli_term.print("Canvas: {url}")
+    if jet_cli_dev_canvas_open_browser(url) == .Val(failure) {
+        cli_term.eprint(jet_cli_report("E2105", "Canvas browser launch failed: {failure}", jet_cli_why("E2105"), "open `{url}` in a browser, or set JET_CANVAS_BROWSER to a browser command", color))
+        cli_term.eprint("Canvas: {url}")
+    }
+    stop: Shared{JetCLIDevWebState{stopped: None}}
+    task.group dev_canvas {
+        serving: task {
+            if bound.serve() == {
+                .Ok(_) -> jet_cli_dev_web_stop(stop, "the Canvas server shut down")
+                .Err(error) -> jet_cli_dev_web_stop(stop, "{error}")
+            }
+        }
+        cli_term.eprint("jet dev: watching {root} (Ctrl-C to stop)")
+        ticks := 0
+        loop jet_cli_dev_web_stopped(stop) == None {
+            cli_time.sleep(80ms)
+            canvas_host_tick(state)
+            // A transaction's own write is not a change to check again.
+            loop {
+                edit: taken.try_receive() ?? break
+                if jet_cli_dev_canvas_transact(state, file, source_id, edit) -> stamp = jet_cli_dev_stamp(root, [String]{})
+            }
+            ticks += 1
+            if ticks % JET_CLI_CANVAS_STAMP_TICKS != 0 -> next
+            now: jet_cli_dev_stamp(root, [String]{})
+            if now == stamp -> next
+            stamp = now
+            cli_term.eprint("jet dev: change detected, checking again")
+            jet_cli_dev_canvas_project(state, file, source_id)
+        }
+        serving.join().drop("the Canvas server's stop is reported from its state")
+    }
+    reason: jet_cli_dev_web_stopped(stop) ?? "the Canvas server stopped"
+    JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2105", "the Canvas on http://{address}/ stopped: {reason}", jet_cli_why("E2105"), fix, color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
+}
+
+// Open the Canvas page in a browser: `JET_CANVAS_BROWSER`, else `BROWSER`,
+// else the platform's opener, given the URL as its one argument. The browser
+// runs on its own; a launch that fails answers why, and the session serves
+// on.
+jet_cli_dev_canvas_open_browser: fn(url: String) -[Env, Exec]> String? Never! {
+    if cli_process.cmd([String]{jet_cli_dev_canvas_browser(), url.copy()}).detached().spawn() == { // copy: the argv owns its words
+        .Ok(_) -> None
+        .Err(error) -> Val("{error}")
+    }
+}
+
+jet_cli_dev_canvas_browser: fn() -[Env]> String Never! {
+    if cli_sys.get("JET_CANVAS_BROWSER") == .Val(explicit) && explicit != "" -> return explicit
+    if cli_sys.get("BROWSER") == .Val(preferred) && preferred != "" -> return preferred
+    os: cli_sys.name()
+    if os == "macos" -> return "open"
+    if os == "windows" -> return "explorer.exe"
+    "xdg-open"
+}
+
+// The entry's path from the project root, the id Canvas names its source by.
+jet_cli_dev_canvas_source_id: fn(root: String, file: String) -[FS]> String Never! {
+    full: cli_files.realpath(file) ?? file
+    base: cli_files.realpath(root) ?? root
+    if full.starts_with("{base}/") -> return full.slice(base.len() + 1, full.len())
+    file.copy() // copy: an entry outside the project root is named by its own path
+}
+
+// Check the entry as `jet inspect semindex` does (Doc mode) and publish its
+// graph, or the failed check. A refused compile (the entry or its package
+// cannot be read) carries its rendered report, and the status names E2105.
+jet_cli_dev_canvas_project: fn(state: Shared<CanvasHostState>, file: String, source_id: String) {
+    watch: cli_time.start()
+    src: cli_files.read(file) ?? ""
+    revision: source_revision(src)
+    compiled: jet_cli_compile_file(file, false, None, JetDriverCompileMode.Doc)
+    if compiled == {
+        .Refused(refusal) -> canvas_host_publish_failure(state, revision, "E2105", refusal.stderr, watch.elapsed_millis())
+        .Compiled(result, snapshot) -> {
+            jet_cli_dev_canvas_publish_project(state, snapshot)
+            jet_cli_dev_canvas_publish(state, file, source_id, src, revision, result, snapshot, watch.elapsed_millis())
+        }
+    }
+}
+
+jet_cli_dev_canvas_publish: fn(state: Shared<CanvasHostState>, file: String, source_id: String, src: String, revision: String, result: JetDriverCompileResult, snapshot: JetDriverAuthorizedSourceSnapshot, checked_ms: Int) {
+    errors: jet_cli_errors(result.diagnostics)
+    if errors.len() > 0 {
+        diagnostics: jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
+        canvas_host_publish_failure(state, revision, errors[0].code, diagnostic_render_all(file, src, diagnostics, false), checked_ms)
+        return
+    }
+    if result.internal_problem == .Val(problem) {
+        canvas_host_publish_failure(state, revision, "E2105", "the Jet compiler stopped on `{file}`: {problem}", checked_ms)
+        return
+    }
+    projection: canvas_graph_projection(source_id, src, result.doc_modules, result.entry_module_identity, jet_cli_checked_semindex(result))
+    canvas_host_publish_graph(state, revision, projection.json, checked_ms)
+}
+
+// The project document of the entry's source root: every source the compile
+// read there, and the root's lock when it has one.
+jet_cli_dev_canvas_publish_project: fn(state: Shared<CanvasHostState>, snapshot: JetDriverAuthorizedSourceSnapshot) {
+    found := -1
+    loop index in 0..<snapshot.roots.len() {
+        if snapshot.roots[index].identity == snapshot.entry_root_identity {
+            found = index
+            break
+        }
+    }
+    if found < 0 -> return
+    root: snapshot.roots[found]
+    files := [CanvasProjectFile]{}
+    loop file in root.files {
+        kind: if file.relative_path == {
+            "package.jet" | "pkg.jet" -> "package"
+            "workspace.jet" -> "workspace"
+            "env.jet" -> "env"
+            else -> "source"
+        }
+        files.push(CanvasProjectFile{path: file.relative_path.copy(), revision: source_revision(file.source), kind: kind}) // copy: the document keeps its own path
+    }
+    if cli_files.read("{root.canonical_path}/.jet/lock") == .Ok(lock) -> files.push(CanvasProjectFile{path: ".jet/lock", revision: source_revision(lock), kind: "lock"})
+    prefix: "{root.canonical_path}/"
+    entry: if snapshot.entry_path.starts_with(prefix) -> snapshot.entry_path.slice(prefix.len(), snapshot.entry_path.len()) else -> snapshot.entry_path.copy() // copy: an entry outside its root is named by its own path
+    canvas_host_publish_project(state, root.canonical_path, entry, files)
+}
+
+// Apply one Canvas source transaction: the host's own checks, the formatter
+// (unless the transaction restores an undo), then the same Doc-mode check
+// the dev loop projects with, over the candidate text in place of the entry.
+// A clean candidate replaces the entry when it is still the text the
+// transaction was made against, and the graph is projected again before the
+// transaction is answered. The answer is whether the entry was written.
+jet_cli_dev_canvas_transact: fn(state: Shared<CanvasHostState>, file: String, source_id: String, taken: CanvasHostEdit) -> Bool {
+    if canvas_host_edit_admit(state, taken) == {
+        .Answered -> false
+        .Admitted(edit, text) -> jet_cli_dev_canvas_apply(state, file, source_id, edit, text)
+    }
+}
+
+jet_cli_dev_canvas_apply: fn(state: Shared<CanvasHostState>, file: String, source_id: String, edit: CanvasEdit, text: &&String) -> Bool {
+    candidate := text
+    if edit.format {
+        formatted: jet_cli_fmt_ordinary(candidate, false, false)
+        if !formatted.ok {
+            canvas_host_edit_refuse_check(state, edit, candidate, diagnostic_render_all(file, candidate, formatted.diagnostics, false), jet_cli_reports_json(None, file, candidate, formatted.diagnostics))
+            return false
+        }
+        candidate = formatted.text.move()
+    }
+    changed: candidate != edit.before
+    if changed {
+        overlay: candidate.copy() // copy: the check reads the candidate in place of the entry, and the write needs it after
+        if jet_cli_compile_entry(file, false, None, JetDriverCompileMode.Doc, Val(overlay), None) == {
+            .Refused(refusal) -> {
+                canvas_host_edit_refuse(state, edit, "check", refusal.stderr)
+                return false
+            }
+            .Compiled(result, snapshot) -> {
+                if jet_cli_errors(result.diagnostics).len() > 0 {
+                    diagnostics: jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
+                    canvas_host_edit_refuse_check(state, edit, candidate, diagnostic_render_all(file, candidate, diagnostics, false), jet_cli_reports_json(None, file, candidate, diagnostics))
+                    return false
+                }
+                if result.internal_problem == .Val(problem) {
+                    canvas_host_edit_refuse(state, edit, "check", "the Jet compiler stopped on `{file}`: {problem}")
+                    return false
+                }
+            }
+        }
+        if !canvas_host_edit_write(state, edit, candidate) -> return false
+        jet_cli_dev_canvas_project(state, file, source_id)
+    }
+    canvas_host_edit_accept(state, edit, candidate)
+    changed
+}

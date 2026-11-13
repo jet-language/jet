@@ -1,24 +1,13 @@
+// The response bodies of Canvas edits, previews, actions, queries, and
+// project transactions.
 use {
+    jet_canvas.[NodeQueryRef, Projection, QUERY_SCHEMA_VERSION, is_space_byte, json_bool, json_str, line_start, query_error, source_revision, span_json]
     jet_foundation.[
-        BinOp,
-        Binding,
-        DIAGNOSTIC_LINT,
-        Diagnostic,
-        Expr,
-        Func,
-        LValue,
-        Span,
-        TextEdit,
-        diagnostic_render_all,
-        diagnostic_source_column,
-        diagnostic_source_line,
-        diagnostic_source_position,
+        DIAGNOSTIC_LINT, Diagnostic, Span, TextEdit, diagnostic_render_all, diagnostic_source_column, diagnostic_source_line, diagnostic_source_position,
         diagnostic_source_texts,
-        type_name,
     ]
     jet_lsp.[LSPChecker]
-    jet_parser.[jfmt_bin_op_spell, jfmt_stmt_span]
-    jet_semindex.[CallableSignatureFact, SemIndex, SourceSpan]
+    jet_semindex.[SemIndex]
 }
 
 // A projection and the semantic index of one file, opened together.
@@ -27,72 +16,22 @@ QueryContext: struct {
     index: SemIndex
 }
 
-graph_id: fn(module_display: String, f: Func) -> String Never! {
-    file: if module_display.cut_last("/") == .Val(parts) -> parts.after else -> module_display
-    "fn:{file}.{f.name}@{f.name_span.start}-{f.name_span.end}"
-}
-
-span_through_closing_parens: fn(src: String, span: Span) -> SourceSpan Never! {
-    if span.start < 0 || span.end > src.len() || span.start > span.end {
-        return SourceSpan{start: span.start, end: span.end}
-    }
-    bytes: src.bytes()
-    opens := 0
-    closes := 0
-    loop i in span.start..<span.end {
-        if bytes[i] == 40 -> opens += 1
-        if bytes[i] == 41 -> closes += 1
-    }
-    end := span.end
-    loop closes < opens && end < bytes.len() && bytes[end] == 41 {
-        end += 1
-        closes += 1
-    }
-    SourceSpan{start: span.start, end: end}
-}
-
-graph_id_name_span: fn(graph_id: String) -> SourceSpan? Never! {
+graph_id_name_span: fn(graph_id: String) -> Span? Never! {
     range: graph_id.cut_last("@") ?? return None
     parts: range.after.split_once("-") ?? return None
     start: parts.before.to_int() ?? return None
     end: parts.after.to_int() ?? return None
-    Val(SourceSpan{start: start, end: end})
+    Val(Span{start: start, end: end})
 }
 
-function_signature_span: fn(src: String, name_span: SourceSpan) -> SourceSpan String! {
+function_signature_span: fn(src: String, name_span: Span) -> Span String! {
     start: line_start(src, name_span.start)
     from: if name_span.end < src.len() -> name_span.end else -> src.len()
     brace_rel: src.slice(from, src.len()).index_of("{{") ?? return Err(edit_error("not_found", "Canvas function signature no longer has a body"))
     bytes: src.bytes()
     end := from + brace_rel
     loop end > start && is_space_byte(Int.from_u8(bytes[end - 1])) -> end -= 1
-    Ok(SourceSpan{start: start, end: end})
-}
-
-is_space_byte: fn(byte: Int) -> Bool Never! {
-    byte == 32 || byte == 9 || byte == 10 || byte == 13 || byte == 12
-}
-
-insert_offset: fn(src: String, f: Func) -> Int Never! {
-    if f.body.len() > 0 {
-        first_start: jfmt_stmt_span(f.body[0]).start
-        line: line_start(src, first_start)
-        if src.slice(line, first_start).contains("{{") -> return first_start
-        return line
-    }
-    line_after(src, f.name_span.end)
-}
-
-line_start: fn(src: String, offset: Int) -> Int Never! {
-    limit: if offset < src.len() -> offset else -> src.len()
-    if src.slice(0, limit).last_index_of("\n") == .Val(i) -> return i + 1
-    0
-}
-
-line_after: fn(src: String, offset: Int) -> Int Never! {
-    from: if offset < src.len() -> offset else -> src.len()
-    if src.slice(from, src.len()).index_of("\n") == .Val(i) -> return from + i + 1
-    src.len()
+    Ok(Span{start: start, end: end})
 }
 
 indentation_at: fn(src: String, offset: Int) -> String Never! {
@@ -104,201 +43,29 @@ indentation_at: fn(src: String, offset: Int) -> String Never! {
     src.slice(start, end)
 }
 
-assignment_title: fn(target: LValue, op: BinOp?) -> String Never! {
-    op_text: if op == .Val(value) -> "{jfmt_bin_op_spell(value)}=" else -> "="
-    if target == {
-        .Local(name, _) -> "{name} {op_text}"
-        .Index(_, _, _, _) -> "index {op_text}"
-        .Field(_, field, _) -> ".{field} {op_text}"
+edit: fn(span: Span, text: String) -> TextEdit Never! {
+    TextEdit{span: span, new_text: text}
+}
+
+spans_overlap: fn(a: Span, b: Span) -> Bool Never! {
+    a.start <= b.end && b.start <= a.end
+}
+
+text_matches: fn(src: String, needle: String) -> [Span] Never! {
+    out := [Span]{}
+    if needle.is_empty() -> return out
+    hay: src.to_ascii_lower()
+    lower_needle: needle.to_ascii_lower()
+    offset := 0
+    loop offset <= hay.len() {
+        pos: hay.slice(offset, hay.len()).index_of(lower_needle) ?? break
+        start: offset + pos
+        end: start + lower_needle.len()
+        out.push(Span{start: start, end: end})
+        offset = end
     }
+    out
 }
-
-lvalue_type: fn(g: GraphBuilder, target: LValue) -> String Never! {
-    if target == .Local(name, _) && g.local_types.has_key(name) -> return g.local_types[name]
-    "unknown"
-}
-
-expr_title: fn(expr: Expr) -> String Never! {
-    if expr == {
-        .StructLit(_, _, _, _, _, _, _, _) -> "construct"
-        .EnumLit(_, _, _, _, _, _, _) -> "variant"
-        .Lambda(_, _) -> "lambda"
-        .If(_, _, _, _, _, _, _) -> "if expression"
-        .ListLit(_, _, _) -> "list"
-        .MapLit(_, _, _) -> "map"
-        .TupleLit(_, _, _, _) -> "tuple"
-        .Index(_, _, _, _, _) -> "index"
-        .Slice(_, _, _, _, _, _) -> "slice"
-        .CallValue(_, _, _, _) -> "call value"
-        .Deref(_, _, _) -> "unsafe expr"
-        .RawOf(_, _, _) -> "unsafe expr"
-        .PtrFromAddr(_, _, _, _, _, _) -> "unsafe expr"
-        .OrFallback(_, _, _, _, _) -> "fallback"
-        .PatternTest(_, _, _, _) -> "pattern test"
-        .Try(_, _, _, _, _) -> "fallible"
-        .Pipe(_, _, _, _) -> "pipe"
-        else -> "expression"
-    }
-}
-
-starts_uppercase: fn(s: String) -> Bool Never! {
-    bytes: s.bytes()
-    bytes.len() > 0 && bytes[0] >= 65 && bytes[0] <= 90
-}
-
-binding_type: fn(g: GraphBuilder, name: String, b: Binding) -> String Never! {
-    if b.ty == .Val(ty) -> return type_name(ty)
-    if g.local_types.has_key(name) -> return g.local_types[name]
-    "unknown"
-}
-
-expr_type: fn(g: GraphBuilder, index: SemIndex, expr: Expr) -> String Never! {
-    if expr == {
-        .Int(_, _, _, _, _) -> "Int"
-        .Float(_, _, is_f32, _, _) -> if is_f32 -> "F32" else -> "Float"
-        .Bool(_, _, _) -> "Bool"
-        .Str(_, _, _) -> "String"
-        .Char(_, _, _) -> "Char"
-        .Ident(name, _, _) -> ident_type(g, index, name)
-        .Binary(op, left, _, _, _) -> if op_is_bool(op) -> "Bool" else -> expr_type(g, index, left)
-        .Call(call, _) -> call_ret(index, call.name) ?? "unknown"
-        .Try(inner, _, _, _, _) -> expr_type(g, index, inner).remove_suffix("?")
-        else -> "unknown"
-    }
-}
-
-ident_type: fn(g: GraphBuilder, index: SemIndex, name: String) -> String Never! {
-    if g.local_types.has_key(name) -> return g.local_types[name]
-    loop definition in index.definitions() {
-        if definition.name != name -> next
-        if definition.kind == .Function(params, _, ret) {
-            param_text: loop param in params -> param.ty
-            ret_text: if ret == .Val(value) -> " {value}" else -> ""
-            return "fn({param_text.join(", ")}){ret_text}"
-        }
-    }
-    "unknown"
-}
-
-op_is_bool: fn(op: BinOp) -> Bool Never! {
-    if op == {
-        .Eq -> true
-        .Ne -> true
-        .Lt -> true
-        .Le -> true
-        .Gt -> true
-        .Ge -> true
-        .And -> true
-        .Or -> true
-        else -> false
-    }
-}
-
-call_ret: fn(index: SemIndex, name: String) -> String? Never! {
-    loop definition in index.definitions() {
-        if definition.name == name && definition.kind == .Function(_, _, ret) && ret == .Val(value) {
-            return Val(value)
-        }
-    }
-    None
-}
-
-callable_signature_for_name: fn(index: SemIndex, function: String) -> CallableSignatureFact? Never! {
-    loop definition in index.definitions() {
-        if definition.name == function && definition.kind == .Function(_, _, _) {
-            return definition.callable_signature
-        }
-    }
-    None
-}
-
-effect_badges: fn(index: SemIndex, function: String) -> [String] Never! {
-    if callable_signature_for_name(index, function) == .Val(signature) {
-        if signature.effects == {
-            .Checked(effects) -> return if effects.len() == 0 -> [String]{} else -> [String]{"effects"}
-            .Unavailable(_) -> return [String]{"effects_unavailable"}
-        }
-    }
-    if index.effect_of(function) == .Val(facts) {
-        loop fact in facts {
-            if fact.direct.len() > 0 || fact.inferred.len() > 0 -> return [String]{"effects"}
-        }
-        return [String]{}
-    }
-    [String]{"effects_unavailable"}
-}
-
-call_has_effects: fn(index: SemIndex, function: String) -> Bool Never! {
-    if callable_signature_for_name(index, function) == .Val(signature) {
-        if signature.effects == {
-            .Checked(effects) -> return effects.len() > 0
-            .Unavailable(_) -> return true
-        }
-    }
-    facts: index.effect_of(function) ?? return true
-    loop fact in facts {
-        if fact.direct.len() > 0 || fact.inferred.len() > 0 -> return true
-    }
-    false
-}
-
-pure_leaf: fn(expr: Expr) -> Bool Never! {
-    if expr == {
-        .Str(_, _, _) -> true
-        .Int(_, _, _, _, _) -> true
-        .Float(_, _, _, _, _) -> true
-        .Bool(_, _, _) -> true
-        .Char(_, _, _) -> true
-        .Ident(_, _, _) -> true
-        .Field(_, _, _, _) -> true
-        .OptField(_, _, _, _, _, _) -> true
-        .Absent(_, _) -> true
-        .Todo(_, _, _) -> true
-        .Unary(_, inner, _, _) -> pure_leaf(inner)
-        .Paren(inner, _, _) -> pure_leaf(inner)
-        .Copy(inner, _, _) -> pure_leaf(inner)
-        .Binary(_, left, right, _, _) -> pure_leaf(left) && pure_leaf(right)
-        .CompareChain(operands, _, _, _, _) -> {
-            loop operand in operands {
-                if !pure_leaf(operand) -> return false
-            }
-            true
-        }
-        .MapLit(entries, _, _) -> {
-            loop entry in entries {
-                if !pure_leaf(entry.key) || !pure_leaf(entry.value) -> return false
-            }
-            true
-        }
-        .TupleLit(fields, _, _, _) -> {
-            loop field in fields {
-                if !pure_leaf(field.value) -> return false
-            }
-            true
-        }
-        .Ok(inner, _, _) -> pure_leaf(inner)
-        .Err(inner, _, _) -> pure_leaf(inner)
-        .Present(inner, _, _) -> pure_leaf(inner)
-        else -> false
-    }
-}
-
-wire_ident_refs: fn(g: &GraphBuilder, expr: Expr, input_pin: String) {
-    if expr == .Ident(name, span, _) && g.local_pins.has_key(name) {
-        add_wire_with_span(g, g.local_pins[name], input_pin, "data", Val(SourceSpan{start: span.start, end: span.end}))
-    }
-}
-
-snippet: fn(src: String, span: Span) -> String Never! {
-    if span.start < 0 || span.end > src.len() || span.start > span.end -> return ""
-    src.slice(span.start, span.end).trim()
-}
-
-edit: fn(span: SourceSpan, text: String) -> TextEdit Never! {
-    TextEdit{span: Span{start: span.start, end: span.end}, new_text: text}
-}
-
-json_bool: fn(value: Bool) -> String Never! { if value -> "true" else -> "false" }
 
 edit_ok: fn(changed: Bool, path: String) -[FS]> String Never! {
     src: read_source_without_symlinks(path) ?? ""
@@ -322,7 +89,7 @@ query_ok: fn(op: String, src: String, results_json: String, extra_fields: String
     "{{\"protocol\":\"jet.canvas.query\",\"schema_version\":{QUERY_SCHEMA_VERSION},\"ok\":true,\"op\":{json_str(op)},\"revision\":{json_str(source_revision(src))},\"results\":{results_json},{extra_fields} }}"
 }
 
-query_result_json: fn(kind: String, title: String, symbol: String, module_path: String, span: SourceSpan, node: NodeQueryRef?, src: String) -> String Never! {
+query_result_json: fn(kind: String, title: String, symbol: String, module_path: String, span: Span, node: NodeQueryRef?, src: String) -> String Never! {
     graph_id := ""
     node_id := ""
     node_kind := ""
@@ -338,7 +105,7 @@ open_query_context: fn(checker: LSPChecker, path: String, src: String) -> QueryC
     project_file_context(checker, path, None) ?? return Err(query_diagnostics_error(path, src, err.diagnostics))
 }
 
-node_for_span: fn(projection: Projection, span: SourceSpan) -> NodeQueryRef? Never! {
+node_for_span: fn(projection: Projection, span: Span) -> NodeQueryRef? Never! {
     best := NodeQueryRef?{None}
     best_width := 0
     loop node in projection.node_refs {
@@ -369,28 +136,8 @@ nearest_node: fn(projection: Projection, offset: Int) -> NodeQueryRef? Never! {
     best
 }
 
-spans_overlap: fn(a: SourceSpan, b: SourceSpan) -> Bool Never! {
-    a.start <= b.end && b.start <= a.end
-}
-
 contains_ci: fn(text: String, needle: String) -> Bool Never! {
     text.to_ascii_lower().contains(needle.to_ascii_lower())
-}
-
-text_matches: fn(src: String, needle: String) -> [SourceSpan] Never! {
-    out := [SourceSpan]{}
-    if needle.is_empty() -> return out
-    hay: src.to_ascii_lower()
-    lower_needle: needle.to_ascii_lower()
-    offset := 0
-    loop offset <= hay.len() {
-        pos: hay.slice(offset, hay.len()).index_of(lower_needle) ?? break
-        start: offset + pos
-        end: start + lower_needle.len()
-        out.push(SourceSpan{start: start, end: end})
-        offset = end
-    }
-    out
 }
 
 dedupe_results: fn(results: &[String]) {
@@ -448,10 +195,6 @@ edit_conflict: fn(message: String, current_revision: String) -> String Never! {
 
 edit_error_with_diagnostics: fn(kind: String, message: String, path: String, src: String, diags: [Diagnostic]) -> String Never! {
     "{{\"protocol\":\"jet.canvas.edit\",\"schema_version\":{EDIT_SCHEMA_VERSION},\"ok\":false,\"kind\":{json_str(kind)},\"message\":{json_str(message)},\"revision\":{json_str(source_revision(src))},\"diagnostic_revision\":{json_str(source_revision(src))},\"diagnostics\":[{diagnostics_json(path, src, diags)}]}}"
-}
-
-query_error: fn(kind: String, message: String) -> String Never! {
-    "{{\"protocol\":\"jet.canvas.query\",\"schema_version\":{QUERY_SCHEMA_VERSION},\"ok\":false,\"kind\":{json_str(kind)},\"message\":{json_str(message)}}}"
 }
 
 query_error_with_diagnostics: fn(kind: String, message: String, path: String, src: String, diags: [Diagnostic]) -> String Never! {

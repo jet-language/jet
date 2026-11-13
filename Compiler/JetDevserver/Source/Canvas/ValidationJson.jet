@@ -1,37 +1,9 @@
 // Canvas request validation and the small JSON readers Canvas uses on its own
 // request bodies and graph JSON. Every failure is a ready jet.canvas error body.
 use {
-    jet_foundation.[foundation_json_quote]
-    jet_semindex.[SourceSpan]
+    jet_canvas.[CommentHint, canvas_collapse_hints, canvas_comment_hints, json_str, parse_bounds, parse_json_string, query_error]
+    jet_foundation.[Span]
 }
-
-// A JSON string literal decoded from the front of a text, and the bytes it used.
-JsonText: struct {
-    value: String
-    consumed: Int
-}
-
-CanvasBounds: struct {
-    x: Int
-    y: Int
-    w: Int
-    h: Int
-}
-
-json_str: fn(value: String) -> String Never! { foundation_json_quote(value) }
-
-json_strs: fn(values: [String]) -> String Never! {
-    quoted := [String]{}
-    loop value in values -> quoted.push(json_str(value))
-    quoted.join(",")
-}
-
-json_optional_str: fn(value: String?) -> String Never! {
-    if value == .Val(text) -> return json_str(text)
-    "null"
-}
-
-span_json: fn(span: SourceSpan) -> String Never! { "{{\"start\":{span.start},\"end\":{span.end}}}" }
 
 ident_byte: fn(byte: Int, first: Bool) -> Bool Never! {
     (byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122) || byte == 95 || (!first && byte >= 48 && byte <= 57)
@@ -116,20 +88,6 @@ validate_comment_alpha: fn(alpha: String) String! {
     value: alpha.trim().to_float() ?? return Err(edit_error("bad_request", "Canvas comment alpha must be a number"))
     if value < 0.0 || value > 1.0 -> return Err(edit_error("bad_request", "Canvas comment alpha must be between 0 and 1"))
     Ok()
-}
-
-// `x,y,w,h` (optionally parenthesized) as four integers, or None.
-parse_bounds: fn(text: String) -> CanvasBounds? Never! {
-    inner := text.trim()
-    if inner.starts_with("(") -> inner = inner.remove_prefix("(")
-    if inner.ends_with(")") -> inner = inner.remove_suffix(")")
-    numbers := [Int]{}
-    loop part in inner.split(",") {
-        number: part.trim().to_int() ?? return None
-        numbers.push(number)
-    }
-    if numbers.len() != 4 -> return None
-    Val(CanvasBounds{x: numbers[0], y: numbers[1], w: numbers[2], h: numbers[3]})
 }
 
 normalize_bounds: fn(bounds: String) -> String String! {
@@ -282,39 +240,6 @@ replace_ident: fn(expr: String, ident: String, replacement: String) -> String Ne
     out.join("").trim_end()
 }
 
-attr_string: fn(text: String, key: String) -> String? Never! {
-    needle: "{key}="
-    pos: text.index_of(needle) ?? return None
-    rest: text.slice(pos + needle.len(), text.len()).trim_start()
-    if rest.starts_with("\"") {
-        parsed: parse_json_string(rest) ?? return None
-        return Val(parsed.value)
-    }
-    bytes: rest.bytes()
-    end := 0
-    loop end < bytes.len() && !is_space_byte(Int.from_u8(bytes[end])) -> end += 1
-    Val(rest.slice(0, end))
-}
-
-is_space_byte: fn(byte: Int) -> Bool Never! { byte == 32 || byte == 9 || byte == 10 || byte == 13 }
-
-attr_span: fn(text: String, key: String) -> SourceSpan? Never! {
-    raw: attr_string(text, key) ?? return None
-    parts: raw.split_once("..") ?? return None
-    start: parts.before.to_int() ?? return None
-    end: parts.after.to_int() ?? return None
-    Val(SourceSpan{start: start, end: end})
-}
-
-attr_bounds: fn(text: String, key: String) -> CanvasBounds? Never! {
-    needle: "{key}="
-    pos: text.index_of(needle) ?? return None
-    rest: text.slice(pos + needle.len(), text.len()).trim_start()
-    if !rest.starts_with("(") -> return None
-    close: rest.index_of(")") ?? return None
-    parse_bounds(rest.slice(1, close))
-}
-
 required_string: fn(text: String, key: String) -> String String! {
     json_string_field(text, key) ?? return Err(edit_error("bad_request", "missing `{key}`"))
 }
@@ -436,43 +361,12 @@ json_object_bodies: fn(text: String) -> [String] Never! {
     out
 }
 
-wire_span_from_json_chunk: fn(chunk: String, wire_id: String) -> SourceSpan? Never! {
+wire_span_from_json_chunk: fn(chunk: String, wire_id: String) -> Span? Never! {
     id: parse_json_string(chunk.trim_start()) ?? return None
     if id.value != wire_id -> return None
     value: json_field_value(chunk, "source_span") ?? return None
     if value.starts_with("null") -> return None
     start: json_int_field(value, "start") ?? return None
     end: json_int_field(value, "end") ?? return None
-    Val(SourceSpan{start: start, end: end})
-}
-
-// The JSON string literal at the front of `text`, decoded.
-parse_json_string: fn(text: String) -> JsonText? Never! {
-    bytes: text.bytes()
-    if bytes.len() == 0 || Int.from_u8(bytes[0]) != 34 -> return None
-    out := [U8]{}
-    escaped := false
-    loop i in 1..<bytes.len() {
-        byte: Int.from_u8(bytes[i])
-        if escaped {
-            escaped = false
-            if {
-                byte == 110 -> out.push(10)
-                byte == 114 -> out.push(13)
-                byte == 116 -> out.push(9)
-                else -> out.push(bytes[i])
-            }
-            next
-        }
-        if byte == 92 {
-            escaped = true
-            next
-        }
-        if byte == 34 {
-            value: String.from_bytes(out) ?? return None
-            return Val(JsonText{value: value, consumed: i + 1})
-        }
-        out.push(bytes[i])
-    }
-    None
+    Val(Span{start: start, end: end})
 }

@@ -1,0 +1,11 @@
+# `jet dev <file> --canvas` serves its Canvas session: Tools/canvas-test/Run.jet native-serve
+# reads the printed Canvas URL, waits for the ready dev status, and checks the page, session,
+# graph and source routes under the session secret and the 401 refusals of a missing or wrong
+# secret and of a Canvas path the host does not serve.
+requires: os-name:linux
+env: JET_BIN={jet}
+env: JET_SOURCE={root}/Examples/Tooling/CanvasBlueprintDemo.jet
+env: TMPDIR={scratch}
+step: jet run --allow=Env,Exec,FS,IO,Net,Time {root}/Tools/canvas-test/Run.jet -- native-serve
+exit: 0
+stdout: ~ "PASS native jet dev --canvas routes" # the probe's one pass line; the URL, port and secret vary per run

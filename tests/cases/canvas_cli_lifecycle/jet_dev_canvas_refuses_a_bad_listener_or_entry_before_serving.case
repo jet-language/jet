@@ -1,0 +1,28 @@
+# `jet dev <file> --canvas` refuses a `--canvas-port` that is not a TCP port, an empty
+# `--canvas-host`, a Canvas flag it does not have yet, and a missing entry, each before
+# any listener starts, so no `Canvas:` line is printed. A listener flag without `--canvas`
+# is refused too, never ignored.
+env: NO_COLOR=1
+step bad_port: jet dev {root}/Examples/Tooling/CanvasBlueprintDemo.jet --canvas --canvas-port=70000
+exit: 2
+stderr: ~ "E2104" # the registered code
+stderr: ~ "`--canvas-port` needs a TCP port number from 0 to 65535" # the diagnostic names the flag and its range
+stdout: !~ "Canvas:" # no listener started
+step empty_host: jet dev {root}/Examples/Tooling/CanvasBlueprintDemo.jet --canvas --canvas-host=
+exit: 2
+stderr: ~ "`--canvas-host` needs a host name or address" # the diagnostic names the flag
+stdout: !~ "Canvas:" # no listener started
+step transport: jet dev {root}/Examples/Tooling/CanvasBlueprintDemo.jet --canvas --canvas-transport=x
+exit: 2
+stderr: ~ "`jet dev --canvas-transport` is not built yet" # the not-built form is named
+stdout: !~ "Canvas:" # no listener started
+step missing: jet dev missing-canvas-entry.jet --canvas
+exit: 1
+stderr: ~ "E2105" # the registered code
+stderr: ~ "the file `missing-canvas-entry.jet`" # the diagnostic names the file
+stdout: !~ "Canvas:" # no listener started
+step alone: jet dev {root}/Examples/Tooling/CanvasBlueprintDemo.jet --canvas-port=8080
+exit: 2
+stderr: ~ "E2102" # the registered code
+stderr: ~ "`--canvas-port` is only valid with `jet dev --canvas`" # the diagnostic names the flag and the form it needs
+stdout: !~ "Canvas:" # no listener started

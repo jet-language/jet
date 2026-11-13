@@ -1,0 +1,242 @@
+// The data side of a graph: value providers, operator and call nodes, and the
+// wires from them into the pins that read them.
+use {
+    jet_foundation.[Binding, Expr, Span, access_sigil, expr_span]
+    jet_parser.[jfmt_bin_op_spell]
+    jet_semindex.[SemIndex]
+}
+
+// Where an expression node sits: on the execution line of its own statement,
+// or feeding a pin of another node.
+ExprPlacement: enum {
+    Exec
+    Data
+}
+
+connect_expr_to_input: fn(g: &GraphBuilder, index: SemIndex, src: String, expr: Expr, ordinal: Int, role: String, owner_node_id: String, input_pin: String, x: Int, y: Int) {
+    connect_expr_to_input_with_span(g, index, src, expr, expr_span(expr), ordinal, role, owner_node_id, input_pin, x, y)
+}
+
+// Compound-assignment sema gives the binary node the target span; its
+// original right-hand side retains the actual source end.
+expr_source_end: fn(expr: Expr) -> Int {
+    if expr == .Binary(_, left, right, _, _) {
+        left_end: expr_source_end(left)
+        right_end: expr_source_end(right)
+        return if left_end > right_end -> left_end else -> right_end
+    }
+    expr_span(expr).end
+}
+
+// From the binding's name through its initializer and any closing
+// parentheses the initializer leaves open.
+binding_source_span: fn(src: String, binding: Binding) -> Span {
+    bytes: src.bytes()
+    init_end := expr_source_end(binding.init)
+    loop init_end < bytes.len() && is_space_byte(Int.from_u8(bytes[init_end])) -> init_end += 1
+    if init_end < bytes.len() && bytes[init_end] == 40 -> init_end += 1
+    init_span: span_through_closing_parens(src, Span{start: expr_span(binding.init).start, end: init_end})
+    Span{start: binding.name_span.start, end: init_span.end}
+}
+
+binding_init_span: fn(src: String, binding: Binding) -> Span {
+    end: expr_source_end(binding.init)
+    start := if binding.sigil_span == .Val(sigil) -> sigil.end else -> expr_span(binding.init).start
+    bytes: src.bytes()
+    loop start < end && start < bytes.len() && is_space_byte(Int.from_u8(bytes[start])) -> start += 1
+    Span{start: start, end: end}
+}
+
+connect_expr_to_input_with_span: fn(g: &GraphBuilder, index: SemIndex, src: String, expr: Expr, inline_span: Span, ordinal: Int, role: String, owner_node_id: String, input_pin: String, x: Int, y: Int) {
+    provider_y: data_provider_y(y, ordinal)
+    if project_value_node(g, index, src, expr, ordinal, role, x, provider_y) == .Val(out) {
+        add_inline(g, owner_node_id, ordinal, role, src, inline_span)
+        add_wire_with_span(g, out, input_pin, "data", Val(expr_span(expr)))
+        return
+    }
+    if pure_leaf(expr) && !is_binary(expr) {
+        add_inline(g, owner_node_id, ordinal, role, src, inline_span)
+        wire_ident_refs(g, expr, input_pin)
+        return
+    }
+    out: project_expr_node(g, index, src, expr, ordinal, x, provider_y, ExprPlacement.Data) ?? return
+    if details_composite_expr(expr) -> add_inline(g, owner_node_id, ordinal, role, src, inline_span)
+    add_wire_with_span(g, out, input_pin, "data", Val(expr_span(expr)))
+}
+
+is_binary: fn(expr: Expr) -> Bool Never! {
+    if expr == .Binary(_, _, _, _, _) -> return true
+    false
+}
+
+// Composite values, enum variants, and variant-style method calls keep an
+// inline editor beside their wire.
+details_composite_expr: fn(expr: Expr) -> Bool Never! {
+    if expr == {
+        .ListLit(_, _, _) | .MapLit(_, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .TupleLit(_, _, _, _) -> true
+        .Present(_, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .EnumLit(_, _, _, _, _, _, _) -> true
+        .MethodCall(_, method, _, _, _, _, _) -> starts_uppercase(method)
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .TypeValue(_, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) -> false
+    }
+}
+
+data_provider_y: fn(y: Int, ordinal: Int) -> Int Never! {
+    y + 96 + (ordinal % 2) * 18
+}
+
+// The getter or constant node that provides `expr`, or None when `expr` is
+// not a plain value.
+project_value_node: fn(g: &GraphBuilder, index: SemIndex, src: String, expr: Expr, ordinal: Int, role: String, x: Int, y: Int) -> String? {
+    if expr == {
+        .Place(inner, _, _, _) -> project_value_node(g, index, src, inner, ordinal, role, x, y)
+        .Ident(name, span, _) -> {
+            key: getter_key(index, name, span)
+            if g.getter_pins.get(key) == .Val(pin) -> return Val(pin)
+            base_node_id: "{g.graph_id}:value:get:{canvas_ident_fragment(name)}"
+            node_id := base_node_id
+            loop node in g.nodes {
+                if node.id == base_node_id && node.span != span {
+                    node_id = "{base_node_id}:{span.start}-{span.end}"
+                    break
+                }
+            }
+            add_node(g, node_id, "variable_get", name, span, x, y, [String]{"read"}, [String]{"edit_inline_expr", "source_jump"})
+            ty: expr_type(g, index, expr)
+            pin: add_pin(g, node_id, name, "output", ty, "", false)
+            g.getter_pins[key] = pin
+            Val(pin)
+        }
+        .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Str(_, _, _) | .Char(_, _, _) | .Absent(_, _) | .Todo(_, _, _) -> {
+            span: expr_span(expr)
+            node_id: "{g.graph_id}:value:{ordinal}:{role}:{span.start}-{span.end}"
+            add_node(g, node_id, "constant", snippet(src, span), span, x, y, [String]{"const"}, [String]{"edit_inline_expr", "source_jump"})
+            ty: expr_type(g, index, expr)
+            Val(add_pin(g, node_id, "value", "output", ty, "", false))
+        }
+        .Field(_, _, _, _) | .Paren(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Unit(_, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .TypeValue(_, _, _) | .Pipe(_, _, _, _) -> None
+    }
+}
+
+// One getter per definition a name reads: the reference's target when the
+// index resolves it, else the name at this span.
+getter_key: fn(index: SemIndex, name: String, span: Span) -> String Never! {
+    loop reference in index.references {
+        if reference.span != span || reference.name != name -> next
+        target: reference.target ?? break
+        return "{name}@{target.module_path}:{target.def_span.start}:{target.def_span.end}"
+    }
+    "{name}@{span.start}:{span.end}"
+}
+
+// Whether the method a call at `span` resolves to declares an empty effect row.
+method_is_pure: fn(index: SemIndex, span: Span) -> Bool Never! {
+    loop reference in index.references {
+        if reference.span != span -> next
+        target: reference.target ?? return false
+        loop definition in index.definitions {
+            if definition.def.module_path != target.module_path || definition.def.def_span != target.def_span -> next
+            if definition.def.kind == .Function(callable) {
+                if callable.effects == .Val(row) -> return row.len() == 0
+            }
+            return false
+        }
+        return false
+    }
+    false
+}
+
+canvas_ident_fragment: fn(name: String) -> String Never! {
+    bytes := name.bytes()
+    loop i in 0..<bytes.len() {
+        b: bytes[i]
+        word: (b >= 48 && b <= 57) || (b >= 65 && b <= 90) || (b >= 97 && b <= 122) || b == 95
+        if !word -> bytes[i] = 95
+    }
+    String.from_bytes(bytes) ?? name
+}
+
+// A game's `assets.image(...)`/`assets.sound(...)` receiver.
+game_assets_receiver: fn(expr: Expr) -> Bool Never! {
+    if expr == {
+        .Field(_, name, _, _) -> name == "assets"
+        .Paren(inner, _, _) -> game_assets_receiver(inner)
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .TypeValue(_, _, _) | .Pipe(_, _, _, _) -> false
+    }
+}
+
+project_expr_node: fn(g: &GraphBuilder, index: SemIndex, src: String, expr: Expr, ordinal: Int, x: Int, y: Int, placement: ExprPlacement) -> String? {
+    if expr == {
+        .Binary(op, left, right, span, _) -> {
+            node_id: "{g.graph_id}:expr:{ordinal}:operator:{span.start}-{span.end}"
+            add_node(g, node_id, "expression", jfmt_bin_op_spell(op), span, x, y, [String]{}, [String]{"edit_inline_expr", "source_jump"})
+            add_inline(g, node_id, ordinal, "value", src, span)
+            left_type: expr_type(g, index, left)
+            left_input: add_pin(g, node_id, "left", "input", left_type, "", false)
+            connect_expr_to_input(g, index, src, left, ordinal * 1000 + 1, "left", node_id, left_input, x - 220, y)
+            right_type: expr_type(g, index, right)
+            right_input: add_pin(g, node_id, "right", "input", right_type, "", false)
+            connect_expr_to_input(g, index, src, right, ordinal * 1000 + 2, "right", node_id, right_input, x - 220, y + 74)
+            ty: expr_type(g, index, expr)
+            Val(add_pin(g, node_id, "result", "output", ty, "", false))
+        }
+        .Call(call, _) -> {
+            node_id: "{g.graph_id}:expr:{ordinal}:call:{call.name}"
+            exec: placement == .Exec || call_has_effects(index, call.name)
+            add_node(g, node_id, if exec -> "function_exec" else -> "function_pure", call.name, call.name_span, x, y, effect_badges(index, call.name), [String]{"insert_call", "source_jump"})
+            loop (i, arg) in call.args {
+                arg_type: expr_type(g, index, arg.expr)
+                input: add_pin(g, node_id, "arg{i + 1}", "input", arg_type, access_sigil(arg.convention), false)
+                connect_expr_to_input(g, index, src, arg.expr, ordinal * 1000 + i + 1, "arg{i + 1}", node_id, input, x - 220, y + i * 74)
+            }
+            ret: call_ret(index, call.name) ?? "Void"
+            Val(add_pin(g, node_id, "result", "output", ret, "", ret.ends_with("?")))
+        }
+        .MethodCall(receiver, method, method_span, _, _, args, _) -> {
+            node_id: "{g.graph_id}:expr:{ordinal}:method:{method}"
+            variant_like: starts_uppercase(method)
+            archetype: if variant_like || method_is_pure(index, method_span) -> "function_pure" else -> "function_exec"
+            affordances := [String]{"insert_call", "source_jump"}
+            if ((method == "image" || method == "sound") && game_assets_receiver(receiver)) || method == "component" -> affordances.push("edit_game_selection")
+            add_node(g, node_id, if variant_like -> "variant" else -> archetype, if variant_like -> method else -> ".{method}", method_span, x, y, [String]{}, affordances)
+            receiver_type: expr_type(g, index, receiver)
+            recv_pin: add_pin(g, node_id, "self", "input", receiver_type, "", false)
+            connect_expr_to_input(g, index, src, receiver, ordinal * 1000 + 1, "self", node_id, recv_pin, x - 220, y)
+            loop (i, arg) in args {
+                arg_type: expr_type(g, index, arg.expr)
+                input: add_pin(g, node_id, "arg{i + 1}", "input", arg_type, access_sigil(arg.convention), false)
+                connect_expr_to_input(g, index, src, arg.expr, ordinal * 1000 + i + 2, "arg{i + 1}", node_id, input, x - 220, y + (i + 1) * 74)
+            }
+            Val(add_pin(g, node_id, "result", "output", "unknown", "", false))
+        }
+        .Try(inner, span, _, _, _) -> {
+            node_id: "{g.graph_id}:expr:{ordinal}:fallible"
+            add_node(g, node_id, "fallible", "?", span, x, y, [String]{"fallible"}, [String]{"add_fallback_rail", "source_jump"})
+            inner_type: expr_type(g, index, inner)
+            input: add_pin(g, node_id, "value", "input", inner_type, "", true)
+            if project_expr_node(g, index, src, inner, ordinal, x - 180, y, ExprPlacement.Data) == .Val(out) -> add_wire(g, out, input, "fallible")
+            Val(add_pin(g, node_id, "ok", "output", "unknown", "", false))
+        }
+        .OrFallback(value, _, _, _, _) -> project_expr_node(g, index, src, value, ordinal, x, y, placement)
+        .ListLit(items, span, _) -> {
+            node_id: "{g.graph_id}:expr:{ordinal}:list"
+            add_node(g, node_id, "expression", "list", span, x, y, [String]{"multi-input"}, [String]{"append_multi_input", "edit_inline_expr", "source_jump"})
+            loop (i, item) in items {
+                item_type: expr_type(g, index, item)
+                input: add_pin(g, node_id, "item{i + 1}", "input", item_type, "", false)
+                set_pin_source_span(g, input, expr_span(item))
+                set_pin_append(g, input, "remove_multi_input_element", i)
+                connect_expr_to_input(g, index, src, item, ordinal * 1000 + i + 1, "item{i + 1}", node_id, input, x - 220, y + i * 74)
+            }
+            ty: expr_type(g, index, expr)
+            Val(add_pin(g, node_id, "value", "output", ty, "", false))
+        }
+        .Field(_, _, _, _) | .Paren(_, _, _) | .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Unary(_, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .OptField(_, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .TypeValue(_, _, _) | .Pipe(_, _, _, _) -> {
+            node_id: "{g.graph_id}:expr:{ordinal}:expr"
+            span: expr_span(expr)
+            add_node(g, node_id, "expression", expr_title(expr), span, x, y, [String]{"expression"}, [String]{"edit_inline_expr", "source_jump"})
+            add_inline(g, node_id, ordinal, "value", src, span)
+            ty: expr_type(g, index, expr)
+            Val(add_pin(g, node_id, "value", "output", ty, "", false))
+        }
+    }
+}

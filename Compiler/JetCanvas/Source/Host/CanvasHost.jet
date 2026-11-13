@@ -1,0 +1,529 @@
+// The Canvas listener `jet dev <file> --canvas` serves: the Canvas page and
+// script, the resident session, the dev status, the project document, the
+// entry's source and the graph the dev loop last projected. Every request but
+// the dev status must carry the session secret and come from this listener's
+// own host and origin. Handlers only read and note; the dev loop (JetCli
+// CanvasDev.jet) checks, projects and publishes through
+// canvas_host_publish_graph, canvas_host_publish_failure and
+// canvas_host_publish_project, and applies each source transaction a handler
+// hands it (Host/CanvasEdit.jet).
+use {
+    host_http: core.http
+    host_random: core.crypto.random
+    host_server: core.http.server
+    host_sys: core.sys
+}
+
+// Session secret bytes; the secret is their lowercase hex.
+CANVAS_HOST_SECRET_BYTES: 32
+CANVAS_HOST_MAX_CLIENT_ID: 128
+CANVAS_HOST_MAX_CLIENTS: 256
+// The dev loop's clock ticks every 80 ms (JetCli CanvasDev.jet). A client
+// whose last request is more than CANVAS_HOST_CLIENT_TICKS ticks old has
+// gone: the page renews its session lease every 80 ms and a lease lasts
+// 160 ms.
+CANVAS_HOST_CLIENT_TICKS: 2
+CANVAS_HOST_JSON: "application/json; charset=utf-8"
+CANVAS_HOST_TEXT: "text/plain; charset=utf-8"
+
+#Error
+CanvasHostError: struct { message: String }
+
+CanvasHostClient: struct {
+    id: String
+    seen: Int
+}
+
+// One resident Canvas session. Revisions are `sha256-<hex>` source
+// revisions; "" is none yet.
+CanvasHostState: struct {
+    id: String
+    secret: String
+    // The entry file as `jet dev` was given it, and its project-relative id.
+    entry: String
+    source_id: String
+    host: String
+    port: Int
+    // "starting", "ready" or "error".
+    state: String
+    source_revision: String
+    accepted_revision: String
+    diagnostic_code: String
+    diagnostic: String
+    diagnostic_revision: String
+    // The `canvas.graph` answer of the last good projection, and of the
+    // failed check after it, when the latest check failed.
+    graph: String
+    failure: String?
+    // The revision of the good graph last served: the session's kept view.
+    graph_view_revision: String
+    // Good projections so far; the dev status's revision number.
+    version: Int
+    last_build_ms: Int
+    clients: [CanvasHostClient]
+    tick: Int
+    // The `canvas.project` answer the dev loop last published; "" none yet.
+    project: String
+    // Transaction receipts, oldest first (at most CANVAS_HOST_MAX_RECEIPTS).
+    receipts: [CanvasHostReceipt]
+}
+
+// What a Canvas listener path names. Every path a Canvas listener serves
+// under its session is a route (the Rust host's canvas_api_path); Unknown
+// paths are refused like a bad secret.
+CanvasHostRoute: enum {
+    Page(base: String)
+    PanelPage
+    App
+    Session
+    Project
+    Graph
+    Source
+    Transaction
+    Status
+    Version
+    // A Canvas path whose handler this host does not have yet.
+    Unbuilt
+    Unknown
+}
+
+// A new session for `entry`, listening on `host`; its port is set once the
+// listener is bound (canvas_host_bound).
+canvas_host_new: fn(entry: String, source_id: String, host: String) -[Env, Rand]> Shared<CanvasHostState> CanvasHostError! {
+    secret: host_random.token_hex(CANVAS_HOST_SECRET_BYTES) ?? return Err(CanvasHostError{message: "couldn't make the Canvas session secret: {err}"})
+    Ok(Shared{CanvasHostState{
+        id: "jet-session-{host_sys.pid()}-1", secret: secret, entry: entry, source_id: source_id, host: host, port: 0,
+        state: "starting", source_revision: "", accepted_revision: "", diagnostic_code: "", diagnostic: "", diagnostic_revision: "",
+        graph: "", failure: None, graph_view_revision: "", version: 0, last_build_ms: 0, clients: [CanvasHostClient]{}, tick: 0, project: "",
+        receipts: [CanvasHostReceipt]{},
+    }})
+}
+
+canvas_host_bound: fn(state: Shared<CanvasHostState>, port: Int) {
+    permit := state.guard_edit()
+    permit.value.port = port
+}
+
+// The page address `jet dev` prints, secret included.
+canvas_host_url: fn(state: Shared<CanvasHostState>) -> String {
+    permit: state.guard_read()
+    "http://{canvas_host_url_host(permit.value.host)}:{permit.value.port}/canvas?session={permit.value.secret}"
+}
+
+// A good projection of the entry at `revision`: `graph_json` is the graph
+// document, `build_ms` how long the check and projection took.
+canvas_host_publish_graph: fn(state: Shared<CanvasHostState>, revision: String, graph_json: String, build_ms: Int) {
+    permit := state.guard_edit()
+    permit.value.state = "ready"
+    permit.value.source_revision = revision.copy() // copy: the session reports it as current and as accepted
+    permit.value.accepted_revision = revision
+    permit.value.diagnostic_code = ""
+    permit.value.diagnostic = ""
+    permit.value.diagnostic_revision = ""
+    permit.value.graph = canvas_machine_output("canvas.graph", true, graph_json)
+    permit.value.failure = None
+    permit.value.version += 1
+    permit.value.last_build_ms = build_ms
+}
+
+// A check of the entry at `revision` that failed: `code` is its first error's
+// code and `rendered` the rendered diagnostics. The last good graph stays.
+canvas_host_publish_failure: fn(state: Shared<CanvasHostState>, revision: String, code: String, rendered: String, build_ms: Int) {
+    permit := state.guard_edit()
+    permit.value.state = "error"
+    permit.value.source_revision = revision.copy() // copy: the session reports it as current and as the failing revision
+    permit.value.diagnostic_revision = revision
+    permit.value.diagnostic_code = code
+    permit.value.failure = Val(canvas_machine_output("canvas.graph", false, query_error("diagnostic", rendered)))
+    permit.value.diagnostic = rendered
+    permit.value.last_build_ms = build_ms
+}
+
+// One tick of the dev loop's clock: clients not heard from for
+// CANVAS_HOST_CLIENT_TICKS ticks are dropped.
+canvas_host_tick: fn(state: Shared<CanvasHostState>) {
+    permit := state.guard_edit()
+    permit.value.tick += 1
+    tick: permit.value.tick
+    expired := false
+    loop client in permit.value.clients {
+        if tick - client.seen > CANVAS_HOST_CLIENT_TICKS -> expired = true
+    }
+    if !expired -> return
+    live := [CanvasHostClient]{}
+    loop client in permit.value.clients {
+        if tick - client.seen <= CANVAS_HOST_CLIENT_TICKS -> live.push(CanvasHostClient{id: client.id.copy(), seen: client.seen}) // copy: a client still leased stays listed
+    }
+    permit.value.clients = live
+}
+
+// The listener's routes: every GET and POST goes through canvas_host_answer,
+// which checks the session before it routes. A POST transaction goes to the
+// dev loop through `edits`.
+canvas_host_mux: fn(state: Shared<CanvasHostState>, edits: Sender<CanvasHostEdit>) -[Net, FS.Read, Time.Wait]> HTTPMux {
+    mux: host_server.mux()
+    reads: state.copy() // copy: each route's handler holds its own handle on the one session
+    posts: state.copy() // copy: each route's handler holds its own handle on the one session
+    // The handlers route on the request's own path; `rest` only satisfies
+    // the catch-all's one typed input.
+    mux.get("/*rest", fn(request: HTTPRequest, rest: String) { Ok(canvas_host_answer(reads, request, None)) })
+    mux.post("/*rest", fn(request: HTTPRequest, rest: String) { Ok(canvas_host_answer(posts, request, Val(edits))) })
+    mux
+}
+
+canvas_host_answer: fn(state: Shared<CanvasHostState>, request: HTTPRequest, edits: Sender<CanvasHostEdit>?) -> HTTPResponse {
+    target: request.path.partition("?")
+    path: target.head
+    query: target.tail
+    route: canvas_host_route(path, query)
+    authorized: canvas_host_authorized(state, request, route, path, query)
+    status: if route == {
+        .Status -> true
+        .Page(_) | .PanelPage | .App | .Session | .Project | .Graph | .Source | .Transaction | .Version | .Unbuilt | .Unknown -> false
+    }
+    if !status && !authorized -> return canvas_host_response(401, CANVAS_HOST_TEXT, "devserver session, host, or origin rejected")
+    if request.method != "GET" && request.method != "POST" -> return canvas_host_response(405, CANVAS_HOST_TEXT, "jet dev's web server only handles GET and Canvas POST requests")
+    if canvas_host_query(query, "client_id") == .Val(client) -> canvas_host_note_client(state, client)
+    if route == {
+        .Unbuilt -> return canvas_host_response(501, CANVAS_HOST_TEXT, "`{path}` is not served by this jet's Canvas yet")
+        .Unknown -> return canvas_host_response(404, CANVAS_HOST_TEXT, "404 Not Found")
+        .Page(_) | .PanelPage | .App | .Session | .Project | .Graph | .Source | .Status | .Version -> {}
+        .Transaction -> {
+            if edits == .Val(sender) && request.method == "POST" -> return canvas_host_transaction(state, request, sender)
+            return canvas_host_response(405, CANVAS_HOST_TEXT, "method not allowed")
+        }
+    }
+    if request.method != "GET" -> return canvas_host_response(405, CANVAS_HOST_TEXT, "method not allowed")
+    if route == {
+        .Page(base) -> canvas_host_response(200, "text/html; charset=utf-8", canvas_host_with_secret(state, canvas_html_for(base)))
+        .PanelPage -> canvas_host_response(200, "text/html; charset=utf-8", canvas_host_with_secret(state, canvas_html_query()))
+        .App -> canvas_host_response(200, "application/javascript; charset=utf-8", canvas_js())
+        .Session -> canvas_host_response(200, CANVAS_HOST_JSON, "{{\"protocol\":\"jet.canvas.session\",\"schema_version\":1,\"session\":{canvas_host_session_json(state)}}}")
+        .Project -> canvas_host_project(state)
+        .Graph -> canvas_host_graph(state, canvas_host_query(query, "source_id"))
+        .Source -> canvas_host_source(state, canvas_host_query(query, "source_id"))
+        .Status -> {
+            if authorized {
+                if canvas_host_query(query, "client") == .Val(client) -> canvas_host_note_client(state, client)
+            }
+            canvas_host_response(200, CANVAS_HOST_JSON, canvas_host_status_json(state))
+        }
+        .Version -> canvas_host_response(200, CANVAS_HOST_TEXT, "{canvas_host_version(state)}")
+        .Transaction | .Unbuilt | .Unknown -> canvas_host_response(404, CANVAS_HOST_TEXT, "404 Not Found")
+    }
+}
+
+canvas_host_route: fn(path: String, query: String) -> CanvasHostRoute Never! {
+    if path == "/__jet_dev_status" -> return .Status
+    if path == "/__jet_dev_version" -> return .Version
+    if path == "/" {
+        if (canvas_host_query(query, "jet_panel") ?? "") == "1" -> return .PanelPage
+        if (canvas_host_query(query, "jet_panel_app") ?? "") == "1" -> return .App
+        if (canvas_host_query(query, "jet_panel_graph") ?? "") == "1" -> return .Graph
+        return .Unknown
+    }
+    if path == "/__jet_dev_disconnect" || path == "/__jet_perf_browser" || path == "/__jet_web/stream" || canvas_host_devtools_path(path) -> return .Unbuilt
+    base: canvas_host_base(path) ?? return .Unknown
+    rest: path.slice(base.len(), path.len())
+    if rest == "" || rest == "/" -> return .Page(base: if base == "/panel" -> "/panel" else -> "/canvas")
+    if rest == {
+        "/app.js" -> .App
+        "/session" -> .Session
+        "/project" -> .Project
+        "/graph" -> .Graph
+        "/source" -> .Source
+        "/transaction" -> .Transaction
+        "/live" | "/source-control" | "/core-catalog" | "/proof" | "/command" | "/project/transaction" | "/query" | "/debug" | "/devtools" -> .Unbuilt
+        else -> .Unknown
+    }
+}
+
+canvas_host_base: fn(path: String) -> String? Never! {
+    bases: [String]{"/__jet_canvas", "/canvas", "/panel"}
+    loop base in bases {
+        if path == base || path.starts_with("{base}/") -> return Val(base)
+    }
+    None
+}
+
+canvas_host_devtools_path: fn(path: String) -> Bool Never! {
+    if path == "/__jet_devtools" -> return true
+    if !path.starts_with("/__jet_devtools/") -> return false
+    if path.slice(16, path.len()) == {
+        "workbench" | "commands" | "assets" | "state" | "reconnect" | "action" | "selection" | "cursor" | "swap" | "recording" | "error" | "paused/inspect" | "paused/evaluate" | "style" -> true
+        else -> false
+    }
+}
+
+// The pages and script a browser opens before it holds the secret in a
+// header: they may come without an Origin.
+canvas_host_bootstrap_path: fn(path: String, query: String) -> Bool Never! {
+    if path == "/" -> return query == "jet_panel=1" || query == "jet_panel_app=1"
+    if path == "/__jet_devtools" || path == "/__jet_devtools/workbench" -> return true
+    base: canvas_host_base(path) ?? return false
+    rest: path.slice(base.len(), path.len())
+    rest == "" || rest == "/" || rest == "/app.js"
+}
+
+// The session check (the Rust host's canvas_request_authorized): GET or
+// POST with an exact body framing, a Canvas path, this listener's own Host,
+// its Origin (or none on a bootstrap page), and the session secret as a
+// Bearer token and/or one `session` query value, each compared in constant
+// time.
+canvas_host_authorized: fn(state: Shared<CanvasHostState>, request: HTTPRequest, route: CanvasHostRoute, path: String, query: String) -> Bool {
+    method: request.method
+    if method != "GET" && method != "POST" -> return false
+    if request.header("transfer-encoding") != None -> return false
+    if method == "POST" && request.header("content-length") == None -> return false
+    if method == "GET" && !canvas_host_body_empty(request) -> return false
+    if !canvas_host_single_security_headers(request) -> return false
+    if route == {
+        .Unknown -> return false
+        .Page(_) | .PanelPage | .App | .Session | .Project | .Graph | .Source | .Transaction | .Status | .Version | .Unbuilt -> {}
+    }
+    host_header: request.header("host") ?? return false
+    permit: state.guard_read()
+    if permit.value.secret == "" || !canvas_host_host_allowed(host_header, permit.value.host, permit.value.port) -> return false
+    same_origin: (request.header("sec-fetch-site") ?? "").to_ascii_lower() == "same-origin"
+    if request.header("origin") == {
+        .Val(origin) -> {
+            if !canvas_host_origin_allowed(origin, permit.value.host, permit.value.port) -> return false
+        }
+        .None -> {
+            if !canvas_host_bootstrap_path(path, query) && !same_origin -> return false
+        }
+    }
+    if canvas_host_session_count(query) > 1 -> return false
+    from_query: canvas_host_query(query, "session")
+    if request.header("authorization") == {
+        .Val(authorization) -> {
+            if !authorization.starts_with("Bearer ") -> return false
+            if !canvas_host_same_secret(authorization.slice(7, authorization.len()), permit.value.secret) -> return false
+            if from_query == .Val(token) -> return canvas_host_same_secret(token, permit.value.secret)
+            true
+        }
+        .None -> {
+            token: from_query ?? return false
+            canvas_host_same_secret(token, permit.value.secret)
+        }
+    }
+}
+
+// A GET carries no body: a 0-byte read of it succeeds.
+canvas_host_body_empty: fn(request: HTTPRequest) -> Bool Never! {
+    text: request.text(0) ?? return false
+    text.len() == 0
+}
+
+// Each header the session check reads appears at most once.
+canvas_host_single_security_headers: fn(request: HTTPRequest) -> Bool Never! {
+    seen := [String]{}
+    loop field in request.headers.fields {
+        name: field.name.to_ascii_lower()
+        if name != "authorization" && name != "content-length" && name != "host" && name != "origin" && name != "transfer-encoding" -> next
+        if seen.contains(name) -> return false
+        seen.push(name)
+    }
+    true
+}
+
+canvas_host_host_allowed: fn(value: String, bind_host: String, port: Int) -> Bool Never! {
+    wanted: value.trim().to_ascii_lower()
+    if wanted == "{canvas_host_url_host(bind_host)}:{port}".to_ascii_lower() -> return true
+    if !canvas_host_loopback(bind_host) -> return false
+    wanted == ("localhost:{port}") || wanted == ("127.0.0.1:{port}") || wanted == ("[::1]:{port}")
+}
+
+canvas_host_origin_allowed: fn(value: String, bind_host: String, port: Int) -> Bool Never! {
+    wanted: value.trim().to_ascii_lower()
+    if wanted == "http://{canvas_host_url_host(bind_host)}:{port}".to_ascii_lower() -> return true
+    if !canvas_host_loopback(bind_host) -> return false
+    wanted == ("http://localhost:{port}") || wanted == ("http://127.0.0.1:{port}") || wanted == ("http://[::1]:{port}")
+}
+
+canvas_host_loopback: fn(host: String) -> Bool Never! {
+    lowered: host.to_ascii_lower()
+    lowered == "localhost" || lowered == "::1" || lowered.starts_with("127.")
+}
+
+// An IPv6 literal is bracketed in a URL.
+canvas_host_url_host: fn(host: String) -> String Never! {
+    if host.contains(":") -> return "[{host}]"
+    host.copy() // copy: the caller builds an address from it
+}
+
+canvas_host_same_secret: fn(left: String, right: String) -> Bool Never! {
+    a: left.bytes()
+    b: right.bytes()
+    difference := a.len().bit_xor(b.len())
+    longest: if a.len() > b.len() -> a.len() else -> b.len()
+    loop index in 0..<longest {
+        x: if index < a.len() -> Int.from_u8(a[index]) else -> 0
+        y: if index < b.len() -> Int.from_u8(b[index]) else -> 0
+        difference = difference.bit_or(x.bit_xor(y))
+    }
+    difference == 0
+}
+
+// How many `session` names the query carries.
+canvas_host_session_count: fn(query: String) -> Int Never! {
+    if query == "" -> return 0
+    count := 0
+    loop part in query.split("&") {
+        if part.partition("=").head == "session" -> count += 1
+    }
+    count
+}
+
+// The first `key` value of `query`, its name matched as written and its
+// value form-decoded (`+` is a space).
+canvas_host_query: fn(query: String, key: String) -> String? Never! {
+    if query == "" -> return None
+    loop part in query.split("&") {
+        pair: part.partition("=")
+        if pair.head == key -> return Val(host_http.form_component_decode(pair.tail))
+    }
+    None
+}
+
+canvas_host_note_client: fn(state: Shared<CanvasHostState>, client: String) {
+    if client == "" || client.len() > CANVAS_HOST_MAX_CLIENT_ID || canvas_host_has_control(client) -> return
+    permit := state.guard_edit()
+    tick: permit.value.tick
+    loop index in 0..<permit.value.clients.len() {
+        if permit.value.clients[index].id == client {
+            permit.value.clients[index].seen = tick
+            return
+        }
+    }
+    if permit.value.clients.len() >= CANVAS_HOST_MAX_CLIENTS -> return
+    permit.value.clients.push(CanvasHostClient{id: client, seen: tick})
+}
+
+canvas_host_has_control: fn(text: String) -> Bool Never! {
+    loop byte in text.bytes() {
+        b: Int.from_u8(byte)
+        if b < 32 || b == 127 -> return true
+    }
+    false
+}
+
+canvas_host_version: fn(state: Shared<CanvasHostState>) -> Int {
+    permit: state.guard_read()
+    permit.value.version
+}
+
+// The page with the session secret on its script URL, so the script's own
+// requests carry it.
+canvas_host_with_secret: fn(state: Shared<CanvasHostState>, html: String) -> String {
+    at: html.index_of("app.js?") ?? return html
+    permit: state.guard_read()
+    insert: at + 7
+    "{html.slice(0, insert)}session={permit.value.secret}&{html.slice(insert, html.len())}"
+}
+
+// The `canvas.graph` answer: the last projection, when `source_id` is absent
+// or names the entry; this host projects the entry only.
+canvas_host_graph: fn(state: Shared<CanvasHostState>, source_id: String?) -> HTTPResponse {
+    if source_id == .Val(wanted) {
+        if wanted != canvas_host_entry_source(state) {
+            refused: canvas_machine_output("canvas.graph", false, query_error("not_found", "Canvas source_id must name a projected Jet source file"))
+            return canvas_host_response(409, CANVAS_HOST_JSON, canvas_host_with_session(state, refused))
+        }
+    }
+    served: canvas_host_take_graph(state)
+    canvas_host_response(if served.ok -> 200 else -> 409, CANVAS_HOST_JSON, canvas_host_with_session(state, served.body))
+}
+
+CanvasHostGraph: struct {
+    ok: Bool
+    body: String
+}
+
+// The graph answer to serve; a good one becomes the session's kept view.
+canvas_host_take_graph: fn(state: Shared<CanvasHostState>) -> CanvasHostGraph {
+    permit := state.guard_edit()
+    if permit.value.failure == .Val(failure) -> return CanvasHostGraph{ok: false, body: failure.copy()} // copy: the session keeps the answer it serves
+    if permit.value.version == 0 {
+        starting: canvas_machine_output("canvas.graph", false, query_error("starting", "Canvas has not projected `{permit.value.entry}` yet"))
+        return CanvasHostGraph{ok: false, body: starting}
+    }
+    permit.value.graph_view_revision = permit.value.accepted_revision.copy() // copy: the kept view names the revision it showed
+    CanvasHostGraph{ok: true, body: permit.value.graph.copy()} // copy: the session keeps the answer it serves
+}
+
+canvas_host_entry_source: fn(state: Shared<CanvasHostState>) -> String {
+    permit: state.guard_read()
+    permit.value.source_id.copy() // copy: the answer outlives the read
+}
+
+// The entry's text as it is on disk now, read without following a link.
+canvas_host_source: fn(state: Shared<CanvasHostState>, source_id: String?) -> HTTPResponse {
+    permit: state.guard_read()
+    if source_id == .Val(wanted) {
+        if wanted != permit.value.source_id -> return canvas_host_response(404, CANVAS_HOST_TEXT, "could not read Canvas source: Canvas source_id must name a projected Jet source file")
+    }
+    if read_source_without_symlinks(permit.value.entry) == {
+        .Ok(text) -> canvas_host_response(200, CANVAS_HOST_TEXT, text)
+        .Err(error) -> canvas_host_response(404, CANVAS_HOST_TEXT, "could not read Canvas source: {error.message}")
+    }
+}
+
+// `body` with the session as the first member of its `canvas` object.
+canvas_host_with_session: fn(state: Shared<CanvasHostState>, body: String) -> String {
+    marker: "\"canvas\":{{"
+    at: body.index_of(marker) ?? return body
+    insert: at + marker.len()
+    "{body.slice(0, insert)}\"session\":{canvas_host_session_json(state)},{body.slice(insert, body.len())}"
+}
+
+// The machine-output envelope every Canvas answer travels in.
+canvas_machine_output: fn(action: String, ok: Bool, payload: String) -> String Never! {
+    "{{\"schema\":\"jet.report/v1\",\"action\":{json_str(action)},\"ok\":{json_bool(ok)},\"reports\":[],\"canvas\":{payload.trim()}}}"
+}
+
+canvas_host_json_value: fn(text: String) -> String Never! {
+    if text == "" -> return "null"
+    json_str(text)
+}
+
+// The session document (the Rust ResidentDevSession json). This host runs no
+// program, debugger or test, so those parts stay idle and empty.
+canvas_host_session_json: fn(state: Shared<CanvasHostState>) -> String {
+    permit: state.guard_read()
+    canvas_host_session_json_of(permit.value)
+}
+
+canvas_host_session_json_of: fn(s: CanvasHostState) -> String {
+    empty_view: "{{\"revision\":null,\"source_id\":null,\"payload\":null}}"
+    graph_view: if s.graph_view_revision == "" -> empty_view else -> "{{\"revision\":{json_str(s.graph_view_revision)},\"source_id\":{canvas_host_json_value(s.source_id)},\"payload\":{json_str(s.graph)}}}"
+    listener: "{{\"canvas\":{{\"host\":{canvas_host_json_value(s.host)},\"port\":{s.port},\"transport\":\"canvas\",\"listener\":\"canvas\",\"shared\":false}}}}"
+    receipts: loop receipt in s.receipts -> "{{\"kind\":{canvas_host_json_value(receipt.kind)},\"status\":{canvas_host_json_value(receipt.status)},\"before\":{canvas_host_json_value(receipt.before)},\"after\":{canvas_host_json_value(receipt.after)},\"client\":{canvas_host_json_value(receipt.client)},\"output\":null,\"live\":null}}"
+    "{{\"id\":{canvas_host_json_value(s.id)},\"protocol\":null,\"session_id\":null,\"source_id\":null,\"build_id\":null,\"revision\":null,\"world_id\":null,\"values\":[],\"entry\":{canvas_host_json_value(s.entry)},\"project_context\":{{\"source_id\":{canvas_host_json_value(s.source_id)}}},\"source_revision\":{canvas_host_json_value(s.source_revision)},\"accepted_revision\":{canvas_host_json_value(s.accepted_revision)},\"last_good_revision\":{canvas_host_json_value(s.accepted_revision)},\"last_good_program\":null,\"state\":{canvas_host_json_value(s.state)},\"diagnostic_code\":{canvas_host_json_value(s.diagnostic_code)},\"diagnostic\":{canvas_host_json_value(s.diagnostic)},\"diagnostic_revision\":{canvas_host_json_value(s.diagnostic_revision)},\"last_good_views\":{{\"graph\":{graph_view},\"debugger\":{empty_view},\"runtime\":{empty_view}}},\"clients\":{s.clients.len()},\"run\":{{\"output\":null,\"target\":null}},\"debugger\":{{\"state\":\"idle\",\"session_id\":null,\"source_id\":null,\"revision\":null,\"tier\":null}},\"tests\":{{\"state\":\"idle\"}},\"history\":{{\"count\":{s.receipts.len()},\"receipts\":[{receipts.join(",")}]}},\"listeners\":{listener},\"custom_servers\":{{\"owner\":\"application\",\"transport\":\"application\",\"reload\":\"source-transaction\",\"listener\":null}}}}"
+}
+
+// The dev status the page's header polls (the Rust DevStatus json).
+canvas_host_status_json: fn(state: Shared<CanvasHostState>) -> String {
+    permit: state.guard_read()
+    canvas_host_status_json_of(permit.value)
+}
+
+canvas_host_status_json_of: fn(s: CanvasHostState) -> String {
+    clients: s.clients.len()
+    plural: if clients == 1 -> "" else -> "s"
+    failed: s.state == "error"
+    word: if failed -> "error" else -> "ready"
+    rest := if failed -> "{s.diagnostic_code} · {clients} client{plural}" else -> "localhost:{s.port} · {clients} client{plural}"
+    if !failed && s.last_build_ms > 0 {
+        tenths: (s.last_build_ms + 50) /% 100
+        rest = "{rest} · built {tenths /% 10}.{tenths % 10}s"
+    }
+    accepted: if s.version > 0 -> "{s.version}" else -> "null"
+    candidate: if failed -> "{s.version + 1}" else -> accepted
+    diagnostic_revision: if failed -> candidate else -> "null"
+    "{{\"version\":{s.version},\"state\":{json_str(word)},\"message\":{json_str("{word} · {rest}")},\"file\":{json_str(s.entry)},\"code\":{json_str(s.diagnostic_code)},\"diagnostic\":{json_str(s.diagnostic)},\"clients\":{clients},\"last_build_ms\":{s.last_build_ms},\"candidate\":{candidate},\"diagnostic_revision\":{diagnostic_revision},\"accepted_revision\":{accepted},\"last_good_revision\":{accepted}}}"
+}
+
+canvas_host_response: fn(status: Int, content_type: String, body: String) -> HTTPResponse Never! {
+    host_server.response(status, body).header("content-type", content_type)
+}

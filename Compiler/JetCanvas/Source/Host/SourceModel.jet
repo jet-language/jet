@@ -98,9 +98,9 @@ source_replace_if_unchanged: fn(path: String, expected: String?, candidate: Stri
     matches: if expected == {
         .Val(text) -> if current == {
             .Val(file) -> file.bytes == text.bytes()
-            else -> false
+            .None -> false
         }
-        else -> current == None
+        .None -> current == None
     }
     if !matches -> return Ok(ReplaceResult.Conflict)
     if candidate == {
@@ -110,10 +110,10 @@ source_replace_if_unchanged: fn(path: String, expected: String?, candidate: Stri
                     if file.bytes == text.bytes() -> return Ok(ReplaceResult.Applied)
                     source_replace(held, text.bytes(), Val(file.mode))
                 }
-                else -> source_replace(held, text.bytes(), None)
+                .None -> source_replace(held, text.bytes(), None)
             }
         }
-        else -> {
+        .None -> {
             if current != None -> held.parent.remove(held.name) ?? return Err(canvas_source_error("couldn't remove Canvas source `{path}`: {err}"))
         }
     }
@@ -195,7 +195,7 @@ source_write_all: fn(writer: &FileWriter, bytes: [U8]) CanvasSourceError! {
 source_replace: fn(target: SourceTarget, bytes: [U8], mode: Int?) CanvasSourceError! {
     file_mode: if mode == {
         .Val(bits) -> bits.bit_and(4095)
-        else -> SOURCE_NEW_FILE_MODE
+        .None -> SOURCE_NEW_FILE_MODE
     }
     pid: source_sys.pid()
     temporary := ""
@@ -224,7 +224,7 @@ source_replace: fn(target: SourceTarget, bytes: [U8], mode: Int?) CanvasSourceEr
     // The rename is done; a failed directory sync only weakens durability.
     if target.parent.fsync() == {
         .Err(_) -> {}
-        else -> {}
+        .Ok(_) -> {}
     }
     Ok()
 }
@@ -233,6 +233,6 @@ source_replace: fn(target: SourceTarget, bytes: [U8], mode: Int?) CanvasSourceEr
 source_remove_quietly: fn(parent: Directory, name: String) Never! {
     if parent.remove(name) == {
         .Err(_) -> {}
-        else -> {}
+        .Ok(_) -> {}
     }
 }

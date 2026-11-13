@@ -1,0 +1,276 @@
+// The Canvas graph document of one checked source: one graph per function of
+// the program's own modules, the node descriptor catalog, and the checked
+// facts Canvas reads beside the graphs.
+use {
+    jet_driver.[JetDriverDocModule]
+    jet_foundation.[Func, Item, Span, access_sigil, type_name]
+    jet_parser.[jet_format_source]
+    jet_semindex.[SEMINDEX_SCHEMA_VERSION, SemEffectProjection, SemIndex]
+}
+
+GRAPH_SCHEMA_VERSION: 1
+
+InlineExpr: struct {
+    id: String
+    span: Span
+}
+
+GraphEditAnchor: struct {
+    graph_id: String
+    insert_offset: Int
+    fallible: Bool
+}
+
+NodeQueryRef: struct {
+    graph_id: String
+    node_id: String
+    kind: String
+    title: String
+    span: Span
+}
+
+// The graph document and the spans Canvas edits and queries address.
+Projection: struct {
+    json: String
+    inline_exprs: [InlineExpr]
+    graph_anchors: [GraphEditAnchor]
+    node_refs: [NodeQueryRef]
+}
+
+GraphBuilder: struct {
+    graph_id: String
+    nodes: [NodeRec]{[NodeRec]{}}
+    pins: [PinRec]{[PinRec]{}}
+    wires: [WireRec]{[WireRec]{}}
+    regions: [String]{[String]{}}
+    inline_exprs: [InlineRec]{[InlineRec]{}}
+    local_pins: [String:String]{[String:String]{}}
+    local_types: [String:String]{[String:String]{}}
+    getter_pins: [String:String]{[String:String]{}}
+    next_wire: Int{0}
+}
+
+NodeRec: struct {
+    id: String
+    kind: String
+    archetype: String
+    title: String
+    span: Span
+    x: Int
+    y: Int
+    badges: [String]
+    affordances: [String]
+    meta_json: String?
+}
+
+PinRec: struct {
+    id: String
+    node_id: String
+    name: String
+    direction: String
+    ty: String
+    role: String?
+    pattern_source: String?
+    ability: String
+    fallible: Bool
+    effect_grant_need: String?
+    span: Span
+    pattern_source_span: Span?
+    append_op: String?
+    element_index: Int?
+}
+
+WireRec: struct {
+    id: String
+    from_pin: String
+    to_pin: String
+    kind: String
+    span: Span?
+    from_span: Span?
+    to_span: Span?
+}
+
+InlineRec: struct {
+    id: String
+    node_id: String
+    role: String
+    source: String
+    span: Span
+}
+
+// The graph document of `src`, the checked entry `source_id` names. Graphs
+// cover the modules of the program's own package; Core and dependency
+// modules stay out of the document.
+canvas_graph_projection: fn(source_id: String, src: String, modules: [JetDriverDocModule], entry_identity: String, index: SemIndex) -> Projection {
+    sink := GraphSink{graphs: [String]{}, inline_exprs: [InlineExpr]{}, anchors: [GraphEditAnchor]{}, node_refs: [NodeQueryRef]{}}
+    loop doc in modules {
+        if doc.alias != "" -> next
+        collect_item_graphs(index, doc, doc.module_identity == entry_identity, doc.items, None, sink)
+    }
+    formatted: jet_format_source(src, false)
+    fmt: if formatted.ok -> formatted.text else -> src
+    enum_catalog: enum_catalog_json(modules)
+    pattern_catalog: pattern_catalog_json(modules)
+    json: "{{\"protocol\":\"jet.canvas.graph\",\"schema_version\":{GRAPH_SCHEMA_VERSION},\"source_id\":{json_str(source_id)},\"revision\":{json_str(source_revision(src))},\"fmt_fingerprint\":{json_str(source_revision(fmt))},\"source_text\":{json_str(src)},\"node_descriptors\":{catalog_json()},\"graphs\":[{sink.graphs.join(",")}],\"diagnostics\":[],\"facts\":{{\"semindex_schema_version\":{SEMINDEX_SCHEMA_VERSION},\"handles\":[\"definitions\",\"references\",\"calls\",\"effects\",\"members\",\"outputs\",\"state_graphs\",\"assets\",\"components\"],\"effect_projection\":{effect_projection_json(index.effect_projection)},\"enum_variants\":{enum_catalog},\"pattern_variants\":{pattern_catalog}}}}}"
+    Projection{json: json, inline_exprs: sink.inline_exprs, graph_anchors: sink.anchors, node_refs: sink.node_refs}
+}
+
+// Where the graphs of the walked modules go.
+GraphSink: struct {
+    graphs: [String]
+    inline_exprs: [InlineExpr]
+    anchors: [GraphEditAnchor]
+    node_refs: [NodeQueryRef]
+}
+
+effect_projection_json: fn(projection: SemEffectProjection) -> String Never! {
+    "{{\"required_effects\":[{json_strs(projection.required)}],\"granted_effects\":[{json_strs(projection.granted)}],\"denied_effects\":[{json_strs(projection.denied)}],\"authority\":{json_str(projection.authority)}}}"
+}
+
+collect_item_graphs: fn(index: SemIndex, doc: JetDriverDocModule, entry: Bool, items: [Item], owner: String?, sink: &GraphSink) {
+    loop item in items {
+        if item == {
+            .Func(f) -> {
+                name: if owner == .Val(value) -> "{value}.{f.name}" else -> f.name
+                add_function_graph(index, doc, entry, f, name, sink)
+            }
+            .Struct(s) -> {
+                loop method in s.methods -> add_function_graph(index, doc, entry, method, "{s.name}.{method.name}", sink)
+            }
+            .Enum(e) -> {
+                loop method in e.methods -> add_function_graph(index, doc, entry, method, "{e.name}.{method.name}", sink)
+            }
+            .Impl(i) -> {
+                loop method in i.methods -> add_function_graph(index, doc, entry, method, "{i.type_name}.{method.name}", sink)
+            }
+            .CodeModule(m) -> {
+                if m.body == .Val(body) -> collect_item_graphs(index, doc, entry, body, Val(m.name), sink)
+            }
+            .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+        }
+    }
+}
+
+add_function_graph: fn(index: SemIndex, doc: JetDriverDocModule, entry: Bool, f: Func, ledger_name: String, sink: &GraphSink) {
+    graph: project_func(index, doc.path, doc.source, f)
+    loop inline in graph.inline_exprs -> sink.inline_exprs.push(InlineExpr{id: inline.id, span: inline.span})
+    if entry -> sink.anchors.push(GraphEditAnchor{graph_id: graph.graph_id, insert_offset: insert_offset(doc.source, f), fallible: function_is_fallible(f)})
+    collect_node_refs(graph, sink.node_refs)
+    sink.graphs.push(graph_to_json(graph, f, doc.source, module_function_visibility(doc, ledger_name)))
+}
+
+module_function_visibility: fn(doc: JetDriverDocModule, name: String) -> String Never! {
+    storage: doc.name_ledger ?? return "private"
+    permit: storage.guard_read()
+    ledger_function_visibility(permit.value, doc.name_module_index, name)
+}
+
+function_is_fallible: fn(f: Func) -> Bool Never! {
+    if f.return_type == .Val(.Result(_, _)) -> return true
+    false
+}
+
+// Every unit variant of each enum the modules declare, by enum name: the
+// choices of an enum-valued inline editor.
+enum_catalog_json: fn(modules: [JetDriverDocModule]) -> String Never! {
+    catalog := [String:[String]]{}
+    loop doc in modules {
+        if doc.alias == "" -> collect_enum_variants(doc.items, catalog)
+    }
+    names := catalog.keys().to_list()
+    names.sort()
+    entries: loop name in names -> {
+        variants: loop variant in catalog[name] -> "{{\"name\":{json_str(variant)},\"source\":{json_str("{name}.{variant}")}}}"
+        "{json_str(name)}:[{variants.join(",")}]"
+    }
+    "{{{entries.join(",")}}}"
+}
+
+collect_enum_variants: fn(items: [Item], catalog: &[String:[String]]) {
+    loop item in items {
+        if item == {
+            .Enum(def) -> {
+                if catalog.has_key(def.name) -> next
+                variants := [String]{}
+                loop variant in def.variants {
+                    if variant.payload == .Unit -> variants.push(variant.name)
+                }
+                catalog[def.name] = variants
+            }
+            .CodeModule(m) -> {
+                if m.body == .Val(body) -> collect_enum_variants(body, catalog)
+            }
+            .Func(_) | .Struct(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+        }
+    }
+}
+
+// Every variant of each enum with its payload arity, by enum name: the arms a
+// pattern editor offers.
+pattern_catalog_json: fn(modules: [JetDriverDocModule]) -> String Never! {
+    catalog := [String:[String]]{}
+    loop doc in modules {
+        if doc.alias == "" -> collect_pattern_variants(doc.items, catalog)
+    }
+    names := catalog.keys().to_list()
+    names.sort()
+    entries: loop name in names -> "{json_str(name)}:[{catalog[name].join(",")}]"
+    "{{{entries.join(",")}}}"
+}
+
+collect_pattern_variants: fn(items: [Item], catalog: &[String:[String]]) {
+    loop item in items {
+        if item == {
+            .Enum(def) -> {
+                if catalog.has_key(def.name) -> next
+                variants := [String]{}
+                loop variant in def.variants {
+                    arity: if variant.payload == {
+                        .Unit -> 0
+                        .Single(_, _) -> 1
+                        .Named(fields) -> fields.len()
+                    }
+                    variants.push("{{\"name\":{json_str(variant.name)},\"arity\":{arity}}}")
+                }
+                catalog[def.name] = variants
+            }
+            .CodeModule(m) -> {
+                if m.body == .Val(body) -> collect_pattern_variants(body, catalog)
+            }
+            .Func(_) | .Struct(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+        }
+    }
+}
+
+project_func: fn(index: SemIndex, module_display: String, module_src: String, f: Func) -> GraphBuilder {
+    id: graph_id(module_display, f)
+    g := GraphBuilder{graph_id: id}
+    entry_id: "{id}:entry"
+    entry_descriptor: descriptor_for_id("entry")
+    g.nodes.push(NodeRec{id: entry_id, kind: entry_descriptor.kind, archetype: entry_descriptor.archetype, title: f.name, span: f.name_span, x: 40, y: 40, badges: effect_badges(index, f.name), affordances: [String]{"source_jump", "insert_call", "rename_function", "edit_function_signature", "create_function"}, meta_json: meta_attr_json(f.meta)})
+    loop p in f.params {
+        pin_id: "{entry_id}:out:{p.name}"
+        ty: type_name(p.ty)
+        g.local_pins[p.name] = pin_id
+        g.local_types[p.name] = ty
+        g.pins.push(PinRec{id: pin_id, node_id: entry_id, name: p.name, direction: "output", ty: ty, role: None, pattern_source: None, ability: access_sigil(p.convention), fallible: false, effect_grant_need: None, span: p.name_span, pattern_source_span: None, append_op: None, element_index: None})
+    }
+    loop definition in index.definitions {
+        if definition.def.kind == {
+            .Local(_, ty) -> {
+                if ty == .Val(t) -> g.local_types[definition.def.name] = type_name(t)
+            }
+            .Param(ty) -> g.local_types[definition.def.name] = type_name(ty)
+            .Module | .Function(_) | .Struct(_, _) | .Enum(_, _) | .Trait | .Tag | .Type(_) | .Const | .EnumVariant(_) | .Field(_, _) -> {}
+        }
+    }
+    project_stmt_block(g, index, module_src, f.body, 0, 220, 170)
+    add_source_comment_regions(g, module_src, f)
+    add_execution_overlay(g, module_src, f.body)
+    g
+}
+
+collect_node_refs: fn(graph: GraphBuilder, out: &[NodeQueryRef]) {
+    loop node in graph.nodes -> out.push(NodeQueryRef{graph_id: graph.graph_id, node_id: node.id, kind: node.kind, title: node.title, span: node.span})
+    loop inline in graph.inline_exprs -> out.push(NodeQueryRef{graph_id: graph.graph_id, node_id: inline.node_id, kind: "inline:{inline.role}", title: inline.source, span: inline.span})
+}

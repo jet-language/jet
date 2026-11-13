@@ -1,0 +1,13 @@
+# `jet dev <file> --canvas` serves its project document and applies Canvas source
+# transactions: Tools/canvas-test/Run.jet native-edit copies the demo into a folder of its own,
+# reads the single-file project, applies a noop and a replace_source (written to disk and
+# projected again), refuses a stale revision, a candidate that does not check and an unknown
+# operation with the entry left as written, and reads all five in the session's history; a GET of
+# the transaction route answers 405, and the unbuilt project transaction route 501.
+requires: os-name:linux
+env: JET_BIN={jet}
+env: JET_SOURCE={root}/Examples/Tooling/CanvasBlueprintDemo.jet
+env: TMPDIR={scratch}
+step: jet run --allow=Env,Exec,FS,IO,Net,Time {root}/Tools/canvas-test/Run.jet -- native-edit
+exit: 0
+stdout: ~ "PASS native jet dev --canvas transactions" # the probe's one pass line; the URL, port and secret vary per run

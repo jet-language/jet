@@ -1,21 +1,22 @@
+// The graph builder's node, pin, wire, and region records, the execution
+// overlay wired over them, and their JSON.
 use {
     jet_foundation.[
         Expr, Func, LValue, MetaAttr, NameLedger, Span, Stmt, access_sigil, expr_span, name_ledger_declaration, type_name,
     ]
     jet_parser.[jfmt_stmt_span]
-    jet_semindex.[SourceSpan]
 }
 
-add_node: fn(g: &GraphBuilder, id: String, descriptor_id: String, title: String, span: SourceSpan, x: Int, y: Int, badges: [String], affordances: [String]) {
+add_node: fn(g: &GraphBuilder, id: String, descriptor_id: String, title: String, span: Span, x: Int, y: Int, badges: [String], affordances: [String]) {
     descriptor: descriptor_for_id(descriptor_id)
     g.nodes.push(NodeRec{id: id, kind: descriptor.kind, archetype: descriptor.archetype, title: title, span: span, x: x, y: y, badges: badges, affordances: affordances, meta_json: None})
 }
 
-node_span_of: fn(g: GraphBuilder, node_id: String) -> SourceSpan Never! {
+node_span_of: fn(g: GraphBuilder, node_id: String) -> Span Never! {
     loop node in g.nodes {
         if node.id == node_id -> return node.span
     }
-    SourceSpan{start: 0, end: 0}
+    Span{start: 0, end: 0}
 }
 
 has_pin: fn(g: GraphBuilder, id: String) -> Bool Never! {
@@ -32,7 +33,7 @@ add_pin: fn(g: &GraphBuilder, node_id: String, name: String, direction: String, 
     id
 }
 
-add_arm_pin: fn(g: &GraphBuilder, node_id: String, name: String, pattern_source: String, pattern_span: SourceSpan) -> String {
+add_arm_pin: fn(g: &GraphBuilder, node_id: String, name: String, pattern_source: String, pattern_span: Span) -> String {
     id: "{node_id}:output:{name}"
     if !has_pin(g, id) {
         g.pins.push(PinRec{id: id, node_id: node_id, name: name, direction: "output", ty: "exec", role: Val("arm"), pattern_source: Val(pattern_source), ability: "control", fallible: false, effect_grant_need: None, span: pattern_span, pattern_source_span: Val(pattern_span), append_op: Val("edit_pattern_arm"), element_index: None})
@@ -40,7 +41,7 @@ add_arm_pin: fn(g: &GraphBuilder, node_id: String, name: String, pattern_source:
     id
 }
 
-set_pin_source_span: fn(g: &GraphBuilder, pin_id: String, span: SourceSpan) {
+set_pin_source_span: fn(g: &GraphBuilder, pin_id: String, span: Span) {
     loop i in 0..<g.pins.len() {
         if g.pins[i].id == pin_id {
             g.pins[i].span = span
@@ -63,27 +64,23 @@ add_wire: fn(g: &GraphBuilder, from_pin: String, to_pin: String, kind: String) {
     add_wire_with_span(g, from_pin, to_pin, kind, None)
 }
 
-add_wire_with_span: fn(g: &GraphBuilder, from_pin: String, to_pin: String, kind: String, span: SourceSpan?) {
+add_wire_with_span: fn(g: &GraphBuilder, from_pin: String, to_pin: String, kind: String, span: Span?) {
     g.next_wire += 1
     g.wires.push(WireRec{id: "{g.graph_id}:wire:{g.next_wire}", from_pin: from_pin, to_pin: to_pin, kind: kind, span: span, from_span: None, to_span: None})
 }
 
-add_control_wire: fn(g: &GraphBuilder, from_pin: String, to_pin: String, from_span: SourceSpan, to_span: SourceSpan) {
+add_control_wire: fn(g: &GraphBuilder, from_pin: String, to_pin: String, from_span: Span, to_span: Span) {
     g.next_wire += 1
     g.wires.push(WireRec{id: "{g.graph_id}:wire:{g.next_wire}", from_pin: from_pin, to_pin: to_pin, kind: "control", span: Val(to_span), from_span: Val(from_span), to_span: Val(to_span)})
 }
 
-source_span_of: fn(span: Span) -> SourceSpan Never! {
-    SourceSpan{start: span.start, end: span.end}
-}
-
 add_region: fn(g: &GraphBuilder, ordinal: Int, kind: String, title: String, span: Span) {
-    g.regions.push("{{\"region_id\":{json_str("{g.graph_id}:region:{ordinal}:{kind}")},\"kind\":{json_str(kind)},\"title\":{json_str(title)},\"source_span\":{span_json(source_span_of(span))}}}")
+    g.regions.push("{{\"region_id\":{json_str("{g.graph_id}:region:{ordinal}:{kind}")},\"kind\":{json_str(kind)},\"title\":{json_str(title)},\"source_span\":{span_json(span)}}}")
 }
 
 add_authority_region: fn(g: &GraphBuilder, ordinal: Int, title: String, required_effects: [String], granted_effects: [String], denied_effects: [String], binding: String?, span: Span) {
     authority: if binding == .Val(name) -> "Authority handle `{name}`" else -> "lexical #FX authority"
-    g.regions.push("{{\"region_id\":{json_str("{g.graph_id}:region:{ordinal}:authority")},\"kind\":\"authority\",\"title\":{json_str(title)},\"required_effects\":{json_strs(required_effects)},\"granted_effects\":{json_strs(granted_effects)},\"denied_effects\":{json_strs(denied_effects)},\"authority\":{json_str(authority)},\"source_span\":{span_json(source_span_of(span))}}}")
+    g.regions.push("{{\"region_id\":{json_str("{g.graph_id}:region:{ordinal}:authority")},\"kind\":\"authority\",\"title\":{json_str(title)},\"required_effects\":{json_strs(required_effects)},\"granted_effects\":{json_strs(granted_effects)},\"denied_effects\":{json_strs(denied_effects)},\"authority\":{json_str(authority)},\"source_span\":{span_json(span)}}}")
 }
 
 meta_attr_json: fn(meta: MetaAttr?) -> String? Never! {
@@ -94,7 +91,7 @@ meta_attr_json: fn(meta: MetaAttr?) -> String? Never! {
         if field == {
             .Category(text, _) -> category = literal_text(text)
             .Tunable(_) -> tunable = true
-            else -> {}
+            .Maturity(_, _) | .Unknown(_, _, _) -> {}
         }
     }
     if category == None && !tunable -> return None
@@ -115,7 +112,7 @@ literal_text: fn(expr: Expr) -> String? Never! {
 }
 
 add_source_comment_regions: fn(g: &GraphBuilder, src: String, f: Func) {
-    func_span: func_source_span(f)
+    func_span: f.span
     loop hint in canvas_comment_hints(src) {
         if !hint_belongs_to_function(src, hint.anchor, hint.hint_span, func_span) -> next
         g.regions.push("{{\"region_id\":{json_str(comment_region_id(g.graph_id, hint.anchor))},\"kind\":\"comment\",\"title\":{json_str(hint.title)},\"color\":{json_str(hint.color)},\"alpha\":{json_str(hint.alpha)},\"bounds\":{{\"x\":{hint.bounds.x},\"y\":{hint.bounds.y},\"w\":{hint.bounds.w},\"h\":{hint.bounds.h}}},\"source_span\":{span_json(hint.anchor)},\"hint_span\":{span_json(hint.hint_span)}}}")
@@ -126,10 +123,14 @@ add_source_comment_regions: fn(g: &GraphBuilder, src: String, f: Func) {
     }
 }
 
-hint_belongs_to_function: fn(src: String, anchor: SourceSpan, hint_span: SourceSpan, func_span: SourceSpan) -> Bool Never! {
-    if span_overlaps(anchor, func_span) || span_overlaps(hint_span, func_span) -> return true
+hint_belongs_to_function: fn(src: String, anchor: Span, hint_span: Span, func_span: Span) -> Bool Never! {
+    if spans_touch(anchor, func_span) || spans_touch(hint_span, func_span) -> return true
     if hint_span.start < func_span.end -> return false
     hint_span.start < next_function_start(src, func_span.end)
+}
+
+spans_touch: fn(a: Span, b: Span) -> Bool Never! {
+    a.start <= b.end && b.start <= a.end
 }
 
 // The offset of the next `name: fn` declaration line at or after `offset`.
@@ -158,7 +159,8 @@ is_identifier_text: fn(text: String) -> Bool Never! {
 add_execution_overlay: fn(g: &GraphBuilder, src: String, body: [Stmt]) {
     exec_nodes := [NodeRec]{}
     loop node in g.nodes {
-        if node_wants_exec(node) -> exec_nodes.push(node)
+        // copy: the overlay below adds pins to g while it walks these nodes
+        if node_wants_exec(node) -> exec_nodes.push(node.copy())
     }
     loop node in exec_nodes {
         if node.kind != "entry" -> ensure_exec_pin(g, node.id, "exec", "input", node.span, None)
@@ -179,7 +181,8 @@ add_execution_overlay: fn(g: &GraphBuilder, src: String, body: [Stmt]) {
     entry := NodeRec?{None}
     loop node in g.nodes {
         if node.kind == "entry" {
-            entry = Val(node)
+            // copy: g stays borrowed; the entry node is read after its pins change
+            entry = Val(node.copy())
             break
         }
     }
@@ -190,14 +193,14 @@ add_execution_overlay: fn(g: &GraphBuilder, src: String, body: [Stmt]) {
 
 node_has_arm_pins: fn(g: GraphBuilder, node_id: String) -> Bool Never! {
     loop pin in g.pins {
-        if pin.node_id == node_id && pin.direction == "output" && pin.role == .Val("arm") -> return true
+        if pin.node_id == node_id && pin.direction == "output" && (pin.role ?? "") == "arm" -> return true
     }
     false
 }
 
 ExecutionEndpoint: struct {
     pin: String
-    span: SourceSpan
+    span: Span
 }
 
 ExecutionFlow: struct {
@@ -216,14 +219,17 @@ execution_block: fn(g: &GraphBuilder, src: String, stmts: [Stmt]) -> ExecutionFl
     loop stmt in stmts {
         if !reachable -> break
         current: execution_stmt(g, src, stmt)
-        if current.entry == .Val(entry) {
-            if flow.entry == None -> flow.entry = Val(entry)
-            loop previous in exits -> add_control_wire_once(g, previous.pin, entry.pin, previous.span, entry.span)
-            exits = current.exits
-            reachable = exits.len() > 0
-        } else if current.exits.len() > 0 {
-            exits = current.exits
-            reachable = true
+        if {
+            current.entry == .Val(entry) -> {
+                if flow.entry == None -> flow.entry = Val(entry)
+                loop previous in exits -> add_control_wire_once(g, previous.pin, entry.pin, previous.span, entry.span)
+                exits = current.exits
+                reachable = exits.len() > 0
+            }
+            current.exits.len() > 0 -> {
+                exits = current.exits
+                reachable = true
+            }
         }
     }
     flow.exits = exits
@@ -249,10 +255,13 @@ execution_arms: fn(g: &GraphBuilder, src: String, stmt: Stmt, arm_bodies: [[Stmt
         append_branch_path(g, src, output, body, node.span, exits)
     }
     else_output: exec_output(g, node.id, "else")
-    if else_body == .Val(body) {
-        append_branch_path(g, src, else_output, body, node.span, exits)
-    } else if else_output == .Val(output) {
-        exits.push(ExecutionEndpoint{pin: output, span: node.span})
+    if {
+        else_body == .Val(body) -> {
+            append_branch_path(g, src, else_output, body, node.span, exits)
+        }
+        else_output == .Val(output) -> {
+            exits.push(ExecutionEndpoint{pin: output, span: node.span})
+        }
     }
     ExecutionFlow{entry: exec_input(node), exits: exits}
 }
@@ -288,7 +297,7 @@ execution_stmt: fn(g: &GraphBuilder, src: String, stmt: Stmt) -> ExecutionFlow {
         .ComptimeBlock(body, _, _) -> execution_block(g, src, body)
         .Transact(_, _, body, _, _) -> execution_block(g, src, body)
         .ScopeMember(_, _, _, _, body, _, _, _) -> execution_block(g, src, body)
-        else -> {
+        .Expr(_) | .Val(_) | .Assign(_, _, _, _) | .Return(_, _) | .Break(_) | .BreakValue(_, _) | .Continue(_) | .BreakLabel(_, _) | .BreakLabelValue(_, _, _, _) | .ContinueLabel(_, _) | .Yield(_, _) | .DeferClose(_, _) -> {
             node: direct_execution_node(g, stmt) ?? return empty_flow()
             exits := [ExecutionEndpoint]{}
             if !stmt_is_terminal(stmt) && exec_output(g, node.id, "then") == .Val(pin) -> exits.push(ExecutionEndpoint{pin: pin, span: node.span})
@@ -300,18 +309,21 @@ execution_stmt: fn(g: &GraphBuilder, src: String, stmt: Stmt) -> ExecutionFlow {
 stmt_is_terminal: fn(stmt: Stmt) -> Bool Never! {
     if stmt == {
         .Return(_, _) | .Break(_) | .BreakValue(_, _) | .BreakLabel(_, _) | .BreakLabelValue(_, _, _, _) | .Continue(_) | .ContinueLabel(_, _) -> true
-        else -> false
+        .Expr(_) | .Val(_) | .Assign(_, _, _, _) | .While(_, _, _, _, _) | .For(_, _, _, _, _, _, _, _, _) | .Switch(_, _, _, _) | .Loop(_, _, _, _) | .CountedLoop(_, _, _, _, _, _, _) | .Unsafe(_, _, _, _) | .Impure(_, _, _, _) | .Reactive(_, _) | .Shield(_, _) | .Switched(_, _, _) | .Region(_, _, _, _) | .Policy(_, _, _) | .TaskGroup(_, _, _, _, _) | .Layout(_, _, _, _) | .AuthorityScope(_, _, _, _, _) | .ComptimeIf(_, _, _, _, _, _) | .ComptimeSwitch(_, _, _, _) | .ComptimeBlock(_, _, _) | .ContextBlock(_, _, _) | .Live(_, _) | .AssumeDet(_, _, _, _) | .Transact(_, _, _, _, _) | .Yield(_, _) | .ScopeMember(_, _, _, _, _, _, _, _) | .DeferClose(_, _) -> false
     }
 }
 
-append_branch_path: fn(g: &GraphBuilder, src: String, output: String?, body: [Stmt], owner_span: SourceSpan, exits: &[ExecutionEndpoint]) {
+append_branch_path: fn(g: &GraphBuilder, src: String, output: String?, body: [Stmt], owner_span: Span, exits: &[ExecutionEndpoint]) {
     pin: output ?? return
     body_flow: execution_block(g, src, body)
-    if body_flow.entry == .Val(entry) {
-        add_control_wire_once(g, pin, entry.pin, owner_span, entry.span)
-        loop exit in body_flow.exits -> exits.push(exit)
-    } else {
-        exits.push(ExecutionEndpoint{pin: pin, span: owner_span})
+    if {
+        body_flow.entry == .Val(entry) -> {
+            add_control_wire_once(g, pin, entry.pin, owner_span, entry.span)
+            loop exit in body_flow.exits -> exits.push(exit)
+        }
+        else -> {
+            exits.push(ExecutionEndpoint{pin: pin, span: owner_span})
+        }
     }
 }
 
@@ -325,12 +337,12 @@ direct_execution_node: fn(g: GraphBuilder, stmt: Stmt) -> NodeRec? Never! {
     None
 }
 
-stmt_execution_anchor: fn(stmt: Stmt) -> SourceSpan Never! {
+stmt_execution_anchor: fn(stmt: Stmt) -> Span Never! {
     if stmt == {
-        .Val(binding) -> source_span_of(binding.name_span)
-        .Assign(target, _, _, _) -> source_span_of(lvalue_span(target))
+        .Val(binding) -> binding.name_span
+        .Assign(target, _, _, _) -> lvalue_span(target)
         .Expr(expr) -> expr_execution_anchor(expr)
-        else -> source_span_of(jfmt_stmt_span(stmt))
+        .Return(_, _) | .While(_, _, _, _, _) | .For(_, _, _, _, _, _, _, _, _) | .Switch(_, _, _, _) | .Break(_) | .BreakValue(_, _) | .Continue(_) | .BreakLabel(_, _) | .BreakLabelValue(_, _, _, _) | .ContinueLabel(_, _) | .Loop(_, _, _, _) | .CountedLoop(_, _, _, _, _, _, _) | .Unsafe(_, _, _, _) | .Impure(_, _, _, _) | .Reactive(_, _) | .Shield(_, _) | .Switched(_, _, _) | .Region(_, _, _, _) | .Policy(_, _, _) | .TaskGroup(_, _, _, _, _) | .Layout(_, _, _, _) | .AuthorityScope(_, _, _, _, _) | .ComptimeIf(_, _, _, _, _, _) | .ComptimeSwitch(_, _, _, _) | .ComptimeBlock(_, _, _) | .ContextBlock(_, _, _) | .Live(_, _) | .AssumeDet(_, _, _, _) | .Transact(_, _, _, _, _) | .Yield(_, _) | .ScopeMember(_, _, _, _, _, _, _, _) | .DeferClose(_, _) -> jfmt_stmt_span(stmt)
     }
 }
 
@@ -342,13 +354,13 @@ lvalue_span: fn(target: LValue) -> Span Never! {
     }
 }
 
-expr_execution_anchor: fn(expr: Expr) -> SourceSpan Never! {
+expr_execution_anchor: fn(expr: Expr) -> Span Never! {
     if expr == {
-        .Call(call, _) -> source_span_of(call.name_span)
-        .MethodCall(_, _, method_span, _, _, _, _) -> source_span_of(method_span)
-        .Try(_, span, _, _, _) -> source_span_of(span)
+        .Call(call, _) -> call.name_span
+        .MethodCall(_, _, method_span, _, _, _, _) -> method_span
+        .Try(_, span, _, _, _) -> span
         .OrFallback(value, _, _, _, _) -> expr_execution_anchor(value)
-        else -> source_span_of(expr_span(expr))
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .TypeValue(_, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) -> expr_span(expr)
     }
 }
 
@@ -364,7 +376,7 @@ exec_output: fn(g: GraphBuilder, node_id: String, name: String) -> String? Never
     None
 }
 
-add_control_wire_once: fn(g: &GraphBuilder, from_pin: String, to_pin: String, from_span: SourceSpan, to_span: SourceSpan) {
+add_control_wire_once: fn(g: &GraphBuilder, from_pin: String, to_pin: String, from_span: Span, to_span: Span) {
     loop wire in g.wires {
         if wire.kind == "control" && wire.from_pin == from_pin && wire.to_pin == to_pin -> return
     }
@@ -375,19 +387,15 @@ node_wants_exec: fn(node: NodeRec) -> Bool Never! {
     node.archetype == "entry" || node.archetype == "function_exec" || node.archetype == "control"
 }
 
-ensure_exec_pin: fn(g: &GraphBuilder, node_id: String, name: String, direction: String, span: SourceSpan, role: String?) {
+ensure_exec_pin: fn(g: &GraphBuilder, node_id: String, name: String, direction: String, span: Span, role: String?) {
     id: "{node_id}:{direction}:{name}"
     if has_pin(g, id) -> return
     g.pins.push(PinRec{id: id, node_id: node_id, name: name, direction: direction, ty: "exec", role: role, pattern_source: None, ability: "control", fallible: false, effect_grant_need: None, span: span, pattern_source_span: None, append_op: None, element_index: None})
 }
 
-func_source_span: fn(f: Func) -> SourceSpan Never! {
-    source_span_of(f.span)
-}
-
 CommentHint: struct {
-    anchor: SourceSpan
-    hint_span: SourceSpan
+    anchor: Span
+    hint_span: Span
     title: String
     color: String
     alpha: String
@@ -403,12 +411,15 @@ canvas_hint_lines: fn(src: String, kind: String) -> [CommentHint] Never! {
         trimmed: line.trim()
         if trimmed.starts_with(prefix) {
             body: trimmed.remove_prefix(prefix)
-            anchor: attr_span(body, "span") ?? SourceSpan{start: 0, end: 0}
-            hint_span: SourceSpan{start: offset, end: offset + line.len()}
-            if kind == "comment" {
-                out.push(CommentHint{anchor: anchor, hint_span: hint_span, title: attr_string(body, "title") ?? "Comment", color: attr_string(body, "color") ?? "#2563eb", alpha: attr_string(body, "alpha") ?? "0.18", bounds: attr_bounds(body, "bounds") ?? CanvasBounds{x: 0, y: 0, w: 360, h: 180}})
-            } else {
-                out.push(CommentHint{anchor: anchor, hint_span: hint_span, title: attr_string(body, "title") ?? "Collapsed", color: "#64748b", alpha: "0.16", bounds: CanvasBounds{x: 0, y: 0, w: 360, h: 120}})
+            anchor: attr_span(body, "span") ?? Span{start: 0, end: 0}
+            hint_span: Span{start: offset, end: offset + line.len()}
+            if {
+                kind == "comment" -> {
+                    out.push(CommentHint{anchor: anchor, hint_span: hint_span, title: attr_string(body, "title") ?? "Comment", color: attr_string(body, "color") ?? "#2563eb", alpha: attr_string(body, "alpha") ?? "0.18", bounds: attr_bounds(body, "bounds") ?? CanvasBounds{x: 0, y: 0, w: 360, h: 180}})
+                }
+                else -> {
+                    out.push(CommentHint{anchor: anchor, hint_span: hint_span, title: attr_string(body, "title") ?? "Collapsed", color: "#64748b", alpha: "0.16", bounds: CanvasBounds{x: 0, y: 0, w: 360, h: 120}})
+                }
             }
         }
         offset += line.len() + 1
@@ -420,7 +431,7 @@ canvas_comment_hints: fn(src: String) -> [CommentHint] Never! {
     canvas_hint_lines(src, "comment")
 }
 
-comment_region_id: fn(graph_id: String, span: SourceSpan) -> String Never! {
+comment_region_id: fn(graph_id: String, span: Span) -> String Never! {
     "{graph_id}:comment:{span.start}-{span.end}"
 }
 
@@ -428,12 +439,12 @@ canvas_collapse_hints: fn(src: String) -> [CommentHint] Never! {
     canvas_hint_lines(src, "collapse")
 }
 
-collapse_region_id: fn(graph_id: String, span: SourceSpan) -> String Never! {
+collapse_region_id: fn(graph_id: String, span: Span) -> String Never! {
     "{graph_id}:collapse:{span.start}-{span.end}"
 }
 
 add_inline: fn(g: &GraphBuilder, node_id: String, ordinal: Int, role: String, src: String, span: Span) {
-    g.inline_exprs.push(InlineRec{id: "{g.graph_id}:inline:{ordinal}:{role}", node_id: node_id, role: role, source: snippet(src, span), span: source_span_of(span)})
+    g.inline_exprs.push(InlineRec{id: "{g.graph_id}:inline:{ordinal}:{role}", node_id: node_id, role: role, source: snippet(src, span), span: span})
 }
 
 graph_to_json: fn(g: GraphBuilder, f: Func, src: String, visibility: String) -> String Never! {
@@ -456,7 +467,7 @@ func_return_name: fn(f: Func) -> String Never! {
 function_metadata_json: fn(src: String, f: Func, visibility: String) -> String Never! {
     params: loop p in f.params -> {
         default: if p.default == .Val(expr) -> json_str(snippet(src, expr_span(expr))) else -> "null"
-        "{{\"name\":{json_str(p.name)},\"type\":{json_str(type_name(p.ty))},\"ability\":{json_str(access_sigil(p.convention))},\"default\":{json_bool(p.default != None)},\"default_source\":{default},\"source_span\":{span_json(source_span_of(p.name_span))}}}"
+        "{{\"name\":{json_str(p.name)},\"type\":{json_str(type_name(p.ty))},\"ability\":{json_str(access_sigil(p.convention))},\"default\":{json_bool(p.default != None)},\"default_source\":{default},\"source_span\":{span_json(p.name_span)}}}"
     }
     effects := [String]{}
     if f.declared_effects == .Val(entries) {
@@ -464,7 +475,7 @@ function_metadata_json: fn(src: String, f: Func, visibility: String) -> String N
     }
     effect_via: if f.effect_via == .Val(via) -> json_str(via.name) else -> "null"
     meta: meta_attr_json(f.meta) ?? "null"
-    "{{\"name\":{json_str(f.name)},\"signature\":{json_str(function_signature_text(src, f))},\"visibility\":{json_str(visibility)},\"docs\":{json_str(doc_comment_before(src, f.name_span.start))},\"pure\":{json_bool(f.is_pure)},\"unsafe\":{json_bool(f.is_unsafe)},\"effects\":[{effects.join(",")}],\"effect_via\":{effect_via},\"returns\":{json_str(func_return_name(f))},\"params\":[{params.join(",")}],\"meta\":{meta},\"source_span\":{span_json(func_source_span(f))},\"edit_affordances\":[\"rename_function\",\"edit_function_signature\",\"create_function\",\"source_jump\"]}}"
+    "{{\"name\":{json_str(f.name)},\"signature\":{json_str(function_signature_text(src, f))},\"visibility\":{json_str(visibility)},\"docs\":{json_str(doc_comment_before(src, f.name_span.start))},\"pure\":{json_bool(f.is_pure)},\"unsafe\":{json_bool(f.is_unsafe)},\"effects\":[{effects.join(",")}],\"effect_via\":{effect_via},\"returns\":{json_str(func_return_name(f))},\"params\":[{params.join(",")}],\"meta\":{meta},\"source_span\":{span_json(f.span)},\"edit_affordances\":[\"rename_function\",\"edit_function_signature\",\"create_function\",\"source_jump\"]}}"
 }
 
 ledger_function_visibility: fn(ledger: NameLedger, module_index: Int, name: String) -> String Never! {
@@ -485,13 +496,17 @@ function_signature_text: fn(src: String, f: Func) -> String Never! {
         text
     }
     out := "{f.name}: fn({params.join(", ")}) {func_return_name(f)}"
-    if f.effect_via == .Val(via) {
-        out = "{out} -[via {via.name}]>"
-    } else if f.declared_effects == .Val(entries) {
-        names: loop entry in entries -> entry.name
-        out = "{out} -[{names.join(", ")}]>"
-    } else if f.is_pure {
-        out = "{out} -[]>"
+    if {
+        f.effect_via == .Val(via) -> {
+            out = "{out} -[via {via.name}]>"
+        }
+        f.declared_effects == .Val(entries) -> {
+            names: loop entry in entries -> entry.name
+            out = "{out} -[{names.join(", ")}]>"
+        }
+        f.is_pure -> {
+            out = "{out} -[]>"
+        }
     }
     out
 }
@@ -521,7 +536,7 @@ doc_comment_before: fn(src: String, name_start: Int) -> String Never! {
 
 callback_event_view_json: fn(graph_id: String, f: Func) -> String? Never! {
     event: callback_event_name(f.name) ?? return None
-    Val("{{\"event_id\":{json_str("{graph_id}:event:{event}")},\"kind\":\"callback_event\",\"title\":{json_str(event)},\"function\":{json_str(f.name)},\"entry_node\":{json_str("{graph_id}:entry")},\"semantics\":\"ordinary_jet_function\",\"dispatch\":\"framework_callback\",\"pending_first_class_events\":\"#286\",\"source_span\":{span_json(func_source_span(f))}}}")
+    Val("{{\"event_id\":{json_str("{graph_id}:event:{event}")},\"kind\":\"callback_event\",\"title\":{json_str(event)},\"function\":{json_str(f.name)},\"entry_node\":{json_str("{graph_id}:entry")},\"semantics\":\"ordinary_jet_function\",\"dispatch\":\"framework_callback\",\"pending_first_class_events\":\"#286\",\"source_span\":{span_json(f.span)}}}")
 }
 
 callback_event_name: fn(name: String) -> String? Never! {
@@ -565,7 +580,7 @@ optional_json_str: fn(value: String?) -> String Never! {
     if value == .Val(text) -> json_str(text) else -> "null"
 }
 
-optional_span_json: fn(value: SourceSpan?) -> String Never! {
+optional_span_json: fn(value: Span?) -> String Never! {
     if value == .Val(span) -> span_json(span) else -> "null"
 }
 

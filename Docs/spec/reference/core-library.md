@@ -2798,6 +2798,15 @@ for. A pipeline receipt takes the largest step's peak and sums the steps' CPU
 time. All three are `None` when no usage was taken, such as a host without
 `wait4` usage.
 
+A child starts with its parent's signal dispositions, as POSIX exec defines
+them. A signal the parent ignores stays ignored in the child, which is how
+`nohup` and a shell's background job (SIGINT and SIGQUIT ignored) keep their
+children running. A signal the parent catches, through `process.signals` or
+`process.on_signal`, returns to its default action in the child, and so does
+SIGPIPE. A program that may run as a background job, and needs its child to
+stop on `interrupt()`, holds `process.signals([ProcessSignal]{.Int})` or calls
+`#Unsafe reset_signal` before it spawns.
+
 #### Building a process policy
 
 `ProcessSpec` builder methods return a modified specification. `.arg(value)`

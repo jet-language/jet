@@ -1,0 +1,438 @@
+// One graph node, region, or nested block per statement of a function body.
+use {
+    jet_foundation.[Expr, Pattern, Span, Stmt, SwitchArm, expr_span, policy_key_name]
+    jet_parser.[jfmt_is_subjectless_guard, jfmt_uses_classic_if_spelling]
+    jet_semindex.[SemIndex]
+}
+
+project_stmt_block: fn(g: &GraphBuilder, index: SemIndex, src: String, stmts: [Stmt], base: Int, x: Int, y: Int) {
+    cursor_y := y
+    loop (i, stmt) in stmts {
+        project_stmt(g, index, src, stmt, base + i + 1, x, cursor_y)
+        cursor_y += stmt_row_step(stmt)
+    }
+}
+
+// A list initializer's multi-input body grows with item count; retain enough
+// spacing for its data providers before the next sibling statement.
+stmt_row_step: fn(stmt: Stmt) -> Int Never! {
+    items: if stmt == {
+        .Val(b) -> multi_input_item_count(b.init)
+        .Assign(_, _, _, value) -> multi_input_item_count(value)
+        .Expr(_) | .Return(_, _) | .While(_, _, _, _, _) | .For(_, _, _, _, _, _, _, _, _) | .Switch(_, _, _, _) | .Break(_) | .BreakValue(_, _) | .Continue(_) | .BreakLabel(_, _) | .BreakLabelValue(_, _, _, _) | .ContinueLabel(_, _) | .Loop(_, _, _, _) | .CountedLoop(_, _, _, _, _, _, _) | .Unsafe(_, _, _, _) | .Impure(_, _, _, _) | .Reactive(_, _) | .Shield(_, _) | .Switched(_, _, _) | .Region(_, _, _, _) | .Policy(_, _, _) | .TaskGroup(_, _, _, _, _) | .Layout(_, _, _, _) | .AuthorityScope(_, _, _, _, _) | .ComptimeIf(_, _, _, _, _, _) | .ComptimeSwitch(_, _, _, _) | .ComptimeBlock(_, _, _) | .ContextBlock(_, _, _) | .Live(_, _) | .AssumeDet(_, _, _, _) | .Transact(_, _, _, _, _) | .Yield(_, _) | .ScopeMember(_, _, _, _, _, _, _, _) | .DeferClose(_, _) -> 0
+    }
+    extra: if items > 2 -> items - 2 else -> 0
+    130 + extra * 55
+}
+
+multi_input_item_count: fn(expr: Expr) -> Int Never! {
+    if expr == .ListLit(items, _, _) -> return items.len()
+    0
+}
+
+project_stmt: fn(g: &GraphBuilder, index: SemIndex, src: String, stmt: Stmt, ordinal: Int, x: Int, y: Int) {
+    if stmt == {
+        .Val(b) -> {
+            node_id: "{g.graph_id}:stmt:{ordinal}:binding"
+            ty: binding_type(g, b.name, b)
+            add_node(g, node_id, "binding", b.name, binding_source_span(src, b), x, y, [String]{"local"}, [String]{"rename_binding", "edit_inline_expr", "source_jump"})
+            set_node_meta(g, node_id, meta_attr_json(b.meta))
+            input_pin: add_pin(g, node_id, "value", "input", ty, "", false)
+            output_pin: add_pin(g, node_id, b.name, "output", ty, "", false)
+            g.local_pins[b.name] = output_pin
+            g.local_types[b.name] = ty
+            init_span: if b.pattern == None -> binding_init_span(src, b) else -> expr_span(b.init)
+            connect_expr_to_input_with_span(g, index, src, b.init, init_span, ordinal, "init", node_id, input_pin, x - 220, y)
+        }
+        .Assign(target, op, _, value) -> {
+            node_id: "{g.graph_id}:stmt:{ordinal}:assign"
+            ty: lvalue_type(g, target)
+            add_node(g, node_id, "assignment", assignment_title(target, op), lvalue_span(target), x, y, [String]{"write"}, [String]{"edit_inline_expr", "source_jump"})
+            input: add_pin(g, node_id, "value", "input", ty, "", false)
+            output: add_pin(g, node_id, "target", "output", ty, "&", false)
+            connect_expr_to_input(g, index, src, value, ordinal, "value", node_id, input, x - 220, y)
+            if target == .Local(name, _) {
+                g.local_pins[name] = output
+                g.local_types[name] = ty
+            }
+        }
+        .Expr(e) -> {
+            _: project_expr_node(g, index, src, e, ordinal, x, y, ExprPlacement.Exec)
+        }
+        .DeferClose(close, span) -> {
+            node_id: "{g.graph_id}:stmt:{ordinal}:defer_close"
+            add_node(g, node_id, "defer_close", "defer close", span, x, y, [String]{"cleanup"}, [String]{"source_jump"})
+            add_inline(g, node_id, ordinal, "close", src, expr_span(close))
+        }
+        .Return(value, span) -> {
+            node_id: "{g.graph_id}:stmt:{ordinal}:return"
+            add_node(g, node_id, "return", "return", span, x, y, [String]{"exit"}, [String]{"source_jump"})
+            if value == .Val(e) {
+                ty: expr_type(g, index, e)
+                input: add_pin(g, node_id, "value", "input", ty, "", false)
+                connect_expr_to_input(g, index, src, e, ordinal, "value", node_id, input, x - 220, y)
+            }
+        }
+        .While(cond, body, span, _, _) -> {
+            node_id: "{g.graph_id}:stmt:{ordinal}:loop"
+            add_node(g, node_id, "loop", "loop", span, x, y, [String]{"control"}, [String]{"edit_inline_expr", "source_jump"})
+            add_inline(g, node_id, ordinal, "cond", src, expr_span(cond))
+            project_stmt_block(g, index, src, body, ordinal * 100 + 15, x + 230, y + 70)
+        }
+        .Loop(body, span, _, _) -> {
+            node_id: "{g.graph_id}:stmt:{ordinal}:loop"
+            add_node(g, node_id, "loop", "loop", span, x, y, [String]{"control"}, [String]{"source_jump"})
+            project_stmt_block(g, index, src, body, ordinal * 100 + 20, x + 230, y + 70)
+        }
+        .CountedLoop(init, cond, step, body, span, _, _) -> {
+            node_id: "{g.graph_id}:stmt:{ordinal}:counted_loop"
+            add_node(g, node_id, "loop", "counted loop", span, x, y, [String]{"control"}, [String]{"add_pattern_arm", "edit_inline_expr", "source_jump"})
+            initializer_span: Span{start: init.name_span.start, end: expr_span(init.init).end}
+            init_pin: add_pin(g, node_id, "initializer", "input", "Value", "", false)
+            connect_expr_to_input_with_span(g, index, src, init.init, initializer_span, ordinal * 10, "initializer", node_id, init_pin, x - 220, y)
+            cond_pin: add_pin(g, node_id, "condition", "input", "Bool", "", false)
+            connect_expr_to_input(g, index, src, cond, ordinal * 10 + 1, "condition", node_id, cond_pin, x - 220, y + 30)
+            add_inline(g, node_id, ordinal, "cond", src, expr_span(cond))
+            if step == .Val(step_stmt) {
+                if step_stmt == {
+                    .Assign(target, _, _, value) -> {
+                        pin: add_pin(g, node_id, "afterthought", "input", "Value", "", false)
+                        afterthought_span: Span{start: lvalue_span(target).start, end: expr_source_end(value)}
+                        connect_expr_to_input_with_span(g, index, src, value, afterthought_span, ordinal * 10 + 2, "afterthought", node_id, pin, x - 220, y + 60)
+                    }
+                    .Expr(value) -> {
+                        pin: add_pin(g, node_id, "afterthought", "input", "Value", "", false)
+                        connect_expr_to_input_with_span(g, index, src, value, expr_span(value), ordinal * 10 + 2, "afterthought", node_id, pin, x - 220, y + 60)
+                    }
+                    .Val(_) | .Return(_, _) | .While(_, _, _, _, _) | .For(_, _, _, _, _, _, _, _, _) | .Switch(_, _, _, _) | .Break(_) | .BreakValue(_, _) | .Continue(_) | .BreakLabel(_, _) | .BreakLabelValue(_, _, _, _) | .ContinueLabel(_, _) | .Loop(_, _, _, _) | .CountedLoop(_, _, _, _, _, _, _) | .Unsafe(_, _, _, _) | .Impure(_, _, _, _) | .Reactive(_, _) | .Shield(_, _) | .Switched(_, _, _) | .Region(_, _, _, _) | .Policy(_, _, _) | .TaskGroup(_, _, _, _, _) | .Layout(_, _, _, _) | .AuthorityScope(_, _, _, _, _) | .ComptimeIf(_, _, _, _, _, _) | .ComptimeSwitch(_, _, _, _) | .ComptimeBlock(_, _, _) | .ContextBlock(_, _, _) | .Live(_, _) | .AssumeDet(_, _, _, _) | .Transact(_, _, _, _, _) | .Yield(_, _) | .ScopeMember(_, _, _, _, _, _, _, _) | .DeferClose(_, _) -> {}
+                }
+            }
+            project_stmt_block(g, index, src, body, ordinal * 100 + 30, x + 230, y + 200)
+        }
+        .For(var, _, var2, kind, body, span, _, _, _) -> {
+            node_id: "{g.graph_id}:stmt:{ordinal}:for"
+            add_node(g, node_id, "loop", "loop {var}", span, x, y, [String]{"control"}, [String]{"source_jump"})
+            iter_ty: if kind == {
+                .Range(_, _, _, _) -> "Int"
+                .In(_, _) -> "iterable"
+            }
+            output: add_pin(g, node_id, var, "output", iter_ty, "", false)
+            g.local_pins[var] = output
+            g.local_types[var] = iter_ty
+            if var2 == .Val(second) {
+                second_output: add_pin(g, node_id, second.name, "output", iter_ty, "", false)
+                g.local_pins[second.name] = second_output
+                g.local_types[second.name] = iter_ty
+            }
+            if kind == {
+                .Range(start, end, stride, _) -> {
+                    start_pin: add_pin(g, node_id, "range_start", "input", "Int", "", false)
+                    connect_expr_to_input(g, index, src, start, ordinal * 10, "range_start", node_id, start_pin, x - 220, y)
+                    end_pin: add_pin(g, node_id, "range_end", "input", "Int", "", false)
+                    connect_expr_to_input(g, index, src, end, ordinal * 10 + 1, "range_end", node_id, end_pin, x - 220, y + 30)
+                    if stride == .Val(value) {
+                        stride_pin: add_pin(g, node_id, "stride", "input", "Int", "", false)
+                        connect_expr_to_input(g, index, src, value, ordinal * 10 + 2, "stride", node_id, stride_pin, x - 220, y + 60)
+                    }
+                }
+                .In(collection, stride) -> {
+                    source_pin: add_pin(g, node_id, "source", "input", "Iterable", "", false)
+                    connect_expr_to_input(g, index, src, collection, ordinal * 10, "source", node_id, source_pin, x - 220, y)
+                    if stride == .Val(value) {
+                        stride_pin: add_pin(g, node_id, "stride", "input", "Int", "", false)
+                        connect_expr_to_input(g, index, src, value, ordinal * 10 + 1, "stride", node_id, stride_pin, x - 220, y + 30)
+                    }
+                }
+            }
+            project_stmt_block(g, index, src, body, ordinal * 100 + 40, x + 230, y + 70)
+        }
+        .Switch(subject, arms, else_body, span) | .ComptimeSwitch(subject, arms, else_body, span) -> project_switch(g, index, src, SwitchStmt{subject: subject, arms: arms, else_body: else_body, span: span}, ordinal, x, y)
+        .Break(span) | .Continue(span) | .BreakLabel(_, span) | .ContinueLabel(_, span) -> {
+            node_id: "{g.graph_id}:stmt:{ordinal}:flow"
+            add_node(g, node_id, "flow", snippet(src, span), span, x, y, [String]{"control"}, [String]{"source_jump"})
+        }
+        .BreakValue(value, span) | .BreakLabelValue(_, _, value, span) -> {
+            node_id: "{g.graph_id}:stmt:{ordinal}:flow"
+            add_node(g, node_id, "flow", "break", span, x, y, [String]{"control"}, [String]{"source_jump"})
+            ty: expr_type(g, index, value)
+            input: add_pin(g, node_id, "value", "input", ty, "", false)
+            connect_expr_to_input(g, index, src, value, ordinal, "value", node_id, input, x - 220, y)
+        }
+        .Unsafe(audit, _, body, span) -> {
+            add_region(g, ordinal, "unsafe", audit ?? "#Unsafe", span)
+            project_stmt_block(g, index, src, body, ordinal * 100 + 95, x + 230, y + 70)
+        }
+        .Impure(reason, _, body, span) -> {
+            add_region(g, ordinal, "impure", reason ?? "#Impure", span)
+            project_stmt_block(g, index, src, body, ordinal * 100 + 100, x + 230, y + 70)
+        }
+        .Reactive(body, span) -> {
+            add_region(g, ordinal, "reactive", "#Reactive", span)
+            project_stmt_block(g, index, src, body, ordinal * 100 + 110, x + 230, y + 70)
+        }
+        .Shield(body, span) -> {
+            add_region(g, ordinal, "shield", "#Shield", span)
+            project_stmt_block(g, index, src, body, ordinal * 100 + 115, x + 230, y + 70)
+        }
+        .Defer(body, span) -> {
+            add_region(g, ordinal, "defer", "defer", span)
+            project_stmt_block(g, index, src, body, ordinal * 100 + 115, x + 230, y + 70)
+        }
+        .Switched(marker, body, span) -> {
+            node_id: "{g.graph_id}:stmt:{ordinal}:switched"
+            // `#Off(.Release)` names the condition menu's one entry.
+            badge: if marker.args.len() > 0 -> "#{marker.name}(.Release)" else -> "#{marker.name}"
+            add_node(g, node_id, "switched", badge, span, x, y, [String]{badge}, [String]{"toggle_switch_state", "source_jump"})
+            project_stmt_block(g, index, src, body, ordinal * 100 + 125, x + 230, y + 70)
+        }
+        .Region(name, _, body, span) -> {
+            add_region(g, ordinal, "region", name, span)
+            project_stmt_block(g, index, src, body, ordinal * 100 + 130, x + 230, y + 70)
+        }
+        .Policy(declarations, body, span) -> {
+            keys: loop declaration in declarations -> policy_key_name(declaration.key)
+            add_region(g, ordinal, "policy", "#Policy({keys.join(", ")})", span)
+            project_stmt_block(g, index, src, body, ordinal * 100 + 135, x + 230, y + 70)
+        }
+        .TaskGroup(name, _, _, body, span) -> {
+            add_region(g, ordinal, "task.group", name, span)
+            project_stmt_block(g, index, src, body, ordinal * 100 + 140, x + 230, y + 70)
+        }
+        .Layout(name, _, body, span) -> {
+            add_region(g, ordinal, "layout", name, span)
+            project_stmt_block(g, index, src, body, ordinal * 100 + 150, x + 230, y + 70)
+        }
+        .AuthorityScope(caps, _, binding, body, span) -> {
+            granted: loop cap in caps -> cap.name
+            binding_name: if binding == .Val(handle) -> Val(handle.name) else -> String?{None}
+            add_authority_region(g, ordinal, "authority: {granted.join(", ")}", [String]{}, granted, [String]{}, binding_name, span)
+            project_stmt_block(g, index, src, body, ordinal * 100 + 160, x + 230, y + 70)
+        }
+        .ComptimeIf(cond, _, then_body, else_body, span, _) -> {
+            add_region(g, ordinal, "comptime_if", "#if", span)
+            node_id: "{g.graph_id}:stmt:{ordinal}:comptime_if"
+            add_node(g, node_id, "branch", "#if", span, x, y, [String]{"comptime"}, [String]{"edit_inline_expr", "source_jump"})
+            add_inline(g, node_id, ordinal, "cond", src, expr_span(cond))
+            project_stmt_block(g, index, src, then_body, ordinal * 100 + 170, x + 230, y + 70)
+            if else_body == .Val(body) -> project_stmt_block(g, index, src, body, ordinal * 100 + 180, x + 460, y + 70)
+        }
+        .ComptimeBlock(body, _, span) -> {
+            add_region(g, ordinal, "comptime", "comptime", span)
+            project_stmt_block(g, index, src, body, ordinal * 100 + 190, x + 230, y + 70)
+        }
+        .ContextBlock(_, body, span) | .Live(body, span) | .AssumeDet(_, _, body, span) | .Transact(_, _, body, _, span) -> {
+            add_region(g, ordinal, "scope", "scope", span)
+            project_stmt_block(g, index, src, body, ordinal * 100 + 200, x + 230, y + 70)
+        }
+        .Yield(value, span) -> {
+            node_id: "{g.graph_id}:stmt:{ordinal}:yield"
+            add_node(g, node_id, "yield", "yield", span, x, y, [String]{"stream"}, [String]{"source_jump"})
+            ty: expr_type(g, index, value)
+            input: add_pin(g, node_id, "value", "input", ty, "", false)
+            connect_expr_to_input(g, index, src, value, ordinal, "value", node_id, input, x - 220, y)
+        }
+        .ScopeMember(name, _, args, _, body, _, _, span) -> {
+            node_id: "{g.graph_id}:stmt:{ordinal}:scope_member:{name}"
+            add_node(g, node_id, "function_exec", ".{name}", span, x, y, [String]{"scope"}, [String]{"source_jump"})
+            loop (i, arg) in args -> add_inline(g, node_id, ordinal, "arg{i + 1}", src, expr_span(arg))
+            project_stmt_block(g, index, src, body, ordinal * 100 + 210, x + 230, y + 70)
+        }
+    }
+}
+
+set_node_meta: fn(g: &GraphBuilder, node_id: String, meta_json: String?) {
+    loop i in 0..<g.nodes.len() {
+        if g.nodes[i].id == node_id {
+            g.nodes[i].meta_json = meta_json
+            return
+        }
+    }
+}
+
+// The parts of a `Switch` or comptime switch statement the projection reads.
+SwitchStmt: struct {
+    subject: Expr
+    arms: [SwitchArm]
+    else_body: [Stmt]?
+    span: Span
+}
+
+project_switch: fn(g: &GraphBuilder, index: SemIndex, src: String, switch: SwitchStmt, ordinal: Int, x: Int, y: Int) {
+    subjectless: jfmt_is_subjectless_guard(switch.subject, switch.span)
+    if subjectless && switch_was_classic_if(src, switch.arms, switch.span) {
+        arm: switch.arms[0]
+        node_id: "{g.graph_id}:stmt:{ordinal}:branch"
+        pattern_test: is_pattern_test(arm.cond)
+        affordances := [String]{"edit_inline_expr", "source_jump"}
+        if pattern_test -> affordances.push("add_pattern_arm")
+        add_node(g, node_id, "branch", if pattern_test -> "if ==" else -> "if", switch.span, x, y, [String]{"control"}, affordances)
+        if pattern_subject_type(g, index, arm.cond) == .Val(pattern_type) -> set_pattern_node_type(g, node_id, pattern_type)
+        cond: add_pin(g, node_id, "cond", "input", "Bool", "", false)
+        if pattern_test {
+            _: add_arm_pin(g, node_id, "arm1", pattern_pin_label(src, arm.cond), pattern_arm_edit_span(src, arm.cond))
+        }
+        connect_expr_to_input(g, index, src, arm.cond, ordinal, "cond", node_id, cond, x - 220, y)
+        project_stmt_block(g, index, src, arm.body, ordinal * 100 + 10, x + 230, y + 70)
+        if switch.else_body == .Val(body) -> project_classic_switch_else(g, index, src, body, ordinal, x + 460, y + 70)
+        return
+    }
+    node_id: "{g.graph_id}:stmt:{ordinal}:dispatch"
+    add_node(g, node_id, "dispatch", if subjectless -> "if guards" else -> "if ==", switch.span, x, y, [String]{"control"}, [String]{"add_pattern_arm", "edit_inline_expr", "source_jump"})
+    pattern_type := String?{None}
+    if {
+        !subjectless -> {
+            pattern_type = Val(expr_type(g, index, switch.subject))
+        }
+        switch.arms.len() > 0 -> {
+            pattern_type = pattern_subject_type(g, index, switch.arms[0].cond)
+        }
+    }
+    if pattern_type == .Val(ty) -> set_pattern_node_type(g, node_id, ty)
+    if !subjectless {
+        subject_type: expr_type(g, index, switch.subject)
+        subject_pin: add_pin(g, node_id, "subject", "input", subject_type, "", false)
+        connect_expr_to_input(g, index, src, switch.subject, ordinal, "subject", node_id, subject_pin, x - 220, y)
+    }
+    loop (i, arm) in switch.arms {
+        _: add_arm_pin(g, node_id, "arm{i + 1}", dispatch_arm_pattern_label(src, arm.cond), dispatch_arm_pattern_span(src, arm.cond))
+        add_inline(g, node_id, ordinal, "arm{i + 1}", src, expr_span(arm.cond))
+        project_stmt_block(g, index, src, arm.body, ordinal * 100 + 50 + i * 20, x + 230 + i * 180, y + 100)
+    }
+    if switch.else_body == .Val(body) -> project_stmt_block(g, index, src, body, ordinal * 100 + 90, x + 460, y + 230)
+}
+
+// An `else if` chain: a lone classic `if` in the else body projects as the
+// next branch rather than as a nested block.
+project_classic_switch_else: fn(g: &GraphBuilder, index: SemIndex, src: String, body: [Stmt], ordinal: Int, x: Int, y: Int) {
+    if body.len() == 1 {
+        if body[0] == .Switch(subject, arms, _, span) {
+            if jfmt_is_subjectless_guard(subject, span) && switch_was_classic_if(src, arms, span) {
+                project_stmt(g, index, src, body[0], ordinal * 100 + 60, x, y)
+                return
+            }
+        }
+    }
+    project_stmt_block(g, index, src, body, ordinal * 100 + 70, x, y)
+}
+
+switch_was_classic_if: fn(src: String, arms: [SwitchArm], span: Span) -> Bool {
+    if arms.len() == 0 -> return false
+    jfmt_uses_classic_if_spelling(src.bytes(), span, expr_span(arms[0].cond))
+}
+
+is_pattern_test: fn(expr: Expr) -> Bool Never! {
+    if expr == .PatternTest(_, _, _, _) -> return true
+    false
+}
+
+pattern_subject_type: fn(g: GraphBuilder, index: SemIndex, cond: Expr) -> String? Never! {
+    if cond == .PatternTest(subject, _, _, _) -> return Val(expr_type(g, index, subject))
+    None
+}
+
+set_pattern_node_type: fn(g: &GraphBuilder, node_id: String, pattern_type: String) {
+    set_node_meta(g, node_id, Val("{{\"pattern_type\":{json_str(pattern_type)}}}"))
+}
+
+pattern_pin_label: fn(src: String, expr: Expr) -> String {
+    balanced: balance_closing_parens(snippet(src, expr_span(expr)))
+    if is_pattern_test(expr) {
+        if balanced.index_of("==") == .Val(pos) -> return balanced.slice(pos, balanced.len()).trim()
+        return "== {balanced.trim()}"
+    }
+    balanced
+}
+
+// Dispatch arm labels omit the leading enum-variant dot and carry no ==.
+dispatch_arm_pattern_label: fn(src: String, expr: Expr) -> String {
+    fragment: dispatch_arm_pattern_fragment(src, expr)
+    balanced: balance_closing_parens(fragment.text.trim())
+    if balanced.starts_with(".") -> return balanced.remove_prefix(".")
+    balanced
+}
+
+dispatch_arm_pattern_span: fn(src: String, expr: Expr) -> Span {
+    fragment: dispatch_arm_pattern_fragment(src, expr)
+    start: expr_span(expr).start + fragment.offset
+    Span{start: start, end: start + fragment.text.len()}
+}
+
+// The pattern text of one dispatch arm and its offset in the arm's source.
+PatternFragment: struct {
+    text: String
+    offset: Int
+}
+
+dispatch_arm_pattern_fragment: fn(src: String, expr: Expr) -> PatternFragment {
+    span: expr_span(expr)
+    source: if span.start >= 0 && span.end <= src.len() && span.start <= span.end -> src.slice(span.start, span.end) else -> ""
+    fragment := source.trim_start()
+    offset := source.len() - fragment.len()
+    opened := false
+    if fragment.index_of("==") == .Val(pos) {
+        after_cmp: fragment.slice(pos + 2, fragment.len())
+        after_space: after_cmp.trim_start()
+        if after_space.starts_with("{{") {
+            skip: pos + 2 + after_cmp.len() - after_space.len()
+            offset += skip
+            fragment = fragment.slice(skip, fragment.len())
+            opened = true
+        }
+    }
+    if !opened {
+        after_space: fragment.trim_start()
+        offset += fragment.len() - after_space.len()
+        fragment = after_space
+    }
+    if fragment.starts_with("{{") {
+        after_open: fragment.slice(1, fragment.len())
+        offset += 1
+        fragment = after_open.trim_start()
+        offset += after_open.len() - fragment.len()
+    }
+    if fragment.last_index_of("->") == .Val(arrow) {
+        after_arrow: fragment.slice(arrow + 2, fragment.len())
+        if after_arrow.last_index_of("}}") == .Val(close) {
+            after_body: after_arrow.slice(close + 1, after_arrow.len())
+            offset += arrow + 2 + close + 1
+            fragment = after_body.trim_start()
+            offset += after_body.len() - fragment.len()
+        }
+    }
+    PatternFragment{text: fragment.trim_end(), offset: offset}
+}
+
+pattern_arm_edit_span: fn(src: String, expr: Expr) -> Span {
+    if expr == .PatternTest(_, pattern, _, _) -> return span_through_closing_parens(src, pattern_span(pattern))
+    expr_span(expr)
+}
+
+pattern_span: fn(pattern: Pattern) -> Span Never! {
+    if pattern == {
+        .Variant(_, _, _, span) -> span
+        .Present(_, _, _, span) -> span
+        .Absent(span) -> span
+        .Ok(_, _, _, span) -> span
+        .Err(_, _, _, span) -> span
+        .Range(_, _, span) -> span
+        .Or(_, span) -> span
+        .Struct(_, _, span, _) -> span
+        .List(_, _, span) -> span
+        .Map(_, _, span) -> span
+        .StrMatch(_, span) -> span
+        .BinMatch(_, span) -> span
+    }
+}
+
+// `text` with the closing parentheses its unbalanced opening ones need.
+balance_closing_parens: fn(text: String) -> String Never! {
+    opens := 0
+    closes := 0
+    loop byte in text.bytes() {
+        if byte == 40 -> opens += 1
+        if byte == 41 -> closes += 1
+    }
+    closing := ""
+    loop _ in closes..<opens -> closing = "{closing})"
+    "{text}{closing}"
+}
