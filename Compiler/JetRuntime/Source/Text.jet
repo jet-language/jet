@@ -1023,12 +1023,12 @@ rt_text_with_length: fn(length: I64, capacity: I64) -> I64 {
 // failure's stop pending.
 rt_text_into: fn(value: I64, carrier: I64) -> I64 {
     len: rt_text_len(value)
-    copy: rt_text_builder_from(len, carrier)
-    if (copy == I64{0}) -> return value
-    rt_text_bytes_copy(rt_text_data(copy), rt_text_data(value), len)
-    rt_text_store(wrapping(copy + I64{8}), len)
+    moved: rt_text_builder_from(len, carrier)
+    if (moved == I64{0}) -> return value
+    rt_text_bytes_copy(rt_text_data(moved), rt_text_data(value), len)
+    rt_text_store(wrapping(moved + I64{8}), len)
     jet_rt_string_drop(value)
-    copy
+    moved
 }
 
 #Export(c) jet_rt_string_builder_push: fn(target: I64, value: I64) {
