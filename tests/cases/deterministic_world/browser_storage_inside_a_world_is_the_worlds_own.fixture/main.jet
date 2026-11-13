@@ -1,0 +1,33 @@
+use {
+    local: core.browser.storage.local
+    session: core.browser.storage.session
+    testing: core.testing
+}
+
+show: fn(label: String) -[Browser, IO]> {
+    theme: local.get_or("theme", "missing")
+    tab: session.get_or("tab", "missing")
+    draft: local.get_or("draft", "missing")
+    print("{label}: local={theme} session={tab} draft={draft}")
+}
+
+inside_world: fn() -[Browser, IO]> {
+    show("world start")
+    local.set("theme", "light")
+    local.set("draft", "kept")
+    session.set("tab", "world")
+    show("world set")
+    session.clear()
+    local.remove("theme")
+    show("world end")
+}
+
+run: fn() {
+    local.set("theme", "dark")
+    session.set("tab", "process")
+    show("process")
+    testing.world(
+    world -> inside_world(),
+    )
+    show("process after")
+}

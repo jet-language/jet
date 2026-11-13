@@ -1847,6 +1847,8 @@ is one process-wide in-memory store, and the two stay separate: `set`
 replaces a key's value, `remove` and `clear` touch only their own store,
 and the empty key is an ordinary key. The golden
 `Examples/Apps/Web/StorageLocalSession.jet` shows this on O0, O1 and O2.
+Inside `testing.world` each is the world's own store instead, starting empty,
+so a world and its tasks never read or change the process stores.
 
 ### `core.crypto` — nominal cryptography
 

@@ -8,9 +8,9 @@ package: {
         storage: .Library{ entry: storage }
     }
 }
+use world_rt: jet.runtime.testing
 
 // core.browser.storage — browser storage namespaces.
-
 
 WebStorage: struct {
     ns: String
@@ -23,3 +23,88 @@ session: fn() -> WebStorage Never! { {ns: "session"} }
 kind_local: fn() -> String Never! { "local" }
 
 kind_session: fn() -> String Never! { "session" }
+
+// Inside a deterministic world, local and session storage are the World's own
+// entries, starting empty, so a world and its tasks never read or change the
+// process storage. The World keeps a namespace's entries as length-prefixed
+// key and value bytes; an edit installs only over the bytes it read, so a
+// concurrent task's edit makes it retry instead of being lost.
+
+// The World's entries for `store`; None outside a World.
+world_entries: fn(store: String) -> [String:String]? {
+    raw: world_rt.world_store_load(store) ?? return None
+    Val(world_decode(raw))
+}
+
+// Sets `key` to `value` in the World's `store`; false outside a World.
+world_set: fn(store: String, key: String, value: String) -> Bool {
+    loop {
+        seen: world_rt.world_store_load(store) ?? return false
+        entries := world_decode(seen)
+        _: entries.add(key.copy(), value.copy())
+        if world_rt.world_store_replace(store, seen, world_encode(entries)) ?? false -> return true
+    }
+}
+
+// Removes `key` from the World's `store`; false outside a World.
+world_remove: fn(store: String, key: String) -> Bool {
+    loop {
+        seen: world_rt.world_store_load(store) ?? return false
+        entries := world_decode(seen)
+        _: entries.remove(key)
+        if world_rt.world_store_replace(store, seen, world_encode(entries)) ?? false -> return true
+    }
+}
+
+// Empties the World's `store`; false outside a World.
+world_clear: fn(store: String) -> Bool {
+    loop {
+        seen: world_rt.world_store_load(store) ?? return false
+        if world_rt.world_store_replace(store, seen, [U8]{}) ?? false -> return true
+    }
+}
+
+world_encode: fn(entries: [String:String]) -> [U8] {
+    out := [U8]{}
+    loop key in entries.keys() {
+        world_put(out, key)
+        world_put(out, entries.get(key) ?? "")
+    }
+    out
+}
+
+world_put: fn(out: &[U8], text: String) {
+    raw: text.bytes()
+    n: raw.len()
+    out.push(wrapping(U8{n}))
+    out.push(wrapping(U8{n >> 8}))
+    out.push(wrapping(U8{n >> 16}))
+    out.push(wrapping(U8{n >> 24}))
+    loop b in raw -> out.push(b)
+}
+
+// The entries `world_encode` wrote; only this file writes the World's bytes.
+world_decode: fn(raw: [U8]) -> [String:String] {
+    entries := [String:String]{}
+    pos := 0
+    loop pos + 4 <= raw.len() {
+        key_length: world_length(raw, pos)
+        key: world_text(raw, pos + 4, key_length)
+        pos = pos + 4 + key_length
+        value_length: world_length(raw, pos)
+        value: world_text(raw, pos + 4, value_length)
+        pos = pos + 4 + value_length
+        _: entries.add(key, value)
+    }
+    entries
+}
+
+world_length: fn(raw: [U8], pos: Int) -> Int {
+    Int.from_u8(raw[pos]).bit_or((Int.from_u8(raw[pos + 1]) << 8)).bit_or((Int.from_u8(raw[pos + 2]) << 16)).bit_or((Int.from_u8(raw[pos + 3]) << 24))
+}
+
+world_text: fn(raw: [U8], start: Int, length: Int) -> String {
+    bytes := [U8]{}
+    loop at in start..<start + length -> bytes.push(raw[at])
+    String.from_bytes(bytes) ?? ""
+}

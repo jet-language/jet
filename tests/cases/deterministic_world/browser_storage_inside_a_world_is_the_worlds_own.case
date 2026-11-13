@@ -1,0 +1,15 @@
+# Inside testing.world, core.browser.storage's local and session stores are the
+# world's own:
+# - they start empty, so the process's keys are missing in the world;
+# - set, remove and clear act on the world's stores, each apart from the other;
+# - after the world the process stores hold exactly what they held before.
+fixture: browser_storage_inside_a_world_is_the_worlds_own.fixture
+env: NO_COLOR=1
+step: jet run main.jet
+exit: 0
+stdout: = browser_storage_inside_a_world_is_the_worlds_own.out
+step: jet build main.jet
+exit: 0
+step: built
+exit: 0
+stdout: = browser_storage_inside_a_world_is_the_worlds_own.out
