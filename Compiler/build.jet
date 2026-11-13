@@ -7,8 +7,12 @@
 // `core-record` step runs it to check Core and the Prelude and writes `jet`,
 // the same executable with their precompiled record added as a part it maps
 // at load (JetCli CoreRecordCheck.jet), so the record is the Core of that
-// very compiler. The `runtime` step puts jet's runtime
-// pack and IDENTITY beside it (Toolchain/RuntimePack.jet): the jet the
+// very compiler. jet-bare has no runtime image yet, so the step can't run
+// Core code at compile time: every Core module value must be a constant the
+// compiler folds, and one that calls Core code is E0643 here (Core/Ui
+// Draw.jet's built-in face is a `#Memo` function for this). The `runtime`
+// step puts jet's runtime pack and IDENTITY beside it
+// (Toolchain/RuntimePack.jet): the jet the
 // `core-record` step wrote lowers the runtime, its bytes, the record
 // included, are jet's identity, and no C compiler runs. It also fails when the
 // jet.runtime interface jet embeds (JetFoundation Registry/RuntimeInterface.jet)
