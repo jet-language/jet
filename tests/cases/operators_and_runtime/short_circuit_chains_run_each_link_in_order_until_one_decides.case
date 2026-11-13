@@ -1,0 +1,26 @@
+# A chain of `||` or `&&` (`a || b || c`, built as `a || (b || c)` so each
+# link becomes its own branch) runs its links in order and stops at the
+# first that decides it, alone and nested, and a digit test chained over
+# byte compares gives the same values, on every tier.
+fixture: short_circuit_chains_run_each_link_in_order_until_one_decides.fixture
+env: NO_COLOR=1
+step: jet run --optimize=none run.jet
+exit: 0
+stdout: = short_circuit_chains_run_each_link_in_order_until_one_decides.out
+step: jet run --optimize=basic run.jet
+exit: 0
+stdout: = short_circuit_chains_run_each_link_in_order_until_one_decides.out
+step: jet run --optimize=full run.jet
+exit: 0
+stdout: = short_circuit_chains_run_each_link_in_order_until_one_decides.out
+step: jet build --release run.jet
+exit: 0
+step: built
+exit: 0
+stdout: = short_circuit_chains_run_each_link_in_order_until_one_decides.out
+step: jet build --target web run.jet
+exit: 0
+step: node app.js
+cwd: .jet/build
+exit: 0
+stdout: = short_circuit_chains_run_each_link_in_order_until_one_decides.out

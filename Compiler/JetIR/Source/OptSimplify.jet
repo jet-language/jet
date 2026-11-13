@@ -1546,6 +1546,58 @@ ir_opt_unwrap: fn(f: &IRFunction) -> Int Never! {
     }
 }
 
+// `if p || q || s -> return 1; 0` as ir_short_circuit builds the chain,
+// `p || (q || s)`: at O1 and O2 both links become branches, every branch
+// tests p, q or s (or their `not`), no Bool copy is left, and IR Lint finds
+// nothing after any pass.
+#Test("Every link of a short-circuit chain becomes a branch on its operand") {
+    loop level in 1..<3 {
+        m := ir_module_new()
+        exact: ir_type_row(m, Type.Int) ?? panic("no Int row")
+        flag: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
+        g := ir_function_new("any", "test:any.jet::any", "", "any.jet", 1)
+        p: ir_slot(g, flag, IRSlotKind.Param, ir_intern_name(m, "p"), 1)
+        q: ir_slot(g, flag, IRSlotKind.Param, ir_intern_name(m, "q"), 1)
+        s: ir_slot(g, flag, IRSlotKind.Param, ir_intern_name(m, "s"), 1)
+        g.result = exact
+        outer: ir_slot(g, flag, IRSlotKind.Temp, -1, 0)
+        _ := ir_emit(g, IROp.Copy, outer, p, -1, -1, 2)
+        not_p: ir_slot(g, flag, IRSlotKind.Temp, -1, 0)
+        _ := ir_emit(g, IROp.Not, not_p, p, -1, -1, 2)
+        _ := ir_open_if(g, not_p, 2)
+        inner: ir_slot(g, flag, IRSlotKind.Temp, -1, 0)
+        _ := ir_emit(g, IROp.Copy, inner, q, -1, -1, 2)
+        not_q: ir_slot(g, flag, IRSlotKind.Temp, -1, 0)
+        _ := ir_emit(g, IROp.Not, not_q, q, -1, -1, 2)
+        _ := ir_open_if(g, not_q, 2)
+        _ := ir_emit(g, IROp.Copy, inner, s, -1, -1, 2)
+        ir_end(g, 2)
+        _ := ir_emit(g, IROp.Copy, outer, inner, -1, -1, 2)
+        ir_end(g, 2)
+        _ := ir_open_if(g, outer, 2)
+        one: ir_slot(g, exact, IRSlotKind.Temp, -1, 0)
+        _ := ir_emit(g, IROp.Const, one, 1, -1, -1, 2)
+        _ := ir_emit(g, IROp.Return, -1, one, -1, -1, 2)
+        ir_end(g, 2)
+        zero: ir_slot(g, exact, IRSlotKind.Temp, -1, 0)
+        _ := ir_emit(g, IROp.Const, zero, 0, -1, -1, 3)
+        _ := ir_emit(g, IROp.Return, -1, zero, -1, -1, 3)
+        m.entry = 0
+        name_rows_set(m.function_rows, g.key, 0)
+        m.functions.push(g)
+        options := ir_opt_options(level)
+        options.verify = true
+        report: ir_optimize_module(m, options, compiler_threads_single())
+        assert_eq(report.lint.len(), 0)
+        assert_eq(report.short_circuits, 2)
+        f: m.functions[0]
+        loop at in 0..<f.op.len() {
+            assert(f.op[at] != .Copy && f.op[at] != .Move)
+            if f.op[at] == .If || f.op[at] == .BrIf -> assert(f.a[at] != outer && f.a[at] != inner)
+        }
+    }
+}
+
 // copy(p, q, i) stores at p + i the word loaded from q + i and hands p + q
 // with it to an `#FFI(asm)` leaf, all three sums computed first: at O1 and
 // O2 each sum sits right before the access it addresses, and IR Lint finds

@@ -1,0 +1,44 @@
+// Each link of a `||` or `&&` chain runs in order, and the chain stops at
+// the first link that decides it: `log` records the links that ran.
+probe: fn(log: &[String], name: String, value: Bool) -> Bool {
+    log.push(name.copy())
+    value
+}
+
+// The value of the two ASCII digits at `at`, or -1 when one is not a digit.
+two_digits: fn(raw: [U8], at: Int) -> Int {
+    high: raw[at]
+    low: raw[at + 1]
+    if high < (U8{48}) || high > (U8{57}) || low < (U8{48}) || low > (U8{57}) -> return -1
+    Int.from_u8(high) * 10 + Int.from_u8(low) - 528
+}
+
+// Whether `c` is an ASCII letter or digit, as one `&&` chain per range
+// inside one `||` chain.
+word_byte: fn(c: U8) -> Bool {
+    (c >= (U8{48}) && c <= (U8{57})) || (c >= (U8{65}) && c <= (U8{90})) || (c >= (U8{97}) && c <= (U8{122}))
+}
+
+run: fn() {
+    loop mask in 0..<8 {
+        a: mask.bit_and(1) != 0
+        b: mask.bit_and(2) != 0
+        c: mask.bit_and(4) != 0
+        any := [String]{}
+        either: probe(any, "a", a) || probe(any, "b", b) || probe(any, "c", c)
+        all := [String]{}
+        every: probe(all, "a", a) && probe(all, "b", b) && probe(all, "c", c)
+        mixed := [String]{}
+        some: probe(mixed, "a", a) || (probe(mixed, "b", b) && probe(mixed, "c", c)) || probe(mixed, "d", !a)
+        print("{mask}: or={either} [{any.join(",")}] and={every} [{all.join(",")}] mixed={some} [{mixed.join(",")}]")
+    }
+    raw: "1234x67:9".bytes()
+    digits := [String]{}
+    loop at in 0..<(raw.len() - 1) -> digits.push("{two_digits(raw, at)}")
+    print("digits {digits.join(" ")}")
+    words := 0
+    loop c in "a1-Z_9 q".bytes() {
+        if word_byte(c) -> words += 1
+    }
+    print("word bytes {words}")
+}

@@ -3112,10 +3112,36 @@ ir_loop_value: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, label: St
     result
 }
 
-// `a && b` / `a || b`: `b` runs only when `a` does not decide.
+// `a && b` / `a || b`: `b` runs only when `a` does not decide. A chain of
+// the one operator, `a || b || c` (parsed `(a || b) || c`), builds as
+// `a || (b || c)`: the same tests in the same order with the same result,
+// but each link's Bool is read only by the branch the link after it ends
+// in, so the optimizer turns every link into a branch on its operand
+// (OptSimplify.jet ir_opt_short_circuits), not only the last.
 ir_short_circuit: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, is_and: Bool, lhs: Int, rhs: Int) -> Int Never! {
-    left: ir_expr(m, p, b, lhs)
-    if ir_failed(b) -> return -1
+    links := [Int]{}
+    ir_short_links(p, b, is_and, lhs, links)
+    links.push(rhs)
+    ir_short_link(m, p, b, is_and, links, 0)
+}
+
+// The operands of the left chain of `is_and`'s operator rooted at `node`
+// onto `links`, first to last.
+ir_short_links: fn(p: IRProgram, b: IRBuilder, is_and: Bool, node: Int, links: &[Int]) Never! {
+    if ir_body_node(p, b, node).kind == .Binary(op, _, _, lhs, rhs) {
+        if (is_and && op == .And) || (!is_and && op == .Or) {
+            ir_short_links(p, b, is_and, lhs, links)
+            links.push(rhs)
+            return
+        }
+    }
+    links.push(node)
+}
+
+// links[at] && (links[at + 1] && ...), or the same with ||.
+ir_short_link: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, is_and: Bool, links: [Int], at: Int) -> Int Never! {
+    left: ir_expr(m, p, b, links[at])
+    if ir_failed(b) || at + 1 == links.len() -> return left
     result: ir_temp_like(m, b, left)
     ir_emit(b.f, IROp.Copy, result, left, -1, -1, b.line)
     test := left
@@ -3123,18 +3149,19 @@ ir_short_circuit: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, is_and: Bool, lh
         test = ir_temp_like(m, b, left)
         ir_emit(b.f, IROp.Not, test, left, -1, -1, b.line)
     }
-    // `b` runs on one path only: a variable it moves still owns its value
-    // where `a` decided, and the paths meet after (ir_meet_paths).
+    // The rest runs on one path only: a variable it moves still owns its
+    // value where `a` decided, and the paths meet after (ir_meet_paths).
     before: ir_own_states(b, b.bindings.len())
     ir_open_if(b.f, test, b.line)
-    right: ir_expr(m, p, b, rhs)
+    right: ir_short_link(m, p, b, is_and, links, at + 1)
     if ir_failed(b) -> return -1
     ir_emit(b.f, IROp.Copy, result, right, -1, -1, b.line)
     then_states: ir_own_states(b, before.len())
     ir_end(b.f, b.line)
     ir_set_own_states(b, before)
-    rhs_stops: ir_never_type(ir_ty(p, b, rhs))
-    ir_meet_paths(m, b, test, then_states, rhs_stops, false)
+    // The rest never yields exactly when its first operand never does.
+    rest_stops: ir_never_type(ir_ty(p, b, links[at + 1]))
+    ir_meet_paths(m, b, test, then_states, rest_stops, false)
     result
 }
 
