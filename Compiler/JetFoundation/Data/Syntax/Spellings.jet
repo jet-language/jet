@@ -10,6 +10,7 @@ LexicalEntry: struct {
 LEXICAL_LEDGER: [LexicalEntry]{
     { spelling: ":", meaning: "immutable binding and declaration: `name: value`, `name: fn(…)`, `Name: struct {{…}}`, `name: module {{…}}`" },
     { spelling: ":=", meaning: "mutable binding" },
+    { spelling: "name := value", meaning: "mutable module global at file scope: starts from any storable value its initializer computes while building, held as program data with no startup copy, which an assignment replaces; only a value holding a runtime handle, such as a `Shared` cell, is built on the global's first use" },
     { spelling: "use {{ … }} / use alias: path", meaning: "import block: one row per line, each a module path, `alias: path`, a \"file\" path or `alias: \"file\"`; `alias: owner.x` where `owner.x` names no module binds the member `x` that `owner` declares; several blocks per scope, `pub use {{ … }}` re-exports every row" },
     { spelling: "x.copy()", meaning: "the one deliberate copy: a compiler-owned method returning an independent owned value" },
     { spelling: "name: T -> expr", meaning: "computed struct field: a read-time formula read like a field; nothing assigns, lends for writing or takes it, even inside its module (E0339), so a public one over `priv` storage is a read-only field" },

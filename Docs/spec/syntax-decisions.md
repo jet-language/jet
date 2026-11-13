@@ -29,6 +29,7 @@ Do not hand-edit these rows. Add or change a spelling in Spellings.jet, then rer
 | --- | --- |
 | `:` | immutable binding and declaration: `name: value`, `name: fn(…)`, `Name: struct {…}`, `name: module {…}` |
 | `:=` | mutable binding |
+| `name := value` | mutable module global at file scope: starts from any storable value its initializer computes while building, held as program data with no startup copy, which an assignment replaces; only a value holding a runtime handle, such as a `Shared` cell, is built on the global's first use |
 | `use { … } / use alias: path` | import block: one row per line, each a module path, `alias: path`, a "file" path or `alias: "file"`; `alias: owner.x` where `owner.x` names no module binds the member `x` that `owner` declares; several blocks per scope, `pub use { … }` re-exports every row |
 | `x.copy()` | the one deliberate copy: a compiler-owned method returning an independent owned value |
 | `name: T -> expr` | computed struct field: a read-time formula read like a field; nothing assigns, lends for writing or takes it, even inside its module (E0339), so a public one over `priv` storage is a read-only field |
@@ -381,12 +382,12 @@ for non-entry parsing; the typed layer generates onto it rather than adding
 a second parser.
 
 **D-ENTRY-SCRIPT1=C / D-ENTRY-ORDER1=C — explicit ordinary-file entry** *(amends
-the 2026-08-08 D-ENTRY-SCRIPT1=B ruling; amended by D-ENTRY-STATEMENTS1
-below)*: in a file with `run: fn`, that is the file's execution body; `jet run`,
-`jet dev`, and `jet test` use that same entry law. At file scope of such a file,
-`name: value` and `name := value` are module globals
-visible to every function in the file; the mutable form is writable and is
-initialized from a tier-stable scalar literal. **D-MODULE-VALUE1** (owner
+the 2026-08-08 D-ENTRY-SCRIPT1=B ruling; amended by D-ENTRY-STATEMENTS1 and
+D-JAI-COMPTIME1 below)*: in a file with `run: fn`, that is the file's execution
+body; `jet run`, `jet dev`, and `jet test` use that same entry law. At file
+scope of such a file, `name: value` and `name := value` are module globals
+visible to every function in the file; the mutable form is writable and starts
+from a value computed while building (D-JAI-COMPTIME1). **D-MODULE-VALUE1** (owner
 instruction 2026-09-28, amended by owner ruling #4276 on 2026-10-23 and by
 D-MODULE-BUILD1 below) amends the immutable form: its initializer is any
 expression, read as an ordinary copy on every tier (spec "Values,
@@ -433,6 +434,21 @@ compute it in `run`, make it a function (`#Memo` when pure), or read a pinned
 build input through `#run { embed_file(…) }`. Inside a function a plain
 `name: value` only tries to fold; top-level statement files run in order
 (D-ENTRY-STATEMENTS1).
+
+**D-JAI-COMPTIME1=A — mutable globals start from values computed while
+building** *(ratified 2026-10-18, card #5029; amends D-ENTRY-SCRIPT1=C)*: a
+file-scope `name := value` starts from any storable value its initializer
+computes while building: `[U8]`, `[T]`, maps (tuple, enum and struct keys
+included, a key type's written `Comparable` order applied while building),
+structs holding them, and exact Ints beyond a machine word. The program file
+holds that value as data, ready to change, so nothing is copied when the
+program starts: a write first copies a piece it would change, and an
+assignment replaces the whole value. Only a value holding a runtime handle,
+such as a `Shared` cell, which can't exist while building, is built once, on
+the global's first use, from the value computed while building. An
+initializer that can't be computed while building is E0643, as for
+`name: value`; E0622 stays for a `#Persist` global, whose initializer is a
+tier-stable scalar literal.
 
 **D-CLI-POS1=A — positional by default, `#Arg(flag_only: true)` to opt out**
 *(ratified 2026-07-23, card #748)*: on a `#CLI` struct, required value fields fill from
