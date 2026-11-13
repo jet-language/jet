@@ -91,6 +91,13 @@ use jet_foundation.[
     effect_list_entry_removal,
     effect_root_removed,
     effect_row_entry_source,
+    ModuleID,
+    ModuleTable,
+    module_find,
+    module_is_core,
+    module_is_none,
+    module_none,
+    module_text,
 ]
 
 SemaEffectFunctionSource: struct {
@@ -321,7 +328,7 @@ SemaEffectInstanceNote: struct {
 SemaEffectNode: struct {
     key: String
     name: String
-    module_identity: String
+    module_identity: ModuleID
     module_index: Int
     span: Span
     name_span: Span
@@ -522,24 +529,24 @@ sema_effect_collect_statement_spans: fn(statements: [Stmt], assume_det: Bool, sp
 // E2-M16 (Rust core-call E3403): a non-deterministic Core call (a `Time` or
 // `Rand` row) inside a pure function, outside `assume_deterministic`. The call
 // is a fixed Core row or a source-owned Core function.
-// The module identity of a direct call's callee body, or "" when the call
-// has no body node in this program.
-sema_effect_callee_module: fn(nodes: [SemaEffectNode], facts: SemaEffectCallIndex, expression: BodyNode) -> String Never! {
+// The module identity of a direct call's callee body, or the none id when
+// the call has no body node in this program.
+sema_effect_callee_module: fn(nodes: [SemaEffectNode], facts: SemaEffectCallIndex, expression: BodyNode) -> ModuleID Never! {
     if expression.kind == .Call(callee, _, _) {
         decl_row: callee.row.index()
         target: if decl_row >= 0 && decl_row < facts.node_by_decl.len() -> facts.node_by_decl[decl_row] else -> -1
         if target >= 0 && target < nodes.len() -> return nodes[target].module_identity
     }
-    ""
+    module_none()
 }
 
-sema_effect_nondeterministic_core: fn(node: SemaEffectNode, expression: BodyNode, fact: SemaCallSiteFact, callee_module: String) -> String? {
+sema_effect_nondeterministic_core: fn(node: SemaEffectNode, expression: BodyNode, fact: SemaCallSiteFact, callee_module: ModuleID) -> String? {
     if !node.is_pure -> return None
     api := ""
     if expression.kind == .Call(_, _, _) {
         // A source-owned Core function, or a Core function with no body in
         // this program; any other callee reports through its own effects.
-        if callee_module != "" && !callee_module.starts_with("<corelib>/") -> return None
+        if !module_is_none(callee_module) && !module_is_core(callee_module) -> return None
         callee: fact.callee ?? return None
         api = sema_effect_decl_label(callee.key)
     } else if expression.kind == .CoreCall(record, _, _, _, _, _) {
@@ -859,7 +866,7 @@ sema_effect_declarations_irreversible_fact: fn(declarations: [Item], effect_name
 sema_effect_canonical_irreversible_fact: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, effect_name: String) -> Bool? {
     if program.registration_graph == .Val(graph) {
         canonical_identity: graph.canonical_effect_module_identity
-        if canonical_identity == "" -> return None
+        if module_is_none(canonical_identity) -> return None
         module_index: sema_registration_module_index(graph, canonical_identity) ?? return None
         if graph.modules[module_index].package_identity != JET_CANONICAL_EFFECT_PACKAGE_IDENTITY || graph.modules[module_index].module_path != JET_CANONICAL_EFFECT_MODULE_PATH -> return None
         return sema_effect_declarations_irreversible_fact(graph.modules[module_index].program.items, effect_name)
@@ -1369,7 +1376,7 @@ sema_effect_runtime_input_diagnostic: fn(nodes: [SemaEffectNode], path: [Int], i
 // names the hook and the call path to the launch. Build code that takes no
 // value, `#Impure` build code and declared steps (`b.run`, which the build
 // runs after its `build: fn` returns) are never held to this.
-sema_effect_check_compiler_hooks: fn(modules: [SemaGraphModuleResult], inputs: [SemaEffectModuleInput], nodes: [SemaEffectNode], node_by_key: NameRows, solved: [[String]], diagnostics: &[Diagnostic]) {
+sema_effect_check_compiler_hooks: fn(table: ModuleTable, modules: [SemaGraphModuleResult], inputs: [SemaEffectModuleInput], nodes: [SemaEffectNode], node_by_key: NameRows, solved: [[String]], diagnostics: &[Diagnostic]) {
     launch: [String]{"Exec"}
     // A hook's own report covers the handlers it registers, whose calls are
     // its calls.
@@ -1382,7 +1389,7 @@ sema_effect_check_compiler_hooks: fn(modules: [SemaGraphModuleResult], inputs: [
             reported[node_index] = true
             seen := (loop _ in nodes -> false)
             path: sema_effect_launch_path(nodes, node_by_key, solved, node_index, seen)
-            chain: loop step in path -> sema_effect_launch_step_name(nodes[step])
+            chain: loop step in path -> sema_effect_launch_step_name(table, nodes[step])
             hook_diagnostics := [Diagnostic]{sema_effect_compiler_hook_diagnostic("`{nodes[node_index].name}`", taken, chain, nodes[node_index].name_span)}
             sema_effect_publish_diagnostics(diagnostics, inputs[nodes[node_index].module_index].source_segments, hook_diagnostics)
         }
@@ -1403,7 +1410,7 @@ sema_effect_check_compiler_hooks: fn(modules: [SemaGraphModuleResult], inputs: [
                 loop edge in hook.call_edges {
                     target: sema_effect_node_index(node_by_key, edge) ?? next
                     if sema_effect_covered(solved[target], launch).len() == 0 -> next
-                    loop step in sema_effect_launch_path(nodes, node_by_key, solved, target, seen) -> chain.push(sema_effect_launch_step_name(nodes[step]))
+                    loop step in sema_effect_launch_path(nodes, node_by_key, solved, target, seen) -> chain.push(sema_effect_launch_step_name(table, nodes[step]))
                     break
                 }
             }
@@ -1436,7 +1443,7 @@ sema_effect_launch_path: fn(nodes: [SemaEffectNode], node_by_key: NameRows, solv
     if seen[index] -> return [Int]{}
     seen[index] = true
     launch: [String]{"Exec"}
-    if nodes[index].module_identity.starts_with("<corelib>/") || nodes[index].maximal || sema_effect_covered(nodes[index].direct, launch).len() > 0 -> return [Int]{index}
+    if module_is_core(nodes[index].module_identity) || nodes[index].maximal || sema_effect_covered(nodes[index].direct, launch).len() > 0 -> return [Int]{index}
     loop edge in nodes[index].call_edges {
         target: sema_effect_node_index(node_by_key, edge) ?? next
         if sema_effect_covered(solved[target], launch).len() == 0 -> next
@@ -1451,8 +1458,8 @@ sema_effect_launch_path: fn(nodes: [SemaEffectNode], node_by_key: NameRows, solv
 
 // A launch path step as the report names it: a Core function by its module
 // (`core.process.call`), any other by its chain name.
-sema_effect_launch_step_name: fn(node: SemaEffectNode) -> String Never! {
-    if node.module_identity.starts_with("<corelib>/") -> return "{node.module_identity.removeprefix("<corelib>/")}.{node.chain_name}"
+sema_effect_launch_step_name: fn(table: ModuleTable, node: SemaEffectNode) -> String Never! {
+    if module_is_core(node.module_identity) -> return "{module_text(table, node.module_identity).removeprefix("<corelib>/")}.{node.chain_name}"
     node.chain_name
 }
 
@@ -1474,7 +1481,7 @@ SemaEffectModuleCap: struct {
 
 // A struct's, enum's or trait's cap and the module that declares it.
 SemaEffectTypeCap: struct {
-    module_identity: String
+    module_identity: ModuleID
     cap: SemaEffectModuleCap
 }
 
@@ -1722,13 +1729,14 @@ sema_effect_type_caps: fn(graph_modules: [SemaRegistrationModule]) -> [String:Se
 
 // The `#FX(…)` cap of every trait in the graph, by its
 // sema_effect_trait_cap_key, each with the `file:line` it is written at.
-sema_effect_trait_caps: fn(graph_modules: [SemaRegistrationModule]) -> [String:SemaEffectTypeCap] {
+sema_effect_trait_caps: fn(graph_modules: [SemaRegistrationModule], table: ModuleTable) -> [String:SemaEffectTypeCap] {
     caps := [String:SemaEffectTypeCap]{}
     loop module_row in graph_modules {
         loop item in module_row.declarations {
             if item == .Trait(definition) {
                 cap: definition.cap ?? next
-                caps["{module_row.module_identity}|{definition.name}"] = SemaEffectTypeCap{module_identity: module_row.module_identity, cap: SemaEffectModuleCap{cap: cap, site: Val(sema_effect_cap_site(module_row, cap.span))}}
+                site: sema_effect_cap_site(module_row, cap.span)
+                caps["{module_text(table, module_row.module_identity)}|{definition.name}"] = SemaEffectTypeCap{module_identity: module_row.module_identity, cap: SemaEffectModuleCap{cap: cap, site: Val(site)}}
             }
         }
     }
@@ -1796,7 +1804,7 @@ sema_effect_nominal_cap: fn(nominal: SemaRegistrationNominal) -> ModuleCap? Neve
 // Binds the cap of the type `nominal_key` names to a method of it declared
 // in `module_identity`. A cap written in the method's own module is labeled
 // where it is written; one in another module is named by `file:line`.
-sema_effect_bind_type_cap: fn(source: &SemaEffectFunctionSource, caps: [String:SemaEffectTypeCap], nominal_key: String?, module_identity: String) {
+sema_effect_bind_type_cap: fn(source: &SemaEffectFunctionSource, caps: [String:SemaEffectTypeCap], nominal_key: String?, module_identity: ModuleID) {
     key: nominal_key ?? return
     found: caps.get(key) ?? return
     site: if found.module_identity == module_identity -> None else -> found.cap.site
@@ -1808,15 +1816,15 @@ sema_effect_bind_type_cap: fn(source: &SemaEffectFunctionSource, caps: [String:S
 // at the head of a file, named after the file. The result is by graph module
 // index, outermost cap first.
 sema_effect_file_module_caps: fn(graph_modules: [SemaRegistrationModule], edges: [SemaRegistrationImportEdge]) -> [[SemaEffectModuleCap]] {
-    rows := [String:Int]{}
-    loop (index, module_row) in graph_modules -> rows[module_row.module_identity] = index
+    rows := [U32:Int]{}
+    loop (index, module_row) in graph_modules -> rows[module_row.module_identity.id] = index
     direct := (loop _ in graph_modules -> [SemaEffectModuleCap]{})
     parents := (loop _ in graph_modules -> [Int]{})
     seen := [String:Bool]{}
     loop edge in edges {
         if edge.declaration.kind == .File(_, _) {
-            source: rows.get(edge.source_module_identity) ?? next
-            target: rows.get(edge.target_module_identity) ?? next
+            source: rows.get(edge.source_module_identity.id) ?? next
+            target: rows.get(edge.target_module_identity.id) ?? next
             key: "{source}:{target}:{edge.declaration.alias}"
             if seen.get(key) != None -> next
             if !sema_effect_declares_file_module(graph_modules[source].program.items, edge.declaration.alias) -> next
@@ -1961,7 +1969,7 @@ SemaEffectUnsafeReach: struct {
 // opens an `#Unsafe` gate or makes an opaque call (a maximal row), which
 // fails closed. Core's gates are vetted and sealed.
 sema_effect_unsafe_opens: fn(node: SemaEffectNode) -> Bool Never! {
-    if node.module_identity.starts_with("<corelib>/") -> return false
+    if module_is_core(node.module_identity) -> return false
     node.maximal || node.direct.contains("Unsafe")
 }
 
@@ -2014,7 +2022,7 @@ sema_effect_unsafe_gate_text: fn(gate: String) -> String Never! {
 // a foreign function's gate) records the deny-only Unsafe fact at `span`;
 // callers inherit it through the solved rows. Core's gates record none.
 sema_effect_record_unsafe_gate: fn(nodes: &[SemaEffectNode], node_index: Int, gate: TUnsafeGate, span: Span) Never! {
-    if nodes[node_index].module_identity.starts_with("<corelib>/") -> return
+    if module_is_core(nodes[node_index].module_identity) -> return
     if nodes[node_index].unsafe_site == "" -> nodes[node_index].unsafe_site = sema_effect_unsafe_site(gate)
     sema_effect_node_add_direct(nodes, node_index, "Unsafe", span)
 }
@@ -2120,7 +2128,7 @@ sema_effect_node_from_source: fn(function: FnBody, sources: [SemaEffectFunctionS
         if sema_effect_set_add(node.direct, effect_name) -> node.direct_spans.push(TEffectSpan{name: effect_name, span: function.source_span})
     }
     loop edge in function.effects.call_edges -> sema_effect_set_add(node.call_edges, edge)
-    if function.unsafe_gate == .Val(gate) && !function.module_identity.starts_with("<corelib>/") {
+    if function.unsafe_gate == .Val(gate) && !module_is_core(function.module_identity) {
         node.unsafe_site = sema_effect_unsafe_site(gate)
         if sema_effect_set_add(node.direct, "Unsafe") -> node.direct_spans.push(TEffectSpan{name: "Unsafe", span: function.source_span})
     }
@@ -3647,13 +3655,14 @@ SemaEffectPending: struct {
 // Each node's callers, in caller and call-edge order: the reverse call graph
 // the fixed point and the reach walks share. A `core.db` call into the SQL
 // engine's parts is no edge: see sema_effect_sealed_edge.
-sema_effect_callers: fn(nodes: [SemaEffectNode], node_by_key: NameRows) -> [[Int]] Never! {
+sema_effect_callers: fn(nodes: [SemaEffectNode], node_by_key: NameRows, table: ModuleTable) -> [[Int]] Never! {
+    core_db: module_find(table, "<corelib>/core.db")
     callers := (loop _ in nodes -> [Int]{})
     loop (index, node) in nodes {
         loop edge in node.call_edges {
             if edge == "__jet_panic__" -> next
             target: sema_effect_node_index(node_by_key, edge) ?? next
-            if sema_effect_sealed_edge(node, nodes[target]) -> next
+            if sema_effect_sealed_edge(table, core_db, node, nodes[target]) -> next
             callers[target].push(index)
         }
     }
@@ -3665,8 +3674,9 @@ sema_effect_callers: fn(nodes: [SemaEffectNode], node_by_key: NameRows) -> [[Int
 // queries, `DB.Write` on `execute`, the `DB` root on transaction control)
 // are the effects its callers see, so an engine row does not flow into a
 // `core.db` body. Calls between engine parts keep their edges.
-sema_effect_sealed_edge: fn(caller: SemaEffectNode, target: SemaEffectNode) -> Bool Never! {
-    caller.module_identity == "<corelib>/core.db" && target.module_identity.starts_with("<corelib>/__core_db_")
+sema_effect_sealed_edge: fn(table: ModuleTable, core_db: ModuleID?, caller: SemaEffectNode, target: SemaEffectNode) -> Bool Never! {
+    db: core_db ?? return false
+    db == caller.module_identity && module_is_core(target.module_identity) && module_text(table, target.module_identity).starts_with("<corelib>/__core_db_")
 }
 
 // Propagate each newly reached effect to callers once. Set insertion keeps
@@ -3680,7 +3690,7 @@ sema_effect_solve: fn(nodes: [SemaEffectNode], callers: [[Int]]) -> [[String]] N
         if node.maximal {
             sema_effect_set_union(row, authority_grantable_roots())
             // An opaque call outside Core fails closed for `!Unsafe`.
-            if !node.module_identity.starts_with("<corelib>/") -> sema_effect_set_add(row, "Unsafe")
+            if !module_is_core(node.module_identity) -> sema_effect_set_add(row, "Unsafe")
         }
         loop edge in node.call_edges {
             if edge == "__jet_panic__" {
@@ -4434,7 +4444,7 @@ sema_effect_stack_seal: fn(frames: &SemaStackFrames, nodes: [SemaEffectNode], no
     loop wrapper in values.wrappers -> wrappers_at[wrapper.node].push(wrapper.target)
     seal := SemaStackSeal{reached: (loop _ in nodes -> false), pending: [Int]{}, taken: (loop _ in nodes -> false), takens: [Int]{}, lambdas: [Int]{}, calls: [Int]{}, names: (loop _ in nodes -> [String]{})}
     loop (index, node) in nodes {
-        if !node.module_identity.starts_with("<corelib>/") -> sema_effect_stack_reach(seal, index)
+        if !module_is_core(node.module_identity) -> sema_effect_stack_reach(seal, index)
     }
     loop {
         index := seal.pending.pop() ?? { break }
@@ -5119,7 +5129,7 @@ sema_effect_region_add_scoped: fn(inferred: &[String], scoped_calls: [SemaEffect
 // are taken seeded ones (sema_finalize_seeded_taken): their bodies keep the
 // rows their finalization solved, and a row this solve would change on one is
 // counted in the result's `seeded_writes`, not stamped.
-sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaEffectModuleInput], prepared: &&SemaEffectPrepared, package_denials: [String], denial_modules: [Bool], file_caps: [[SemaEffectModuleCap]], trait_caps: [String:SemaEffectTypeCap], decls: DeclTable, prep_functions: [String:Bool], threads: CompilerThreads, closed: Bool, organization_denials: [String]{[String]{}}, organization_source: String{""}, taken: Int{0}) -> SemaEffectGraphResult {
+sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaEffectModuleInput], prepared: &&SemaEffectPrepared, package_denials: [String], denial_modules: [Bool], file_caps: [[SemaEffectModuleCap]], trait_caps: [String:SemaEffectTypeCap], decls: DeclTable, table: ModuleTable, prep_functions: [String:Bool], threads: CompilerThreads, closed: Bool, organization_denials: [String]{[String]{}}, organization_source: String{""}, taken: Int{0}) -> SemaEffectGraphResult {
     owned_prepared := prepared.move()
     diagnostics := owned_prepared.diagnostics.move()
     nodes := owned_prepared.nodes.move()
@@ -5133,7 +5143,7 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
     tables := SemaEffectImplTables{}
     loop module_index in 0..<inputs.len() {
         module_row: inputs[module_index]
-        module_identity: modules[module_row.module_index].module_identity
+        module_identity: module_text(table, modules[module_row.module_index].module_identity)
         loop row in module_row.trait_implementers {
             pair: row.cut_last("::") ?? next
             sema_effect_add_implementer(tables, "{module_identity}|{pair.before}", pair.after)
@@ -5175,7 +5185,7 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
     calls = sema_effect_collect_threads(modules, inputs, nodes, calls, any_unsafe, diagnostics, threads)
     sema_effect_resolve_type_params(nodes, calls)
     sema_effect_check_expanding_instances(nodes, calls.node_by_key, inputs, diagnostics)
-    callers: sema_effect_callers(nodes, calls.node_by_key)
+    callers: sema_effect_callers(nodes, calls.node_by_key, table)
     solved: sema_effect_solve(nodes, callers)
     loop module_index in 0..<inputs.len() {
         sites := [String:SharedLifetime]{}
@@ -5246,7 +5256,7 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
         sema_effect_check_callback_bounds(nodes, calls.node_by_key, solved, node_index, callback_diagnostics)
         sema_effect_publish_diagnostics(diagnostics, inputs[nodes[node_index].module_index].source_segments, callback_diagnostics)
     }
-    sema_effect_check_compiler_hooks(modules, inputs, nodes, calls.node_by_key, solved, diagnostics)
+    sema_effect_check_compiler_hooks(table, modules, inputs, nodes, calls.node_by_key, solved, diagnostics)
     // A pure function may not write module state, itself or through any
     // function it calls or takes as a value.
     loop node_index in 0..<nodes.len() {

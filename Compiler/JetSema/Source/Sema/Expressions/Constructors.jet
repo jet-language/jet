@@ -56,6 +56,10 @@ use {
         checked_generated_local,
         TextEdit,
         diagnostic_with_edit,
+        ModuleID,
+        module_is_core,
+        module_is_none,
+        module_text,
     ]
 }
 
@@ -102,7 +106,7 @@ sema_expression_core_export_variants: fn(environment: SemaScopeEnvironment, prog
     if symbol.kind != SymbolKind.Type || !symbol.module_name.starts_with("<corelib>/") -> return None
     if sema_scope_declaration_site(environment, program, symbol.id) != None -> return None
     if program.registration_graph == .Val(graph) {
-    module_index: sema_registration_module_index(graph, symbol.module_name) ?? return None
+    module_index: sema_registration_module_index_text(graph, symbol.module_name) ?? return None
     return core_module_enum_variants(graph.modules[module_index].module_name, symbol.name)
     }
     None
@@ -367,7 +371,7 @@ sema_expression_struct_field_fact: fn(field: Field, owner: Symbol, names: [Strin
     holds_view := false
     if program.registration_graph == .Val(graph) {
         seen := [String:Bool]{}
-        holds_view = sema_check_type_contains_view(graph, owner.module_name, field_ty, seen)
+        holds_view = sema_check_type_contains_view(graph, sema_registration_module_id(graph, owner.module_name), field_ty, seen)
     }
     SemaStructFieldFact{field_ty: field_ty, string_view: sema_stmt_string_view_type(field_ty), symbol: symbol, boxed: sema_scope_environment_boxed_edge(environment, program, owner.id, field.name), holds_view: holds_view}
 }
@@ -481,7 +485,7 @@ sema_expression_struct_field_inferred: fn(field: Field, field_value: Expr, field
 // that module's names (sema_default_owner_scope); a problem it reports there is
 // anchored at this literal.
 sema_expression_struct_field_default: fn(field: Field, default_value: Expr, literal_span: Span, owner: Symbol, names: [String], args: [Type], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TStructFieldValue? {
-    owner_scope := sema_default_owner_scope(environment, program, scopes, owner.module_name, default_value)
+    owner_scope := sema_default_owner_scope(environment, program, scopes, sema_check_registered_module_id(program, owner.module_name), default_value)
     scope := owner_scope.move() ?? {
         return sema_expression_struct_field_value(field, default_value, field.name_span, false, owner, names, args, environment, program, scopes, state, tail_store, context, diagnostics)
     }
@@ -506,7 +510,7 @@ sema_expression_core_record_name: fn(struct_name: String, type_args: [Type], exp
     }
     if sema_expression_type_symbol(scopes, environment, program, name) != None -> return None
     if core_record_literal_fields(name) == None -> return None
-    if core_record_literal_is_core_only(name) && !sema_module_is_core_source(environment.module_identity) -> return None
+    if core_record_literal_is_core_only(name) && !module_is_core(environment.module_identity) -> return None
     Val(name)
 }
 
@@ -1356,7 +1360,7 @@ sema_expression_typed_literal_printable: fn(ty: Type, environment: SemaScopeEnvi
 // is the joined text.
 SemaExpressionCheckedTextTarget: struct {
     owner: Symbol
-    implementation_module_identity: String
+    implementation_module_identity: ModuleID
     check: SemaRegistrationFunction
     encode_hole: SemaRegistrationFunction
     build: SemaRegistrationFunction?
@@ -1458,9 +1462,9 @@ sema_expression_checked_text_target: fn(head: Type, environment: SemaScopeEnviro
 // string-backed. None when the row is not the head's.
 sema_expression_checked_text_impl_target: fn(graph: SemaRegistrationGraph, module_index: Int, row: Int, owner: Symbol?, identity_key: String, name: String, head_module: String?, string_backed: Bool) -> SemaExpressionCheckedTextTarget? {
     if owner == .Val(nominal) {
-        if graph.modules[module_index].impls[row].target_identity_key != identity_key && (graph.modules[module_index].impls[row].target_module_identity != Val(nominal.module_name) || graph.modules[module_index].impls[row].target_type_name != nominal.name) -> return None
+        if graph.modules[module_index].impls[row].target_identity_key != identity_key && (module_is_none(graph.modules[module_index].impls[row].target_module_identity) || module_text(graph.module_table, graph.modules[module_index].impls[row].target_module_identity) != nominal.module_name || graph.modules[module_index].impls[row].target_type_name != nominal.name) -> return None
     } else {
-        if graph.modules[module_index].impls[row].target_module_identity == None || graph.modules[module_index].impls[row].target_type_name != name || head_module != Val((graph.modules[module_index].module_name)) -> return None
+        if module_is_none(graph.modules[module_index].impls[row].target_module_identity) || graph.modules[module_index].impls[row].target_type_name != name || head_module != Val((graph.modules[module_index].module_name)) -> return None
     }
     check := SemaRegistrationFunction?{None}
     encode_hole := SemaRegistrationFunction?{None}
@@ -1724,7 +1728,7 @@ sema_expression_checked_text_literal: fn(head: Type, source_head: Type?, body: T
         if !dependencies.contains(reference.symbol.id.key) -> dependencies.push(reference.symbol.id.key)
     }
     source_file := sema_source_file_at(environment.source_segments, environment.source_file, environment.source_origin, span)
-    key := "{environment.module_identity}::checked-text::{target.owner.id.key}::{span.start}:{span.end}:{type_identity_key(head)}"
+    key := "{module_text(graph.module_table, environment.module_identity)}::checked-text::{target.owner.id.key}::{span.start}:{span.end}:{type_identity_key(head)}"
     evaluation := SemaCheckedTextEvaluation{
         module_identity: environment.module_identity,
         key: key,

@@ -58,7 +58,8 @@ SemaTestFunctionCheckResult: struct {
 }
 
 sema_check_test_function: fn(test: TestDef, environment: SemaScopeEnvironment, program: SemaProgramTables, module_scopes: SemaScopeTable, host_hooks: SemaHostHookAccess?) -> SemaTestFunctionCheckResult {
-    key := checked_test_artifact_key(environment.module_identity, test)
+    module_name: sema_scope_environment_module_text(environment, program)
+    key := checked_test_artifact_key(module_name, test)
     owner_id := SymbolID{key: key}
     scopes := sema_scope_snapshot(module_scopes)
     // Names the synthetic body `__test_<name>`. A runtime stop inside the test
@@ -72,7 +73,7 @@ sema_check_test_function: fn(test: TestDef, environment: SemaScopeEnvironment, p
     registered := false
     loop !registered {
         synthetic.name = temporary_name
-        symbol := sema_item_symbol(Item.Func{value: synthetic}, environment.module_identity, environment.source_file, environment.source_origin, environment.source_segments) ?? {
+        symbol := sema_item_symbol(Item.Func{value: synthetic}, module_name, environment.source_file, environment.source_origin, environment.source_segments) ?? {
             return SemaTestFunctionCheckResult{
                 function: None,
                 call_facts: [SemaCallSiteFact]{},

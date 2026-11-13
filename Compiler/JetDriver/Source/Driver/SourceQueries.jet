@@ -1,7 +1,7 @@
 // Read-only compiler source queries use the authorized loader, not a semantic
 // check. This is the CmdSchema/Source-query seam over the same compile request.
 use {
-    jet_foundation.[Diagnostic, Item, Program, NameLedger, NameModule, NameAlias, NameVisibility, StructureFact, StructureFactKind, ast_program, compiler_transfer_rows, name_ledger_from_facts]
+    jet_foundation.[Diagnostic, Item, Program, NameLedger, NameModule, NameAlias, NameVisibility, StructureFact, StructureFactKind, ast_program, compiler_transfer_rows, module_text, name_ledger_from_facts]
     jet_sema.[SemaSourceOrigin, SemaRegistrationImportEdge, sema_name_loaded_facts]
 }
 
@@ -71,7 +71,7 @@ jet_driver_source_query_loaded: fn(load: JetDriverLoadResult, request: JetDriver
             source = file.source
         } else { source = jet_driver_source_text_at(load.source_files, source_positions, unit.path) }
         modules.push(JetDriverSourceQueryModule{
-            module_identity: loaded.module_identity,
+            module_identity: module_text(load.module_table, loaded.module_identity),
             package_identity: loaded.package_identity,
             path: unit.path,
             module_name: unit.module_name,
@@ -93,10 +93,10 @@ jet_driver_source_query_loaded: fn(load: JetDriverLoadResult, request: JetDriver
 jet_driver_loaded_names: fn(loaded: &[JetDriverLoadedModule], units: [JetDriverSourceUnit], edges: [SemaRegistrationImportEdge]) -> NameLedger Never! {
     modules := [NameModule]{}
     programs := [Program]{}
-    positions := [String:Int]{}
+    positions := [U32:Int]{}
     loop index in 0..<loaded.len() {
         unit_index: loaded[index].source_unit_index
-        positions[loaded[index].module_identity] = index
+        positions[loaded[index].module_identity.id] = index
         namespace: if units[unit_index].in_namespace -> Val(loaded[index].package_identity) else -> None
         modules.push(NameModule{alias: loaded[index].module_name, path: jet_driver_module_display(units[unit_index].relative_path), package: loaded[index].package_identity, namespace: namespace})
         items := ast_program()
@@ -106,8 +106,8 @@ jet_driver_loaded_names: fn(loaded: &[JetDriverLoadedModule], units: [JetDriverS
     aliases := [NameAlias]{}
     structure := [StructureFact]{}
     loop edge in edges {
-        source: positions.get(edge.source_module_identity) ?? next
-        target: positions.get(edge.target_module_identity) ?? next
+        source: positions.get(edge.source_module_identity.id) ?? next
+        target: positions.get(edge.target_module_identity.id) ?? next
         declaration: edge.declaration
         visibility: if declaration.is_pub -> NameVisibility.Public else -> if declaration.is_package_pub -> NameVisibility.Package else -> NameVisibility.Private
         aliases.push(NameAlias{module_index: source, name: declaration.alias, target: modules[target].alias, target_module: Val(target), span: declaration.alias_span, visibility: visibility})

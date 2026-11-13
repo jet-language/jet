@@ -28,7 +28,7 @@
 //   (E-WEB-CROSS-PARTITION).
 use {
     jet_driver.[JetDriverCompileMode, JetDriverVerbOutput, JET_DRIVER_EXIT_OK, jet_driver_present_diagnostics]
-    jet_foundation.[CompilerThreads, FnBody, body_node, build_options_stock]
+    jet_foundation.[CompilerThreads, FnBody, body_node, build_options_stock, module_is_core]
     jet_ir.[IROptInlined]
 }
 
@@ -122,7 +122,7 @@ jet_cli_collection_choices: fn(functions: [FnBody], out: &[JetCLIChoice]) Never!
 // the local it copies.
 jet_cli_copy_choices: fn(functions: [FnBody], out: &[JetCLIChoice]) Never! {
     loop function in functions {
-        if function.synthetic || function.module_identity.starts_with("<corelib>/") -> next
+        if function.synthetic || module_is_core(function.module_identity) -> next
         loop node in function.tree.nodes {
             if node.kind == .Clone(value, fact) {
                 copied: body_node(function.tree, value)
@@ -146,7 +146,7 @@ jet_cli_copy_choices: fn(functions: [FnBody], out: &[JetCLIChoice]) Never! {
 // web partition (sema stamps `web_reason` only then).
 jet_cli_placement_choices: fn(functions: [FnBody], out: &[JetCLIChoice]) Never! {
     loop function in functions {
-        if function.synthetic || function.web_reason == "" || function.module_identity.starts_with("<corelib>/") -> next
+        if function.synthetic || function.web_reason == "" || module_is_core(function.module_identity) -> next
         bucket: function.web_bucket ?? next
         name: if bucket == {
             .JS -> "JS"

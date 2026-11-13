@@ -281,7 +281,7 @@ sema_local_splice_unlanded: fn(sources: &[SemaComptimeBodySource], landed: [Stri
     held.reverse()
     loop held.len() > 0 {
         source := held.pop() ?? break
-        if landed.get("{source.module_identity}\n{source.key}") == None -> sources.push(source.move())
+        if landed.get("{source.module_identity.id}\n{source.key}") == None -> sources.push(source.move())
     }
 }
 
@@ -290,7 +290,7 @@ sema_local_splice_unlanded: fn(sources: &[SemaComptimeBodySource], landed: [Stri
 sema_local_splice_valued: fn(landed: [String:Bool], after: [SemaModuleBodyRows]) -> [String:Bool] Never! {
     remaining := [String:Bool]{}
     loop rows in after {
-        loop source in rows.comptime_body_sources -> remaining["{source.module_identity}\n{source.key}"] = true
+        loop source in rows.comptime_body_sources -> remaining["{source.module_identity.id}\n{source.key}"] = true
     }
     valued := [String:Bool]{}
     loop (site, _) in landed {
@@ -348,7 +348,7 @@ sema_local_splice_holds: fn(modules: [SemaGraphModuleResult], owner_modules: [In
 sema_local_splice_computed: fn(landed: [String:Bool], values: [SemaComptimeItemValue]) -> [String:Bool] Never! {
     computed := [String:Bool]{}
     loop value in values {
-        site: "{value.module_identity}\n{value.key}"
+        site: "{value.module_identity.id}\n{value.key}"
         if landed.get(site) != None && sema_comptime_local_value_reason(value.value) == None -> computed[site] = true
     }
     computed
@@ -358,7 +358,7 @@ sema_local_splice_computed: fn(landed: [String:Bool], values: [SemaComptimeItemV
 // its owner whose span is strictly inside the site's.
 sema_local_splice_inner_call: fn(rows: SemaModuleBodyRows, sites: [String:Bool]) -> Bool Never! {
     loop source in rows.comptime_body_sources {
-        if sites.get("{source.module_identity}\n{source.key}") == None -> next
+        if sites.get("{source.module_identity.id}\n{source.key}") == None -> next
         loop fact in rows.call_facts {
             if fact.caller_key != source.function_key -> next
             if fact.span.start < source.span.start || fact.span.end > source.span.end -> next
@@ -378,7 +378,7 @@ sema_local_splice_demands_core: fn(graph: SemaRegistrationGraph, functions: [Sem
     if graph.core_demand_rows.len() == 0 -> return false
     keys := [String]{}
     loop result in functions {
-        if known.get("{result.module_identity}\n{result.function_key}") != None -> next
+        if known.get("{result.module_identity.id}\n{result.function_key}") != None -> next
         if result.function == .Val(function) -> sema_core_demand_body_keys(function, graph.decls, keys)
         loop fact in result.call_facts {
             if fact.callee == .Val(callee) -> keys.push(callee.key)
@@ -435,7 +435,7 @@ sema_local_splice_landed_keys: fn(landed: [SemaComptimeItemSource]) -> [String:B
     keys := [String:Bool]{}
     loop source in landed {
         if !source.local_value -> return None
-        keys["{source.module_identity}\n{source.key}"] = true
+        keys["{source.module_identity.id}\n{source.key}"] = true
     }
     Val(keys)
 }
@@ -446,7 +446,7 @@ sema_local_splice_landed_keys: fn(landed: [SemaComptimeItemSource]) -> [String:B
 // its pass finalizes again.
 sema_local_splice_holds_host_value: fn(values: [SemaComptimeItemValue], landed: [String:Bool]) -> Bool Never! {
     loop value in values {
-        if landed.get("{value.module_identity}\n{value.key}") != None && sema_compiler_host_value_held(value.ty) != None -> return true
+        if landed.get("{value.module_identity.id}\n{value.key}") != None && sema_compiler_host_value_held(value.ty) != None -> return true
     }
     false
 }
@@ -561,7 +561,7 @@ sema_local_splice_owners: fn(
     found := [String:Bool]{}
     loop module_index in 0..<modules.len() {
         loop source in modules[module_index].comptime_body_sources {
-            site: "{source.module_identity}\n{source.key}"
+            site: "{source.module_identity.id}\n{source.key}"
             if landed.get(site) == None -> next
             if source.function_key == "" -> return SemaLocalValueSplice{graph: graph.move(), spliced: false, valued: [String:Bool]{}}
             found[site] = true
@@ -580,7 +580,7 @@ sema_local_splice_owners: fn(
     // recheck may hold no body for it: such a pass finalizes again.
     earlier_rows: sema_comptime_checked_function_rows(earlier_functions)
     loop result in comptime_functions {
-        if earlier_rows.get("{result.module_identity}\n{result.function_key}") != None || owners.get(result.function_key) != None -> next
+        if earlier_rows.get("{result.module_identity.id}\n{result.function_key}") != None || owners.get(result.function_key) != None -> next
         loop module_index in 0..<modules.len() {
             if modules[module_index].module_identity != result.module_identity -> next
             if sema_local_splice_slot(modules[module_index].functions, result.function_key) == None -> next

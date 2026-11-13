@@ -13,7 +13,7 @@ use {
     ]
     jet_parser.[parse_source]
     jet_driver.[jet_driver_canonical_effect_module]
-    jet_foundation.[Span, compiler_threads_single, jet_target_machine_hosted]
+    jet_foundation.[Span, compiler_threads_single, jet_target_machine_hosted, module_intern, module_table]
 }
 
 TYPE_ROW_EFFECTS: "IO: struct {{\n    impl Effect {{}}\n}}\nNet: struct {{\n    impl Effect {{}}\n}}\nEnv: struct {{\n    impl Effect {{}}\n}}\n"
@@ -28,14 +28,17 @@ effect_type_row_graph: fn(failures: &[String]) -> SemaRegistrationGraph? {
         failures.push("source parsing failed: {parsed.diagnostics:Debug}")
         return None
     }
-    canonical: jet_driver_canonical_effect_module(TYPE_ROW_EFFECTS) ?? {
+    table := module_table()
+    main_id: module_intern(table, TYPE_ROW_MODULE)
+    canonical: jet_driver_canonical_effect_module(TYPE_ROW_EFFECTS, table) ?? {
         failures.push("canonical effect declaration failed parsing")
         return None
     }
+    canonical_id: canonical.module_identity
     facts: SemaBuildFacts{package_name: "type-rows", package_version: "0.1.0", os: "linux", profile: "dev", stamp_git: None, stamp_dirty: false, stamp_toolchain: "fixture", stamp_at: ""}
     segment: SemaSourceSegment{generated: Span{start: 0, end: TYPE_ROW_SOURCE.len()}, source_file: "main.jet", source_start: 0, line_starts: [Int]{0}, origin: SemaSourceOrigin.Snapshot}
-    input: SemaRegistrationModuleInput{package_identity: "type-rows", module_identity: TYPE_ROW_MODULE, module_name: "main", core_source_alias: "", module_path: "main.jet", source_file: "main.jet", source_segments: [SemaSourceSegment]{segment}, source_origin: SemaSourceOrigin.Snapshot, program: parsed.program, foreign_handles: [SemaRegistrationForeignHandleFacts]{}, source: TYPE_ROW_SOURCE}
-    graph: sema_registration_prepare_graph([SemaRegistrationModuleInput]{input, canonical}, [SemaRegistrationModule]{}, [SemaRegistrationImportEdge]{}, "type-rows", TYPE_ROW_MODULE, canonical.module_identity, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), facts, false, compiler_threads_single()) ?? {
+    input: SemaRegistrationModuleInput{package_identity: "type-rows", module_identity: main_id, module_name: "main", core_source_alias: "", module_path: "main.jet", source_file: "main.jet", source_segments: [SemaSourceSegment]{segment}, source_origin: SemaSourceOrigin.Snapshot, program: parsed.program, foreign_handles: [SemaRegistrationForeignHandleFacts]{}, source: TYPE_ROW_SOURCE}
+    graph: sema_registration_prepare_graph([SemaRegistrationModuleInput]{input, canonical}, [SemaRegistrationModule]{}, [SemaRegistrationImportEdge]{}, "type-rows", main_id, canonical_id, table, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), facts, false, compiler_threads_single()) ?? {
         failures.push("registration failed: {err:Debug}")
         return None
     }
@@ -53,7 +56,7 @@ effect_type_row_find: fn(graph: SemaRegistrationGraph, rows: [SemaEffectTypeRow]
         if nominal.symbol.name == name -> key = nominal.symbol.id.key.copy()
     }
     if key == "" {
-        symbol: sema_type_graph_trait_symbol(graph, TYPE_ROW_MODULE, name) ?? return None
+        symbol: sema_type_graph_trait_symbol(graph, graph.modules[0].module_identity, name) ?? return None
         key = symbol.id.key.copy()
     }
     loop row in rows {

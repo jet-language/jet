@@ -18,7 +18,7 @@
 
 use {
     jet_backend.[X64DataExport]
-    jet_foundation.[CompilerThreads, DeclTable, FnBody, TConstantDef, TImplDef, TTypeDef, Type, name_rows_get_text, name_rows_sorted, sha256_bytes, sha256_hex_bytes]
+    jet_foundation.[CompilerThreads, DeclTable, FnBody, ModuleID, TConstantDef, TImplDef, TTypeDef, Type, name_rows_get_text, name_rows_sorted, sha256_bytes, sha256_hex_bytes]
     jet_sema.[SemaCheckedForeignFunction]
 }
 
@@ -97,7 +97,7 @@ ir_core_layout: fn(layout: IRExportLayout) -> String Never! { "{layout.size}/{la
 // Core check's entry, JetCli CoreRecordCheck.jet: every other checked module
 // is Core's or the Prelude's) and every function they reach, on up to
 // `threads` threads; the other inputs as ir_build_program's.
-ir_build_core_library: fn(functions: &&[FnBody], decls: DeclTable, type_defs: &&[TTypeDef], impls: &&[TImplDef], sources: &&[String:String], constants: &&[TConstantDef], foreign: &&[SemaCheckedForeignFunction], entry_module: String, threads: CompilerThreads) -> IRCoreLibrary Never! {
+ir_build_core_library: fn(functions: &&[FnBody], decls: DeclTable, type_defs: &&[TTypeDef], impls: &&[TImplDef], sources: &&[String:String], constants: &&[TConstantDef], foreign: &&[SemaCheckedForeignFunction], entry_module: ModuleID, threads: CompilerThreads) -> IRCoreLibrary Never! {
     p := ir_program_new(functions, decls, type_defs, impls, sources, constants)
     p.sentries = true
     ir_foreign_index(p, foreign, decls)

@@ -5,7 +5,7 @@ use {
     jet_parser.[parse_source]
     jet_driver.[JetDriverRustForeignEntry, JetDriverRustForeignFacts, JetDriverRustForeignPlan, jet_driver_rust_foreign_plan, jet_driver_rust_foreign_function, JET_DRIVER_RUST_FOREIGN_TARGET, JET_DRIVER_RUST_FOREIGN_ARTIFACT_MODE, JET_DRIVER_RUST_FOREIGN_DESCRIPTOR]
     rust_foreign_test_sys: core.sys
-    jet_foundation.[sha256_bytes, sha256_hex_bytes]
+    jet_foundation.[module_none, sha256_bytes, sha256_hex_bytes]
 }
 
 cli_rust_foreign_test_plan: fn(name: String) -> JetDriverRustForeignPlan {
@@ -14,7 +14,7 @@ cli_rust_foreign_test_plan: fn(name: String) -> JetDriverRustForeignPlan {
     entries := [JetDriverRustForeignEntry]{}
     loop item in parsed.program.items {
         if item == .ExternRust(block) {
-            loop declaration in block.functions -> entries.push(JetDriverRustForeignEntry{module_identity: "test-module", crate_spec: block.crate_spec, declaration: jet_driver_rust_foreign_function(declaration)})
+            loop declaration in block.functions -> entries.push(JetDriverRustForeignEntry{module_identity: module_none(), crate_spec: block.crate_spec, declaration: jet_driver_rust_foreign_function(declaration)})
         }
     }
     assert(entries.len() == 1)

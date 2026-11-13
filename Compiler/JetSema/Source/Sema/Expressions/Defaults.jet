@@ -10,6 +10,8 @@ use jet_foundation.[
     Expr,
     Span,
     StrPart,
+    ModuleID,
+    module_is_none,
 ]
 
 // The declaring module's scope for one default: its environment facts and a
@@ -26,8 +28,8 @@ SemaDefaultOwnerScope: struct {
 
 // None when the default is written in the module being checked, or when it is
 // a literal that names nothing, so the caller's scope checks it unchanged.
-sema_default_owner_scope: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, owner_module: String, default_value: Expr) -> SemaDefaultOwnerScope? {
-    if owner_module == "" || owner_module == environment.module_identity -> return None
+sema_default_owner_scope: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, owner_module: ModuleID, default_value: Expr) -> SemaDefaultOwnerScope? {
+    if module_is_none(owner_module) || owner_module == environment.module_identity -> return None
     if sema_default_names_nothing(default_value) -> return None
     if program.registration_graph == .Val(graph) {
         module_index: sema_registration_module_index(graph, owner_module) ?? return None

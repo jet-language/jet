@@ -4,6 +4,8 @@
 use {
     jet_foundation.[
         AccessConvention,
+        module_is_none,
+        module_none,
         AppliedRuleApplication,
         BodyNode,
         CallArg,
@@ -42,6 +44,8 @@ use {
         symbol_id,
         type_name,
         foundation_named_type,
+        ModuleID,
+        module_is_core,
     ]
     jet_parser.[
         parse_source,
@@ -378,7 +382,7 @@ sema_module_no_prelude: fn(environment: SemaScopeEnvironment, program: SemaProgr
 sema_prelude_error_conversion_key: fn(error: Type, target: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> String? {
     if target != (Type.Named{name: "Err"}) -> return None
     if !sema_core_error_family_source(error) || sema_module_no_prelude(environment, program) -> return None
-    Val(symbol_id(SymbolKind.Function, environment.module_identity, "", sema_failure_conversion_function_name(error, target)).key)
+    Val(symbol_id(SymbolKind.Function, sema_scope_environment_module_text(environment, program), "", sema_failure_conversion_function_name(error, target)).key)
 }
 
 SemaPreludeConversionDemand: struct {
@@ -541,7 +545,7 @@ sema_failure_keep_errors_since: fn(diagnostics: &[Diagnostic], start: Int) Never
 
 // E2417: an explicit `!` domain names `Err`, a Core
 // error, a type marked `#Error`, an all-error union, or `Never`.
-sema_failure_items_nominal_is_error: fn(items: [Item], module_identity: String, leaf: String, seen: [String], environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool? {
+sema_failure_items_nominal_is_error: fn(items: [Item], module_identity: ModuleID, leaf: String, seen: [String], environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool? {
     loop item in items {
         if item == {
             .Struct(definition) -> if definition.name == leaf -> return Val(sema_failure_markers_name_error(definition.type_markers))
@@ -549,7 +553,7 @@ sema_failure_items_nominal_is_error: fn(items: [Item], module_identity: String, 
             .Distinct(definition) -> if definition.name == leaf -> return Val(sema_failure_markers_name_error(definition.type_markers))
             .TypeAlias(definition) -> if definition.name == leaf {
                 if definition.type_params.len() != 0 -> return Val(false)
-                seen_key: "{module_identity}::{leaf}"
+                seen_key: "{module_identity.id}::{leaf}"
                 loop name in seen {
                     if name == seen_key -> return Val(false)
                 }
@@ -572,7 +576,7 @@ sema_failure_items_nominal_is_error: fn(items: [Item], module_identity: String, 
 
 // The declaration a qualified alias target names, resolved from the module
 // that declares the alias.
-sema_failure_alias_target_is_error: fn(target_name: String, module_identity: String, seen: [String], environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool? {
+sema_failure_alias_target_is_error: fn(target_name: String, module_identity: ModuleID, seen: [String], environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool? {
     if program.registration_graph == .Val(graph) {
         resolved: sema_type_graph_lookup_symbol(graph, module_identity, target_name) ?? return None
         row: sema_type_graph_resolved_nominal_row(graph, resolved) ?? return None
@@ -644,7 +648,7 @@ sema_check_failure_contract_type: fn(ty: Type, span: Span, in_return: Bool, gene
             sema_check_private_module_type(name, span, environment, program, diagnostics)
             // Compiler-owned IO enum/record rows have no public annotation origin.
             // Reuse the Core-only literal origin gate; user declarations stay E0119.
-            unresolved := (name == "IOOperation" || name == "IOContext") && !sema_module_is_core_source(environment.module_identity)
+            unresolved := (name == "IOOperation" || name == "IOContext") && !module_is_core(environment.module_identity)
             // Owner-only impl metadata cannot manufacture a qualified export.
             owner_annotation: loop suffix in JET_CORE_OWNER_ANNOTATION_SUFFIXES {
                 if name.ends_with(suffix) -> break true
@@ -893,7 +897,7 @@ sema_check_public_failure_carrier: fn(func: Func, environment: SemaScopeEnvironm
     }
 }
 
-sema_check_public_failure_carrier_graph: fn(function: String, error_type: Type, graph: SemaRegistrationGraph, module_identity: String, diagnostics: &[Diagnostic]) {
+sema_check_public_failure_carrier_graph: fn(function: String, error_type: Type, graph: SemaRegistrationGraph, module_identity: ModuleID, diagnostics: &[Diagnostic]) {
     pending := [String]{}
     sema_public_failure_collect_named(error_type, pending)
     checked := [String:Bool]{}
@@ -1089,21 +1093,21 @@ sema_never_module_call_diverges: fn(receiver: Expr, method: String, arity: Int, 
     if !sema_call_core_import_is_unshadowed(environment, program, scopes, imported) -> return false
     member: sema_call_core_import_member(imported, method) ?? return false
     module_name := imported.module_name
-    module_identity := sema_call_core_import_source_identity(environment, program, imported) ?? ""
+    module_identity := sema_call_core_import_source_identity(environment, program, imported) ?? module_none()
     if nested {
         if imported.item != None -> return false
         loop leaf in path.leaves {
             module_name = "{module_name}.{leaf}"
             if core_module_export(module_name) == None -> return false
         }
-        module_identity = sema_call_core_module_identity(environment, program, module_name) ?? ""
+        module_identity = sema_call_core_module_identity(environment, program, module_name) ?? module_none()
     }
     if core_call_typed_signature(module_name, member, arity) == .Val(signature) {
         if signature.return_type == .Val(ret) {
             if sema_never_callee_return_diverges(ret) -> return true
         }
     }
-    if module_identity == "" -> return false
+    if module_is_none(module_identity) -> return false
     if program.registration_graph == .Val(graph) {
         module_index: sema_registration_module_index(graph, module_identity) ?? return false
         export: sema_registration_resolve_export(graph, module_index, member, environment.module_identity, environment.package_identity, [String]{}) ?? return false
@@ -1144,7 +1148,7 @@ sema_check_never_fallthrough: fn(func: Func, environment: SemaScopeEnvironment, 
 // every path", so a body that ends in a call of a diverging helper, however
 // deep, counts as well as one that panics itself.
 sema_lint_inferred_never_return: fn(func: Func, owner_key: String, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) {
-    if !func.is_pub || func.compiler_generated || sema_function_promises_never(func) || environment.module_identity.starts_with("<corelib>/") -> return
+    if !func.is_pub || func.compiler_generated || sema_function_promises_never(func) || module_is_core(environment.module_identity) -> return
     if program.registration_graph == .Val(graph) {
         if !sema_divergence_function_diverges(graph, owner_key) -> return
     } else {

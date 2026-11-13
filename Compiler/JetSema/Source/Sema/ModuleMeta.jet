@@ -24,6 +24,7 @@ use jet_foundation.[
     StrPart,
     Type,
     ast_const,
+    module_is_core,
 ]
 
 // The generated constant holding a module's record.
@@ -363,17 +364,17 @@ sema_module_meta_value_reads: fn(text: String, modules: [String:Bool], reads: &[
 sema_module_meta_mark_reads: fn(inputs: &[SemaRegistrationModuleInput]) {
     names := [String:Bool]{}
     loop input in inputs {
-        if input.module_identity.starts_with("<corelib>/") -> next
+        if module_is_core(input.module_identity) -> next
         sema_module_meta_declared_names(input.program.items, input.declared_module, names)
     }
     if names.len() == 0 -> return
     reads := [String:Bool]{}
     loop input in inputs {
-        if input.module_identity.starts_with("<corelib>/") -> next
+        if module_is_core(input.module_identity) -> next
         sema_module_meta_value_reads(input.source, names, reads)
     }
     if reads.len() == 0 -> return
     loop index in 0..<inputs.len() {
-        if !inputs[index].module_identity.starts_with("<corelib>/") -> inputs[index].meta.reads = reads.copy()
+        if !module_is_core(inputs[index].module_identity) -> inputs[index].meta.reads = reads.copy()
     }
 }

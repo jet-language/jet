@@ -1,6 +1,6 @@
 // generic-instance/inline-module display paths, reused from
 // origin/port/compiler CheckProgram.jet. Identity paths remain untouched.
-use jet_foundation.[NameFacts, NameDisplayPath, Item, Func, CodeModule, Diagnostic, DiagnosticLabel, Span]
+use jet_foundation.[NameFacts, NameDisplayPath, Item, Func, CodeModule, Diagnostic, DiagnosticLabel, ModuleID, Span]
 sema_name_strip_prefix: fn(name: String, prefix: String) -> String Never! {
     if !name.starts_with(prefix) -> return name.copy()
     name.slice(prefix.len(), name.len())
@@ -252,7 +252,7 @@ sema_name_display_diagnostics: fn(graph: SemaRegistrationGraph, diagnostics: &[D
 
 // The instance line (`int_billing: billing<Int>`) of the generic-module
 // instance whose lifted function is `function`, if it is one.
-sema_name_instance_span: fn(graph: SemaRegistrationGraph, module_identity: String, function: String) -> Span? Never! {
+sema_name_instance_span: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, function: String) -> Span? Never! {
     if !function.starts_with("__jet_") -> return None
     module_index: sema_registration_module_index(graph, module_identity) ?? return None
     sema_name_instance_item_span(graph.modules[module_index].program.items, "", sema_inline_member_source_name(function), function)

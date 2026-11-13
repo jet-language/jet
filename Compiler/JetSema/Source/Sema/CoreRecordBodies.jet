@@ -1,4 +1,4 @@
-// The Core record's body packets (its section 5, schema `jet.core/v3`). The
+// The Core record's body packets (its section 5, schema `jet.core/v4`). The
 // record is written from a finalized Core check, whose module rows hold every
 // checked body with the facts all of them recorded, merged. At write time
 // each row is split: every body becomes one packet, a
@@ -45,7 +45,7 @@ sema_core_body_packets: fn(moved: &&SemaGraphModuleResult, bodies: &&[FnBody], p
         at[function.key.copy()] = packets.len()
         spans.push(function.source_span.copy())
         packets.push(SemaComptimeFunctionResult{
-            module_identity: row.module_identity.copy(),
+            module_identity: row.module_identity,
             function_key: function.key.copy(),
             function: None,
             waiting_dependencies: [String]{},
@@ -277,7 +277,7 @@ sema_core_body_take_from: fn(store: &SemaCoreBodyStore, table: &DeclTable, modul
     }
     if packet.function_key != key || packet.module_identity != identity {
         modules[row.module_index].complete = false
-        modules[row.module_index].incomplete_reasons.push("the Core record's body `{key}` holds `{packet.function_key}` of {packet.module_identity}")
+        modules[row.module_index].incomplete_reasons.push("the Core record's body `{key}` holds `{packet.function_key}` of a module other than `{modules[row.module_index].module_name}`")
         return false
     }
     sema_core_body_packet_take(modules[row.module_index], packet)

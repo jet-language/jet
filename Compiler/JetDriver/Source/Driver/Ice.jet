@@ -3,6 +3,7 @@
 // found it. The pass records the row, traps or skips that function, and keeps
 // going; once every phase has reported, the command exits 101 with every row.
 
+use jet_foundation.[ModuleTable]
 use jet_sema.[SemaGraphModuleResult, SemaTotalityRow, sema_totality_rows]
 
 // One compiler fault.
@@ -45,10 +46,10 @@ jet_driver_totality_function: fn(row: SemaTotalityRow) -> String Never! {
 }
 
 // The ICE report of a sema stop that broke totality (sema_totality_rows of
-// `modules`): `summary`, then one `totality` row of `pass` per recorded
-// cause of each incomplete function.
-jet_driver_totality_problem: fn(summary: String, pass: String, modules: [SemaGraphModuleResult]) -> String Never! {
+// `modules`, whose identities `table` holds): `summary`, then one `totality`
+// row of `pass` per recorded cause of each incomplete function.
+jet_driver_totality_problem: fn(summary: String, pass: String, modules: [SemaGraphModuleResult], table: ModuleTable) -> String Never! {
     rows := [JetDriverIceRow]{}
-    loop row in sema_totality_rows(modules) -> jet_driver_ice_record(rows, jet_driver_totality_function(row), pass, "totality", row.reason)
+    loop row in sema_totality_rows(modules, table) -> jet_driver_ice_record(rows, jet_driver_totality_function(row), pass, "totality", row.reason)
     "{summary}: {jet_driver_ice_text(rows)}"
 }

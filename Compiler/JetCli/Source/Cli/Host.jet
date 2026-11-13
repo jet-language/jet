@@ -1499,10 +1499,10 @@ jet_cli_native_level: fn(options: BuildOptions) -> Int Never! {
 jet_cli_ir_checks: fn(result: JetDriverCompileResult, inputs: JetDriverLoweringInputs, options: BuildOptions) -> IRChecks Never! {
     bounds: build_options_value(options, "bounds")
     dead_code: build_options_value(options, "dead_code")
-    modules := [String:Bool]{}
+    modules := [U32:Bool]{}
     if bounds != "fatal" || dead_code == "keep" {
         loop graph_module in inputs.modules {
-            if graph_module.package_identity == result.package_identity -> modules[graph_module.module_identity.copy()] = true
+            if graph_module.package_identity == result.package_identity -> modules[graph_module.module_identity.id] = true
         }
     }
     checks := ir_checks_of(bounds, build_options_value(options, "backtrace"), dead_code, modules)

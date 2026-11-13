@@ -255,10 +255,10 @@ jet_driver_script_probe_stage: fn(
 ) -> SemaComptimeDeclarationStage? {
     dropped := [Diagnostic]{}
     inputs := jet_driver_registration_module_inputs(load.modules, load.source_units, load.source_files, load.packages, providers, dropped, request.core_sources, false) ?? return None
-    canonical := jet_driver_canonical_effect_module(request.canonical_effect_source) ?? return None
+    canonical := jet_driver_canonical_effect_module(request.canonical_effect_source, load.module_table) ?? return None
     canonical_identity := canonical.module_identity
     inputs.push(canonical)
-    graph := sema_registration_prepare_graph(inputs, [SemaRegistrationModule]{}, load.imports, load.package_identity, load.entry_module_identity, canonical_identity, providers, target_machine, jet_driver_build_facts(load, request, target_machine), false, request.compiler_threads) ?? return None
+    graph := sema_registration_prepare_graph(inputs, [SemaRegistrationModule]{}, load.imports, load.package_identity, load.entry_module_identity, canonical_identity, load.module_table.copy(), providers, target_machine, jet_driver_build_facts(load, request, target_machine), false, request.compiler_threads) ?? return None
     stage := sema_collect_comptime_declarations(graph, package_policies, request.compiler_threads, None) ?? return None
     Val(stage)
 }

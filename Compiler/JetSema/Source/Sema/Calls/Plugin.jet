@@ -12,6 +12,7 @@ use jet_foundation.[
     CoreCallRecord,
     ComponentTypeDescriptor,
     ComponentTypeField,
+    ModuleID,
     ParamZone,
     Span,
     TFailureCarrier,
@@ -91,8 +92,8 @@ sema_plugin_forbidden_component_name: fn(name: String) -> Bool Never! {
     name == "Dyn" || name == "JSON" || name == "Authority" || name == "Secret" || name == "Date" || name == "LocalDate" || name == "LocalTime" || name == "DateTime" || name == "Duration"
 }
 
-sema_plugin_checked_type_definition: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, nominal: SemaRegistrationNominal) -> TTypeDef? {
-    row: sema_scope_checked_type_row(environment, program, nominal.symbol.module_name, nominal.symbol.name) ?? return None
+sema_plugin_checked_type_definition: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, module_identity: ModuleID, nominal: SemaRegistrationNominal) -> TTypeDef? {
+    row: sema_scope_checked_type_row(environment, program, module_identity, nominal.symbol.name) ?? return None
     Val(program.checked_types[row])
 }
 
@@ -118,7 +119,7 @@ sema_plugin_component_descriptor: fn(graph: SemaRegistrationGraph, environment: 
             }
             nominal_row: sema_type_resolve_nominal_row(graph, ty, environment.module_identity) ?? return None
             nominal: graph.modules[nominal_row.module_index].nominals[nominal_row.row]
-            definition: sema_plugin_checked_type_definition(environment, program, nominal) ?? return None
+            definition: sema_plugin_checked_type_definition(environment, program, graph.modules[nominal_row.module_index].module_identity, nominal) ?? return None
             type_args := if ty == {
                 .Apply(_, args) -> args
                 .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> [Type]{}

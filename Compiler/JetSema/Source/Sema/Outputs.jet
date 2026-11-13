@@ -1,7 +1,7 @@
 // 2: checked Output links and tool selection, ported. Resolve against the
 // existing registration graph; collect owned facts before publishing so no
 // graph read survives a write.
-use jet_foundation.[ConstDef, Diagnostic, EnumLitArg, Expr, ExprMember, Item, OutputCallableAuthority, OutputKind, OutputParam, ResolvedOutput, Span, Symbol, SymbolKind, TGenericParam, Type, diagnostic_from_registry, expr_span, failure_contract_of_function, name_mangle, symbol_id]
+use jet_foundation.[ConstDef, Diagnostic, EnumLitArg, Expr, ExprMember, Item, ModuleID, OutputCallableAuthority, OutputKind, OutputParam, ResolvedOutput, Span, Symbol, SymbolKind, TGenericParam, Type, diagnostic_from_registry, expr_span, failure_contract_of_function, module_text, name_mangle, symbol_id]
 
 SemaOutputIntent: enum {
     Check
@@ -121,9 +121,10 @@ sema_output_path: fn(value: Expr) -> (root: String, root_span: Span, members: [E
     }
 }
 
-sema_output_import_reference: fn(owner: SemaRegistrationModule, target_identity: String, name: String, span: Span, visibility: Int) -> SemaNameReferenceFact Never! {
+sema_output_import_reference: fn(graph: SemaRegistrationGraph, owner: SemaRegistrationModule, target_identity: ModuleID, name: String, span: Span, visibility: Int) -> SemaNameReferenceFact Never! {
     // An alias use names the declaring module's alias, not the target function.
-    symbol: Symbol{id: symbol_id(SymbolKind.Import, owner.module_identity, target_identity, name), kind: SymbolKind.Import, name: name.copy(), module_name: owner.module_identity.copy(), owner: None, span: span, ty: None, visibility: visibility}
+    owner_text: module_text(graph.module_table, owner.module_identity)
+    symbol: Symbol{id: symbol_id(SymbolKind.Import, owner_text, module_text(graph.module_table, target_identity), name), kind: SymbolKind.Import, name: name.copy(), module_name: owner_text, owner: None, span: span, ty: None, visibility: visibility}
     SemaNameReferenceFact{span: span, symbol: symbol.move(), kind: "import_alias"}
 }
 
@@ -136,13 +137,13 @@ sema_output_callable_target: fn(graph: SemaRegistrationGraph, declaring_index: I
         if owner.inline_bindings.imports.get(name) == .Val(binding) {
             resolved = sema_registration_lookup_name(graph, owner.module_identity, binding.semantic_name)
             source_name = Val(name.copy())
-            references.push(sema_output_import_reference(owner, owner.module_identity, name, binding.span, binding.visibility))
+            references.push(sema_output_import_reference(graph, owner, owner.module_identity, name, binding.span, binding.visibility))
         } else {
             resolved = sema_registration_lookup_name(graph, owner.module_identity, name)
             if sema_registration_import_binding_named(owner, name) == .Val(binding_row) {
                 imported: owner.imports[binding_row.import_index]
                 binding: imported.bindings[binding_row.binding]
-                references.push(sema_output_import_reference(owner, binding.target_module_identity, name, binding.symbol.span, imported.visibility))
+                references.push(sema_output_import_reference(graph, owner, binding.target_module_identity, name, binding.symbol.span, imported.visibility))
             }
             if resolved == None {
                 exported: sema_registration_resolve_export(graph, declaring_index, name, owner.module_identity, owner.package_identity, [String]{})
@@ -207,17 +208,17 @@ sema_output_callable_target: fn(graph: SemaRegistrationGraph, declaring_index: I
             break
         }
         // `use alias: module.submodule` also binds a genuine namespace.
-        root_target := String?{None}
+        root_target := ModuleID?{None}
         if imported_root == .Val(index) {
             imported: owner.imports[index]
-            root_target = Val(imported.target_module_identity.copy())
-            references.push(sema_output_import_reference(owner, imported.target_module_identity, path.root, imported.declaration.alias_span, imported.visibility))
+            root_target = Val(imported.target_module_identity)
+            references.push(sema_output_import_reference(graph, owner, imported.target_module_identity, path.root, imported.declaration.alias_span, imported.visibility))
         } else if sema_registration_import_binding_named(owner, path.root) == .Val(binding_row) {
             imported: owner.imports[binding_row.import_index]
             binding: imported.bindings[binding_row.binding]
             if binding.symbol.kind == SymbolKind.Import || binding.symbol.kind == SymbolKind.Module {
-                root_target = Val(binding.target_module_identity.copy())
-                references.push(sema_output_import_reference(owner, binding.target_module_identity, path.root, binding.symbol.span, imported.visibility))
+                root_target = Val(binding.target_module_identity)
+                references.push(sema_output_import_reference(graph, owner, binding.target_module_identity, path.root, binding.symbol.span, imported.visibility))
             }
         }
         target_identity: root_target ?? {
@@ -261,7 +262,7 @@ sema_output_callable_target: fn(graph: SemaRegistrationGraph, declaring_index: I
                     nested_visible: sema_output_nested_modules_visible(graph.modules[current], path.members, index, owner.package_identity)
                     if nested_visible == (Val(true)) {
                         if sema_registration_resolve_export(graph, current, lifted, owner.module_identity, owner.package_identity, [String]{}) == .Val(found) {
-                            references.push(sema_output_import_reference(graph.modules[current], exported.source_module_identity, member.name, exported.symbol.span, exported.visibility))
+                            references.push(sema_output_import_reference(graph, graph.modules[current], exported.source_module_identity, member.name, exported.symbol.span, exported.visibility))
                             source_name = Val(last.name.copy())
                             // copy: as for the export row below.
                             resolved = Val(SemaRegistrationResolvedSymbol{place: SemaRegistrationSymbolPlace.Detached{symbol: found.symbol.copy()}, source_module_identity: found.source_module_identity.copy(), target_module_identity: found.source_module_identity.copy(), visibility: found.visibility})
@@ -275,7 +276,7 @@ sema_output_callable_target: fn(graph: SemaRegistrationGraph, declaring_index: I
                     }
                     return None
                 }
-                references.push(sema_output_import_reference(graph.modules[current], exported.source_module_identity, member.name, exported.symbol.span, exported.visibility))
+                references.push(sema_output_import_reference(graph, graph.modules[current], exported.source_module_identity, member.name, exported.symbol.span, exported.visibility))
                 current = sema_registration_module_index(graph, exported.source_module_identity) ?? return None
             } else {
                 // copy: the resolved symbol owns its texts, while `exported` is a view of an export
@@ -329,7 +330,7 @@ sema_output_has_import: fn(module_row: SemaRegistrationModule, name: String) -> 
     false
 }
 
-sema_output_cli_parameter: fn(graph: SemaRegistrationGraph, module_identity: String, ty: Type) -> Bool Never! {
+sema_output_cli_parameter: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, ty: Type) -> Bool Never! {
     if ty == .Named(_) {} else { return false }
     if sema_type_bound_satisfied_with_generics(graph, ty, "CLI", module_identity, [TGenericParam]{}) == (Val(true)) -> return true
     row: sema_type_resolve_nominal_row(graph, ty, module_identity) ?? return false
@@ -652,7 +653,7 @@ sema_output_fact_with_solved_effects: fn(output: &&ResolvedOutput, graph: SemaRe
         }
         indexed[target] = true
     }
-    key: symbol_id(SymbolKind.Function, modules[target].module_identity, "", fact.semantic_name).key
+    key: symbol_id(SymbolKind.Function, module_text(graph.module_table, modules[target].module_identity), "", fact.semantic_name).key
     function_index: rows[target].get(key) ?? return fact
     declaration_span := Span?{None}
     loop declared_index in 0..<graph.modules[target].functions.len() {

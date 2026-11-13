@@ -3,20 +3,20 @@
 // spelling of its import alias and module path (`use core.http.server as
 // server` gives `#Server.Get`); a lowercase library part is E0087.
 use {
-    jet_foundation.[AppliedRuleApplication, Diagnostic, Func, Item, MARKER_ALLOW, MARKER_FX, MARKER_SOURCE, Marker, MarkerDecl, Program, RuleSite, Span, TAppliedRule, TAppliedRuleArgumentMenu, TextEdit, ast_program, diagnostic_with_edit, diagnostic_with_source_path, foundation_core_argument_menus, owned_trait, owned_trait_auto_derive_marker, sema_casing_marker_qualifier]
+    jet_foundation.[AppliedRuleApplication, Diagnostic, Func, Item, MARKER_ALLOW, MARKER_FX, MARKER_SOURCE, Marker, MarkerDecl, ModuleID, Program, RuleSite, Span, TAppliedRule, TAppliedRuleArgumentMenu, TextEdit, ast_program, diagnostic_with_edit, diagnostic_with_source_path, foundation_core_argument_menus, module_none, owned_trait, owned_trait_auto_derive_marker, sema_casing_marker_qualifier]
     jet_parser.[parse_generated_source]
 }
 
 SemaMarkerModuleResolution: struct {
     status: String
-    declaring_module_identity: String
+    declaring_module_identity: ModuleID
     declaration: MarkerDecl?
     exported: Bool { false }
 }
 
 SemaMarkerModuleTarget: struct {
     status: String
-    module_identity: String
+    module_identity: ModuleID
     name: String
     require_export: Bool
 }
@@ -24,7 +24,7 @@ SemaMarkerModuleTarget: struct {
 SemaMarkerModuleBinding: struct {
     name: String
     application_span: Span
-    module_identity: String
+    module_identity: ModuleID
     declaration_span: Span
 }
 
@@ -42,12 +42,12 @@ SemaMarkerModuleMatches: struct {
 // Selective imports still require the module name, never their member alias.
 // `name` carries the PascalCase library part (`Server.Get`); a scope prefix
 // is spelled by sema_marker_module_scoped_name.
-sema_marker_module_target: fn(edges: [SemaRegistrationImportEdge], module_identity: String, name: String) -> SemaMarkerModuleTarget {
+sema_marker_module_target: fn(edges: [SemaRegistrationImportEdge], module_identity: ModuleID, name: String) -> SemaMarkerModuleTarget {
     sema_marker_module_target_in_scope(edges, module_identity, name, "")
 }
 
-sema_marker_module_target_in_scope: fn(edges: [SemaRegistrationImportEdge], module_identity: String, name: String, scope: String) -> SemaMarkerModuleTarget {
-    target := String?{None}
+sema_marker_module_target_in_scope: fn(edges: [SemaRegistrationImportEdge], module_identity: ModuleID, name: String, scope: String) -> SemaMarkerModuleTarget {
+    target := ModuleID?{None}
     ambiguous := false
     private := false
     length := 0
@@ -74,7 +74,7 @@ sema_marker_module_target_in_scope: fn(edges: [SemaRegistrationImportEdge], modu
             if !lexical && !edge.source_scope_exported -> private = true
         }
     }
-    if ambiguous -> return SemaMarkerModuleTarget{status: "ambiguous", module_identity: "", name: tail, require_export: true}
+    if ambiguous -> return SemaMarkerModuleTarget{status: "ambiguous", module_identity: module_none(), name: tail, require_export: true}
     if private && target == .Val(identity) -> return SemaMarkerModuleTarget{status: "private", module_identity: identity, name: tail, require_export: true}
     if target == .Val(identity) -> return SemaMarkerModuleTarget{status: "found", module_identity: identity, name: tail, require_export: true}
     SemaMarkerModuleTarget{status: "found", module_identity: module_identity, name: name, require_export: false}
@@ -131,7 +131,7 @@ sema_marker_module_resolve_items: fn(items: [Item], target: SemaMarkerModuleTarg
     SemaMarkerModuleResolution{status: "found", declaring_module_identity: target.module_identity, declaration: Val(candidate.declaration), exported: candidate.exported}
 }
 
-sema_marker_module_resolve: fn(graph: SemaRegistrationGraph, module_identity: String, name: String) -> SemaMarkerModuleResolution {
+sema_marker_module_resolve: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, name: String) -> SemaMarkerModuleResolution {
     target: sema_marker_module_target(graph.edges, module_identity, name)
     if target.status != "found" -> return SemaMarkerModuleResolution{status: target.status, declaring_module_identity: target.module_identity, declaration: None}
     module_index: sema_registration_module_index(graph, target.module_identity) ?? return SemaMarkerModuleResolution{status: "unknown", declaring_module_identity: target.module_identity, declaration: None}
@@ -177,7 +177,7 @@ sema_marker_module_scope: fn(items: [Item], span: Span, prefix: String) -> Strin
     prefix.copy()
 }
 
-sema_marker_module_resolve_scoped: fn(graph: SemaRegistrationGraph, module_identity: String, name: String, scope: String) -> SemaMarkerModuleResolution {
+sema_marker_module_resolve_scoped: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, name: String, scope: String) -> SemaMarkerModuleResolution {
     prefix := scope
     loop {
         candidate: sema_marker_module_scoped_name(prefix, name)
@@ -191,7 +191,7 @@ sema_marker_module_resolve_scoped: fn(graph: SemaRegistrationGraph, module_ident
     }
 }
 
-sema_marker_module_resolve_application: fn(graph: SemaRegistrationGraph, module_identity: String, marker: Marker) -> SemaMarkerModuleResolution {
+sema_marker_module_resolve_application: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, marker: Marker) -> SemaMarkerModuleResolution {
     if marker.declaration_module == .Val(identity) && marker.declaration_span == .Val(span) {
         if sema_registration_module_index(graph, identity) == .Val(index) {
             candidate: sema_marker_module_candidate_by_span(graph.modules[index].program.items, span, true)
@@ -228,7 +228,7 @@ sema_marker_module_declarations: fn(items: [Item], prefix: String, exported_only
     declarations
 }
 
-sema_marker_module_visible_declarations: fn(graph: SemaRegistrationGraph, module_identity: String) -> [MarkerDecl] {
+sema_marker_module_visible_declarations: fn(graph: SemaRegistrationGraph, module_identity: ModuleID) -> [MarkerDecl] {
     declarations := [MarkerDecl]{}
     seen := [String]{}
     loop edge_index in 0..<graph.edges.len() {
@@ -386,7 +386,7 @@ sema_marker_module_bindings: fn(inputs: [SemaRegistrationModuleInput], edges: [S
     bindings.move()
 }
 
-sema_marker_module_check_groups: fn(graph: SemaRegistrationGraph, module_identity: String, items: [Item], scope: String, exported: Bool, catalog: SemaScopeMembersMarkerRegistry, diagnostics: &[Diagnostic]) {
+sema_marker_module_check_groups: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, items: [Item], scope: String, exported: Bool, catalog: SemaScopeMembersMarkerRegistry, diagnostics: &[Diagnostic]) {
     loop item in items {
         if item == .CodeModule(code_module) && code_module.body == .Val(body) {
             prefix: if scope == "" -> code_module.name else -> "{scope}.{code_module.name}"

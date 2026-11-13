@@ -45,6 +45,9 @@ use {
         NamedSpan,
         Stmt,
         ast_empty_lambda_meta,
+        ModuleID,
+        module_is_core,
+        module_none,
     ]
     jet_lexer.[Token]
     jet_parser.[jfmt_fmt_expr, jfmt_new, jfmt_out_text]
@@ -342,7 +345,7 @@ sema_expression_field_owner_type: fn(environment: SemaScopeEnvironment, program:
     // field's declared type (a read parameter), which stays in the nominal.
     if owner_module == "" -> return declared.copy()
     generics: loop name in generic_names -> TGenericParam{name: name, bounds: [SymbolID]{}}
-    return sema_type_resolve_declared_with_generics(graph, declared, owner_module, generics)
+    return sema_type_resolve_declared_with_generics(graph, declared, sema_registration_module_id(graph, owner_module), generics)
     }
     // copy: the owner type is a new owned Type. When nothing applies it equals `declared`, the
     // field's declared type (a read parameter), which stays in the nominal.
@@ -359,11 +362,13 @@ sema_expression_field_owner_type: fn(environment: SemaScopeEnvironment, program:
 sema_expression_field_visible: fn(is_pub: Bool, is_package_pub: Bool, owner_module: String, inline_module: Span?, use_span: Span, generated: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
     if is_pub -> return true
     owner_package := ""
+    owner_id := module_none()
     if program.registration_graph == .Val(graph) {
-        if sema_registration_module_index(graph, owner_module) == .Val(owner_index) -> owner_package = graph.modules[owner_index].package_identity
+        owner_id = sema_registration_module_id(graph, owner_module)
+        if sema_registration_module_index(graph, owner_id) == .Val(owner_index) -> owner_package = graph.modules[owner_index].package_identity
     }
     visibility: if is_package_pub -> 1 else -> 0
-    if !sema_registration_visible(visibility, environment.module_identity, environment.package_identity, owner_module, owner_package) -> return false
+    if !sema_registration_visible(visibility, environment.module_identity, environment.package_identity, owner_id, owner_package) -> return false
     declared: inline_module ?? return true
     generated || (use_span.start >= declared.start && use_span.end <= declared.end)
 }
@@ -511,7 +516,7 @@ sema_expression_field_checked: fn(base: TExpr, member: String, span: Span, expec
     // exist, so reads and writes alike get the missing-field error below.
     if owner_name != "" {
         core_field: core_record_field(owner_name, member)
-        visible: !core_record_field_is_core_only(owner_name, member) || sema_module_is_core_source(environment.module_identity)
+        visible: !core_record_field_is_core_only(owner_name, member) || module_is_core(environment.module_identity)
         if visible && core_field == .Val(core_field_ty) {
             core_reference: TFieldRef{owner: None, field: symbol_id(SymbolKind.Field, "", owner_name, member), name: member, ty: core_field_ty, boxed: false}
             core_value: sema_tree_node(core_field_ty, TExprKind.Field{receiver: base, field: core_reference}, span)
@@ -1016,10 +1021,11 @@ sema_expression_module_constant: fn(alias: String, member: String, member_span: 
 // `alias` declares, hoisted under its member identity in that file.
 sema_expression_module_nested_record: fn(graph: SemaRegistrationGraph, alias: String, member: String, environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaRegistrationResolvedSymbol? {
     imported: sema_call_source_import_target(environment, program, alias) ?? return None
-    module_index: sema_registration_module_index(graph, imported.module_identity) ?? return None
+    module_id: sema_registration_module_id(graph, imported.module_identity)
+    module_index: sema_registration_module_index(graph, module_id) ?? return None
     loop surface in graph.modules[module_index].inline_bindings.modules {
         if surface.name != member || surface.private_to != None || surface.constants.get(SEMA_MODULE_META) == None -> next
-        return sema_registration_lookup_name(graph, imported.module_identity, sema_inline_member_name(surface.path, SEMA_MODULE_META))
+        return sema_registration_lookup_name(graph, module_id, sema_inline_member_name(surface.path, SEMA_MODULE_META))
     }
     None
 }
@@ -1032,7 +1038,7 @@ sema_expression_module_nested_record: fn(graph: SemaRegistrationGraph, alias: St
 // Core module paths such as `core.text.wrap` name published modules and keep
 // their own route.
 sema_expression_module_file_child: fn(graph: SemaRegistrationGraph, resolved: SemaRegistrationResolvedSymbol, alias: String, member: String, member_span: Span) -> Diagnostic? {
-    if resolved.target_module_identity.starts_with("<corelib>/") || sema_resolved_kind(graph, resolved) != SymbolKind.Import -> return None
+    if module_is_core(resolved.target_module_identity) || sema_resolved_kind(graph, resolved) != SymbolKind.Import -> return None
     owner_index: sema_registration_module_index(graph, resolved.target_module_identity) ?? return None
     loop declaration in graph.modules[owner_index].declarations {
         if declaration == .CodeModule(definition) && definition.name == member && definition.body == None {
@@ -1072,7 +1078,7 @@ sema_expression_core_nested_constant: fn(alias: String, nested: String, member: 
 // keep their own value route. Any other member kind is not a value read here.
 sema_expression_module_constant_read: fn(graph: SemaRegistrationGraph, resolved: SemaRegistrationResolvedSymbol, label: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     kind: sema_resolved_kind(graph, resolved)
-    source_function: kind == SymbolKind.Function && !resolved.source_module_identity.starts_with("<corelib>/")
+    source_function: kind == SymbolKind.Function && !module_is_core(resolved.source_module_identity)
     if kind != SymbolKind.Constant && !source_function -> return SemaMethodSpecialCheck{handled: false, value: None}
     symbol: sema_resolved_symbol(graph, resolved)
     if source_function {
@@ -1103,14 +1109,14 @@ sema_expression_module_constant_read: fn(graph: SemaRegistrationGraph, resolved:
 // E1004 for a Core module, E0605 for a private item and E0102 otherwise.
 // None when `alias` is not a whole-module import (a binding with no
 // declaration, as `sema_call_source_import_target` reads it).
-sema_expression_module_member_unknown: fn(graph: SemaRegistrationGraph, module_identity: String, alias: String, member: String, member_span: Span) -> Diagnostic? {
+sema_expression_module_member_unknown: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, alias: String, member: String, member_span: Span) -> Diagnostic? {
     module_index: sema_registration_module_index(graph, module_identity) ?? return None
     loop import in graph.modules[module_index].imports {
         loop binding in import.bindings {
             if binding.local != alias || binding.symbol.kind != SymbolKind.Import || binding.declaration != None -> next
             target_index: sema_registration_module_index(graph, binding.target_module_identity) ?? return None
             target: graph.modules[target_index]
-            if target.module_identity.starts_with("<corelib>/") -> return Val(sema_expression_core_member_unknown(target, member, member_span))
+            if module_is_core(target.module_identity) -> return Val(sema_expression_core_member_unknown(target, member, member_span))
             if sema_registration_direct_symbol(target, member) != None -> return Val(sema_error("E0605", member_span, "`{alias}.{member}` is private to its module", "a `priv module` is usable only by its enclosing module (`priv(package)`: by its package), and a `priv` field only by its type's module", "use `{alias}.{member}` from inside its module, or remove `priv` from its module or field"))
             return Val(sema_call_import_member_unknown(target.module_name, member, member_span))
         }
@@ -1312,7 +1318,7 @@ sema_expression_optional_method_call: fn(receiver: Expr, method: String, method_
     receiver_span: expr_span(receiver)
     name: "__jet_optional_receiver_{method_span.start}"
     sema_scope_enter(scopes, state, "optional-call@{method_span.start}")
-    module_name: environment.module_identity
+    module_name: sema_scope_environment_module_text(environment, program)
     owner: sema_scope_local_owner_key(scopes)
     symbol: Symbol{
         id: symbol_id(SymbolKind.Local, module_name, owner, name),

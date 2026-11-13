@@ -18,6 +18,7 @@ use {
         SourceFile,
         NamedSpan,
         PolicyDeclaration,
+        ModuleID,
         Program,
         Span,
         Stmt,
@@ -25,6 +26,7 @@ use {
         Type,
         UserPolicyDecl,
         diagnostic_with_source_path,
+        module_intern,
         source_file_id,
     ]
     jet_lexer.[
@@ -942,7 +944,7 @@ jet_driver_foreign_import_edge_declaration: fn(request: JetDriverForeignRequest)
     request.declaration
 }
 
-jet_driver_foreign_add_import_edge: fn(load: &JetDriverLoadResult, request: JetDriverForeignRequest, target_identity: String, target_package: String) Never! {
+jet_driver_foreign_add_import_edge: fn(load: &JetDriverLoadResult, request: JetDriverForeignRequest, target_identity: ModuleID, target_package: String) Never! {
     declaration: jet_driver_foreign_import_edge_declaration(request)
     scope := String?{None}
     if request.scope != "" -> scope = Val(request.scope)
@@ -1159,7 +1161,7 @@ jet_driver_foreign_canonical_assembly: fn(load: JetDriverLoadResult, surface: Je
     Val(JetDriverForeignCanonicalAssembly{source: canonical, overlay_functions: canonical_overlays, adapter_functions: canonical_adapters, source_segments: source_segments, generated_source_files: generated_source_files})
 }
 
-jet_driver_foreign_rewrite_module: fn(load: &JetDriverLoadResult, surface: JetDriverForeignSurface, merged_functions: [ExternFn], adapters: [SemaForeignCloseAdapterInput], adapter_functions: [Func], diagnostics: &[Diagnostic]) -> String? {
+jet_driver_foreign_rewrite_module: fn(load: &JetDriverLoadResult, surface: JetDriverForeignSurface, merged_functions: [ExternFn], adapters: [SemaForeignCloseAdapterInput], adapter_functions: [Func], diagnostics: &[Diagnostic]) -> ModuleID? {
     cached: surface.cache_program
     program: cached ?? jet_driver_foreign_empty_program()
     cache_path: jet_driver_foreign_generated_path(surface)
@@ -1210,7 +1212,7 @@ jet_driver_foreign_rewrite_module: fn(load: &JetDriverLoadResult, surface: JetDr
     // jet_driver_core_source_unit and jet_driver_unit_module_identity set them.
     core_provider: surface.root_index < 0
     package: if core_provider -> aggregate_path.copy() else -> jet_driver_foreign_package_for_root(load, surface.root_index)
-    module_identity: if core_provider -> aggregate_path.copy() else -> jet_driver_module_identity(package, aggregate_path)
+    module_identity: module_intern(load.module_table, if core_provider -> aggregate_path.copy() else -> jet_driver_module_identity(package, aggregate_path))
     source_identity: jet_driver_source_identity(package, aggregate_path)
     synthetic_items := [Item]{}
     loop item in program.items {

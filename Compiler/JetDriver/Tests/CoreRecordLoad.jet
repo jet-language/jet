@@ -12,7 +12,7 @@ use {
         sema_registration_prepare_graph,
     ]
     jet_driver.[JetDriverLoadedModule, JetDriverParseJob, jet_driver_canonical_effect_module, jet_driver_core_record_seeds, jet_driver_parse_one]
-    jet_foundation.[Span, ast_program, compiler_threads_single, jet_target_machine_hosted]
+    jet_foundation.[Span, ast_program, compiler_threads_single, jet_target_machine_hosted, module_intern, module_table]
 }
 
 LOAD_EFFECTS: "IO: struct {{\n    impl Effect {{}}\n}}\nPanic: struct {{\n    impl Effect {{}}\n}}\n"
@@ -20,18 +20,20 @@ LOAD_MAIN: "Point: struct {{\n    x: Int\n}}\n\nmain: fn() {{\n}}\n"
 
 // The registered row of `LOAD_MAIN`, as a record holds it.
 core_record_load_row: fn() -> SemaRegistrationModule {
-    effects := jet_driver_canonical_effect_module(LOAD_EFFECTS) ?? panic("the canonical effect source does not parse")
-    effect_identity: effects.module_identity.copy()
+    table := module_table()
+    main_id: module_intern(table, "load::main")
+    effects := jet_driver_canonical_effect_module(LOAD_EFFECTS, table) ?? panic("the canonical effect source does not parse")
+    effect_identity: effects.module_identity
     parsed := parse_source(LOAD_MAIN.bytes())
     assert_eq(parsed.diagnostics.len(), 0)
     segment: SemaSourceSegment{generated: Span{start: 0, end: LOAD_MAIN.len()}, source_file: "main.jet", source_start: 0, line_starts: parser_line_starts(LOAD_MAIN.bytes()), origin: SemaSourceOrigin.Snapshot}
-    main: SemaRegistrationModuleInput{package_identity: "load", module_identity: "load::main", module_name: "main", core_source_alias: "", module_path: "main.jet", source_file: "main.jet", source_segments: [SemaSourceSegment]{segment}, source_origin: SemaSourceOrigin.Snapshot, program: parsed.program.move(), foreign_handles: [SemaRegistrationForeignHandleFacts]{}, source: LOAD_MAIN}
+    main: SemaRegistrationModuleInput{package_identity: "load", module_identity: main_id, module_name: "main", core_source_alias: "", module_path: "main.jet", source_file: "main.jet", source_segments: [SemaSourceSegment]{segment}, source_origin: SemaSourceOrigin.Snapshot, program: parsed.program.move(), foreign_handles: [SemaRegistrationForeignHandleFacts]{}, source: LOAD_MAIN}
     facts: SemaBuildFacts{package_name: "load", package_version: "0.1.0", os: "linux", profile: "dev", stamp_git: None, stamp_dirty: false, stamp_toolchain: "fixture", stamp_at: ""}
-    graph := sema_registration_prepare_graph([SemaRegistrationModuleInput]{main, effects}, [SemaRegistrationModule]{}, [SemaRegistrationImportEdge]{}, "load", "load::main", effect_identity, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), facts, false, compiler_threads_single())
+    graph := sema_registration_prepare_graph([SemaRegistrationModuleInput]{main, effects}, [SemaRegistrationModule]{}, [SemaRegistrationImportEdge]{}, "load", main_id, effect_identity, table, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), facts, false, compiler_threads_single())
     rows := graph.modules.move()
     loop rows.len() > 0 {
         row := rows.pop() ?? break
-        if row.module_identity == "load::main" -> return row
+        if row.module_identity == main_id -> return row
     }
     panic("the fixture registered no main module")
 }
@@ -62,7 +64,7 @@ core_record_load_module: fn(row: SemaRegistrationModule, index: Int) -> JetDrive
     assert_eq(unit.core_record_index, 3)
     assert_eq(unit.core_registration.len(), 1)
     registration := unit.core_registration.pop() ?? panic("the record unit kept no registration row")
-    assert_eq(registration.module_identity, "load::main")
+    assert_eq(registration.module_identity, row.module_identity)
     assert_eq(registration.program.items.len(), 0)
     assert_eq(registration.nominals.len(), row.nominals.len())
 }
@@ -73,7 +75,7 @@ core_record_load_module: fn(row: SemaRegistrationModule, index: Int) -> JetDrive
     modules := [JetDriverLoadedModule]{core_record_load_module(row, 1)}
     seeds := jet_driver_core_record_seeds(modules, 2, true) ?? panic("the record rows don't seed: {err}")
     assert_eq(seeds.len(), 1)
-    assert_eq(seeds[0].module_identity, "load::main")
+    assert_eq(seeds[0].module_identity, row.module_identity)
     assert_eq(seeds[0].program.items.len(), items)
     assert_eq(modules[0].core_registration.len(), 0)
     // Copied, not moved, when a later stage reads the loaded programs again.

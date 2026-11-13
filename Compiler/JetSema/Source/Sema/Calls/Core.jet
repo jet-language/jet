@@ -59,6 +59,11 @@ use jet_foundation.[
     type_name,
     shared_lifetime_core_member,
     CORE_CALLS,
+    ModuleID,
+    module_find,
+    module_is_core,
+    module_none,
+    module_text,
 ]
 
 // A visible module alias (`use slots`, `use core.mem`) and the registered
@@ -80,10 +85,10 @@ SemaCoreCallRoute: enum {
 sema_call_core_import_target: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, alias: String) -> SemaCallImportTarget? {
     if program.registration_graph == .Val(graph) {
     module_index: sema_scope_caller_index(environment, graph) ?? return None
-    imports: sema_core_registration_imports(graph.modules[module_index])
+    imports: sema_core_registration_imports(graph.modules[module_index], graph.module_table)
     imported: sema_core_import_find(imports, alias) ?? return None
     module_name := imported.module_name
-    target_index: sema_registration_module_index(graph, imported.module_name)
+    target_index: sema_registration_module_index_text(graph, imported.module_name)
     if target_index != None {
         index: target_index
         module_name = graph.modules[index].module_name
@@ -107,7 +112,7 @@ sema_call_source_import_target: fn(environment: SemaScopeEnvironment, program: S
             target_index: sema_registration_module_index(graph, graph.modules[module_index].imports[import_index].bindings[binding_index].target_module_identity) ?? return None
             module_name: graph.modules[target_index].module_name
             if sema_core_import_is_core(module_name) -> return None
-            return Val(SemaCallImportTarget{alias: alias, module_identity: graph.modules[module_index].imports[import_index].bindings[binding_index].target_module_identity, module_name: module_name, item: None, span: graph.modules[module_index].imports[import_index].bindings[binding_index].symbol.span})
+            return Val(SemaCallImportTarget{alias: alias, module_identity: module_text(graph.module_table, graph.modules[module_index].imports[import_index].bindings[binding_index].target_module_identity), module_name: module_name, item: None, span: graph.modules[module_index].imports[import_index].bindings[binding_index].symbol.span})
         }
     }
     return None
@@ -151,9 +156,9 @@ sema_call_core_import_member: fn(target: SemaCallImportTarget, requested_member:
 // The loaded module whose source functions a Core import calls. A member
 // that names a Core submodule (`use core.files`) binds the module by name,
 // not by a loaded identity, so its source rows are found by that name.
-sema_call_core_import_source_identity: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, target: SemaCallImportTarget) -> String? {
+sema_call_core_import_source_identity: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, target: SemaCallImportTarget) -> ModuleID? {
     graph: program.registration_graph ?? return None
-    if sema_registration_module_index(graph, target.module_identity) != None -> return Val(target.module_identity)
+    if sema_registration_module_index_text(graph, target.module_identity) == .Val(index) -> return Val(graph.modules[index].module_identity)
     sema_call_core_module_identity(environment, program, target.module_name)
 }
 
@@ -165,10 +170,12 @@ sema_call_core_import_is_unshadowed: fn(environment: SemaScopeEnvironment, progr
     visible_index: sema_scope_resolve_index(scopes, target.alias) ?? return false
     visible_symbol := scopes.bindings[visible_index].symbol
     module_row: graph.modules[module_index]
+    // Only an import whose target spells the alias's module is its binding.
+    target_identity: module_find(graph.module_table, target.module_identity) ?? return false
     loop import in module_row.imports {
         loop binding in import.bindings {
             // A Core submodule member (`use core.mem`) names its own target.
-            if import.target_module_identity != target.module_identity && binding.target_module_identity != target.module_identity -> next
+            if import.target_module_identity != target_identity && binding.target_module_identity != target_identity -> next
             if binding.local != target.alias -> next
             skip_binding := if target.item == {
                 .Val(item) -> binding.original != item
@@ -285,7 +292,7 @@ sema_call_core_vault_safe_member: fn(member: String) -> Bool Never! {
     }
 }
 
-sema_call_core_source_target: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, module_identity: String, member: String, type_args: [Type], span: Span, registered_source_target: Bool, diagnostics: &[Diagnostic]) -> SemaCallDirectTarget? {
+sema_call_core_source_target: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, module_identity: ModuleID, member: String, type_args: [Type], span: Span, registered_source_target: Bool, diagnostics: &[Diagnostic]) -> SemaCallDirectTarget? {
     if program.registration_graph == .Val(graph) {
     module_index: sema_registration_module_index(graph, module_identity) ?? return None
     // Module rows are read in place; binding one would copy its whole program.
@@ -304,7 +311,7 @@ sema_call_core_source_target: fn(environment: SemaScopeEnvironment, program: Sem
             if record.symbol != CoreCallSymbol.SourceOwned -> return None
         }
     }
-    core_private_seam: graph.modules[module_index].module_identity.starts_with("<corelib>/") && graph.modules[caller_index].module_identity.starts_with("<corelib>/")
+    core_private_seam: module_is_core(graph.modules[module_index].module_identity) && module_is_core(graph.modules[caller_index].module_identity)
     export: (if registered_source_target || core_private_seam -> sema_registration_resolve_export(graph, module_index, member, module_identity, graph.modules[module_index].package_identity, [String]{}) else -> sema_registration_resolve_export(graph, module_index, member, environment.module_identity, environment.package_identity, [String]{})) ?? {
         // A `priv` jet.runtime member is Core's alone (#6615): another caller
         // gets the ordinary visibility error, not "has no item".
@@ -363,12 +370,12 @@ sema_call_try_source_module_call: fn(alias: String, alias_span: Span, member: St
     imported: sema_call_source_import_target(environment, program, alias) ?? return unhandled
     if !sema_call_core_record_import_reference(environment, program, scopes, imported, alias_span, context) -> return unhandled
     if program.registration_graph == .Val(graph) {
-    module_index: sema_registration_module_index(graph, imported.module_identity) ?? return unhandled
+    module_index: sema_registration_module_index_text(graph, imported.module_identity) ?? return unhandled
     // A Core source module imported by its bare name (`use app`) is called
     // here, not through the Core module-method route.
     unbuilt := SemaCoreUnbuiltCall?{None}
-    if graph.modules[module_index].module_identity.starts_with("<corelib>/") -> sema_call_core_unbuilt_note(graph.modules[module_index].module_name, member, span, environment, program, unbuilt)
-    if graph.modules[module_index].module_identity.starts_with("<corelib>/") && sema_live_member(graph.modules[module_index].module_name, member) {
+    if module_is_core(graph.modules[module_index].module_identity) -> sema_call_core_unbuilt_note(graph.modules[module_index].module_name, member, span, environment, program, unbuilt)
+    if module_is_core(graph.modules[module_index].module_identity) && sema_live_member(graph.modules[module_index].module_name, member) {
         live: sema_call_live(member, alias, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         return SemaMethodSpecialCheck{handled: true, value: live.value}
     }
@@ -422,7 +429,7 @@ sema_call_private_member: fn(shown: String, span: Span) -> Diagnostic {
 sema_call_source_import_inline_module: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, alias: String, name: String) -> Bool Never! {
     imported: sema_call_source_import_target(environment, program, alias) ?? return false
     if program.registration_graph == .Val(graph) {
-        module_index: sema_registration_module_index(graph, imported.module_identity) ?? return false
+        module_index: sema_registration_module_index_text(graph, imported.module_identity) ?? return false
         loop surface in graph.modules[module_index].inline_bindings.modules {
             if surface.name == name -> return true
         }
@@ -475,10 +482,10 @@ sema_call_import_member_unknown: fn(module_name: String, member: String, span: S
     sema_error("E0102", span, "nothing named `{member}` exists in this import", "only functions and types outside a `priv module` of the other file are reachable here", "check the spelling, or move the item out of its `priv module`")
 }
 
-sema_call_core_module_identity: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, module_name: String) -> String? {
+sema_call_core_module_identity: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, module_name: String) -> ModuleID? {
     if program.registration_graph == .Val(graph) {
     loop module_row_index in 0..<graph.modules.len() {
-        if graph.modules[module_row_index].module_name != module_name || !sema_module_is_core_source(graph.modules[module_row_index].module_identity) -> next
+        if graph.modules[module_row_index].module_name != module_name || !module_is_core(graph.modules[module_row_index].module_identity) -> next
         loop owner in CORE_SOURCE_OWNED_ROWS {
             if owner.module_name == module_name && owner.alias == graph.modules[module_row_index].core_source_alias && graph.modules[module_row_index].source_file == "<corelib>/{owner.path}" -> return Val(graph.modules[module_row_index].module_identity)
         }
@@ -487,6 +494,14 @@ sema_call_core_module_identity: fn(environment: SemaScopeEnvironment, program: S
     } else {
         return None
     }
+}
+
+// Whether the symbol of identity text `symbol_module` belongs to the loaded
+// Core source module `module_name` (sema_call_core_module_identity).
+sema_call_core_module_is: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, module_name: String, symbol_module: String) -> Bool Never! {
+    identity: sema_call_core_module_identity(environment, program, module_name) ?? return false
+    if program.registration_graph == .Val(graph) -> return module_text(graph.module_table, identity) == symbol_module
+    false
 }
 
 // Rust `serde_diags::unknown_core_item` (E1004): the one report for a Core
@@ -690,7 +705,7 @@ sema_call_core_resolve_route: fn(environment: SemaScopeEnvironment, program: Sem
 // is the name at `span`; an import alias gets the advisory without the edit.
 sema_call_core_tolerant_form_lint: fn(environment: SemaScopeEnvironment, module_name: String, member: String, written: String, span: Span, diagnostics: &[Diagnostic]) {
     if module_name != "core.http" || (member != "query_decode" && member != "form_decode") -> return
-    if environment.module_identity.starts_with("<corelib>/") -> return
+    if module_is_core(environment.module_identity) -> return
     row: diagnostic_registry_row("L0208") ?? panic("L0208 has no registry row")
     lint: sema_lint("L0208", span, row.what.replace("{{member}}", member), row.why, row.fix.replace("{{member}}", member))
     if written != member {
@@ -1264,7 +1279,7 @@ sema_call_core_inference_parameters: fn(signature: CoreTypedCallSignature, span:
         bounds: [String]{},
         span: span,
         identity_key: "",
-        bound_module: "",
+        bound_module: module_none(),
     }
     parameters
 }
@@ -1474,7 +1489,7 @@ sema_call_core_shared_reject: fn(member: String, span: Span, diagnostics: &[Diag
 // zero-argument call checking owns its failure/effect facts; this node only
 // changes the storage lifetime and preserves its declared Shared payload type.
 sema_call_core_global_shared: fn(lifetime: SharedLifetime, member: String, type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
-    if !environment.module_identity.starts_with("<corelib>/") {
+    if !module_is_core(environment.module_identity) {
         diagnostics.push(sema_error("E0067", span, "`{member}` is reserved for Jet", "Double-underscore names belong to the compiler, generated binders, debugger, serializer, and tools", "Rename it without the second leading underscore"))
         return None
     }
@@ -1500,7 +1515,7 @@ sema_call_core_global_shared: fn(lifetime: SharedLifetime, member: String, type_
     if context.call_facts.len() != before + 1 -> panic("checked Core publication call has no effect obligation")
     context.call_facts[before].shared_lifetime = Val(lifetime)
     context.call_facts[before].shared_member = member
-    context.call_facts[before].shared_source = environment.module_identity
+    context.call_facts[before].shared_source = sema_scope_environment_module_text(environment, program)
     initializer: sema_call_callee_decl(program, target.symbol.id, span, diagnostics) ?? return None
     value: sema_node(context, published, NodeKind.GlobalShared{initializer: initializer, lifetime: lifetime}, span)
     sema_expr_expected(value, expected, environment, program, diagnostics)
@@ -1511,7 +1526,7 @@ sema_call_core_global_shared: fn(lifetime: SharedLifetime, member: String, type_
 // module keeps its functions as registration-graph rows, not in
 // `environment.declarations`; both are read in place.
 sema_call_core_shared_initializer_declared: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, target: SemaCallDirectTarget) -> Bool Never! {
-    if target.symbol.module_name != environment.module_identity -> return false
+    if target.symbol.module_name != sema_scope_environment_module_text(environment, program) -> return false
     if program.registration_graph == .Val(graph) {
         if sema_registration_callable_row(graph, target.symbol.id.key) == .Val(row) {
             if row == {
@@ -1550,7 +1565,7 @@ sema_call_core_shared_success: fn(ty: Type) -> Type? Never! {
 }
 
 sema_call_core_check_source_owned: fn(target: SemaCallDirectTarget, qualified_name: String, type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
-    if target.symbol.name == "graph" && sema_call_core_module_identity(environment, program, "core.build") == (Val(target.symbol.module_name)) {
+    if target.symbol.name == "graph" && sema_call_core_module_is(environment, program, "core.build", target.symbol.module_name) {
         if !sema_call_core_check_type_args("core.build", "graph", 0, false, type_args, span, diagnostics) -> return None
         // A body checked on a compiler thread keeps its name in location_function (Control.jet).
         check: sema_compiler_services_check_call("core.build", "graph", args, span, (scopes.location_function ?? environment.function_name) == "build", environment, program, scopes, state, tail_store, context, diagnostics)
@@ -1571,7 +1586,7 @@ sema_call_core_check_source_owned: fn(target: SemaCallDirectTarget, qualified_na
     if sema_call_histories_is_call(target, environment, program) -> call_args = sema_call_histories_args(args, type_args, span, environment, program)
     call := Call{name: qualified_name, name_span: span, type_args: type_args, args: call_args}
     checked: sema_call_check_direct_target_owned(state, target, call, [SemaCallDefaultValue]{}, expected, environment, program, scopes, tail_store, context, diagnostics) ?? return None
-    if target.symbol.name == "to_string" && sema_call_core_module_identity(environment, program, "core.encoding.csv") == (Val(target.symbol.module_name)) {
+    if target.symbol.name == "to_string" && sema_call_core_module_is(environment, program, "core.encoding.csv", target.symbol.module_name) {
         if !sema_data_csv_check_rows(args, checked.value, environment, program, diagnostics) -> return None
     }
     if !sema_data_encode_check_value(target, args, checked.value, environment, program, diagnostics) -> return None

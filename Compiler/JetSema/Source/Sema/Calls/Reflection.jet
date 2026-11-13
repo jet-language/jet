@@ -131,7 +131,7 @@ sema_call_reflection_bound: fn(ty: Type, bound: String, environment: SemaScopeEn
         // caller need not import the trait name as well as the displayed type.
         owner: sema_type_resolve_nominal_row_at(graph, ty, sema_scope_caller_row(environment, graph)) ?? return false
         nominal: graph.modules[owner.module_index].nominals[owner.row]
-        sema_type_bound_satisfied_with_generics(graph, nominal.ty, bound, nominal.symbol.module_name, environment.generic_params) ?? false
+        sema_type_bound_satisfied_with_generics(graph, nominal.ty, bound, graph.modules[owner.module_index].module_identity, environment.generic_params) ?? false
     } else {
         return false
     }

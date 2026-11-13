@@ -30,9 +30,10 @@ use jet_foundation.[
     symbol_id,
     checked_symbol_local,
     type_name,
+    ModuleID,
 ]
 
-sema_http_route_marker_verb: fn(marker: Marker, graph: SemaRegistrationGraph, module_identity: String) -> String? {
+sema_http_route_marker_verb: fn(marker: Marker, graph: SemaRegistrationGraph, module_identity: ModuleID) -> String? {
     if marker.negated -> return None
     resolved: sema_marker_module_resolve_application(graph, module_identity, marker)
     if resolved.status != "found" -> return None
@@ -57,7 +58,7 @@ SEMA_WEB_MARKER_COLUMN_OF: "ColumnOf"
 
 // Whether `marker`, written in the module `module_identity`, is the web
 // module's marker `name`.
-sema_web_marker_is: fn(marker: Marker, graph: SemaRegistrationGraph, module_identity: String, name: String) -> Bool {
+sema_web_marker_is: fn(marker: Marker, graph: SemaRegistrationGraph, module_identity: ModuleID, name: String) -> Bool {
     if marker.negated || (marker.name != name && !marker.name.ends_with(".{name}")) -> return false
     resolved: sema_marker_module_resolve_application(graph, module_identity, marker)
     if resolved.status != "found" -> return false
@@ -122,9 +123,10 @@ sema_call_http_mount: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg],
     body := [TStmt]{}
     mux_name: "__jet_http_mount_mux_{span.start}"
     owner: sema_scope_local_owner_key(scopes)
-    mux_id: symbol_id(SymbolKind.Local, environment.module_identity, owner, mux_name)
+    local_module: sema_scope_environment_module_text(environment, program)
+    mux_id: symbol_id(SymbolKind.Local, local_module, owner, mux_name)
     mux_symbol: Symbol{id: mux_id, kind: SymbolKind.Local, name: mux_name,
-        module_name: environment.module_identity, owner: Val(owner), span: span,
+        module_name: local_module, owner: Val(owner), span: span,
         ty: Val(receiver_value.ty), visibility: 0}
     _ := sema_scope_declare_local(scopes, mux_symbol, false, AccessConvention.Read, None, false)
     sema_ownership_declare_binding(state, mux_symbol, false)
@@ -212,7 +214,7 @@ sema_http_mount_prefix: fn(text: String) -> String Never! {
     text.slice(0, end)
 }
 
-sema_http_collect_mounted: fn(tree: BodyTree, expression: Int, graph: SemaRegistrationGraph, module_identity: String, mounted: &[String]) Never! {
+sema_http_collect_mounted: fn(tree: BodyTree, expression: Int, graph: SemaRegistrationGraph, module_identity: ModuleID, mounted: &[String]) Never! {
     node: body_node(tree, expression)
     if node.kind == .InlineBlock(body) {
         loop statement in body {
@@ -230,7 +232,7 @@ sema_http_collect_mounted: fn(tree: BodyTree, expression: Int, graph: SemaRegist
 // One function body's mounts. Its own function so the visitor closure lends
 // the `mounted` write parameter: the stage-0 Rust tier then lends `graph` to the
 // closure instead of copying the whole registration graph per function.
-sema_http_collect_mounted_body: fn(function: FnBody, graph: SemaRegistrationGraph, identity: String, mounted: &[String]) Never! {
+sema_http_collect_mounted_body: fn(function: FnBody, graph: SemaRegistrationGraph, identity: ModuleID, mounted: &[String]) Never! {
     loop statement in function.body {
         body_each_stmt_child(function.tree, function.tree.stmts[statement], fn(expression: Int) { sema_http_collect_mounted(function.tree, expression, graph, identity, mounted) })
     }

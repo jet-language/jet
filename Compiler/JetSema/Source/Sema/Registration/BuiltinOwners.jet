@@ -13,7 +13,10 @@ use jet_foundation.[
     TCompilerBuiltin,
     TCoreBuiltinOwner,
     TDeclarationOwnership,
+    module_is_none,
+    module_none,
     symbol_id,
+    ModuleID,
 ]
 
 sema_registration_core_builtin_task_name: fn() -> String Never! {
@@ -32,7 +35,7 @@ sema_registration_core_builtin_owner_fact: fn(name: String) -> SemaRegistrationC
     symbol: symbol_id(SymbolKind.Type, "", "", name)
     SemaRegistrationCoreBuiltinOwnerFact{
         symbol: symbol,
-        module_identity: None,
+        module_identity: module_none(),
         name: name,
         ownership: TDeclarationOwnership.Owned,
     }
@@ -62,7 +65,8 @@ sema_registration_core_builtin_owner: fn(graph: SemaRegistrationGraph, name: Str
 
 SemaRegistrationCoreBuiltinOwnerFact: struct {
     symbol: SymbolID
-    module_identity: String?
+    // None: the fact belongs to every module.
+    module_identity: ModuleID
     name: String
     ownership: TDeclarationOwnership
 }
@@ -75,7 +79,7 @@ sema_registration_compiler_builtin_marker: fn(nominal: SemaRegistrationNominal) 
 
 sema_checked_core_builtin_owners: fn(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule) -> [TCoreBuiltinOwner] Never! {
     // A fact without a module identity belongs to every module.
-    owners: loop fact in graph.core_builtin_owner_facts if (fact.module_identity ?? module_row.module_identity) == module_row.module_identity -> TCoreBuiltinOwner{
+    owners: loop fact in graph.core_builtin_owner_facts if module_is_none(fact.module_identity) || fact.module_identity == module_row.module_identity -> TCoreBuiltinOwner{
         symbol: fact.symbol,
         module_identity: fact.module_identity,
         name: fact.name,

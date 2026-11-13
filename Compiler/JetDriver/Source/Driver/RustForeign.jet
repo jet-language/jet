@@ -1,7 +1,7 @@
 // User Rust helpers retain the hosted bridge's ordered identity record and
 // cache layout. Native static-musl artifacts occupy an explicit separate mode.
 use {
-    jet_foundation.[Type, ExternFn, Item, Field, AccessConvention, ast_comptime_generated_path, dimension_identity, measure_expression, measure_signed_value, type_internal_tag_name, sha256_bytes, sha256_hex_bytes]
+    jet_foundation.[Type, ExternFn, Item, Field, AccessConvention, ModuleID, ast_comptime_generated_path, dimension_identity, measure_expression, measure_signed_value, type_internal_tag_name, sha256_bytes, sha256_hex_bytes]
     jet_sema.[SemaRegistrationGraph, SemaRegistrationForeignOwner]
 }
 
@@ -22,7 +22,7 @@ JetDriverRustForeignFunction: struct {
     close: String?
 }
 JetDriverRustForeignEntry: struct {
-    module_identity: String
+    module_identity: ModuleID
     crate_spec: String
     declaration: JetDriverRustForeignFunction
 }
@@ -196,7 +196,7 @@ jet_driver_rust_foreign_function: fn(declaration: ExternFn) -> JetDriverRustFore
     close: if declaration.close == .Val(value) -> Val(value.name) else -> None
     JetDriverRustForeignFunction{name: declaration.name, params: params, return_type: declaration.return_type, rust_path: declaration.rust_path, generated: declaration.generated, close: close}
 }
-jet_driver_rust_foreign_collect_items: fn(items: [Item], owner: String, module_identity: String, entries: &[JetDriverRustForeignEntry], records: &JetDriverRustForeignRecordIndex) Never! {
+jet_driver_rust_foreign_collect_items: fn(items: [Item], owner: String, module_identity: ModuleID, entries: &[JetDriverRustForeignEntry], records: &JetDriverRustForeignRecordIndex) Never! {
     loop item in items {
         if item == {
             .ExternRust(block) -> {

@@ -10,7 +10,7 @@
 // The record writer runs the same module map the other way: the Core check's
 // graph indexes become module key positions before a row is encoded.
 use {
-    jet_foundation.[Item, compiler_transfer_rows]
+    jet_foundation.[Item, compiler_transfer_rows, module_text]
     jet_sema.[SemaComptimeItemValue, SemaCoreBodyRow, SemaGraphModuleResult, SemaGraphResult, SemaRegistrationGraph, SemaRegistrationImport, SemaRegistrationModule, sema_core_body_store_new]
 }
 
@@ -71,7 +71,7 @@ jet_driver_core_record_seeds: fn(modules: &[JetDriverLoadedModule], record_modul
         if position >= graph_modules.len() || graph_modules[position] >= 0 -> return Err("Core module `{modules[index].module_name}` loads record module {position}, which the record doesn't hold once")
         graph_modules[position] = seeds.len()
         seed := modules[index].core_registration.pop() ?? return Err("Core module `{modules[index].module_name}` loaded no registration row")
-        if seed.module_identity != modules[index].module_identity -> return Err("Core module `{modules[index].module_name}` ({modules[index].module_identity}) loaded the registration row of {seed.module_identity}")
+        if seed.module_identity != modules[index].module_identity -> return Err("Core module `{modules[index].module_name}` loaded the registration row of `{seed.module_name}`")
         if release_programs {
             // The items, the bulk of the tree, move; the rest is small.
             items := [Item]{}
@@ -108,7 +108,7 @@ jet_driver_core_record_take: fn(graph: &SemaRegistrationGraph, record: JetDriver
     loop _ in 0..<record.module_names.len() -> graph_modules.push(-1)
     positions := [Int]{}
     loop index in 0..<graph.seeded {
-        position: record.module_rows.get(graph.modules[index].module_identity) ?? return Err("seeded module `{graph.modules[index].module_name}` isn't one of the Core record's")
+        position: record.module_rows.get(module_text(graph.module_table, graph.modules[index].module_identity)) ?? return Err("seeded module `{graph.modules[index].module_name}` isn't one of the Core record's")
         graph_modules[position] = index
         positions.push(position)
     }

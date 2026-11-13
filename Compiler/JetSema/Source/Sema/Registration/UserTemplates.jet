@@ -41,6 +41,8 @@ use jet_foundation.[
     diagnostic_with_source_path,
     expr_span,
     import_walk_bindings,
+    module_is_core,
+    module_text,
 ]
 
 // ---------------------------------------------------------------------------
@@ -197,8 +199,9 @@ sema_user_template_register: fn(graph: &SemaRegistrationGraph, module_index: Int
         sema_derive_expand_builtin_items(generated, problems)
         codecs: sema_serde_graph_codecs(graph, generated)
         sema_serde_expand_builtin_items(generated, codecs)
-        if !sema_module_is_core_source(graph.modules[module_index].module_identity) -> sema_fork_methods_expand(generated)
+        if !module_is_core(graph.modules[module_index].module_identity) -> sema_fork_methods_expand(generated)
         sema_registration_expand_impl_self(generated)
+        row_text: module_text(graph.module_table, graph.modules[module_index].module_identity)
         module_row := graph.modules[module_index]
         first_nominal: module_row.nominals.len()
         source_file: module_row.source_file.copy()
@@ -209,7 +212,7 @@ sema_user_template_register: fn(graph: &SemaRegistrationGraph, module_index: Int
             if item == {
                 .Impl(_) -> {}
                 .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {
-                    _ := sema_registration_add_root(module_row, item, source_file, source_origin, source_segments, problems)
+                    _ := sema_registration_add_root(module_row, row_text, item, source_file, source_origin, source_segments, problems)
                 }
             }
         }
@@ -218,7 +221,7 @@ sema_user_template_register: fn(graph: &SemaRegistrationGraph, module_index: Int
         // writes it, so they are read in place.
         items := module_row.program.items.move()
         module_row.program.items = [Item]{}
-        loop item in generated -> sema_registration_add_impl(module_row, item, items, impl_rows, problems)
+        loop item in generated -> sema_registration_add_impl(module_row, row_text, item, items, impl_rows, problems)
         module_row.program.items = items.move()
         graph.modules[module_index] = module_row
         sema_registration_index_nominal_rows(graph, module_index, first_nominal)
@@ -255,7 +258,7 @@ META_REWRITE: "Meta.Rewrite"
 META_TYPES: "Meta.Types"
 META_RAW: "Meta.Raw"
 
-sema_user_rule_body: fn(graph: SemaRegistrationGraph, module_identity: String, marker: Marker) -> SemaUserRule? {
+sema_user_rule_body: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, marker: Marker) -> SemaUserRule? {
     resolved: sema_marker_module_resolve_application(graph, module_identity, marker)
     declaration: resolved.declaration ?? return None
     body: declaration.body ?? return None
@@ -275,7 +278,7 @@ sema_user_rule_body: fn(graph: SemaRegistrationGraph, module_identity: String, m
             }
         }
     }
-    definition_module: if resolved.declaring_module_identity == module_identity -> "" else -> resolved.declaring_module_identity.copy()
+    definition_module: if resolved.declaring_module_identity == module_identity -> "" else -> module_text(graph.module_table, resolved.declaring_module_identity)
     Val(SemaUserRule{body: body, reports: reports, generates: sema_user_rule_row_generates(declaration.row), receiver: sema_user_rule_receiver(declaration, marker), definition_module: definition_module})
 }
 

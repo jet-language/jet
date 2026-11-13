@@ -102,6 +102,7 @@ use {
     jet_foundation.[
         Diagnostic,
         SourceFile,
+        module_text,
         source_file_id,
     ]
     jet_sema.[
@@ -354,11 +355,12 @@ jet_driver_compiler_check: fn(input: JetDriverCompilerCheckInput) -> JetDriverCo
     load := jet_driver_load(input.request)
     parse_only := jet_driver_compiler_check_parse_only(load)
     if (!load.complete || jet_driver_has_errors(load.diagnostics)) && !parse_only -> return jet_driver_compiler_check_failure(load, load.failed_stage ?? JetDriverStage.Load, None)
-    canonical_option := jet_driver_canonical_effect_module(input.request.canonical_effect_source)
+    canonical_option := jet_driver_canonical_effect_module(input.request.canonical_effect_source, load.module_table)
     if canonical_option == None -> return jet_driver_compiler_check_failure(load, JetDriverStage.Check, Val("the embedded compiler-owned Prelude effect source is invalid"))
     canonical := canonical_option ?? return jet_driver_compiler_check_failure(load, JetDriverStage.Check, Val("the embedded compiler-owned Prelude effect source is unavailable"))
+    canonical_text: module_text(load.module_table, canonical.module_identity)
     loop unit in load.source_units {
-        if jet_driver_module_identity(unit.package_identity, unit.relative_path) == canonical.module_identity || unit.path == canonical.source_file {
+        if jet_driver_module_identity(unit.package_identity, unit.relative_path) == canonical_text || unit.path == canonical.source_file {
             return jet_driver_compiler_check_failure(load, JetDriverStage.Load, Val("an authorized source unit collides with the pinned compiler-owned Prelude effect source"))
         }
     }
@@ -419,6 +421,7 @@ jet_driver_compiler_check: fn(input: JetDriverCompilerCheckInput) -> JetDriverCo
         load.package_identity,
         load.entry_module_identity,
         canonical_identity,
+        load.module_table.copy(),
         providers,
         target,
         jet_driver_build_facts(load, input.request, target),
@@ -463,7 +466,7 @@ jet_driver_compiler_check: fn(input: JetDriverCompilerCheckInput) -> JetDriverCo
             packet := jet_driver_compiler_check_diagnostic_packet(input, registration, provisional, module_sources, load.diagnostics)
             if packet == .Val(result) -> return result
         }
-        if !jet_driver_has_errors(load.diagnostics) -> return jet_driver_compiler_check_failure(load, JetDriverStage.Check, Val(jet_driver_totality_problem("semantic declaration checking did not return a complete resolved package graph ({stage.modules.len()} of {registration_count} modules checked)", "sema.check", stage.modules)))
+        if !jet_driver_has_errors(load.diagnostics) -> return jet_driver_compiler_check_failure(load, JetDriverStage.Check, Val(jet_driver_totality_problem("semantic declaration checking did not return a complete resolved package graph ({stage.modules.len()} of {registration_count} modules checked)", "sema.check", stage.modules, load.module_table)))
         return jet_driver_compiler_check_failure(load, JetDriverStage.Check, None)
     }
     // The run starts from the taken Core modules' values, which type their

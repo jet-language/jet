@@ -42,6 +42,8 @@ use jet_foundation.[
     symbol_id,
     type_identity_equal,
     type_name,
+    ModuleID,
+    module_is_none,
 ]
 
 SemaStaticMethodTarget: struct {
@@ -60,7 +62,8 @@ sema_call_static_registered_method_exists: fn(graph: SemaRegistrationGraph, nomi
 // statics (no `self` receiver) when `statics`, else its instance methods.
 sema_call_registered_method_names: fn(graph: SemaRegistrationGraph, nominal: SemaRegistrationNominal, statics: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables) -> [String] Never! {
     names := [String]{}
-    owner_module := nominal.symbol.module_name
+    nominal_module: sema_registration_module_id(graph, nominal.symbol.module_name)
+    owner_module := nominal_module
     owner_package := ""
     if sema_type_graph_nominal_row(graph, nominal.symbol.id.key) == .Val(owner_row) {
         owner_module = graph.modules[owner_row.module_index].module_identity
@@ -75,7 +78,7 @@ sema_call_registered_method_names: fn(graph: SemaRegistrationGraph, nominal: Sem
     loop impl_row in sema_registration_impl_rows_named(graph, nominal.symbol.name) {
         implementation: graph.modules[impl_row.module_index].impls[impl_row.row]
         if implementation.trait_name != None -> next
-        if implementation.target_identity_key != nominal.identity_key && (implementation.target_module_identity != (Val(nominal.symbol.module_name)) || implementation.target_type_name != nominal.symbol.name) -> next
+        if implementation.target_identity_key != nominal.identity_key && (module_is_none(implementation.target_module_identity) || implementation.target_module_identity != nominal_module || implementation.target_type_name != nominal.symbol.name) -> next
         loop function in implementation.methods {
             is_static: function.parameters.len() == 0 || function.parameters[0].symbol.name != "self"
             if is_static == statics && !names.contains(function.symbol.name) && sema_registration_visible(function.symbol.visibility, environment.module_identity, environment.package_identity, graph.modules[impl_row.module_index].module_identity, graph.modules[impl_row.module_index].package_identity) -> names.push(function.symbol.name.copy())
@@ -244,7 +247,7 @@ sema_call_static_owner_resolution: fn(owner_params: [SemaInferenceTypeParam], ow
     Val(result)
 }
 
-sema_call_static_append_registered: fn(output: &[SemaStaticMethodTarget], graph: SemaRegistrationGraph, nominal: SemaRegistrationNominal, function: SemaRegistrationFunction, owner_name: String, owner_module: String, owner_package: String, owner_type_args: [Type], type_args: [Type], args: [CallArg], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, span: Span, diagnostics: &[Diagnostic]) Never! {
+sema_call_static_append_registered: fn(output: &[SemaStaticMethodTarget], graph: SemaRegistrationGraph, nominal: SemaRegistrationNominal, function: SemaRegistrationFunction, owner_name: String, owner_module: ModuleID, owner_package: String, owner_type_args: [Type], type_args: [Type], args: [CallArg], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, span: Span, diagnostics: &[Diagnostic]) Never! {
     if function.symbol.name == "" || sema_call_static_has_method(output, function.symbol.id) -> return
     if function.parameters.len() > 0 && function.parameters[0].symbol.name == "self" -> return
     if !sema_registration_visible(function.symbol.visibility, environment.module_identity, environment.package_identity, owner_module, owner_package) -> return
@@ -275,7 +278,8 @@ sema_call_static_append_registered: fn(output: &[SemaStaticMethodTarget], graph:
 sema_call_static_registered_targets: fn(graph: SemaRegistrationGraph, nominal: SemaRegistrationNominal, method: String, owner_type_args: [Type], type_args: [Type], args: [CallArg], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, span: Span, diagnostics: &[Diagnostic]) -> [SemaStaticMethodTarget] Never! {
     targets := [SemaStaticMethodTarget]{}
     owner_name := nominal.symbol.name
-    owner_module := nominal.symbol.module_name
+    nominal_module: sema_registration_module_id(graph, nominal.symbol.module_name)
+    owner_module := nominal_module
     owner_package := ""
     if sema_type_graph_nominal_row(graph, nominal.symbol.id.key) == .Val(owner_row) {
         owner_module = graph.modules[owner_row.module_index].module_identity
@@ -289,7 +293,7 @@ sema_call_static_registered_targets: fn(graph: SemaRegistrationGraph, nominal: S
     loop impl_row in sema_registration_impl_rows_named(graph, nominal.symbol.name) {
         implementation: graph.modules[impl_row.module_index].impls[impl_row.row]
         if implementation.trait_name != None -> next
-        if implementation.target_identity_key != nominal.identity_key && (implementation.target_module_identity != (Val(nominal.symbol.module_name)) || implementation.target_type_name != nominal.symbol.name) -> next
+        if implementation.target_identity_key != nominal.identity_key && (module_is_none(implementation.target_module_identity) || implementation.target_module_identity != nominal_module || implementation.target_type_name != nominal.symbol.name) -> next
         loop function in implementation.methods {
             if function.symbol.name == method {
                 sema_call_static_append_registered(targets, graph, nominal, function, owner_name, graph.modules[impl_row.module_index].module_identity, graph.modules[impl_row.module_index].package_identity, owner_type_args, type_args, args, expected, environment, program, scopes, state, tail_store, context, span, diagnostics)
@@ -301,10 +305,11 @@ sema_call_static_registered_targets: fn(graph: SemaRegistrationGraph, nominal: S
 
 sema_call_static_local_target: fn(owner_symbol: Symbol, owner_name: String, declared_owner: Type, owner_params: [SemaInferenceTypeParam], owner_type_args: [Type], function: Func, type_args: [Type], args: [CallArg], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, span: Span, diagnostics: &[Diagnostic]) -> SemaStaticMethodTarget? {
     if function.params.len() > 0 && function.params[0].name == "self" -> return None
-    method_id: symbol_id(SymbolKind.Function, environment.module_identity, owner_name, function.name)
+    module_name: sema_scope_environment_module_text(environment, program)
+    method_id: symbol_id(SymbolKind.Function, module_name, owner_name, function.name)
     signature: sema_function_symbol_type(function, false, method_id, environment.source_file, environment.source_origin, environment.source_segments)
     visibility: if function.is_pub -> 2 else -> if function.is_package_pub -> 1 else -> 0
-    method_symbol := Symbol{id: method_id, kind: SymbolKind.Function, name: function.name, module_name: environment.module_identity, owner: Val(owner_symbol.id.key), span: function.name_span, ty: Val(signature), visibility: visibility}
+    method_symbol := Symbol{id: method_id, kind: SymbolKind.Function, name: function.name, module_name: module_name, owner: Val(owner_symbol.id.key), span: function.name_span, ty: Val(signature), visibility: visibility}
     target := sema_call_static_function_target(method_symbol, signature, sema_inference_type_params(function.type_params), type_args, environment, program, span, diagnostics) ?? return None
     owner_result: sema_call_static_owner_resolution(sema_call_static_unshadowed_params(owner_params, target.generic_params, owner_type_args), owner_type_args, target.signature, args, expected, environment, program, scopes, state, tail_store, context, span, diagnostics) ?? return None
     owner_type: sema_inference_substitute_type_bindings(declared_owner, owner_result.substitutions)

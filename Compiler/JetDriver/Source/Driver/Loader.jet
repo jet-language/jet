@@ -70,6 +70,12 @@ use {
         diagnostic_with_migration_edit,
         effect_list_entry_removal,
         effect_root_removed,
+        ModuleID,
+        ModuleTable,
+        module_intern,
+        module_none,
+        module_table,
+        module_text,
     ]
     jet_lexer.[
         STRING_PART_INTERPOLATION,
@@ -2362,44 +2368,44 @@ jet_driver_is_foreign_provider_import: fn(declaration: ImportDecl) -> Bool Never
     }
 }
 
-// The loader's module edges (file and module imports) by source identity,
+// The loader's module edges (file and module imports) by source module id,
 // kept beside its resolved edge list as edges land. The cycle check walks
 // only the reachable part of the graph through them; a scan of every edge per
 // visited module, deduplicated through a list, made loading quadratic or
 // worse in the number of imports.
 JetDriverModuleEdges: struct {
-    slots: [String:Int]
-    targets: [[String]]
+    slots: [U32:Int]
+    targets: [[ModuleID]]
 }
 
 jet_driver_module_edges: fn() -> JetDriverModuleEdges Never! {
-    JetDriverModuleEdges{slots: [String:Int]{}, targets: [[String]]{}}
+    JetDriverModuleEdges{slots: [U32:Int]{}, targets: [[ModuleID]]{}}
 }
 
 jet_driver_module_edges_add: fn(edges: &JetDriverModuleEdges, edge: SemaRegistrationImportEdge) Never! {
     if !jet_driver_import_is_module_edge(edge.declaration.kind) -> return
-    slot := edges.slots.get(edge.source_module_identity) ?? -1
+    slot := edges.slots.get(edge.source_module_identity.id) ?? -1
     if slot < 0 {
         slot = edges.targets.len()
-        edges.slots[edge.source_module_identity] = slot
-        edges.targets.push([String]{})
+        edges.slots[edge.source_module_identity.id] = slot
+        edges.targets.push([ModuleID]{})
     }
     edges.targets[slot].push(edge.target_module_identity)
 }
 
-jet_driver_module_reaches: fn(edges: JetDriverModuleEdges, start: String, target: String) -> Bool Never! {
-    pending := [String]{start}
-    visited := [String:Bool]{}
+jet_driver_module_reaches: fn(edges: JetDriverModuleEdges, start: ModuleID, target: ModuleID) -> Bool Never! {
+    pending := [ModuleID]{start}
+    visited := [U32:Bool]{}
     cursor := 0
     loop cursor < pending.len() {
-        current := pending[cursor]
+        current: pending[cursor]
         cursor += 1
         if current == target -> return true
-        if visited.get(current) != None -> next
-        visited[current] = true
-        slot: edges.slots.get(current) ?? next
+        if visited.get(current.id) != None -> next
+        visited[current.id] = true
+        slot: edges.slots.get(current.id) ?? next
         loop reached in edges.targets[slot] {
-            if visited.get(reached) == None -> pending.push(reached.copy())
+            if visited.get(reached.id) == None -> pending.push(reached.copy())
         }
     }
     false
@@ -2407,25 +2413,25 @@ jet_driver_module_reaches: fn(edges: JetDriverModuleEdges, start: String, target
 
 // The module edge chain from `start` to `target` (both included), if one
 // exists: the circle an import that closes a cycle completes.
-jet_driver_module_path: fn(imports: [SemaRegistrationImportEdge], start: String, target: String) -> [String]? {
-    pending := [String]{start}
-    parents := [String:String]{}
+jet_driver_module_path: fn(imports: [SemaRegistrationImportEdge], start: ModuleID, target: ModuleID) -> [ModuleID]? {
+    pending := [ModuleID]{start}
+    parents := [U32:ModuleID]{}
     cursor := 0
     loop cursor < pending.len() {
-        current := pending[cursor]
+        current: pending[cursor]
         cursor += 1
         if current == target {
-            reversed := [String]{current}
+            reversed := [ModuleID]{current}
             loop reversed[reversed.len() - 1] != start {
-                reversed.push(parents.get(reversed[reversed.len() - 1]) ?? return None)
+                reversed.push(parents.get(reversed[reversed.len() - 1].id) ?? return None)
             }
             path: loop index in 0..<reversed.len() -> reversed[reversed.len() - 1 - index]
             return Val(path)
         }
         loop edge in imports {
             if edge.source_module_identity != current || !jet_driver_import_is_module_edge(edge.declaration.kind) -> next
-            if edge.target_module_identity == start || parents.get(edge.target_module_identity) != None -> next
-            parents[edge.target_module_identity] = current
+            if edge.target_module_identity == start || parents.get(edge.target_module_identity.id) != None -> next
+            parents[edge.target_module_identity.id] = current
             pending.push(edge.target_module_identity)
         }
     }
@@ -2520,13 +2526,13 @@ jet_driver_code_module_file: fn(source_units: [JetDriverSourceUnit], unit: JetDr
 // E0604 for an import that closes a cycle. Rust lists the load stack: the
 // entry's import chain down to the file that is imported again, then the
 // circle itself.
-jet_driver_import_cycle: fn(resolved_imports: [SemaRegistrationImportEdge], source_units: [JetDriverSourceUnit], entry_identity: String, target_identity: String, module_identity: String) -> Diagnostic {
-    lead: jet_driver_module_path(resolved_imports, entry_identity, target_identity) ?? [String]{target_identity}
-    chain: jet_driver_module_path(resolved_imports, target_identity, module_identity) ?? [String]{module_identity}
+jet_driver_import_cycle: fn(resolved_imports: [SemaRegistrationImportEdge], source_units: [JetDriverSourceUnit], table: ModuleTable, entry_identity: ModuleID, target_identity: ModuleID, module_identity: ModuleID) -> Diagnostic {
+    lead: jet_driver_module_path(resolved_imports, entry_identity, target_identity) ?? [ModuleID]{target_identity}
+    chain: jet_driver_module_path(resolved_imports, target_identity, module_identity) ?? [ModuleID]{module_identity}
     circle := [String]{}
-    loop index in 0..<lead.len() - 1 -> circle.push(jet_driver_cycle_member(source_units, lead[index]))
-    loop identity in chain -> circle.push(jet_driver_cycle_member(source_units, identity))
-    circle.push(jet_driver_cycle_member(source_units, target_identity))
+    loop index in 0..<lead.len() - 1 -> circle.push(jet_driver_cycle_member(source_units, module_text(table, lead[index])))
+    loop identity in chain -> circle.push(jet_driver_cycle_member(source_units, module_text(table, identity)))
+    circle.push(jet_driver_cycle_member(source_units, module_text(table, target_identity)))
     jet_driver_diagnostic_without_span("E0604", "these files import each other in a circle", "Jet loads every imported file before compiling, so imports can't loop", "break the cycle: {circle.join(" → ")}")
 }
 
@@ -4968,7 +4974,7 @@ jet_driver_core_module_order: fn(modules: [JetDriverLoadedModule], source_units:
 }
 
 // One loaded module row; the program moves in.
-jet_driver_loaded_module: fn(source_unit_index: Int, unit: JetDriverSourceUnit, module_identity: String, program: &&Program, declared_module: String) -> JetDriverLoadedModule {
+jet_driver_loaded_module: fn(source_unit_index: Int, unit: JetDriverSourceUnit, module_identity: ModuleID, program: &&Program, declared_module: String) -> JetDriverLoadedModule {
     JetDriverLoadedModule{
         source_unit_index: source_unit_index,
         source_identity: jet_driver_source_identity(unit.package_identity, unit.path),
@@ -5014,6 +5020,13 @@ jet_driver_load: fn(request: JetDriverCompileRequest) -> JetDriverLoadResult {
 // (jet_driver_load_with_names), JET_KEEP_GOING and `jet check Core` need.
 jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) -> JetDriverLoadResult {
     diagnostics := [Diagnostic]{}
+    // Module ids, interned as the load meets each module. A Core record the
+    // compile takes rows from interns its module table first, so the ids its
+    // rows name are this table's.
+    table := module_table()
+    if request.core_record == .Val(record) {
+        if jet_driver_core_record_loads(request, record) -> _: jet_driver_core_record_intern_modules(table, record) ?? panic("the Core record: {err}")
+    }
     failed_stage := JetDriverStage?{None}
     catalog := jet_driver_build_source_catalog(request)
     loop diagnostic in catalog.diagnostics -> diagnostics.push(diagnostic)
@@ -5042,7 +5055,8 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
             packages: catalog.packages,
             source_units: catalog.source_units,
             entry_source_identity: "",
-            entry_module_identity: "",
+            entry_module_identity: module_none(),
+            module_table: table,
             modules: [JetDriverLoadedModule]{},
             imports: [SemaRegistrationImportEdge]{},
             source_files: [SourceFile]{},
@@ -5070,7 +5084,7 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
         }
     }
     entry_source_identity: jet_driver_source_identity(selected_entry.package_identity, selected_entry.path)
-    entry_module_identity: jet_driver_module_identity(selected_entry.package_identity, selected_entry.path)
+    entry_module_identity: module_intern(table, jet_driver_module_identity(selected_entry.package_identity, selected_entry.path))
     // Only the installed runtime unit's exact source/path earns Core privileges.
     entry_module := ""
     if jet_driver_source_unit_text(request, selected_entry) == .Val(entry_text) {
@@ -5165,7 +5179,7 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
                     source_module_identity: modules[source_module].module_identity,
                     source_scope: scoped.scope,
                     source_scope_exported: scoped.exported,
-                    target_module_identity: jet_driver_unit_module_identity(target_unit),
+                    target_module_identity: module_intern(table, jet_driver_unit_module_identity(target_unit)),
                     target_package_identity: target_unit.package_identity,
                     declaration: scoped.declaration,
                     foreign_binding: None,
@@ -5250,7 +5264,7 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
         if !policy_ok -> failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Parse)
         jet_driver_bind_dependency_imports(program, unit, catalog.packages)
         jet_driver_apply_auto_derive_policy(program, unit, catalog.packages)
-        module_identity: jet_driver_unit_module_identity(unit)
+        module_identity: module_intern(table, jet_driver_unit_module_identity(unit))
         if jet_driver_has_errors(parse_result.diagnostics) {
             modules.push(jet_driver_loaded_module(source_unit_index, unit, module_identity, program, declared_modules.get(source_unit_index) ?? ""))
             next
@@ -5516,11 +5530,11 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
             alias_key: if scoped.scope == "" -> scoped.declaration.alias else -> "{scoped.scope}.{scoped.declaration.alias}"
             _ := aliases.add(alias_key, target_unit_index)
             target_unit: source_units[target_unit_index]
-            target_identity: jet_driver_unit_module_identity(target_unit)
+            target_identity: module_intern(table, jet_driver_unit_module_identity(target_unit))
             // Core library modules import one another like the Rust loader's
             // transitive Core closure; only user module edges must be acyclic.
             if !jet_driver_unit_is_core(target_unit) && jet_driver_module_reaches(module_edges, target_identity, module_identity) {
-                diagnostics.push(jet_driver_import_cycle(resolved_imports, source_units, jet_driver_unit_module_identity(source_units[entry_index ?? 0]), target_identity, module_identity))
+                diagnostics.push(jet_driver_import_cycle(resolved_imports, source_units, table, module_intern(table, jet_driver_unit_module_identity(source_units[entry_index ?? 0])), target_identity, module_identity))
                 failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Load)
             }
             edge: SemaRegistrationImportEdge{
@@ -5622,9 +5636,9 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
                         next
                     }
                     target_unit: source_units[target_unit_index]
-                    target_identity: jet_driver_unit_module_identity(target_unit)
+                    target_identity: module_intern(table, jet_driver_unit_module_identity(target_unit))
                     if jet_driver_module_reaches(module_edges, target_identity, module_identity) {
-                        diagnostics.push(jet_driver_import_cycle(resolved_imports, source_units, jet_driver_unit_module_identity(source_units[entry_index ?? 0]), target_identity, module_identity))
+                        diagnostics.push(jet_driver_import_cycle(resolved_imports, source_units, table, module_intern(table, jet_driver_unit_module_identity(source_units[entry_index ?? 0])), target_identity, module_identity))
                         failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Load)
                     }
                     // Rust names the file relative to the declaring file,
@@ -5733,7 +5747,7 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
                         source_module_identity: module_identity,
                         source_scope: scoped.scope,
                         source_scope_exported: scoped.exported,
-                        target_module_identity: jet_driver_unit_module_identity(target_unit),
+                        target_module_identity: module_intern(table, jet_driver_unit_module_identity(target_unit)),
                         target_package_identity: target_unit.package_identity,
                         declaration: scoped.declaration,
                         foreign_binding: None,
@@ -5819,6 +5833,7 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
         source_units: source_units,
         entry_source_identity: entry_source_identity,
         entry_module_identity: entry_module_identity,
+        module_table: table,
         modules: modules,
         imports: resolved_imports,
         source_files: provenance.files,
@@ -5835,7 +5850,7 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
 // another loaded user module declares, or a qualified Output entry
 // `module.function`, gets its generated entry once every module has loaded
 // (sema_cli_entry_expand_imported).
-jet_driver_expand_imported_cli_entry: fn(modules: &[JetDriverLoadedModule], source_units: [JetDriverSourceUnit], entry_module_identity: String) {
+jet_driver_expand_imported_cli_entry: fn(modules: &[JetDriverLoadedModule], source_units: [JetDriverSourceUnit], entry_module_identity: ModuleID) {
     entry := -1
     loop index in 0..<modules.len() {
         if modules[index].module_identity == entry_module_identity -> entry = index

@@ -26,6 +26,7 @@ use {
         SymbolKind,
         TypedLitBody,
         name_rows_hash,
+        module_is_core,
     ]
 }
 
@@ -56,7 +57,7 @@ sema_divergence_solve: fn(graph: &SemaRegistrationGraph) Never! {
     loop changed {
         changed = false
         loop module_index in 0..<graph.modules.len() {
-            if graph.modules[module_index].module_identity.starts_with("<corelib>/") -> next
+            if module_is_core(graph.modules[module_index].module_identity) -> next
             loop row in 0..<graph.modules[module_index].functions.len() {
                 if graph.modules[module_index].functions[row].declaration.diverges -> next
                 scope: SemaDivergenceScope{module_index: module_index, locals: sema_divergence_param_names(graph.modules[module_index].functions[row].declaration.params)}

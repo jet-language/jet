@@ -18,6 +18,7 @@ use jet_foundation.[
     ExternFn,
     Field,
     Func,
+    ModuleID,
     NameTable,
     NamedSpan,
     SinkClass,
@@ -35,6 +36,8 @@ use jet_foundation.[
     expr_binary_operands,
     expr_optional_method_call_as_call,
     expr_span,
+    module_is_none,
+    module_none,
     name_find,
     name_index,
     name_intern,
@@ -51,7 +54,7 @@ SEMA_TAINT_ORIGIN_FFI: "$origin.ffi"
 
 SemaTaintTagFact: struct {
     name: String
-    module_identity: String
+    module_identity: ModuleID
     deny: [String]
     from: [String]
     span: Span
@@ -70,7 +73,7 @@ SemaTaintTagList: struct {
 
 SemaTaintCallableFact: struct {
     key: String
-    module_identity: String
+    module_identity: ModuleID
     owner: String
     name: String
     parameter_tags: [SemaTaintTagList]
@@ -82,7 +85,7 @@ SemaTaintCallableFact: struct {
 }
 
 SemaTaintFieldFact: struct {
-    module_identity: String
+    module_identity: ModuleID
     owner_type: String
     field: String
     tags: [String]
@@ -148,7 +151,7 @@ SemaTaintImportAlias: struct {
     alias: String
     module_name: String
     // The imported module an alias names ("": a binding's local name).
-    module_identity: String
+    module_identity: ModuleID
 }
 
 SemaTaintSnapshot: struct {
@@ -157,7 +160,7 @@ SemaTaintSnapshot: struct {
 
 SemaTaintFlowState: struct {
     catalog: SemaTaintCatalog
-    module_identity: String
+    module_identity: ModuleID
     bindings: [SemaTaintBindingFact]
     imports: [SemaTaintImportAlias]
     // The callable each bare name reaches beyond the module's own functions
@@ -359,12 +362,12 @@ sema_taint_credential_sink: fn(module_name: String, method: String) -> Bool Neve
 sema_taint_builtin_tag: fn(name: String) -> SemaTaintTagFact? {
     injection := [String]{"DB", "Exec", "Net"}
     if name == "Input" || name == "PII" || name == "Secret" {
-        return Val(SemaTaintTagFact{name: name, module_identity: "", deny: injection, from: [String]{}, span: Span{start: 0, end: 0}, visibility: 2, fixed: name == "Secret", integrity: name == "Input"})
+        return Val(SemaTaintTagFact{name: name, module_identity: module_none(), deny: injection, from: [String]{}, span: Span{start: 0, end: 0}, visibility: 2, fixed: name == "Secret", integrity: name == "Input"})
     }
     if name == "Credential" {
         deny := injection
         deny.push("Log")
-        return Val(SemaTaintTagFact{name: name, module_identity: "", deny: deny, from: [String]{}, span: Span{start: 0, end: 0}, visibility: 2})
+        return Val(SemaTaintTagFact{name: name, module_identity: module_none(), deny: deny, from: [String]{}, span: Span{start: 0, end: 0}, visibility: 2})
     }
     None
 }
@@ -381,11 +384,11 @@ sema_taint_add_builtin_tags: fn(catalog: &SemaTaintCatalog) Never! {
         }
     }
     origin_rows := [SemaTaintTagFact]{
-        {name: SEMA_TAINT_ORIGIN_NET, module_identity: "", deny: [String]{"SQL.raw", "HTML.raw", "Sh.raw"}, from: [String]{"Net"}, span: Span{start: 0, end: 0}, visibility: 2},
-        {name: SEMA_TAINT_ORIGIN_FS, module_identity: "", deny: [String]{"SQL.raw", "HTML.raw", "Sh.raw"}, from: [String]{"FS"}, span: Span{start: 0, end: 0}, visibility: 2},
-        {name: SEMA_TAINT_ORIGIN_ENV, module_identity: "", deny: [String]{"SQL.raw", "HTML.raw", "Sh.raw"}, from: [String]{"Env"}, span: Span{start: 0, end: 0}, visibility: 2},
-        {name: SEMA_TAINT_ORIGIN_PROCESS, module_identity: "", deny: [String]{"SQL.raw", "HTML.raw", "Sh.raw"}, from: [String]{"Exec"}, span: Span{start: 0, end: 0}, visibility: 2},
-        {name: SEMA_TAINT_ORIGIN_FFI, module_identity: "", deny: [String]{"SQL.raw", "HTML.raw", "Sh.raw"}, from: [String]{"FFI"}, span: Span{start: 0, end: 0}, visibility: 2},
+        {name: SEMA_TAINT_ORIGIN_NET, module_identity: module_none(), deny: [String]{"SQL.raw", "HTML.raw", "Sh.raw"}, from: [String]{"Net"}, span: Span{start: 0, end: 0}, visibility: 2},
+        {name: SEMA_TAINT_ORIGIN_FS, module_identity: module_none(), deny: [String]{"SQL.raw", "HTML.raw", "Sh.raw"}, from: [String]{"FS"}, span: Span{start: 0, end: 0}, visibility: 2},
+        {name: SEMA_TAINT_ORIGIN_ENV, module_identity: module_none(), deny: [String]{"SQL.raw", "HTML.raw", "Sh.raw"}, from: [String]{"Env"}, span: Span{start: 0, end: 0}, visibility: 2},
+        {name: SEMA_TAINT_ORIGIN_PROCESS, module_identity: module_none(), deny: [String]{"SQL.raw", "HTML.raw", "Sh.raw"}, from: [String]{"Exec"}, span: Span{start: 0, end: 0}, visibility: 2},
+        {name: SEMA_TAINT_ORIGIN_FFI, module_identity: module_none(), deny: [String]{"SQL.raw", "HTML.raw", "Sh.raw"}, from: [String]{"FFI"}, span: Span{start: 0, end: 0}, visibility: 2},
     }
     loop row in origin_rows -> catalog.tags.push(row)
 }
@@ -507,7 +510,7 @@ sema_taint_case_is: fn(value: NamedSpan?, name: String) -> Bool Never! {
     false
 }
 
-sema_taint_add_tag_declaration: fn(catalog: &SemaTaintCatalog, module_identity: String, tag_def: TagDef, diagnostics: &[Diagnostic]) {
+sema_taint_add_tag_declaration: fn(catalog: &SemaTaintCatalog, module_identity: ModuleID, tag_def: TagDef, diagnostics: &[Diagnostic]) {
     deny := [String]{}
     from := [String]{}
     loop item in tag_def.deny {
@@ -537,9 +540,9 @@ sema_taint_collect_tag_declarations: fn(catalog: &SemaTaintCatalog, graph: SemaR
     }
 }
 
-sema_taint_callable_key: fn(module_identity: String, owner: String, name: String) -> String Never! {
-    if owner == "" -> return "{module_identity}:{name}"
-    "{module_identity}:{owner}::{name}"
+sema_taint_callable_key: fn(module_identity: ModuleID, owner: String, name: String) -> String Never! {
+    if owner == "" -> return "{module_identity.id}:{name}"
+    "{module_identity.id}:{owner}::{name}"
 }
 
 sema_taint_add_known_source: fn(catalog: &SemaTaintCatalog, source: String) Never! {
@@ -553,15 +556,15 @@ sema_taint_add_source_path: fn(catalog: &SemaTaintCatalog, module_alias: String,
 }
 
 // The slots of the callable row just pushed.
-sema_taint_index_callable: fn(catalog: &SemaTaintCatalog, module_identity: String, owner: String, name: String) Never! {
+sema_taint_index_callable: fn(catalog: &SemaTaintCatalog, module_identity: ModuleID, owner: String, name: String) Never! {
     slot: catalog.callables.len() - 1
-    exact: "{module_identity}|{owner}|{name}"
+    exact: "{module_identity.id}|{owner}|{name}"
     _: sema_taint_slot_add(catalog.callable_slots, exact, slot)
     loose: "{owner}|{name}"
     _: sema_taint_slot_add(catalog.callable_name_slots, loose, slot)
 }
 
-sema_taint_add_callable: fn(catalog: &SemaTaintCatalog, module_identity: String, module_alias: String, owner: String, function: Func) Never! {
+sema_taint_add_callable: fn(catalog: &SemaTaintCatalog, module_identity: ModuleID, module_alias: String, owner: String, function: Func) Never! {
     params := [SemaTaintTagList]{}
     loop parameter_index in 0..<function.params.len() -> params.push(SemaTaintTagList{tags: sema_taint_type_tags(function.params[parameter_index].ty)})
     success: sema_taint_success_type(function.return_type)
@@ -578,25 +581,25 @@ sema_taint_add_callable: fn(catalog: &SemaTaintCatalog, module_identity: String,
     sema_taint_add_source_path(catalog, module_alias, owner, function.name)
 }
 
-sema_taint_add_extern_callable: fn(catalog: &SemaTaintCatalog, module_identity: String, function: ExternFn) Never! {
+sema_taint_add_extern_callable: fn(catalog: &SemaTaintCatalog, module_identity: ModuleID, function: ExternFn) Never! {
     params := [SemaTaintTagList]{}
     loop parameter_index in 0..<function.params.len() -> params.push(SemaTaintTagList{tags: sema_taint_type_tags(function.params[parameter_index].ty)})
     success: sema_taint_success_type(function.return_type)
     returns := [String]{SEMA_TAINT_ORIGIN_FFI}
     if success == .Val(ty) -> returns = sema_taint_type_tags(ty)
     sema_taint_add(returns, SEMA_TAINT_ORIGIN_FFI)
-    catalog.callables.push(SemaTaintCallableFact{key: "{module_identity}:{function.name}", module_identity: module_identity, owner: "", name: function.name, parameter_tags: params, return_tags: returns, return_type: success, scrub_tag: None, ffi_origin: true, span: function.name_span})
+    catalog.callables.push(SemaTaintCallableFact{key: sema_taint_callable_key(module_identity, "", function.name), module_identity: module_identity, owner: "", name: function.name, parameter_tags: params, return_tags: returns, return_type: success, scrub_tag: None, ffi_origin: true, span: function.name_span})
     sema_taint_index_callable(catalog, module_identity, "", function.name)
 }
 
-sema_taint_add_field: fn(catalog: &SemaTaintCatalog, module_identity: String, owner: String, field: Field) Never! {
+sema_taint_add_field: fn(catalog: &SemaTaintCatalog, module_identity: ModuleID, owner: String, field: Field) Never! {
     catalog.fields.push(SemaTaintFieldFact{module_identity: module_identity, owner_type: owner, field: field.name, tags: sema_taint_type_tags(field.ty), type_name: sema_taint_type_name(field.ty), span: field.ty_span})
     slot: catalog.fields.len() - 1
-    exact: "{module_identity}|{owner}|{field.name}"
+    exact: "{module_identity.id}|{owner}|{field.name}"
     _: sema_taint_slot_add(catalog.field_slots, exact, slot)
     loose: "{owner}|{field.name}"
     _: sema_taint_slot_add(catalog.field_name_slots, loose, slot)
-    _: sema_taint_slot_add(catalog.struct_field_slots, "{module_identity}|{owner}", slot)
+    _: sema_taint_slot_add(catalog.struct_field_slots, "{module_identity.id}|{owner}", slot)
     _: sema_taint_slot_add(catalog.struct_field_slots, owner, slot)
 }
 sema_taint_collect_items: fn(catalog: &SemaTaintCatalog, graph: SemaRegistrationGraph) Never! {
@@ -621,8 +624,8 @@ sema_taint_collect_items: fn(catalog: &SemaTaintCatalog, graph: SemaRegistration
     }
 }
 
-sema_taint_import_module: fn(graph: SemaRegistrationGraph, module_identity: String, name: String) -> String Never! {
-    module_index: sema_registration_module_index(graph, module_identity) ?? return ""
+sema_taint_import_module: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, name: String) -> ModuleID Never! {
+    module_index: sema_registration_module_index(graph, module_identity) ?? return module_none()
     module_row: graph.modules[module_index]
     // The package names bind after the imports before
     // `namespace_import_split`, unless the module declares the name itself.
@@ -630,7 +633,7 @@ sema_taint_import_module: fn(graph: SemaRegistrationGraph, module_identity: Stri
     loop (import_index, import) in module_row.imports {
         if import_index == namespace_from {
             namespace: sema_taint_namespace_module(graph, module_index, name)
-            if namespace != "" -> return namespace
+            if !module_is_none(namespace) -> return namespace
         }
         loop binding in import.bindings {
             if binding.local == name -> return binding.target_module_identity
@@ -638,15 +641,15 @@ sema_taint_import_module: fn(graph: SemaRegistrationGraph, module_identity: Stri
         if import.declaration.alias == name -> return import.target_module_identity
     }
     if namespace_from >= module_row.imports.len() -> return sema_taint_namespace_module(graph, module_index, name)
-    ""
+    module_none()
 }
 
-sema_taint_namespace_module: fn(graph: SemaRegistrationGraph, module_index: Int, name: String) -> String Never! {
-    if sema_registration_module_has_name(graph.modules[module_index], name) -> return ""
-    owner: sema_registration_namespace_owner(graph, module_index, name) ?? return ""
+sema_taint_namespace_module: fn(graph: SemaRegistrationGraph, module_index: Int, name: String) -> ModuleID Never! {
+    if sema_registration_module_has_name(graph.modules[module_index], name) -> return module_none()
+    owner: sema_registration_namespace_owner(graph, module_index, name) ?? return module_none()
     graph.modules[owner.module_index].module_identity
 }
-sema_taint_find_tag: fn(catalog: SemaTaintCatalog, graph: SemaRegistrationGraph, module_identity: String, name: String) -> SemaTaintTagFact? {
+sema_taint_find_tag: fn(catalog: SemaTaintCatalog, graph: SemaRegistrationGraph, module_identity: ModuleID, name: String) -> SemaTaintTagFact? {
     builtin: sema_taint_builtin_tag(name)
     if builtin != None -> return builtin
     index := 0
@@ -662,8 +665,8 @@ sema_taint_find_tag: fn(catalog: SemaTaintCatalog, graph: SemaRegistrationGraph,
 // method, the first `name` of any type called `owner`. A function (owner "")
 // resolves only exactly: sema_taint_bare_callable and
 // sema_taint_method_callable find its module.
-sema_taint_find_callable: fn(catalog: SemaTaintCatalog, module_identity: String, owner: String, name: String) -> SemaTaintCallableFact? {
-    exact: sema_taint_slot(catalog.callable_slots, "{module_identity}|{owner}|{name}")
+sema_taint_find_callable: fn(catalog: SemaTaintCatalog, module_identity: ModuleID, owner: String, name: String) -> SemaTaintCallableFact? {
+    exact: sema_taint_slot(catalog.callable_slots, "{module_identity.id}|{owner}|{name}")
     if exact == .Val(slot) {
         callable := catalog.callables[slot]
         return Val(callable)
@@ -679,7 +682,7 @@ sema_taint_find_callable: fn(catalog: SemaTaintCatalog, module_identity: String,
 // import or the module's package binds the name to.
 sema_taint_bare_callable: fn(state: SemaTaintFlowState, name: String) -> SemaTaintCallableFact? {
     if sema_taint_binding_index(state.bindings, name) != None -> return None
-    slot := sema_taint_slot(state.catalog.callable_slots, "{state.module_identity}||{name}")
+    slot := sema_taint_slot(state.catalog.callable_slots, "{state.module_identity.id}||{name}")
     if slot == None -> slot = sema_taint_slot(state.callable_scope, name)
     found: slot ?? return None
     callable := state.catalog.callables[found]
@@ -692,7 +695,7 @@ sema_taint_method_callable: fn(state: SemaTaintFlowState, receiver: Expr, method
     if receiver == .Ident(alias, _, _) {
         if sema_taint_binding_index(state.bindings, alias) == None {
             loop item in state.imports {
-                if item.alias != alias || item.module_identity == "" -> next
+                if item.alias != alias || module_is_none(item.module_identity) -> next
                 return sema_taint_find_callable(state.catalog, item.module_identity, "", method)
             }
         }
@@ -704,28 +707,28 @@ sema_taint_method_callable: fn(state: SemaTaintFlowState, receiver: Expr, method
 // The functions a bare name in module `module_identity` reaches beyond its
 // own: each import binding's, by its name in the imported module, and each
 // package member's the module scope binds (sema_registration_bind_namespaces).
-sema_taint_callable_scope: fn(graph: SemaRegistrationGraph, catalog: SemaTaintCatalog, module_identity: String) -> SemaTaintSlots Never! {
+sema_taint_callable_scope: fn(graph: SemaRegistrationGraph, catalog: SemaTaintCatalog, module_identity: ModuleID) -> SemaTaintSlots Never! {
     scope := sema_taint_slots()
     module_index: sema_registration_module_index(graph, module_identity) ?? return scope
     loop import in graph.modules[module_index].imports {
         loop binding in import.bindings {
-            slot: sema_taint_slot(catalog.callable_slots, "{import.target_module_identity}||{binding.original}") ?? next
+            slot: sema_taint_slot(catalog.callable_slots, "{import.target_module_identity.id}||{binding.original}") ?? next
             _: sema_taint_slot_add(scope, binding.local, slot)
         }
     }
     loop owner in graph.modules[module_index].namespace_bindings {
         name: graph.modules[owner.module_index].symbols[owner.row].name
-        slot: sema_taint_slot(catalog.callable_slots, "{graph.modules[owner.module_index].module_identity}||{name}") ?? next
+        slot: sema_taint_slot(catalog.callable_slots, "{graph.modules[owner.module_index].module_identity.id}||{name}") ?? next
         _: sema_taint_slot_add(scope, name, slot)
     }
     scope
 }
 
 // A field of `owner` declared in `module_identity` (or with no declaring
-// module), else the first field of that name on any `owner`.
-sema_taint_find_field: fn(catalog: SemaTaintCatalog, module_identity: String, owner: String, field: String) -> SemaTaintFieldFact? {
-    local: sema_taint_slot(catalog.field_slots, "{module_identity}|{owner}|{field}")
-    unowned: sema_taint_slot(catalog.field_slots, "|{owner}|{field}")
+// module, id 0), else the first field of that name on any `owner`.
+sema_taint_find_field: fn(catalog: SemaTaintCatalog, module_identity: ModuleID, owner: String, field: String) -> SemaTaintFieldFact? {
+    local: sema_taint_slot(catalog.field_slots, "{module_identity.id}|{owner}|{field}")
+    unowned: sema_taint_slot(catalog.field_slots, "{module_none().id}|{owner}|{field}")
     first := local
     if unowned == .Val(unowned_slot) {
         if local == .Val(local_slot) {
@@ -742,7 +745,7 @@ sema_taint_find_field: fn(catalog: SemaTaintCatalog, module_identity: String, ow
     fact := catalog.fields[loose]
     Val(fact)
 }
-sema_taint_validate_tag_in_catalog: fn(tag_value: String, module_identity: String, catalog: SemaTaintCatalog, graph: SemaRegistrationGraph, span: Span, diagnostics: &[Diagnostic]) -> Bool {
+sema_taint_validate_tag_in_catalog: fn(tag_value: String, module_identity: ModuleID, catalog: SemaTaintCatalog, graph: SemaRegistrationGraph, span: Span, diagnostics: &[Diagnostic]) -> Bool {
     if sema_taint_find_tag(catalog, graph, module_identity, tag_value) != None -> return true
     candidates := sema_taint_tag_candidate_names(catalog)
     suggestion := sema_taint_closest(tag_value, candidates)
@@ -758,7 +761,7 @@ sema_taint_validate_tag_in_catalog: fn(tag_value: String, module_identity: Strin
     }
     false
 }
-sema_taint_validate_tag_graph: fn(tag_value: String, module_identity: String, graph: SemaRegistrationGraph, span: Span, diagnostics: &[Diagnostic]) -> Bool {
+sema_taint_validate_tag_graph: fn(tag_value: String, module_identity: ModuleID, graph: SemaRegistrationGraph, span: Span, diagnostics: &[Diagnostic]) -> Bool {
     catalog := sema_taint_catalog_init()
     temporary := [Diagnostic]{}
     sema_taint_collect_tag_declarations(catalog, graph, temporary)
@@ -785,7 +788,7 @@ sema_taint_validate_tag: fn(tag_value: String, env: SemaScopeEnvironment, progra
     false
 }
 
-sema_taint_validate_type_tags: fn(graph: SemaRegistrationGraph, ty: Type, module_identity: String, state: &SemaTaintFlowState, span: Span) {
+sema_taint_validate_type_tags: fn(graph: SemaRegistrationGraph, ty: Type, module_identity: ModuleID, state: &SemaTaintFlowState, span: Span) {
     if ty == {
         .Tagged(marker, inner) -> {
             if marker == {
@@ -1157,7 +1160,7 @@ sema_taint_e0721: fn(tag_value: String, api: String, destinations: [String], spa
 
 // The `timing: .Fixed` tags module `module_identity` sees by name: the
 // builtin `Secret`, and each declared tag that resolves there as fixed.
-sema_taint_fixed_tags: fn(graph: SemaRegistrationGraph, catalog: SemaTaintCatalog, module_identity: String) -> [String] {
+sema_taint_fixed_tags: fn(graph: SemaRegistrationGraph, catalog: SemaTaintCatalog, module_identity: ModuleID) -> [String] {
     names := [String]{"Secret"}
     loop fact in catalog.tags {
         if !fact.fixed || sema_taint_has(names, fact.name) -> next
@@ -1732,7 +1735,7 @@ sema_taint_check_struct_compare: fn(state: &SemaTaintFlowState, op: BinOp, left:
 // its type declares, else its own.
 sema_taint_struct_fixed: fn(state: &SemaTaintFlowState, value: Expr) -> String? {
     owner: sema_taint_type_of_expr(state, value) ?? return None
-    local: sema_taint_slot(state.catalog.struct_field_slots, "{state.module_identity}|{owner}")
+    local: sema_taint_slot(state.catalog.struct_field_slots, "{state.module_identity.id}|{owner}")
     first: local ?? sema_taint_slot(state.catalog.struct_field_slots, owner) ?? return None
     at := first
     loop at < state.catalog.fields.len() && state.catalog.fields[at].owner_type == owner && state.catalog.fields[at].module_identity == state.catalog.fields[first].module_identity {
@@ -1826,7 +1829,7 @@ sema_taint_check_size: fn(state: &SemaTaintFlowState, method: String, args: [Cal
 
 // The body of `name` in module `module_identity`: a function (`owner` "")
 // or a method of the type `owner`.
-sema_taint_body_of: fn(graph: SemaRegistrationGraph, module_identity: String, owner: String, name: String) -> Func? {
+sema_taint_body_of: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, owner: String, name: String) -> Func? {
     module_index: sema_registration_module_index(graph, module_identity) ?? return None
     loop item in graph.modules[module_index].program.items {
         if item == {
@@ -1879,15 +1882,15 @@ sema_taint_clause: fn(what: String) -> String Never! {
 // does not: its body walked with the tag on that parameter. Each key is
 // walked once per module walk; a recursive call meets the key while its
 // body is being walked and adds nothing, since that walk covers the body.
-sema_taint_crossing_path: fn(graph: SemaRegistrationGraph, state: &SemaTaintFlowState, module_identity: String, owner: String, callee: Func, index: Int, tag_value: String) -> String {
-    key: "{module_identity}|{owner}|{callee.name}|{index}|{tag_value}"
+sema_taint_crossing_path: fn(graph: SemaRegistrationGraph, state: &SemaTaintFlowState, module_identity: ModuleID, owner: String, callee: Func, index: Int, tag_value: String) -> String {
+    key: "{module_identity.id}|{owner}|{callee.name}|{index}|{tag_value}"
     loop (seen, crossed) in state.crossed {
         if crossed == key -> return state.crossed_paths[seen].copy()
     }
     state.crossed.push(key.copy())
     state.crossed_paths.push("")
     slot: state.crossed.len() - 1
-    saved_module: state.module_identity.copy()
+    saved_module: state.module_identity
     saved_imports: state.imports.copy()
     saved_scope: state.callable_scope.copy()
     saved_fixed: state.fixed_tags.copy()
@@ -1902,7 +1905,7 @@ sema_taint_crossing_path: fn(graph: SemaRegistrationGraph, state: &SemaTaintFlow
     saved_exit_marks: state.exit_marks.copy()
     saved_cross_at: state.cross_at
     saved_cross_path: state.cross_path.copy()
-    state.module_identity = module_identity.copy()
+    state.module_identity = module_identity
     state.imports = sema_taint_collect_imports(graph, module_identity)
     state.callable_scope = sema_taint_callable_scope(graph, state.catalog, module_identity)
     state.fixed_tags = sema_taint_fixed_tags(graph, state.catalog, module_identity)
@@ -1957,7 +1960,7 @@ sema_taint_crossing_path: fn(graph: SemaRegistrationGraph, state: &SemaTaintFlow
 
 // E0737 at `span` when the `tag_value` value passed there to the untagged
 // parameter `index` of `callee` is steered on in its body.
-sema_taint_check_crossing: fn(graph: SemaRegistrationGraph, state: &SemaTaintFlowState, module_identity: String, owner: String, callee: Func, index: Int, tag_value: String, span: Span) {
+sema_taint_check_crossing: fn(graph: SemaRegistrationGraph, state: &SemaTaintFlowState, module_identity: ModuleID, owner: String, callee: Func, index: Int, tag_value: String, span: Span) {
     if index >= callee.params.len() || callee.body.len() == 0 -> return
     parameter: callee.params[index]
     loop declared in sema_taint_type_tags(parameter.ty) {
@@ -1975,7 +1978,7 @@ sema_taint_check_crossing: fn(graph: SemaRegistrationGraph, state: &SemaTaintFlo
 // The crossing checks of a call's arguments into `callee`, whose
 // parameter `offset + i` takes positional argument `i` (a labeled argument
 // takes the parameter of its label).
-sema_taint_check_crossings: fn(graph: SemaRegistrationGraph, state: &SemaTaintFlowState, module_identity: String, owner: String, callee: Func, args: [CallArg], offset: Int) {
+sema_taint_check_crossings: fn(graph: SemaRegistrationGraph, state: &SemaTaintFlowState, module_identity: ModuleID, owner: String, callee: Func, args: [CallArg], offset: Int) {
     loop (position, argument) in args {
         if argument.spread -> return
         tag_value: sema_taint_fixed_in(state, argument.expr) ?? next
@@ -2044,7 +2047,7 @@ sema_taint_check_method_crossing: fn(graph: SemaRegistrationGraph, state: &SemaT
     if receiver == .Ident(alias, _, _) {
         if sema_taint_binding_index(state.bindings, alias) == None {
             target: sema_taint_import_module(graph, state.module_identity, alias)
-            if target != "" {
+            if !module_is_none(target) {
                 function: sema_taint_body_of(graph, target, "", method) ?? return
                 sema_taint_check_crossings(graph, state, target, "", function, args, 0)
                 return
@@ -2573,7 +2576,7 @@ sema_taint_switch_exhaustive: fn(arms: [SwitchArm], diagnostics: [Diagnostic], s
     true
 }
 
-sema_taint_module_name: fn(graph: SemaRegistrationGraph, module_identity: String) -> String Never! {
+sema_taint_module_name: fn(graph: SemaRegistrationGraph, module_identity: ModuleID) -> String Never! {
     module_index: sema_registration_module_index(graph, module_identity) ?? return ""
     graph.modules[module_index].module_name
 }
@@ -2587,14 +2590,14 @@ sema_taint_import_module_name: fn(graph: SemaRegistrationGraph, import: SemaRegi
     sema_taint_module_name(graph, import.target_module_identity)
 }
 
-sema_taint_collect_imports: fn(graph: SemaRegistrationGraph, module_identity: String) -> [SemaTaintImportAlias] Never! {
+sema_taint_collect_imports: fn(graph: SemaRegistrationGraph, module_identity: ModuleID) -> [SemaTaintImportAlias] Never! {
     imports := [SemaTaintImportAlias]{}
     module_index: sema_registration_module_index(graph, module_identity) ?? return imports
     module_row: graph.modules[module_index]
     loop import in module_row.imports {
         target_name := sema_taint_import_module_name(graph, import)
         imports.push(SemaTaintImportAlias{alias: import.declaration.alias, module_name: target_name, module_identity: import.target_module_identity})
-        loop binding in import.bindings -> imports.push(SemaTaintImportAlias{alias: binding.local, module_name: target_name, module_identity: ""})
+        loop binding in import.bindings -> imports.push(SemaTaintImportAlias{alias: binding.local, module_name: target_name, module_identity: module_none()})
     }
     imports
 }

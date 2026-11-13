@@ -5,7 +5,7 @@
 // comptime child (jet_eval_native_load), and each entry runs its own item
 // function there (jet_eval_native_run).
 use {
-    jet_foundation.[DeclTable, FnBody, Span, StmtKind, TComptimeValue, TConstantDef, TImplDef, TTypeDef, TVisibility]
+    jet_foundation.[DeclTable, FnBody, ModuleTable, Span, StmtKind, SymbolKind, TComptimeValue, TConstantDef, TImplDef, TTypeDef, TVisibility, module_text, symbol_id]
     jet_sema.[SemaComptimeItemValue, SemaGraphModuleResult]
     jet_ir.[IRProgram, ir_comptime_item_function, ir_program_declared]
     jet_eval.[JetEvalConfig, JetEvalIRComptime, JetEvalIRResult, jet_eval_ir_comptime_build, jet_eval_ir_comptime_build_over, jet_eval_native_load, jet_eval_native_run]
@@ -32,11 +32,11 @@ jet_driver_comptime_declared: fn(modules: [SemaGraphModuleResult]) -> IRProgram 
 // builds over the run's declared program, whose constant rows the values
 // landed since its last build take over first (a key's first landed value
 // stands).
-jet_driver_comptime_ir_build: fn(batch: JetDriverComptimeBatch, staging: &JetDriverComptimeStaging, values: [SemaComptimeItemValue], decls: DeclTable) -> JetEvalIRComptime {
+jet_driver_comptime_ir_build: fn(batch: JetDriverComptimeBatch, staging: &JetDriverComptimeStaging, values: [SemaComptimeItemValue], decls: DeclTable, table: ModuleTable) -> JetEvalIRComptime {
     functions := batch.functions.copy()
     keys := [String]{}
     loop entry in batch.entries {
-        item := ir_comptime_item_function(entry.request, entry.request.module_identity)
+        item := ir_comptime_item_function(entry.request, module_text(table, entry.request.module_identity))
         // The request's expression carries its own function-local ids
         // (sema_publish_expression): the item's body returns it.
         item.tree = entry.request.expression.tree.copy()
@@ -49,16 +49,16 @@ jet_driver_comptime_ir_build: fn(batch: JetDriverComptimeBatch, staging: &JetDri
     landed := [TConstantDef]{}
     loop index in staging.landed..<values.len() {
         value: values[index]
-        landed.push(jet_driver_comptime_value_row(value, value.key))
-        if value.destination_key != value.key -> landed.push(jet_driver_comptime_value_row(value, value.destination_key))
+        landed.push(jet_driver_comptime_value_row(value, value.key, table))
+        if value.destination_key != value.key -> landed.push(jet_driver_comptime_value_row(value, value.destination_key, table))
     }
     staging.landed = values.len()
     jet_eval_ir_comptime_build_over(staging.program.copy(), functions, decls, keys, landed, batch.foreign.copy(), staging.taken)
 }
 
-// The constant row of landed value `value` under `key`.
-jet_driver_comptime_value_row: fn(value: SemaComptimeItemValue, key: String) -> TConstantDef Never! {
-    TConstantDef{module_identity: value.module_identity.copy(), key: key.copy(), name: key.copy(), span: Span{start: 0, end: 0}, visibility: TVisibility.Private, ty: value.ty.copy(), is_comptime: true, is_storage: false, value: value.value.copy(), shared_holder: value.shared_holder}
+// The constant row of landed value `value` under `key`, named in `table`.
+jet_driver_comptime_value_row: fn(value: SemaComptimeItemValue, key: String, table: ModuleTable) -> TConstantDef Never! {
+    TConstantDef{module_identity: value.module_identity, key: key.copy(), name: key.copy(), symbol_key: symbol_id(SymbolKind.Constant, module_text(table, value.module_identity), "", key).key, span: Span{start: 0, end: 0}, visibility: TVisibility.Private, ty: value.ty.copy(), is_comptime: true, is_storage: false, value: value.value.copy(), shared_holder: value.shared_holder}
 }
 
 // A fn-build or fn-dev invocation's run (`result`): the checked entry

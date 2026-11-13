@@ -37,6 +37,7 @@ use jet_foundation.[
     type_identity_equal,
     type_name,
     Func,
+    module_is_core,
 ]
 
 SemaDirectSpecialCheck: struct {
@@ -1736,7 +1737,7 @@ sema_call_direct_checked_from_target: fn(state: &SemaOwnershipState, target: Sem
     // E2104: a C import whose convention or values the native backend has no
     // C ABI marshalling for yet (#6366) is refused by a compile that lowers
     // the call, instead of stopping inside the IR.
-    if abi == .Val(callable_abi) && callable_abi.is_c_abi && !environment.module_identity.starts_with("<corelib>/") && sema_refuses_unbuilt(program) {
+    if abi == .Val(callable_abi) && callable_abi.is_c_abi && !module_is_core(environment.module_identity) && sema_refuses_unbuilt(program) {
         if program.registration_graph == .Val(graph) {
             if sema_checked_foreign_c_marshal_gap(graph, candidate.symbol.id) == .Val(gap) {
                 diagnostics.push(sema_error("E2104", call.name_span, "calling `{call.name}` is not built yet", "This `jet` cannot yet {gap}, and no other `jet` can build it.", "Remove the `{call.name}` call for now; native C ABI marshalling for it needs its Jet implementation first (card #6366)."))

@@ -37,6 +37,8 @@ use {
         checked_symbol_local,
         type_identity_equal,
         type_name,
+        ModuleID,
+        module_is_core,
     ]
     jet_parser.[jfmt_expr_start]
 }
@@ -739,7 +741,7 @@ sema_call_typecheck_bound_arguments: fn(callee: String, params: [SemaCallParam],
     // (#6366), so a compile that lowers the call refuses it here instead of
     // stopping inside the IR. A checker error on the call stands alone, and
     // `jet check` (which lowers nothing) still reports only those.
-    if c_callback == .Val(callback_span) && !environment.module_identity.starts_with("<corelib>/") && sema_refuses_unbuilt(program) && !sema_has_error_since(diagnostics, call_diagnostics_start) {
+    if c_callback == .Val(callback_span) && !module_is_core(environment.module_identity) && sema_refuses_unbuilt(program) && !sema_has_error_since(diagnostics, call_diagnostics_start) {
         diagnostics.push(sema_error("E2104", callback_span, "passing a Jet function to `{callee}` is not built yet", "This `jet` cannot yet hand a Jet function to C code as a callback pointer, and no other `jet` can build it.", "Remove the callback argument for now; C callbacks need their native trampoline first (card #6366)."))
     }
     reference_starts.push(context.name_references.len())
@@ -1095,8 +1097,9 @@ sema_call_key_named_elsewhere: fn(key: String, own: Int, starts: [Int], context:
 }
 
 sema_call_binder_ref_symbol: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, owner: String, site: Int, slot: Int, name: String, ty: Type, span: Span) -> Symbol Never! {
-    id: symbol_id(SymbolKind.Local, environment.module_identity, owner, "binder_ref_{site}_{slot}")
-    Symbol{id: id, kind: SymbolKind.Local, name: name, module_name: environment.module_identity, owner: Val(owner), span: span, ty: Val(ty), visibility: 0}
+    local_module: sema_scope_environment_module_text(environment, program)
+    id: symbol_id(SymbolKind.Local, local_module, owner, "binder_ref_{site}_{slot}")
+    Symbol{id: id, kind: SymbolKind.Local, name: name, module_name: local_module, owner: Val(owner), span: span, ty: Val(ty), visibility: 0}
 }
 
 // Opens the default's own frame with each earlier parameter bound to its slot
@@ -1138,7 +1141,7 @@ sema_call_default_owner_scope: fn(source: SemaCallArgSource, parameter: SemaCall
 }
 
 // The module that declares the callable a default belongs to.
-sema_call_default_ref_module: fn(program: SemaProgramTables, reference: FunctionDefaultRef) -> String? {
+sema_call_default_ref_module: fn(program: SemaProgramTables, reference: FunctionDefaultRef) -> ModuleID? {
     if program.registration_graph == .Val(graph) {
         row: sema_registration_callable_row(graph, reference.owner_key) ?? return None
         module_index: if row == {

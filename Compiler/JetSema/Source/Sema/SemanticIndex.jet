@@ -47,6 +47,9 @@ use jet_foundation.[
     failure_contract_source,
     sha256_hex,
     type_name,
+    ModuleID,
+    module_none,
+    module_text,
 ]
 
 // `missing` names the first fact that left the index incomplete ("" when complete).
@@ -56,7 +59,7 @@ SemaCompilerSemanticIndexFacts: struct {
     missing: String{""}
 }
 SemaCompilerModuleSource: struct {
-    module_identity: String
+    module_identity: ModuleID
     source: String
 }
 
@@ -68,7 +71,7 @@ sema_compiler_index_module_sources_missing: fn(registration: SemaRegistrationGra
         loop module_source in module_sources {
             if module_source.module_identity == registration.modules[registered_module_index].module_identity -> matches += 1
         }
-        if matches != 1 -> return "registered module `{registration.modules[registered_module_index].module_identity}` has {matches} sources"
+        if matches != 1 -> return "registered module `{module_text(registration.module_table, registration.modules[registered_module_index].module_identity)}` has {matches} sources"
     }
     loop module_source in module_sources {
         found := false
@@ -78,12 +81,12 @@ sema_compiler_index_module_sources_missing: fn(registration: SemaRegistrationGra
                 break
             }
         }
-        if !found -> return "source module `{module_source.module_identity}` is not registered"
+        if !found -> return "source module `{module_text(registration.module_table, module_source.module_identity)}` is not registered"
     }
     ""
 }
 
-sema_compiler_index_module_source: fn(module_sources: [SemaCompilerModuleSource], module_identity: String) -> String? {
+sema_compiler_index_module_source: fn(module_sources: [SemaCompilerModuleSource], module_identity: ModuleID) -> String? {
     loop module_source in module_sources {
         if module_source.module_identity == module_identity -> return Val(module_source.source)
     }
@@ -154,7 +157,7 @@ sema_compiler_identity: fn(registration: SemaRegistrationGraph, key: String) -> 
     loop part in head.split(":") {
         prefix = if first -> part.copy() else -> "{prefix}:{part}"
         first = false
-        if sema_registration_module_index(registration, prefix) == .Val(row) {
+        if sema_registration_module_index_text(registration, prefix) == .Val(row) {
             declaring = registration.modules[row].module_name.copy()
             start: prefix.len() + 1
             owner = if start >= head.len() -> "" else -> head.slice(start, head.len())
@@ -680,7 +683,7 @@ SemaCompilerIndexStructuralRecord: struct {
     class: String
     shape: String
     module_path: String
-    module_identity: String
+    module_identity: ModuleID
     span: Span
 }
 
@@ -693,7 +696,7 @@ SemaCompilerIndexWalkState: struct {
     ordinals: [String:Int]
     slot: String
     slot_is_list: Bool
-    module_identity: String
+    module_identity: ModuleID
     // The source file of the module being walked.
     file: String
 }
@@ -707,7 +710,7 @@ sema_compiler_index_walk_state: fn() -> SemaCompilerIndexWalkState Never! {
         ordinals: [String:Int]{},
         slot: "root",
         slot_is_list: true,
-        module_identity: "",
+        module_identity: module_none(),
         file: "",
     }
 }
@@ -1579,16 +1582,16 @@ sema_compiler_index_derivations: fn(registration: SemaRegistrationGraph, structu
     loop node in structural {
         if node.parent != None || node.class != "item" -> next
         module_index: sema_registration_module_index(registration, node.module_identity) ?? {
-            if missing == "" -> missing = "item at {node.span.start}..{node.span.end} of `{node.module_identity}` has no registered module"
+            if missing == "" -> missing = "item at {node.span.start}..{node.span.end} of `{module_text(registration.module_table, node.module_identity)}` has no registered module"
             next
         }
         registered_module: registration.modules[module_index]
         source: sema_compiler_index_module_source(module_sources, node.module_identity) ?? {
-            if missing == "" -> missing = "module `{node.module_identity}` has no source"
+            if missing == "" -> missing = "module `{module_text(registration.module_table, node.module_identity)}` has no source"
             next
         }
         definition_source: sema_compiler_index_source_fragment(source, node.span) ?? {
-            if missing == "" -> missing = "item at {node.span.start}..{node.span.end} lies outside the {source.count_bytes()}-byte source of `{node.module_identity}`"
+            if missing == "" -> missing = "item at {node.span.start}..{node.span.end} lies outside the {source.count_bytes()}-byte source of `{module_text(registration.module_table, node.module_identity)}`"
             next
         }
         symbol := Symbol?{None}
@@ -1727,8 +1730,9 @@ sema_compiler_semantic_index_from_checked: fn(registration: SemaRegistrationGrap
     loop checked_module in graph.modules {
         module_index: sema_registration_module_index(registration, checked_module.module_identity) ?? next
         registered_module: registration.modules[module_index]
+        module_name: module_text(registration.module_table, checked_module.module_identity)
         loop reference in checked_module.name_references {
-            target_index := sema_registration_module_index(registration, reference.symbol.module_name) ?? module_index
+            target_index := sema_registration_module_index_text(registration, reference.symbol.module_name) ?? module_index
             sema_compiler_index_append_definition(registration, target_index, reference.symbol, function_views, definitions, definition_keys)
             references.push(sema_compiler_index_reference(reference, registration, checked_module.module_path, registered_module.source_file))
         }
@@ -1736,10 +1740,10 @@ sema_compiler_semantic_index_from_checked: fn(registration: SemaRegistrationGrap
             effects.push(sema_compiler_index_effect(function, registration, registered_module.source_file))
             loop parameter in function.params {
                 parameter_id: parameter.local.symbol_id ?? next
-                parameter_symbol := Symbol{id: parameter_id, kind: SymbolKind.Parameter, name: parameter.name, module_name: checked_module.module_identity, owner: Val(function.key), span: parameter.span, ty: Val(parameter.ty), visibility: 0}
+                parameter_symbol := Symbol{id: parameter_id, kind: SymbolKind.Parameter, name: parameter.name, module_name: module_name, owner: Val(function.key), span: parameter.span, ty: Val(parameter.ty), visibility: 0}
                 sema_compiler_index_append_definition(registration, module_index, parameter_symbol, function_views, definitions, definition_keys)
             }
-            sema_compiler_index_collect_checked_locals(function, checked_module.module_identity, function.key, registration, module_index, function_views, definitions, definition_keys)
+            sema_compiler_index_collect_checked_locals(function, module_name, function.key, registration, module_index, function_views, definitions, definition_keys)
         }
         loop call in checked_module.call_facts {
             value: sema_compiler_index_call(call, registration, checked_module.module_path, registered_module.source_file) ?? next
@@ -1762,7 +1766,7 @@ sema_compiler_semantic_index_from_checked: fn(registration: SemaRegistrationGrap
                 break
             }
         }
-        if !found && missing == "" -> missing = "registered module `{registration.modules[registered_module_index].module_identity}` has no checked result"
+        if !found && missing == "" -> missing = "registered module `{module_text(registration.module_table, registration.modules[registered_module_index].module_identity)}` has no checked result"
     }
     loop checked_module in graph.modules {
         found := false
@@ -1772,7 +1776,7 @@ sema_compiler_semantic_index_from_checked: fn(registration: SemaRegistrationGrap
                 break
             }
         }
-        if !found && missing == "" -> missing = "checked module `{checked_module.module_identity}` is not registered"
+        if !found && missing == "" -> missing = "checked module `{module_text(registration.module_table, checked_module.module_identity)}` is not registered"
     }
     if derivations.missing != "" && missing == "" -> missing = "derivations: {derivations.missing}"
     index := TComptimeValue.Struct{type_name: "CompilerSemanticIndex", fields: [TComptimeField]{

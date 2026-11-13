@@ -2,7 +2,7 @@
 // kernels: the selector's Core/Text/Fmt.jet helper renders the value, called
 // with the selector's constants or its computed number.
 
-use jet_foundation.[Span, TStrFormat, Type]
+use jet_foundation.[Span, TStrFormat, Type, module_is_core]
 
 // The text `{value:format}` adds to the string: a fresh String. Pretty hands
 // the helper the Debug spelling (quotes on a String included); a String
@@ -16,7 +16,7 @@ ir_string_format: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, form
     member: ir_string_format_member(concrete, format) ?? return ir_fail_slot(b, span, "interpolation format {format}")
     row := -1
     loop (index, function) in p.functions {
-        if function.name == member && ir_string_format_source(function.module_identity, function.source_file, function.kind) && ir_function_row(p, function.key) == (Val(index)) {
+        if function.name == member && ir_string_format_source(module_is_core(function.module_identity), function.source_file, function.kind) && ir_function_row(p, function.key) == (Val(index)) {
             row = index
             break
         }

@@ -26,6 +26,7 @@ use jet_foundation.[
     Marker,
     MarkerCallArg,
     NamedSpan,
+    ModuleTable,
     Span,
     Symbol,
     TraitImplBlock,
@@ -39,6 +40,7 @@ use jet_foundation.[
     type_name,
     sema_casing_acronym_name,
     sema_casing_pascal_words,
+    module_text,
 ]
 
 // Rounds of the call-graph join before a still-growing row widens to the
@@ -267,7 +269,8 @@ sema_failure_union_mint: fn(graph: &SemaRegistrationGraph, row: SemaFailureUnion
     source_file: graph.modules[module_index].source_file.copy()
     source_origin: graph.modules[module_index].source_origin.copy()
     register_diagnostics := [Diagnostic]{}
-    if !sema_registration_add_root(graph.modules[module_index], item, source_file, source_origin, segments, register_diagnostics) || register_diagnostics.len() > 0 {
+    registered_module: module_text(graph.module_table, graph.modules[module_index].module_identity)
+    if !sema_registration_add_root(graph.modules[module_index], registered_module, item, source_file, source_origin, segments, register_diagnostics) || register_diagnostics.len() > 0 {
         sema_graph_module_rollback(graph.modules[module_index], mark, owned)
         loop diagnostic in register_diagnostics -> diagnostics.push(diagnostic)
         sema_attach_diagnostic_source_locations(diagnostics, start, segments)
@@ -404,7 +407,7 @@ sema_failure_project_returns: fn(graph: &SemaRegistrationGraph, projections: [Se
         updated := graph.modules[module_index].functions[projection.row].declaration.copy()
         updated.return_type = Val(projection.return_type)
         updated.return_type_span = None
-        row: sema_registration_function(updated, graph.modules[module_index].functions[projection.row].raw_protocol_return, graph.modules[module_index].module_identity, None, graph.modules[module_index].source_file, graph.modules[module_index].source_origin, graph.modules[module_index].source_segments, unused_diagnostics)
+        row: sema_registration_function(updated, graph.modules[module_index].functions[projection.row].raw_protocol_return, graph.modules[module_index].module_identity, module_text(graph.module_table, graph.modules[module_index].module_identity), None, graph.modules[module_index].source_file, graph.modules[module_index].source_origin, graph.modules[module_index].source_segments, unused_diagnostics)
         if declaring_slot[module_index] < 0 {
             declaring_slot[module_index] = declaring.len()
             declaring.push(module_index)
@@ -596,12 +599,12 @@ sema_failure_project_infallible: fn(graph: &SemaRegistrationGraph, solved: [Stri
 sema_failure_project_method_site: fn(graph: &SemaRegistrationGraph, site: SemaRegistrationCallableRow, trail: &SemaGraphTrail) {
     if site == {
         .NominalMethod(module_index, owner, index) -> {
-            projected: sema_failure_infallible_method_row(graph.modules[module_index].nominals[owner].methods[index], graph.modules[module_index])
+            projected: sema_failure_infallible_method_row(graph.modules[module_index].nominals[owner].methods[index], graph.modules[module_index], graph.module_table)
             trail.entries.push(SemaGraphUndo.NominalMethodRow{module_index: module_index, owner: owner, row: index, old: graph.modules[module_index].nominals[owner].methods[index]})
             graph.modules[module_index].nominals[owner].methods[index] = projected.move()
         }
         .ImplMethod(module_index, owner, index) -> {
-            projected: sema_failure_infallible_method_row(graph.modules[module_index].impls[owner].methods[index], graph.modules[module_index])
+            projected: sema_failure_infallible_method_row(graph.modules[module_index].impls[owner].methods[index], graph.modules[module_index], graph.module_table)
             trail.entries.push(SemaGraphUndo.ImplMethodRow{module_index: module_index, owner: owner, row: index, old: graph.modules[module_index].impls[owner].methods[index]})
             graph.modules[module_index].impls[owner].methods[index] = projected.move()
         }
@@ -611,7 +614,7 @@ sema_failure_project_method_site: fn(graph: &SemaRegistrationGraph, site: SemaRe
 
 // `method`'s registered row with the span-less `T Never!` return: its
 // declaration, signature, symbol type and identity.
-sema_failure_infallible_method_row: fn(method: SemaRegistrationFunction, module_row: SemaRegistrationModule) -> SemaRegistrationFunction {
+sema_failure_infallible_method_row: fn(method: SemaRegistrationFunction, module_row: SemaRegistrationModule, table: ModuleTable) -> SemaRegistrationFunction {
     // copy: the projected row is new; the old row stays on the trail.
     updated := method.copy()
     updated.declaration.return_type = Val(Type.Result{ok: sema_failure_union_success(method.declaration), err: Type.Named{name: "Never"}})
@@ -619,7 +622,7 @@ sema_failure_infallible_method_row: fn(method: SemaRegistrationFunction, module_
     signature: sema_registration_function_signature(updated.declaration, method.raw_protocol_return, method.symbol.id, module_row.source_file, module_row.source_origin, module_row.source_segments)
     updated.symbol.ty = Val(signature)
     updated.identity = type_identity(signature)
-    updated.identity_key = sema_registration_function_identity_key(module_row.module_identity, method.symbol.owner ?? "", signature)
+    updated.identity_key = sema_registration_function_identity_key(module_text(table, module_row.module_identity), method.symbol.owner ?? "", signature)
     updated.signature = signature
     updated
 }

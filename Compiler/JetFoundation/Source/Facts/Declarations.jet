@@ -83,7 +83,7 @@ TDeclarationOwnership: enum {
 }
 TCoreBuiltinOwner: struct {
     symbol: SymbolID
-    module_identity: String?
+    module_identity: ModuleID
     name: String
     ownership: TDeclarationOwnership
 }
@@ -148,7 +148,7 @@ TSerdeAttribute: struct {
 
 TFunctionRef: struct {
     key: String
-    module_identity: String
+    module_identity: ModuleID
     name: String
     span: Span
     visibility: TVisibility
@@ -198,7 +198,7 @@ TTypeDefKind: enum {
 TCompilerBuiltin: enum { DefaultErr }
 
 TTypeDef: struct {
-    module_identity: String
+    module_identity: ModuleID
     key: String
     name: String
     span: Span
@@ -266,7 +266,7 @@ TTraitMethod: struct {
 }
 
 TTraitDef: struct {
-    module_identity: String
+    module_identity: ModuleID
     key: String
     name: String
     span: Span
@@ -345,7 +345,7 @@ TOperatorMarker: enum {
 }
 
 TImplDef: struct {
-    module_identity: String
+    module_identity: ModuleID
     key: String
     span: Span
     self_type: Type
@@ -372,9 +372,13 @@ TTraitConstantValue: struct {
 }
 
 TConstantDef: struct {
-    module_identity: String
+    module_identity: ModuleID
     key: String
     name: String
+    // The key a `ConstRef` names the row by beside `key`: its constant
+    // SymbolID text (`constant:<module>::<name>`), "" for a row no
+    // constant symbol names (a trait constant).
+    symbol_key: String{""}
     span: Span
     visibility: TVisibility
     ty: Type

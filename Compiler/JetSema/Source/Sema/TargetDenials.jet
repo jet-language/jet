@@ -17,6 +17,7 @@ use jet_foundation.[
     jet_target_machine_use_default,
     jet_target_machine_use_from_core_apis,
     jet_target_machine_validate,
+    module_is_core,
     sema_effect_covers,
 ]
 
@@ -68,7 +69,7 @@ sema_target_denial_check: fn(modules: [SemaGraphModuleResult], graph: SemaRegist
     loop key in reached {
         slot: slots.get(key) ?? next
         function: modules[slot.module_index].functions[slot.row]
-        if sema_module_is_core_source(function.module_identity) -> next
+        if module_is_core(function.module_identity) -> next
         if sema_effect_covered(function.effects.solved, denied).len() == 0 -> next
         found := [Diagnostic]{}
         reported := [String]{}
@@ -84,7 +85,7 @@ sema_target_denial_check: fn(modules: [SemaGraphModuleResult], graph: SemaRegist
             callee_slot: slots.get(callee.key) ?? next
             callee_function: modules[callee_slot.module_index].functions[callee_slot.row]
             // A call into a program function reports inside that function.
-            if !sema_module_is_core_source(callee_function.module_identity) -> next
+            if !module_is_core(callee_function.module_identity) -> next
             loop effect_name in callee_function.effects.solved {
                 denial: sema_target_denied_by(effect_name, denied) ?? next
                 if reported.contains(denial) -> next
@@ -141,7 +142,7 @@ sema_target_capability_check: fn(graph: SemaRegistrationGraph, core_usage: SemaC
     declared: jet_target_machine_validate(machine, jet_target_machine_use_default())
     complete := true
     loop module_usage in core_usage.modules {
-        if sema_module_is_core_source(module_usage.module_identity) -> next
+        if module_is_core(module_usage.module_identity) -> next
         found := [Diagnostic]{}
         reported := [TargetMachineError]{}
         loop site in module_usage.usage_spans {

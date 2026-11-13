@@ -4,6 +4,7 @@ use jet_foundation.[
     Expr,
     Item,
     MarkerDecl,
+    ModuleID,
     MarkerDeclParam,
     Program,
     Span,
@@ -23,7 +24,7 @@ SemaScopeMembersMarkerRule: struct {
     repeatable: Bool
     params: [MarkerDeclParam]
     group: Bool{false}
-    declaration_module: String?{None}
+    declaration_module: ModuleID?{None}
     declaration_span: Span?{None}
 }
 
@@ -120,7 +121,7 @@ sema_scope_members_registry_add_declaration: fn(registry: &SemaScopeMembersMarke
     sema_scope_members_registry_add_identity(registry, declaration, None, None)
 }
 
-sema_scope_members_registry_add_identity: fn(registry: &SemaScopeMembersMarkerRegistry, declaration: MarkerDecl, identity: String?, span: Span?) -> Bool Never! {
+sema_scope_members_registry_add_identity: fn(registry: &SemaScopeMembersMarkerRegistry, declaration: MarkerDecl, identity: ModuleID?, span: Span?) -> Bool Never! {
     loop existing in registry.marker_rules {
         if existing.name == declaration.name && existing.declaration_module == identity && existing.declaration_span == span -> return identity != None
     }
@@ -175,7 +176,7 @@ sema_scope_members_registry_add_applied_catalog: fn(registry: &SemaScopeMembersM
 // `catalog` must be built from the complete embedded Prelude/Markers.jet
 // source. The graph must be complete because the visible marker declarations
 // are read across it. Occurrence facts never authorize marker sites.
-sema_scope_members_build_marker_registry: fn(graph: SemaRegistrationGraph, module_identity: String, program: Program, catalog: TAppliedRuleCatalog) -> SemaScopeMembersMarkerRegistry? {
+sema_scope_members_build_marker_registry: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, program: Program, catalog: TAppliedRuleCatalog) -> SemaScopeMembersMarkerRegistry? {
     if !graph.complete -> return None
     registry := SemaScopeMembersMarkerRegistry{
         applied_rules: catalog.rows,

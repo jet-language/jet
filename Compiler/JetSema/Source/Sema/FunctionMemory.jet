@@ -29,13 +29,13 @@ use jet_foundation.[
 ]
 
 SemaFunctionMemoryModuleInput: struct {
-    module_identity: String
+    module_identity: ModuleID
     package_identity: String
     policy_declarations: [PolicyDeclaration]
 }
 
 SemaFunctionMemoryFunction: struct {
-    module_identity: String
+    module_identity: ModuleID
     // The leaf name of the type that owns a method, "" for a free function.
     owner: String
     // The declaration as the plan rewrote it. None when no scoped-GC policy
@@ -57,7 +57,7 @@ SemaFunctionMemoryPlan: struct {
 }
 
 SemaFunctionMemorySource: struct {
-    module_identity: String
+    module_identity: ModuleID
     owner: String
     name: String
     span: Span
@@ -101,11 +101,11 @@ SemaFunctionMemoryPolicy: struct {
 // A derived member keeps its `Prelude/Derives.jet` template span, which every
 // derived type shares, so the owner tells `Effect.equal` from `Route.equal`;
 // a `#loop` template declares one member per value at one span, so
-// the name tells `field_x` from `field_y` on the same owner. The integers lead
-// and the owner and name are identifiers, so no module identity text can
-// collide with another key.
-sema_function_memory_key: fn(module_identity: String, owner: String, name: String, span: Span) -> String Never! {
-    "{span.start}:{span.end}:{owner}:{name}:{module_identity}"
+// the name tells `field_x` from `field_y` on the same owner. The integers lead,
+// the owner and name are identifiers and the module id ends the key, so no
+// two functions share one.
+sema_function_memory_key: fn(module_identity: ModuleID, owner: String, name: String, span: Span) -> String Never! {
+    "{span.start}:{span.end}:{owner}:{name}:{module_identity.id}"
 }
 
 sema_function_memory_policy_declaration_equal: fn(left: PolicyDeclaration, right: PolicyDeclaration) -> Bool Never! {
@@ -192,7 +192,7 @@ sema_function_memory_walk_new: fn() -> SemaFunctionMemoryWalk Never! {
 
 // One function of the walk, at the walk's next row. A declaration is copied
 // only when the plan may rewrite it or (fetching) the plan asked for it.
-sema_function_memory_visit: fn(walk: &SemaFunctionMemoryWalk, module_identity: String, owner: String, function: Func, transfer_root: Bool, outer: [PolicyDeclaration], declarations: [PolicyDeclaration]) Never! {
+sema_function_memory_visit: fn(walk: &SemaFunctionMemoryWalk, module_identity: ModuleID, owner: String, function: Func, transfer_root: Bool, outer: [PolicyDeclaration], declarations: [PolicyDeclaration]) Never! {
     row: walk.next_row
     walk.next_row = row + 1
     if walk.fetching {
@@ -205,7 +205,7 @@ sema_function_memory_visit: fn(walk: &SemaFunctionMemoryWalk, module_identity: S
     walk.sources.push(SemaFunctionMemorySource{module_identity: module_identity, owner: sema_serde_named_leaf(owner), name: function.name, span: function.span, function: rewritable, chain: chain, transfer_root: transfer_root})
 }
 
-sema_function_memory_collect_items: fn(items: [Item], module_identity: String, top_level: Bool, outer: [PolicyDeclaration], declarations: [PolicyDeclaration], walk: &SemaFunctionMemoryWalk) Never! {
+sema_function_memory_collect_items: fn(items: [Item], module_identity: ModuleID, top_level: Bool, outer: [PolicyDeclaration], declarations: [PolicyDeclaration], walk: &SemaFunctionMemoryWalk) Never! {
     loop item in items {
         if item == {
             .Func(function) -> sema_function_memory_visit(walk, module_identity, "", function, top_level, outer, declarations)
@@ -239,7 +239,7 @@ sema_function_memory_collect_items: fn(items: [Item], module_identity: String, t
 // Visits one module's functions in row order under its package and module
 // scoped-GC policies; returns its top-level item count (the propagation bound
 // sums them).
-sema_function_memory_walk_module: fn(modules: [SemaFunctionMemoryModuleInput], package_identity: String, module_identity: String, declarations: [PolicyDeclaration], items: [Item], walk: &SemaFunctionMemoryWalk) -> Int Never! {
+sema_function_memory_walk_module: fn(modules: [SemaFunctionMemoryModuleInput], package_identity: String, module_identity: ModuleID, declarations: [PolicyDeclaration], items: [Item], walk: &SemaFunctionMemoryWalk) -> Int Never! {
     outer := sema_function_memory_package_policies(modules, package_identity)
     loop declaration in declarations {
         if declaration.key == PolicyKey.ScopedGC && declaration.scope == PolicyScope.Module -> outer.push(declaration.copy())
@@ -260,7 +260,7 @@ sema_function_memory_walk_graph: fn(graph: SemaRegistrationGraph, walk: &SemaFun
     limit
 }
 
-sema_function_memory_walk_program: fn(program: Program, module_identity: String, package_identity: String, walk: &SemaFunctionMemoryWalk) -> Int Never! {
+sema_function_memory_walk_program: fn(program: Program, module_identity: ModuleID, package_identity: String, walk: &SemaFunctionMemoryWalk) -> Int Never! {
     modules: [SemaFunctionMemoryModuleInput]{SemaFunctionMemoryModuleInput{module_identity: module_identity, package_identity: package_identity, policy_declarations: program.policy_declarations}}
     sema_function_memory_walk_module(modules, package_identity, module_identity, program.policy_declarations, program.items, walk)
 }
@@ -425,7 +425,7 @@ sema_function_memory_plan_from_graph: fn(graph: SemaRegistrationGraph) -> SemaFu
     plan
 }
 
-sema_function_memory_plan_for_program: fn(program: Program, module_identity: String, package_identity: String) -> SemaFunctionMemoryPlan {
+sema_function_memory_plan_for_program: fn(program: Program, module_identity: ModuleID, package_identity: String) -> SemaFunctionMemoryPlan {
     walk := sema_function_memory_walk_new()
     limit: sema_function_memory_walk_program(program, module_identity, package_identity, walk)
     plan := sema_function_memory_plan_new()
@@ -461,7 +461,7 @@ sema_function_memory_has_unsupported_policies: fn(declarations: [PolicyDeclarati
 
 // `owner` is the owning type of a method (any spelling; its leaf name is
 // used), or "" for a free function.
-sema_function_memory_position: fn(plan: SemaFunctionMemoryPlan, module_identity: String, owner: String, name: String, span: Span) -> Int? {
+sema_function_memory_position: fn(plan: SemaFunctionMemoryPlan, module_identity: ModuleID, owner: String, name: String, span: Span) -> Int? {
     plan.positions.get(sema_function_memory_key(module_identity, sema_serde_named_leaf(owner), name, span))
 }
 

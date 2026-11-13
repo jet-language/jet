@@ -4,10 +4,12 @@
 // nominal generic checking. Callers retain the resulting evidence rather than
 // guessing whether a bound was checked.
 use jet_foundation.[
+    ModuleID,
     Span,
     TGenericParam,
     Type,
     TypeParam,
+    module_none,
     type_identity_equal,
 ]
 
@@ -16,9 +18,9 @@ SemaInferenceTypeParam: struct {
     bounds: [String]
     span: Span
     identity_key: String
-    // The declaring module, where `bounds` name their traits ("": the
+    // The declaring module, where `bounds` name their traits (none: the
     // caller's own declaration or a Core signature's unbounded parameter).
-    bound_module: String
+    bound_module: ModuleID
 }
 
 SemaInferenceBinding: struct {
@@ -46,7 +48,7 @@ SemaInferenceBoundEvidence: struct {
 // The registration graph is not part of the context: solver entry points take
 // it as a read parameter, so building a context never copies the graph.
 SemaInferenceContext: struct {
-    caller_module_identity: String
+    caller_module_identity: ModuleID
     caller_package_identity: String
     type_params: [SemaInferenceTypeParam]
     lexical_generic_params: [TGenericParam]
@@ -64,7 +66,7 @@ SemaInferenceResult: struct {
 }
 
 sema_inference_type_params: fn(parameters: [TypeParam]) -> [SemaInferenceTypeParam] Never! {
-    result: loop parameter in parameters -> SemaInferenceTypeParam{name: parameter.name, bounds: parameter.bounds, span: parameter.name_span, identity_key: "", bound_module: ""}
+    result: loop parameter in parameters -> SemaInferenceTypeParam{name: parameter.name, bounds: parameter.bounds, span: parameter.name_span, identity_key: "", bound_module: module_none()}
     result
 }
 
@@ -79,7 +81,7 @@ sema_inference_bindings_for_type_args: fn(parameters: [SemaInferenceTypeParam], 
     result
 }
 
-sema_inference_context: fn(caller_module_identity: String, caller_package_identity: String, type_params: [SemaInferenceTypeParam], lexical_generic_params: [TGenericParam], expected: Type?) -> SemaInferenceContext Never! {
+sema_inference_context: fn(caller_module_identity: ModuleID, caller_package_identity: String, type_params: [SemaInferenceTypeParam], lexical_generic_params: [TGenericParam], expected: Type?) -> SemaInferenceContext Never! {
     SemaInferenceContext{caller_module_identity: caller_module_identity, caller_package_identity: caller_package_identity, type_params: type_params, lexical_generic_params: lexical_generic_params, expected: expected}
 }
 

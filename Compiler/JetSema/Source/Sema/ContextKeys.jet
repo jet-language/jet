@@ -98,7 +98,7 @@ sema_context_field_key: fn(name: String, program: SemaProgramTables) -> SemaCont
             loop function in graph.modules[module_index].functions {
                 if function.symbol.name != "__stop_ignore" -> next
                 id: sema_registration_callable_id(graph, function.symbol.id.key) ?? return None
-                ty: sema_type_resolve_declared(graph, function.signature, function.symbol.module_name)
+                ty: sema_type_resolve_declared(graph, function.signature, graph.modules[module_index].module_identity)
                 return Val(SemaContextFieldKey{key: SemaContextKey{key: CONTEXT_ON_STOP_KEY, ty: ty}, default: SemaContextDefault.Function{function: id}})
             }
             return None
@@ -107,7 +107,7 @@ sema_context_field_key: fn(name: String, program: SemaProgramTables) -> SemaCont
             found: if name == "print" -> constant.symbol.name == "__print_style" else -> constant.symbol.name == name && sema_context_key_declared(constant.declaration)
             if !found -> next
             declared: constant.symbol.ty ?? constant.ty ?? return None
-            ty: sema_type_resolve_declared(graph, declared, constant.symbol.module_name)
+            ty: sema_type_resolve_declared(graph, declared, graph.modules[module_index].module_identity)
             return Val(SemaContextFieldKey{key: SemaContextKey{key: constant.symbol.id.key, ty: ty}, default: SemaContextDefault.Constant{symbol: constant.symbol.id.copy()}})
         }
     }
@@ -169,7 +169,7 @@ sema_context_key_resolve: fn(name: String, environment: SemaScopeEnvironment, pr
 // its declaring module's row.
 sema_context_key_symbol: fn(program: SemaProgramTables, symbol: Symbol) -> Bool Never! {
     if program.registration_graph == .Val(graph) {
-        module_index: sema_registration_module_index(graph, symbol.module_name) ?? return false
+        module_index: sema_registration_module_index_text(graph, symbol.module_name) ?? return false
         loop constant in graph.modules[module_index].constants {
             if constant.symbol.id.key == symbol.id.key -> return sema_context_key_declared(constant.declaration)
         }

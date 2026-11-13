@@ -43,6 +43,10 @@ use jet_foundation.[
     diagnostic_registry_row,
     boundary_head_owner_module,
     symbol_id,
+    ModuleID,
+    ModuleTable,
+    module_is_core,
+    module_text,
 ]
 
 SemaCoreImport: struct {
@@ -58,7 +62,7 @@ SemaCoreUsageSpan: struct {
 }
 
 SemaCoreModuleUsageResult: struct {
-    module_identity: String
+    module_identity: ModuleID
     used_core: [String]
     usage_spans: [SemaCoreUsageSpan]
     ffi_callback_keys: [String]
@@ -224,7 +228,7 @@ sema_core_generated_register_unqualified: fn(graph: SemaRegistrationGraph, regis
             return
         }
         if {
-            row.target_module_identity == module_name && sema_core_generated_core_type(module_name, type_name) -> {
+            module_text(graph.module_table, row.target_module_identity) == module_name && sema_core_generated_core_type(module_name, type_name) -> {
                 sema_core_generated_register_core_name(markers, type_name, module_name, type_name)
             }
             else -> {
@@ -236,8 +240,8 @@ sema_core_generated_register_unqualified: fn(graph: SemaRegistrationGraph, regis
     sema_core_generated_register_core_name(markers, type_name, module_name, type_name)
 }
 
-sema_core_generated_register_import: fn(markers: &[String:Bool], row: SemaRegistrationImport) Never! {
-    target := row.target_module_identity
+sema_core_generated_register_import: fn(markers: &[String:Bool], row: SemaRegistrationImport, table: ModuleTable) Never! {
+    target := module_text(table, row.target_module_identity)
     if target == "" {
         if row.declaration.kind == {
             .Module(name, _) -> target = name
@@ -279,7 +283,7 @@ sema_core_generated_context_markers: fn(graph: SemaRegistrationGraph, registrati
     loop type_name in ([String]{"Vec", "Matrix"}) -> sema_core_generated_register_unqualified(graph, registration_module, markers, "core.compute", type_name)
     loop type_name in ([String]{"Pool", "Cell", "ID"}) -> sema_core_generated_register_core_qualified(markers, "core.mem", type_name)
     loop type_name in ([String]{"Vec", "Matrix"}) -> sema_core_generated_register_core_qualified(markers, "core.compute", type_name)
-    loop row in registration_module.imports -> sema_core_generated_register_import(markers, row)
+    loop row in registration_module.imports -> sema_core_generated_register_import(markers, row, graph.module_table)
     // A package name bound in the module shadows a Core name
     // like a non-Core import does.
     loop owner in registration_module.namespace_bindings -> sema_core_generated_marker_add(markers, sema_core_generated_shadow_marker(graph.modules[owner.module_index].symbols[owner.row].name))
@@ -442,7 +446,7 @@ sema_core_module_and_helper: fn(usage: String) -> [String] Never! {
 // declared in the package's `authority.needs`. Each missing capability is
 // reported once per module, on its first located use: the module's calls
 // into Core source functions first, then its Core usage rows.
-sema_core_check_ui_capabilities: fn(call_facts: [SemaCallSiteFact], graph: SemaRegistrationGraph, usage_modules: [SemaCoreModuleUsageResult], module_identity: String, needs: [String], diagnostics: &[Diagnostic]) {
+sema_core_check_ui_capabilities: fn(call_facts: [SemaCallSiteFact], graph: SemaRegistrationGraph, usage_modules: [SemaCoreModuleUsageResult], module_identity: ModuleID, needs: [String], diagnostics: &[Diagnostic]) {
     reported := [String]{}
     loop fact in call_facts {
         callee: fact.callee ?? next
@@ -463,8 +467,7 @@ sema_core_source_call_usage: fn(key: String, graph: SemaRegistrationGraph) -> St
     cut: key.rfind(":")
     head: key.slice(0, cut)
     if !head.ends_with(":") -> return None
-    module_identity: head.slice(9, head.len() - 1)
-    index: sema_registration_module_index(graph, module_identity) ?? return None
+    index: sema_registration_module_index_text(graph, head.slice(9, head.len() - 1)) ?? return None
     Val("{graph.modules[index].module_name}::{key.slice(cut + 1, key.len())}")
 }
 
@@ -702,9 +705,9 @@ sema_core_collect_source_wrapper: fn(function: Func, owner: String, imports: [Se
 // The top-level functions of a Core source module that no other body of the
 // module calls. Self-recursion is not a sibling call: a wrapper's own
 // `core.ui.tui_backend()` may resolve to itself.
-sema_core_source_unshared_functions: fn(registration_module: SemaRegistrationModule, call_facts: [SemaCallSiteFact]) -> [String] Never! {
+sema_core_source_unshared_functions: fn(registration_module: SemaRegistrationModule, module_text: String, call_facts: [SemaCallSiteFact]) -> [String] Never! {
     unshared := [String]{}
-    if !registration_module.module_identity.starts_with("<corelib>/") -> return unshared
+    if !module_is_core(registration_module.module_identity) -> return unshared
     called := [String:Bool]{}
     loop fact in call_facts {
         callee: fact.callee ?? next
@@ -713,7 +716,7 @@ sema_core_source_unshared_functions: fn(registration_module: SemaRegistrationMod
     loop item in registration_module.program.items {
         if item == {
             .Func(function) -> {
-                key: symbol_id(SymbolKind.Function, registration_module.module_identity, "", function.name).key
+                key: symbol_id(SymbolKind.Function, module_text, "", function.name).key
                 if called.get(key) == None -> unshared.push(function.name)
             }
             .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
@@ -1304,18 +1307,18 @@ SemaCoreModuleContext: struct {
 sema_core_module_context: fn(graph: SemaRegistrationGraph, registration_module: SemaRegistrationModule, call_facts: [SemaCallSiteFact]) -> SemaCoreModuleContext {
     registered := sema_core_registration_type_names(registration_module)
     sema_core_generated_context_markers(graph, registration_module, registered)
-    owner: if registration_module.module_identity.starts_with("<corelib>/") -> registration_module.module_name else -> ""
+    owner: if module_is_core(registration_module.module_identity) -> registration_module.module_name else -> ""
     // An import row names its target by module identity (a Core module's is
     // `<corelib>/…`, as `use sys: core.sys` or `use core.sys.[get]` registers
     // it); a Core usage is keyed by the module's name.
-    imports := sema_core_registration_imports(registration_module)
+    imports := sema_core_registration_imports(registration_module, graph.module_table)
     loop index in 0..<imports.len() {
-        target: sema_registration_module_index(graph, imports[index].module_name) ?? next
+        target: sema_registration_module_index_text(graph, imports[index].module_name) ?? next
         imports[index].module_name = graph.modules[target].module_name.copy()
     }
     SemaCoreModuleContext{
         owner: owner,
-        unshared: sema_core_source_unshared_functions(registration_module, call_facts),
+        unshared: sema_core_source_unshared_functions(registration_module, module_text(graph.module_table, registration_module.module_identity), call_facts),
         imports: imports.move(),
         registered: registered.move(),
     }
@@ -1364,12 +1367,13 @@ sema_core_module_usage_assemble: fn(registration_module: SemaRegistrationModule,
 }
 
 // The module's Core-visible imports, read from its registration rows without
-// copying the module's program.
-sema_core_registration_imports: fn(registration_module: SemaRegistrationModule) -> [SemaCoreImport] Never! {
+// copying the module's program. An import with no loaded target names its
+// module by the name it is written with.
+sema_core_registration_imports: fn(registration_module: SemaRegistrationModule, table: ModuleTable) -> [SemaCoreImport] Never! {
     imports := [SemaCoreImport]{}
     loop registration in registration_module.imports {
         declaration := registration.declaration
-        target := registration.target_module_identity
+        target := module_text(table, registration.target_module_identity)
         if declaration.kind == {
             .Module(name, span) -> {
                 if target == "" -> target = name
@@ -1382,7 +1386,7 @@ sema_core_registration_imports: fn(registration_module: SemaRegistrationModule) 
                 loop binding in registration.bindings {
                     // A Core submodule member (`use core.mem`) binds a namespace.
                     if binding.declaration == None && binding.symbol.kind == SymbolKind.Import {
-                        sema_core_import_add(imports, SemaCoreImport{alias: binding.local, module_name: binding.target_module_identity, item: None, span: binding.symbol.span})
+                        sema_core_import_add(imports, SemaCoreImport{alias: binding.local, module_name: module_text(table, binding.target_module_identity), item: None, span: binding.symbol.span})
                         next
                     }
                     sema_core_import_add(imports, SemaCoreImport{alias: binding.local, module_name: target, item: Val(binding.original), span: binding.symbol.span})

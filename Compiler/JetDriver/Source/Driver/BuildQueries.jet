@@ -1,7 +1,7 @@
 // Read-only fn-build staging: ordinary Driver checking and comptime execution,
 // followed by Core's checked finish. No action or generated-file write occurs.
 use {
-    jet_foundation.[DIAGNOSTIC_ERROR, Diagnostic, DiagnosticFixApplicability, DiagnosticFixSafety, Item, PolicyKey, SourceFile, Span, TComptimeValue, TextEdit, Type, diagnostic_from_registry, diagnostic_registry_row, diagnostic_sentence_case_line, diagnostic_with_source_path, policy_gate_allows, sha256_hex]
+    jet_foundation.[DIAGNOSTIC_ERROR, Diagnostic, DiagnosticFixApplicability, DiagnosticFixSafety, Item, ModuleID, PolicyKey, SourceFile, Span, TComptimeValue, TextEdit, Type, diagnostic_from_registry, diagnostic_registry_row, diagnostic_sentence_case_line, diagnostic_with_source_path, policy_gate_allows, sha256_hex]
     jet_eval.[jet_eval_build_context_value, jet_eval_build_session_input, jet_eval_build_session_diagnostic, jet_eval_runtime_config]
     jet_eval.[jet_eval_build_failed_diagnostic]
     core.build.[BuildGraph, BuildGraphNode, BuildGraphInputDigest]
@@ -16,7 +16,7 @@ use {
 // Rust Driver::compiler_nodes_for_bundle_with_outputs. These are static
 // identities, not BuildNodeRecords: no duration or why-ran observation exists
 // until an actual build action runs. Core owns the sole hash byte recipe.
-jet_driver_build_compiler_nodes: fn(request: JetDriverCompileRequest, load: JetDriverLoadResult, checked: SemaGraphResult, effect_identity: String) -> [BuildGraphNode]? Never! {
+jet_driver_build_compiler_nodes: fn(request: JetDriverCompileRequest, load: JetDriverLoadResult, checked: SemaGraphResult, effect_identity: ModuleID) -> [BuildGraphNode]? Never! {
     if !checked.complete -> return None
     root: jet_driver_entry_root_path(request.authorized_sources)
     if root == "" -> return None

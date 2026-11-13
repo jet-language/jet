@@ -4,7 +4,7 @@
 use {
     jet_foundation.[
         Diagnostic, Span, Type, compiler_threads_single, core_record_field, core_record_literal_fields,
-        core_record_literal_is_core_only, jet_target_machine_hosted,
+        core_record_literal_is_core_only, jet_target_machine_hosted, module_intern, module_table,
     ]
     jet_parser.[parse_generated_source]
     jet_driver.[jet_driver_canonical_effect_module]
@@ -28,13 +28,16 @@ core_failure_record_expect: fn(owner: String, field: String) {
 core_failure_record_diagnostics: fn(source: String, module_identity: String) -> [Diagnostic] {
     parsed := parse_generated_source(source.bytes())
     if parsed.diagnostics.len() != 0 -> panic("failure fixture did not parse: {source}")
-    effects: jet_driver_canonical_effect_module("IO: struct {{\n    impl Effect {{}}\n}}\nPanic: struct {{\n    impl Effect {{}}\n}}\n") ?? panic("canonical effect source did not parse")
+    table := module_table()
+    module_id: module_intern(table, module_identity)
+    effects: jet_driver_canonical_effect_module("IO: struct {{\n    impl Effect {{}}\n}}\nPanic: struct {{\n    impl Effect {{}}\n}}\n", table) ?? panic("canonical effect source did not parse")
+    effects_id: effects.module_identity
     package_identity: module_identity.split("/").to_list()[0]
     file: "{module_identity}/fixture.jet"
     facts: SemaBuildFacts{package_name: package_identity.copy(), package_version: "0.1.0", os: "linux", profile: "dev", stamp_git: None, stamp_dirty: false, stamp_toolchain: "fixture", stamp_at: ""}
     segment: SemaSourceSegment{generated: Span{start: 0, end: source.len()}, source_file: file.copy(), source_start: 0, line_starts: [Int]{0}, origin: SemaSourceOrigin.Snapshot}
-    input: SemaRegistrationModuleInput{package_identity: package_identity.copy(), module_identity: module_identity.copy(), module_name: "fixture", core_source_alias: "", module_path: "fixture.jet", source_file: file.copy(), source_segments: [SemaSourceSegment]{segment}, source_origin: SemaSourceOrigin.Snapshot, program: parsed.program.move(), foreign_handles: [SemaRegistrationForeignHandleFacts]{}, source: source.copy()}
-    graph := sema_registration_prepare_graph([SemaRegistrationModuleInput]{input, effects}, [SemaRegistrationModule]{}, [SemaRegistrationImportEdge]{}, package_identity, module_identity, effects.module_identity, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), facts, false, compiler_threads_single()) ?? panic("registration failed {err}: {source}")
+    input: SemaRegistrationModuleInput{package_identity: package_identity.copy(), module_identity: module_id, module_name: "fixture", core_source_alias: "", module_path: "fixture.jet", source_file: file.copy(), source_segments: [SemaSourceSegment]{segment}, source_origin: SemaSourceOrigin.Snapshot, program: parsed.program.move(), foreign_handles: [SemaRegistrationForeignHandleFacts]{}, source: source.copy()}
+    graph := sema_registration_prepare_graph([SemaRegistrationModuleInput]{input, effects}, [SemaRegistrationModule]{}, [SemaRegistrationImportEdge]{}, package_identity, module_id, effects_id, table, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), facts, false, compiler_threads_single()) ?? panic("registration failed {err}: {source}")
     hooks: Shared{SemaRegistrationHostHooks{numeric_unit_conversion_exact: None}}
     // Declaration checking loans the graph to its stage, which returns it.
     stage := sema_collect_comptime_declarations(graph, [SemaRegistrationPackagePolicy]{}, compiler_threads_single(), None) ?? panic("declaration checking failed {err}: {source}")

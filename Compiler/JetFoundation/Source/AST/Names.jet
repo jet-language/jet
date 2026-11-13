@@ -133,6 +133,71 @@ name_table_grow: fn(table: &NameTable) Never! {
     table.mask = mask
 }
 
+// Loaded modules by identity (#6793, Docs/spec/compiler-data.md). The loader
+// interns each module's identity text once, as it first meets it; every later phase
+// names a module by its `ModuleID` and resolves the text only at an edge (a
+// diagnostic, a cache or symbol key, a tool record) with `module_text`. Id 0
+// is the empty identity: no module.
+//
+// The id's top bit marks a Core source's identity (`<corelib>/...`), so the
+// Core test needs no table; the low 31 bits are the table row.
+ModuleID: struct {
+    id: U32
+}
+
+ModuleTable: struct {
+    identities: NameTable
+}
+
+MODULE_CORE_PREFIX: "<corelib>/"
+MODULE_CORE_BIT: U32{0x80000000}
+MODULE_ROW_BITS: U32{0x7fffffff}
+
+module_table: fn() -> ModuleTable Never! {
+    ModuleTable{identities: name_table()}
+}
+
+module_none: fn() -> ModuleID Never! {
+    ModuleID{id: U32{0}}
+}
+
+module_is_none: fn(module_id: ModuleID) -> Bool Never! {
+    module_id.id == U32{0}
+}
+
+// The table row of `module_id`: 0 for no module, below `module_count`.
+module_index: fn(module_id: ModuleID) -> Int Never! {
+    Int.from_u32(module_id.id.bit_and(MODULE_ROW_BITS))
+}
+
+module_count: fn(table: ModuleTable) -> Int Never! {
+    name_count(table.identities)
+}
+
+module_is_core: fn(module_id: ModuleID) -> Bool Never! {
+    module_id.id.bit_and(MODULE_CORE_BIT) != U32{0}
+}
+
+module_id_of: fn(name: Name, text: String) -> ModuleID Never! {
+    if text.starts_with(MODULE_CORE_PREFIX) -> return ModuleID{id: name.id.bit_or(MODULE_CORE_BIT)}
+    ModuleID{id: name.id}
+}
+
+// The id of identity `text`, interned when it is new.
+module_intern: fn(table: &ModuleTable, text: String) -> ModuleID Never! {
+    module_id_of(name_intern(table.identities, text), text)
+}
+
+// The id of identity `text`, None when the table has no such identity.
+module_find: fn(table: ModuleTable, text: String) -> ModuleID? Never! {
+    name: name_find(table.identities, text) ?? return None
+    Val(module_id_of(name, text))
+}
+
+module_text: fn(table: ModuleTable, module_id: ModuleID) -> String Never! {
+    table.identities.texts[module_index(module_id)]
+}
+
 // The low 30 bits of `text.hash()`: a small Int whose low bits index slots.
 // A lookup computes it once (in place, no byte copy) and passes it with the
 // spelling to every `NameRows` it visits.

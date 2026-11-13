@@ -25,6 +25,7 @@ use jet_foundation.[
     Marker,
     MarkerCallArg,
     MaturityTag,
+    ModuleID,
     Measure,
     NamedSpan,
     NamedType,
@@ -75,6 +76,8 @@ use jet_foundation.[
     ast_comptime_value_show,
     type_name,
     foundation_named_type,
+    module_is_core,
+    module_text,
 ]
 use jet_lexer.[
     TOKEN_BLOCK_COMMENT,
@@ -764,7 +767,7 @@ sema_comptime_reflection_signature_record: fn(params: [TComptimeValue], returned
 // `inferred` row, as on a function. Its types are named from the module
 // `module_identity` that writes it; with no registration `graph` they are
 // named as written.
-sema_comptime_reflection_closure_info: fn(graph: SemaRegistrationGraph?, module_identity: String, name: String, span: Span, lambda: TLambda, location: TComptimeValue, file: String) -> TComptimeValue {
+sema_comptime_reflection_closure_info: fn(graph: SemaRegistrationGraph?, module_identity: ModuleID, name: String, span: Span, lambda: TLambda, location: TComptimeValue, file: String) -> TComptimeValue {
     caller: if graph == .Val(known) -> sema_type_module_row(known, module_identity) else -> -1
     params := [TComptimeValue]{}
     index := 0
@@ -988,7 +991,7 @@ sema_comptime_reflection_layout_item_name: fn(item: Item) -> String? {
     }
 }
 
-sema_comptime_reflection_layout_type_resolution: fn(graph: SemaRegistrationGraph, module_identity: String, owner: String, source_name: String, generic_params: [TypeParam], resolutions: &[TargetLayoutNameResolution]) Never! {
+sema_comptime_reflection_layout_type_resolution: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, owner: String, source_name: String, generic_params: [TypeParam], resolutions: &[TargetLayoutNameResolution]) Never! {
     loop parameter in generic_params {
         if parameter.name == source_name -> return
     }
@@ -1002,7 +1005,7 @@ sema_comptime_reflection_layout_type_resolution: fn(graph: SemaRegistrationGraph
     }
 }
 
-sema_comptime_reflection_layout_type_resolutions: fn(graph: SemaRegistrationGraph, module_identity: String, owner: String, generic_params: [TypeParam], ty: Type, resolutions: &[TargetLayoutNameResolution]) Never! {
+sema_comptime_reflection_layout_type_resolutions: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, owner: String, generic_params: [TypeParam], ty: Type, resolutions: &[TargetLayoutNameResolution]) Never! {
     if ty == {
         .Named(name) -> sema_comptime_reflection_layout_type_resolution(graph, module_identity, owner, name, generic_params, resolutions)
         .Apply(name, args) -> {
@@ -1014,7 +1017,7 @@ sema_comptime_reflection_layout_type_resolutions: fn(graph: SemaRegistrationGrap
     }
 }
 
-sema_comptime_reflection_layout_item_resolutions: fn(graph: SemaRegistrationGraph, module_identity: String, owner: String, item: Item, resolutions: &[TargetLayoutNameResolution]) Never! {
+sema_comptime_reflection_layout_item_resolutions: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, owner: String, item: Item, resolutions: &[TargetLayoutNameResolution]) Never! {
     if item == {
         .Struct(definition) -> {
             loop field in definition.fields -> sema_comptime_reflection_layout_type_resolutions(graph, module_identity, owner, definition.type_params, field.ty, resolutions)
@@ -1038,11 +1041,13 @@ sema_comptime_reflection_layout_engine: fn(graph: SemaRegistrationGraph) -> Targ
     qualified_items := [TargetLayoutQualifiedItem]{}
     resolutions := [TargetLayoutNameResolution]{}
     loop registration_module_index in 0..<graph.modules.len() {
+        module_identity: graph.modules[registration_module_index].module_identity
+        module_name: module_text(graph.module_table, module_identity)
         loop item_index in 0..<graph.modules[registration_module_index].program.items.len() {
             name: sema_comptime_reflection_layout_item_name(graph.modules[registration_module_index].program.items[item_index]) ?? next
-            qualified_name: if graph.modules[registration_module_index].module_identity == "" -> name else -> "{graph.modules[registration_module_index].module_identity}::{name}"
-            qualified_items.push(TargetLayoutQualifiedItem{qualified_name: qualified_name, module_identity: graph.modules[registration_module_index].module_identity, item: graph.modules[registration_module_index].program.items[item_index]})
-            sema_comptime_reflection_layout_item_resolutions(graph, graph.modules[registration_module_index].module_identity, qualified_name, graph.modules[registration_module_index].program.items[item_index], resolutions)
+            qualified_name: if module_name == "" -> name else -> "{module_name}::{name}"
+            qualified_items.push(TargetLayoutQualifiedItem{qualified_name: qualified_name, core: module_is_core(module_identity), item: graph.modules[registration_module_index].program.items[item_index]})
+            sema_comptime_reflection_layout_item_resolutions(graph, module_identity, qualified_name, graph.modules[registration_module_index].program.items[item_index], resolutions)
         }
     }
     jet_target_layout_engine_with_registry([Item]{}, qualified_items, resolutions, jet_target_layout_from_machine(graph.target_machine))
@@ -1163,7 +1168,7 @@ sema_comptime_reflection_member_markers: fn(markers: [Marker], registry: SemaSco
 // the graph cannot build it.
 sema_comptime_reflection_written_markers: fn(
     graph: SemaRegistrationGraph,
-    module_identity: String,
+    module_identity: ModuleID,
     program: Program,
     catalog: TAppliedRuleCatalog,
     markers: [Marker],
@@ -2272,7 +2277,7 @@ sema_comptime_reflection_struct_type_info: fn(
     reflection_fields := [TComptimeValue]{}
     dimensions := [TComptimeValue]{}
     facts := [TComptimeValue]{}
-    layout_facts: jet_target_layout_struct_facts_in_module(engine, definition, registered_module.module_identity)
+    layout_facts: jet_target_layout_struct_facts_in_module(engine, definition, module_text(registration.module_table, registered_module.module_identity))
     loop field in definition.fields {
         if field.computed != None -> next
         default := Span?{None}
@@ -2371,7 +2376,7 @@ sema_comptime_reflection_enum_type_info: fn(
         registered_module.module_path,
         identity,
         "enum",
-        sema_comptime_reflection_enum_layout(registration, caller, definition, engine, registered_module.module_identity),
+        sema_comptime_reflection_enum_layout(registration, caller, definition, engine, module_text(registration.module_table, registered_module.module_identity)),
         definition.name_span,
         variant_values,
         methods,
@@ -2433,7 +2438,7 @@ sema_comptime_reflection_distinct_type_info: fn(
 // declaration.
 sema_comptime_reflection_type_info: fn(
     graph: SemaRegistrationGraph,
-    module_identity: String,
+    module_identity: ModuleID,
     type_name: String,
     catalog: TAppliedRuleCatalog,
     args: [Type],

@@ -700,7 +700,7 @@ JetDriverLoadedModule: struct {
     source_unit_index: Int
     source_identity: String
     package_identity: String
-    module_identity: String
+    module_identity: ModuleID
     module_name: String
     program: Program
     // The dotted path of the `name: module` declarations that reach this
@@ -738,7 +738,11 @@ JetDriverLoadResult: struct {
     packages: [JetDriverPackageInfo]
     source_units: [JetDriverSourceUnit]
     entry_source_identity: String
-    entry_module_identity: String
+    entry_module_identity: ModuleID
+    // Every module identity the load met (loaded modules and import
+    // targets), interned as met: each `module_identity` here and downstream
+    // is an id into this table.
+    module_table: ModuleTable
     modules: [JetDriverLoadedModule]
     imports: [SemaRegistrationImportEdge]
     source_files: [SourceFile]

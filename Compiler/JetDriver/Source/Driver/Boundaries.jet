@@ -26,12 +26,12 @@ jet_driver_check_import_boundaries: fn(packages: [JetDriverPackageInfo], source_
         hits.push(row)
     }
     if !any_rule -> return
-    unit_of_module := [String:Int]{}
-    loop loaded in modules -> unit_of_module[loaded.module_identity] = loaded.source_unit_index
+    unit_of_module := [U32:Int]{}
+    loop loaded in modules -> unit_of_module[loaded.module_identity.id] = loaded.source_unit_index
     loop edge in imports {
         if !jet_driver_import_is_module_edge(edge.declaration.kind) -> next
-        from_index: unit_of_module.get(edge.source_module_identity) ?? next
-        to_index: unit_of_module.get(edge.target_module_identity) ?? next
+        from_index: unit_of_module.get(edge.source_module_identity.id) ?? next
+        to_index: unit_of_module.get(edge.target_module_identity.id) ?? next
         from_unit: source_units[from_index]
         to_unit: source_units[to_index]
         if from_unit.root_index < 0 || from_unit.root_index >= packages.len() || to_unit.root_index < 0 || to_unit.root_index >= packages.len() -> next

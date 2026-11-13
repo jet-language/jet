@@ -4,7 +4,7 @@
 // enum payloads hold. A trait's row is the union of its implementing types'
 // rows. Field types refer back to other types, so the rows are solved to a
 // fixed point, and a recursive type settles on the union of its cycle.
-use jet_foundation.[Span, Type]
+use jet_foundation.[ModuleID, Span, Type]
 
 // One source of a type's effects. A `method` names its function in
 // `function_key` and takes that function's solved row; a `field` carries the
@@ -93,7 +93,7 @@ sema_effect_type_impl_shape: fn(trait_key: String, implementer_key: String, impl
 // The sources a field or payload named `label` of type `ty` adds: the row
 // written on a function type, and each struct, enum or trait the type holds,
 // through lists, maps, optionals, results, tuples and type arguments.
-sema_effect_type_add_held: fn(graph: SemaRegistrationGraph, module_identity: String, label: String, span: Span, ty: Type, sources: &[SemaEffectTypeSource]) Never! {
+sema_effect_type_add_held: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, label: String, span: Span, ty: Type, sources: &[SemaEffectTypeSource]) Never! {
     if ty == {
         .Fn(_, _, bound, _, _, _) -> {
             row: bound ?? return
@@ -138,7 +138,7 @@ sema_effect_type_add_held: fn(graph: SemaRegistrationGraph, module_identity: Str
 
 // A `field type` source for the struct, enum or trait `name` resolves to
 // from `module_identity`; nothing for a name that resolves to neither.
-sema_effect_type_add_named: fn(graph: SemaRegistrationGraph, module_identity: String, label: String, span: Span, name: String, sources: &[SemaEffectTypeSource]) Never! {
+sema_effect_type_add_named: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, label: String, span: Span, name: String, sources: &[SemaEffectTypeSource]) Never! {
     key := ""
     if sema_type_graph_lookup_symbol(graph, module_identity, name) == .Val(resolved) {
         if sema_type_graph_resolved_nominal_row(graph, resolved) == .Val(row) -> key = graph.modules[row.module_index].nominals[row.row].symbol.id.key.copy()

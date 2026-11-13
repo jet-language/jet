@@ -772,7 +772,7 @@ jet_cli_web_expand_roots: fn(walk: &JetCLIWebWalk, roots: [AppRouteRoot]) {
 jet_cli_web_marker_route: fn(marker: Marker) -> [String]? {
     if marker.negated -> return None
     parts: marker.name.split(".").to_list()
-    if parts.len() < 2 && (marker.declaration_module ?? "") != "core.http.server" -> return None
+    if parts.len() < 2 -> return None
     verb: parts[parts.len() - 1].lower()
     texts := [String]{}
     loop argument in marker.args {

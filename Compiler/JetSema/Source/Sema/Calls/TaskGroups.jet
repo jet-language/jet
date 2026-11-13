@@ -356,8 +356,9 @@ sema_taskgroup_check_statement: fn(name: String, name_span: Span, args: TaskGrou
     owner := "task.group@{name_span.start}"
     sema_scope_enter(scopes, state, owner)
     symbol_owner := sema_scope_local_owner_key(scopes)
-    id := symbol_id(SymbolKind.Local, environment.module_identity, symbol_owner, name)
-    symbol := Symbol{id: id, kind: SymbolKind.Local, name: name, module_name: environment.module_identity, owner: Val(symbol_owner), span: name_span, ty: Val(Type.Named{name: "Group"}), visibility: 0}
+    local_module: sema_scope_environment_module_text(environment, program)
+    id := symbol_id(SymbolKind.Local, local_module, symbol_owner, name)
+    symbol := Symbol{id: id, kind: SymbolKind.Local, name: name, module_name: local_module, owner: Val(symbol_owner), span: name_span, ty: Val(Type.Named{name: "Group"}), visibility: 0}
     if {
         !sema_scope_declare_local(scopes, symbol, false, AccessConvention.Read, None, false) -> {
             diagnostics.push(sema_already_defined(name, name_span))
@@ -1110,8 +1111,9 @@ sema_readiness_check_head: fn(cond: Expr, table: &SemaReadinessTable, environmen
                 table.element = Val(payload)
             }
             owner: sema_scope_local_owner_key(scopes)
-            id: symbol_id(SymbolKind.Local, environment.module_identity, owner, binding)
-            symbol: Symbol{id: id, kind: SymbolKind.Local, name: binding, module_name: environment.module_identity, owner: Val(owner), span: cond_span, ty: Val(payload), visibility: 0}
+            local_module: sema_scope_environment_module_text(environment, program)
+            id: symbol_id(SymbolKind.Local, local_module, owner, binding)
+            symbol: Symbol{id: id, kind: SymbolKind.Local, name: binding, module_name: local_module, owner: Val(owner), span: cond_span, ty: Val(payload), visibility: 0}
             if checked == .Val(receiver) {
                 table.arms.push(Val(SemaReadinessArm.Receive{local: checked_symbol_local(binding, cond_span, id, payload), receiver: receiver, ordinal: table.receivers}))
             } else {

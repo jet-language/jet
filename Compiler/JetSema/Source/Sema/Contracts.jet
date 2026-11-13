@@ -9,6 +9,8 @@
 use jet_foundation.[
     AST_NODE_GENERATED,
     AccessConvention,
+    ModuleID,
+    module_is_core,
     BindPattern,
     Binding,
     Call,
@@ -102,8 +104,8 @@ sema_contract_line: fn(environment: SemaScopeEnvironment, program: SemaProgramTa
 
 // The declared site of the clause whose condition spans `span` in the module
 // `module_identity`, whose source `segments` map.
-sema_contract_site: fn(segments: [SemaSourceSegment], file: String, origin: SemaSourceOrigin, module_identity: String, span: Span) -> TContractSite Never! {
-    TContractSite{file: sema_source_file_at(segments, file, origin, span), line: sema_source_line_at(segments, span) ?? 0, column: sema_source_column_at(segments, span) ?? 0, core: sema_module_is_core_source(module_identity)}
+sema_contract_site: fn(segments: [SemaSourceSegment], file: String, origin: SemaSourceOrigin, module_identity: ModuleID, span: Span) -> TContractSite Never! {
+    TContractSite{file: sema_source_file_at(segments, file, origin, span), line: sema_source_line_at(segments, span) ?? 0, column: sema_source_column_at(segments, span) ?? 0, core: module_is_core(module_identity)}
 }
 
 // The declared sites of `func`'s `pre` clauses: `func` is the declaration
@@ -635,7 +637,7 @@ sema_contract_distinct_range: fn(ty: Type, environment: SemaScopeEnvironment, pr
     // The first row that is either `name` owned by this module or the
     // qualified `module::name` itself.
     local_row: sema_scope_checked_type_row(environment, program, environment.module_identity, name)
-    qualified_row: program.checked_type_rows.get(name)
+    qualified_row: sema_scope_checked_type_row_qualified(program, name)
     row := -1
     if local_row == .Val(local) -> row = local
     if qualified_row == .Val(qualified) && (row < 0 || qualified < row) -> row = qualified
@@ -734,8 +736,9 @@ sema_contract_make: fn(kind: TContractKind, condition: TExpr, message: TExpr, en
 // an identity of its own once both are lowered by symbol.
 sema_contract_result_binding_symbol: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, owner: String, ty: Type, span: Span) -> Symbol Never! {
     result_owner: "{owner}/post"
-    id: symbol_id(SymbolKind.Local, environment.module_identity, result_owner, "result")
-    Symbol{id: id, kind: SymbolKind.Local, name: "result", module_name: environment.module_identity, owner: Val(result_owner), span: span, ty: Val(ty), visibility: 0}
+    module_name: sema_scope_environment_module_text(environment, program)
+    id: symbol_id(SymbolKind.Local, module_name, result_owner, "result")
+    Symbol{id: id, kind: SymbolKind.Local, name: "result", module_name: module_name, owner: Val(result_owner), span: span, ty: Val(ty), visibility: 0}
 }
 
 sema_contract_check_function: fn(func: Func, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaContractDeclaration {
@@ -825,7 +828,7 @@ sema_contract_function_for_symbol: fn(environment: SemaScopeEnvironment, program
             // copy: `value` is a payload of read parameter `environment`, which keeps the original; the Val carrier owns this one
             if environment.declarations[declaration_index].item == .Func(value) -> return Val(value.copy())
         }
-        method: sema_contract_method_function_for_item(environment.declarations[declaration_index].item, target, environment.module_identity)
+        method: sema_contract_method_function_for_item(environment.declarations[declaration_index].item, target, sema_scope_environment_module_text(environment, program))
         if method != None -> return method
     }
     None
@@ -909,7 +912,7 @@ sema_contract_function_facts: fn(environment: SemaScopeEnvironment, program: Sem
         if environment.declarations[declaration_index].symbol_id.key == target.key {
             if environment.declarations[declaration_index].item == .Func(value) -> return Val(sema_contract_callee_facts(value))
         }
-        method: sema_contract_method_facts_for_item(environment.declarations[declaration_index].item, target, environment.module_identity)
+        method: sema_contract_method_facts_for_item(environment.declarations[declaration_index].item, target, sema_scope_environment_module_text(environment, program))
         if method != None -> return method
     }
     None
@@ -924,8 +927,9 @@ sema_contract_function_checks_calls: fn(environment: SemaScopeEnvironment, progr
 
 sema_contract_generated_argument_symbol: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, owner: String, index: Int, parameter_name: String, span: Span, ty: Type) -> Symbol Never! {
     name: "contract_arg_{span.start}_{index}"
-    id: symbol_id(SymbolKind.Local, environment.module_identity, owner, name)
-    Symbol{id: id, kind: SymbolKind.Local, name: parameter_name, module_name: environment.module_identity, owner: Val(owner), span: span, ty: Val(ty), visibility: 0}
+    module_name: sema_scope_environment_module_text(environment, program)
+    id: symbol_id(SymbolKind.Local, module_name, owner, name)
+    Symbol{id: id, kind: SymbolKind.Local, name: parameter_name, module_name: module_name, owner: Val(owner), span: span, ty: Val(ty), visibility: 0}
 }
 
 sema_contract_pin_argument: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, owner: String, index: Int, parameter_name: String, convention: AccessConvention, argument: &TCallArg, call_span: Span, scopes: &SemaScopeTable, state: &SemaOwnershipState, bindings: &[TStmt]) -> TLocal Never! {

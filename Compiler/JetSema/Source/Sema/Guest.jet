@@ -20,6 +20,7 @@ use {
         runtime_c_export,
         runtime_only_read,
         type_name,
+        ModuleID,
     ]
     jet_parser.[parser_guest_import_symbol]
 }
@@ -170,7 +171,7 @@ sema_guest_import_bridge_compatible: fn(function: Func) -> Bool Never! {
 // Rust `library_component_type_is_safe`: native Library rich values use the
 // canonical byte carrier; named records and enums are admitted only when every
 // nested payload has a closed, checked shape.
-sema_guest_library_component_type: fn(graph: SemaRegistrationGraph, module_identity: String, ty: Type, seen: &[String:Bool]) -> Bool {
+sema_guest_library_component_type: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, ty: Type, seen: &[String:Bool]) -> Bool {
     if ty == {
         .Int | .Float | .Bool | .String | .Char | .IntN(_, _) | .Float32 -> true
         .List(inner) | .Option(inner) | .FixedList(inner, _) | .InlineRange(inner, _, _) | .Tagged(_, inner) -> sema_guest_library_component_type(graph, module_identity, inner, seen)
@@ -182,7 +183,7 @@ sema_guest_library_component_type: fn(graph: SemaRegistrationGraph, module_ident
 
 // The `Type::Named` arm: a registered struct, enum, distinct or alias whose
 // every nested payload is itself a closed shape; a recursive name is not.
-sema_guest_library_component_named: fn(graph: SemaRegistrationGraph, module_identity: String, ty: Type, name: String, seen: &[String:Bool]) -> Bool {
+sema_guest_library_component_named: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, ty: Type, name: String, seen: &[String:Bool]) -> Bool {
     if seen.get(name) == .Val(seen_before) && seen_before -> return false
     row: sema_type_resolve_nominal_row(graph, ty, module_identity) ?? return false
     owner: graph.modules[row.module_index].module_identity
@@ -225,7 +226,7 @@ sema_guest_library_component_named: fn(graph: SemaRegistrationGraph, module_iden
 }
 
 // Rust `library_component_signature_is_safe`.
-sema_guest_library_component_signature: fn(graph: SemaRegistrationGraph, module_identity: String, function: Func) -> Bool {
+sema_guest_library_component_signature: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, function: Func) -> Bool {
     return_type: function.return_type ?? return false
     seen := [String:Bool]{}
     if !sema_guest_library_component_type(graph, module_identity, return_type, seen) -> return false

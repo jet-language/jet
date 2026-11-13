@@ -1,5 +1,5 @@
 // Production stored-view bookkeeping and return checking; no host view carrier.
-use jet_foundation.[AST_NODE_GENERATED, AccessConvention, Binding, DIAGNOSTIC_ERROR, Diagnostic, Expr, ExprField, Marker, Span, Symbol, SymbolKind, Type, ViewSource, ViewSourceProjection, symbol_id]
+use jet_foundation.[AST_NODE_GENERATED, AccessConvention, Binding, DIAGNOSTIC_ERROR, Diagnostic, Expr, ExprField, Marker, Span, Symbol, SymbolKind, Type, ViewSource, ViewSourceProjection, module_none, symbol_id]
 use jet_parser.[parse_source]
 use jet_sema.[SemaOwnershipMoveOrigin, SemaOwnershipMovedPlace, SemaSourceSegment, check_program, sema_check_context_init, sema_has_error_since, sema_ownership_clear_moved, sema_ownership_declare_binding, sema_ownership_place_exact, sema_ownership_place_from_expr_inner, sema_ownership_state_init, sema_scope_declare_local, sema_scope_init, sema_stmt_local_view_facts_for_expr, sema_stmt_record_binding_views, sema_stmt_record_return_views]
 
@@ -26,7 +26,7 @@ view_field_case: fn(parameter: Bool, access: AccessConvention, expected: String)
     list_type: Type.List{element: Type.Named{name: "Int"}}
     owner: view_field_symbol("values", if parameter -> SymbolKind.Parameter else -> SymbolKind.Local, list_type, span)
     selected: view_field_symbol("selected", SymbolKind.Local, view_type, use_span)
-    scopes := sema_scope_init("fixture")
+    scopes := sema_scope_init(module_none())
     state := sema_ownership_state_init()
     context := sema_check_context_init()
     diagnostics := [Diagnostic]{}
@@ -126,7 +126,7 @@ view_pattern_reinitialization: fn() {
     // caller has already admitted the descendant assignment.
     span: Span{start: 10, end: 20}
     owner: view_field_symbol("pair", SymbolKind.Local, Type.Named{name: "Pair"}, span)
-    scopes := sema_scope_init("fixture")
+    scopes := sema_scope_init(module_none())
     state := sema_ownership_state_init()
     view_field_require(sema_scope_declare_local(scopes, owner, true, AccessConvention.Read, None, false), "reinit owner declared")
     base: Expr.Field{base: Expr.Ident{name: "pair", span: span, id: AST_NODE_GENERATED}, member: "inner", span: span, id: AST_NODE_GENERATED}

@@ -5,7 +5,7 @@
 use {
     jet_foundation.[AccessConvention, BinEndian, BinMatchPart, DeclID, Span, StrMatchPart, SymbolID, Type, TBinaryOp, TBinaryPatternPart, TBuiltinOp, BodyCallArg, TCanonicalField, TComptimeEnumArg, TComptimeField, TComptimeKey, TComptimeMapEntry, TComptimeValue, TDestructureBinding, BodyEnumArg, BodyEnumPayload, NodeKind, TForInMethod, FnBody, TFuncKind, BodyHandleOp, BodyIfCond, BodyLambda, BodyListSpreadPart, TLocal, BodyMapPatternEntry, BodyMatchArm, TMethodRef, BodyMixedArm, BodyNestedPattern, TNumericOp, BodyOrFallback, TPanicLoc, BodyPattern, BodyPatternBinding, BodyPatternShape, BodyRangeArm, BodyRequireKind, TStaticOwner, BodyStrPart, BodyStructFieldValue, TTextPatternPart, TTryConvert, TypeTupleField, measure_literal_value, body_each_expr_child, body_each_or_fallback_child, body_each_stmt_child, body_stmt, checked_generated_local, checked_user_local, name_rows_set, name_rows_value, type_carrier_identity, StmtKind]
 
-    jet_foundation.[AutoVectorizationFacts, FunctionCallMetadata, function_param_writes, ir_host_value_name, number_argument_value]
+    jet_foundation.[AutoVectorizationFacts, FunctionCallMetadata, function_param_writes, ir_host_value_name, module_is_core, number_argument_value]
     jet_foundation.[ComponentSignatureDescriptor, ComponentTypeDescriptor, ComponentTypeField]
     jet_backend.[ERR_CONTEXT, ERR_CONTEXT_BYTES, ERR_CONVERSIONS, ERR_CONVERSION_BYTES, ERR_DETAILS, ERR_DETAILS_BYTES, ERR_DETAILS_END, ERR_DETAILS_FIELDS, ERR_DETAILS_HAS_SPAN, ERR_DETAILS_START, ERR_DETAILS_VARIANT, ERR_FIELD_BYTES, ERR_IDENTITY]
 }
@@ -2565,7 +2565,7 @@ ir_defer_close: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, close: Int, span: 
 ir_args_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, receiver: Int, helper: String, args: [Int], span: Span) -> Int Never! {
     key := ""
     loop (index, function) in p.functions {
-        if function.name == helper && ir_args_source(function.module_identity, function.source_file, function.kind, function.name) && ir_function_row(p, function.key) == (Val(index)) {
+        if function.name == helper && ir_args_source(module_is_core(function.module_identity), function.source_file, function.kind, function.name) && ir_function_row(p, function.key) == (Val(index)) {
             key = function.key.copy()
             break
         }

@@ -3,7 +3,7 @@
 // rendering (Display/Show/Debug) and numeric conversions.
 
 use {
-    jet_foundation.[CORE_ENUM_ROWS, IRRuntimeHandle, IR_RUNTIME_HANDLES, Span, SymbolID, Type, TypeTupleField, TBinaryOp, TCLIBinding, TCompilerBuiltin, TComptimeValue, TDeclarationOwnership, TField, FnBody, TGenericParam, TNarrowOutcome, TNumericOp, TSerdeAttribute, TShapeFieldNames, TTextPatternPart, TTryConvert, TTypeDef, TTypeDefKind, TVariant, TVariantPayload, core_source_owns_type, core_source_part_owns_type, ir_host_value_name, jet_target_layout_member_order, measure_literal_value, name_rows_set, name_rows_value, type_carrier_identity, type_name, type_table_intern, type_union_member_payload, type_union_member_tag]
+    jet_foundation.[CORE_ENUM_ROWS, IRRuntimeHandle, IR_RUNTIME_HANDLES, ModuleID, Span, SymbolID, Type, TypeTupleField, TBinaryOp, TCLIBinding, TCompilerBuiltin, TComptimeValue, TDeclarationOwnership, TField, FnBody, TGenericParam, TNarrowOutcome, TNumericOp, TSerdeAttribute, TShapeFieldNames, TTextPatternPart, TTryConvert, TTypeDef, TTypeDefKind, TVariant, TVariantPayload, core_source_owns_type, core_source_part_owns_type, ir_host_value_name, jet_target_layout_member_order, measure_literal_value, module_is_core, module_none, name_rows_set, name_rows_value, type_carrier_identity, type_name, type_table_intern, type_union_member_payload, type_union_member_tag]
     jet_sema.[sema_type_def_instance_type]
 }
 
@@ -3049,7 +3049,7 @@ ir_collect_signature_unions: fn(functions: [FnBody], found: &[Type]) Never! {
 
 // The structural enum of union `key`: one variant per member, named by its
 // union member tag and carrying the member, or a named case's payload.
-ir_union_def: fn(module_identity: String, key: String, members: [Type]) -> TTypeDef Never! {
+ir_union_def: fn(module_identity: ModuleID, key: String, members: [Type]) -> TTypeDef Never! {
     variants: loop member in members -> TVariant{name: type_union_member_tag(member), wire_name: type_union_member_tag(member), span: Span{start: 0, end: 0}, payload: TVariantPayload.Single{value: type_union_member_payload(member)}, discriminant: None}
     ir_compiler_owned_def(module_identity, key, TTypeDefKind.Enum{variants: variants, methods: [String]{}})
 }
@@ -3414,12 +3414,12 @@ ir_compiler_owned_type_rows: fn() -> [IRCompilerOwnedTypeRow] Never! {
     rows := [IRCompilerOwnedTypeRow]{}
     loop row in IR_COMPILER_OWNED_ENUMS {
         variants: loop variant in row.variants -> ir_compiler_owned_variant(variant, ir_compiler_owned_enum_payload(row.name, variant))
-        rows.push(IRCompilerOwnedTypeRow{class: .RuntimeEnum, definition: ir_compiler_owned_def("", row.name, TTypeDefKind.Enum{variants: variants, methods: [String]{}})})
+        rows.push(IRCompilerOwnedTypeRow{class: .RuntimeEnum, definition: ir_compiler_owned_def(module_none(), row.name, TTypeDefKind.Enum{variants: variants, methods: [String]{}})})
     }
     loop core_row in CORE_ENUM_ROWS {
         if core_row.kind == .Enum(names) {
             variants: loop variant in names -> ir_compiler_owned_variant(variant, IRCompilerOwnedPayload.Unit)
-            rows.push(IRCompilerOwnedTypeRow{class: .CoreEnum, definition: ir_compiler_owned_def("", core_row.name, TTypeDefKind.Enum{variants: variants, methods: [String]{}})})
+            rows.push(IRCompilerOwnedTypeRow{class: .CoreEnum, definition: ir_compiler_owned_def(module_none(), core_row.name, TTypeDefKind.Enum{variants: variants, methods: [String]{}})})
         }
     }
     records := [String]{"FieldError", IR_RANGE_RECORD}
@@ -3429,7 +3429,7 @@ ir_compiler_owned_type_rows: fn() -> [IRCompilerOwnedTypeRow] Never! {
     core: ir_compiler_owned_core_fields()
     loop name in records {
         fields: ir_compiler_owned_record_fields(name, core) ?? panic("compiler-owned record `{name}` has no field rows")
-        rows.push(IRCompilerOwnedTypeRow{class: .Record, definition: ir_compiler_owned_def("", name, TTypeDefKind.Struct{fields: ir_compiler_owned_fields(fields), methods: [String]{}})})
+        rows.push(IRCompilerOwnedTypeRow{class: .Record, definition: ir_compiler_owned_def(module_none(), name, TTypeDefKind.Struct{fields: ir_compiler_owned_fields(fields), methods: [String]{}})})
     }
     rows
 }
@@ -3494,7 +3494,7 @@ ir_compiler_owned_fields: fn(record_fields: [TypeTupleField]) -> [TField] Never!
 
 // One compiler-owned row under its bare canonical key, with the row's type
 // parameters.
-ir_compiler_owned_def: fn(module_identity: String, name: String, kind: &&TTypeDefKind) -> TTypeDef Never! {
+ir_compiler_owned_def: fn(module_identity: ModuleID, name: String, kind: &&TTypeDefKind) -> TTypeDef Never! {
     generic_params: loop param in ir_compiler_owned_generic_params(name) -> TGenericParam{name: param, bounds: [SymbolID]{}}
     TTypeDef{
         module_identity: module_identity.copy(),
@@ -3787,7 +3787,7 @@ ir_print_style_scalar: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, 
 // core.term no block set a style, and Print renders as Show.
 ir_print_style_row: fn(p: IRProgram, name: String) -> Int Never! {
     loop (index, function) in p.functions {
-        if function.name == name && ir_print_style_source(function.module_identity, function.source_file, function.kind, name) && ir_function_row(p, function.key) == (Val(index)) -> return index
+        if function.name == name && ir_print_style_source(module_is_core(function.module_identity), function.source_file, function.kind, name) && ir_function_row(p, function.key) == (Val(index)) -> return index
     }
     -1
 }

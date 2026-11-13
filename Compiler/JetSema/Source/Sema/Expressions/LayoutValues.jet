@@ -239,8 +239,9 @@ sema_call_try_layout_method: fn(receiver: Expr, receiver_value: TExpr, method: S
 sema_stmt_check_layout: fn(name: String, name_span: Span, body: [Stmt], span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic], output: &[TStmt]) -> Bool {
     layout_ty: Type.Named{name: "Layout"}
     owner: sema_scope_local_owner_key(scopes)
-    id: symbol_id(SymbolKind.Local, environment.module_identity, owner, name)
-    symbol: Symbol{id: id, kind: SymbolKind.Local, name: name, module_name: environment.module_identity, owner: Val(owner), span: name_span, ty: Val(layout_ty), visibility: 0}
+    local_module: sema_scope_environment_module_text(environment, program)
+    id: symbol_id(SymbolKind.Local, local_module, owner, name)
+    symbol: Symbol{id: id, kind: SymbolKind.Local, name: name, module_name: local_module, owner: Val(owner), span: name_span, ty: Val(layout_ty), visibility: 0}
     if !sema_scope_declare_local(scopes, symbol, false, AccessConvention.Read, None, false) {
         diagnostics.push(sema_already_defined(name, name_span))
         return false

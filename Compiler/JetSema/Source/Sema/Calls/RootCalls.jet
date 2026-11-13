@@ -84,7 +84,7 @@ sema_root_call_imported: fn(method: String, receiver: Type?, environment: SemaSc
         imported: sema_call_source_import_target(environment, program, alias) ?? next
         if seen.contains(imported.module_identity) -> next
         seen.push(imported.module_identity)
-        target_index: sema_registration_module_index(graph, imported.module_identity) ?? next
+        target_index: sema_registration_module_index_text(graph, imported.module_identity) ?? next
         export: sema_registration_resolve_export(graph, target_index, method, environment.module_identity, environment.package_identity, [String]{}) ?? next
         row: sema_call_export_function_row(environment, program, export) ?? next
         registered: graph.modules[row.module_index].functions[row.row]

@@ -67,6 +67,7 @@ use jet_foundation.[
     expr_span,
     owned_trait_codec,
     type_name,
+    module_is_core,
 ]
 
 // Rust `expand_builtin_serde_items`: selects each declaration's codecs from
@@ -1810,7 +1811,7 @@ sema_derive_index_methods: fn(graph: &SemaRegistrationGraph) {
     rows := [String:SemaDeriveMethodRow]{}
     types := [String:[String]]{}
     loop module_index in 0..<graph.modules.len() {
-        if graph.modules[module_index].source_file != SEMA_PRELUDE_ERROR_SOURCE_PATH && !sema_module_is_core_source(graph.modules[module_index].module_identity) -> next
+        if graph.modules[module_index].source_file != SEMA_PRELUDE_ERROR_SOURCE_PATH && !module_is_core(graph.modules[module_index].module_identity) -> next
         loop nominal in 0..<graph.modules[module_index].nominals.len() {
             loop method in 0..<graph.modules[module_index].nominals[nominal].methods.len() {
                 declaration: graph.modules[module_index].nominals[nominal].methods[method].declaration

@@ -10,6 +10,7 @@ use jet_foundation.[
     LambdaBody,
     LambdaParam,
     NamedSpan,
+    ModuleID,
     OrFallback,
     ParamZone,
     Span,
@@ -39,7 +40,7 @@ SemaHTTPRouteParameter: struct {
 SemaHTTPRouteShape: struct {
     params: [SemaHTTPRouteParameter]
     body: LambdaBody
-    module_identity: String
+    module_identity: ModuleID
 }
 
 SemaHTTPRoutePathField: struct {
@@ -81,7 +82,7 @@ sema_http_route_find_function: fn(environment: SemaScopeEnvironment, program: Se
     }
 }
 
-sema_http_route_find_struct: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, ty: Type, module_identity: String) -> StructDef? {
+sema_http_route_find_struct: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, ty: Type, module_identity: ModuleID) -> StructDef? {
     if program.registration_graph == .Val(graph) {
     nominal_row: sema_type_resolve_nominal_row(graph, ty, module_identity) ?? return None
     nominal: graph.modules[nominal_row.module_index].nominals[nominal_row.row]
@@ -141,13 +142,13 @@ sema_http_route_shape: fn(expression: Expr, environment: SemaScopeEnvironment, p
             if program.registration_graph == .Val(graph) {
             params := [SemaHTTPRouteParameter]{}
             loop parameter in function.declaration.params {
-                resolved := sema_type_resolve_declared(graph, parameter.ty, function.symbol.module_name)
+                resolved := sema_type_resolve_declared(graph, parameter.ty, sema_registration_module_id(graph, function.symbol.module_name))
                 params.push(SemaHTTPRouteParameter{name: parameter.name, ty: resolved})
             }
             // Named-handler metadata reads another raw body, not merely
             // its callable header. The accepted logical query must recompute.
             sema_body_check_mark_foreign_raw_body(host_hooks)
-            return Val(SemaHTTPRouteShape{params: params, body: LambdaBody.Block{body: function.declaration.body}, module_identity: function.symbol.module_name})
+            return Val(SemaHTTPRouteShape{params: params, body: LambdaBody.Block{body: function.declaration.body}, module_identity: sema_registration_module_id(graph, function.symbol.module_name)})
             } else {
                 return None
             }
@@ -156,7 +157,7 @@ sema_http_route_shape: fn(expression: Expr, environment: SemaScopeEnvironment, p
     }
 }
 
-sema_http_route_method_owner_module: fn(graph: SemaRegistrationGraph, symbol_key: String) -> String? {
+sema_http_route_method_owner_module: fn(graph: SemaRegistrationGraph, symbol_key: String) -> ModuleID? {
     loop module_row_index in 0..<graph.modules.len() {
         loop nominal_index in 0..<graph.modules[module_row_index].nominals.len() {
             loop method in graph.modules[module_row_index].nominals[nominal_index].methods { if method.symbol.id.key == symbol_key -> return Val(graph.modules[module_row_index].module_identity) }
@@ -497,7 +498,7 @@ sema_http_route_json_quote: fn(value: String) -> String Never! {
 
 // The JSON schema of `ty` as module `module_identity` names it; generic
 // parameters are `environment`'s.
-sema_http_route_schema_type: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, module_identity: String, active: [String]) -> String? {
+sema_http_route_schema_type: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, module_identity: ModuleID, active: [String]) -> String? {
     if ty == {
         .Int | .IntN(_, _) -> return Val("{{\"type\":\"integer\",\"format\":\"int64\"}}")
         .Float | .Float32 -> return Val("{{\"type\":\"number\",\"format\":\"double\"}}")
@@ -550,7 +551,7 @@ sema_http_route_schema_type: fn(ty: Type, environment: SemaScopeEnvironment, pro
             required := [String]{}
             loop field in nominal.fields {
                 if field.symbol.visibility != 2 -> next
-                field_schema: sema_http_route_schema_type(field.ty, environment, program, nominal.symbol.module_name, next_active) ?? return None
+                field_schema: sema_http_route_schema_type(field.ty, environment, program, graph.modules[nominal_row.module_index].module_identity, next_active) ?? return None
                 properties.push("{sema_http_route_json_quote(field.symbol.name)}:{field_schema}")
                 if field.ty == {
                     .Option(_) -> {}
@@ -567,7 +568,7 @@ sema_http_route_schema_type: fn(ty: Type, environment: SemaScopeEnvironment, pro
     }
 }
 
-sema_http_route_schema_expr: fn(expression: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, module_identity: String, locals: [SemaHTTPRouteParameter]) -> String? {
+sema_http_route_schema_expr: fn(expression: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, module_identity: ModuleID, locals: [SemaHTTPRouteParameter]) -> String? {
     if expression == {
         .Paren(inner, _, _) -> return sema_http_route_schema_expr(inner, environment, program, module_identity, locals)
         .Str(_, _, _) | .Char(_, _, _) -> return Val("{{\"type\":\"string\"}}")
@@ -602,7 +603,7 @@ sema_http_route_schema_expr: fn(expression: Expr, environment: SemaScopeEnvironm
     }
 }
 
-sema_http_route_response_status: fn(expression: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, module_identity: String) -> Int? {
+sema_http_route_response_status: fn(expression: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, module_identity: ModuleID) -> Int? {
     if expression == {
         .Paren(inner, _, _) -> return sema_http_route_response_status(inner, environment, program, scopes, module_identity)
         .Int(value, _, _, _, _) -> return Val(value)
@@ -659,7 +660,7 @@ sema_http_route_response_status: fn(expression: Expr, environment: SemaScopeEnvi
     }
 }
 
-sema_http_route_response_constructor: fn(name: String, args: [CallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, locals: [SemaHTTPRouteParameter], module_identity: String) -> SemaHTTPRouteResponse? {
+sema_http_route_response_constructor: fn(name: String, args: [CallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, locals: [SemaHTTPRouteParameter], module_identity: ModuleID) -> SemaHTTPRouteResponse? {
     if name != "response" && name != "json" && name != "empty_response" -> return None
     if args.len() == 0 -> return None
     status: sema_http_route_response_status(args[0].expr, environment, program, scopes, module_identity) ?? return None
@@ -677,7 +678,7 @@ sema_http_route_response_alias: fn(aliases: [SemaHTTPRouteResponseAlias], name: 
     None
 }
 
-sema_http_route_response_local_type: fn(expression: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, locals: [SemaHTTPRouteParameter], module_identity: String) -> Type? {
+sema_http_route_response_local_type: fn(expression: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, locals: [SemaHTTPRouteParameter], module_identity: ModuleID) -> Type? {
     if expression == {
         .Paren(inner, _, _) -> return sema_http_route_response_local_type(inner, environment, program, locals, module_identity)
         .Str(_, _, _) | .Char(_, _, _) -> return Val(Type.String)
@@ -716,7 +717,7 @@ sema_http_route_response_local_type: fn(expression: Expr, environment: SemaScope
     }
 }
 
-sema_http_route_response_adapter_returns_response: fn(method: String, args: [CallArg], type_args: [Type], span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, module_identity: String) -> Bool Never! {
+sema_http_route_response_adapter_returns_response: fn(method: String, args: [CallArg], type_args: [Type], span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, module_identity: ModuleID) -> Bool Never! {
     updated_args := args
     if program.registration_graph == .Val(graph) {
     response_row: sema_type_resolve_nominal_row(graph, Type.Named{name: "HTTPResponse"}, module_identity) ?? return false
@@ -755,7 +756,7 @@ sema_http_route_response_adapter_returns_response: fn(method: String, args: [Cal
     }
 }
 
-sema_http_route_response_expr: fn(expression: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, locals: [SemaHTTPRouteParameter], aliases: [SemaHTTPRouteResponseAlias], module_identity: String) -> [SemaHTTPRouteResponse] {
+sema_http_route_response_expr: fn(expression: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, locals: [SemaHTTPRouteParameter], aliases: [SemaHTTPRouteResponseAlias], module_identity: ModuleID) -> [SemaHTTPRouteResponse] {
     if expression == {
         .Paren(inner, _, _) | .Ok(inner, _, _) | .Try(inner, _, _, _, _) -> return sema_http_route_response_expr(inner, environment, program, scopes, locals, aliases, module_identity)
         .If(_, then_body, then_value, else_body, else_value, _, _) -> {
@@ -792,7 +793,7 @@ sema_http_route_response_expr: fn(expression: Expr, environment: SemaScopeEnviro
     [SemaHTTPRouteResponse]{}
 }
 
-sema_http_route_response_statements: fn(statements: [Stmt], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, locals: [SemaHTTPRouteParameter], initial_aliases: [SemaHTTPRouteResponseAlias], module_identity: String) -> [SemaHTTPRouteResponse] {
+sema_http_route_response_statements: fn(statements: [Stmt], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, locals: [SemaHTTPRouteParameter], initial_aliases: [SemaHTTPRouteResponseAlias], module_identity: ModuleID) -> [SemaHTTPRouteResponse] {
     output := [SemaHTTPRouteResponse]{}
     aliases := initial_aliases
     local_types := locals
@@ -991,7 +992,7 @@ sema_http_route_stage_token_check: fn(token: String, argument: CallArg, environm
     key: target.symbol.id.key
     evaluation := SemaCheckedTextEvaluation{
         module_identity: environment.module_identity,
-        key: "{environment.module_identity}::http-method::{span.start}:{span.end}",
+        key: "{sema_scope_environment_module_text(environment, program)}::http-method::{span.start}:{span.end}",
         type_name: "HTTP route method",
         source_file: sema_source_file_at(environment.source_segments, environment.source_file, environment.source_origin, span),
         source_expression: argument.expr,

@@ -10,7 +10,7 @@
 // JS-to-`#Export(wasm)` bridge (E-WEB-CROSS-PARTITION). The bucket is stamped
 // onto each FnBody (`web_bucket`) and, once the program opts in, why it was
 // chosen (`web_reason`).
-use jet_foundation.[Diagnostic, EffectRowEntry, EnumDef, Func, Item, NamedSpan, Span, StructDef, Type, VariantPayload, WebBucket, WebPartitionMarker, owned_trait_codec_names, owned_trait_family, type_name]
+use jet_foundation.[Diagnostic, EffectRowEntry, EnumDef, Func, Item, NamedSpan, Span, StructDef, Type, VariantPayload, WebBucket, WebPartitionMarker, module_is_core, owned_trait_codec_names, owned_trait_family, type_name]
 
 // One function's partition inputs, read from its declaration and its checked
 // body (`slot`/`row` in the module results; row -1 when it has none).
@@ -108,7 +108,7 @@ sema_web_partition_check: fn(modules: &[SemaGraphModuleResult], graph: SemaRegis
                 // pin is the E-WEB-TARGET-BROWSER above, and a Core helper that
                 // uses no `Browser` serves both sides, whichever caller pulled
                 // its bucket (Rust partitioned user functions only).
-                if sema_module_is_core_source(graph.modules[metas[callee].registration].module_identity) && (uses_browser || !sema_web_has_root(sema_web_solved(modules, metas[callee]), "Browser")) -> next
+                if module_is_core(graph.modules[metas[callee].registration].module_identity) && (uses_browser || !sema_web_has_root(sema_web_solved(modules, metas[callee]), "Browser")) -> next
                 found.push(sema_error("E-WEB-CROSS-PARTITION", meta.name_span, "`{meta.key}` is compiled to {sema_web_bucket_name(buckets[at])} but calls `{metas[callee].name}`, which lives in {sema_web_bucket_name(buckets[callee])}", "the web backend keeps DOM/view code in JS and compute in WASM; a direct call across that boundary is not allowed yet", "move the call behind a generated bridge, colocate both functions in the same bucket, or adjust their `#Target(Wasm|JS)` markers"))
             }
         }

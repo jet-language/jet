@@ -78,14 +78,16 @@ TOutputCheckFact: struct {
     function: TFunctionRef
 }
 
-checked_test_artifact_key: fn(module_identity: String, test: TestDef) -> String Never! {
+// A test's key: its module identity's text `module_text` ("" for none), then
+// its name and span.
+checked_test_artifact_key: fn(module_text: String, test: TestDef) -> String Never! {
     name := test.name ?? "anonymous"
     local := "test::{name}@{test.span.start}..{test.span.end}"
-    if module_identity == "" -> local else -> "{module_identity}::{local}"
+    if module_text == "" -> local else -> "{module_text}::{local}"
 }
 
-checked_test_artifact_function_ref: fn(module_identity: String, test: TestDef) -> TFunctionRef Never! {
-    key := checked_test_artifact_key(module_identity, test)
+checked_test_artifact_function_ref: fn(module_identity: ModuleID, module_text: String, test: TestDef) -> TFunctionRef Never! {
+    key := checked_test_artifact_key(module_text, test)
     TFunctionRef{
         key: key,
         module_identity: module_identity,
@@ -198,9 +200,9 @@ checked_test_law: fn(test: TestDef, source: String) -> TTestLawFact Never! {
     TTestLawFact{precondition: precondition, partitions: partitions, relation: visitor.relation, surfaces: visitor.surfaces}
 }
 
-// The checked fact of `test` in the module `module_identity`, whose source
-// text is `source`.
-checked_test_artifact_fact: fn(module_identity: String, test: TestDef, source: String) -> TTestFact Never! {
+// The checked fact of `test` in the module `module_identity`, whose identity
+// text is `module_text` and whose source text is `source`.
+checked_test_artifact_fact: fn(module_identity: ModuleID, module_text: String, test: TestDef, source: String) -> TTestFact Never! {
     parameters := [TTestParamFact]{}
     index := 0
     loop parameter in test.params {
@@ -217,10 +219,10 @@ checked_test_artifact_fact: fn(module_identity: String, test: TestDef, source: S
         })
         index += 1
     }
-    key := checked_test_artifact_key(module_identity, test)
+    key := checked_test_artifact_key(module_text, test)
     TTestFact{
         key: key,
-        function: checked_test_artifact_function_ref(module_identity, test),
+        function: checked_test_artifact_function_ref(module_identity, module_text, test),
         name: test.name ?? key,
         span: test.span,
         kind: if test.params.len() == 0 -> TTestKind.Unit else -> TTestKind.Property,

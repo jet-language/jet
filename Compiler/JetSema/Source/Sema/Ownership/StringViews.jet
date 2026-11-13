@@ -27,6 +27,7 @@ use jet_foundation.[
     expr_span,
     type_identity_equal,
     type_name,
+    ModuleID,
 ]
 
 sema_string_view_copies_declaration: fn(declaration: PolicyDeclaration) -> Bool Never! {
@@ -59,7 +60,7 @@ sema_string_view_copies_marker: fn(marker: Marker) -> Bool Never! {
 
 // Rust `copies_explicit`: a package or module `copies: .Explicit` declaration,
 // or the function's own `#Policy(copies: .Explicit)` marker.
-sema_string_view_apply_copies_policy: fn(table: &SemaScopeTable, graph: SemaRegistrationGraph, module_identity: String, markers: [Marker]) Never! {
+sema_string_view_apply_copies_policy: fn(table: &SemaScopeTable, graph: SemaRegistrationGraph, module_identity: ModuleID, markers: [Marker]) Never! {
     position: sema_scope_module_policy(table, graph, module_identity)
     table.copies_explicit = table.policy_rows[position].copies_explicit
     loop marker in markers {

@@ -27,7 +27,7 @@ use {
         TTryConvert,
         core_identity_in_module,
     ]
-    jet_foundation.[DeclTable, NameRows, Span, Type, decl_table_find, name_rows, name_rows_get_text, name_rows_set_first]
+    jet_foundation.[DeclTable, ModuleID, NameRows, Span, Type, decl_table_find, module_is_core, name_rows, name_rows_get_text, name_rows_set_first]
 }
 
 ir_core_reach_is_top_level: fn(kind: TFuncKind) -> Bool Never! {
@@ -75,23 +75,24 @@ ir_core_source_path: fn(path: String, relative: String) -> Bool Never! {
 }
 
 // Whether a function with these header fields is a Core/Text/Fmt.jet
-// selector helper (ir_string_format_member).
-ir_string_format_source: fn(module_identity: String, source_file: String, kind: TFuncKind) -> Bool Never! {
-    module_identity.starts_with("<corelib>/") && ir_core_source_path(source_file, "Core/Text/Fmt.jet") && ir_core_reach_is_top_level(kind)
+// selector helper (ir_string_format_member). `core`: whether its module is
+// a Core module (module_is_core).
+ir_string_format_source: fn(core: Bool, source_file: String, kind: TFuncKind) -> Bool Never! {
+    core && ir_core_source_path(source_file, "Core/Text/Fmt.jet") && ir_core_reach_is_top_level(kind)
 }
 
 // Whether a function with these header fields is one of the core.term
 // print-style helpers `print` calls by name (BuildTypes.jet
 // ir_print_style_row): a top-level `__print_` function of Core/Term/Term.jet.
-ir_print_style_source: fn(module_identity: String, source_file: String, kind: TFuncKind, name: String) -> Bool Never! {
-    module_identity.starts_with("<corelib>/") && ir_core_source_path(source_file, "Core/Term/Term.jet") && ir_core_reach_is_top_level(kind) && name.starts_with("__print_")
+ir_print_style_source: fn(core: Bool, source_file: String, kind: TFuncKind, name: String) -> Bool Never! {
+    core && ir_core_source_path(source_file, "Core/Term/Term.jet") && ir_core_reach_is_top_level(kind) && name.starts_with("__print_")
 }
 
 // A `#Context(print: …)` block roots the print-style helpers: only a program
 // that sets a style prints through them, and any other prints as Show.
 ir_print_style_keys: fn(functions: [FnBody], keys: &[String]) Never! {
     loop function in functions {
-        if ir_print_style_source(function.module_identity, function.source_file, function.kind, function.name) -> ir_core_reach_add(keys, function.key)
+        if ir_print_style_source(module_is_core(function.module_identity), function.source_file, function.kind, function.name) -> ir_core_reach_add(keys, function.key)
     }
 }
 
@@ -103,8 +104,8 @@ ir_codec_decode_helpers: fn() -> [String] Never! {
 }
 
 // Whether a function with these header fields is one of those helpers.
-ir_codec_decode_source: fn(module_identity: String, source_file: String, kind: TFuncKind, name: String) -> Bool Never! {
-    if !module_identity.starts_with("<corelib>/") || !ir_core_source_path(source_file, "Core/Encoding/Encoding.jet") || !ir_core_reach_is_top_level(kind) -> return false
+ir_codec_decode_source: fn(core: Bool, source_file: String, kind: TFuncKind, name: String) -> Bool Never! {
+    if !core || !ir_core_source_path(source_file, "Core/Encoding/Encoding.jet") || !ir_core_reach_is_top_level(kind) -> return false
     loop helper in ir_codec_decode_helpers() {
         if helper == name -> return true
     }
@@ -147,8 +148,8 @@ ir_args_helper: fn(operation: BodyHandleOp) -> String? Never! {
 }
 
 // Whether a function with these header fields is one of those helpers.
-ir_args_source: fn(module_identity: String, source_file: String, kind: TFuncKind, name: String) -> Bool Never! {
-    module_identity.starts_with("<corelib>/") && ir_core_source_path(source_file, "Core/Args/Args.jet") && ir_core_reach_is_top_level(kind) && (name.starts_with("__args_") || name.starts_with("__parsed_"))
+ir_args_source: fn(core: Bool, source_file: String, kind: TFuncKind, name: String) -> Bool Never! {
+    core && ir_core_source_path(source_file, "Core/Args/Args.jet") && ir_core_reach_is_top_level(kind) && (name.starts_with("__args_") || name.starts_with("__parsed_"))
 }
 
 ir_precise_source_family: fn(name: String, owner: String, prefix: String) -> Bool Never! {
@@ -182,13 +183,13 @@ ir_precise_source_name: fn(name: String) -> Bool Never! {
 }
 
 ir_precise_source_target: fn(function: FnBody) -> Bool Never! {
-    ir_core_reach_is_top_level(function.kind) && ir_precise_source_function(function.module_identity, function.source_file, function.name)
+    ir_core_reach_is_top_level(function.kind) && ir_precise_source_function(module_is_core(function.module_identity), function.source_file, function.name)
 }
 
 // Whether a top-level Core function with these header fields is one of the
 // precise-operation source helpers (ir_precise_source_name).
-ir_precise_source_function: fn(module_identity: String, source_file: String, name: String) -> Bool Never! {
-    module_identity.starts_with("<corelib>/") && ir_core_source_path(source_file, "Core/Math/Math.jet") && ir_precise_source_name(name)
+ir_precise_source_function: fn(core: Bool, source_file: String, name: String) -> Bool Never! {
+    core && ir_core_source_path(source_file, "Core/Math/Math.jet") && ir_precise_source_name(name)
 }
 
 // Whether a top-level Core function with these header fields is one lowering
@@ -198,10 +199,16 @@ ir_precise_source_function: fn(module_identity: String, source_file: String, nam
 // or a core.process line reader (ir_process_line_reader). A compile that
 // lowers checks each up front under Core demand (driver
 // jet_driver_core_lowering_roots), since no checked body names it.
-ir_core_lowered_by_name: fn(module_identity: String, source_file: String, name: String) -> Bool Never! {
+ir_core_lowered_by_name: fn(core: Bool, source_file: String, name: String) -> Bool Never! {
     top: TFuncKind.TopLevel
-    if ir_string_format_source(module_identity, source_file, top) || ir_codec_decode_source(module_identity, source_file, top, name) || ir_args_source(module_identity, source_file, top, name) || ir_print_style_source(module_identity, source_file, top, name) || ir_precise_source_function(module_identity, source_file, name) -> return true
-    core_identity_in_module(module_identity, "core.process") && (name == ir_process_line_reader("ProcessStdoutStream") || name == ir_process_line_reader("ProcessStderrStream"))
+    if ir_string_format_source(core, source_file, top) || ir_codec_decode_source(core, source_file, top, name) || ir_args_source(core, source_file, top, name) || ir_print_style_source(core, source_file, top, name) || ir_precise_source_function(core, source_file, name) -> return true
+    ir_core_process_source(core, source_file) && (name == ir_process_line_reader("ProcessStdoutStream") || name == ir_process_line_reader("ProcessStderrStream"))
+}
+
+// Whether a function with these header fields is core.process's, whose one
+// source is Core/Process/Process.jet.
+ir_core_process_source: fn(core: Bool, source_file: String) -> Bool Never! {
+    core && ir_core_source_path(source_file, "Core/Process/Process.jet")
 }
 
 // The core.process function that reads one line of a child's stream of
@@ -265,10 +272,10 @@ ir_line_reader_key: fn(functions: [FnBody], handle: Type) -> String Never! {
     stream: ir_process_line_reader(owner)
     loop function in functions {
         if stream != "" {
-            if function.name == stream && core_identity_in_module(function.module_identity, "core.process") -> return function.key.copy()
+            if function.name == stream && ir_core_process_source(module_is_core(function.module_identity), function.source_file) -> return function.key.copy()
             next
         }
-        if function.name != "read_line" || !function.module_identity.starts_with("<corelib>/") -> next
+        if function.name != "read_line" || !module_is_core(function.module_identity) -> next
         if function.kind == .Method(_, owner_type) {
             if ir_line_reader_owner(owner_type) == owner -> return function.key.copy()
         }
@@ -289,7 +296,7 @@ ir_encoding_reader_next_key: fn(functions: [FnBody], reader: Type) -> String Nev
     owner: ir_line_reader_owner(reader)
     if owner == "" -> return ""
     loop function in functions {
-        if function.name != "next" || !function.module_identity.starts_with("<corelib>/") -> next
+        if function.name != "next" || !module_is_core(function.module_identity) -> next
         if function.kind == .Method(_, owner_type) {
             if ir_line_reader_owner(owner_type) == owner -> return function.key.copy()
         }
@@ -726,10 +733,10 @@ ir_core_reach_template_key: fn(key: String) -> String Never! {
 // Reachability is a closure, so the flags are the same for any thread
 // count. `functions` leaves for the threads and comes back unchanged.
 // `decls` is the run's declaration table the direct calls name.
-ir_reachable_core_rows: fn(functions: &[FnBody], decls: DeclTable, candidates: &&[Bool], core_module_identities: [String], rooted_keys: [String:Bool], threads: CompilerThreads) -> [Bool] {
+ir_reachable_core_rows: fn(functions: &[FnBody], decls: DeclTable, candidates: &&[Bool], core_module_identities: [ModuleID], rooted_keys: [String:Bool], threads: CompilerThreads) -> [Bool] {
     if core_module_identities.len() == 0 -> return candidates
-    core_modules := [String:Bool]{}
-    loop identity in core_module_identities -> core_modules[identity] = true
+    core_modules := [U32:Bool]{}
+    loop identity in core_module_identities -> core_modules[identity.id] = true
     // Each candidate key's first row (a hashed map: only looked up).
     by_key := name_rows()
     reachable := [Bool]{}
@@ -750,8 +757,9 @@ ir_reachable_core_rows: fn(functions: &[FnBody], decls: DeclTable, candidates: &
         if decl_table_find(decls, function.key) == .Val(id) {
             if decl_rows[id.row.index()] < 0 -> decl_rows[id.row.index()] = index
         }
-        if ir_string_format_source(function.module_identity, function.source_file, function.kind) || ir_codec_decode_source(function.module_identity, function.source_file, function.kind, function.name) || ir_args_source(function.module_identity, function.source_file, function.kind, function.name) -> source_keys[function.name] = function.key
-        rooted: !core_modules.has_key(function.module_identity) || rooted_keys.has_key(function.key) || (!ir_core_reach_is_top_level(function.kind) && !function.synthetic) || ir_core_reach_generated_codec(function) || ir_precise_source_target(function)
+        core: module_is_core(function.module_identity)
+        if ir_string_format_source(core, function.source_file, function.kind) || ir_codec_decode_source(core, function.source_file, function.kind, function.name) || ir_args_source(core, function.source_file, function.kind, function.name) -> source_keys[function.name] = function.key
+        rooted: !core_modules.has_key(function.module_identity.id) || rooted_keys.has_key(function.key) || (!ir_core_reach_is_top_level(function.kind) && !function.synthetic) || ir_core_reach_generated_codec(function) || ir_precise_source_target(function)
         reachable.push(rooted)
         if rooted {
             roots.push(index)

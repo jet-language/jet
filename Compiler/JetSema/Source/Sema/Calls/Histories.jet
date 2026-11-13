@@ -26,6 +26,7 @@ use {
         type_name,
         ast_empty_call_arg_flags,
         sha256_hex,
+        module_text,
     ]
     jet_parser.[
         parse_generated_source,
@@ -39,7 +40,7 @@ SemaHistoriesDerived: struct {
 }
 
 sema_call_histories_is_call: fn(target: SemaCallDirectTarget, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
-    target.symbol.name == "histories" && sema_call_core_module_identity(environment, program, "core.testing") == (Val(target.symbol.module_name))
+    target.symbol.name == "histories" && sema_call_core_module_is(environment, program, "core.testing", target.symbol.module_name)
 }
 
 // The call's arguments followed by the hidden ones.
@@ -136,7 +137,7 @@ sema_call_histories_package_digest: fn(graph: SemaRegistrationGraph, package_ide
     frames := [String]{}
     loop index in 0..<graph.modules.len() {
         if graph.modules[index].package_identity != package_identity || graph.modules[index].source == "" -> next
-        frames.push(sema_call_histories_frame(graph.modules[index].module_identity))
+        frames.push(sema_call_histories_frame(module_text(graph.module_table, graph.modules[index].module_identity)))
         frames.push(sema_call_histories_frame(graph.modules[index].source))
     }
     if frames.len() == 0 -> return ""

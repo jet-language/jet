@@ -1,5 +1,5 @@
 use {
-    jet_foundation.[CompilerThreads, Diagnostic, Item, NameTable, Span, UnitFamilyDef, UnitFamilyMember, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_heaviest_first, compiler_transfer_rows, name_intern, name_table]
+    jet_foundation.[CompilerThreads, Diagnostic, Item, ModuleID, NameTable, Span, UnitFamilyDef, UnitFamilyMember, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_heaviest_first, compiler_transfer_rows, name_intern, name_table]
     jet_parser.[parse_generated_source]
 }
 
@@ -145,7 +145,7 @@ SEMA_UNITS_SCAN_MIN_BYTES_PER_THREAD: 262144
 
 // Whether input `index` takes the catalog families: every source module
 // (the compiler-owned effect module `skipped` is none) that keeps its prelude.
-sema_units_scanned: fn(inputs: [SemaRegistrationModuleInput], index: Int, skipped: String) -> Bool Never! {
+sema_units_scanned: fn(inputs: [SemaRegistrationModuleInput], index: Int, skipped: ModuleID) -> Bool Never! {
     !inputs[index].program.no_prelude && inputs[index].module_identity != skipped
 }
 
@@ -155,7 +155,7 @@ sema_units_scanned: fn(inputs: [SemaRegistrationModuleInput], index: Int, skippe
 // threads scan the sources in place, claimed largest first, and the inputs
 // move back in order. Each row lands at its input, so the rows are the same
 // for any thread count.
-sema_units_scan_mentions: fn(inputs: &[SemaRegistrationModuleInput], skipped: String, wanted: NameTable, threads: CompilerThreads) -> [SemaUnitSourceMentions] {
+sema_units_scan_mentions: fn(inputs: &[SemaRegistrationModuleInput], skipped: ModuleID, wanted: NameTable, threads: CompilerThreads) -> [SemaUnitSourceMentions] {
     rows := [SemaUnitSourceMentions]{}
     jobs := [Int]{}
     weights := [Int]{}

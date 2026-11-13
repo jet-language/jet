@@ -162,15 +162,15 @@ sema_units_resolve_standard: fn(prelude: &[UnitFamilyDef]) Never! {
 // not incur a declarations × pending-claims scan each iteration.
 sema_units_resolve: fn(inputs: &[SemaRegistrationModuleInput], edges: [SemaRegistrationImportEdge], diagnostics: &[Diagnostic]) Never! {
     declarations := [SemaUnitDimensionDeclaration]{}
-    module_rows := [String:Int]{}
+    module_rows := [U32:Int]{}
     locals := [[String:Int]]{}
     exports := [[String:Int]]{}
     sema_units_dimension_declarations(inputs, declarations, module_rows, locals, exports)
     visibility := [SemaUnitDimensionVisibility]{}
     loop local in locals -> visibility.push(SemaUnitDimensionVisibility{local: local, imported: [String:[Int]]{}, qualified: [String:Int]{}, aliases: [String:Int]{}})
     loop edge in edges {
-        source: module_rows.get(edge.source_module_identity) ?? next
-        target: module_rows.get(edge.target_module_identity) ?? next
+        source: module_rows.get(edge.source_module_identity.id) ?? next
+        target: module_rows.get(edge.target_module_identity.id) ?? next
         alias: edge.declaration.alias
         visibility[source].aliases[alias] = target
         loop (name, index) in exports[target] {
@@ -266,9 +266,9 @@ sema_units_resolve: fn(inputs: &[SemaRegistrationModuleInput], edges: [SemaRegis
 
 // Every unit family of `inputs` that claims a dimension, with each module's
 // local and exported family rows; each input is read in place.
-sema_units_dimension_declarations: fn(inputs: [SemaRegistrationModuleInput], declarations: &[SemaUnitDimensionDeclaration], module_rows: &[String:Int], locals: &[[String:Int]], exports: &[[String:Int]]) Never! {
+sema_units_dimension_declarations: fn(inputs: [SemaRegistrationModuleInput], declarations: &[SemaUnitDimensionDeclaration], module_rows: &[U32:Int], locals: &[[String:Int]], exports: &[[String:Int]]) Never! {
     loop (module_index, input) in inputs {
-        module_rows[input.module_identity] = module_index
+        module_rows[input.module_identity.id] = module_index
         local := [String:Int]{}
         public := [String:Int]{}
         loop (item, value) in input.program.items {

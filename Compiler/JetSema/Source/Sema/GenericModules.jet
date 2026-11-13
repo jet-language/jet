@@ -22,6 +22,9 @@ use jet_foundation.[
     type_identity_key,
     type_name,
     Func,
+    ModuleID,
+    ModuleTable,
+    module_text,
 ]
 
 // Generic module instantiation checks (Rust
@@ -56,7 +59,7 @@ SemaGenericModuleTemplate: struct {
 }
 
 SemaGenericModuleCheck: struct {
-    module_identity: String
+    module_identity: ModuleID
     diagnostics: [Diagnostic]
     seen: [String:Bool]
 }
@@ -109,7 +112,7 @@ sema_generic_modules_collect: fn(graph: SemaRegistrationGraph, inputs: [SemaRegi
 }
 
 // Locate the written input without returning an owned copy of its items.
-sema_genmod_written_input: fn(inputs: [SemaRegistrationModuleInput], module_identity: String) -> Int? {
+sema_genmod_written_input: fn(inputs: [SemaRegistrationModuleInput], module_identity: ModuleID) -> Int? {
     loop index in 0..<inputs.len() {
         if inputs[index].module_identity == module_identity -> return Val(index)
     }
@@ -400,7 +403,7 @@ sema_genmod_arg_span: fn(arg: ModuleArg) -> Span {
 // Rust `TraitRegistry::implements_trait` for a module bound. Only a bound
 // that names a declared trait is checked; a type that resolves to no
 // declaration (a primitive, an unknown name) implements no declared trait.
-sema_genmod_implements: fn(graph: SemaRegistrationGraph, module_identity: String, ty: Type, bound: String) -> Bool {
+sema_genmod_implements: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, ty: Type, bound: String) -> Bool {
     resolved_bound: sema_registration_lookup_name(graph, module_identity, bound) ?? return true
     if sema_resolved_kind(graph, resolved_bound) != SymbolKind.Trait -> return true
     if sema_type_resolve_nominal_row(graph, ty, module_identity) == None -> return false
@@ -835,13 +838,13 @@ SemaGenericModuleExpansion: struct {
 // by module identity, each in ascending order. A per-module scan of every
 // edge and every input made registration modules × (edges + inputs).
 SemaGenericModuleIndex: struct {
-    edge_slots: [String:Int]
+    edge_slots: [ModuleID:Int]
     edge_rows: [[Int]]
-    template_slots: [String:Int]
+    template_slots: [ModuleID:Int]
     template_rows: [[Int]]
 }
 
-sema_generic_modules_bucket_add: fn(slots: &[String:Int], rows: &[[Int]], key: String, row: Int) Never! {
+sema_generic_modules_bucket_add: fn(slots: &[ModuleID:Int], rows: &[[Int]], key: ModuleID, row: Int) Never! {
     if slots.get(key) == .Val(slot) {
         rows[slot].push(row)
         return
@@ -851,7 +854,7 @@ sema_generic_modules_bucket_add: fn(slots: &[String:Int], rows: &[[Int]], key: S
 }
 
 sema_generic_modules_index: fn(inputs: [SemaRegistrationModuleInput], edges: [SemaRegistrationImportEdge]) -> SemaGenericModuleIndex Never! {
-    index := SemaGenericModuleIndex{edge_slots: [String:Int]{}, edge_rows: [[Int]]{}, template_slots: [String:Int]{}, template_rows: [[Int]]{}}
+    index := SemaGenericModuleIndex{edge_slots: [ModuleID:Int]{}, edge_rows: [[Int]]{}, template_slots: [ModuleID:Int]{}, template_rows: [[Int]]{}}
     loop (row, edge) in edges -> sema_generic_modules_bucket_add(index.edge_slots, index.edge_rows, edge.source_module_identity, row)
     loop (row, input) in inputs {
         has_template := false
@@ -863,9 +866,10 @@ sema_generic_modules_index: fn(inputs: [SemaRegistrationModuleInput], edges: [Se
     index
 }
 
-// Templates `module_identity` imports by name, from each loaded import edge.
-// A private template binds nothing; import registration reports it (E0609).
-sema_generic_modules_imported: fn(inputs: [SemaRegistrationModuleInput], edges: [SemaRegistrationImportEdge], index: SemaGenericModuleIndex, module_identity: String) -> [SemaGenericModuleSource] {
+// Templates `module_identity` imports by name, from each loaded import edge;
+// `table` spells their keys. A private template binds nothing; import
+// registration reports it (E0609).
+sema_generic_modules_imported: fn(inputs: [SemaRegistrationModuleInput], edges: [SemaRegistrationImportEdge], index: SemaGenericModuleIndex, module_identity: ModuleID, table: ModuleTable) -> [SemaGenericModuleSource] {
     sources := [SemaGenericModuleSource]{}
     edge_slot: index.edge_slots.get(module_identity) ?? return sources
     loop edge_row in index.edge_rows[edge_slot] {
@@ -881,7 +885,7 @@ sema_generic_modules_imported: fn(inputs: [SemaRegistrationModuleInput], edges: 
                     loop item in items {
                         if item == .GenericModule(definition) {
                             if definition.name == entry.original && (definition.is_pub || definition.is_package_pub) {
-                                sources.push(SemaGenericModuleSource{local: sema_genmod_import_local(entry), key: "{input.module_identity}:{definition.name}", definition: definition, source_items: sema_genmod_definition_items(items), source_values: values})
+                                sources.push(SemaGenericModuleSource{local: sema_genmod_import_local(entry), key: "{module_text(table, input.module_identity)}:{definition.name}", definition: definition, source_items: sema_genmod_definition_items(items), source_values: values})
                             }
                         }
                     }
@@ -905,9 +909,10 @@ sema_genmod_definition_items: fn(items: [Item]) -> [Item] {
 }
 
 // Expands `program`'s module aliases in place; a program without one is left
-// untouched (not copied).
-sema_generic_modules_expand: fn(program: &Program, module_identity: String, imported: [SemaGenericModuleSource], settings: [SemaBuildSetting]) {
-    if sema_generic_modules_rewritten_items(program, module_identity, imported, settings) == .Val(rewritten) -> program.items = rewritten
+// untouched (not copied). `module_text` is `module_identity`'s identity text,
+// which the instances' keys and applications spell.
+sema_generic_modules_expand: fn(program: &Program, module_identity: ModuleID, module_text: String, imported: [SemaGenericModuleSource], settings: [SemaBuildSetting]) {
+    if sema_generic_modules_rewritten_items(program, module_identity, module_text, imported, settings) == .Val(rewritten) -> program.items = rewritten
     if !sema_genmod_has_expression_tests(program.items) -> return
     enums: sema_genmod_enums(program.items, [GenericModuleDef]{})
     sema_genmod_resolve_test_names(program.items, sema_genmod_setting_literals(settings, enums), enums)
@@ -962,12 +967,12 @@ sema_genmod_has_expression_tests: fn(items: [Item]) -> Bool {
 
 // The expanded item list of `program`, or None when it has no module alias to
 // expand (or its aliases form a cycle).
-sema_generic_modules_rewritten_items: fn(program: Program, module_identity: String, imported: [SemaGenericModuleSource], settings: [SemaBuildSetting]) -> [Item]? {
+sema_generic_modules_rewritten_items: fn(program: Program, module_identity: ModuleID, module_text: String, imported: [SemaGenericModuleSource], settings: [SemaBuildSetting]) -> [Item]? {
     items: program.items
     if !sema_genmod_has_aliases(items) -> return None
     enums: sema_genmod_enums(items, [GenericModuleDef]{})
     values: sema_genmod_folded_consts(items, sema_genmod_setting_literals(settings, enums), enums)
-    nesting: SemaGenericModuleNesting{module_identity: module_identity, key_prefix: "{module_identity}:", path: ""}
+    nesting: SemaGenericModuleNesting{module_identity: module_identity, module_text: module_text, key_prefix: "{module_text}:", path: ""}
     expanded: sema_genmod_expand_items(items, nesting, imported, values, enums) ?? return None
     Val(expanded.items)
 }
@@ -979,12 +984,14 @@ sema_genmod_has_aliases: fn(items: [Item]) -> Bool Never! {
     false
 }
 
-// Where one item list's aliases expand: the module that declares them, the
-// prefix of its local templates' keys (a template inside an instance belongs
-// to that instance), and the flattened name of the module body holding the
-// list ("" at file level), which its application names start from.
+// Where one item list's aliases expand: the module that declares them and its
+// identity text, the prefix of its local templates' keys (a template inside
+// an instance belongs to that instance), and the flattened name of the module
+// body holding the list ("" at file level), which its application names
+// start from.
 SemaGenericModuleNesting: struct {
-    module_identity: String
+    module_identity: ModuleID
+    module_text: String
     key_prefix: String
     path: String
 }
@@ -1117,10 +1124,10 @@ sema_genmod_application_name: fn(path: String, name: String) -> String {
 sema_genmod_with_applications: fn(instance: CodeModule, aliases: [ModuleAliasDef], canonical: [String:String], nesting: SemaGenericModuleNesting) -> CodeModule {
     identity := instance.instance_identity ?? return instance.copy()
     semantic: "instance:{identity.fingerprint}"
-    applications := [ModuleInstanceApplication]{ModuleInstanceApplication{name: sema_genmod_application_name(nesting.path, instance.name), source_module: nesting.module_identity, semantic_identity: semantic, span: instance.name_span}}
+    applications := [ModuleInstanceApplication]{ModuleInstanceApplication{name: sema_genmod_application_name(nesting.path, instance.name), source_module: nesting.module_text, semantic_identity: semantic, span: instance.name_span}}
     loop alias in aliases {
         if alias.name == instance.name || canonical.get(alias.name) != Val(instance.name) -> next
-        applications.push(ModuleInstanceApplication{name: sema_genmod_application_name(nesting.path, alias.name), source_module: nesting.module_identity, semantic_identity: semantic, span: alias.name_span})
+        applications.push(ModuleInstanceApplication{name: sema_genmod_application_name(nesting.path, alias.name), source_module: nesting.module_text, semantic_identity: semantic, span: alias.name_span})
     }
     identity.applications = applications
     updated := instance
@@ -1336,7 +1343,7 @@ sema_genmod_expand_alias: fn(alias: ModuleAliasDef, source: SemaGenericModuleSou
             inner.push(Item.ModuleAlias{value: renamed})
         }
     }
-    inner_nesting: SemaGenericModuleNesting{module_identity: nesting.module_identity, key_prefix: "{binding.key}#", path: nesting.path}
+    inner_nesting: SemaGenericModuleNesting{module_identity: nesting.module_identity, module_text: nesting.module_text, key_prefix: "{binding.key}#", path: nesting.path}
     if sema_genmod_expand_items(inner, inner_nesting, [SemaGenericModuleSource]{}, rewrite.values, enums) == .Val(nested_expanded) {
         loop item in template.body {
             if item == .ModuleAlias(nested) {
@@ -1354,7 +1361,7 @@ sema_genmod_expand_alias: fn(alias: ModuleAliasDef, source: SemaGenericModuleSou
             .CodeModule(nested) -> {
                 mapped := nested
                 mapped.name = sema_genmod_value_name(alias.name, nested.name)
-                nested_path: SemaGenericModuleNesting{module_identity: nesting.module_identity, key_prefix: "{binding.key}#{nested.name}.", path: sema_genmod_application_name(nesting.path, mapped.name)}
+                nested_path: SemaGenericModuleNesting{module_identity: nesting.module_identity, module_text: nesting.module_text, key_prefix: "{binding.key}#{nested.name}.", path: sema_genmod_application_name(nesting.path, mapped.name)}
                 if nested.body == .Val(nested_body) -> mapped.body = Val(sema_genmod_specialize_nested(rewrite, nested_body, nested.name, enums, nested_path))
                 declarations.push(Item.CodeModule{value: mapped})
             }
@@ -1508,7 +1515,7 @@ sema_genmod_specialize_nested: fn(rewrite: &SemaInlineRewrite, body: [Item], mod
             }
             .CodeModule(child) -> {
                 updated := child
-                child_nesting: SemaGenericModuleNesting{module_identity: nesting.module_identity, key_prefix: "{nesting.key_prefix}{child.name}.", path: sema_genmod_value_name(nesting.path, child.name)}
+                child_nesting: SemaGenericModuleNesting{module_identity: nesting.module_identity, module_text: nesting.module_text, key_prefix: "{nesting.key_prefix}{child.name}.", path: sema_genmod_value_name(nesting.path, child.name)}
                 if child.body == .Val(child_body) -> updated.body = Val(sema_genmod_specialize_nested(rewrite, child_body, child.name, enums, child_nesting))
                 mapped.push(Item.CodeModule{value: updated})
             }

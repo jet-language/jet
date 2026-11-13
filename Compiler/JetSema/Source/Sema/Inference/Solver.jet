@@ -14,6 +14,8 @@ use jet_foundation.[
     owned_trait_requires_listed,
     type_identity_equal,
     type_name,
+    module_is_none,
+    ModuleID,
 ]
 
 sema_inference_parameter_index: fn(context: SemaInferenceContext, name: String) -> Int? {
@@ -216,9 +218,9 @@ sema_inference_unify_inner: fn(context: SemaInferenceContext, expected: Type, fo
 // A bound names a trait of the callee's declaring module (`bound_module`),
 // which the caller need not see (`Transform.point<P: GeometryPoint>` called
 // from user code); the actual type resolves where the caller wrote it.
-sema_inference_bound_value: fn(graph: SemaRegistrationGraph?, context: &SemaInferenceContext, actual: Type, bound: String, bound_module: String) -> Bool? {
+sema_inference_bound_value: fn(graph: SemaRegistrationGraph?, context: &SemaInferenceContext, actual: Type, bound: String, bound_module: ModuleID) -> Bool? {
     graph_value: graph ?? return None
-    if bound_module == "" || bound_module == context.caller_module_identity -> return sema_type_bound_satisfied_with_generics(graph_value, actual, bound, context.caller_module_identity, context.lexical_generic_params)
+    if module_is_none(bound_module) || bound_module == context.caller_module_identity -> return sema_type_bound_satisfied_with_generics(graph_value, actual, bound, context.caller_module_identity, context.lexical_generic_params)
     resolved: sema_type_resolve_declared_recursive(graph_value, actual, sema_type_module_row(graph_value, context.caller_module_identity), context.lexical_generic_params)
     sema_type_bound_satisfied_with_generics(graph_value, resolved, bound, bound_module, context.lexical_generic_params)
 }
@@ -283,7 +285,7 @@ sema_inference_validate_bounds: fn(graph: SemaRegistrationGraph?, context: &Sema
                     fix = "call the function and use its result, as `f()`"
                 }
                 if graph == .Val(graph_value) {
-                    head_module: if parameter.bound_module == "" -> context.caller_module_identity else -> parameter.bound_module
+                    head_module: if module_is_none(parameter.bound_module) -> context.caller_module_identity else -> parameter.bound_module
                     if sema_type_conditional_impl_head(graph_value, concrete, bound, head_module) == .Val(head) {
                         why = "`{head}` applies only where its bounds hold, and the type arguments of `{name}` don't meet them"
                         fix = "use type arguments that meet the bounds of `{head}`, or implement those traits for them"

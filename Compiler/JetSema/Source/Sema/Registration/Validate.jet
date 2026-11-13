@@ -30,6 +30,7 @@ use jet_foundation.[
     core_record_field,
     core_record_field_is_core_only,
     core_source_is_validate,
+    module_is_core,
 ]
 
 // The rule statement's name (Syntax `VALIDATE_CHECK_FN`).
@@ -218,6 +219,6 @@ sema_validate_over_has_field: fn(subject: Type, name: String, environment: SemaS
             return false
         }
     }
-    if core_record_field_is_core_only(owner_name, name) && !sema_module_is_core_source(environment.module_identity) -> return false
+    if core_record_field_is_core_only(owner_name, name) && !module_is_core(environment.module_identity) -> return false
     core_record_field(owner_name, name) != None
 }

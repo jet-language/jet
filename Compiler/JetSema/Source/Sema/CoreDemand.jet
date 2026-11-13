@@ -46,6 +46,8 @@ use jet_foundation.[
     body_each_stmt_child,
     body_node,
     symbol_id,
+    module_is_core,
+    module_text,
 ]
 
 // Indexes the deferred bodies of `graph` for one finalization: none unless
@@ -87,10 +89,11 @@ sema_core_demand_index: fn(graph: &SemaRegistrationGraph, enabled: Bool) {
 // entry. `roots` and `eager` are the keys that stay checked up front.
 sema_core_demand_module_rows: fn(graph: SemaRegistrationGraph, module_index: Int, roots: [String:Bool], eager: [String:Bool], rows: &[String:Int]) Never! {
     identity: graph.modules[module_index].module_identity
-    if !sema_module_is_core_source(identity) || identity == graph.entry_module_identity -> return
+    if !module_is_core(identity) || identity == graph.entry_module_identity -> return
+    identity_text: module_text(graph.module_table, identity)
     loop item in graph.modules[module_index].program.items {
         if item == .Func(func) {
-            key: symbol_id(SymbolKind.Function, identity, "", func.name).key
+            key: symbol_id(SymbolKind.Function, identity_text, "", func.name).key
             if roots.get(key) == None -> rows[key] = module_index
         }
     }
@@ -140,7 +143,7 @@ sema_core_demand_deferred: fn(graph: SemaRegistrationGraph, key: String) -> Bool
 sema_check_registered_item_deferred: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, module_index: Int, item_index: Int) -> Bool {
     if program.registration_graph == .Val(graph) {
         if graph.core_demand_rows.len() == 0 -> return false
-        if graph.modules[module_index].program.items[item_index] == .Func(func) -> return sema_core_demand_deferred(graph, symbol_id(SymbolKind.Function, graph.modules[module_index].module_identity, "", func.name).key)
+        if graph.modules[module_index].program.items[item_index] == .Func(func) -> return sema_core_demand_deferred(graph, symbol_id(SymbolKind.Function, module_text(graph.module_table, graph.modules[module_index].module_identity), "", func.name).key)
         return false
     }
     panic("an owning registered-module pass lost its registration graph")
@@ -150,7 +153,7 @@ sema_check_registered_item_deferred: fn(environment: SemaScopeEnvironment, progr
 // current demand wave checks (graph.core_wave_rows).
 sema_check_registered_item_in_core_wave: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, module_index: Int, item_index: Int) -> Bool {
     if program.registration_graph == .Val(graph) {
-        if graph.modules[module_index].program.items[item_index] == .Func(func) -> return graph.core_wave_rows.get(symbol_id(SymbolKind.Function, graph.modules[module_index].module_identity, "", func.name).key) != None
+        if graph.modules[module_index].program.items[item_index] == .Func(func) -> return graph.core_wave_rows.get(symbol_id(SymbolKind.Function, module_text(graph.module_table, graph.modules[module_index].module_identity), "", func.name).key) != None
         return false
     }
     panic("an owning registered-module pass lost its registration graph")
@@ -301,7 +304,7 @@ sema_check_core_demand_module_lent: fn(environment: &SemaScopeEnvironment, progr
         if !sema_check_apply_method_job(module_index, memory_plan, job, method_ready, queries, None, scopes, environment, program, host_hooks, comptime_functions, comptime_rows, result.diagnostics, result.functions, prelude_demands, result.call_facts, result.hardware_use, result.comptime_requests, result.name_references, result.comptime_body_sources, result.compute_facts, result.failure_facts, result.exact_int_reachable, result.copy_events, result.incomplete_reasons, keep_going, pending_obligations) -> result.complete = false
     }
     injected_from := result.functions.len()
-    if !sema_inject_prelude_error_conversions(module_identity, environment, program, scopes, host_hooks, result.functions, prelude_demands, result.diagnostics, result.call_facts, result.comptime_requests, result.name_references, result.incomplete_reasons, keep_going) -> result.complete = false
+    if !sema_inject_prelude_error_conversions(sema_check_registered_module_text(program, module_identity), environment, program, scopes, host_hooks, result.functions, prelude_demands, result.diagnostics, result.call_facts, result.comptime_requests, result.name_references, result.incomplete_reasons, keep_going) -> result.complete = false
     loop index in injected_from..<result.functions.len() -> result.injected_function_keys.push(result.functions[index].key)
     sema_check_registered_locate_diagnostics(environment, program, module_index, diagnostics_before, result.diagnostics)
     result.functions.len() - before

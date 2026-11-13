@@ -2,7 +2,7 @@
 // Host tests cover cache publication; these pure tests never spawn Cargo/rustc.
 use {
     jet_parser.[parse_source]
-    jet_foundation.[Type, TagMarker, Measure]
+    jet_foundation.[Type, TagMarker, Measure, module_none]
     jet_driver.[
         JET_DRIVER_RUST_FOREIGN_TARGET, JetDriverRustForeignEntry, JetDriverRustForeignFacts,
         JetDriverRustForeignRecordIndex, jet_driver_rust_foreign_collect_items,
@@ -16,7 +16,7 @@ rust_foreign_test_facts: fn(source: String) -> JetDriverRustForeignFacts {
     assert(parsed.diagnostics.len() == 0)
     entries := [JetDriverRustForeignEntry]{}
     records := JetDriverRustForeignRecordIndex{records: [], names: [String:String]{}, aliases: [String:Type]{}}
-    jet_driver_rust_foreign_collect_items(parsed.program.items, "", "test-module", entries, records)
+    jet_driver_rust_foreign_collect_items(parsed.program.items, "", module_none(), entries, records)
     JetDriverRustForeignFacts{entries: entries, record_source: "", record_names: records.names}
 }
 #Test("native Rust helpers preserve declared dependency set and slot ABI") {

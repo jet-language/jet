@@ -24,6 +24,7 @@ use jet_foundation.[
     THardwareCall,
     Type,
     expr_span,
+    module_text,
 ]
 
 SemaHardwareBoardPath: struct {
@@ -229,7 +230,7 @@ sema_hardware_expr_name: fn(expression: Expr) -> String? {
 sema_hardware_import_module: fn(graph: SemaRegistrationGraph, binding: SemaRegistrationImportBinding) -> String Never! {
     module_index: sema_registration_module_index(graph, binding.target_module_identity)
     if module_index == .Val(index) -> return graph.modules[index].module_name
-    binding.target_module_identity
+    module_text(graph.module_table, binding.target_module_identity)
 }
 
 // Resolve only an active, unshadowed module import whose canonical target is a

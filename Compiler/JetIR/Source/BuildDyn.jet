@@ -9,7 +9,7 @@
 // helper or the runtime's scalar Decode adapter, whose String Decode reads a
 // native Text in place.
 
-use jet_foundation.[Span, TBuiltinOp, BodyCallArg, Measure, NodeKind, BodyHandleOp, TPanicLoc, Type, checked_generated_local, checked_user_local, measure_literal_value, StmtKind]
+use jet_foundation.[Span, TBuiltinOp, BodyCallArg, Measure, NodeKind, BodyHandleOp, TPanicLoc, Type, checked_generated_local, checked_user_local, measure_literal_value, module_is_core, StmtKind]
 
 // The lowering of `receiver.operation(args)` when the receiver is the
 // canonical Dyn and the operation is one of the tree methods here; None
@@ -666,7 +666,7 @@ ir_codec_decode_helper: fn(p: IRProgram, target: Type) -> (name: String, type_ar
 // does not hold it (CoreReach.jet ir_codec_decode_source).
 ir_codec_decode_key: fn(p: IRProgram, name: String) -> String? Never! {
     loop (index, function) in p.functions {
-        if function.name == name && ir_codec_decode_source(function.module_identity, function.source_file, function.kind, function.name) && ir_function_row(p, function.key) == (Val(index)) -> return Val(function.key.copy())
+        if function.name == name && ir_codec_decode_source(module_is_core(function.module_identity), function.source_file, function.kind, function.name) && ir_function_row(p, function.key) == (Val(index)) -> return Val(function.key.copy())
     }
     None
 }
@@ -954,7 +954,7 @@ ir_codec_method_args: fn(p: IRProgram, function: FnBody, concrete: Type) -> [Typ
 // the reference body: the value's captured tree, decoded.
 ir_decoding_read: fn(p: IRProgram, function: FnBody, type_args: [Type]) -> (key: String, args: [Type])? Never! {
     if function.name != "read" || type_args.len() != 2 || !function.key.ends_with("read") -> return None
-    if !function.module_identity.starts_with("<corelib>/") || !ir_core_source_path(function.source_file, "Core/Encoding/Encoding.jet") -> return None
+    if !module_is_core(function.module_identity) || !ir_core_source_path(function.source_file, "Core/Encoding/Encoding.jet") -> return None
     owner: if function.kind == {
         .Method(_, owner_type) -> ir_nominal_name(ir_untag(owner_type)) ?? ""
         .TopLevel | .TraitMethod(_, _, _, _, _) -> ""

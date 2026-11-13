@@ -95,11 +95,11 @@ JetCheckedLayoutResult: enum {
 }
 
 // One source declaration in the canonical module-qualified layout registry.
-// The module identity is retained so raw field names can be resolved in the
-// declaration's own source namespace during recursive layout.
+// `core` marks a Core source's declaration, which has no native layout of
+// its own.
 TargetLayoutQualifiedItem: struct {
     qualified_name: String
-    module_identity: String
+    core: Bool
     item: Item
 }
 
@@ -362,9 +362,10 @@ jet_target_layout_engine_target: fn(engine: TargetLayoutEngine) -> JetTargetLayo
     engine.target
 }
 
-jet_target_layout_struct_facts_in_module: fn(engine: TargetLayoutEngine, definition: StructDef, module_identity: String) -> LayoutFacts Never! {
+// `module_text` is the declaring module identity's text ("" for none).
+jet_target_layout_struct_facts_in_module: fn(engine: TargetLayoutEngine, definition: StructDef, module_text: String) -> LayoutFacts Never! {
     query := jet_target_layout_query()
-    identity: if module_identity == "" -> definition.name else -> "{module_identity}::{definition.name}"
+    identity: if module_text == "" -> definition.name else -> "{module_text}::{definition.name}"
     jet_target_layout_struct_facts_inner_named(engine, definition, identity, identity, query)
 }
 
@@ -454,9 +455,9 @@ jet_target_layout_marker_expression: fn(marker: Marker, index: Int) -> Expr? {
     }
 }
 
-jet_target_layout_enum_facts_in_module: fn(engine: TargetLayoutEngine, definition: EnumDef, module_identity: String) -> LayoutFacts Never! {
+jet_target_layout_enum_facts_in_module: fn(engine: TargetLayoutEngine, definition: EnumDef, module_text: String) -> LayoutFacts Never! {
     query := jet_target_layout_query()
-    identity: if module_identity == "" -> definition.name else -> "{module_identity}::{definition.name}"
+    identity: if module_text == "" -> definition.name else -> "{module_text}::{definition.name}"
     jet_target_layout_enum_facts_inner_named(engine, definition, identity, identity, query)
 }
 
@@ -570,7 +571,7 @@ jet_target_layout_native_named: fn(engine: TargetLayoutEngine, name: String, own
         return jet_target_layout_native_item(engine, engine.items[position], name, query)
     }
     position: engine.qualified_positions.get(resolved_name) ?? return None
-    if engine.qualified_items[position].module_identity.starts_with("<corelib>/") -> return None
+    if engine.qualified_items[position].core -> return None
     jet_target_layout_native_item(engine, engine.qualified_items[position].item, engine.qualified_items[position].qualified_name, query)
 }
 

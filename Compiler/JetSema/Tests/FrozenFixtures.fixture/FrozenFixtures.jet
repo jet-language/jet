@@ -1,9 +1,9 @@
 // Freeze provenance and frozen-write checks over the production ownership state.
-use jet_foundation.[AST_NODE_GENERATED, AccessConvention, Diagnostic, Expr, Span, Symbol, SymbolKind, Type, expr_span, symbol_id]
+use jet_foundation.[AST_NODE_GENERATED, AccessConvention, Diagnostic, Expr, Span, Symbol, SymbolKind, Type, expr_span, module_none, symbol_id]
 use jet_sema.[SemaOwnershipFreezeSite, sema_ownership_declare_binding, sema_ownership_fork, sema_ownership_fork_apply, sema_ownership_fork_base, sema_ownership_fork_close, sema_ownership_fork_path, sema_ownership_fork_rollback, sema_ownership_frozen_expr_site, sema_ownership_frozen_for_key, sema_ownership_join_paths, sema_ownership_note_undo, sema_ownership_path_join, sema_ownership_reject_frozen_write, sema_ownership_state_init, sema_ownership_state_snapshot, sema_scope_declare_local, sema_scope_init]
 
 run: fn() {
-    scopes := sema_scope_init("frozen-fixture")
+    scopes := sema_scope_init(module_none())
     state := sema_ownership_state_init()
     span := Span{start: 0, end: 1}
     key := symbol_id(SymbolKind.Local, "frozen-fixture", "run", "snapshot")

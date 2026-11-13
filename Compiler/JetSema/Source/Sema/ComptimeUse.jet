@@ -15,6 +15,7 @@ use jet_foundation.[
     Func,
     ImportDecl,
     Item,
+    ModuleID,
     OrFallback,
     Param,
     Span,
@@ -30,6 +31,7 @@ use jet_foundation.[
     import_alias,
     member_import_local,
     pattern_binding_names,
+    module_is_core,
 ]
 
 SemaComptimeUseScan: struct {
@@ -69,7 +71,7 @@ sema_comptime_use_check: fn(graph: &SemaRegistrationGraph) {
     runtime_names := [[String:Bool]]{}
     scanned := [Bool]{}
     loop module_index in 0..<count {
-        if sema_module_is_core_source(graph.modules[module_index].module_identity) {
+        if module_is_core(graph.modules[module_index].module_identity) {
             runtime_names.push([String:Bool]{})
             scanned.push(false)
             next
@@ -615,14 +617,14 @@ sema_comptime_use_type: fn(ty: Type, span: Span, scan: &SemaComptimeUseScan) Nev
 sema_comptime_use_record_targets: fn(graph: &SemaRegistrationGraph) Never! {
     targets := [String:Span]{}
     loop module_row in graph.modules {
-        plain := [String:Bool]{}
+        plain := [U32:Bool]{}
         loop import in module_row.imports {
-            if import.declaration.comptime_span == None -> plain[import.target_module_identity] = true
+            if import.declaration.comptime_span == None -> plain[import.target_module_identity.id] = true
         }
         loop import in module_row.imports {
             prefix: import.declaration.comptime_span ?? next
-            if plain.has_key(import.target_module_identity) -> next
-            targets["{module_row.module_identity}\n{import.target_module_identity}"] = prefix
+            if plain.has_key(import.target_module_identity.id) -> next
+            targets["{module_row.module_identity.id}\n{import.target_module_identity.id}"] = prefix
         }
     }
     graph.comptime_use_targets = targets.move()
@@ -633,7 +635,7 @@ sema_comptime_use_record_targets: fn(graph: &SemaRegistrationGraph) Never! {
 // test, a job, a scheduled or marked function, foreign rows) always ship;
 // every module a shipping module's runtime code imports ships too. A
 // `pub use` re-export counts as a runtime use.
-sema_comptime_use_build_only: fn(graph: SemaRegistrationGraph, runtime_names: [[String:Bool]], scanned: [Bool]) -> [String] Never! {
+sema_comptime_use_build_only: fn(graph: SemaRegistrationGraph, runtime_names: [[String:Bool]], scanned: [Bool]) -> [ModuleID] Never! {
     count: graph.modules.len()
     imported := (loop _ in 0..<count -> false)
     edges := (loop _ in 0..<count -> [Int]{})
@@ -668,7 +670,7 @@ sema_comptime_use_build_only: fn(graph: SemaRegistrationGraph, runtime_names: [[
             }
         }
     }
-    build_only := [String]{}
+    build_only := [ModuleID]{}
     loop module_index in 0..<count {
         if !ships[module_index] -> build_only.push(graph.modules[module_index].module_identity)
     }
@@ -720,9 +722,9 @@ sema_comptime_use_value_read: fn(name: String, ty: Type, span: Span, environment
     }
 }
 
-sema_comptime_use_value_prefix: fn(graph: SemaRegistrationGraph, ty: Type, module_identity: String) -> Span? {
+sema_comptime_use_value_prefix: fn(graph: SemaRegistrationGraph, ty: Type, module_identity: ModuleID) -> Span? {
     if sema_type_resolve_nominal_row(graph, ty, module_identity) == .Val(row) {
-        if graph.comptime_use_targets.get("{module_identity}\n{graph.modules[row.module_index].module_identity}") == .Val(prefix) -> return Val(prefix)
+        if graph.comptime_use_targets.get("{module_identity.id}\n{graph.modules[row.module_index].module_identity.id}") == .Val(prefix) -> return Val(prefix)
     }
     if ty == {
         .List(inner) | .Shared(inner) | .Option(inner) | .Tagged(_, inner) | .Case(_, inner) | .FixedList(inner, _) -> return sema_comptime_use_value_prefix(graph, inner, module_identity)

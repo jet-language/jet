@@ -37,6 +37,7 @@ use jet_foundation.[
     marker_hook_of_declaration,
     symbol_id,
     type_name,
+    module_text,
 ]
 
 SemaMarkerRuleArgumentObservation: struct {
@@ -723,13 +724,14 @@ sema_marker_rules_constant_for_reference: fn(symbol: Symbol, references: [SemaNa
     if !found {
         return None
     }
+    symbol_module: sema_check_registered_module_id(program, symbol.module_name)
     loop value in values {
-        if value.kind == SemaComptimeItemKind.Constant && value.module_identity == symbol.module_name && value.key == symbol.id.key {
+        if value.kind == SemaComptimeItemKind.Constant && value.module_identity == symbol_module && value.key == symbol.id.key {
             return Val(value.value)
         }
     }
     if program.registration_graph == .Val(graph) {
-        module_index: sema_registration_module_index(graph, symbol.module_name) ?? return None
+        module_index: sema_registration_module_index(graph, symbol_module) ?? return None
         loop constant_index in 0..<graph.modules[module_index].constants.len() {
             if graph.modules[module_index].constants[constant_index].symbol.id.key == symbol.id.key {
                 value: graph.modules[module_index].constants[constant_index].declaration.ct ?? return None
@@ -771,7 +773,7 @@ sema_marker_rules_comptime_source: fn(marker: Marker, source_index: Int, express
         destination_key := "{marker.name}::marker::{marker.name_span.start}::arg::{source_index}"
         source := SemaComptimeItemSource{
             module_identity: environment.module_identity,
-            key: "{environment.module_identity}::{destination_key}",
+            key: "{module_text(graph.module_table, environment.module_identity)}::{destination_key}",
             destination_key: destination_key,
             name: "#{marker.name} argument {source_index + 1}",
             source_file: environment.source_file,
@@ -1399,7 +1401,7 @@ sema_marker_rules_fact_allows: fn(rule: TAppliedRule, application: AppliedRuleAp
 // declaration, so dedupes probe a map instead of rescanning the list.
 sema_marker_rules_declaration_key: fn(marker: Marker) -> String Never! {
     if marker.declaration_module == {
-        .Val(owner_module) -> "m{owner_module.len()}:{owner_module}|{sema_marker_rules_span_key(marker.declaration_span)}"
+        .Val(owner_module) -> "m{owner_module.id}|{sema_marker_rules_span_key(marker.declaration_span)}"
         .None -> "n:{marker.name}"
     }
 }
@@ -2255,7 +2257,7 @@ sema_marker_rules_check_inline_always: fn(graph: SemaRegistrationGraph, modules:
         loop item_index in 0..<graph.modules[source_module_index].program.items.len() {
             if graph.modules[source_module_index].program.items[item_index] == .Func(function) {
                 if own -> sema_inline_always_check_function(function, diagnostics)
-                key: symbol_id(SymbolKind.Function, graph.modules[source_module_index].module_identity, "", function.name).key
+                key: symbol_id(SymbolKind.Function, module_text(graph.module_table, graph.modules[source_module_index].module_identity), "", function.name).key
                 if function.is_inline_always && address_taken.get(key) != None {
                     name: function.name
                     diagnostics.push(sema_error("E0918", function.inline_span ?? function.name_span, "`{name}` cannot be inlined: its address is taken", "`#Inline(Always)` promises every call to `{name}` expands in place — but `{name}` is also used as a plain value somewhere (stored, returned, or passed as a callback), and a value needs a real function to point at.", "drop `#Inline(Always)`, or call `{name}` directly instead of through a value."))

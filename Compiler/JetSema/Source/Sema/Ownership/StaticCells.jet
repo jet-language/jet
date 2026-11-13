@@ -8,6 +8,7 @@ use jet_foundation.[
     ConstDef,
     Diagnostic,
     Expr,
+    ModuleID,
     Span,
     expr_span,
 ]
@@ -24,12 +25,12 @@ sema_ownership_is_static_root: fn(declaration: ConstDef) -> Bool Never! {
 
 // The module's static roots, read from its registration row: walking the
 // module's constants here copied every constant AST once per checked function.
-sema_ownership_static_roots: fn(graph: SemaRegistrationGraph, module_identity: String) -> [String] {
+sema_ownership_static_roots: fn(graph: SemaRegistrationGraph, module_identity: ModuleID) -> [String] {
     module_index: sema_registration_module_index(graph, module_identity) ?? return [String]{}
     graph.modules[module_index].static_roots
 }
 
-sema_ownership_persist_roots: fn(graph: SemaRegistrationGraph, module_identity: String) -> [String] {
+sema_ownership_persist_roots: fn(graph: SemaRegistrationGraph, module_identity: ModuleID) -> [String] {
     module_index: sema_registration_module_index(graph, module_identity) ?? return [String]{}
     graph.modules[module_index].persist_roots
 }

@@ -27,6 +27,7 @@ use jet_foundation.[
     expr_node_id,
     expr_source_span,
     expr_source_start,
+    ModuleID,
 ]
 
 sema_call_marks_writes_declaration: fn(declaration: PolicyDeclaration) -> Bool Never! {
@@ -59,7 +60,7 @@ sema_call_marks_writes_marker: fn(marker: Marker) -> Bool Never! {
 
 // A package or module `writes: .Explicit` declaration, or the function's own
 // `#Policy(writes: .Explicit)` marker.
-sema_call_marks_apply_policy: fn(table: &SemaScopeTable, graph: SemaRegistrationGraph, module_identity: String, markers: [Marker]) Never! {
+sema_call_marks_apply_policy: fn(table: &SemaScopeTable, graph: SemaRegistrationGraph, module_identity: ModuleID, markers: [Marker]) Never! {
     position: sema_scope_module_policy(table, graph, module_identity)
     table.writes_explicit = table.policy_rows[position].writes_explicit
     loop marker in markers {

@@ -3,7 +3,7 @@
 // module build keeps going and reports every failure (collect-all).
 
 use {
-    jet_foundation.[CompilerThreads, DeclID, DeclTable, decl_table_find, Span, Type, TypeTable, TypeTupleField, BodyCallArg, TConstantDef, NodeKind, TExprType, TFailureCarrier, FnBody, TFuncKind, TGenericParam, TImplDef, BodyLambda, TLocal, TTryConvert, TTypeDef, TVisibility, compiler_threads_failure_text, type_carrier_identity, BodyNode, BodyTree, StmtKind, body_fixed_timing, body_node, body_stmt, body_type, body_type_id, type_table_find, type_table_intern, NameRows, name_rows, name_rows_get_text, name_rows_set, name_rows_set_first, name_rows_value, OWNED_TRAITS, owned_trait_arithmetic, owned_trait_operator_hook]
+    jet_foundation.[CompilerThreads, DeclID, DeclTable, decl_table_find, ModuleID, Span, Type, TypeTable, TypeTupleField, BodyCallArg, TConstantDef, NodeKind, TExprType, TFailureCarrier, FnBody, TFuncKind, TGenericParam, TImplDef, BodyLambda, TLocal, TTryConvert, TTypeDef, TVisibility, compiler_threads_failure_text, type_carrier_identity, BodyNode, BodyTree, StmtKind, body_fixed_timing, body_node, body_stmt, body_type, body_type_id, type_table_find, type_table_intern, NameRows, name_rows, name_rows_get_text, name_rows_set, name_rows_set_first, name_rows_value, OWNED_TRAITS, owned_trait_arithmetic, owned_trait_operator_hook]
     jet_sema.[SemaCheckedForeignFunction, sema_inference_type_mentions_param, sema_instance_type, sema_instance_types]
 }
 
@@ -283,7 +283,7 @@ IRBoundsMode: enum { Fatal Report Off }
 // as a root next to the entry (ir_build_program).
 IRChecks: struct {
     bounds: IRBoundsMode
-    modules: [String:Bool]
+    modules: [U32:Bool]
     backtrace: IRBacktrace
     keep: Bool
     // The entry package's `allocator:` policy: Val(cap) wraps the system
@@ -339,13 +339,13 @@ IRJob: struct {
 IRBacktrace: enum { Full Brief Off }
 
 ir_checks_stock: fn() -> IRChecks Never! {
-    IRChecks{bounds: IRBoundsMode.Fatal, modules: [String:Bool]{}, backtrace: IRBacktrace.Full, keep: false}
+    IRChecks{bounds: IRBoundsMode.Fatal, modules: [U32:Bool]{}, backtrace: IRBacktrace.Full, keep: false}
 }
 
 // The checks of the resolved `bounds` value (`fatal`, `report` or `off`),
 // `backtrace` value (`full`, `brief` or `off`) and `dead_code` value
 // (`remove` or `keep`) over `modules`.
-ir_checks_of: fn(bounds: String, backtrace: String, dead_code: String, modules: [String:Bool]) -> IRChecks Never! {
+ir_checks_of: fn(bounds: String, backtrace: String, dead_code: String, modules: [U32:Bool]) -> IRChecks Never! {
     mode: if bounds == {
         "fatal" -> IRBoundsMode.Fatal
         "report" -> IRBoundsMode.Report
@@ -364,7 +364,7 @@ ir_checks_of: fn(bounds: String, backtrace: String, dead_code: String, modules: 
 // The bounds mode of checked function `row` (-1: glue, Fatal).
 ir_bounds_mode: fn(p: IRProgram, row: Int) -> IRBoundsMode Never! {
     if row < 0 || p.checks.bounds == .Fatal -> return IRBoundsMode.Fatal
-    if p.checks.modules.get(p.functions[row].module_identity) == None -> return IRBoundsMode.Fatal
+    if p.checks.modules.get(p.functions[row].module_identity.id) == None -> return IRBoundsMode.Fatal
     p.checks.bounds
 }
 
@@ -468,7 +468,7 @@ IRProgram: struct {
     // returns tell the runtime the process is ending (ir_emit_return).
     entry: Int{-1}
     // The runtime checks the built functions keep (ir_bounds_mode).
-    checks: IRChecks{IRChecks{bounds: IRBoundsMode.Fatal, modules: [String:Bool]{}, backtrace: IRBacktrace.Full, keep: false}}
+    checks: IRChecks{IRChecks{bounds: IRBoundsMode.Fatal, modules: [U32:Bool]{}, backtrace: IRBacktrace.Full, keep: false}}
 }
 
 // A Display, Printable, Close or user Comparable implementation: the
@@ -657,10 +657,10 @@ ir_program_declared: fn(type_defs: &&[TTypeDef], impl_defs: &&[TImplDef], consta
     loop (index, definition) in types -> type_keys.push((key: definition.name.copy(), at: types.len() + index, row: index))
     type_rows: ir_first_rows(type_keys)
     impls: impl_defs.move()
-    // A constant by its key, then by the `constant:<module>::<name>` a
-    // ConstRef names; the first definition of a key holds it. Each trait
-    // constant of an implementation is one more constant, keyed by
-    // ir_trait_constant_key.
+    // A constant by its key, then by the symbol key a ConstRef names
+    // (TConstantDef.symbol_key); the first definition of a key holds it.
+    // Each trait constant of an implementation is one more constant, keyed
+    // by ir_trait_constant_key alone.
     defs := constant_defs.move()
     loop implementation in impls {
         trait_name: if implementation.trait_ref == .Val(name) -> name else if implementation.trait_name == .Val(name) -> name else -> ""
@@ -671,13 +671,13 @@ ir_program_declared: fn(type_defs: &&[TTypeDef], impl_defs: &&[TImplDef], consta
         plain: ir_untag(implementation.self_type)
         owner: if plain == .Named(_) -> ir_render_type_key(type_rows, types, plain) else -> type_carrier_identity(plain)
         loop constant in implementation.constants {
-            defs.push(TConstantDef{module_identity: implementation.module_identity.copy(), key: ir_trait_constant_key(ir_short_name(trait_name), owner, constant.name), name: "{owner}.{constant.name}", span: constant.span, visibility: TVisibility.Public, ty: constant.ty.copy(), is_comptime: true, is_storage: false, value: constant.value.copy()})
+            defs.push(TConstantDef{module_identity: implementation.module_identity, key: ir_trait_constant_key(ir_short_name(trait_name), owner, constant.name), name: "{owner}.{constant.name}", span: constant.span, visibility: TVisibility.Public, ty: constant.ty.copy(), is_comptime: true, is_storage: false, value: constant.value.copy()})
         }
     }
     constant_keys := [(key: String, at: Int, row: Int)]{}
     loop (index, definition) in defs {
         constant_keys.push((key: definition.key.copy(), at: 2 * index, row: 2 * index))
-        constant_keys.push((key: "constant:{definition.module_identity}::{definition.name}", at: 2 * index + 1, row: 2 * index + 1))
+        if definition.symbol_key != "" -> constant_keys.push((key: definition.symbol_key.copy(), at: 2 * index + 1, row: 2 * index + 1))
     }
     constant_rows: ir_first_rows(constant_keys)
     constants := [String:Int]{}
@@ -698,7 +698,7 @@ ir_program_declared: fn(type_defs: &&[TTypeDef], impl_defs: &&[TImplDef], consta
         trait_short: ir_short_name(trait_name)
         owner_key: ir_render_type_key(type_rows, types, implementation.self_type)
         loop key in implementation.methods {
-            slot_key: "{implementation.module_identity}|{owner_key}|{ir_impl_method_leaf(key)}"
+            slot_key: "{implementation.module_identity.id}|{owner_key}|{ir_impl_method_leaf(key)}"
             slot := impl_slots.get(slot_key) ?? -1
             if slot < 0 {
                 slot = impl_traits.len()
@@ -913,7 +913,7 @@ ir_declared_owners: fn(functions: &[FnBody], types: [TTypeDef]) Never! {
     declared := [String:String]{}
     loop definition in types {
         if owners.get(definition.name) == None -> next
-        scoped: "{definition.module_identity}|{definition.name}"
+        scoped: "{definition.module_identity.id}|{definition.name}"
         if declared.get(scoped) == None -> declared[scoped] = definition.key.copy()
     }
     loop index in 0..<functions.len() {
@@ -945,14 +945,14 @@ ir_declared_owner_name: fn(kind: TFuncKind) -> String? Never! {
 
 // `owner` named by the key of its declaration in `module_identity`, or None
 // when that module declares no type of its name.
-ir_declared_owner: fn(declared: [String:String], module_identity: String, owner: Type) -> Type? Never! {
+ir_declared_owner: fn(declared: [String:String], module_identity: ModuleID, owner: Type) -> Type? Never! {
     if owner == {
         .Named(name) -> {
-            key: declared.get("{module_identity}|{name}") ?? return None
+            key: declared.get("{module_identity.id}|{name}") ?? return None
             return Val(Type.Named{name: key.copy()})
         }
         .Apply(name, args) -> {
-            key: declared.get("{module_identity}|{name}") ?? return None
+            key: declared.get("{module_identity.id}|{name}") ?? return None
             return Val(Type.Apply{name: key.copy(), args: args.copy()})
         }
         .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> return None
@@ -990,20 +990,19 @@ ir_spawn_sites: fn(functions: [FnBody]) -> [String:Int] Never! {
     sites
 }
 
-// `definition` takes over `p`'s constant rows of its key and its qualified
-// name (a compile-time value landed after the program was declared), each
-// not taken over yet (`taken`, which it joins): a key's first landed row
-// stands. Both keys name the one definition it appends.
+// `definition` takes over `p`'s constant rows of its key and its symbol key
+// (a compile-time value landed after the program was declared), each not
+// taken over yet (`taken`, which it joins): a key's first landed row stands.
+// Both keys name the one definition it appends.
 ir_program_put_constant: fn(p: &IRProgram, definition: &&TConstantDef, taken: &[String:Bool]) Never! {
     owned := definition.move()
-    qualified: "constant:{owned.module_identity}::{owned.name}"
-    by_name: taken.get(qualified) == None
+    by_name: owned.symbol_key != "" && taken.get(owned.symbol_key) == None
     by_key: taken.get(owned.key) == None
     if !by_name && !by_key -> return
     row: p.constant_defs.len()
     if by_name {
-        taken[qualified.copy()] = true
-        p.constants[qualified.copy()] = row
+        taken[owned.symbol_key.copy()] = true
+        p.constants[owned.symbol_key.copy()] = row
     }
     if by_key {
         taken[owned.key.copy()] = true
@@ -1039,7 +1038,7 @@ ir_trait_methods: fn(functions: [FnBody], type_rows: [String:Int], types: [TType
             .TraitMethod(_, _, _, trait_name, _) -> traits.push(ir_short_name(trait_name.key))
             .Method(_, owner_type) -> {
                 owner_key: ir_render_type_key(type_rows, types, owner_type)
-                slot: impl_slots.get("{function.module_identity}|{owner_key}|{function.name}") ?? -1
+                slot: impl_slots.get("{function.module_identity.id}|{owner_key}|{function.name}") ?? -1
                 if slot >= 0 {
                     loop trait_short in impl_traits[slot] -> traits.push(trait_short.copy())
                 }
@@ -1346,7 +1345,7 @@ ir_build_program: fn(functions: &&[FnBody], decls: DeclTable, type_defs: &&[TTyp
     if p.checks.keep {
         loop kept in 0..<p.functions.len() {
             function: p.functions[kept]
-            if kept == row || p.checks.modules.get(function.module_identity) == None -> next
+            if kept == row || p.checks.modules.get(function.module_identity.id) == None -> next
             if function.generic_params.len() > 0 || ir_owner_binders(p, function).len() > 0 || p.intrinsics.get(function.key) != None -> next
             roots.push(IRWaveJob{key: function.key.copy(), row: kept, args: [Type]{}, lambda: -1, part: -1, local: -1})
             kept_keys.push(function.key.copy())

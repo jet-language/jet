@@ -12,6 +12,8 @@ use jet_foundation.[
     Type,
     TypeTupleField,
     type_identity_equal,
+    ModuleID,
+    module_is_core,
 ]
 
 // A seeded module was canonicalized when it was finalized: its declarations
@@ -39,7 +41,7 @@ sema_registration_canonicalize_qualified_types: fn(graph: &SemaRegistrationGraph
         loop import_index in 0..<graph.modules[module_index].imports.len() {
             loop binding in 0..<graph.modules[module_index].imports[import_index].bindings.len() {
                 source: graph.modules[module_index].imports[import_index].bindings[binding].symbol.module_name
-                source_index: sema_registration_module_index(graph, source) ?? next
+                source_index: sema_registration_module_index_text(graph, source) ?? next
                 if module_keys[source_index].len() == 0 -> next
                 sema_registration_canonical_symbol(graph.modules[module_index].imports[import_index].bindings[binding].symbol, module_keys[source_index])
             }
@@ -74,10 +76,10 @@ sema_registration_module_qualified_keys: fn(graph: SemaRegistrationGraph, module
     keys
 }
 
-sema_registration_imported_user_type: fn(graph: SemaRegistrationGraph, module_index: Int, identity: String, name: String) -> Bool Never! {
+sema_registration_imported_user_type: fn(graph: SemaRegistrationGraph, module_index: Int, identity: ModuleID, name: String) -> Bool Never! {
     found: sema_registration_lookup_name_at(graph, module_index, identity, name) ?? return false
     if found.place == {
-        .Imported(_, _, _) -> !found.source_module_identity.starts_with("<corelib>/")
+        .Imported(_, _, _) -> !module_is_core(found.source_module_identity)
         .Declared(_, _) | .Nominal(_, _) | .Detached(_) -> false
     }
 }

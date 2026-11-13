@@ -58,6 +58,10 @@ use jet_foundation.[
     name_rows,
     name_rows_get_text,
     name_rows_set,
+    ModuleID,
+    module_find,
+    module_is_core,
+    module_text,
 ]
 
 SemaKnowledgePlane: enum {
@@ -373,7 +377,7 @@ sema_statement_tail_store_add_body: fn(store: &SemaStatementTailStore, statement
 // check. A Result error refuses the site as `code` with `what` and `fix`;
 // the error's reason is the Why.
 SemaCheckedTextEvaluation: struct {
-    module_identity: String
+    module_identity: ModuleID
     key: String
     type_name: String
     source_file: String
@@ -392,7 +396,7 @@ SemaCheckedTextEvaluation: struct {
 
 SemaComptimeRequest: struct {
     callee_key: String
-    module_identity: String
+    module_identity: ModuleID
     args: [TComptimeValue]
     span: Span
     checked_text: SemaCheckedTextEvaluation?
@@ -409,7 +413,7 @@ SemaComptimePreparedLocal: struct {
 }
 
 SemaComptimeBodySource: struct {
-    module_identity: String
+    module_identity: ModuleID
     function_key: String
     source_file: String
     key: String
@@ -432,7 +436,7 @@ SemaComptimeBodySource: struct {
 }
 
 SemaComptimeBodyValue: struct {
-    module_identity: String
+    module_identity: ModuleID
     key: String
     destination_key: String
     value: TComptimeValue
@@ -444,7 +448,8 @@ SemaComptimeBodyValue: struct {
 // visible length, never a copied table or a rebuilt index.
 SemaComptimeBodyFacts: struct {
     values: [SemaComptimeBodyValue]
-    modules: [String:Int]
+    // Each module's slot at its ModuleID row (sema_comptime_index_module_slot).
+    modules: [Int]
     first_rows: [[String:Int]]
     second_rows: [[String:Int]]
     indexed_rows: Int
@@ -494,7 +499,7 @@ SemaComptimeBodyWorkOperation: enum {
 // also keep their owning graph and its checked-type indexes here.
 SemaScopeEnvironment: struct {
     registration_graph: SemaRegistrationGraph?{None}
-    module_identity: String
+    module_identity: ModuleID
     // The registration row of `module_identity` when module entry set it
     // (sema_scope_caller_row checks it still is), -1 otherwise.
     module_row: Int{-1}
@@ -539,7 +544,7 @@ SemaScopeEnvironment: struct {
 // Core's own generic bodies are checked independently of a consumer's target.
 // User bodies consume the selected machine fact, never a host OS guess.
 sema_scope_environment_no_os: fn(environment: SemaScopeEnvironment) -> Bool Never! {
-    if sema_module_is_core_source(environment.module_identity) -> return false
+    if module_is_core(environment.module_identity) -> return false
     if environment.registration_graph == .Val(graph) -> return graph.target_machine.no_os
     false
 }
@@ -553,7 +558,7 @@ sema_scope_environment_no_os: fn(environment: SemaScopeEnvironment) -> Bool Neve
 // else, so `constants` names the only bindings a rebuilt table could differ
 // in, and where their graph rows live.
 SemaScopeProbe: struct {
-    module_identity: String
+    module_identity: ModuleID
     table: SemaScopeTable
     // sema_registration_apply_graph_module's result and its diagnostics.
     applied: Bool
@@ -631,7 +636,7 @@ SemaCheckContext: struct {
     comptime_body_sources: [SemaComptimeBodySource]
     comptime_body_values: SemaComptimeBodyValues
     // Derived module/key indexes into the canonical ordered source rows.
-    comptime_body_source_modules: [String:Int]
+    comptime_body_source_modules: [Int]
     comptime_body_source_rows: [[String:Int]]
     compute_calls: [SemaComputeCallFact]
     autodiff_obligations: [SemaAutodiffObligation]
@@ -844,6 +849,9 @@ SemaScopeModulePolicy: struct {
 }
 
 SemaScopeTable: struct {
+    // The module whose scope the table is (none for a detached table); its
+    // root frame has no owner.
+    module_identity: ModuleID
     frames: [SemaScopeFrame]
     bindings: [SemaScopeBinding]
     // Binding positions per name, ascending: `name_slots` maps a name to its
@@ -877,7 +885,7 @@ SemaScopeTable: struct {
     // Derived from the immutable graph installed by seed_unit_policy.
     // Function rollback leaves this memo intact; snapshots may rebuild it.
     // A new graph/module setup reseeds it, including each staging version.
-    policy_modules: [String:Int]{[String:Int]{}}
+    policy_modules: [U32:Int]{[U32:Int]{}}
     policy_rows: [SemaScopeModulePolicy]{[SemaScopeModulePolicy]{}}
     // Rollback support (sema_scope_mark / sema_scope_rollback): while a mark
     // is open, an in-place edit of an existing binding first records the old
@@ -1000,7 +1008,7 @@ sema_program_tables_with: fn(graph: &&SemaRegistrationGraph?, checked_types: [TT
     name_slots := [String:Int]{}
     name_rows := [[Int]]{}
     loop (index, definition) in checked_types {
-        key: "{definition.module_identity}::{definition.name}"
+        key: "{definition.module_identity.id}::{definition.name}"
         if rows.get(key) == None -> rows[key] = index
         if name_slots.get(definition.name) == .Val(slot) {
             name_rows[slot].push(index)
@@ -1020,7 +1028,7 @@ sema_program_tables_with: fn(graph: &&SemaRegistrationGraph?, checked_types: [TT
     }
 }
 
-sema_scope_environment_init: fn(module_identity: String, package_identity: String, module_name: String, source_file: String, source_origin: SemaSourceOrigin, source_segments: [SemaSourceSegment], declarations: [SemaScopeDeclaration]) -> SemaScopeEnvironment Never! {
+sema_scope_environment_init: fn(module_identity: ModuleID, package_identity: String, module_name: String, source_file: String, source_origin: SemaSourceOrigin, source_segments: [SemaSourceSegment], declarations: [SemaScopeDeclaration]) -> SemaScopeEnvironment Never! {
     SemaScopeEnvironment{
         registration_graph: None,
         module_identity: module_identity,
@@ -1040,6 +1048,13 @@ sema_scope_environment_init: fn(module_identity: String, package_identity: Strin
     }
 }
 
+// The identity text of the environment's module: its graph's spelling, or the
+// module name a graphless snapshot check names its module by.
+sema_scope_environment_module_text: fn(environment: SemaScopeEnvironment, program: SemaProgramTables) -> String Never! {
+    if program.registration_graph == .Val(graph) -> return module_text(graph.module_table, environment.module_identity)
+    environment.module_name
+}
+
 // The boxed field edges of `graph`, read in place through the `.Val(…)`
 // pattern on the parameter; binding `value: graph ?? …` copies the whole
 // graph.
@@ -1048,9 +1063,21 @@ sema_scope_environment_boxed_edges: fn(graph: SemaRegistrationGraph?) -> [String
     [String:[String]]{}
 }
 
-// The first checked declaration of `name` owned by `module_identity`.
-sema_scope_checked_type_row: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, module_identity: String, name: String) -> Int? {
-    program.checked_type_rows.get("{module_identity}::{name}")
+// The first checked declaration of `name` owned by `module_identity`
+// (checked_type_rows keys a row by its module id and name).
+sema_scope_checked_type_row: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, module_identity: ModuleID, name: String) -> Int? {
+    program.checked_type_rows.get("{module_identity.id}::{name}")
+}
+
+// The checked declaration a qualified `module::Name` spelling names.
+sema_scope_checked_type_row_qualified: fn(program: SemaProgramTables, qualified: String) -> Int? {
+    parts: qualified.split("::").to_list()
+    if parts.len() < 2 -> return None
+    if program.registration_graph == .Val(graph) {
+        owner: module_find(graph.module_table, parts.slice(0, parts.len() - 1).join("::")) ?? return None
+        return program.checked_type_rows.get("{owner.id}::{parts[parts.len() - 1]}")
+    }
+    None
 }
 
 // Every checked declaration row named `name`, in declaration order.
@@ -1085,7 +1112,7 @@ sema_scope_environment_enter_module: fn(environment: &SemaScopeEnvironment, prog
 // A comptime probe borrows the program graph and replaces only scope facts.
 // Its else-arm/debug-site reset differs from real declaration/body entry.
 // False when the graph has no such module.
-sema_scope_environment_enter_probe_module: fn(environment: &SemaScopeEnvironment, program: SemaProgramTables, module_identity: String, comptime_body_values: &&SemaComptimeBodyValues) -> Bool Never! {
+sema_scope_environment_enter_probe_module: fn(environment: &SemaScopeEnvironment, program: SemaProgramTables, module_identity: ModuleID, comptime_body_values: &&SemaComptimeBodyValues) -> Bool Never! {
     if program.registration_graph == .Val(graph) {
         module_index: sema_registration_module_index(graph, module_identity) ?? return false
         environment.module_identity = graph.modules[module_index].module_identity
@@ -1177,7 +1204,7 @@ sema_check_context_init: fn() -> SemaCheckContext Never! {
         comptime_requests: [SemaComptimeRequest]{},
         comptime_body_sources: [SemaComptimeBodySource]{},
         comptime_body_values: SemaComptimeBodyValues{},
-        comptime_body_source_modules: [String:Int]{},
+        comptime_body_source_modules: [Int]{},
         comptime_body_source_rows: [[String:Int]]{},
         compute_calls: [SemaComputeCallFact]{},
         autodiff_obligations: [SemaAutodiffObligation]{},
@@ -1250,7 +1277,7 @@ sema_check_context_snapshot: fn(source: SemaCheckContext) -> SemaCheckContext Ne
         // values (a handle: Shared facts plus length) outlive the live context's later publication
         // edits.
         comptime_body_values: source.comptime_body_values.copy(),
-        comptime_body_source_modules: [String:Int]{},
+        comptime_body_source_modules: [Int]{},
         comptime_body_source_rows: [[String:Int]]{},
         compute_calls: source.compute_calls.copy(),
         autodiff_obligations: source.autodiff_obligations.copy(),
@@ -1408,7 +1435,7 @@ sema_check_context_save: fn(context: SemaCheckContext) -> SemaCheckContextMark N
             // copy: the publication view (shared facts owner and visible
             // length); rollback restores it, including a replaced generation.
             comptime_body_values: context.comptime_body_values.copy(),
-            comptime_body_source_modules: [String:Int]{},
+            comptime_body_source_modules: [Int]{},
             comptime_body_source_rows: [[String:Int]]{},
             compute_calls: [SemaComputeCallFact]{},
             autodiff_obligations: [SemaAutodiffObligation]{},
@@ -1630,6 +1657,7 @@ sema_scope_hardware_transfers_snapshot: fn(source: [SemaHardwareDMATransferFact]
 // while the live table goes on to the sibling arm; the snapshot is that table.
 sema_scope_snapshot: fn(source: SemaScopeTable) -> SemaScopeTable Never! {
     SemaScopeTable{
+        module_identity: source.module_identity,
         frames: source.frames.copy(),
         bindings: source.bindings.copy(),
         name_slots: source.name_slots.copy(),
@@ -1670,6 +1698,7 @@ sema_scope_mark: fn(table: &SemaScopeTable) -> SemaScopeMark Never! {
         bindings: table.bindings.len(),
         undo: table.binding_undo.len(),
         saved: SemaScopeTable{
+            module_identity: table.module_identity,
             frames: [SemaScopeFrame]{},
             bindings: [SemaScopeBinding]{},
             name_slots: name_rows(),
@@ -1754,9 +1783,10 @@ sema_scope_hardware_facts: fn(table: SemaScopeTable) -> SemaScopeHardwareFacts N
     }
 }
 
-sema_scope_init: fn(module_name: String) -> SemaScopeTable Never! {
+sema_scope_init: fn(module_identity: ModuleID) -> SemaScopeTable Never! {
     SemaScopeTable{
-        frames: [SemaScopeFrame]{SemaScopeFrame{parent: -1, owner: module_name}},
+        module_identity: module_identity,
+        frames: [SemaScopeFrame]{SemaScopeFrame{parent: -1, owner: ""}},
         bindings: [SemaScopeBinding]{},
         name_slots: name_rows(),
         name_positions: [[Int]]{},
@@ -1901,7 +1931,7 @@ sema_scope_add_module_symbol: fn(table: &SemaScopeTable, symbol: Symbol) -> Bool
 // they hide its same-named rows. A name a paste produced (Func.site_names)
 // keeps resolving at the marker's site. The caller's mark drops the rows.
 sema_scope_bind_definition_site: fn(table: &SemaScopeTable, graph: SemaRegistrationGraph, func: Func) Never! {
-    module_index: sema_registration_module_index(graph, func.definition_module) ?? return
+    module_index: sema_registration_module_index_text(graph, func.definition_module) ?? return
     loop symbol in graph.modules[module_index].symbols {
         if !func.site_names.contains(symbol.name) -> sema_scope_push_binding(table, SemaScopeBinding{frame: 0, symbol: symbol, mutable: false, access: AccessConvention.Read, integer_bounds: None, string_view: false, compiler_builtin: false})
     }
@@ -1993,8 +2023,8 @@ sema_scope_require_knowledge_gate: fn(table: &SemaScopeTable, plane: SemaKnowled
     false
 }
 
-sema_scope_module_policy: fn(table: &SemaScopeTable, graph: SemaRegistrationGraph, module_identity: String) -> Int Never! {
-    if table.policy_modules.get(module_identity) == .Val(position) -> return position
+sema_scope_module_policy: fn(table: &SemaScopeTable, graph: SemaRegistrationGraph, module_identity: ModuleID) -> Int Never! {
+    if table.policy_modules.get(module_identity.id) == .Val(position) -> return position
     policy := SemaScopeModulePolicy{
         unit_explicit_units: false,
         copies_explicit: false,
@@ -2026,20 +2056,20 @@ sema_scope_module_policy: fn(table: &SemaScopeTable, graph: SemaRegistrationGrap
         }
     }
     position: table.policy_rows.len()
-    table.policy_modules.add(module_identity.copy(), position).drop("a new policy module has no row")
+    table.policy_modules.add(module_identity.id, position).drop("a new policy module has no row")
     table.policy_rows.push(policy)
     position
 }
 
-sema_scope_seed_unit_policy: fn(table: &SemaScopeTable, graph: SemaRegistrationGraph, module_identity: String) Never! {
+sema_scope_seed_unit_policy: fn(table: &SemaScopeTable, graph: SemaRegistrationGraph, module_identity: ModuleID) Never! {
     // Module installation is the graph-lifetime boundary, not a function check.
-    table.policy_modules = [String:Int]{}
+    table.policy_modules = [U32:Int]{}
     table.policy_rows = [SemaScopeModulePolicy]{}
     position: sema_scope_module_policy(table, graph, module_identity)
     table.unit_explicit_units = table.policy_rows[position].unit_explicit_units
 }
 
-sema_scope_apply_unit_policy_for_function: fn(table: &SemaScopeTable, graph: SemaRegistrationGraph, module_identity: String, function_span: Span) Never! {
+sema_scope_apply_unit_policy_for_function: fn(table: &SemaScopeTable, graph: SemaRegistrationGraph, module_identity: ModuleID, function_span: Span) Never! {
     position: sema_scope_module_policy(table, graph, module_identity)
     table.unit_explicit_units = table.policy_rows[position].unit_explicit_units
     if table.policy_rows[position].function_unit_starts.get(function_span.start) == .Val(slot) {
@@ -2251,6 +2281,7 @@ sema_scope_light_copy: fn(source: SemaScopeTable) -> SemaScopeTable Never! {
         light.push(function_type)
     }
     SemaScopeTable{
+        module_identity: source.module_identity,
         frames: source.frames.copy(),
         bindings: bindings.move(),
         name_slots: source.name_slots.copy(),

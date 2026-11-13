@@ -20,7 +20,7 @@ use {
         jet_driver_entry_root_path,
         jet_driver_ice_record,
     ]
-    jet_foundation.[BuildOptions, FnBody, cli_schema_embed_wasm_record]
+    jet_foundation.[BuildOptions, FnBody, cli_schema_embed_wasm_record, module_is_core]
     jet_web.[web_app_js, web_dom_runtime_js, web_index_html, web_program]
 }
 
@@ -81,7 +81,7 @@ jet_cli_web_partition_report: fn(functions: [FnBody]) -> String Never! {
     // Each row is `<key>\t<shown row>`, so sorting the rows orders them by key.
     rows := [String]{}
     loop function in functions {
-        if function.synthetic || function.module_identity.starts_with("<corelib>/") -> next
+        if function.synthetic || module_is_core(function.module_identity) -> next
         bucket: function.web_bucket ?? next
         qualifier: if function.module_name != "" -> "{function.module_name}." else -> ""
         browser: function.effects.solved.contains("Browser")

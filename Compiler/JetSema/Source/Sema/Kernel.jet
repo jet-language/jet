@@ -6,7 +6,7 @@
 // the effect rows are known (sema_effect_check_node), effects first, in the
 // Rust reference's order. Each kernel reports its first unproved obligation
 // (E1102).
-use jet_foundation.[AccessConvention, CallArg, Diagnostic, Expr, Func, KernelMarker, PlaceAccess, Span, Stmt, Type, expr_span]
+use jet_foundation.[AccessConvention, CallArg, Diagnostic, Expr, Func, KernelMarker, ModuleTable, PlaceAccess, Span, Stmt, Type, expr_span]
 
 SEMA_KERNEL_SAFE_COMPUTE_CALLS: [String]{
     "abs", "add", "broadcast_to", "det", "div", "exp", "fft", "full", "from_list", "inv", "matmul",
@@ -180,9 +180,9 @@ sema_kernel_check_effects: fn(pending: SemaKernelPending, direct: [String], call
 }
 
 // The module's local aliases of `core.compute`.
-sema_kernel_compute_aliases: fn(module_row: SemaRegistrationModule) -> [String] Never! {
+sema_kernel_compute_aliases: fn(module_row: SemaRegistrationModule, table: ModuleTable) -> [String] Never! {
     aliases := [String]{}
-    loop row in sema_core_registration_imports(module_row) {
+    loop row in sema_core_registration_imports(module_row, table) {
         if row.module_name == "core.compute" && row.item == None -> aliases.push(row.alias)
     }
     aliases

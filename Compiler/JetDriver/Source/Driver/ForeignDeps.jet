@@ -57,13 +57,13 @@ JetDriverForeignDeclaration: struct {
     symbol: String
     path: String
     line: Int
-    module_identity: String{""}
+    module_identity: ModuleID{ModuleID{id: U32{0}}}
 }
 
 // One C provider of a checked module (`#Import c.<lib>`): the module's
 // identity, the provider library and its direct and transitive links.
 JetDriverForeignProvider: struct {
-    module_identity: String
+    module_identity: ModuleID
     library: String
     direct_links: [String]
     transitive_links: [String]
@@ -96,17 +96,17 @@ jet_driver_foreign_link_empty: fn() -> JetDriverForeignLinkFacts Never! {
 // row needs the program's C platform. No live declaration leaves no closure.
 jet_driver_foreign_link_live: fn(facts: JetDriverForeignLinkFacts, live: [String:Bool]) -> JetDriverForeignLinkFacts Never! {
     kept := jet_driver_foreign_link_empty()
-    modules := [String]{}
+    modules := [U32:Bool]{}
     loop declaration in facts.declarations {
         if live.get(declaration.symbol) == None -> next
         if declaration.language == "c" || declaration.language == "rust" -> kept.c_or_rust_rows = true
-        jet_driver_foreign_push_unique(modules, declaration.module_identity)
+        modules[declaration.module_identity.id] = true
         kept.declarations.push(declaration.copy())
     }
     direct := [String]{}
     transitive := [String]{}
     loop provider in facts.providers {
-        if !modules.contains(provider.module_identity) -> next
+        if modules.get(provider.module_identity.id) == None -> next
         jet_driver_foreign_push_unique(kept.libraries, provider.library)
         loop library in provider.direct_links -> jet_driver_foreign_push_unique(direct, library)
         loop library in provider.transitive_links -> jet_driver_foreign_push_unique(transitive, library)
