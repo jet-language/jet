@@ -1,13 +1,15 @@
-# core.browser.launch starts the Firefox pinned in .jet/lock headless on a
-# throwaway profile, drives it over its own WebDriver BiDi endpoint (open a
-# page, evaluate its script-computed text), and stops it at close. Chromium
-# has no locked driver, so launch refuses it.
+# core.browser.launch starts the Firefox that `jetpack browser provision`
+# admitted into the Jetpack store from the repository browser catalog and
+# pinned in .jet/lock, headless on a throwaway profile; it drives the engine
+# over its own WebDriver BiDi endpoint (open a page, evaluate its
+# script-computed text) and stops it at close. It needs no browser on PATH.
+# Chromium has no locked driver, so launch refuses it.
+opt-in: live cache.nixos.org closure download (about 500 MB); run deliberately with --opt-in or by exact id
 fixture: core_browser_launch_drives_locked_firefox.fixture
 env: NO_COLOR=1
 requires: os-name:linux
-requires: tool:firefox
 env: JET_PROJECT_ROOT={work}
-step: jetpack browser lock firefox --binary {tool:firefox} --version 157.0.1 --protocol bidi-2025.5
+step: jetpack browser provision firefox@jetpack --local-nix-catalog {root}/Jetpack/Environment/Catalogs/browsers --yes
 exit: 0
 step: jet run --allow=Env,Exec,FS,IO,Net,Time {work}/main.jet
 exit: 0

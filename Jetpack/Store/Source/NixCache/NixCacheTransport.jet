@@ -12,6 +12,9 @@ STORE_NIX_MAX_METADATA_BYTES: 1048576
 STORE_NIX_MAX_PARALLEL_FETCHES: 8
 STORE_NIX_MAX_PARALLEL_METADATA_FETCHES: 32
 STORE_NIX_TRANSPORT_TIMEOUT_MS: 120000
+// Core's HTTP client holds a whole response body in memory under a 64 MiB
+// bound, so a cache object downloads in ranged pieces well inside it.
+STORE_NIX_DOWNLOAD_PIECE_BYTES: 33554432
 STORE_NIX_ENDPOINT_CONFIG: "config/nix-cache-v1.endpoint"
 STORE_NIX_TRUST_KEY_CONFIG: "trust/nix-cache-v1.ed25519.pub"
 STORE_NIX_STORE_HASH_ALPHABET: "0123456789abcdfghijklmnpqrsvwxyz"
@@ -198,6 +201,15 @@ NixCacheEndpoint: struct {
         Ok(Val(response))
     }
 
+    // Open bytes `first..=last` of one object, unencoded so the range counts
+    // the stored bytes. 404 and 410 are absence; callers judge other statuses.
+    open_range: fn(self, url: String, first: Int, last: Int) -[Net, Time.Wait]> HTTPResponse? NixCacheError! {
+        request: http_client.request("GET", url).header("Range", "bytes={first}-{last}").header("Accept-Encoding", "identity").total_timeout(STORE_NIX_TRANSPORT_TIMEOUT_MS).redirects(0)
+        response: http_client.send(request) ?? return Err(NixCacheError.new(.Transport, "{err}"))
+        if response.status() == 404 || response.status() == 410 -> return Ok(None)
+        Ok(Val(response))
+    }
+
     // Bounded metadata GET. Reading stops past `limit` bytes so an oversized
     // response is a metadata failure, not a transport one.
     get: fn(self, url: String, limit: Int) -[Net, Time.Wait]> [U8]? NixCacheError! {
@@ -220,22 +232,83 @@ NixCacheEndpoint: struct {
     }
 }
 
-// Stream one cache object to `path`, counting and hashing the compressed
-// bytes and refusing more than the signed `limit`.
-store_nix_download: fn(response: HTTPResponse, limit: Int, path: String, progress: ProgressHandle?) -[IO, FS, Net, Env, Time.Wait]> (count: Int, digest: String) NixCacheError! {
+// Download one cache object to `path` in ranged pieces, counting and hashing
+// the compressed bytes and refusing any byte past the object's size, which
+// must match the signed FileSize when the narinfo has one. A server that
+// ignores the range answers the whole object at once.
+store_nix_download: fn(endpoint: NixCacheEndpoint, url: String, signed_size: Int?, path: String, progress: ProgressHandle?) -[IO, FS, Net, Env, Time.Wait]> (count: Int, digest: String) NixCacheError! {
     output: files.create(path, if_exists: .Refuse) ?? return Err(NixCacheError.new(.Admission, "could not stage the Nix cache object: {err}"))
     hasher := crypto.Hasher.new()
     count := 0
-    loop part in response.body().chunks(65536) {
-        chunk: part ?? return Err(NixCacheError.new(.Transport, "{err}"))
-        count += chunk.len()
-        if count > limit -> return Err(NixCacheError.new(.CompressedCorruption, "Nix cache response exceeded its signed byte limit"))
-        hasher.update(chunk)
-        output.write_all(chunk) ?? return Err(NixCacheError.new(.Admission, "could not stage the Nix cache object: {err}"))
-        store_nix_progress_transferred(progress, chunk.len())
+    size := Int?{None}
+    done := false
+    loop !done {
+        response: if endpoint.open_range(url, count, count + STORE_NIX_DOWNLOAD_PIECE_BYTES - 1) == {
+            .Ok(found) -> found ?? return Err(NixCacheError.new(.MissingReference, "Nix cache object is absent"))
+            .Err(error) -> { return Err(error) }
+        }
+        span: if response.status() == {
+            206 -> {
+                range: store_nix_content_range(response)
+                if range.first != count -> return Err(NixCacheError.new(.Transport, "Nix cache answered a different byte range"))
+                (size: range.size, end: range.last + 1)
+            }
+            200 -> {
+                if count != 0 -> return Err(NixCacheError.new(.Transport, "Nix cache answered a ranged continuation with the whole object"))
+                whole: store_nix_content_length(response) ?? (signed_size ?? return Err(NixCacheError.new(.CompressedCorruption, "Nix cache object has neither FileSize nor Content-Length")))
+                (size: whole, end: whole)
+            }
+            else -> { return Err(NixCacheError.new(.Transport, "Nix cache object returned a non-success status")) }
+        }
+        if signed_size == .Val(expected) && span.size != expected {
+            return Err(NixCacheError.new(.CompressedCorruption, "Nix cache object size disagrees with signed FileSize"))
+        }
+        if size == {
+            .Val(known) -> {
+                if known != span.size -> return Err(NixCacheError.new(.Transport, "Nix cache object size changed between ranges"))
+            }
+            .None -> {
+                size = Val(span.size)
+                store_nix_progress_discovered(progress, span.size)
+            }
+        }
+        loop part in response.body().chunks(65536) {
+            chunk: part ?? return Err(NixCacheError.new(.Transport, "{err}"))
+            count += chunk.len()
+            if count > span.end -> return Err(NixCacheError.new(.CompressedCorruption, "Nix cache response exceeded its signed byte limit"))
+            hasher.update(chunk)
+            output.write_all(chunk) ?? return Err(NixCacheError.new(.Admission, "could not stage the Nix cache object: {err}"))
+            store_nix_progress_transferred(progress, chunk.len())
+        }
+        if count != span.end {
+            return Err(NixCacheError.new(.CompressedCorruption, "Nix cache compressed byte count disagrees with its signed size"))
+        }
+        done = count == span.size
     }
     output.fsync() ?? return Err(NixCacheError.new(.Admission, "could not stage the Nix cache object: {err}"))
     Ok((count: count, digest: "sha256:{hasher.digest()}"))
+}
+
+// The `bytes <first>-<last>/<size>` span of a 206 answer.
+store_nix_content_range: fn(response: HTTPResponse) -> (first: Int, last: Int, size: Int) NixCacheError! {
+    text: response.header("content-range") ?? return Err(NixCacheError.new(.Transport, "Nix cache range answer has no Content-Range"))
+    trimmed: text.trim()
+    if !trimmed.starts_with("bytes ") -> return Err(NixCacheError.new(.Transport, "Nix cache returned a malformed Content-Range"))
+    range: trimmed.removeprefix("bytes ").split_once("/") ?? return Err(NixCacheError.new(.Transport, "Nix cache returned a malformed Content-Range"))
+    bounds: range.before.split_once("-") ?? return Err(NixCacheError.new(.Transport, "Nix cache returned a malformed Content-Range"))
+    first: Int.parse(bounds.before) ?? return Err(NixCacheError.new(.Transport, "Nix cache returned a malformed Content-Range"))
+    last: Int.parse(bounds.after) ?? return Err(NixCacheError.new(.Transport, "Nix cache returned a malformed Content-Range"))
+    size: Int.parse(range.after) ?? return Err(NixCacheError.new(.Transport, "Nix cache returned a malformed Content-Range"))
+    if first < 0 || last < first || size <= last -> return Err(NixCacheError.new(.Transport, "Nix cache returned a malformed Content-Range"))
+    Ok((first: first, last: last, size: size))
+}
+
+store_nix_content_length: fn(response: HTTPResponse) -> Int? Never! {
+    text: response.header("content-length") ?? return None
+    if Int.parse(text.trim()) == {
+        .Ok(value) -> Val(value)
+        .Err(failed) -> None
+    }
 }
 
 store_nix_progress_phase: fn(progress: ProgressHandle?, phase: String) Never! -[IO, Env, Time.Wait]> {

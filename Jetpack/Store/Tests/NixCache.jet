@@ -387,6 +387,32 @@ NixTestProgress: struct {
     store_nix_test_remove_dir(root)
 }
 
+#Test("store nix cache admits a self-referencing object without a self edge") {
+    verification := StoreVerification.new()
+    root: store_nix_test_unique_dir("self-reference")
+    source: files.join(root, "source")
+    files.create_dir_all(source) ?? panic("source dir")
+    files.write(files.join(source, "payload"), "self") ?? panic("payload")
+    nar: (store_write_nar(source) ?? panic("nar")).bytes
+    store_path: "/nix/store/22222222222222222222222222222222-self"
+    seed: store_nix_test_seed(7)
+    info: store_nix_test_signed_narinfo(store_path, "self.nar", nar, [String]{store_path}, STORE_NIX_TEST_KEY_ID, seed)
+    routes := [String: [U8]]{
+        "/nix-cache-info": store_nix_test_cache_info(),
+        "/22222222222222222222222222222222.narinfo": info,
+        "/nar/self.nar": nar,
+    }
+    server: NixTestCacheServer.start(files.join(root, "site"), routes)
+    roots: store_nix_test_configure_root(files.join(root, "jetpack"), server.endpoint, STORE_NIX_TEST_KEY_ID, seed)
+    admitted: store_admit_nix_closure(verification, roots, store_nix_test_request("out", store_path), false) ?? panic("admit self-referencing object: {err.message()}")
+    assert_eq(admitted.objects.len(), 1)
+    assert_eq(store_nix_test_object(admitted, store_path).direct_reference_digests.len(), 0)
+    entry := store_test_find_entry(store_list_checked(verification, roots) ?? panic("listing"), store_path)
+    assert_eq(entry.references.len(), 0)
+    server.stop()
+    store_nix_test_remove_dir(root)
+}
+
 #Test("store nix cache shared transitive object admits twice and stores once") {
     verification := StoreVerification.new()
     root: store_nix_test_unique_dir("shared-closure")

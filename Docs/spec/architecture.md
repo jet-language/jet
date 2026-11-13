@@ -1356,7 +1356,14 @@ reads that pin (FS) so launch resolves a deterministic binary. An engine that
 serves BiDi only through a WebDriver driver also pins that driver in its entry
 (`driver`, `driver-size`): `jetpack browser lock chromium --driver <path>`, or
 `jetpack browser provision chromium@<source>`, which realizes
-`chromedriver@<source>` beside it so the two versions match.
+`chromedriver@<source>` beside it so the two versions match. The repository
+ships the engine records for one pinned nixpkgs revision as a local unofficial
+catalog, `Jetpack/Environment/Catalogs/browsers`: with a project lock that pins
+the `jetpack` source channel to that revision, `jetpack browser provision
+chromium@jetpack --local-nix-catalog Jetpack/Environment/Catalogs/browsers`
+(or `firefox@jetpack`) admits the engine's signed cache.nixos.org closure into
+the Jetpack store and locks it; no Nix command runs and no browser on PATH is
+used.
 `browser.launch(engine)` starts the locked engine headless on a throwaway
 profile and connects with the lock's protocol profile. Firefox serves BiDi
 itself: launch passes `--remote-debugging-port=0`, reads the BiDi port Firefox

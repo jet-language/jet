@@ -227,31 +227,13 @@ NixAdmission: struct {
         }
         store_path: info.info.store_path
         url: endpoint.object_url(info.info.url)
-        response: endpoint.open(url) ?? return Err(NixCacheError.new(.MissingReference, "Nix cache object is absent"))
-        if response.status() != 200 {
-            return Err(NixCacheError.new(.Transport, "Nix cache object returned a non-success status"))
-        }
-        content_length := Int?{None}
-        if response.header("content-length") == .Val(text) -> content_length = if Int.parse(text.trim()) == {
-            .Ok(value) -> Val(value)
-            .Err(failed) -> None
-        }
-        signed_size: info.info.file_size
-        if signed_size == .Val(expected) && content_length == .Val(actual) && actual != expected {
-            return Err(NixCacheError.new(.CompressedCorruption, "Nix cache Content-Length disagrees with signed FileSize"))
-        }
-        compressed_limit: signed_size ?? (content_length ?? return Err(NixCacheError.new(.CompressedCorruption, "Nix cache object has neither FileSize nor Content-Length")))
-        store_nix_progress_discovered(progress, compressed_limit)
         trees: files.join(self.stage, "trees")
         tree: files.join(trees, store_nix_store_basename(store_path))
         store_nix_ensure_dir(trees, .Admission)
         downloads: files.join(self.stage, "downloads")
         store_nix_ensure_dir(downloads, .Admission)
         download: files.join(downloads, store_nix_store_basename(store_path))
-        fetched: store_nix_download(response, compressed_limit, download, progress)
-        if fetched.count != compressed_limit {
-            return Err(NixCacheError.new(.CompressedCorruption, "Nix cache compressed byte count disagrees with its signed size"))
-        }
+        fetched: store_nix_download(endpoint, url, info.info.file_size, download, progress)
         stats: store_nix_read_nar(download, compression, tree, info.info.nar_size, store_path)
         files.remove(download) ?? return Err(store_nix_io_error(.Admission, err))
         compressed_hash: fetched.digest
@@ -269,8 +251,14 @@ NixAdmission: struct {
         }
         store_seal_node(tree) ?? return Err(store_nix_store_error(err))
         hangar_digest: store_verified_output_hash(verification, tree, Val(self.roots.hangar_dir()), false) ?? return Err(NixCacheError.new(.NarCorruption, "Nix staged object {store_path} could not be hashed: {err.message()}"))
+        // A signed narinfo lists a self-referencing path among its own
+        // references; the signed fingerprint keeps that fact, and the closure
+        // graph has no self edges.
         references := [String]{}
-        loop name in info.info.references -> references.push("{store_dir}/{name}")
+        loop name in info.info.references {
+            reference: "{store_dir}/{name}"
+            if reference != store_path -> references.push(reference)
+        }
         references.sort()
         proof: store_nix_proof_digest(endpoint.endpoint, info.info, info.fingerprint, info.key_id, info.signature, references)
         Ok(FetchedObject{
