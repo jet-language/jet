@@ -16,17 +16,3 @@ exit: 1
 stderr: ~ "Error [jet.InvalidCommandInput]: `HTTPClient.new` is not built yet" # the client constructor's runtime route is unbuilt
 stderr: ~ "card #3665" # the refusal names the card that ports it
 stderr: !~ "internal compiler error" # sema refuses before codegen
-
-# Forward- and reverse-mode autodiff are unbuilt: `compute.jvp` and
-# `compute.vjp` check as transforms but have no IR builder. Each call is
-# refused at its site.
-step: jet check autodiff.jet
-exit: 0
-stderr: !~ "E2104" # check mode lowers nothing, so nothing is refused
-
-step: jet build autodiff.jet
-exit: 1
-stderr: ~ "`compute.jvp` is not built yet" # the forward-mode transform has no IR builder
-stderr: ~ "`compute.vjp` is not built yet" # the reverse-mode transform has no IR builder
-stderr: ~ "card #6627" # the refusal names the card that builds autodiff
-stderr: !~ "internal compiler error" # sema refuses before codegen

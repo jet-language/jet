@@ -567,6 +567,22 @@ sema_expression_core_record_literal: fn(owner_name: String, fields: [ExprField],
     sema_expr_expected(value, expected, environment, program, diagnostics)
 }
 
+// The `VJPRun<G>` a `compute.vjp` transform builds (`type_args` is `[G]`).
+// Only the compiler writes one: `VJPRun` has no source literal, so the
+// generated node is checked here, field by field against the run's rows.
+sema_expression_vjp_run_literal: fn(type_args: [Type], fields: [ExprField], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    if type_args.len() != 1 -> return None
+    gradient: type_args[0]
+    values := [TStructFieldValue]{}
+    loop source in fields {
+        ty: sema_expression_vjp_run_field(gradient, source.name) ?? return None
+        checked: sema_expression_core_record_field_value("VJPRun", TypeTupleField{name: source.name, ty: ty}, source.value, environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
+        values.push(checked)
+    }
+    value: sema_tree_node(Type.Apply{name: "VJPRun", args: [Type]{gradient}}, TExprKind.StructLit{fields: values}, span)
+    sema_expr_expected(value, expected, environment, program, diagnostics)
+}
+
 sema_expression_struct_literal: fn(struct_name: String, type_args: [Type], fields: [ExprField], inferred: Bool, as_trait: String?, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     if !inferred && as_trait == None {
         head: if type_args.len() > 0 -> Type.Apply{name: struct_name, args: type_args} else -> Type.Named{name: struct_name}

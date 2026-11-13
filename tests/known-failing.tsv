@@ -97,8 +97,6 @@ tests/cases/cffi/foreign_js_import_uses_generated_binding_cache_for_symbols.case
 tests/cases/cffi/foreign_js_inline_member_list_uses_the_same_binding_cache.case	#5454	E1002 ReservedRootShadowed: `js` is reserved for first-party or foreign packages, so the generated .jet/bindings/js cache is never consulted
 tests/cases/cffi/foreign_js_inline_pub_member_list_reexports_the_namespace.case	#5454	E1002 ReservedRootShadowed: `js` is reserved for first-party or foreign packages, so the generated .jet/bindings/js cache is never consulted
 tests/cases/cffi_enum_boundaries/cffi_enum_out_of_range_discriminant_stays_at_the_checked_boundary.case	#5454	`jet check --verbose run.jet` accepts the program ("no problems"); the original requires InvalidEnumDiscriminant
-tests/cases/compute_extended/curried_autodiff_shapes_share_the_prelude_handle.case	#6627	`jet run run.jet` is E2104 "`compute.jvp` is not built yet" and "`compute.vjp` is not built yet": gradient and value_and_gradient run on the Core tape, but the forward and pullback transforms have no lowering yet
-tests/cases/compute_extended/f32_simd_matmul_keeps_vjp_and_jvp_on_the_cpu_oracle.case	#6627	`jet run run.jet` is E2104 "`compute.jvp` is not built yet": the gradient half runs on the Core tape, but jvp has no lowering yet
 tests/cases/devtools/devtools_bless_rejects_unknown_target.case	#5454	`jet self devtools bless … --dry-run` exits 2 with E2104 "`jet devtools` is not built yet"
 tests/cases/encoding_edition/edition_2027_cbor_decode_emits_l2001_and_2028_removes_it.case	#5454	E2001 EditionTooNew: this compiler supports edition 2026 only, so the 2027/2028 manifests never reach L2001
 tests/cases/encoding_edition/edition_2027_cbor_encode_emits_l2001.case	#5454	E2001 EditionTooNew: this compiler supports edition 2026 only, so the 2027 manifest never reaches L2001
@@ -480,7 +478,6 @@ Examples/Interop/Languages/R	#6418	`use r.ops` reports E1002 (foreign root `r` r
 Examples/Interop/Languages/Ruby	#6418	`use ruby.ops` reports E0603 (module not in the package source snapshot); the foreign binding route is not built
 Examples/Interop/FFI/Callbacks	#6418	`jet inspect bind` reports E2104 not built yet, so `source.on_data` is E0102; Callbacks.out is the run.sh oracle
 tests/run/Foundations/Capabilities	#4599	the host loads guest/build/capability_guest.wasm, which no sandbox build target produces (only guest/hostile/ ships a prebuilt guest), so the compiler reads no Component interface for it and `jet check` reports E1257 at each export call; no expected stream exists
-Examples/Math/Compute/ComputeAutoDiff	#6627	`jet check` is clean, but `jet run` is E2104 "`compute.jvp` is not built yet" and "`compute.vjp` is not built yet": gradient and value_and_gradient run on the Core tape, but jvp and vjp have no lowering yet
 tests/cases/authority_manifest/default_run_records_source_linked_authority_delegation.case	#6419	unbuilt: core API surface missing (E1001/E1004/E0102/E0107/E0302/E0311/E0313/E0304) (E1004)
 tests/cases/build_entry/action_generated_jet_reenters_frontend_before_runtime_codegen.case	#6418	unbuilt: E2101/E2102 command or flag not built (E2102)
 tests/cases/build_entry/body_edit_rechecks_only_the_edited_item.case	#6418	unbuilt: E2104 command form not built (E2104)
@@ -679,7 +676,6 @@ tests/cases/web_dev/jet_dev_web_live_canvas_debug_session_round_trip.case	#6418	
 tests/cases/web_dev/jet_dev_web_project_queries_round_trip_and_reject_stale_revision.case	#6418	`jet dev` is not built yet (E2104)
 tests/cases/web_dev/jet_dev_web_rejects_windows_absolute_static_paths.case	#6418	`jet dev` is not built yet (E2104)
 tests/cases/web_dev/jet_dev_web_status_does_not_expose_canvas_session_data.case	#6418	`jet dev` is not built yet (E2104)
-tests/cases/compute_extended/autodiff_sparse_simd_and_streams_use_real_paths.case	#6627	`jet run main.jet` is E2104 "`compute.jvp` is not built yet" and "`compute.vjp` is not built yet": gradient and value_and_gradient run on the Core tape, but jvp and vjp have no lowering yet
 tests/cases/http_client_law/request_first_byte_timeout_overrides_client_phase_budget.case	#3665	configured client (pool, jar, h2c, TLS) not ported; HTTPClientNew/Method have no runtime export or IR builder
 tests/cases/http_client_law/cookie_jar_rejects_domain_attributes_on_ip_hosts.case	#3665	configured client cookie jar not ported: Client.cookies(.Memory) is E0330, no CookieJar in Core
 tests/cases/http_client_law/cookie_jar_uses_schemeful_registrable_sites_and_rejects_public_suffixes.case	#3665	configured client cookie jar not ported: Client.cookies(.Memory) is E0330, no CookieJar or public-suffix rules in Core

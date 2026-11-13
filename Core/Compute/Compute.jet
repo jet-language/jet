@@ -1204,10 +1204,11 @@ quoted: fn(names: [String]) -> String Never! {
 }
 
 // Reverse-mode autodiff (core-library.md `core.compute` transforms). The
-// compiler expands `compute.gradient(f)` and `compute.value_and_gradient(f)`
+// compiler expands `compute.gradient`, `value_and_gradient`, `vjp` and `jvp`
 // into a callable that enters the process tape (__ad_enter), makes each
 // differentiated argument a tracked leaf (__ad_leaf), calls `f`, reads each
-// gradient back (__ad_gradient, __ad_value) and leaves the tape (__ad_exit).
+// result back (__ad_gradient, __ad_pull, __ad_tangent, __ad_value) and leaves
+// the tape (__ad_exit).
 // While a transform is open, an operation that reads a tracked tensor records
 // its inputs as one node and tags its result with that node. The backward
 // rules are written with the same operations, so a gradient computed inside
@@ -1270,6 +1271,34 @@ __ad_gradient: fn(out: Tensor, leaf: Tensor) -> Tensor Never! {
     gradient
 }
 
+// The pullback of `out` to `leaf` under `seed`, the adjoint `out` receives:
+// the `pull` of a `compute.vjp` run. `seed` has `out`'s shape.
+__ad_pull: fn(out: Tensor, leaf: Tensor, seed: Tensor) -> Tensor Never! {
+    if seed.shape != out.shape -> panic("compute.vjp: the seed has shape {seed.shape} but the value has shape {out.shape}")
+    gradient := ad_backward_seeded(out, leaf, seed) ?? panic("compute.vjp: a derivative rule failed")
+    if ad_depth() <= 1 -> gradient.node = -1
+    gradient
+}
+
+// The tangent of `out` at `leaves` along `tangents` (J·t): what a
+// `compute.jvp` transform returns. The pullback of `out` under a tracked seed
+// `u` is linear in `u`, so differentiating each leaf's pullback·tangent with
+// respect to `u` gives that leaf's share of J·t.
+__ad_tangent: fn(out: Tensor, leaves: [Tensor], tangents: [Tensor]) -> Tensor Never! {
+    seed: __ad_leaf(like(out, out.shape.copy(), ad_fill(out.data.len(), 1.0)))
+    tangent := like(out, out.shape.copy(), ad_fill(out.data.len(), 0.0))
+    loop (index, leaf) in leaves {
+        direction: tangents[index]
+        if direction.shape != leaf.shape -> panic("compute.jvp: tangent {index} has shape {direction.shape} but its primal has shape {leaf.shape}")
+        pullback: ad_backward_seeded(out, leaf, seed) ?? panic("compute.jvp: a derivative rule failed")
+        along: mul(pullback, direction) ?? panic("compute.jvp: a derivative rule failed")
+        share: ad_backward(along, seed) ?? panic("compute.jvp: a derivative rule failed")
+        tangent = add(tangent, share) ?? panic("compute.jvp: a derivative rule failed")
+    }
+    if ad_depth() <= 1 -> tangent.node = -1
+    tangent
+}
+
 // The process tape's first value, a compiler-facing hook: it stays outside
 // `autodiff` because the compiler resolves the initializer named in
 // core.mem.__process_shared at module scope and cannot name a function inside
@@ -1317,12 +1346,18 @@ priv autodiff: module {
     // Each node from `out` back to `leaf` hands its adjoint to its inputs; the
     // seed is ones of `out`'s shape.
     ad_backward: fn(out: Tensor, leaf: Tensor) -> Tensor ComputeError! {
+        ad_backward_seeded(out, leaf, like(out, out.shape.copy(), ad_fill(out.data.len(), 1.0)))
+    }
+
+    // ad_backward with `seed` as `out`'s adjoint. A tracked seed records the
+    // backward pass, so it can be differentiated with respect to the seed.
+    ad_backward_seeded: fn(out: Tensor, leaf: Tensor, seed: Tensor) -> Tensor ComputeError! {
         zero: like(leaf, leaf.shape.copy(), ad_fill(leaf.data.len(), 0.0))
         if out.node < 0 || leaf.node < 0 || leaf.node > out.node -> return Ok(zero)
         nodes: ad_nodes(out.node)
         adjoints := [Tensor?]{}
         loop _ in 0..<(out.node + 1) -> adjoints.push(None)
-        adjoints[out.node] = Val(like(out, out.shape.copy(), ad_fill(out.data.len(), 1.0)))
+        adjoints[out.node] = Val(seed.copy())
         loop step in 0..<(out.node - leaf.node) {
             id: out.node - step
             adjoint: adjoints[id] ?? { next }
@@ -1362,9 +1397,12 @@ priv autodiff: module {
         b: node.inputs[1]
         if op == "matmul" -> return Ok(if index == 0 -> matmul(g, transpose(b)) else -> matmul(transpose(a), g))
         // The f32 tile kernel differentiates on the CPU oracle, in its inputs'
-        // contract: its f32 adjoint is read as `a`'s profile.
+        // contract: its f32 adjoint is read as `a`'s profile. A tracked
+        // adjoint stays tracked through that read, so the backward pass
+        // differentiates in turn.
         if op == "matmul_f32_tile" {
-            oracle: like(a, g.shape.copy(), g.data.copy())
+            oracle := like(a, g.shape.copy(), g.data.copy())
+            if g.node >= 0 -> oracle.node = ad_record("identity", [Tensor]{g.copy()}, 0)
             return Ok(if index == 0 -> matmul(oracle, transpose(b)) else -> matmul(transpose(a), oracle))
         }
         contribution: if op == {
