@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6779,
-    "rev": 101325,
+    "rev": 101326,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -81588,11 +81588,11 @@
         {
           "n": 3,
           "text": "A gate type-checks every Core function body, reached or not. Today Tools/agent/CoreModuleCheck.jet (VerifyFull) and LaneCheck's Core path (47fbc5b2a5) use a one-import probe that checks only the bodies the module reaches. A type error injected into Core/Encoding/Encoding.jet bytes_to_hex passes both, and surfaces as a user error at <corelib>/Core/Encoding/Encoding.jet only when a program calls it (TestSystemLead-2, 11-07). Fix: a Loader mode that checks a Core-row entry whole. Proof: the injected error is red in LaneCheck and CoreModuleCheck, and HEAD is green.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T15:02:58.241Z"
+          "evidence": "Holds on dev fd72bf4d8d (gate since e2118b654e); Lander5 on seed-b14. `JET=$(command -v jet) jet Tools/agent/CoreModuleCheck.jet` exits 0: 121 core modules checked, 121 clean (with jet check Core). With `injected: \"not an Int\" + 1` inside bytes_to_hex at Core/Encoding/Encoding.jet:221 it exits 1, reporting jet.OperatorTypeMismatch (E0109) at Encoding.jet:221:15. After the revert it exits 0. Found by G3Core-2.",
+          "at": "2026-11-13T09:11:38.491Z"
         },
         {
           "n": 4,
@@ -81648,7 +81648,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-01T04:00:20.629Z",
-      "updated": "2026-11-13T02:20:01.958Z",
+      "updated": "2026-11-13T09:11:38.491Z",
       "updatedBy": "Main",
       "criteriaLastN": 9
     },
@@ -198918,6 +198918,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-13T09:11:38.491Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0h114mv",
+      "note": "#3"
+    },
     {
       "at": "2026-11-13T09:11:37.382Z",
       "by": "Main",
