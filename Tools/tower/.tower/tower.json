@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6777,
-    "rev": 101226,
+    "rev": 101229,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -46367,6 +46367,33 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-04T23:50:41.047Z"
+        },
+        {
+          "n": 5,
+          "text": "D-MEMREF-EXCL1=A is built: where sema proves no conflict, a write while an @ link reads stays a compile-time error (E0204/E0212 extended to links). Where two links might reach one value, a small runtime access check at the lend or loop stops the program with the source location, and a function denying !Mem.Check refuses the runtime check at compile time. A proven-free link lowers to a plain pointer with no flag. Proof: a case per path (static refusal, runtime stop with location, the denial refusal) on O0, O1 and O2; UI snapshots for the static and denial errors; a codegen row showing no access flag on the proven path.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T05:26:08.092Z"
+        },
+        {
+          "n": 6,
+          "text": "D-MEMREF-LIFE1=A is built: when sema cannot prove an owner outlives a link, it chooses counted storage for that binding at compile time and never moves memory at run time. Types that can form cycles get cycle collection, and E0221 selects it instead of being an error. jet gc report lists each case with a concrete fix, jet fix applies the mechanical ones, and !Mem.Rc or !Mem.Gc forbid the cost, with Shared.Weak<T> (downgrade, upgrade) as the expert back link. Proof: cases for an escaping link kept alive, a cycle collected (no leak witness), a denial refusal and a weak back link, on O0, O1 and O2, plus a jet gc report golden.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T05:26:08.973Z"
+        },
+        {
+          "n": 7,
+          "text": "D-MEMREF-TASK1=A is built: a type whose links can reach another task uses atomic counts and one lock step per statement, and otherwise the fast local form. #Transact groups several writes, #Local forbids crossing (a compile error), and #Shared forces the thread-safe form. A task capture copies the link, never the binding. jet inspect lists each switch with the task that caused it. Proof: cases for the auto switch, the #Local refusal (UI snapshot), #Shared and #Transact, on O0, O1 and O2, with no data race under a two-task stress row, plus a jet inspect golden naming the switch.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T05:26:09.863Z"
         }
       ],
       "refs": [],
@@ -46377,12 +46404,12 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-04T00:21:42.477Z",
-      "updated": "2026-11-09T20:47:53.012Z",
+      "updated": "2026-11-13T05:26:09.863Z",
       "updatedBy": "Main",
       "goals": [
         "G10"
       ],
-      "criteriaLastN": 4
+      "criteriaLastN": 7
     },
     {
       "id": "c0p6h37r",
@@ -197660,6 +197687,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-13T05:26:09.863Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0s8gang",
+      "note": "#7 D-MEMREF-TASK1=A is built: a type whose links can reach anot"
+    },
+    {
+      "at": "2026-11-13T05:26:08.973Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0s8gang",
+      "note": "#6 D-MEMREF-LIFE1=A is built: when sema cannot prove an owner o"
+    },
+    {
+      "at": "2026-11-13T05:26:08.093Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0s8gang",
+      "note": "#5 D-MEMREF-EXCL1=A is built: where sema proves no conflict, a "
+    },
     {
       "at": "2026-11-13T05:23:43.081Z",
       "by": "Main",
