@@ -18,7 +18,8 @@
 // explainable). Every row's texts follow the plain-words rubric of
 // Docs/spec/diagnostics.md: a Why gives a reason, not a placeholder, no
 // meaning, What, Why or Fix names a decision ID, and an active row states a
-// meaning of its own words, not its What again.
+// meaning of its own words, not its What again, and a Fix that is a step,
+// not the placeholder.
 // Usage: jet Tools/agent/DiagnosticRows.jet [--check|--write]
 // --check fails when any copy differs from what the rows give it; --write
 // rewrites the copies and removes pages no row owns.
@@ -62,8 +63,9 @@ REPLACE_FIX: Regex{"^\.Replace\{{from: (\x22(?:[^\x22\\]|\\.)*\x22), to: (\x22(?
 REMOVE_FIX: Regex{"^\.Remove\{{text: (\x22(?:[^\x22\\]|\\.)*\x22)\}}$"}
 STAGE_LIST: Regex{"^\[(\.[A-Z][a-z]*(?:, \.[A-Z][a-z]*)*)\]$"}
 LINT_NAME: Regex{"^[a-z][a-z0-9_]*$"}
-// The rubric's placeholder Why and its decision IDs (`D-…`, `S…`).
+// The rubric's placeholder Why and Fix, and its decision IDs (`D-…`, `S…`).
 PLACEHOLDER_WHY: Regex{"The registered .* rule applies here"}
+PLACEHOLDER_FIX: Regex{"^Follow the guidance for "}
 DECISION_ID: Regex{"\bD-[A-Z0-9-]+|\bS[0-9]+\b"}
 
 #Error
@@ -331,6 +333,7 @@ render_row: fn(source: DiagnosticSource) -> RenderedRow DiagnosticRowsError! {
         status == "Active" && !written_meaning -> rubric.push("{code_text} states no meaning")
         status == "Active" && meaning == texts[0] -> rubric.push("{code_text} meaning repeats its what")
     }
+    if status == "Active" && PLACEHOLDER_FIX.is_match(texts[2]) -> rubric.push("{code_text} fix is a placeholder")
     detail: entry(source.constants, "detail") ?? "false"
     if detail != "true" && detail != "false" -> return Err(rows_fail("{context}: `detail` is `true` or `false`"))
     written_fix: entry(source.constants, "structured_fix") ?? ""
@@ -410,7 +413,7 @@ render_rows: fn(source: String) -> RenderedRows DiagnosticRowsError! {
         facts.push(one.facts)
         loop problem in one.rubric -> rubric.push(problem.copy())
     }
-    if rubric.len() > 0 -> return Err(rows_fail("{rubric.len()} row texts break the plain-words rubric of Docs/spec/diagnostics.md (a Why gives a reason; no human text names a decision ID; an active row's meaning is its own words): {rubric.join("; ")}"))
+    if rubric.len() > 0 -> return Err(rows_fail("{rubric.len()} row texts break the plain-words rubric of Docs/spec/diagnostics.md (a Why gives a reason; no human text names a decision ID; an active row's meaning is its own words and its Fix a step): {rubric.join("; ")}"))
     Ok(RenderedRows{text: "{GENERATED_BY}\nDIAGNOSTIC_ROWS: #run {{ [DiagnosticRegistryRow]{{\n{rendered.join("\n")}\n}} }}\n", facts: facts})
 }
 
@@ -1110,7 +1113,18 @@ MINIMAL_MEANING: "        meaning: \"A route that doesn't start at the root\"\n"
     }
 }
 
-#Test("every Prelude row's Why gives a reason and no human text names a decision ID") {
+#Test("an active row whose Fix is the placeholder is refused; a retired or reserved row may keep it") {
+    placeholder: MINIMAL_ROW.replace("write {{{{/path}}}}", "Follow the guidance for E9999")
+    error: diagnostic_rows_error(placeholder)
+    assert(error.contains("1 row texts break the plain-words rubric"), error)
+    assert(error.contains("E9999 fix is a placeholder"), error)
+    statuses: [String]{"Retired", "Reserved"}
+    loop status in statuses {
+        assert_eq(diagnostic_rows_error(placeholder.replace(MINIMAL_CODE, "{MINIMAL_CODE}        status: .{status}\n")), "")
+    }
+}
+
+#Test("every Prelude row's Why gives a reason, every active row's Fix is a step, and no human text names a decision ID") {
     source: files.read(SOURCE_PATH) ?? panic("cannot read {SOURCE_PATH}: {err}")
     rows: render_rows(source) ?? panic(err.message)
     assert(rows.facts.len() > 0)

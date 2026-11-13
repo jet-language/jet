@@ -71,7 +71,8 @@ words for the learner who hit it:
   of the rule's internal meaning.
 - **Why** gives the reason in one or two plain sentences. A placeholder such as
   "The registered sema rule applies here" is not a reason.
-- **Fix** gives a concrete edit or command.
+- **Fix** gives a concrete edit or command. A placeholder such as "Follow the
+  guidance for E0123" is not a step; only a retired or reserved row keeps one.
 - Human fields carry no internal vocabulary: no decision IDs (`D-…`, `S…`), no
   constant names, no "unit", "source bytes", byte offsets, `key=value` dumps,
   or stage names. That material belongs to `jet explain CODE --verbose` and
