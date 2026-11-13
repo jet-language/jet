@@ -1099,7 +1099,7 @@ sema_http_route_contract: fn(method: String, wire: String, pattern: String, path
 
 sema_call_try_http_router: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     updated_args := args
-    app: sema_app_is_core_app(receiver_value.ty, environment, program)
+    app: sema_app_is_route_table(receiver_value.ty, environment, program)
     receiver_name := if app -> "App" else -> sema_call_http_nominal_leaf(receiver_value.ty)
     if receiver_name != "HTTPRouter" && !app -> return SemaMethodSpecialCheck{handled: false, value: None}
     if app && method == "mount" -> return sema_call_http_mount(receiver, receiver_value, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)

@@ -46,6 +46,22 @@ sema_http_route_marker_verb: fn(marker: Marker, graph: SemaRegistrationGraph, mo
     Val(verb)
 }
 
+// The module that declares the web markers. The web rules key on its
+// markers (`#RouteTable` on App), never on another module's same-named ones.
+SEMA_WEB_MARKER_MODULE: "core.web"
+SEMA_WEB_MARKER_ROUTE_TABLE: "RouteTable"
+
+// Whether `marker`, written in the module `module_identity`, is the web
+// module's marker `name`.
+sema_web_marker_is: fn(marker: Marker, graph: SemaRegistrationGraph, module_identity: String, name: String) -> Bool {
+    if marker.negated || (marker.name != name && !marker.name.ends_with(".{name}")) -> return false
+    resolved: sema_marker_module_resolve_application(graph, module_identity, marker)
+    if resolved.status != "found" -> return false
+    declaration: resolved.declaration ?? return false
+    module_index: sema_registration_module_index(graph, resolved.declaring_module_identity) ?? return false
+    graph.modules[module_index].module_name == SEMA_WEB_MARKER_MODULE && declaration.name == name
+}
+
 sema_http_mount_arg: fn(expression: Expr, span: Span) -> CallArg Never! {
     CallArg{convention: AccessConvention.Read, expr: expression, span: span,
         flags: ast_empty_call_arg_flags(), label: None, spread: false}

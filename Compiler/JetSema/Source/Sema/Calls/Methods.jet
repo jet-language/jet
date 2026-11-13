@@ -1333,15 +1333,26 @@ sema_app_routes_overlap: fn(left_path: String, right_path: String) -> Bool {
 // so the check site calls it before declared-method resolution. Whether it
 // reported.
 sema_call_app_route_registrations: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> Bool {
-    if !sema_app_is_core_app(receiver_value.ty, environment, program) -> return false
+    if !sema_app_is_route_table(receiver_value.ty, environment, program) -> return false
     graph: program.registration_graph ?? return false
     sema_app_check_route_registrations(receiver, method, args, span, environment, graph, diagnostics)
 }
 
-// Whether `ty` is core.web's App.
-sema_app_is_core_app: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool {
+// Whether `ty` is a struct the web module marks `#RouteTable`, its App. The
+// web rules key on the marker, not on the type's or its module's name.
+sema_app_is_route_table: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool {
+    graph: program.registration_graph ?? return false
     resolved: sema_call_resolved_type(ty, environment, program)
-    resolved == (Type.Named{name: "App"}) || resolved == (Type.Named{name: "<corelib>/core.web::App"})
+    row: sema_type_resolve_nominal_row(graph, resolved, environment.module_identity) ?? return false
+    nominal: graph.modules[row.module_index].nominals[row.row]
+    if nominal.kind != SemaRegistrationNominalKind.Struct -> return false
+    item: sema_registration_nominal_source_item(nominal.source) ?? return false
+    if item == .Struct(definition) {
+        loop marker in definition.type_markers {
+            if sema_web_marker_is(marker, graph, graph.modules[row.module_index].module_identity, SEMA_WEB_MARKER_ROUTE_TABLE) -> return true
+        }
+    }
+    false
 }
 
 // The App capability check for a browser feature: `.csr`, `.island` and the
@@ -1349,8 +1360,7 @@ sema_app_is_core_app: fn(ty: Type, environment: SemaScopeEnvironment, program: S
 // enclosing function's `#Target(JS|Wasm)` pin, else its file's `#Target`;
 // an unpinned function has no resolved web target yet and is not checked.
 sema_call_app_browser_feature: fn(receiver_value: TExpr, method: String, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, function_name: String, diagnostics: &[Diagnostic]) {
-    receiver_type: sema_call_resolved_type(receiver_value.ty, environment, program)
-    if receiver_type != (Type.Named{name: "App"}) && receiver_type != (Type.Named{name: "<corelib>/core.web::App"}) -> return
+    if !sema_app_is_route_table(receiver_value.ty, environment, program) -> return
     graph: program.registration_graph ?? return
     row: sema_app_module_row(environment, graph)
     if row < 0 -> return
@@ -1403,7 +1413,7 @@ sema_app_route_shape: fn(path: String) -> String {
 }
 
 sema_call_try_app_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
-    if !sema_app_is_core_app(receiver_value.ty, environment, program) -> return SemaMethodSpecialCheck{handled: false, value: None}
+    if !sema_app_is_route_table(receiver_value.ty, environment, program) -> return SemaMethodSpecialCheck{handled: false, value: None}
     // Single routes, marked methods and middleware: the App's one route
     // table takes them as the HTTP registrations they are.
     if method == sema_http_route_custom_verb() || sema_http_route_verbs().contains(method) -> return sema_call_try_http_router(receiver, receiver_value, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)

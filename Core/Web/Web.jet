@@ -179,8 +179,18 @@ __AppState: struct {
     table: HTTPMux
 }
 
+// The compiler's web rules key on this marker, not on this module's name: the
+// type it marks owns the one route table, so its registrations chain and its
+// routes, browser features and OpenAPI rows are checked.
+RouteTable: struct {
+    impl Marker {
+        sites: [.Type]
+    }
+}
+
 /// One application graph: routes, server functions, mounts and policies.
 /// Copies share the one graph.
+#RouteTable
 App: struct {
     __state: Shared<__AppState>
 

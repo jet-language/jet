@@ -458,7 +458,7 @@ sema_call_http_mux_source_call: fn(receiver_value: TExpr, method: String, args: 
             location: sema_check_expression(sema_site_location_expr("", environment, program, scopes, span), Val(sema_call_resolved_type(declared_ty, environment, program)), environment, program, scopes, state, tail_store, context, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
             filled.push(sema_call_http_static_tree_arg(location, sema_call_http_core_synthetic_arg(declared, span)))
         }
-        app: owner == "App"
+        app: sema_app_is_route_table(receiver_value.ty, environment, program)
         result_type: if app -> receiver_value.ty.copy() else -> Type.Named{name: "Unit"}
         built := sema_tree_node(result_type, TExprKind.MethodCall{receiver: receiver_value, method: candidate.method.move(), type_args: [Type]{}, args: filled.move()}, span)
         if !app -> sema_call_http_record_effect("Net", "{owner}.{method}", built.ty, span, environment, program, scopes, context, diagnostics)
@@ -805,7 +805,7 @@ sema_call_http_web_openapi_mux: fn(target: SemaCallDirectTarget, qualified_name:
     if identity != target.symbol.module_name -> return SemaMethodSpecialCheck{handled: false, value: None}
     probe_diagnostics := [Diagnostic]{}
     probed: sema_probe_expression(args[0].expr, None, environment, program, scopes, state, tail_store, context, probe_diagnostics) ?? return SemaMethodSpecialCheck{handled: false, value: None}
-    if !sema_app_is_core_app(probed.ty, environment, program) -> return SemaMethodSpecialCheck{handled: false, value: None}
+    if !sema_app_is_route_table(probed.ty, environment, program) -> return SemaMethodSpecialCheck{handled: false, value: None}
     mux_target: sema_call_core_source_target(environment, program, identity, "__openapi_app", [Type]{}, span, true, diagnostics) ?? panic("core.web.__openapi_app is not registered")
     SemaMethodSpecialCheck{handled: true, value: sema_call_core_check_source_owned(mux_target, qualified_name, type_args, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)}
 }

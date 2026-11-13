@@ -1,0 +1,15 @@
+// The web rules key on the `#RouteTable` marker core.web puts on its App, not
+// on the type's name: a program's own `App` with a `get` method is an ordinary
+// struct, and the method runs as declared.
+App: struct {
+    name: String
+
+    get: fn(self, path: String, handler: fn() -> String) -> String {
+        "{self.name} {path} -> {handler()}"
+    }
+}
+
+run: fn() {
+    app: App{name: "mine"}
+    print(app.get("/health", fn() { "ok" }))
+}
