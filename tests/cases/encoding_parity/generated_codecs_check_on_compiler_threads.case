@@ -1,0 +1,19 @@
+# Card #6793 c6: a codec wave checks the codecs it generated on compiler
+# threads, as a body wave does (JetSema Sema/CheckProgram.jet,
+# sema_check_body_wave with SemaWaveKind.Codec), and the module checks then
+# take those bodies in module order. Eight codable types generate sixteen
+# codec methods, enough work to admit two threads. The program's JSON round
+# trip shows the bodies the threads checked are the ones a single thread
+# checks.
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+write: main.jet = "use json: core.encoding.json\n\nPoint: struct { x: Int y: Int }\nSize: struct { width: Int height: Int }\nLabel: struct { text: String weight: Int }\nBox: struct { origin: Point size: Size label: Label }\nShade: enum { Light Dark }\nStyle: struct { shade: Shade border: Int fill: Bool }\nLayer: struct { name: String boxes: [Box] style: Style }\nPage: struct { title: String layers: [Layer] number: Int }\n\nrun: fn() {\n    box: Box{origin: Point{x: 1, y: 2}, size: Size{width: 3, height: 4}, label: Label{text: \"a\", weight: 5}}\n    layer: Layer{name: \"top\", boxes: [Box]{box.copy()}, style: Style{shade: Shade.Dark, border: 2, fill: true}}\n    page: Page{title: \"p\", layers: [Layer]{layer.copy()}, number: 7}\n    text: json.to_string(page)\n    print(text)\n    back: json.decode<Page>(text) ?? return\n    print(json.to_string(back) == text)\n}\n"
+step: jet check --threads 2 --trace main.jet
+exit: 0
+stderr: ~ "# sema.codec_generated = 16\n" # each of the eight types gets an encode and a decode method
+stderr: ~ "# sema.codecs.wave_workers = 2\n" # the codec wave admits both threads the cap allows
+stderr: ~ "# sema.codecs.wave_jobs = " # the wave counts the codec methods its threads may check
+stderr: !~ "# sema.codecs.wave_jobs = 0\n" # and the threads get some of them
+step: jet run --threads 2 main.jet
+exit: 0
+stdout: = "{\"title\":\"p\",\"layers\":[{\"name\":\"top\",\"boxes\":[{\"origin\":{\"x\":1,\"y\":2},\"size\":{\"width\":3,\"height\":4},\"label\":{\"text\":\"a\",\"weight\":5}}],\"style\":{\"shade\":\"Dark\",\"border\":2,\"fill\":true}}],\"number\":7}\ntrue\n"
