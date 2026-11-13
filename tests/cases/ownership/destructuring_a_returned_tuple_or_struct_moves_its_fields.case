@@ -1,0 +1,27 @@
+# Destructuring a returned tuple or struct moves its fields into the names: the
+# emitted code of from_tuple, from_struct and from_nested clones no field (no
+# String clone, no List retain, no copy routine), and the field a `..` pattern
+# skips drops with the value. The values match on o0, o1, o2 and a built binary.
+fixture: destructuring_a_returned_tuple_or_struct_moves_its_fields.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet inspect decisions --optimize=none --opt-dump=from_tuple,from_struct,from_nested main.jet
+exit: 0
+stdout: ~ "before fn from_nested" # the dump covers the repro
+stdout: !~ "jet_rt_string_clone" # no String field is cloned
+stdout: !~ "jet_rt_block_retain" # no List field is retained
+stdout: !~ "#copy<" # no field goes through a copy routine
+step: jet run --optimize=none main.jet
+exit: 0 # o0
+stdout: = destructuring_a_returned_tuple_or_struct_moves_its_fields.out # o0
+step: jet run --optimize=basic main.jet
+exit: 0 # o1
+stdout: = destructuring_a_returned_tuple_or_struct_moves_its_fields.out # o1
+step: jet run --optimize=full main.jet
+exit: 0 # o2
+stdout: = destructuring_a_returned_tuple_or_struct_moves_its_fields.out # o2
+step: jet build main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = destructuring_a_returned_tuple_or_struct_moves_its_fields.out

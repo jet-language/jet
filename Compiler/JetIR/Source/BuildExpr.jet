@@ -1280,30 +1280,72 @@ ir_bind_uninit: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, local: TLocal, ty:
 // `(a, b): init` / `{x, y}: init`: each name binds its own copy of the
 // field it names. A fresh subject ends after the copies, but one that closes
 // stays, as an unnamed variable declared before the names: what the names
-// leave of it closes where it would have, in its own field order.
+// leave of it closes where it would have, in its own field order. A fresh
+// subject that doesn't close and drops through its own glue gives its parts
+// away instead: each moves into its name (an aggregate's bytes into storage
+// of its own), and only the parts no name takes drop with it
+// (ir_drop_untaken).
 ir_field_destructure: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, init: Int, binds: [TDestructureBinding], span: Span) Never! {
     init_ty: ir_ty(p, b, init)
     subject: ir_expr(m, p, b, init)
     if ir_failed(b) -> return
     if subject < 0 || ir_kind_of(m, b, subject) != .Aggregate -> return ir_fail(b, span, "destructure of {ir_type_name(init_ty)}")
     subject_row: b.f.slot_type[subject]
-    if b.fresh[subject] && ir_close_glue(m, p, b, subject_row, false, span) >= 0 {
+    closes: b.fresh[subject] && ir_close_glue(m, p, b, subject_row, false, span) >= 0
+    if closes {
         owned: ir_has_drop(m, b, subject)
         b.bindings.push(IRBinding{name: "#destructured", slot: subject, owned: owned, symbol: ""})
         b.fresh[subject] = false
         ir_close_arm(m, p, b, subject, false, span)
     }
+    moving: b.fresh[subject] && !closes && m.types[subject_row].drop != "" && m.types[subject_row].drop == ir_drop_key(m, subject_row) && ir_inline_members(m, p, subject_row) != None
+    taken := [Int]{}
     loop binding in binds {
         member: ir_member_of(m, p, b, subject, binding.field) ?? return ir_fail(b, span, "destructure field {binding.field} of {ir_type_name(init_ty)}")
-        value: ir_member_value(m, b, subject, member)
+        value := ir_member_value(m, b, subject, member)
         if value < 0 -> next
+        if moving && !member.boxed && !taken.contains(member.offset) {
+            taken.push(member.offset)
+            if m.types[member.ty].kind == .Aggregate {
+                part: m.types[member.ty]
+                moved: ir_temp(m, b, member.ty)
+                ir_emit(b.f, IROp.StackAddress, moved, part.size, part.align, -1, b.line)
+                ir_emit(b.f, IROp.CopyBytes, -1, moved, value, part.size, b.line)
+                value = moved
+            }
+            b.fresh[value] = true
+        }
         // The part moves out of the subject into its name, which closes it.
         ir_close_note(m, p, b, value, subject, IRPartStep{selector: -1, offset: member.offset})
         ir_bind_local(m, p, b, binding.local, value, span)
         named: b.bindings[b.bindings.len() - 1].slot
         ir_close_arm(m, p, b, named, false, span)
     }
+    if moving {
+        ir_drop_untaken(m, p, b, subject, taken)
+        b.fresh[subject] = false
+        return
+    }
     ir_release(m, b, subject)
+}
+
+// Drops the parts of the fresh aggregate `subject` whose offsets `taken`
+// doesn't list, last declared first, as its drop glue would (ir_drop_glue).
+ir_drop_untaken: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, subject: Int, taken: [Int]) Never! {
+    members: ir_inline_members(m, p, b.f.slot_type[subject]) ?? return
+    index := members.len()
+    loop index > 0 {
+        index -= 1
+        member: members[index]
+        if taken.contains(member.offset) -> next
+        if member.boxed {
+            ir_wrapper_drop(m, b, subject, member)
+            next
+        }
+        if !ir_glue_drops(m, member.ty) -> next
+        value: ir_load_at(m, b, subject, member.offset, member.ty)
+        ir_drop_part(m, b, value)
+    }
 }
 
 // `[a, b]: init`: the first `count` names each bind a copy of the element

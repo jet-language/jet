@@ -1,0 +1,50 @@
+// Destructuring a returned tuple or struct moves its fields into the names:
+// no field is cloned, and a field no name takes drops with the value.
+Pair: struct {
+    items: [Int]
+    name: String
+}
+
+Labeled: struct {
+    label: String
+    pair: Pair
+    tags: [String]
+}
+
+make_tuple: fn(n: Int) -> (items: [Int], name: String) {
+    (items: [Int]{n, n + 1}, name: "t{n}")
+}
+
+make_pair: fn(n: Int) -> Pair {
+    Pair{items: [Int]{n}, name: "p{n}"}
+}
+
+make_labeled: fn(n: Int) -> Labeled {
+    Labeled{label: "l{n}", pair: make_pair(n), tags: [String]{"a{n}", "b{n}"}}
+}
+
+from_tuple: fn(n: Int) -> Int {
+    (items, name): make_tuple(n)
+    items.len() + name.len()
+}
+
+from_struct: fn(n: Int) -> Int {
+    Pair{items, name}: make_pair(n)
+    items.len() + name.len()
+}
+
+from_nested: fn(n: Int) -> Int {
+    Labeled{label, pair, ..}: make_labeled(n)
+    label.len() + pair.items.len() + pair.name.len()
+}
+
+run: fn() {
+    total := 0
+    loop i in 0..<3 {
+        total += from_tuple(i) + from_struct(i) + from_nested(i)
+    }
+    print(from_tuple(3))
+    print(from_struct(4))
+    print(from_nested(5))
+    print(total)
+}
