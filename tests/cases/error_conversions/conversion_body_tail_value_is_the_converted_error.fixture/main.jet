@@ -10,8 +10,10 @@ AppErr: struct {
     origin: String
 }
 
-impl ReadErr -> AppErr {
-    AppErr{code: self.code + 100, origin: "read"}
+impl AppErr.From(ReadErr) {
+    from: fn(error: ReadErr) -> AppErr {
+        AppErr{code: error.code + 100, origin: "read"}
+    }
 }
 
 read: fn(n: Int) -> Int ReadErr! {

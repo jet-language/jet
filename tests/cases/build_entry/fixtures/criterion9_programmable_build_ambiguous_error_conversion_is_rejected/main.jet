@@ -6,10 +6,18 @@ BuildRightError: enum { One }
 #Error
 BuildTargetError: enum { One }
 
-impl BuildError -> BuildLeftError { return BuildLeftError.One }
-impl BuildError -> BuildRightError { return BuildRightError.One }
-impl BuildLeftError -> BuildTargetError { return BuildTargetError.One }
-impl BuildRightError -> BuildTargetError { return BuildTargetError.One }
+impl BuildLeftError.From(BuildError) {
+    from: fn(error: BuildError) -> BuildLeftError { return BuildLeftError.One }
+}
+impl BuildRightError.From(BuildError) {
+    from: fn(error: BuildError) -> BuildRightError { return BuildRightError.One }
+}
+impl BuildTargetError.From(BuildLeftError) {
+    from: fn(error: BuildLeftError) -> BuildTargetError { return BuildTargetError.One }
+}
+impl BuildTargetError.From(BuildRightError) {
+    from: fn(error: BuildRightError) -> BuildTargetError { return BuildTargetError.One }
+}
 
 build: fn(b: Build) BuildTargetError! {
     first: b.add_library("app", ["main.jet"], [])

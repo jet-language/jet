@@ -71,7 +71,7 @@ schema_has: fn(diagnostics: [Diagnostic], text: String) Never! {
     schema_has(check_schema_migrations(missing_converter, baseline, None, program), "has no converter")
     converted: schema_items("#PublishedSchema Account: struct {{ name: Int }}\nmigration Account {{ change name: String -> Int via {{ fn(old) {{ 0 }} }} }}")
     schema_require(check_schema_migrations(converted, baseline, None, program).len() == 0, "inline converter")
-    impl_converted: schema_items("Label: struct {{ text: String }}\nimpl String -> Label {{ return Label{{ text: self }} }}\n#PublishedSchema Account: struct {{ name: Label }}\nmigration Account {{ change name: String -> Label }}")
+    impl_converted: schema_items("Label: struct {{ text: String }}\nimpl Label.From(String) {{\n    from: fn(value: String) -> Label {{ Label{{ text: value }} }}\n}}\n#PublishedSchema Account: struct {{ name: Label }}\nmigration Account {{ change name: String -> Label }}")
     schema_require(check_schema_migrations(impl_converted, baseline, None, program).len() == 0, "impl converter")
     invalid_remove: schema_items("#PublishedSchema Account: struct {{ name: String }}\nmigration Account {{ remove name }}")
     schema_has(check_schema_migrations(invalid_remove, baseline, None, program), "still has that field")

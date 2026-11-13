@@ -302,8 +302,8 @@ GainRow: struct {
 }
 
 // A malformed header ends the run with its own message.
-impl binary.BinaryError -> Err {
-    Err("{self}")
+impl Err.From(binary.BinaryError) {
+    from: fn(error: binary.BinaryError) -> Err { Err("{error}") }
 }
 
 // `text` as an Int, else the error `what`.

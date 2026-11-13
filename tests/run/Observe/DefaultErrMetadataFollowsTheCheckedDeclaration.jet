@@ -1,8 +1,8 @@
 // The default Err lowers from its checked Prelude declaration: a fresh error
 // holds the declared metadata default (no identity, context or conversion),
 // and copy keeps the metadata a conversion and a context frame recorded.
-impl IOError -> Err {
-    return Err("store unavailable", code: "E_STORE")
+impl Err.From(IOError) {
+    from: fn(error: IOError) -> Err { return Err("store unavailable", code: "E_STORE") }
 }
 
 read_store: fn() -> Int IOError! {

@@ -268,11 +268,11 @@ sema_owned_check_literal: fn(trait_name: String, source: Type, owner_type: Type,
 }
 
 // A conversion (`impl Celsius.From(Float)`) is its one hook, once: static,
-// with a read `value` of the source the impl names, then only parameters
-// with defaults, and making the owner, with or without a failure (E0906 when
-// it is missing, E0907 at a hook of the wrong shape and at every other
-// method). Types compare by name, since a built-in owner the impl names
-// (`impl Float.From(Celsius)`) is a written name.
+// taking the source the impl names first (read or moved, under any name but
+// `self`), then only parameters with defaults, and making the owner, with or
+// without a failure (E0906 when it is missing, E0907 at a hook of the wrong
+// shape and at every other method). Types compare by name, since a built-in
+// owner the impl names (`impl Float.From(Celsius)`) is a written name.
 sema_owned_check_conversion: fn(trait_name: String, hook: String, owner_type: Type, source: Type, methods: [Func], span: Span, diagnostics: &[Diagnostic]) -> Bool {
     owner: sema_owned_owner_name(owner_type)
     expected: "`{hook}: fn(value: {type_name(source)}) -> {owner}`"
@@ -285,7 +285,7 @@ sema_owned_check_conversion: fn(trait_name: String, hook: String, owner_type: Ty
     valid := hooks.len() == 1 && found.type_params.len() == 0 && found.params.len() >= 1 && !found.is_comptime
     if valid {
         value: found.params[0]
-        valid = value.name != "self" && value.convention == AccessConvention.Read && type_name(value.ty) == type_name(source) && value.default == None && !value.variadic
+        valid = value.name != "self" && value.convention != AccessConvention.Write && type_name(value.ty) == type_name(source) && value.default == None && !value.variadic
         loop index in 1..<found.params.len() {
             if found.params[index].default == None -> valid = false
         }

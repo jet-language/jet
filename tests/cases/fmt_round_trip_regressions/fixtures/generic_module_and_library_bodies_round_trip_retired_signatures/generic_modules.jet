@@ -107,7 +107,9 @@ local_laws: module<T> {
         Wrapped(SourceErr)
     }
 
-    impl SourceErr -> TargetErr { return TargetErr.Wrapped(self) }
+    impl TargetErr.From(SourceErr) {
+        from: fn(error: SourceErr) -> TargetErr { return TargetErr.Wrapped(error) }
+    }
 }
 
 int_laws: local_laws<Int>

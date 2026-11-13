@@ -39,8 +39,8 @@ union: fn(value: Int) -> Int (TypedFailure | OtherFailure)! {
 }
 
 // One declared conversion crosses from a named error into default Err.
-impl StoreFailure -> Err {
-    return Err("converted")
+impl Err.From(StoreFailure) {
+    from: fn(error: StoreFailure) -> Err { return Err("converted") }
 }
 
 converted: fn(value: Int) -> Int StoreFailure! {

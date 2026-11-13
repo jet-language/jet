@@ -52,7 +52,7 @@ Run a lesson from the repository root, for example `jet run Examples/ErrorsAndEf
 
 - [AmbientErr](Errors/AmbientErr.jet)
 - [CallbackFailurePassthrough](Errors/CallbackFailurePassthrough.jet) — A function passes a callback's failure through to its caller with a failure-type parameter.
-- [ConvertedErrMessage](Errors/ConvertedErrMessage.jet) — After a declared `impl T -> Err`, the `??` fallback's ambient `err` is the converted default Err.
+- [ConvertedErrMessage](Errors/ConvertedErrMessage.jet) — After a declared `impl Err.From(T)`, the `??` fallback's ambient `err` is the converted default Err.
 - [CoreErrorConversion](Errors/CoreErrorConversion.jet) — The standard library declares the conversion for its own error family.
 - [DefaultErrEdge](Errors/DefaultErrEdge.jet) — An unhandled default Err is rendered at the program edge through the shared Prelude report.
 - [DefaultErrorConversion](Errors/DefaultErrorConversion.jet) — One declared conversion rail can target the default Err.

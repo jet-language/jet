@@ -100,7 +100,7 @@ format version, type, published version, optional `squashed_before` cutoff,
 and declaration-order field names and types. Field reordering is not breaking.
 Removing a field, changing its type, or adding a required field needs declared
 migration intent; invalid migration operations also report E0910 before
-codegen. A type change requires an inline converter or an `impl Old -> New`.
+codegen. A type change requires an inline converter or an `impl New.From(Old)`.
 
 `inspect schema status` uses the same sema diff over authorized load-only
 declarations, intentionally without a full build's populated trait registry.

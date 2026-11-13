@@ -592,7 +592,9 @@ and name it in the function contract:
 #Error
 AppErr: enum { Read(IOError) }
 
-impl IOError -> AppErr { return AppErr.Read(self) }
+impl AppErr.From(IOError) {
+    from: fn(error: IOError) -> AppErr { AppErr.Read(error) }
+}
 
 load: fn() -> String AppErr! {
     text: fs.read("data.txt")
@@ -604,7 +606,7 @@ Conversions into a typed target require ownership of the source or target
 error. An application error still needs an explicit conversion before it can
 propagate into `Err`. `TaskFailure` is outside Core's automatic conversion
 family; handle it explicitly or declare an allowed
-conversion. The mechanism is the same `impl Source -> Target` declaration in
+conversion. The mechanism is the same `impl Target.From(Source)` declaration in
 all cases (D-ERR-CONV, D-FAIL-CONV1, D-FAIL-CONV2).
 
 `?T` is either `Val(x)` or `None`. Pattern tests and `??` are the primitive

@@ -17,8 +17,10 @@ impl Pattern.CheckedText {
     }
 }
 
-impl PatternError -> Err {
-    return Err("pattern rejected", code: "E_PATTERN", cause: Err("invalid shape"))
+impl Err.From(PatternError) {
+    from: fn(error: PatternError) -> Err {
+        return Err("pattern rejected", code: "E_PATTERN", cause: Err("invalid shape"))
+    }
 }
 
 parse: fn(text: String) -[]> Pattern {

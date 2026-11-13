@@ -17,10 +17,12 @@ AppFailure: enum {
     Config(String)
 }
 
-impl ConfigFailure -> AppFailure {
-    if self == {
-        .Missing -> return AppFailure.Config("missing")
-        .Invalid -> return AppFailure.Config("invalid")
+impl AppFailure.From(ConfigFailure) {
+    from: fn(error: ConfigFailure) -> AppFailure {
+        if error == {
+            .Missing -> return AppFailure.Config("missing")
+            .Invalid -> return AppFailure.Config("invalid")
+        }
     }
 }
 

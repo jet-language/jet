@@ -1,4 +1,4 @@
-// After a declared `impl T -> Err`, the
+// After a declared `impl Err.From(T)`, the
 // `??` fallback's ambient `err` is the converted default Err. Its fields read
 // what the conversion built, including through a `?("note")` context frame.
 // Rule 7: the conversion applies only against a written
@@ -8,8 +8,10 @@ StoreErr: enum {
     Missing
 }
 
-impl StoreErr -> Err {
-    return Err("store unavailable: missing user", code: "E_STORE", cause: Err("disk offline"))
+impl Err.From(StoreErr) {
+    from: fn(error: StoreErr) -> Err {
+        return Err("store unavailable: missing user", code: "E_STORE", cause: Err("disk offline"))
+    }
 }
 
 User: struct {

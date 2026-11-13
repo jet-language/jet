@@ -3,8 +3,8 @@
 // context frame and copies them, and a comptime Err (fresh, or the failure
 // of a fallible call) reaches the program with its message, code, cause and
 // the metadata its conversion and context frame recorded.
-impl IOError -> Err {
-    return Err("store unavailable", code: "E_STORE")
+impl Err.From(IOError) {
+    from: fn(error: IOError) -> Err { return Err("store unavailable", code: "E_STORE") }
 }
 
 read_store: fn() -> Int IOError! {

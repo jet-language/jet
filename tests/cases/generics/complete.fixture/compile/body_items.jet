@@ -10,7 +10,7 @@ complete: module<T>(count: Int, label: String) {
     impl Wrapped.Reveal { reveal: fn(self) -> T { return self.value } }
     SourceErr: enum { Bad(T) }
     TargetErr: enum { Wrapped(SourceErr) }
-    impl SourceErr -> TargetErr { return TargetErr.Wrapped(self) }
+    impl TargetErr.From(SourceErr) { from: fn(error: SourceErr) -> TargetErr { return TargetErr.Wrapped(error) } }
     #Target(OS.Linux)
     impl Wrapped { linux_value: fn(self) -> T { return self.value } }
     plain: module { value: fn() -> Int { return count } }

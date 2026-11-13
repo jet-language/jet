@@ -8,7 +8,7 @@ AppErr: enum {
     File(FileErr)
 }
 
-impl FileErr -> AppErr { AppErr.File(self) }
+impl AppErr.From(FileErr) { from: fn(error: FileErr) -> AppErr { AppErr.File(error) } }
 
 priv internal: module {
     unused_helper: fn() -> Int { 1 }

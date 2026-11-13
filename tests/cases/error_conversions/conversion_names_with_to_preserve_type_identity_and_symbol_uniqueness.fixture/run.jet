@@ -9,12 +9,16 @@ TargetErr: struct {
     message: String
 }
 
-impl SourceErr -> TargetErr {
-    return TargetErr{message: "converted from source"}
+impl TargetErr.From(SourceErr) {
+    from: fn(error: SourceErr) -> TargetErr {
+        return TargetErr{message: "converted from source"}
+    }
 }
 
-impl TargetErr -> Err {
-    return Err("converted from target")
+impl Err.From(TargetErr) {
+    from: fn(error: TargetErr) -> Err {
+        return Err("converted from target")
+    }
 }
 
 read: fn() -> Int SourceErr! {

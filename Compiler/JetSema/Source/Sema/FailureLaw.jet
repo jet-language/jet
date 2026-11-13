@@ -3,6 +3,7 @@
 // `Sema::Prelude::inject_exercised_error_conversions` and the arm.
 use {
     jet_foundation.[
+        AST_NODE_GENERATED,
         AccessConvention,
         module_is_none,
         module_none,
@@ -33,6 +34,7 @@ use {
         TextEdit,
         Type,
         TypeParam,
+        ast_empty_call_arg_flags,
         ast_func,
         core_call_typed_signature,
         core_module_export,
@@ -46,6 +48,7 @@ use {
         foundation_named_type,
         ModuleID,
         module_is_core,
+        owned_trait_conversion,
         module_text,
     ]
     jet_parser.[
@@ -222,12 +225,14 @@ sema_error_conversion_local_types: fn(items: [Item]) -> [String] Never! {
     names
 }
 
-// `impl Source -> Target { body }` checks and lowers as the one routine
-// `errconv_Source_to_Target: fn(self: Source) -> Target Never!`: a conversion
-// cannot itself fail, and `Err(...)` in its body builds the default error value.
-sema_error_conversion_function: fn(name: String, from_span: Span, to_ty: String, to_span: Span, source: Type, body: [Stmt], body_span: Span) -> Func Never! {
+// A conversion route (`impl Target.From(Source)` into a failure domain, or
+// `impl Source -> Target { body }`) checks and lowers as the one routine
+// `errconv_Source_to_Target: fn(value: Source) -> Target Never!`, its source
+// named `param_name`: a conversion cannot itself fail, and `Err(...)` in its
+// body builds the default error value.
+sema_error_conversion_function: fn(name: String, param_name: String, from_span: Span, to_ty: String, to_span: Span, source: Type, body: [Stmt], body_span: Span) -> Func Never! {
     function := ast_func(name, from_span, Span{start: from_span.start, end: body_span.end})
-    function.params = [Param]{Param{convention: AccessConvention.Move, root: false, name: "self", name_span: from_span, public_label: None, zone: ParamZone.Either, ty: source, ty_span: from_span, default: None, variadic: false, variadic_bound_list: None, declared_view_from_names: None, declared_footprint: None}}
+    function.params = [Param]{Param{convention: AccessConvention.Move, root: false, name: param_name, name_span: from_span, public_label: None, zone: ParamZone.Either, ty: source, ty_span: from_span, default: None, variadic: false, variadic_bound_list: None, declared_view_from_names: None, declared_footprint: None}}
     function.return_type = Val(Type.Result{ok: Type.Named{name: to_ty}, err: Type.Named{name: "Never"}})
     function.return_type_span = Val(to_span)
     function.body = body
@@ -250,11 +255,13 @@ sema_is_error_conversion_function: fn(func: Func) -> Bool {
 // `package_types` are the names a sibling member file of the same package declares that
 // this file reaches: types of the package itself for the orphan rule (S28).
 sema_error_conversion_items: fn(items: &[Item], facts: &[AppliedRuleApplication], package_types: [String], diagnostics: &[Diagnostic]) {
+    plain_types: sema_error_conversion_plain_types(items)
     has_conversion: loop index in 0..<items.len() {
-        if items[index] == .ErrorConv(_) -> break true
+        if items[index] == .ErrorConv(_) || sema_error_conversion_from_route(plain_types, items[index]) != None -> break true
     } ?? false
     if !has_conversion -> return
     local_types := sema_error_conversion_local_types(items)
+    declared_types: sema_error_conversion_local_types(items)
     loop name in package_types -> local_types.push(name.copy())
     // A conversion from a generic type this file declares is generic over
     // that type's own parameters, so it converts every instantiation; one
@@ -262,6 +269,7 @@ sema_error_conversion_items: fn(items: &[Item], facts: &[AppliedRuleApplication]
     conversion_params := [[TypeParam]]{}
     loop item in items {
         if item == .ErrorConv(definition) -> conversion_params.push(sema_error_conversion_type_params(items, definition.from_ty))
+        if sema_error_conversion_from_route(plain_types, item) == .Val(route) -> conversion_params.push(sema_error_conversion_type_params(items, route.from_ty))
     }
     edges := [SemaErrorConversionEdge]{}
     output := [Item]{}
@@ -275,13 +283,89 @@ sema_error_conversion_items: fn(items: &[Item], facts: &[AppliedRuleApplication]
             loop marker in definition.markers -> facts.push(AppliedRuleApplication{marker: marker, target: Val(definition.from_span), site: Val(RuleSite.Impl)})
             type_params: conversion_params[converted].copy()
             converted += 1
-            routine := sema_error_conversion_routine(definition, type_params, local_types, edges, diagnostics) ?? next
+            routine := sema_error_conversion_routine(definition, "self", type_params, local_types, edges, diagnostics) ?? next
             output.push(routine)
+            next
+        }
+        if sema_error_conversion_from_route(plain_types, item) == .Val(route) {
+            type_params: conversion_params[converted].copy()
+            converted += 1
+            // A target this file declares keeps its impl, so `AppErr.from(e)`
+            // and `AppErr{e}` call the hook the route calls; any other
+            // target's impl is the route alone, its hook's body checked once
+            // as the routine. A rejected route drops the impl with it, so
+            // its one report is the route's.
+            kept: declared_types.contains(route.to_ty)
+            if item == .Impl(definition) {
+                param_name: definition.methods[0].params[0].name
+                routed := route
+                if kept -> routed.body = [Stmt]{Stmt.Expr{expr: sema_error_conversion_hook_call(route.to_ty, param_name, route.to_span)}}
+                if !kept {
+                    loop marker in definition.markers -> facts.push(AppliedRuleApplication{marker: marker, target: Val(route.from_span), site: Val(RuleSite.Impl)})
+                }
+                routine := sema_error_conversion_routine(routed, param_name, type_params, local_types, edges, diagnostics) ?? next
+                if kept -> output.push(item)
+                output.push(routine)
+            }
             next
         }
         output.push(item)
     }
     items = output.move()
+}
+
+// A From impl that converts failures reads as one conversion route: the
+// impl's one hook cannot itself fail, and its target is `Err` or a failure
+// domain (no name in `plain_types`), so `impl AppErr.From(IOError)` is the
+// route from `IOError` to `AppErr` that `?` takes. The route's body is the
+// hook's own.
+sema_error_conversion_from_route: fn(plain_types: [String], item: Item) -> ErrorConvDef? {
+    if item == .Impl(definition) {
+        trait_name: definition.trait_name ?? return None
+        if !owned_trait_conversion(trait_name) || definition.methods.len() != 1 -> return None
+        source: definition.operator_rhs ?? return None
+        hook: definition.methods[0]
+        if hook.params.len() == 0 || hook.params[0].name == "self" -> return None
+        if hook.return_type == .Val(returned) {
+            if returned == .Result(_, failure) {
+                if failure != (Type.Named{name: "Never"}) -> return None
+            }
+        }
+        if plain_types.contains(definition.type_name) || !(foundation_named_type(definition.type_name) == .Named(_)) || sema_registration_builtin_scalar(definition.type_name) != None -> return None
+        written: type_name(source)
+        open: written.find("<")
+        from_ty: if open > 0 -> written.slice(0, open) else -> written
+        source_span: definition.trait_span ?? definition.type_span
+        return Val(ErrorConvDef{from_ty: from_ty, from_span: source_span, to_ty: definition.type_name, to_span: definition.type_span, body: hook.body, body_span: hook.span, markers: definition.markers})
+    }
+    None
+}
+
+// The types this file declares that a conversion into converts no failure:
+// those not marked `#Error`. `Err`, a Core error and another module's type
+// are failure domains; a built-in value type never is (sema_error_conversion_from_route).
+sema_error_conversion_plain_types: fn(items: [Item]) -> [String] Never! {
+    names := [String]{}
+    loop item in items {
+        if item == .Struct(definition) {
+            // The Prelude declares the default `Err` itself.
+            if definition.name != "Err" && !sema_failure_markers_name_error(definition.type_markers) -> names.push(definition.name.copy())
+        }
+        if item == .Enum(definition) {
+            if !sema_failure_markers_name_error(definition.type_markers) -> names.push(definition.name.copy())
+        }
+        if item == .Distinct(definition) {
+            if !sema_failure_markers_name_error(definition.type_markers) -> names.push(definition.name.copy())
+        }
+    }
+    names
+}
+
+// The routine body of a route whose target keeps its impl: the hook's own
+// call, `Target.from(value)`.
+sema_error_conversion_hook_call: fn(target: String, param_name: String, span: Span) -> Expr Never! {
+    argument: CallArg{convention: AccessConvention.Read, expr: Expr.Ident{name: param_name, span: span, id: AST_NODE_GENERATED}, span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false}
+    Expr.MethodCall{receiver: Expr.Ident{name: target, span: span, id: AST_NODE_GENERATED}, method: "from", method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: [CallArg]{argument}, id: AST_NODE_GENERATED}
 }
 
 // The type parameters of the generic struct or enum `name` that `items`
@@ -299,9 +383,10 @@ sema_error_conversion_type_params: fn(items: [Item], name: String) -> [TypeParam
 }
 
 // The checked routine of one declared conversion, or None when it is
-// rejected; an accepted conversion's route joins `edges`. A source with
-// `type_params` makes the routine generic over them (`self: Unsent<T>`).
-sema_error_conversion_routine: fn(definition: ErrorConvDef, type_params: [TypeParam], local_types: [String], edges: &[SemaErrorConversionEdge], diagnostics: &[Diagnostic]) -> Item? {
+// rejected; an accepted conversion's route joins `edges`. The routine takes
+// its source as `param_name`. A source with `type_params` makes the routine
+// generic over them (`value: Unsent<T>`).
+sema_error_conversion_routine: fn(definition: ErrorConvDef, param_name: String, type_params: [TypeParam], local_types: [String], edges: &[SemaErrorConversionEdge], diagnostics: &[Diagnostic]) -> Item? {
     from_ty: definition.from_ty
     to_ty: definition.to_ty
     span: definition.from_span
@@ -345,9 +430,9 @@ sema_error_conversion_routine: fn(definition: ErrorConvDef, type_params: [TypePa
         return None
     }
     // The source is a written type name; a primitive name is that primitive
-    // (`impl String -> Err` takes a `String` self).
+    // (`impl Err.From(String)` takes a `String` value).
     source: if type_params.len() == 0 -> foundation_named_type(from_ty) else -> sema_derive_owner_type(from_ty, type_params)
-    routine := sema_error_conversion_function(sema_failure_declared_conversion_name(sema_error_conversion_leaf(from_ty), sema_error_conversion_leaf(to_ty)), definition.from_span, to_ty, definition.to_span, source, definition.body, definition.body_span)
+    routine := sema_error_conversion_function(sema_failure_declared_conversion_name(sema_error_conversion_leaf(from_ty), sema_error_conversion_leaf(to_ty)), param_name, definition.from_span, to_ty, definition.to_span, source, definition.body, definition.body_span)
     routine.type_params = type_params.copy()
     Val(Item.Func{value: routine})
 }
@@ -370,7 +455,7 @@ sema_prelude_error_conversion: fn(source: Type, diagnostics: &[Diagnostic]) -> F
     }
     if parsed.program.items.len() != 1 -> return None
     if parsed.program.items[0] == {
-        .ErrorConv(definition) -> Val(sema_error_conversion_function(sema_failure_conversion_function_name(source, Type.Named{name: definition.to_ty}), definition.from_span, definition.to_ty, definition.to_span, source, definition.body, definition.body_span))
+        .ErrorConv(definition) -> Val(sema_error_conversion_function(sema_failure_conversion_function_name(source, Type.Named{name: definition.to_ty}), "self", definition.from_span, definition.to_ty, definition.to_span, source, definition.body, definition.body_span))
         .Func(_) | .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> None
     }
 }

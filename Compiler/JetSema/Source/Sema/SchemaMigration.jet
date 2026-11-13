@@ -1,7 +1,7 @@
 // 2: E0910 diff, independent of I/O. None is the status command's deliberately
 // empty advisory registry; builds supply the canonical populated scope
 // environment after type registration.
-use jet_foundation.[Diagnostic, Item, MigrationOp, Span, StructDef, Type, type_name, TTypeDef]
+use jet_foundation.[Diagnostic, Item, MigrationOp, Span, StructDef, Type, owned_trait_conversion, type_name, TTypeDef]
 
 sema_schema_published: fn(definition: StructDef) -> Bool Never! {
     if definition.is_published_schema -> return true
@@ -42,8 +42,9 @@ check_schema_migrations: fn(items: [Item], snapshots: [String:SchemaSnapshot], e
     diagnostics := [Diagnostic]{}
     migrations := [String:[MigrationOp]]{}
     conversions := [(from_ty: String, to_ty: String)]{}
-    // A checked program holds each accepted `impl Old -> New` as its lowered
-    // routine (sema_error_conversion_items); a parsed one still holds the item.
+    // A checked program holds each accepted conversion into a failure domain
+    // as its lowered routine (sema_error_conversion_items); a parsed one, and
+    // every value conversion (`impl Label.From(String)`), still holds the item.
     functions := [String]{}
     loop item in items {
         if item == {
@@ -53,8 +54,13 @@ check_schema_migrations: fn(items: [Item], snapshots: [String:SchemaSnapshot], e
                 migrations[migration.type_name] = operations.move()
             }
             .ErrorConv(conversion) -> conversions.push((from_ty: conversion.from_ty, to_ty: conversion.to_ty))
+            .Impl(definition) -> {
+                if definition.trait_name == .Val(trait_name) {
+                    if owned_trait_conversion(trait_name) && definition.operator_rhs == .Val(source) -> conversions.push((from_ty: type_name(source), to_ty: definition.type_name))
+                }
+            }
             .Func(function) -> functions.push(function.name)
-            .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+            .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
     }
     loop item in items {

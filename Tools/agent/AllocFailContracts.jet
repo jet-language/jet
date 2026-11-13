@@ -3,7 +3,7 @@
 // Map or String growth can report `AllocError`, every function that reaches
 // one has to say what happens to that error. Each owner choice is one mode:
 //   --domains=admit    a typed domain `E!` becomes `(E | AllocError)!`
-//   --domains=convert  each domain type gets `impl AllocError -> E`. An enum
+//   --domains=convert  each domain type gets `impl E.From(AllocError)`. An enum
 //                      gains an `OutOfMemory` case; a struct whose one field is
 //                      `message: String` gets a fixed message. Any other type
 //                      is listed for a hand choice.
@@ -742,13 +742,13 @@ plan_edits: fn(sources: [Source], domains: String, never: String, growth: [Strin
                     domain: sources[choice.source].types[choice.decl]
                     owner: sources[choice.source]
                     key: "{choice.source}:{choice.decl}"
-                    if !converted_types.has_key(key) && !owner.text.contains("impl AllocError -> {domain.name} ") {
+                    if !converted_types.has_key(key) && !owner.text.contains("impl {domain.name}.From(AllocError) ") {
                         converted_types[key] = true
                         if domain.kind == "enum" && !domain.has_case {
                             put_edit(edits, choice.source, case_edit(owner.code, domain))
                         }
                         body: if domain.kind == "enum" -> "{domain.name}.{CASE}" else -> "{domain.name}{{message: \"{MESSAGE}\"}}"
-                        put_edit(edits, choice.source, Edit{start: domain.close + 1, end: domain.close + 1, text: "\n\nimpl AllocError -> {domain.name} {{ {body} }}"})
+                        put_edit(edits, choice.source, Edit{start: domain.close + 1, end: domain.close + 1, text: "\n\nimpl {domain.name}.From(AllocError) {{\n    from: fn(error: AllocError) -> {domain.name} {{ {body} }}\n}}"})
                         converted += 1
                     }
                 }
@@ -930,7 +930,7 @@ rewrite: fn(text: String, domains: String, never: String) -> String {
 
 #Test("a message struct with impl blocks converts; other fields stay for a hand choice") {
     text: "P: struct {{\n    message: String\n    impl Display {{\n        display: fn(self) -> String {{ self.message.copy() }}\n    }}\n}}\nf: fn(xs: &[Int]) P! {{\n    xs.push(1)\n}}\n"
-    assert_eq(rewrite(text, "convert", ""), "P: struct {{\n    message: String\n    impl Display {{\n        display: fn(self) -> String {{ self.message.copy() }}\n    }}\n}}\n\nimpl AllocError -> P {{ P{{message: \"memory allocation refused\"}} }}\nf: fn(xs: &[Int]) P! {{\n    xs.push(1)\n}}\n")
+    assert_eq(rewrite(text, "convert", ""), "P: struct {{\n    message: String\n    impl Display {{\n        display: fn(self) -> String {{ self.message.copy() }}\n    }}\n}}\n\nimpl P.From(AllocError) {{\n    from: fn(error: AllocError) -> P {{ P{{message: \"memory allocation refused\"}} }}\n}}\nf: fn(xs: &[Int]) P! {{\n    xs.push(1)\n}}\n")
     reason: "R: struct {{ reason: String }}\nf: fn(xs: &[Int]) R! {{\n    xs.push(1)\n}}\n"
     assert_eq(rewrite(reason, "convert", ""), reason)
     assert_eq(rewrite(rewrite(text, "convert", ""), "convert", ""), rewrite(text, "convert", ""))
@@ -945,9 +945,9 @@ rewrite: fn(text: String, domains: String, never: String) -> String {
 
 #Test("convert adds a case and one impl per domain type") {
     text: "E: enum {{\n    A\n}}\nf: fn(xs: &[Int]) E! {{\n    xs.push(1)\n}}\ng: fn(xs: &[Int]) E! {{\n    f(xs)\n}}\n"
-    assert_eq(rewrite(text, "convert", ""), "E: enum {{\n    A\n    OutOfMemory\n}}\n\nimpl AllocError -> E {{ E.OutOfMemory }}\nf: fn(xs: &[Int]) E! {{\n    xs.push(1)\n}}\ng: fn(xs: &[Int]) E! {{\n    f(xs)\n}}\n")
+    assert_eq(rewrite(text, "convert", ""), "E: enum {{\n    A\n    OutOfMemory\n}}\n\nimpl E.From(AllocError) {{\n    from: fn(error: AllocError) -> E {{ E.OutOfMemory }}\n}}\nf: fn(xs: &[Int]) E! {{\n    xs.push(1)\n}}\ng: fn(xs: &[Int]) E! {{\n    f(xs)\n}}\n")
     message: "S: struct {{ message: String }}\nf: fn(xs: &[Int]) S! {{\n    xs.push(1)\n}}\n"
-    assert_eq(rewrite(message, "convert", ""), "S: struct {{ message: String }}\n\nimpl AllocError -> S {{ S{{message: \"memory allocation refused\"}} }}\nf: fn(xs: &[Int]) S! {{\n    xs.push(1)\n}}\n")
+    assert_eq(rewrite(message, "convert", ""), "S: struct {{ message: String }}\n\nimpl S.From(AllocError) {{\n    from: fn(error: AllocError) -> S {{ S{{message: \"memory allocation refused\"}} }}\n}}\nf: fn(xs: &[Int]) S! {{\n    xs.push(1)\n}}\n")
     assert_eq(rewrite(text, "mix", ""), "E: enum {{\n    A\n}}\nf: fn(xs: &[Int]) (E | AllocError)! {{\n    xs.push(1)\n}}\ng: fn(xs: &[Int]) (E | AllocError)! {{\n    f(xs)\n}}\n")
 }
 

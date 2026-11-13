@@ -1,5 +1,5 @@
 // Typed error families and error conversion.
-// `#Error` declares application-owned result families; `impl Source -> Target`
+// `#Error` declares application-owned result families; `impl Target.From(Source)`
 // is the one conversion rail. It is not a logging layer or a generic alias.
 #Error
 FileErr: enum {
@@ -21,14 +21,18 @@ AppErr: enum {
 }
 
 // Each conversion preserves the original source error as a payload in the
-// application family. The body receives that error as `self`. Without
-// `impl FileErr -> AppErr`, the `read_config(path)` call in `load` is
+// application family. Its `from` receives that error. Without
+// `impl AppErr.From(FileErr)`, the `read_config(path)` call in `load` is
 // rejected because `FileErr` has no route into `AppErr`
 // (tests/ui/error_family_missing_conversion.jet records the rejection and
 // this repair).
-impl FileErr -> AppErr { AppErr.File(self) }
+impl AppErr.From(FileErr) {
+    from: fn(error: FileErr) -> AppErr { AppErr.File(error) }
+}
 
-impl ParseErr -> AppErr { AppErr.Parse(self) }
+impl AppErr.From(ParseErr) {
+    from: fn(error: ParseErr) -> AppErr { AppErr.Parse(error) }
+}
 
 read_config: fn(path: String) -> String FileErr! {
     if path == "" -> return Err(FileErr.NotFound("(empty path)"))

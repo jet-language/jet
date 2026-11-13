@@ -1163,7 +1163,7 @@ migration UserRecord {
 ```
 
 `rename` targets an existing field of the same type. `change` resolves its
-converter in order: inline `via { … }`, an in-scope `impl Old -> New`, then an
+converter in order: inline `via { … }`, an in-scope `impl New.From(Old)`, then an
 E0910 asking for one. `add` supplies the value for old records. There is no
 `reorder` operation because field order is not a breaking shape change. `drop`
 and `reorder`, and other unknown verbs, teach E0911. An operation that contradicts
@@ -1510,26 +1510,30 @@ with E0392, whose edit writes the flat state. A table with an `.Err` arm
 handles the failure itself; without one, the failure passes up and the
 `.Val`/`.None` arms test the optional. (D-OUTCOME-SHAPE1=A)
 
-A failure conversion is one declared rail:
+A failure conversion is one declared rail, a `From` impl whose target is a
+failure domain:
 
 ```jet
-impl DiskError -> StoreError {
-    convert: fn(error: DiskError) -> StoreError {
+impl StoreError.From(DiskError) {
+    from: fn(error: DiskError) -> StoreError {
         StoreError.IO
     }
 }
 ```
 
-The conversion applies when a fallible call propagates. A conversion into the
-default `Err` may name a foreign source type. A typed target must obey the
-orphan rule: the declaration must be owned by the source or target side. The
-compiler reports an undeclared conversion as E2402, a duplicate as E2405, and a
-violation of the typed-target rule as E2406. The target is a failure domain, so
-a value type such as `Float` can't be one (E2417): a value conversion is an
-ordinary function. (D-ERR-CONV, D-FAIL-CONV1, D-FAIL-CONV2)
+The conversion applies when a fallible call propagates: a `DiskError` failure
+reaching a `StoreError` contract becomes `StoreError.from(error)`. The target
+is `Err`, a Core error, an imported type or a local type marked `#Error`, and
+`from` itself can't fail. A conversion into the default `Err` may name a
+foreign source type. A typed target must obey the orphan rule: the declaration
+must be owned by the source or target side. The compiler reports an undeclared
+conversion as E2402, a duplicate as E2405, and a violation of the typed-target
+rule as E2406. A `From` impl into a value type such as `Float` is a value
+conversion (`Float.from(reading)`), never a failure route. (D-ERR-CONV,
+D-FAIL-CONV1, D-FAIL-CONV2, D-CONVERT-TRAIT1)
 
 A conversion from a generic error type names the type bare, as an impl of a
-generic type does (`impl Unsent -> Err`), and applies to every instantiation:
+generic type does (`impl Err.From(Unsent)`), and applies to every instantiation:
 an `Unsent<Int>` and an `Unsent<String>` failure both convert through it. It is
 declared in the file that declares the type.
 

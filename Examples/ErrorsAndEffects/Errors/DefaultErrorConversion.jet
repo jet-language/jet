@@ -8,8 +8,8 @@ StoreErr: enum {
     Missing
 }
 
-impl StoreErr -> Err {
-    return Err("store unavailable: missing user")
+impl Err.From(StoreErr) {
+    from: fn(error: StoreErr) -> Err { return Err("store unavailable: missing user") }
 }
 
 read_store: fn() -> User StoreErr! { Err(StoreErr.Missing) }

@@ -2152,7 +2152,7 @@ explicit default-error contract. An `Err(e)` in a result-arm context
 still wraps the typed error value `e`. Argument shape distinguishes the two
 readings. `run: fn()` is fallible by default; an expert may pin `run: fn() !E`.
 Returned default errors print one report frame and exit non-zero. Cross-type
-`?` conversion uses declared `impl Source -> Target`; the retired
+`?` conversion uses a declared `impl Target.From(Source)`; the retired
 default-conversion trait, helper, and compiler arm are deleted by D-FAIL-CONV1.
 Compiler-synthesized default-error records pass the ordinary record checker,
 including Prelude-owned private field defaults; they are not a parallel layout.
@@ -2217,11 +2217,12 @@ and deletes `Error` as a type name, not an alias.
 
 **D-FAIL-CONV1=A — one conversion rail** *(ratified 2026-08-06, card #1529)*:
 the retired default-conversion trait, helper, and compiler arm are deleted.
-Error conversion uses the declared `impl Source -> Target` form, including a
-conversion into the default error. The default-error target may name a foreign
-source type; typed targets keep E2406's orphan rule. This amends D-ERR2 and
-D-LIB3. E2402 and E2406 teach the one rail and their registered UI snapshots
-follow it.
+Error conversion uses one declared impl, including a conversion into the
+default error. The default-error target may name a foreign source type; typed
+targets keep E2406's orphan rule. This amends D-ERR2 and D-LIB3. E2402 and
+E2406 teach the one rail and their registered UI snapshots follow it. The rail
+is spelled `impl Target.From(Source)` (D-CONVERT-TRAIT1=A); the earlier
+`impl Source -> Target` spelling is not Jet syntax.
 
 **D-FAIL-CONV2=A — the standard library declares the conversion for its own
 error family** *(ratified 2026-08-17, card #2018)*: the standard library ships
@@ -6438,7 +6439,7 @@ default, `fast`, and `debug` profiles, emits Rust and builds with rustc/LLVM.
 **Migrations** *(D-MIGRATE1, D-MIGRATE2A–F)*: `#PublishedSchema` types
 snapshot field layout; a breaking change without a migration is E0910.
 Verbs: `add f: T = val`; `remove f`; `change f: Old -> New via { old ->
-expr }` (converter: inline `via` → `impl Old -> New` in scope → E0910); no
+expr }` (converter: inline `via` → `impl New.From(Old)` in scope → E0910); no
 `reorder`. CLI: `jet inspect schema squash --before <ver>`, `jet inspect schema status`.
 
 **Decode-time migration transparency** *(D-MIGRATE3=A, retired by

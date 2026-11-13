@@ -303,14 +303,14 @@ optionals: fn(user: User?) -> String {
     return city ?? "unknown"
 }
 
-// Error conversion: declare one `Source -> Target` rail; ordinary calls apply it
-// (D-FAIL-CONV1).
-impl FileErr -> Err {
-    return Err("file error")
+// Error conversion: declare one `Target.From(Source)` rail; ordinary calls apply it
+// (D-FAIL-CONV1, D-CONVERT-TRAIT1).
+impl Err.From(FileErr) {
+    from: fn(error: FileErr) -> Err { return Err("file error") }
 }
 // A foreign source may target the default `Err`; typed targets keep the orphan rule.
-impl String -> Err {
-    return Err(self)
+impl Err.From(String) {
+    from: fn(text: String) -> Err { return Err(text) }
 }
 // load: fn() !Config {
 //     return Err("bad config", code: "CFG404", cause: io_err)

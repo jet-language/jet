@@ -5,8 +5,10 @@ Unsent: struct<T> {
     value: T
 }
 
-impl Unsent -> Err {
-    return Err("send on a closed channel")
+impl Err.From(Unsent) {
+    from: fn(error: Unsent) -> Err {
+        return Err("send on a closed channel")
+    }
 }
 
 send_one: fn(v: Int) Unsent<Int>! {
