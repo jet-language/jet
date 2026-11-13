@@ -76,7 +76,8 @@ jet test Compiler --profile ui                              # tests/ui and tests
 jet test Compiler --profile cases                           # tests/cases
 jet test Compiler --profile packages                        # the #Tests of every other package under Compiler/ and Jetpack/
 jet test Compiler --profile core                            # every Core #Test at optimize none, basic and full
-jet test Compiler --profile full                            # every package's and Core's #Tests, all three corpora, selfhost and perf
+jet test Compiler --profile fuzz                            # tests/fuzz/sema: check verdicts, differential runs agree at none, basic and full
+jet test Compiler --profile full                            # every package's and Core's #Tests, all three corpora, fuzz, selfhost and perf
 jet test Compiler --profile corpora                         # all three corpora, no #Tests
 jet test Compiler --profile golden Basics/FizzBuzz          # rows whose ID contains the filter
 JET_CI_EVIDENCE_DIR=/disk/scratch jet test Compiler --profile golden  # writes golden.json

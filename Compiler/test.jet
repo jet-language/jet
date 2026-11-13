@@ -1,6 +1,6 @@
 // The compiler workspace's code suites, run by the test
 // profiles of package.jet: `jet test Compiler --profile packages`, `core`,
-// `selfhost` or `perf`. Each runs in its own child, where JET names the jet under test,
+// `fuzz`, `selfhost` or `perf`. Each runs in its own child, where JET names the jet under test,
 // JET_COMPILER_IDENTITY its identity (that jet sets it when the caller didn't)
 // and JET_TEST_SUITE_ROOT this package's directory; the checkout is its
 // parent. A row is one check; the profile compares the rows with
@@ -11,6 +11,7 @@ use {
     json: core.encoding.json
     process: core.process
     sys: core.sys
+    time: core.time
     jet_testkit.[kit_claim_jobs, kit_exec_available_memory, kit_execute_budget]
 }
 
@@ -75,6 +76,7 @@ PERF_COLUMN: "225K"
 test: fn(t: Test) -> Int {
     t.suite("packages", package_suite_rows)
     t.suite("core", core_rows)
+    t.suite("fuzz", fuzz_rows)
     t.suite("selfhost", selfhost_rows)
     t.suite("perf", perf_rows)
     t.run()
@@ -745,6 +747,267 @@ core_rows: fn(rows: TestRows) {
             .Err(error) -> rows.fail(id, "couldn't run `jet test {run.path} --optimize={run.level}`: {error}")
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// fuzz: the sema fuzz corpus FUZZ_CORPUS, checked differentially by the jet
+// under test. Each directory of the corpus holds `.jet` programs, and its
+// name is their verdict:
+// - FUZZ_REFUSED (`invalid/<name>.<code>.jet`): `jet check --json` refuses
+//   the program. The code in the name is the refusal it was written for, and
+//   a failing row names it. A `__NUL__` in the file stands for a NUL byte, so
+//   the file is checked from a scratch copy that holds one.
+// - Every other directory: `jet check --json` accepts the program.
+// - FUZZ_RUNS (`differential/`): a program that checks clean also runs at
+//   every CORE_LEVELS level. The first level's run exits 0 and, where the
+//   directory's FUZZ_MANIFEST pairs the program with an `exact-stdout`
+//   output, prints exactly that file. Each later level's run ends as the
+//   first one did (exit code and stdout): the optimizer never changes what a
+//   program does.
+// A check is the row `<corpus>/<dir>/<file>`, and a run adds ` [<level>]`. A
+// program the check refuses does not run, so it has no run rows. No jet may
+// die by a signal, outlive FUZZ_TIMEOUT_MS, or exit FUZZ_INTERNAL_EXIT (an
+// internal compiler error), whatever its row expects. Under a filter only the
+// selected rows report; a selected run row checks its program and runs every
+// level, so it has the first level to compare with.
+FUZZ_CORPUS: "tests/fuzz/sema"
+FUZZ_REFUSED: "invalid"
+FUZZ_RUNS: "differential"
+FUZZ_MANIFEST: "manifest.tsv"
+FUZZ_INTERNAL_EXIT: 101
+FUZZ_TIMEOUT_MS: 120000
+// What one check or run of a fuzz program may hold.
+FUZZ_MEMORY: 2147483648
+
+// One corpus program: its row ID, the file jet is given and the directory
+// it runs in, whether the check must refuse it, whether it runs, the output
+// file its first-level run is pinned to ("" for none) and that file's text,
+// and whether its check row is selected.
+FuzzProgram: struct {
+    id: String
+    name: String
+    cwd: String
+    refused: Bool
+    runs: Bool
+    pin: String
+    pinned: String
+    checked: Bool
+}
+
+// How one run of a program ended: why it failed outright ("" when it did
+// not crash, hang or fail to start), its exit code, its stdout, and the
+// first error line of its stderr.
+FuzzOutcome: struct {
+    failure: String
+    code: Int
+    output: String
+    errors: String
+}
+
+fuzz_rows: fn(rows: TestRows) {
+    setup: suite_setup(rows) ?? return
+    scratch: files.temp_dir("jet-fuzz") ?? {
+        rows.fail("fuzz", "couldn't create a scratch directory: {err}")
+        return
+    }
+    listed: files.list_dir(files.join(setup.checkout, FUZZ_CORPUS)) ?? {
+        rows.fail(FUZZ_CORPUS, "couldn't list `{FUZZ_CORPUS}`: {err}")
+        return
+    }
+    dirs := [String]{}
+    loop entry in listed {
+        if entry.is_dir -> dirs.push(entry.name.copy()) // copy: the listing keeps its entries
+    }
+    dirs.sort()
+    programs := [FuzzProgram]{}
+    loop dir in dirs -> fuzz_programs(rows, setup.checkout, scratch.path, dir, programs)
+    if programs.len() == 0 -> return
+    checks := [ProcessSpec]{}
+    loop program in programs -> checks.push(fuzz_command(setup, program.cwd, [String]{"check", "--json", program.name}))
+    checked: process.run_all(checks, fuzz_jobs(checks.len())) ?? {
+        rows.fail("fuzz", "couldn't start the fuzz checks: {err}")
+        return
+    }
+    running := [Int]{}
+    runs := [ProcessSpec]{}
+    loop (index, program) in programs {
+        failure := ""
+        if checked[index] == {
+            .Ok(receipt) -> failure = fuzz_check_failure(program, receipt)
+            .Err(error) -> failure = "couldn't start jet: {error}"
+        }
+        if program.checked {
+            if failure == "" -> rows.pass(program.id) else -> rows.fail(program.id, failure)
+        }
+        if failure != "" || !program.runs -> next
+        running.push(index)
+        loop level in CORE_LEVELS -> runs.push(fuzz_command(setup, program.cwd, [String]{"run", "--optimize={level}", program.name}))
+    }
+    if runs.len() == 0 -> return
+    ran: process.run_all(runs, fuzz_jobs(runs.len())) ?? {
+        rows.fail("fuzz", "couldn't start the fuzz runs: {err}")
+        return
+    }
+    outcomes := [FuzzOutcome]{}
+    loop index in 0..<runs.len() {
+        if ran[index] == {
+            // copy: the outcome outlives the receipt it is read from
+            .Ok(receipt) -> outcomes.push(FuzzOutcome{failure: fuzz_crash(receipt, "jet run"), code: receipt.code, output: receipt.output.copy(), errors: failure_line(receipt.errors)})
+            .Err(error) -> outcomes.push(FuzzOutcome{failure: "couldn't start jet: {error}", code: -1, output: "", errors: ""})
+        }
+    }
+    loop (at, index) in running {
+        program: programs[index]
+        first: at * CORE_LEVELS.len()
+        loop (offset, level) in CORE_LEVELS {
+            id: "{program.id} [{level}]"
+            if !rows.selects(id) -> next
+            failure: fuzz_run_failure(program, outcomes[first], outcomes[first + offset], offset == 0)
+            if failure == "" -> rows.pass(id) else -> rows.fail(id, failure)
+        }
+    }
+}
+
+// The programs of the corpus directory `dir` whose check or run rows are
+// selected, pushed to `programs`.
+fuzz_programs: fn(rows: TestRows, checkout: String, scratch: String, dir: String, programs: &[FuzzProgram]) {
+    relative: "{FUZZ_CORPUS}/{dir}"
+    directory: files.join(checkout, relative)
+    listed: files.list_dir(directory) ?? {
+        rows.fail(relative, "couldn't list `{relative}`: {err}")
+        return
+    }
+    names := [String]{}
+    loop entry in listed {
+        if !entry.is_dir && entry.name.ends_with(".jet") -> names.push(entry.name.copy()) // copy: the listing keeps its entries
+    }
+    names.sort()
+    if names.len() == 0 {
+        rows.fail(relative, "the corpus directory holds no `.jet` file")
+        return
+    }
+    runs: dir == FUZZ_RUNS
+    pins: if runs -> fuzz_pins(directory) else -> [String: String]{}
+    loop name in names {
+        id: "{relative}/{name}"
+        run_selected := false
+        if runs {
+            loop level in CORE_LEVELS {
+                if rows.selects("{id} [{level}]") -> run_selected = true
+            }
+        }
+        checked: rows.selects(id)
+        if !checked && !run_selected -> next
+        text: files.read(files.join(directory, name)) ?? {
+            rows.fail(id, "couldn't read `{id}`: {err}")
+            next
+        }
+        cwd := directory.copy() // copy: every check and run of this file starts in this directory
+        if text.contains("__NUL__") {
+            files.write(files.join(scratch, name), text.replace("__NUL__", String.from_bytes([U8]{0}) ?? "")) ?? {
+                rows.fail(id, "couldn't write its scratch copy: {err}")
+                next
+            }
+            cwd = scratch.copy() // copy: the program holds its own directory
+        }
+        pin: pins.get(name) ?? ""
+        pinned := ""
+        if run_selected && pin != "" {
+            pinned = files.read(files.join(directory, pin)) ?? {
+                rows.fail("{id} [{CORE_LEVELS[0]}]", "couldn't read `{relative}/{pin}`, the output {FUZZ_MANIFEST} pairs it with: {err}")
+                next
+            }
+        }
+        // copy: the program row outlives the loop's names and the manifest map
+        programs.push(FuzzProgram{id: id, name: name.copy(), cwd: cwd, refused: dir == FUZZ_REFUSED, runs: run_selected, pin: pin.copy(), pinned: pinned, checked: checked})
+    }
+}
+
+// The `exact-stdout` pairs of a FUZZ_RUNS directory's FUZZ_MANIFEST
+// (`source<TAB>output<TAB>relation<TAB>exception` rows): source -> output.
+fuzz_pins: fn(directory: String) -> [String: String] {
+    pins := [String: String]{}
+    text: files.read(files.join(directory, FUZZ_MANIFEST)) ?? return pins
+    loop line in text.split("\n") {
+        if line.starts_with("#") -> next
+        fields: line.split("\t").to_list()
+        if fields.len() >= 3 && fields[2] == "exact-stdout" -> pins[fields[0].copy()] = fields[1].copy() // copy: the map outlives the manifest text
+    }
+    pins
+}
+
+// How many fuzz checks or runs go at once: the packages suite's sizing, with
+// a FUZZ_MEMORY claim each.
+fuzz_jobs: fn(count: Int) -> Int {
+    requested: Int.parse(sys.get("JET_TEST_SUITE_MEMORY") ?? "") ?? 0
+    kit_claim_jobs(kit_execute_budget(requested, kit_exec_available_memory()), FUZZ_MEMORY, sys.cpu_count(), PACKAGE_JOBS, PACKAGE_JOBS_MAX, count)
+}
+
+// A child jet on one fuzz program `cwd` holds, bounded by FUZZ_TIMEOUT_MS.
+fuzz_command: fn(setup: SuiteSetup, cwd: String, args: [String]) -> ProcessSpec {
+    jet_command(setup, setup.jet, args).cwd(cwd).env("NO_COLOR", "1").timeout(time.duration_ms(FUZZ_TIMEOUT_MS))
+}
+
+// Why a jet failed whatever its row expects: a signal, the time limit, or an
+// internal compiler error; "" when none of them.
+fuzz_crash: fn(receipt: ProcessReceipt, verb: String) -> String {
+    if receipt.signal != None -> return "`{verb}` died by a signal"
+    if receipt.timed_out -> return "`{verb}` ran past {FUZZ_TIMEOUT_MS} ms"
+    if receipt.code == FUZZ_INTERNAL_EXIT -> return "`{verb}` exited {FUZZ_INTERNAL_EXIT}, an internal compiler error: {failure_line(receipt.errors)}"
+    ""
+}
+
+// Why a program's check row fails; "" when the verdict is its directory's.
+fuzz_check_failure: fn(program: FuzzProgram, receipt: ProcessReceipt) -> String {
+    crash: fuzz_crash(receipt, "jet check")
+    if crash != "" -> return crash
+    if program.refused {
+        if receipt.success -> return "`jet check` accepted it; it was written to be refused with {fuzz_named_code(program.name)}"
+        return ""
+    }
+    if receipt.success -> return ""
+    reports: fuzz_reports(receipt.output)
+    "`jet check` exited {receipt.code}: {if reports.len() == 0 -> failure_line(receipt.errors) else -> reports.join("; ")}"
+}
+
+// The code a FUZZ_REFUSED file's name gives: `<name>.<code>.jet`.
+fuzz_named_code: fn(name: String) -> String {
+    stem: name.removesuffix(".jet")
+    at: stem.rfind(".")
+    if at <= 0 -> return "no named code"
+    stem.slice(at + 1, stem.len()).copy() // copy: the code outlives the stem it is cut from
+}
+
+// Why one run row fails; "" when it passes. The first level's run exits 0
+// and prints its pinned output; a later level's ends as the first one did.
+fuzz_run_failure: fn(program: FuzzProgram, first: FuzzOutcome, this: FuzzOutcome, is_first: Bool) -> String {
+    if this.failure != "" -> return this.failure
+    if is_first {
+        if this.code != 0 -> return "`jet run` exited {this.code}: {this.errors}"
+        // copy: Dyn.Text owns its text
+        if program.pin != "" && this.output != program.pinned -> return "stdout differs from `{program.pin}`: got {json.dumps(Dyn.Text(this.output.copy())) ?? ""}"
+        return ""
+    }
+    if first.failure != "" -> return "the {CORE_LEVELS[0]} run failed, so this one has nothing to agree with: {first.failure}"
+    if this.code != first.code -> return "`jet run` exited {this.code}, but {first.code} at {CORE_LEVELS[0]}: {this.errors}"
+    // copy: Dyn.Text owns its text
+    if this.output != first.output -> return "stdout differs from the {CORE_LEVELS[0]} run: got {json.dumps(Dyn.Text(this.output.copy())) ?? ""}, {CORE_LEVELS[0]} printed {json.dumps(Dyn.Text(first.output.copy())) ?? ""}"
+    ""
+}
+
+// The error reports of a `jet check --json` answer, each `<code>: <what>`.
+fuzz_reports: fn(output: String) -> [String] {
+    tree: json.parse(output) ?? return [String]{}
+    reports := [String]{}
+    if json_field(tree, "reports") == .Array(items) {
+        loop item in items {
+            if json_field(item, "severity") != (Dyn.Text("error")) -> next
+            if json_field(item, "code") == .Text(code) {
+                if json_field(item, "what") == .Text(what) -> reports.push("{code}: {what}") else -> reports.push("{code}:")
+            }
+        }
+    }
+    reports
 }
 
 // ---------------------------------------------------------------------------

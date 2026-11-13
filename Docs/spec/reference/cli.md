@@ -964,7 +964,16 @@ of a directory of the Core library (`jet test Core/Encoding`) runs
 `jet test <file>` for each Core source under it that declares #Tests or
 doctests, as a workspace runs its members.
 `jet test Compiler --profile core` runs every Core #Test at optimize none,
-basic and full.
+basic and full. `jet test Compiler --profile fuzz` runs the sema fuzz corpus
+`tests/fuzz/sema` differentially. Each `invalid/<name>.<code>.jet` file must
+fail `jet check`; `<code>` names the refusal it was written for. Every other
+file must pass `jet check`. A `differential/` file that passes then runs at
+optimize none, basic and full: the none run exits 0 and prints exactly the
+output `differential/manifest.tsv` pairs it with (an `exact-stdout` row), and
+the basic and full runs end with the none run's exit code and stdout. No check
+or run may exit 101 (an internal compiler error), die by a signal or time out.
+Its rows are `tests/fuzz/sema/<dir>/<file>` and
+`tests/fuzz/sema/differential/<file> [<level>]`.
 Each test setting (D-TEST-INVOKE1=A, the `JET_TEST_SETTINGS` table in
 `Compiler/JetFoundation/Source/Registry/TestSettings.jet`) has three
 spellings from one row: the flag `--shard=3/8`, the TestProfile field
