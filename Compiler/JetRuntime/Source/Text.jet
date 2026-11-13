@@ -142,10 +142,39 @@ rt_text_cache_store: fn(value: I64, prefix: I64, counted: I64) {
 // is at least RT_TEXT_INLINE, so the test is exact.
 rt_text_immortal: fn(value: I64) -> Bool { rt_text_word(wrapping(value + I64{16})) == I64{0} }
 
+// A text under 8 bytes is one word: its bytes are read one at a time and
+// gathered (rt_text_short_word), then stored whole (rt_text_from_word).
 rt_text_copy: fn(ptr: I64, len: I64) -> I64 {
+    if (len < I64{8}) -> return rt_text_from_word(rt_text_short_word(ptr, len), len)
     header: rt_text_builder_with_capacity(len)
     if (header == I64{0}) -> return I64{0}
     rt_text_bytes_copy(rt_text_data(header), ptr, len)
+    rt_text_store(wrapping(header + I64{8}), len)
+    header
+}
+
+// The `len` (under 8) bytes at `ptr` as one little-endian word, the bytes
+// past them zero, read one at a time. Bytes their writer just stored one at
+// a time (a [U8] built by push) reach a byte read from those stores, while a
+// word read of them stalls until every one of the stores is in the cache.
+rt_text_short_word: fn(ptr: I64, len: I64) -> I64 {
+    word := I64{0}
+    at := I64{0}
+    loop at < len {
+        word = word.bit_or(rt_text_byte(wrapping(ptr + at)) << (at * I64{8}))
+        at = wrapping(at + I64{1})
+    }
+    word
+}
+
+// A fresh text of `len` (under 8) bytes, `word` (rt_text_short_word), in
+// one store to its inline buffer: a word read of the text (jet_string_hash,
+// a comparison) is then served from that store. 0 only after a propagated
+// allocation failure.
+rt_text_from_word: fn(word: I64, len: I64) -> I64 {
+    header: rt_text_builder_with_capacity(len)
+    if (header == I64{0}) -> return I64{0}
+    rt_text_store(rt_text_data(header), word)
     rt_text_store(wrapping(header + I64{8}), len)
     header
 }

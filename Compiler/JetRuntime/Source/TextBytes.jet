@@ -98,8 +98,17 @@ text_bytes_owned: fn(data: I64, length: I64) -> I64 {
 }
 
 // jet_string_from_bytes: the validated copy, or UTF8Error carrying the same
-// message (the record owns its own message copy).
+// message (the record owns its own message copy). Bytes under 8 are read
+// once, one at a time (rt_text_short_word, which a [U8] just built by push
+// serves without a stall): all ASCII, that word is the text.
 #Export(c) jet_string_from_bytes: fn(data: I64, length: I64, ok: I64, err: I64) -> I64 {
+    if (RT_HOST_U8_STRIDE == I64{1} && length < I64{8}) {
+        word: rt_text_short_word(data, length)
+        if (word.bit_and(I64{-9187201950435737472}) == I64{0}) {
+            rt_text_store(ok, rt_text_from_word(word, length))
+            return I64{1}
+        }
+    }
     message: text_bytes_utf8_error(data, length)
     if (message != I64{0}) {
         rt_text_store(err, jet_rt_record_new_utf8_error(message))

@@ -1,0 +1,61 @@
+// String.from_bytes of short byte runs pushed into one reused [U8], the way
+// a word counter builds its words: every result is its literal byte for
+// byte and hashes as it (one map key per word, counted on each pass), at
+// every length from empty past 8 bytes, ASCII or not, and a run that is not
+// UTF-8 is still an error.
+package: {
+    name: "run"
+    authority: { allow: [IO, Mem.Alloc] }
+}
+
+WORDS: [String]{"", "a", "ab", "abc", "abcd", "abcde", "abcdef", "abcdefg", "abcdefgh", "abcdefghi", "a b\tc", "é", "aé", "naïve", "日本", "abcdefé", "🙂"}
+
+same: fn(got: String, want: String) -> Bool {
+    have: got.bytes()
+    need: want.bytes()
+    if have.len() != need.len() || got.count_bytes() != want.count_bytes() || got.len() != want.len() -> return false
+    loop k in 0..<need.len() {
+        if have[k] != need[k] -> return false
+    }
+    got == want
+}
+
+fill: fn(token: &[U8], bytes: [U8]) {
+    token.clear()
+    loop byte in bytes -> token.push(byte)
+}
+
+run: fn() {
+    counts := [String:Int]{}
+    token := [U8]{}
+    mismatches := 0
+    passes: 3
+    loop _ in 0..<passes {
+        loop word in WORDS {
+            fill(token, word.bytes())
+            made: String.from_bytes(token) ?? panic("invalid utf8")
+            if !same(made, word) {
+                mismatches += 1
+                print("mismatch: {word}")
+            }
+            counts[made] = (counts.get(made) ?? 0) + 1
+        }
+    }
+    loop word in WORDS {
+        seen: counts.get(word) ?? 0
+        if seen != passes -> mismatches += 1
+    }
+    // Not UTF-8: a lone 0xff after ASCII, a lead byte with no continuation,
+    // and a continuation byte with no lead, under and over 8 bytes.
+    bad := [U8]{}
+    fill(bad, "abc".bytes())
+    bad.push(U8{255})
+    first: String.from_bytes(bad) ?? "error"
+    lead: "é".bytes()
+    fill(bad, [U8]{lead[0]})
+    second: String.from_bytes(bad) ?? "error"
+    fill(bad, "abcdefghij".bytes())
+    bad.push(lead[1])
+    third: String.from_bytes(bad) ?? "error"
+    print("words={WORDS.len()} distinct={counts.len()} mismatches={mismatches} invalid={first},{second},{third}")
+}

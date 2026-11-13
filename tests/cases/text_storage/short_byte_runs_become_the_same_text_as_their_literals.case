@@ -1,0 +1,25 @@
+# String.from_bytes of short byte runs pushed into one reused [U8] (an ASCII
+# run under 8 bytes is gathered into one word and stored whole, others take
+# the checked copy) gives each word's literal byte for byte, hashing as it,
+# and keeps not-UTF-8 runs errors, on every tier.
+fixture: short_byte_runs_become_the_same_text_as_their_literals.fixture
+env: NO_COLOR=1
+step run: jet run run.jet
+exit: 0
+stdout: = "words=17 distinct=17 mismatches=0 invalid=error,error,error\n"
+step: jet build --optimize=none run.jet
+exit: 0
+step: built
+exit: 0
+stdout: == run
+step: jet build --release run.jet
+exit: 0
+step: built
+exit: 0
+stdout: == run
+step: jet build --target web run.jet
+exit: 0
+step: node app.js
+cwd: .jet/build
+exit: 0
+stdout: == run
