@@ -565,6 +565,15 @@ own arm, so no run-time test remains. Over a union value, an arm may name a
 member without binding it, as in `.Int -> …` (the same test as `.Int(_)`); a
 union table stays exhaustive and needs no `else` (D-TYPESWITCH1=A).
 
+A value of a union passes where a union holding all its members is expected:
+as an argument, a return value, a struct field, an assignment or a list
+element, `keep: fn(cell: Int | String) { store(cell) }` hands its value to
+`store: fn(cell: Int | String | Bool)`, and each member keeps its payload as
+its own case of the wider union. A union with a member the expected one lacks
+is E0112. Only the value widens: a `&` parameter takes exactly its union type,
+and a list, optional or other container of the smaller union is not one of the
+larger (D-ALT-SUBSET1=A).
+
 `loop` supports infinite, conditional, source, map-pair, and explicit-state
 forms:
 

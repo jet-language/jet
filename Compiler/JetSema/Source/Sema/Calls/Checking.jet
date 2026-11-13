@@ -604,7 +604,11 @@ sema_call_typecheck_bound_arguments: fn(callee: String, params: [SemaCallParam],
             if sema_integer_narrowing_fix(required, sema_call_resolved_type(checked_value.ty, environment, program)) == None -> sema_call_argument_replace_mismatch(callee, index, required, args[index].expr, lambda_escapes, slot_start, environment, program, scopes, state, tail_store, context, diagnostics)
             return None
         }
-        compatible := if trait_parameter && parameter.convention == AccessConvention.Write -> type_identity_equal(required, sema_call_resolved_type(value.ty, environment, program)) else -> sema_call_type_assignable(required_declared, value.ty, environment, program) ?? return None
+        // A write parameter edits its argument's own storage, so a trait or
+        // union parameter takes exactly its type: a member or a smaller
+        // union would be widened into a temporary the callee's writes miss.
+        exact_write: parameter.convention == AccessConvention.Write && (trait_parameter || required == .Union(_))
+        compatible := if exact_write -> type_identity_equal(required, sema_call_resolved_type(value.ty, environment, program)) else -> sema_call_type_assignable(required_declared, value.ty, environment, program) ?? return None
         // A parameter whose written type names nothing reported E0119 at its
         // declaration; it takes any argument, so the call's own checks (the
         // moves, E0201) still run without a cascade E0112 (#6294).

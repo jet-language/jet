@@ -3194,6 +3194,17 @@ ir_union_rewiden: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, sour
     out
 }
 
+// The union value `value` (of union `source_ty`) where the union `union_ty`
+// that holds all its members is wanted: re-tagged into a fresh box its new
+// holder owns. The same union under another spelling is `value` itself.
+ir_union_rewiden_fresh: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, source_ty: Type, union_ty: Type, span: Span) -> Int Never! {
+    if ir_union_key(ir_untag(source_ty)) == ir_union_key(ir_untag(union_ty)) -> return value
+    converted: ir_union_rewiden(m, p, b, value, source_ty, union_ty, span)
+    if ir_failed(b) -> return -1
+    b.fresh[converted] = true
+    converted
+}
+
 // The spelling an error conversion reports for `ty`: a nominal type's
 // declared name (`StoreErr`, `IOError`), never the owner-qualified key
 // (`module:…::StoreErr`, `<corelib>/…::IOError`) that identifies it, and a

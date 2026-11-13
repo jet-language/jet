@@ -436,12 +436,7 @@ sema_expression_try_union_conversion: fn(target: Type, source: Type, environment
             tags: loop member in members -> type_name(member)
             enum_name: "__JetUnion_{tags.join("_")}"
             if sema_expr_unwrap_tag(source) == .Union(source_members) {
-                loop source_member in source_members {
-                    covered: loop member in members {
-                        if type_identity_equal(member, source_member) -> break true
-                    } ?? false
-                    if !covered -> return None
-                }
+                if !sema_type_union_covers(members, source_members) -> return None
                 return Val(TTryConvert.RewidenUnion{enum_name: enum_name})
             }
             resolved: sema_expr_expected_type(source, environment, program)

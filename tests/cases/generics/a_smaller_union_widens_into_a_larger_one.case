@@ -1,0 +1,17 @@
+# A value of a smaller union passes where a larger union holding all its
+# members is expected, at a call argument, a return, a struct field, an
+# assignment and a list element; each member keeps its payload on every tier.
+fixture: a_smaller_union_widens_into_a_larger_one.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step check: jet check widen.jet
+exit: 0
+step o0: jet run --optimize=none widen.jet
+exit: 0
+stdout: = "int 7\ntext jet\nint 7\ntext jet\nint 7\nbool true\ntext jet\nint 7\ntext jet\nbool false\ntext jet\n"
+step o1: jet run --optimize=basic widen.jet
+exit: 0
+stdout: = "int 7\ntext jet\nint 7\ntext jet\nint 7\nbool true\ntext jet\nint 7\ntext jet\nbool false\ntext jet\n"
+step o2: jet run --optimize=full widen.jet
+exit: 0
+stdout: = "int 7\ntext jet\nint 7\ntext jet\nint 7\nbool true\ntext jet\nint 7\ntext jet\nbool false\ntext jet\n"

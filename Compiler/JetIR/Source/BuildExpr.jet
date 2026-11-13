@@ -1323,14 +1323,15 @@ ir_list_destructure: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, init: Int, co
 
 // A plain write's value `slot` where a variable or field of type row `row`
 // holds it: a member value of a union `row` is boxed as that member's
-// variant, as a binding's initializer or a field's value is (ir_adapt). The
-// box owns the value, cloned first when it is a read; any other value is
-// `slot` itself.
+// variant, as a binding's initializer or a field's value is (ir_adapt), and a
+// smaller union is re-tagged into `row` (ir_union_rewiden_fresh). The box owns
+// the value, cloned first when it is a read; any other value is `slot` itself.
 ir_union_assigned: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, row: Int, span: Span) -> Int Never! {
     if slot < 0 || b.f.slot_type[slot] == row -> return slot
     member_ty: m.types[b.f.slot_type[slot]].ty
     union_ty: m.types[row].ty
-    if !(ir_untag(union_ty) == .Union(_)) || ir_untag(member_ty) == .Union(_) -> return slot
+    if !(ir_untag(union_ty) == .Union(_)) -> return slot
+    if ir_untag(member_ty) == .Union(_) -> return ir_union_rewiden_fresh(m, p, b, slot, member_ty, union_ty, span)
     payload: ir_own(m, p, b, slot)
     boxed: ir_union_box(m, p, b, payload, member_ty, union_ty, span)
     if ir_failed(b) -> return -1

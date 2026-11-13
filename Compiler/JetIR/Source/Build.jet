@@ -2939,12 +2939,13 @@ ir_adapt: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, row: Int, spa
     if have_box && want_box && ir_box_bytes(m, p, have) != ir_box_bytes(m, p, row) -> return ir_result_rebox(m, p, b, slot, row, span)
     // A member value where its structural union is wanted (a `[A | B]`
     // literal's element) is boxed as that member's variant (widen_to_union).
+    // A smaller union, whose every member sema found in the wanted one, is
+    // re-tagged member by member into it (ir_union_rewiden).
     union_ty: m.types[row].ty
     member_ty: m.types[have].ty
     if ir_untag(union_ty) == .Union(_) {
-        widens := true
-        if ir_untag(member_ty) == .Union(_) -> widens = false
-        if widens -> return ir_union_box(m, p, b, slot, member_ty, union_ty, span)
+        if ir_untag(member_ty) == .Union(_) -> return ir_union_rewiden_fresh(m, p, b, slot, member_ty, union_ty, span)
+        return ir_union_box(m, p, b, slot, member_ty, union_ty, span)
     }
     // An inline `[T#N]` where a `[T]` is wanted is a List copy of it; no
     // other value stands for an inline `[T#N]`.

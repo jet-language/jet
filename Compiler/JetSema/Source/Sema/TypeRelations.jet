@@ -563,12 +563,28 @@ sema_type_assignable: fn(required: Type, offered: Type) -> Bool Never! {
     if sema_type_compute_tensor_compatible(required, offered) -> return true
     if required == {
         .List(required_element) -> if offered == .FixedList(offered_element, _) -> return type_identity_equal(required_element, offered_element)
-        .Union(members) -> loop member in members {
-            if type_identity_equal(member, offered) -> return true
+        .Union(members) -> {
+            loop member in members {
+                if type_identity_equal(member, offered) -> return true
+            }
+            // A smaller union widens whole into one holding all its members.
+            // A container of it does not (sema_type_carrier_compatible).
+            if offered == .Union(offered_members) -> return sema_type_union_covers(members, offered_members)
         }
         .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Quantity(_, _) | .Measure(_) -> {}
     }
     false
+}
+
+// Whether every member of `offered_members` is one of `members`.
+sema_type_union_covers: fn(members: [Type], offered_members: [Type]) -> Bool Never! {
+    loop offered_member in offered_members {
+        covered: loop member in members {
+            if type_identity_equal(member, offered_member) -> break true
+        } ?? false
+        if !covered -> return false
+    }
+    true
 }
 
 // Rust `Type::compute_tensor_compatible`: the erased `Tensor` spelling is the

@@ -1,0 +1,46 @@
+// A value of a smaller union passes where a larger union holding all its
+// members is expected: as a call argument, a return value, a struct field,
+// an assignment and a list element. Each member keeps its payload, and the
+// source value stays usable.
+Slot: struct {
+    value: Int | String | Bool
+}
+
+store: fn(cell: Int | String | Bool) -> String {
+    if cell == {
+        .Int(n) -> "int {n}"
+        .String(s) -> "text {s}"
+        .Bool(b) -> "bool {b}"
+    }
+}
+
+keep: fn(cell: Int | String) -> String { store(cell) }
+
+small: fn(text: Bool) -> Int | String {
+    if text -> return "jet"
+    7
+}
+
+flag: fn() -> Int | String | Bool { true }
+
+taken: fn(cell: Int | String | Bool) -> Int | String | Bool { cell.copy() }
+
+lift: fn(cell: Int | String) -> Int | String | Bool { cell.copy() }
+
+run: fn() {
+    word: small(true)
+    number: small(false)
+    print(keep(number))
+    print(keep(word))
+    print(store(lift(number)))
+    print(store(taken(word)))
+    box: Slot{value: number.copy()}
+    print(store(box.value))
+    slot := flag()
+    print(store(slot))
+    slot = word.copy()
+    print(store(slot))
+    row: [Int | String | Bool]{number.copy(), word.copy(), false}
+    loop item in row -> print(store(item))
+    print(keep(word))
+}

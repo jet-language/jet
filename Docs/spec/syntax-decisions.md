@@ -663,6 +663,15 @@ an undotted `Int(n) ->` is E0367. Codable decode rejects ambiguous wire shapes
 (E2415). Named enums remain the documenting form; crossings use ordinary match
 conversion. Does not reopen D-ANY-JAI1.
 
+**D-ALT-SUBSET1=A — A smaller union widens into a larger one** *(ratified
+2026-11-06, card #6251)*: a value of a union passes where a union holding all
+its members is expected, at the places a member value already widens
+(argument, return, binding, struct field, assignment, list element). Each
+member keeps its own case of the wider union, and a union with a member the
+target lacks is E0112. Only the value converts: a `&` parameter takes exactly
+its union type, and containers of the smaller union are not containers of the
+larger. Declared enums keep their explicit conversion boundary.
+
 **D-TYPESWITCH1=A — Type tables** *(ratified 2026-10-29, card #6180)*: a
 generic function branches on a type parameter with an ordinary `if` table,
 `if T == { Int -> … Point -> … else -> … }`. Each arm names one type (E0119
