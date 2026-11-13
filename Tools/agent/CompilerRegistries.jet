@@ -53,6 +53,9 @@ REGISTRY_PACKAGE: "name: \"compiler_registry\"\nversion: \"0.0.1\"\nedition: \"2
 // The C host of a plain transport: it registers the process arguments a stop
 // reports, attaches the main thread and runs the fragment's exported entry.
 PLAIN_DRIVER: "#include <stdint.h>\nextern char **environ;\nextern void jet_rt_host_arguments(int64_t,char **,char **);\nextern void jet_rt_thread_attach(void),jet_rt_thread_detach(void);\nextern void jet_rt_plain_fixture(void);\nint main(int argc,char **argv) {{ jet_rt_host_arguments(argc,argv,environ); jet_rt_thread_attach(); jet_rt_plain_fixture(); jet_rt_thread_detach(); return 0; }}\n"
+// The committed C host of a fragment run as a program: jet_rt_main runs its
+// entry to the real process end, then the fragment's ended check runs.
+FRAGMENT_HOST: "tests/fixtures/runtime_fragment_host.c"
 // The ICU root primary order of the ASCII names a repository holds: the order
 // the inventory walk lists directory entries in.
 ROOT_PRIMARY_ORDER: " _-,;:!?.'\"()[]{{}}@*/\\&#%`^+<=>|~$0123456789abcdefghijklmnopqrstuvwxyz"
@@ -143,13 +146,15 @@ Kit: struct {
 // How a native registry is driven: the runner under Compiler/*/Tests and the
 // verdict that admits it. `blocked` names a registry without a transport.
 // `fragments` names the fragments a plain transport's unit composes and
-// `cflags` the flags its C host compiles with; `calls` the runs of a
+// `cflags` the flags its C host compiles with; `ended` the fragment's check
+// a program host runs after jet_rt_main returned; `calls` the runs of a
 // committed Jet runner.
 Spec: struct {
     kind: String
     name: String
     runner: String
     call: String?
+    ended: String?
     expected: String
     witness: String
     expected_file: String
@@ -681,7 +686,7 @@ strip_imports: fn(text: String) -[Exec, IO]> String Never! {
 // --- transports ---------------------------------------------------------------
 
 spec: fn(kind: String, name: String, runner: String) -> Spec Never! {
-    Spec{kind: kind, name: name, runner: runner, call: None, expected: "", witness: "", expected_file: "", blocked: "", fragments: [String]{}, cflags: STRICT_CFLAGS.copy(), calls: [RunnerCall]{}}
+    Spec{kind: kind, name: name, runner: runner, call: None, ended: None, expected: "", witness: "", expected_file: "", blocked: "", fragments: [String]{}, cflags: STRICT_CFLAGS.copy(), calls: [RunnerCall]{}}
 }
 
 runner_call: fn(mode: String, witness: String, expected: String) -> RunnerCall Never! {
@@ -724,6 +729,15 @@ plain_cflags: fn(name: String) -> [String] Never! {
         else -> {}
     }
     flags
+}
+
+// The check a fragment run as a program (FRAGMENT_HOST) makes after
+// jet_rt_main returned: what the process end left.
+plain_ended: fn(name: String) -> String? Never! {
+    if name == {
+        "Secret" -> Val("secret_tests_ended")
+        else -> None
+    }
 }
 
 // The exact stdout of the sync host: its STM lines, then the condition and
@@ -809,7 +823,7 @@ specification: fn(id: String) -> Spec? Never! {
             "Scan" -> Val((call: Val("scan_tests"), witness: "", expected: ""))
             "Text" -> Val((call: Val("text_tests"), witness: "", expected: ""))
             "Unicode" -> Val((call: Val("unicode_tests"), witness: "", expected: ""))
-            "Secret" -> Val((call: Val("secret_tests"), witness: "", expected: "secret tests: ok\n"))
+            "Secret" -> Val((call: Val("secret_tests"), witness: FRAGMENT_HOST, expected: "secret tests: ok\n"))
             "FilesWalk" -> Val((call: Val("files_walk_tests"), witness: "", expected: ""))
             "HostParallelism" -> Val((call: Val("host_parallelism_tests"), witness: "", expected: ""))
             "TestSuite" -> Val((call: None, witness: "{RT}test-suite-fixture.c", expected: "test suite: ok\n"))
@@ -831,6 +845,7 @@ specification: fn(id: String) -> Spec? Never! {
             found.witness = table.witness.copy()
             found.expected = table.expected.copy()
             found.fragments = plain_fragments(name)
+            found.ended = plain_ended(name)
             found.cflags = plain_cflags(name)
             if PROCESS_WITNESSES.contains(name) || CRYPTO_FROZEN.contains(name) -> found.expected_file = "{RT}{name}Witness.stdout"
             return Val(found)
@@ -890,6 +905,7 @@ spec_dyn: fn(found: Spec, runner_sha256: String) -> Dyn Never! {
         if found.kind == "plain" || found.kind == "cli" -> entries["expected"] = Dyn.Text(found.expected.copy())
         if found.kind == "plain" {
             entries["call"] = if found.call == .Val(call) -> Dyn.Text(call.copy()) else -> Dyn.Null
+            if found.ended == .Val(ended) -> entries["ended"] = Dyn.Text(ended.copy())
             entries["fragments"] = texts(found.fragments)
             entries["cflags"] = texts(found.cflags)
         }
@@ -1411,10 +1427,11 @@ drive: fn(lane: &Lane, found: Spec) Problem! -[Env, Exec, FS, IO, Time, Time.Wai
         assembled: files.read("{raw}/unit.jet") ?? return Err(problem("`{raw}/unit.jet` cannot be read: {err}"))
         unit: if found.name == "CollectionsStop" -> collections_stop_unit(assembled) ?? return Err(err) else -> assembled.copy()
         entry: if found.call == .Val(call) -> "\n#Export(c) jet_rt_plain_fixture: fn() {{ {call}() }}\n" else -> ""
+        ended: if found.ended == .Val(check) -> "#Export(c) jet_rt_plain_fixture_ended: fn() {{ {check}() }}\n" else -> ""
         export: codec_export(found.name)
         if entry == "" && found.witness == "" && export == "" -> return Err(problem("plain transport {found.name} names no entry"))
         fixture: "{native}/Source/Fixture.jet"
-        files.write(fixture, "{unit}{entry}") ?? return Err(problem("`{fixture}` cannot be written: {err}"))
+        files.write(fixture, "{unit}{entry}{ended}") ?? return Err(problem("`{fixture}` cannot be written: {err}"))
         package: files.read("{repo}/Compiler/JetRuntime/package.jet") ?? return Err(problem("`Compiler/JetRuntime/package.jet` cannot be read: {err}"))
         files.write("{native}/package.jet", package) ?? return Err(problem("`{native}/package.jet` cannot be written: {err}"))
         // The fragments witness the allocator a program built without
@@ -2381,7 +2398,7 @@ fragment_registry: fn(name: String) -> Registry Never! {
 
 #Test("a plain transport runs its generated entry driver or its committed C host") {
     repo: test_repo()
-    loop name in ([String]{"Alloc", "FilesWalk", "HostParallelism", "TestSuite", "Parallel", "Scheduler", "World", "Sentry", "TestScope", "AllocationPolicy", "Channel", "Stm", "Sync", "Observe", "SharedPublication", "SharedThread", "CollectionsStop"}) {
+    loop name in ([String]{"Alloc", "FilesWalk", "HostParallelism", "Secret", "TestSuite", "Parallel", "Scheduler", "World", "Sentry", "TestScope", "AllocationPolicy", "Channel", "Stm", "Sync", "Observe", "SharedPublication", "SharedThread", "CollectionsStop"}) {
         entry: prepare_transport(repo, fragment_registry(name), "/native/registries", "{repo}{TOOL}") ?? panic("{name}: no transport")
         transport: field(entry, "transport")
         assert_eq(text_field(transport, "type"), "plain")
@@ -2390,11 +2407,16 @@ fragment_registry: fn(name: String) -> Registry Never! {
             "Alloc" -> "alloc_tests"
             "FilesWalk" -> "files_walk_tests"
             "HostParallelism" -> "host_parallelism_tests"
+            "Secret" -> "secret_tests"
             else -> ""
         }
         if call != "" {
             assert_eq(text_field(transport, "call"), call)
-            assert(field(transport, "witness") == Dyn.Null)
+            // Secret runs as a program and checks what the process end left.
+            program: name == "Secret"
+            assert(field(transport, "witness") == if program -> Dyn.Text(FRAGMENT_HOST.copy()) else -> Dyn.Null)
+            assert(field(transport, "ended") == if program -> Dyn.Text("secret_tests_ended") else -> Dyn.Null)
+            assert_eq(array_field(entry, "sources").contains(Dyn.Text(FRAGMENT_HOST.copy())), program)
             assert(field(transport, "fragments") == texts([String]{name.copy()}))
             next
         }

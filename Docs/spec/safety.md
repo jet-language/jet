@@ -211,15 +211,15 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 <!-- unsafe-ratchet:data
 {
   "schema": 1,
-  "total": 1422,
+  "total": 1427,
   "counts": {
-    "Compiler": 750,
+    "Compiler": 751,
     "Core": 170,
     "Docs": 8,
     "Examples": 41,
     "Jetpack": 9,
     "Tools": 6,
-    "tests": 438
+    "tests": 442
   },
   "regions": [
     {
@@ -5237,114 +5237,121 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Tests/Fragments.fixture/SecretTests.jet",
-      "line": 6,
+      "line": 9,
       "column": 5,
       "reason": "a failed isolated Secret witness terminates this test process"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Tests/Fragments.fixture/SecretTests.jet",
-      "line": 14,
+      "line": 17,
       "column": 5,
       "reason": "header is fresh aligned24B storage owned by the test; data owns cap times the host U8 stride bytes or is zero for an empty List"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Tests/Fragments.fixture/SecretTests.jet",
-      "line": 26,
+      "line": 29,
       "column": 5,
       "reason": "the pointer is a live small allocation; this isolated test is the sole allocator user and can inspect its slab's class metadata"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Tests/Fragments.fixture/SecretTests.jet",
-      "line": 42,
+      "line": 45,
       "column": 5,
       "reason": "input and secret are distinct live headers; adoption leaves one live buffer owner and borrowed bytes alias only that parent's header"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Tests/Fragments.fixture/SecretTests.jet",
-      "line": 63,
+      "line": 66,
       "column": 5,
       "reason": "the test owns data and checks the initialized U8 slots, including epoch padding, before any release"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Tests/Fragments.fixture/SecretTests.jet",
-      "line": 74,
+      "line": 77,
       "column": 5,
       "reason": "secret still owns its live24B header after Close; the buffer was released, and no pointer into it is used"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Tests/Fragments.fixture/SecretTests.jet",
-      "line": 86,
+      "line": 89,
       "column": 5,
       "reason": "each block is a fresh live allocation this witness owns exclusively and chains through its first word; reused is the newly allocated buffer, not a read of freed storage"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Tests/Fragments.fixture/SecretTests.jet",
-      "line": 135,
+      "line": 138,
       "column": 5,
       "reason": "data is this test's live List allocation; every capacity byte is dirtied before the wipe"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Tests/Fragments.fixture/SecretTests.jet",
-      "line": 143,
+      "line": 146,
       "column": 5,
       "reason": "the same live allocation remains exclusively owned while this test checks all wiped bytes"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Tests/Fragments.fixture/SecretTests.jet",
-      "line": 163,
+      "line": 166,
       "column": 5,
       "reason": "data is this test's fresh live allocation of bytes bytes"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Tests/Fragments.fixture/SecretTests.jet",
-      "line": 175,
+      "line": 178,
       "column": 5,
       "reason": "secret is a live Secret header over its own buffer; data stays live through the retained reference"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Tests/Fragments.fixture/SecretTests.jet",
-      "line": 189,
+      "line": 192,
       "column": 5,
       "reason": "data is still live: the other holder's reference was never released"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Tests/Fragments.fixture/SecretTests.jet",
-      "line": 200,
+      "line": 203,
       "column": 5,
       "reason": "frozen is a live Secret header over its own buffer"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Tests/Fragments.fixture/SecretTests.jet",
-      "line": 240,
+      "line": 252,
       "column": 5,
       "reason": "both buffers are this test's fresh live allocations of bytes bytes"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Tests/Fragments.fixture/SecretTests.jet",
-      "line": 256,
+      "line": 269,
       "column": 5,
-      "reason": "the scrub marked the process ending and this single-threaded witness goes on, so it clears the flag; kept is a live Secret header and kept_data its live buffer; the scrub only zeroes the buffer"
+      "reason": "the single-threaded fixture host owns the kept Secret from the entry to its ended check"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Tests/Fragments.fixture/SecretTests.jet",
-      "line": 280,
+      "line": 292,
       "column": 5,
-      "reason": "this isolated native witness writes its17B success literal and exits without introducing any text or collection runtime dependency"
+      "reason": "kept is the live Secret header the entry registered and kept_data its live buffer; the process end only zeroed the buffer"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRuntime/Tests/Fragments.fixture/SecretTests.jet",
+      "line": 305,
+      "column": 5,
+      "reason": "this isolated native witness writes its17B success literal without introducing any text or collection runtime dependency"
     },
     {
       "package": "Compiler",
@@ -7303,6 +7310,13 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
       "package": "tests",
       "file": "tests/cases/control_and_data/explicit_process_exit_cleanup_golden_matches_all_execution_tiers.fixture/process_exit_cleanup.jet",
       "line": 22,
+      "column": 5,
+      "reason": "the exit callback has no captured state"
+    },
+    {
+      "package": "tests",
+      "file": "tests/cases/control_and_data/process_exit_leaves_heap_to_kernel_after_user_cleanup.fixture/main.jet",
+      "line": 35,
       "column": 5,
       "reason": "the exit callback has no captured state"
     },
@@ -9688,10 +9702,24 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     },
     {
       "package": "tests",
+      "file": "tests/fuzz/sema/valid/ex_crypto_crypto_suite.jet",
+      "line": 38,
+      "column": 5,
+      "reason": "known-answer check reads the RFC 7748 shared secret"
+    },
+    {
+      "package": "tests",
       "file": "tests/fuzz/sema/valid/ex_lowlevel_lowlevel.jet",
-      "line": 10,
+      "line": 8,
       "column": 5,
       "reason": "`cell` is live on this stack frame and the pointer never escapes"
+    },
+    {
+      "package": "tests",
+      "file": "tests/fuzz/sema/valid/ex_lowlevel_lowlevel.jet",
+      "line": 22,
+      "column": 5,
+      "reason": "`cell` is a live Int on this stack frame; the pointer never escapes"
     },
     {
       "package": "tests",
@@ -10136,6 +10164,13 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     },
     {
       "package": "tests",
+      "file": "tests/ui/unsafe_block_after_statement_parse_error.jet",
+      "line": 8,
+      "column": 5,
+      "reason": "target outlives the read in this frame"
+    },
+    {
+      "package": "tests",
       "file": "tests/ui/unsafe_forbidden/run.jet",
       "line": 2,
       "column": 5,
@@ -10184,14 +10219,14 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 
 | crate/package | regions |
 | --- | ---: |
-| Compiler | 750 |
+| Compiler | 751 |
 | Core | 170 |
 | Docs | 8 |
 | Examples | 41 |
 | Jetpack | 9 |
 | Tools | 6 |
-| tests | 438 |
-| **total** | **1422** |
+| tests | 442 |
+| **total** | **1427** |
 
 ### Regions
 
@@ -10913,22 +10948,23 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/SchedulerTests.jet | 221:5 | "fixture byte writes stay within owned 19/20-byte text buffers" |
 | Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/SchedulerTests.jet | 230:5 | "fixture byte writes stay within an owned one-byte text buffer" |
 | Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/SchedulerTests.jet | 234:5 | "fixture byte writes stay within an owned one-byte text buffer" |
-| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/SecretTests.jet | 6:5 | "a failed isolated Secret witness terminates this test process" |
-| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/SecretTests.jet | 14:5 | "header is fresh aligned24B storage owned by the test; data owns cap times the host U8 stride bytes or is zero for an empty List" |
-| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/SecretTests.jet | 26:5 | "the pointer is a live small allocation; this isolated test is the sole allocator user and can inspect its slab's class metadata" |
-| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/SecretTests.jet | 42:5 | "input and secret are distinct live headers; adoption leaves one live buffer owner and borrowed bytes alias only that parent's header" |
-| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/SecretTests.jet | 63:5 | "the test owns data and checks the initialized U8 slots, including epoch padding, before any release" |
-| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/SecretTests.jet | 74:5 | "secret still owns its live24B header after Close; the buffer was released, and no pointer into it is used" |
-| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/SecretTests.jet | 86:5 | "each block is a fresh live allocation this witness owns exclusively and chains through its first word; reused is the newly allocated buffer, not a read of freed storage" |
-| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/SecretTests.jet | 135:5 | "data is this test's live List allocation; every capacity byte is dirtied before the wipe" |
-| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/SecretTests.jet | 143:5 | "the same live allocation remains exclusively owned while this test checks all wiped bytes" |
-| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/SecretTests.jet | 163:5 | "data is this test's fresh live allocation of bytes bytes" |
-| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/SecretTests.jet | 175:5 | "secret is a live Secret header over its own buffer; data stays live through the retained reference" |
-| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/SecretTests.jet | 189:5 | "data is still live: the other holder's reference was never released" |
-| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/SecretTests.jet | 200:5 | "frozen is a live Secret header over its own buffer" |
-| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/SecretTests.jet | 240:5 | "both buffers are this test's fresh live allocations of bytes bytes" |
-| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/SecretTests.jet | 256:5 | "the scrub marked the process ending and this single-threaded witness goes on, so it clears the flag; kept is a live Secret header and kept_data its live buffer; the scrub only zeroes the buffer" |
-| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/SecretTests.jet | 280:5 | "this isolated native witness writes its17B success literal and exits without introducing any text or collection runtime dependency" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/SecretTests.jet | 9:5 | "a failed isolated Secret witness terminates this test process" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/SecretTests.jet | 17:5 | "header is fresh aligned24B storage owned by the test; data owns cap times the host U8 stride bytes or is zero for an empty List" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/SecretTests.jet | 29:5 | "the pointer is a live small allocation; this isolated test is the sole allocator user and can inspect its slab's class metadata" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/SecretTests.jet | 45:5 | "input and secret are distinct live headers; adoption leaves one live buffer owner and borrowed bytes alias only that parent's header" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/SecretTests.jet | 66:5 | "the test owns data and checks the initialized U8 slots, including epoch padding, before any release" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/SecretTests.jet | 77:5 | "secret still owns its live24B header after Close; the buffer was released, and no pointer into it is used" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/SecretTests.jet | 89:5 | "each block is a fresh live allocation this witness owns exclusively and chains through its first word; reused is the newly allocated buffer, not a read of freed storage" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/SecretTests.jet | 138:5 | "data is this test's live List allocation; every capacity byte is dirtied before the wipe" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/SecretTests.jet | 146:5 | "the same live allocation remains exclusively owned while this test checks all wiped bytes" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/SecretTests.jet | 166:5 | "data is this test's fresh live allocation of bytes bytes" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/SecretTests.jet | 178:5 | "secret is a live Secret header over its own buffer; data stays live through the retained reference" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/SecretTests.jet | 192:5 | "data is still live: the other holder's reference was never released" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/SecretTests.jet | 203:5 | "frozen is a live Secret header over its own buffer" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/SecretTests.jet | 252:5 | "both buffers are this test's fresh live allocations of bytes bytes" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/SecretTests.jet | 269:5 | "the single-threaded fixture host owns the kept Secret from the entry to its ended check" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/SecretTests.jet | 292:5 | "kept is the live Secret header the entry registered and kept_data its live buffer; the process end only zeroed the buffer" |
+| Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/SecretTests.jet | 305:5 | "this isolated native witness writes its17B success literal without introducing any text or collection runtime dependency" |
 | Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/TextTests.jet | 6:5 | "a failed text runtime witness terminates only its isolated process" |
 | Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/ThreadTests.jet | 8:5 | "a failed isolated runtime witness ends the process without allocation or libc" |
 | Compiler | Compiler/JetRuntime/Tests/Fragments.fixture/ThreadTests.jet | 36:5 | "gettid verifies identity without trusting the TCB under test" |
@@ -11209,6 +11245,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | tests | tests/cases/comptime_core_pure_parity/crypto_values_match_aot_comptime_forced_interpreter_and_default_dev/input/o2/run.jet | 11:5 | "fixed RFC interop vectors" |
 | tests | tests/cases/control_and_data/explicit_exit_unmapped_keeps_101_on_every_tier.fixture/main.jet | 5:5 | "this case reports a Jet defect status on purpose" |
 | tests | tests/cases/control_and_data/explicit_process_exit_cleanup_golden_matches_all_execution_tiers.fixture/process_exit_cleanup.jet | 22:5 | "the exit callback has no captured state" |
+| tests | tests/cases/control_and_data/process_exit_leaves_heap_to_kernel_after_user_cleanup.fixture/main.jet | 35:5 | "the exit callback has no captured state" |
 | tests | tests/cases/core_crypto_argon2id/argon2id_parallel_lanes_match_rfc_vector_across_tiers/input/run.jet | 9:5 | "fixed Argon2id parallel-lane known-answer vector" |
 | tests | tests/cases/custom/fixtures/from_addr_sentry_is_tier_parity/fixture.jet | 6:5 | "value is live on this stack frame and the pointer never escapes" |
 | tests | tests/cases/custom/fixtures/sentry_faults_are_tier_parity/unsafe_sentries_alignment/unsafe_sentries_alignment.jet | 4:5 | "the tuple storage is live but this raw Int is misaligned" |
@@ -11549,7 +11586,9 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | tests | tests/fixtures/native_inline_c_shared_state.jet | 25:5 | "the counter is private to these two bodies" |
 | tests | tests/fixtures/unsafe_obligations/run.jet | 5:5 | "local pointer" |
 | tests | tests/fuzz/sema/differential/ex_crypto_crypto_migration.jet | 28:5 | "AES-256-GCM protocol interoperability" |
-| tests | tests/fuzz/sema/valid/ex_lowlevel_lowlevel.jet | 10:5 | "`cell` is live on this stack frame and the pointer never escapes" |
+| tests | tests/fuzz/sema/valid/ex_crypto_crypto_suite.jet | 38:5 | "known-answer check reads the RFC 7748 shared secret" |
+| tests | tests/fuzz/sema/valid/ex_lowlevel_lowlevel.jet | 8:5 | "`cell` is live on this stack frame and the pointer never escapes" |
+| tests | tests/fuzz/sema/valid/ex_lowlevel_lowlevel.jet | 22:5 | "`cell` is a live Int on this stack frame; the pointer never escapes" |
 | tests | tests/fuzz/sema/valid/ex_lowlevel_pointer_cast_deref.jet | 11:5 | "flag is live on this stack frame and the pointer never escapes" |
 | tests | tests/run/Comptime/ForeignBranchNotTaken.jet | 11:1 | "the operands are scalar registers and the early-written r10 clobber does not overlap live inputs" |
 | tests | tests/run/Comptime/ForeignBranchNotTaken.jet | 23:9 | "call the audited register-only assembly contract" |
@@ -11613,6 +11652,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | tests | tests/ui/module_write_from_fn_is_e0111.jet | 11:5 | "this program starts no task, so nothing else writes `raw`" |
 | tests | tests/ui/secrets_expiry/expiring_secret_loan_rejects_move_variadic_and_drop_paths_3.jet | 13:9 | "attempt to discard a loan" |
 | tests | tests/ui/unsafe_and_runtime/volatile_write_emit_is_byte_exact/run.jet | 2:1 | "UART TX register is mapped by the target machine" |
+| tests | tests/ui/unsafe_block_after_statement_parse_error.jet | 8:5 | "target outlives the read in this frame" |
 | tests | tests/ui/unsafe_forbidden/run.jet | 2:5 | "not allowed" |
 | tests | tests/ui/unsafe_obligation_missing.jet | 5:5 | "local pointer" |
 | tests | tests/ui/unsafe_obligation_no_bleed.jet | 6:5 | "two independent pointer operations" |
