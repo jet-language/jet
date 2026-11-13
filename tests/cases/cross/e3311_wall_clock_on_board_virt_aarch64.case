@@ -1,0 +1,11 @@
+# A machine without an OS has only the services its profile declares.
+# `board.virt_aarch64` declares no clock, so `time.now()` is E3311 at the call
+# when the program is built for it, and the build stops before any image.
+fixture: e3311_wall_clock_on_board_virt_aarch64.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet build --target=board.virt_aarch64 test.jet
+exit: 1
+stderr: ~ "Target `board.virt_aarch64` lacks the required `Time.Wall` capability." # the build checks for the selected machine
+stderr: ~ "test.jet:4:13" # reported at the `now` call
+stderr: !~ "is not built yet" # the refusal comes from the check, before any image

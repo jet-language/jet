@@ -241,6 +241,19 @@ environment in `Compiler/JetSema/Source/Sema/Calls/Core.jet`. Hosted and no-OS
 behavior therefore share the same diagnostic renderer while the target rule
 remains explicit.
 
+E3301 covers the modules no machine without an OS can serve (`core.files`,
+the network and HTTP modules, `core.tasks`, `core.process`, `core.log`,
+`core.watcher`, `core.crypto.vault`) and `#Live`. A Core operation a machine's
+declared services can back, such as `core.time`'s clocks or `core.term`'s
+reads and writes, is checked against the selected machine instead: each
+service the operation needs that the machine's profile lacks is E3311 at the
+first use in each module (`sema_target_capability_check` in
+`Compiler/JetSema/Source/Sema/TargetDenials.jet`). `jet build --target=<machine>`
+and `jet check --target=<machine>` select the machine; `board.sensor_v1`
+declares a monotonic clock, so `time.instant()` is accepted for it and
+`time.now()` is refused, as `tests/ui/target_missing_capability_e3311.stderr`
+shows.
+
 ## Explain and website output
 
 `jet explain <CODE>` resolves the same registry rows offline through

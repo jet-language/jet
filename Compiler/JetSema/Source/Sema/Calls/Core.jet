@@ -635,14 +635,16 @@ sema_call_core_has_explicit_source_target: fn(module_name: String, member: Strin
 }
 
 // The no-OS call boundary is checked before choosing either a source-owned
-// implementation or a native Core row.
+// implementation or a native Core row. These modules need an OS on every
+// machine; a module a machine's declared services can back (`core.time`'s
+// clocks, `core.term`'s byte sink) is checked against the selected machine
+// instead (TargetDenials.jet sema_target_capability_check, E3311).
 sema_call_core_no_os_hint: fn(module_name: String) -> String? Never! {
     if module_name == {
         "core.files" -> Val("Embed the data at compile time with `@embed(\"file\")`, or select a hosted target.")
         "core.net" | "core.net.tls" | "core.http" -> Val("No-OS targets have no network stack. Select a hosted target, or use a declared network provider.")
         "core.tasks" -> Val("OS threads are not available without an OS. Use cooperative or interrupt-driven concurrency.")
-        "core.term" -> Val("Standard I/O requires an OS. Use a declared IO provider or select a hosted target.")
-        "core.process" | "core.time" -> Val("System calls are not available on a no-OS target. Select a hosted target or declare the required provider.")
+        "core.process" -> Val("System calls are not available on a no-OS target. Select a hosted target or declare the required provider.")
         "core.log" -> Val("The log module writes to stderr (an OS resource). Use a declared IO provider or select a hosted target.")
         "core.watcher" | "core.crypto.vault" -> Val("Select a hosted target, or replace this call with a core-level alternative.")
         else -> None

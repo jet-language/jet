@@ -1,10 +1,24 @@
-// The effects a build's target denies. An artifact built for a machine gets
-// only the services the machine provides (the facts `core.target` declares),
-// and each service it lacks denies the effect that needs it. Every function
-// the entry reaches whose solved row uses a denied effect reports E1123 where
-// the effect enters the program's own code: a use in its body, or its call
-// into Core. A call into another program function reports there instead.
-use jet_foundation.[Diagnostic, Span, authority_own_process_leaf, jet_target_machine_denied_effects, sema_effect_covers]
+// The services a build's target lacks. An artifact built for a machine gets
+// only the services the machine provides (the facts `core.target` declares).
+// Each service it lacks denies the effect that needs it: every function the
+// entry reaches whose solved row uses a denied effect reports E1123 where the
+// effect enters the program's own code, a use in its body or its call into
+// Core; a call into another program function reports there instead. On a
+// machine with no OS, each Core operation the program's own code uses is
+// validated against the machine's declared services, and a service it lacks
+// is E3311 where the code first uses it.
+use jet_foundation.[
+    Diagnostic,
+    Span,
+    TargetMachineError,
+    authority_own_process_leaf,
+    jet_target_machine_denied_effects,
+    jet_target_machine_error_diagnostic,
+    jet_target_machine_use_default,
+    jet_target_machine_use_from_core_apis,
+    jet_target_machine_validate,
+    sema_effect_covers,
+]
 
 sema_target_denial_check: fn(modules: [SemaGraphModuleResult], graph: SemaRegistrationGraph, diagnostics: &[Diagnostic]) Never! {
     denied: jet_target_machine_denied_effects(graph.target_machine)
@@ -106,4 +120,48 @@ sema_target_denied_by: fn(effect_name: String, denied: [String]) -> String? Neve
 
 sema_target_denied_diagnostic: fn(function: String, denied: String, target: String, span: Span) -> Diagnostic Never! {
     sema_error("E1123", span, "`{function}` uses `{denied}`, which target `{target}` denies", "an artifact built for `{target}` gets only the services that machine provides, and it lacks the one `{denied}` needs", "keep the `{denied}` work out of the code this entry reaches, or build the entry for a target that provides `{denied}`")
+}
+
+// On a machine with no OS: each Core operation a program module uses (its
+// `core_usage` rows, first site per operation) is validated against the
+// machine (jet_target_machine_validate), and each service the operation needs
+// that the machine's profile lacks is E3311 at that site, once per module.
+// Only operations are checked: a Core type a signature names (`__type__`,
+// `typed_head`) needs no service, and `#Live`'s terminal (a row naming only
+// `core.term`) is refused at the block (E3301). A module no machine without
+// an OS can serve is refused at each call instead (E3301,
+// sema_call_core_no_os_hint), and the validator's runtime-layer and allocator
+// rows are the per-site E3301 and E3303 reports, so only its capability rows
+// are reported here.
+sema_target_capability_check: fn(graph: SemaRegistrationGraph, core_usage: SemaCoreUsageResult, diagnostics: &[Diagnostic]) -> Bool Never! {
+    machine: graph.target_machine
+    if !machine.no_os -> return true
+    // The profile's own gaps hold for every program; only what a use adds is
+    // the program's.
+    declared: jet_target_machine_validate(machine, jet_target_machine_use_default())
+    complete := true
+    loop module_usage in core_usage.modules {
+        if sema_module_is_core_source(module_usage.module_identity) -> next
+        found := [Diagnostic]{}
+        reported := [TargetMachineError]{}
+        loop site in module_usage.usage_spans {
+            parts: site.usage.split("::").to_list()
+            if parts.len() < 2 || parts[1] == "__type__" || parts[1] == "typed_head" -> next
+            if sema_call_core_no_os_hint(parts[0]) != None -> next
+            loop error in jet_target_machine_validate(machine, jet_target_machine_use_from_core_apis([String]{site.usage})) {
+                if declared.contains(error) || reported.contains(error) -> next
+                diagnostic := jet_target_machine_error_diagnostic(machine, error)
+                if diagnostic.code != "E3311" -> next
+                reported.push(error.copy()) // copy: the validator's list keeps its row.
+                diagnostic.span = Val(site.span)
+                found.push(diagnostic)
+            }
+        }
+        if found.len() == 0 -> next
+        complete = false
+        registration: sema_registration_module_index(graph, module_usage.module_identity) ?? next
+        sema_attach_diagnostic_source_locations(found, 0, graph.modules[registration].source_segments)
+        loop diagnostic in found -> diagnostics.push(diagnostic)
+    }
+    complete
 }

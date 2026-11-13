@@ -822,6 +822,13 @@ jet_driver_selected_target_machine: fn(
         diagnostics.push(jet_driver_diagnostic_without_span("E0003", "the native compiler identity has no parseable exact package version", "target layout facts are versioned by the compiler identity, not the selected program package", "supply a canonical `name@version#build-id` compiler identity"))
         return None
     }
+    // A named machine (`--target=board.sensor_v1`) is the machine the
+    // program is checked for; the front door passes only declared names.
+    if request.target_machine != "" {
+        named: jet_driver_target_machine_by_name(request.target_machine, compiler_version)
+        if named == None -> diagnostics.push(jet_driver_diagnostic_without_span("E0003", "the compile request names the undeclared target machine `{request.target_machine}`", "a request selects a machine only by a declared name", "use one of {JET_DRIVER_TARGET_MACHINE_NAMES.join(", ")}"))
+        return named
+    }
     // A build for an OS no host triple names (`os: web`) targets that OS's
     // machine, so its artifact is checked against that machine's row.
     if target_os_parse(request.build_os) == {

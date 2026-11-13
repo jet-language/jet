@@ -1535,11 +1535,13 @@ JetCLIOverlay: struct {
 // `trace_sink`: the process's one sink, which `jet_cli_main` opens for
 // `build`, `run`, `check`, `test` and `emit` (the `--trace` control).
 // `settings` are the command line's `--set` writers and `profile` the
-// `--profile` it selects ("" keeps the request's default; `jet check`).
-jet_cli_compile_entry: fn(file: String, color: Bool, threads: Int?, mode: JetDriverCompileMode, entry_source: String?, trace_sink: JetCLITraceSink?, settings: [BuildSettingOverride]{[BuildSettingOverride]{}}, profile: String{""}) -> JetCLICompiled {
+// `--profile` it selects ("" keeps the request's default; `jet check`);
+// `target_machine` is the machine without an OS it checks for ("" for the
+// host; `jet check --target`).
+jet_cli_compile_entry: fn(file: String, color: Bool, threads: Int?, mode: JetDriverCompileMode, entry_source: String?, trace_sink: JetCLITraceSink?, settings: [BuildSettingOverride]{[BuildSettingOverride]{}}, profile: String{""}, target_machine: String{""}) -> JetCLICompiled {
     overlays := [JetCLIOverlay]{}
     if entry_source == .Val(replacement) -> overlays.push(JetCLIOverlay{path: file, source: replacement})
-    jet_cli_compile_overlays(file, file, overlays, color, threads, mode, trace_sink, settings, profile)
+    jet_cli_compile_overlays(file, file, overlays, color, threads, mode, trace_sink, settings, profile, target_machine)
 }
 
 // An overlay or entry path as the snapshot spells it: the canonical path of a
@@ -1628,11 +1630,11 @@ jet_cli_prepare_refusal: fn(what: String, fix: String, color: Bool) -> JetDriver
 // source loader and its authorization stay the one in this file. The source
 // walk is the `sources` span; the request carries `trace_sink` into the
 // driver's phases.
-jet_cli_compile_overlays: fn(anchor: String, entry: String, overlays: [JetCLIOverlay], color: Bool, threads: Int?, mode: JetDriverCompileMode, trace_sink: JetCLITraceSink?, settings: [BuildSettingOverride]{[BuildSettingOverride]{}}, profile: String{""}) -> JetCLICompiled {
+jet_cli_compile_overlays: fn(anchor: String, entry: String, overlays: [JetCLIOverlay], color: Bool, threads: Int?, mode: JetDriverCompileMode, trace_sink: JetCLITraceSink?, settings: [BuildSettingOverride]{[BuildSettingOverride]{}}, profile: String{""}, target_machine: String{""}) -> JetCLICompiled {
     if trace_sink == .Val(sink) -> sink.begin("sources", "", -1, -1)
     prepared: jet_cli_prepare_overlays(anchor, entry, overlays, color, threads, mode)
     if trace_sink == .Val(sink) -> sink.end("sources", jet_cli_prepared_file_count(prepared))
-    jet_cli_compile_prepared(prepared, None, trace_sink, settings, profile)
+    jet_cli_compile_prepared(prepared, None, trace_sink, settings, profile, target_machine: target_machine)
 }
 
 // How many source files a prepared compile authorizes; -1 for a refusal.
@@ -1649,8 +1651,9 @@ jet_cli_prepared_file_count: fn(prepared: JetCLIPrepared) -> Int Never! {
 // `profile` is the selected `--profile`; `prelude` checks the entry as a
 // Compiler/Prelude source (`jet check --prelude`); `every_core_body` checks
 // every Core body, called or not, and `core_layers` is Core's layer table
-// whose upward names it reports (`jet check Core`).
-jet_cli_compile_prepared: fn(prepared: &&JetCLIPrepared, input_log: Shared<JetDriverComptimeInputLog>?, trace_sink: JetCLITraceSink?, settings: [BuildSettingOverride]{[BuildSettingOverride]{}}, profile: String{""}, prelude: Bool{false}, every_core_body: Bool{false}, core_layers: [ModuleLayer]{[ModuleLayer]{}}) -> JetCLICompiled {
+// whose upward names it reports (`jet check Core`); a non-empty
+// `target_machine` is the machine without an OS the program is checked for.
+jet_cli_compile_prepared: fn(prepared: &&JetCLIPrepared, input_log: Shared<JetDriverComptimeInputLog>?, trace_sink: JetCLITraceSink?, settings: [BuildSettingOverride]{[BuildSettingOverride]{}}, profile: String{""}, prelude: Bool{false}, every_core_body: Bool{false}, core_layers: [ModuleLayer]{[ModuleLayer]{}}, target_machine: String{""}) -> JetCLICompiled {
     if prepared.move() == {
         .Refused(output) -> JetCLICompiled.Refused{output: output}
         .Prepared(request, snapshot) -> {
@@ -1660,6 +1663,7 @@ jet_cli_compile_prepared: fn(prepared: &&JetCLIPrepared, input_log: Shared<JetDr
             selected.comptime_input_log = input_log.copy()
             selected.setting_overrides = settings
             if profile != "" -> selected.profile = profile
+            selected.target_machine = target_machine
             selected.prelude_entry = prelude
             selected.every_core_body = every_core_body
             selected.core_layers = core_layers
@@ -1723,6 +1727,8 @@ jet_cli_compile_executable: fn(prepared: &&JetCLIPrepared, entry: String?, optio
             // which no host triple names.
             os_option: build_options_value(options, "os")
             if target_os_parse(os_option) == .Val(os) && !target_os_native(os) -> selected.build_os = os_option
+            // copy: the caller's options keep the machine for the image refusal.
+            selected.target_machine = options.target_machine.copy()
             selected.setting_overrides = options.settings.copy()
             selected.gate_set.allowed = options.gates.copy()
             contributed := jet_cli_contributed_request(selected, color)

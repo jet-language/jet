@@ -74,9 +74,6 @@ tests/ui/crypto_secret_local_operations	#6425	check not ported: L0101 and L0103 
 tests/ui/crypto_secret_nested_provenance	#6425	check not ported: E1004 and E0119 for `crypto.Secret` in a value and a type position (reports E0629 `crypto` is a module, not a value)
 tests/ui/reflect_name_ledger	#6425	check not ported: E0302 names an ambiguous imported owner by its module (`alpha.Point`; reports `Point`); the snapshot lines also predate the `use { "alpha" "beta" }` block (+2)
 tests/ui/taint/external_boundaries_seed_origin_facts_3	#6425	check not ported: E0433 after E1004 (the unresolved `process.run` call's value is not reported as thrown away)
-tests/ui/freestanding_e3301	#5201	E2104 `jet build --target=wasm.no-os` is not built yet
-tests/ui/freestanding_e3303	#5201	E2104 `jet build --target=wasm.no-os` is not built yet
-tests/ui/live_freestanding_e3301	#5201	E2104 `jet build --target=wasm.no-os` is not built yet
 tests/ui/wasip2_unsupported_socket_operation_e3305	#5201	E2104 `jet build --target=wasm32-wasip2` is not built yet
 tests/ui/wasip2_unsupported_tls_surface_e3305	#5201	E2104 `jet build --target=wasm32-wasip2` is not built yet
 tests/ui/wasip2_unsupported_websocket_e3305	#5201	E2104 `jet build --target=wasm32-wasip2` is not built yet
@@ -157,9 +154,7 @@ tests/cases/core_encoding_foundations/user_duplicate_display_is_rejected_as_e090
 tests/cases/core_net_tls/configured_tls_client_keeps_native_builder_identity_and_exact_labels.case	#5454	E0764 names the canonical callee: "`core.net.tls.client` has no parameter labelled `host`" (the case expects the written `tls.client`)
 tests/cases/core_net_tls/tcp_stream_and_listener_reject_public_fields_and_forged_records.case	#5454	`stream.fd`, `stream.host` and the other handle fields report E0302 UnknownField, not PrivateItem; the original requires twelve PrivateItem errors
 tests/cases/core_testing_history/core_testing_histories_callback_failure_becomes_unavailable_across_i9_tiers.case	#5454	prints `unsupported` / "core.testing.histories command type `Dyn` has no checked enum schema": the Dyn schema strategy (HistorySchemaStrategy for Dyn commands) is not ported to Core
-tests/cases/cross/e3301_fs_read_in_freestanding.case	#5454	E2104 `jet build --target=wasm.no-os` is not built yet
-tests/cases/cross/e3301_http_in_freestanding.case	#5454	E2104 `jet build --target=wasm.no-os` is not built yet
-tests/cases/cross/e3301_tasks_in_freestanding.case	#5454	E2104 `jet build --target=wasm.no-os` is not built yet
+tests/cases/cross/e3301_tasks_in_freestanding.case	#5454	`task 42` is no `core.tasks` module call, so the no-OS check reports no E3301 for it (only a module call is refused, sema_call_core_no_os_hint)
 tests/cases/cross/freestanding_allows_core_json.case	#5454	E2104 `jet build --target=wasm.no-os` is not built yet
 tests/cases/cross/freestanding_allows_core_math.case	#5454	E2104 `jet build --target=wasm.no-os` is not built yet
 tests/cases/browser_bidi/native_bidi_browser_surface_hostile_matrix.case	#5454	`wait matrix_wire` exits 1 ("client closed while 2 bytes were expected"): after the hostile wire reply the dropped Browser sends no `session.end`; Core/Browser/Browser.jet has no last-owner drop cleanup (architecture.md "Last-owner drops perform the same cleanup as a best effort")
@@ -397,13 +392,13 @@ tests/cases/repl/repl_tty_second_ctrl_c_during_turn_exits_session.case	#6418	unb
 tests/cases/review/comment_only_change_has_no_semantic_operation.case	#6418	stream predicate ~ failed; loose before.jet/after.jet entries get file-named identities (fn:before.run vs fn:after.run), so `jet review` reports added/removed/effect_changed instead of no semantic_ops
 tests/cases/structure_liveness/liveness_web_compile_keeps_the_same_front_end_result.case	#5201	`jet build --target=web` prints no lint warnings: on Examples/Tooling/StructureLiveness.jet it exits 0 with an empty stdout and only the effects summary on stderr, while `jet check` on the same file reports L0101, L0103, L0104 and L0105
 tests/cases/target_machines/browser_wasm_target_witness.case	#5201	`jet build --target=wasm.browser` is not built yet (E2104)
-tests/cases/target_machines/heap_free_core_target_witness.case	#5201	`jet build --target=wasm.no-os` is not built yet (E2104)
+tests/cases/target_machines/heap_free_core_target_witness.case	#5201	the program is checked for wasm.no-os, then `jet build --target=wasm.no-os` is not built yet (E2104): no backend writes a no-OS image
 tests/cases/target_machines/hosted_default_target_witness.case	#6418	`jet build --target=hosted` is not built yet (E2104)
 tests/cases/target_machines/wasi_target_witness.case	#5201	`jet build --target=wasm.wasi` is not built yet (E2104)
-tests/cases/target_machines/no_os_core_mem_try_allocation_compiles_with_fixed_allocator.case	#6418	`jet build --target=board.sensor_v1` is not built yet (E2104)
-tests/cases/target_machines/selected_target_machine_rejects_direct_mmio_outside_region.case	#6418	`jet build --target=board.sensor_v1` is not built yet (E2104)
-tests/cases/target_machines/selected_target_machine_rejects_unavailable_core_api_before_codegen.case	#6418	`jet build --target=board.sensor_v1` is not built yet (E2104)
-tests/cases/target_machines/selected_target_machine_validates_direct_mmio_accesses.case	#6418	`jet build --target=board.sensor_v1` is not built yet (E2104)
+tests/cases/target_machines/no_os_core_mem_try_allocation_compiles_with_fixed_allocator.case	#6418	the program is checked for board.sensor_v1, then `jet build --target=board.sensor_v1` is not built yet (E2104): no backend writes a no-OS image
+tests/cases/target_machines/selected_target_machine_rejects_direct_mmio_outside_region.case	#6418	no MMIO fact check (E3313) runs on direct volatile accesses; the check for board.sensor_v1 passes and the build is not built yet (E2104)
+tests/cases/target_machines/selected_target_machine_rejects_unavailable_core_api_before_codegen.case	#6418	the check for board.sensor_v1 refuses the `core.files` call with the per-site E3301 (sema_call_core_no_os_hint), not the closure's E3310 row the case expects
+tests/cases/target_machines/selected_target_machine_validates_direct_mmio_accesses.case	#6418	the program is checked for board.sensor_v1, then `jet build --target=board.sensor_v1` is not built yet (E2104): no backend writes a no-OS image
 tests/cases/task_state_tiers/web_matches_expected_task_output.case	#5201	web tasks need threads: the build runs and the first task start stops E3001 (#5201 criterion 7)
 tests/cases/web_build/codable_struct_wasm_bridge_reconstructs_typed_argument.case	#5201	pins the retired JS emitter's build (manifest `"status": "m2"`, JS output and exports); the wasm build writes none of it
 tests/cases/web_build/default_wasm_top_level_dev_is_not_web_runtime.case	#5201	`jet build --target web --json main.jet` exits 1: Error [E0102]: `DevServer` has no method `port`, the error native `jet check` gives the same program

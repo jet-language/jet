@@ -195,6 +195,9 @@ BuildSettingOverride: struct {
 // `explain_partition` is `jet build --explain-partition`: a web build also
 // prints which partition, JS or Wasm, each function went to and why; it
 // shapes no image either.
+// `target_machine` is the declared machine without an OS that `jet build
+// --target=<machine>` names: the program is checked for that machine, and no
+// image is written for it yet; "" builds for the host.
 BuildOptions: struct {
     command: String
     profile: String
@@ -207,6 +210,7 @@ BuildOptions: struct {
     locked: Bool{false}
     deep_checks: DeepChecks{DeepChecks{}}
     explain_partition: Bool{false}
+    target_machine: String{""}
 }
 
 // The deep checks one compile keeps (`--deep-checks` of run, dev, test and
