@@ -618,7 +618,11 @@ core_decl_call_effect_leaf: fn(module_name: String, member: String) -> String? N
             "sleep" | "sleep_until" -> Val("Time.Wait")
             else -> None
         }
-        "core.tasks" -> if member == "yield_now" || member == "__yield_now" -> Val("Time.Wait") else -> None
+        // A timer's deadline is a monotonic clock read, the waiting leaf.
+        "core.tasks" -> if member == {
+            "yield_now" | "__yield_now" | "after" | "__interval_ms" -> Val("Time.Wait")
+            else -> None
+        }
         "core.files" -> if member == {
             "scope" | "read" | "read_bytes" | "read_at" | "read_link" | "map" | "open" | "exists" | "is_dir" | "is_fifo" | "is_socket" | "space"
                 | "can_read" | "can_write" | "can_execute"

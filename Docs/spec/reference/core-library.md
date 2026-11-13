@@ -4464,17 +4464,23 @@ sendability rules. The implementation is in
 
 | Signature | Result | Description |
 |---|---|---|
-| `after<T>(delay: Duration, value: T) -[Time]> Receiver<T>` | receiver | Deliver one value after a duration, then close. |
-| `interval(period: Duration) -[Time]> Receiver<Int>` | receiver | Deliver successive tick counts starting at one. |
+| `after<T>(delay: Duration, value: T) -[Time.Wait]> Receiver<T>` | receiver | Deliver one value after a duration, then close. |
+| `interval(period: Duration) -[Time.Wait]> Receiver<Int>` | receiver | Deliver successive tick counts starting at one. |
 | `recv<T>(rx: Receiver<T>) -[Time.Wait]> T?` | value | Receive the next value; None once the channel is closed and drained. |
 | `try_recv<T>(rx: Receiver<T>) -> T?` | value | Take a queued value without waiting; None when nothing is queued. |
 | `waitall<T>(receivers: [Receiver<T>]) -[Time.Wait]> [T?]` | values | One `recv` per receiver, in order. |
 | `waitany<T>(receivers: [Receiver<T>]) -[Time.Wait]> (index: Int, value: T?)` | answer | The receiver that answered and its `recv` result; the list must not be empty. |
-| `yield_now() -[Time]>` | — | Yield to another runnable task. |
+| `yield_now() -[Time.Wait]>` | — | Yield to another runnable task. |
 | `current_task() -> TaskID` | identity | Identify the running task. |
 | `cpu_ns() -[Time]> Int` | nanoseconds | The CPU time the running task has used. |
-| `timeout(delay: Duration) -[Time]>` | — | Wait for a duration before returning. |
+| `timeout(delay: Duration) -[Time.Wait]>` | — | Wait for a duration before returning. |
+| `sleep(ms: Int) -[Time.Wait]>` | — | Wait for `ms` milliseconds (none when negative) before returning. |
 | `quiesce() -[Exec]> Bool` | joined | Join the scheduler's carrier and timer threads before a raw exec or fork that needs a single-threaded process; `false`, with nothing stopped, while a task or a timer is pending. The threads start again on the next use. |
+
+Every function here that waits, or reads the monotonic clock for a timer's
+deadline, declares the waiting leaf `Time.Wait`, and sema infers the same leaf
+for a call to it, so a function whose row grants only `Time.Wait` can receive,
+sleep and set timers.
 
 `TaskID` is opaque: it compares with `==`, keys a map and prints, and nothing
 else reads it. Two reads by one task are equal and differ from every other running task's;

@@ -1,0 +1,17 @@
+# Every blocking core.tasks call declares the waiting leaf `Time.Wait` and sema
+# infers that leaf for a body that makes one, so a function whose row grants
+# only `Time.Wait` can receive, wait on several receivers, sleep, time out and
+# set timers. The same program checks clean and prints 42 on every tier.
+fixture: waiting_leaf_covers_every_blocking_task_call.fixture
+env: NO_COLOR=1
+step check: jet check main.jet
+exit: 0
+step o0: jet run --optimize=none main.jet
+exit: 0
+stdout: = "42\n"
+step o1: jet run --optimize=basic main.jet
+exit: 0
+stdout: = "42\n"
+step o2: jet run --optimize=full main.jet
+exit: 0
+stdout: = "42\n"

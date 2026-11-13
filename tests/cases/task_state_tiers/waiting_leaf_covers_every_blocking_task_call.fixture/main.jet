@@ -1,0 +1,40 @@
+// A row granting only the waiting leaf covers every blocking core.tasks call:
+// receiving, waiting on several receivers, sleeping, timing out and timers.
+use {
+    tasks: core.tasks
+    time: core.time
+}
+
+millis: fn(count: Int) -> time.Duration {
+    time.Duration.milliseconds(count) ?? panic("a small duration")
+}
+
+// No row written: sema infers `Time.Wait` from the blocking calls, which the
+// bounded caller below accepts.
+pause: fn() {
+    tasks.sleep(1)
+    tasks.timeout(millis(1))
+}
+
+receive_one: fn(rx: Receiver<Int>) -[Time.Wait]> Int {
+    tasks.recv(rx) ?? -1
+}
+
+wait_only: fn(ticks: Receiver<Int>) -[Time.Wait]> Int {
+    pause()
+    first: receive_one(tasks.after(millis(1), 40))
+    tick: tasks.recv(ticks) ?? 0
+    all: tasks.waitall([Receiver<Int>]{tasks.after(millis(0), 1)})
+    tasks.yield_now()
+    first + tick + (all[0] ?? 0)
+}
+
+timer: fn() -[Time.Wait]> Receiver<Int> {
+    tasks.interval(millis(1))
+}
+
+run: fn() {
+    ticks: timer()
+    print(wait_only(ticks.copy()))
+    _: tasks.cancel(ticks)
+}

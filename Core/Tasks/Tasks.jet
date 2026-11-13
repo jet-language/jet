@@ -16,12 +16,13 @@ use {
 
 // Timer creation and scheduler identity are host cells. Scheduler channels
 // and task groups use language primitives; TaskState transitions are pure Jet.
-// Sleeping uses core.time.sleep.
-after: fn<T>(delay: time.Duration, value: T) -[Time]> Receiver<T> Never! {
+// Sleeping uses core.time.sleep. A function that waits, or reads the
+// monotonic clock for a timer's deadline, names the waiting leaf `Time.Wait`.
+after: fn<T>(delay: time.Duration, value: T) -[Time.Wait]> Receiver<T> Never! {
     core.tasks.after(delay, value)
 }
 
-interval: fn(period: time.Duration) -[Time]> Receiver<Int> Never! {
+interval: fn(period: time.Duration) -[Time.Wait]> Receiver<Int> Never! {
     core.tasks.__interval_ms(interval_milliseconds(period))
 }
 
@@ -123,7 +124,7 @@ waitany: fn<T>(receivers: [Receiver<T>]) -[Time.Wait]> (index: Int, value: T?) N
 }
 
 
-host_sleep_ms: fn(ms: Int) -[Time]> {
+host_sleep_ms: fn(ms: Int) -[Time.Wait]> {
     _: recv(core.tasks.after(Duration.milliseconds(ms) ?? panic("sleep duration is outside Duration's range"), 0))
 }
 
@@ -146,11 +147,11 @@ is_ready: fn<T>(rx: Receiver<T>) -> Bool Never! { rx.is_ready() }
 
 delay_ms: fn<T>(rx: Receiver<T>) -> Int Never! { rx.delay_ms() }
 
-timeout: fn(delay: time.Duration) Never! -[Time]> {
+timeout: fn(delay: time.Duration) Never! -[Time.Wait]> {
     _: recv(core.tasks.after(delay, 0))
 }
 
-sleep: fn(ms: Int) Never! -[Time]> {
+sleep: fn(ms: Int) Never! -[Time.Wait]> {
     delay := ms
     if delay < 0 -> delay = 0
     host_sleep_ms(delay)
