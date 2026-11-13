@@ -8,12 +8,12 @@
 #   grammars/jet.wasm     the tree-sitter parser
 #   languages/jet/*.scm   highlights, brackets, indents, outline, overrides
 #
-# grammars/jet.wasm is compiled from the committed, generated parser in
-# Tools/editors/tree-sitter/src with the same command Zed's extension builder
-# uses (wasi-sdk clang, -fPIC -shared -Os), so "Add Dev Extension"/"Rebuild"
-# in Zed produce the same parser. Zed's builder clones the grammar from
-# grammar-repo/ (a local git mirror of Tools/editors/tree-sitter) at the
-# commit written into extension.toml; grammars/jet/ is removed so it can.
+# grammars/jet.wasm is compiled from the committed, generated parser and the
+# block-comment scanner in Tools/editors/tree-sitter/src with the same command
+# Zed's extension builder uses (wasi-sdk clang, -fPIC -shared -Os), so "Add Dev
+# Extension"/"Rebuild" in Zed produce the same parser. Zed's builder clones
+# the grammar from grammar-repo/ (a local git mirror of Tools/editors/tree-sitter)
+# at the commit written into extension.toml; grammars/jet/ is removed so it can.
 #
 # Zed compiles Rust only when Cargo.toml sits in the extension root, which
 # fails for nix-only toolchains; extension.wasm is prebuilt here instead and
@@ -71,12 +71,12 @@ rm -rf "$ROOT/grammars/jet"
 
 # ── Tree-sitter grammar wasm ─────────────────────────────────────────────────
 mkdir -p "$ROOT/grammars"
-if stale "$ROOT/grammars/jet.wasm" "$TREE_SITTER_SRC/src/parser.c"; then
+if stale "$ROOT/grammars/jet.wasm" "$TREE_SITTER_SRC/src/parser.c" "$TREE_SITTER_SRC/src/scanner.c"; then
   echo "Building grammars/jet.wasm ..."
   WASI_CLANG="$ZED_EXTENSIONS_DIR/build/wasi-sdk/bin/clang"
   if [ -x "$WASI_CLANG" ]; then
     "$WASI_CLANG" -fPIC -shared -Os -Wl,--export=tree_sitter_jet \
-      -o "$ROOT/grammars/jet.wasm" -I "$TREE_SITTER_SRC/src" "$TREE_SITTER_SRC/src/parser.c" 2> >(grep -v 'creating shared libraries' >&2)
+      -o "$ROOT/grammars/jet.wasm" -I "$TREE_SITTER_SRC/src" "$TREE_SITTER_SRC/src/parser.c" "$TREE_SITTER_SRC/src/scanner.c" 2> >(grep -v 'creating shared libraries' >&2)
   elif command -v tree-sitter >/dev/null 2>&1; then
     tree-sitter build --wasm -o "$ROOT/grammars/jet.wasm" "$TREE_SITTER_SRC"
   else

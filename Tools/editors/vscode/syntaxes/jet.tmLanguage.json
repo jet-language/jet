@@ -76,9 +76,21 @@
     },
     "comments": {
       "patterns": [
+        { "include": "#block-comments" },
         {
           "name": "comment.line.double-slash.jet",
           "match": "//.*$"
+        }
+      ]
+    },
+    "block-comments": {
+      "comment": "S5: block comments nest, so the rule includes itself and each `/*` needs its own `*/`.",
+      "patterns": [
+        {
+          "name": "comment.block.jet",
+          "begin": "/\\*",
+          "end": "\\*/",
+          "patterns": [{ "include": "#block-comments" }]
         }
       ]
     },

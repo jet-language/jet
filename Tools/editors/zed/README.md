@@ -18,7 +18,8 @@ Tools/editors/zed/install.sh
 `install.sh` builds the two WebAssembly assets and links the extension into
 Zed:
 
-- `grammars/jet.wasm` is compiled from the committed, generated parser in
+- `grammars/jet.wasm` is compiled from the committed, generated parser and
+  the block-comment scanner (`scanner.c`) in
   [`Tools/editors/tree-sitter/src`](../tree-sitter/src) with the same command
   Zed's extension builder uses (its wasi-sdk `clang -fPIC -shared -Os`), so a
   later **Rebuild** inside Zed produces the same parser. The script also

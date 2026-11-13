@@ -74,6 +74,11 @@ module.exports = grammar({
 
   word: ($) => $.identifier,
 
+  // src/scanner.c scans block comments, which nest as the Jet lexer reads
+  // them (S5). `_string_guard` is never produced: it marks where quoted text
+  // continues, so the scanner leaves a `/*` there as text.
+  externals: ($) => [$.block_comment, $._string_guard],
+
   extras: ($) => [/\s/, ";", $.line_comment, $.doc_comment, $.block_comment],
 
   conflicts: ($) => [
@@ -443,7 +448,7 @@ module.exports = grammar({
     string_literal: ($) =>
       seq(
         '"',
-        repeat(choice($.string_content, $.escape_sequence, $.interpolation)),
+        repeat(choice($.string_content, $.escape_sequence, $.interpolation, $._string_guard)),
         '"',
       ),
 
@@ -457,6 +462,7 @@ module.exports = grammar({
             alias($._multiline_quotes, $.string_content),
             $.escape_sequence,
             $.interpolation,
+            $._string_guard,
           ),
         ),
         '"""',
@@ -501,7 +507,6 @@ module.exports = grammar({
 
     line_comment: (_) => token(seq("//", /[^\n]*/)),
     doc_comment: (_) => token(prec(1, seq("///", /[^\n]*/))),
-    block_comment: (_) => token(seq("/*", /[^*]*\*+([^/*][^*]*\*+)*/, "/")),
   },
 });
 

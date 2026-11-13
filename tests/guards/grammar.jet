@@ -81,6 +81,28 @@ s5_grammar_slice_bytes: fn(text: String, start: Int, end: Int) -> String {
     assert(classic == vscode, "classic TextMate grammar must mirror VSCode grammar")
 }
 
+// S5: block comments nest. Each TextMate grammar's `block-comments` rule
+// includes itself and the `comments` rule reaches it, and the VSCode language
+// configuration names the block comment pair.
+#Test("textmate_block_comments_nest") {
+    guards_enter_root()
+    paths: [String]{"Tools/editors/vscode/syntaxes/jet.tmLanguage.json", "Tools/editors/jet.tmGrammar"}
+    loop path in paths {
+        grammar: files.read(path) ?? panic("read {path}")
+        rule: s5_grammar_find(grammar, "\"block-comments\": {{", 0)
+        assert(rule >= 0, "{path} has no block-comments rule")
+        body: s5_grammar_slice_bytes(grammar, rule, s5_grammar_find(grammar, "\n    }},", rule))
+        assert(body.contains("\"begin\": \"/\\\\*\"") && body.contains("\"end\": \"\\\\*/\""), "{path}: the block-comments rule must open at `/*` and close at `*/`")
+        assert(body.contains("{{ \"include\": \"#block-comments\" }}"), "{path}: the block-comments rule must include itself so comments nest")
+        comments: s5_grammar_find(grammar, "\"comments\": {{", 0)
+        assert(comments >= 0, "{path} has no comments rule")
+        section: s5_grammar_slice_bytes(grammar, comments, s5_grammar_find(grammar, "\n    }},", comments))
+        assert(section.contains("{{ \"include\": \"#block-comments\" }}"), "{path}: the comments rule must reach the block-comments rule")
+    }
+    config: files.read("Tools/editors/vscode/language-configuration.json") ?? panic("read the VSCode language configuration")
+    assert(config.contains("\"blockComment\": [\"/*\", \"*/\"]"), "the VSCode language configuration must name the block comment pair")
+}
+
 s5_grammar_first_quoted: fn(text: String, start: Int) -> String? {
     first: s5_grammar_find(text, "\"", start)
     if first < 0 -> return None
@@ -191,5 +213,32 @@ s5_grammar_first_quoted: fn(text: String, start: Int) -> String? {
         if ran.code != 0 -> failures.push("{query}: {process.combined_output(ran).trim()}")
     }
     assert(failures.len() == 0, "Zed would drop the Jet language; these queries do not compile:\n{failures.join("\n")}")
+    files.remove_all(scratch) ?? panic("remove {scratch}: {err}")
+}
+
+// S5: a block comment nests, so `/* a /* b */ c */` is one comment, and a
+// `/*` inside quoted text stays text (src/scanner.c scans the comment).
+#Test("tree_sitter_block_comments_nest_and_stay_text_inside_quotes") {
+    guards_enter_root()
+    tree_sitter: process.which("tree-sitter") ?? {
+        print("SKIP-HOST: tree-sitter is not on PATH")
+        return
+    }
+    if process.which("cc") == None {
+        print("SKIP-HOST: tree-sitter builds its parser with `cc`, which is not on PATH")
+        return
+    }
+    scratch: testing.temp_dir("tree-sitter-block-comments")
+    library: files.join(scratch, "jet.so")
+    built: process.cmd([tree_sitter, "build", "-o", library, "Tools/editors/tree-sitter"]).stdout(.Capture).stderr(.Capture).run() ?? panic("run tree-sitter build: {err}")
+    assert(built.code == 0, "tree-sitter build failed: {process.combined_output(built).trim()}")
+    sample: files.join(scratch, "sample.jet")
+    files.write(sample, "/* outer /* inner */ still the outer comment */\nrun: fn() {{\n    text: \"/* not a comment */\"\n    print(text) /* a /* b */ c */\n}}\n") ?? panic("write {sample}: {err}")
+    parsed: process.cmd([tree_sitter, "parse", "--lib-path", library, "--lang-name", "jet", sample]).stdout(.Capture).stderr(.Capture).run() ?? panic("run tree-sitter parse: {err}")
+    tree: process.stdout_lines(parsed).join("\n")
+    assert(parsed.code == 0 && !tree.contains("(ERROR") && !tree.contains("(MISSING"), "tree-sitter rejects nested block comments:\n{process.combined_output(parsed).trim()}")
+    assert(tree.contains("(block_comment [0, 0] - [0, 47])"), "the nested comment on line 1 must be one block comment:\n{tree}")
+    assert(tree.contains("(string_content [2, 11] - [2, 30])"), "a `/*` inside quoted text must stay text:\n{tree}")
+    assert(tree.contains("(block_comment [3, 16] - [3, 33])"), "the nested trailing comment must be one block comment:\n{tree}")
     files.remove_all(scratch) ?? panic("remove {scratch}: {err}")
 }

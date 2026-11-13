@@ -1,0 +1,56 @@
+================================================================================
+Block comments nest
+================================================================================
+
+/* outer /* inner */ still the outer comment */
+run: fn() {
+    print(1) /* a /* b /* c */ */ d */
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (block_comment)
+  (function_def
+    name: (identifier)
+    parameters: (parameters)
+    body: (block
+      (call_expr
+        function: (identifier)
+        arguments: (arguments
+          (number_literal)))
+      (block_comment))))
+
+================================================================================
+A comment opener inside quoted text is text
+================================================================================
+
+run: fn() {
+    a: "/* text */"
+    b: """
+/* still text */
+"""
+    c: "{a /* a comment in code */}"
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_def
+    name: (identifier)
+    parameters: (parameters)
+    body: (block
+      (label
+        name: (identifier))
+      (string_literal
+        (string_content))
+      (label
+        name: (identifier))
+      (multiline_string
+        (string_content))
+      (label
+        name: (identifier))
+      (string_literal
+        (interpolation
+          (identifier)
+          (block_comment))))))
