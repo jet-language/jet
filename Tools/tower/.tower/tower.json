@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6777,
-    "rev": 101218,
+    "rev": 101219,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -88281,82 +88281,6 @@
       "criteriaLastN": 2
     },
     {
-      "id": "c0pr0hh0",
-      "num": 6648,
-      "title": "FFI rows time out on a cold build cache (first row of each suite run)",
-      "body": "In batches vb9 and ffi6109 (s1 at 6a31fd6143 and 6109b7f72f), whichever FFI row runs first on a cold cache hits the suite's wall-clock limit, and the same row passes on the next tier or run: Bridges and FFI.jet o0 TIMEOUT with o1/o2 PASS; ffi_bad_path, ffi_bad_type, rust_extern_std_round_trip, ffi_runtime_stop_keeps_one_jet_source_frame and transact_ffi_with_undo TIMEOUT once and PASS on retry or at --time-limit=900s (PortsLead-2). The cold cost (C toolchain or Rust helper-crate realization) is charged to one row's wall clock. A fresh clone or release gate can fail on it.",
-      "kind": "task",
-      "track": "epoch",
-      "epoch": "e4",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P2",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-10",
-          "by": "Main",
-          "text": "Every criterion is met. c2 was re-met with G6Lead-rx, landed on dev 973d760c89: rust_extern_build_killed_mid_way passes, with each step on its own cache."
-        },
-        {
-          "at": "2026-11-10",
-          "by": "Main",
-          "text": "Reopened c2 after the cut-3 regression; see the criterion."
-        },
-        {
-          "at": "2026-11-07",
-          "by": "Main",
-          "text": "TestSystemLead-2: p79 (per-run in-memory FFI cache) queued; kf97 cold cache, every FFI row ran in 0.3-2.0 s (47-60 s TIMEOUTs before). Leak and snapshot copy found during the work are c2 and c3."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "On a cold test state (empty JET_TEST_STATE_DIR and FFI caches), jet test Compiler --profile golden, ui and cases run over the FFI rows (Foundations/Bridges, Interop/FFI, tests/ui/ffi_*, tests/cases/ffi_rust, ffi_runtime_stop_keeps_one_jet_source_frame, transact_ffi_with_undo_registers_rollback_hook) report 0 TIMEOUT with the default limits: the shared cold realization is done once, before the rows, and is not charged to any row's wall clock.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "$JET_SCRATCH_ROOT/lanes/Main/coldffi.sh at dev 6d50143539 with seed a0_032 (empty JET_TEST_STATE_DIR and private HOME, so no FFI cache): jet test Compiler --profile golden Examples/Interop/FFI (18 rows), --profile ui ffi (80 rows) and --profile cases ffi (87 rows, incl. ffi_rust/*, diagnostics_coverage/ffi_runtime_stop_keeps_one_jet_source_frame and effects/transact_ffi_with_undo_registers_rollback_hook): 0 TIMEOUT across 185 rows; slowest row 5.6 s; the cold Rust FFI rows took 1.2-2.7 s. (Examples/Foundations/Bridges no longer exists.) Commits a496f3c2c0 (an in-memory run keeps its FFI cache in memory) and 34290833a9.",
-          "at": "2026-11-07T07:11:14.017Z"
-        },
-        {
-          "n": 2,
-          "text": "A killed or failed FFI build leaves no .workspaces directory behind in the testkit FFI state (today they leak up to 868 MB per key; the state directory reached 3.4 GB): the workspace is removed on every exit path, and a test kills a build mid-way and finds no leftover.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Landed on dev 973d760c89 (train t4a, 63944380ec..973d760c89), SUB G6Lead-rx. Every test line of the SUB passes with the compiler built from the landed tree ($JET_SCRATCH_ROOT/lanes/Main/integ/t4a/REPORT.md). rust_extern_build_killed_mid_way PASS: each step has its own XDG_CACHE_HOME, so the second run really builds and is killed mid-way, and the third run leaves 0 workspaces.",
-          "at": "2026-11-10T05:07:01.138Z"
-        },
-        {
-          "n": 3,
-          "text": "jet_cli_rust_foreign_snapshot does not copy the whole shared cargo target into every private build: a private build reuses the shared target by reference (or copies only its own crate outputs), and its disk use per key is recorded under 50 MB.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "34290833a9 (an FFI build copies only the shared dependencies it needs, not the whole cargo target): TestSystemLead-2 measured 28 KiB per key plus a 44080 KiB shared target and 0 workspaces; $JET_SCRATCH_ROOT/lanes/Main/coldffi.sh at dev 6d50143539 with seed a0_032 (empty JET_TEST_STATE_DIR and private HOME, so no FFI cache) left 24 KiB in the test state after 185 FFI rows (the cache was memory-backed and went with the run scratch).",
-          "at": "2026-11-07T07:11:14.915Z"
-        }
-      ],
-      "refs": [],
-      "tags": [],
-      "goals": [
-        "G1"
-      ],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-11-07T05:00:47.568Z",
-      "updated": "2026-11-10T05:07:33.510Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 3,
-      "completedAt": "2026-11-10T05:07:33.510Z"
-    },
-    {
       "id": "c0afjv0e",
       "num": 6650,
       "title": "JetLSP does not build, and no gate builds JetLSP and JetDevserver",
@@ -90062,111 +89986,6 @@
       "updatedBy": "Main",
       "criteriaLastN": 21,
       "completedAt": "2026-11-11T19:44:02.334Z"
-    },
-    {
-      "id": "c0ajhpeh",
-      "num": 6695,
-      "title": "No C: port the SQLite that Core/Db uses to Jet (core.db)",
-      "body": "Owner order 2026-11-08: \"We need to fix the issue blocking build.jet but also need to remove the C dependencies. Start by directly porting the functions being used but we also need full coverage of the libraries that are dependencies. Ensure all are tracked.\"\n\nCore/Db/Db.jet uses c.sqlite3 (Core/Vendor/Sqlite3, the amalgamation). Port the whole library the vendored build provides: the SQL language, the file format (databases written by either build open in the other), the pager and journal and WAL modes, locking and the VFS, and the compiled-in extensions (FTS3, FTS5, JSON1, RTree, DBSTAT, STAT4, SOUNDEX, column metadata), with the flags PrebuildRuntime.jet sets today.",
-      "kind": "task",
-      "track": "epoch",
-      "epoch": "e4",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P1",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-10",
-          "by": "Main",
-          "text": "Every criterion is met. c2 via G1Lead-3-dbblob, landed on dev 973d760c89; c1 and c3 in earlier trains. Core db runs on the Jet SQLite engine with no vendored C."
-        },
-        {
-          "at": "2026-11-09",
-          "by": "Main",
-          "text": "OWNER 2026-11-09: the SQLite cutover is due by 16:00 (owner: a couple thousand lines to port is doable). Scope is what Core/Db uses: open/prepare/bind/step/column, CREATE/DROP TABLE with INTEGER PRIMARY KEY, AUTOINCREMENT, NOT NULL and UNIQUE, INSERT/UPDATE/DELETE, SELECT with WHERE, IN, JOIN, ORDER BY and LIMIT, transactions, PRAGMA table_info, count/hex/json/jsonb/sqlite_version, and the rollback journal. Triggers, FK actions, ALTER, ATTACH, vtab, backup, date and WAL go to G3 #3550 with a clear unsupported error."
-        },
-        {
-          "at": "2026-11-09",
-          "by": "Main",
-          "text": "Lane paused by owner (4-lead cap). SqliteLead-4r..12 landed (latest 175fda41c4). Unlanded: none. SUB-13 (Build.jet / __core_db_build) is designed in the lane handoff but not written. Resume after integration seed a0_042: Build.jet, then Dml.jet, SUB-15..18 (cutover closes c1)."
-        },
-        {
-          "at": "2026-11-09",
-          "by": "Main",
-          "text": "Landed in b5: 76488bd487 (SqliteLead-1b: the SQL front end, util/utf/printf, the record format), acd0529e4b (SqliteLead-2b: vdbemem values), eb8e720a29 (SqliteLead-3: 21 unix VFS host leaves)."
-        },
-        {
-          "at": "2026-11-08",
-          "by": "Main",
-          "text": "SqliteLead-6 (wal.c port, pager WAL paths and unix shm methods) is submitted and waits for a seed that carries SqliteLead-3. Owed when the connection layer (main.c) lands: wire the checkpoint interrupt check and the \"PRAGMA table_list\" exec that sqlite3PagerCheckpoint issues."
-        },
-        {
-          "at": "2026-11-08",
-          "by": "Main",
-          "text": "SqliteLead plan accepted 2026-11-08. Target is SQLite 3.45.0 with the PrebuildRuntime SQLITE_FLAGS: full SQL, VDBE, planner with STAT4, B-tree, pager, rollback journal, WAL with shm, the unix VFS with fcntl locks, memdb, FK on by default, and the FTS3/4, FTS5, JSON1, RTree, DBSTAT, SOUNDEX and column-metadata extensions. load_extension stays refused as today. The engine lives as private core.db parts under Core/Db/Engine/; the public core.db API is unchanged. Slices: S0 scratch-only C oracle, S1 file-format read, S2 B-tree and pager write, S3 minimal SQL end to end, S4 full SQL against sqllogictest slices, S5 WAL, locking and crash recovery, S6 extensions, S7 perf against C (speedtest1 and the db cells), S8 the one-commit cutover deleting Core/Vendor/Sqlite3. Main rulings: SqliteLead owns the new Compiler/JetRuntime/HostDbVfs.jet; shared registry rows go in Core.jet and CoreSourceParts.tsv; existing file leaves are reused and only missing ones added; sqllogictest goes in as a pinned manifest plus runner, with no corpus committed."
-        },
-        {
-          "at": "2026-11-08",
-          "by": "Main",
-          "text": "Assigned 2026-11-08 by Main to SqliteLead (spawned with owner approval). The brief is in the Main lane scratch, briefs/SqliteLead.md."
-        },
-        {
-          "at": "2026-11-08",
-          "by": "Main",
-          "text": "Assigned 2026-11-08 by Main: unstaffed: needs the owner's permission for another lead."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "Core/Db/Db.jet uses the Jet implementation, and Core/Vendor/Sqlite3 is deleted.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "d46993e917: Core/Db/Db.jet runs on the Jet engine (Core/Db/Engine). At c057ea659d, git ls-tree finds no Core/Vendor and no Compiler/Toolchain/VendoredC.jet. The SUB test jet test tests/guards gave rc 0. The Lander integrated t2c on e4096a0f3b; landed as dev e4096a0f3b..c057ea659d.",
-          "at": "2026-11-10T02:36:08.026Z"
-        },
-        {
-          "n": 2,
-          "text": "Every Core db case and example passes on the Jet implementation on O0, O1 and O2.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Landed on dev 973d760c89 (train t4a, 63944380ec..973d760c89), SUB G1Lead-3-dbblob. Every test line of the SUB passes with the compiler built from the landed tree ($JET_SCRATCH_ROOT/lanes/Main/integ/t4a/REPORT.md). Every Core db case passes on O0, O1 and O2, with CREATE INDEX in the Jet engine and the core.db private-handle ui snapshots.",
-          "at": "2026-11-10T05:06:59.450Z"
-        },
-        {
-          "n": 3,
-          "text": "Databases written by C SQLite open in Jet and the reverse, in the journal mode Core/Db uses, case-tested.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "a5518357aa: DBFileFormat finds its fixtures from its own package root, and the golden passes at O0, O1 and O2. It landed in train t3c (dev c057ea659d..63944380ec). The SUB's tests line passed with the compiler built from the landed tree (Lander t3c run, rc 0), and the census and ratchets were rc 0.",
-          "at": "2026-11-10T03:58:32.750Z"
-        }
-      ],
-      "refs": [],
-      "tags": [
-        "no-c",
-        "owner-direction"
-      ],
-      "goals": [
-        "G1",
-        "G7"
-      ],
-      "parentId": "c0lscvc9",
-      "needsAcceptance": false,
-      "created": "2026-11-08T15:47:22.108Z",
-      "updated": "2026-11-10T05:07:28.995Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 4,
-      "completedAt": "2026-11-10T05:07:28.995Z"
     },
     {
       "id": "c0cs6xlg",
@@ -92882,6 +92701,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-09T16:59:02.889Z"
+        },
+        {
+          "n": 3,
+          "text": "A value taken by a task &&name capture runs its Close exactly once when the task drops it: plain and grouped tasks, at O0, O1 and O2, the same as a local or a call-taken value. On seed-b14 it never runs (G6Meta-4 repro: $JET_SCRATCH_ROOT/lanes/G6Meta/p6749/plain.jet prints no \"close group\"), which is an I1 leak. Proof: a cases row per form, printing the close line, fails on a0_042 and passes on every tier.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T05:08:48.024Z"
         }
       ],
       "refs": [],
@@ -92892,9 +92720,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-09T16:58:53.917Z",
-      "updated": "2026-11-13T02:01:56.715Z",
+      "updated": "2026-11-13T05:08:48.024Z",
       "updatedBy": "Main",
-      "criteriaLastN": 2
+      "criteriaLastN": 3
     },
     {
       "id": "c0ccaugz",
@@ -197795,6 +197623,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-13T05:08:48.024Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0j93bm1",
+      "note": "#3 A value taken by a task &&name capture runs its Close exactl"
+    },
     {
       "at": "2026-11-13T05:04:17.541Z",
       "by": "Main",
