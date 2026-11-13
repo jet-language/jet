@@ -882,6 +882,25 @@ JetDriverComptimeRunIndex: struct {
     // closure that reaches it reuses that check instead of making its own.
     waiting_rows: [String:Int]
     waiting_functions: [SemaComptimeFunctionResult]
+    // Checked function row -> what a closure reads of that row besides the
+    // result itself (JetDriverComptimeClosureRow), so each later closure
+    // that reuses the row skips its body walks.
+    closure_rows: [Int:JetDriverComptimeClosureRow]{[Int:JetDriverComptimeClosureRow]{}}
+}
+
+// What a closure reads of one checked function row besides its result, the
+// same for every closure of the run, since the graph and the row never
+// change: `refs`, the functions its body reaches with no call fact
+// (jet_driver_comptime_body_refs), in the order the closure queues them,
+// and, once a module value's or a local value's closure asked, why the row
+// keeps that value from being computed while building
+// (jet_driver_comptime_row_impurity).
+JetDriverComptimeClosureRow: struct {
+    refs: [JetDriverComptimeFunctionRef]
+    module_known: Bool{false}
+    module_impurity: String?{None}
+    local_known: Bool{false}
+    local_impurity: String?{None}
 }
 
 jet_driver_comptime_run_index: fn(checked_functions: [SemaComptimeFunctionResult]) -> JetDriverComptimeRunIndex Never! {
@@ -969,7 +988,7 @@ jet_driver_comptime_wait_add: fn(dependencies: &[String], key: String) Never! {
 // for it, so the closure queues each helper `roots` and `body` lower to (as
 // Rust `is_core_precise_source_target` roots it): it is checked and lowered
 // with the item, together with its own callees.
-jet_driver_comptime_precise_refs: fn(graph: SemaRegistrationGraph, index: &JetDriverComptimeRunIndex, tree: BodyTree, roots: [Int], body: [Int], queue: &[JetDriverComptimeFunctionRef], queued: &[String:Bool]) Never! {
+jet_driver_comptime_precise_refs: fn(graph: SemaRegistrationGraph, index: &JetDriverComptimeRunIndex, tree: BodyTree, roots: [Int], body: [Int], refs: &[JetDriverComptimeFunctionRef]) Never! {
     // Function values the body stores, Core source functions Sema rewrote a
     // Core call to, and the error conversions its `?` calls are lowered with
     // it, like its callees.
@@ -977,7 +996,7 @@ jet_driver_comptime_precise_refs: fn(graph: SemaRegistrationGraph, index: &JetDr
     if named.len() > 0 {
         if !index.owners_built -> jet_driver_comptime_owners_build(graph, index)
         loop key in named {
-            if jet_driver_comptime_function_owner(index, key) == .Val(owner) -> jet_driver_comptime_function_ref_add(queue, queued, owner, key)
+            if jet_driver_comptime_function_owner(index, key) == .Val(owner) -> refs.push(JetDriverComptimeFunctionRef{module_identity: owner, function_key: key})
         }
     }
     names: ir_precise_helper_names(tree, roots, body)
@@ -988,7 +1007,7 @@ jet_driver_comptime_precise_refs: fn(graph: SemaRegistrationGraph, index: &JetDr
         module_text_value: module_text(graph.module_table, module_row.module_identity)
         loop name in names {
             key: symbol_key_text(SymbolKind.Function, module_text_value, "", name)
-            if jet_driver_comptime_function_owner(index, key) == .Val(owner) -> jet_driver_comptime_function_ref_add(queue, queued, owner, key)
+            if jet_driver_comptime_function_owner(index, key) == .Val(owner) -> refs.push(JetDriverComptimeFunctionRef{module_identity: owner, function_key: key})
         }
     }
 }
@@ -999,11 +1018,11 @@ jet_driver_comptime_precise_refs: fn(graph: SemaRegistrationGraph, index: &JetDr
 // `module_identity` (sema_comptime_codec_methods), and the
 // Core/Encoding/Encoding.jet decode helpers a container target is decoded
 // through, queued like the precise helpers.
-jet_driver_comptime_codec_refs: fn(graph: SemaRegistrationGraph, index: &JetDriverComptimeRunIndex, module_identity: ModuleID, tree: BodyTree, roots: [Int], body: [Int], queue: &[JetDriverComptimeFunctionRef], queued: &[String:Bool]) {
+jet_driver_comptime_codec_refs: fn(graph: SemaRegistrationGraph, index: &JetDriverComptimeRunIndex, module_identity: ModuleID, tree: BodyTree, roots: [Int], body: [Int], refs: &[JetDriverComptimeFunctionRef]) {
     targets: ir_comptime_codec_targets(tree, roots, body)
     if targets.len() == 0 -> return
     loop target in targets {
-        loop method in sema_comptime_codec_methods(graph, target.ty, module_identity, target.encode, target.decode) -> jet_driver_comptime_function_ref_add(queue, queued, method.module_identity, method.key)
+        loop method in sema_comptime_codec_methods(graph, target.ty, module_identity, target.encode, target.decode) -> refs.push(JetDriverComptimeFunctionRef{module_identity: method.module_identity, function_key: method.key})
     }
     if !index.owners_built -> jet_driver_comptime_owners_build(graph, index)
     loop module_row in graph.modules {
@@ -1011,7 +1030,7 @@ jet_driver_comptime_codec_refs: fn(graph: SemaRegistrationGraph, index: &JetDriv
         module_text_value: module_text(graph.module_table, module_row.module_identity)
         loop name in ir_codec_decode_helpers() {
             key: symbol_key_text(SymbolKind.Function, module_text_value, "", name)
-            if jet_driver_comptime_function_owner(index, key) == .Val(owner) -> jet_driver_comptime_function_ref_add(queue, queued, owner, key)
+            if jet_driver_comptime_function_owner(index, key) == .Val(owner) -> refs.push(JetDriverComptimeFunctionRef{module_identity: owner, function_key: key})
         }
     }
 }
@@ -1027,12 +1046,70 @@ jet_driver_comptime_codec_refs: fn(graph: SemaRegistrationGraph, index: &JetDriv
 // `show` (sema_comptime_render_methods), its own or a nested value's, make
 // its text in an interpolation or a `print`, so a value computed while
 // building renders as it does at run time.
-jet_driver_comptime_owner_refs: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, tree: BodyTree, roots: [Int], body: [Int], queue: &[JetDriverComptimeFunctionRef], queued: &[String:Bool]) Never! {
+jet_driver_comptime_owner_refs: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, tree: BodyTree, roots: [Int], body: [Int], refs: &[JetDriverComptimeFunctionRef]) Never! {
     rendered := [String:Bool]{}
     loop type_id in ir_comptime_expression_types(tree, roots, body) {
-        loop method in sema_comptime_close_methods(graph, tree.types.types[type_id], module_identity) -> jet_driver_comptime_function_ref_add(queue, queued, method.module_identity, method.key)
-        loop method in sema_comptime_render_methods(graph, tree.types.types[type_id], module_identity, rendered) -> jet_driver_comptime_function_ref_add(queue, queued, method.module_identity, method.key)
+        loop method in sema_comptime_close_methods(graph, tree.types.types[type_id], module_identity) -> refs.push(JetDriverComptimeFunctionRef{module_identity: method.module_identity, function_key: method.key})
+        loop method in sema_comptime_render_methods(graph, tree.types.types[type_id], module_identity, rendered) -> refs.push(JetDriverComptimeFunctionRef{module_identity: method.module_identity, function_key: method.key})
     }
+}
+
+// The functions that `roots` and `body` of `tree` (named from
+// `module_identity`) reach with no call fact: the precise helpers, codec
+// methods and owner-type methods lowering calls, in that order, each
+// possibly more than once. The closure queues each the first time.
+jet_driver_comptime_body_refs: fn(graph: SemaRegistrationGraph, index: &JetDriverComptimeRunIndex, module_identity: ModuleID, tree: BodyTree, roots: [Int], body: [Int]) -> [JetDriverComptimeFunctionRef] {
+    refs := [JetDriverComptimeFunctionRef]{}
+    jet_driver_comptime_precise_refs(graph, index, tree, roots, body, refs)
+    jet_driver_comptime_codec_refs(graph, index, module_identity, tree, roots, body, refs)
+    jet_driver_comptime_owner_refs(graph, module_identity, tree, roots, body, refs)
+    refs
+}
+
+// Why checked function `checked` (its body `function`) keeps a module value,
+// or with `local_value` a local value, from being computed while building:
+// an impure call site, a runtime intrinsic or a body that can't be baked in.
+jet_driver_comptime_row_impurity: fn(graph: SemaRegistrationGraph, checked: SemaComptimeFunctionResult, function: FnBody, local_value: Bool) -> String? {
+    if sema_comptime_call_facts_impurity(graph, checked.call_facts, local_value) == .Val(reason) -> return Val(reason)
+    // #6777: a runtime intrinsic's checked body is a stand-in (the library
+    // build lowers each call as its own operation), so a value computed from
+    // it is not the one the program sees: `key: rt_static_text("…")` folded
+    // to the stand-in's 0.
+    if ir_runtime_intrinsic(function.name) -> return Val("it calls `{function.name}`, a runtime intrinsic the build lowers as its own operation")
+    sema_comptime_body_unfoldable(function, local_value)
+}
+
+// The closure row of checked function `checked` (its body `function`), with
+// its impurity for a module value (`local_value`: a local value) when the
+// closure `asks`, which it does until a row is impure. Row `row` of the
+// run's checked functions keeps it for the closures after this one; a row
+// of -1 is one the run does not keep.
+jet_driver_comptime_closure_row: fn(graph: SemaRegistrationGraph, index: &JetDriverComptimeRunIndex, row: Int, checked: SemaComptimeFunctionResult, function: FnBody, asks: Bool, local_value: Bool) -> JetDriverComptimeClosureRow {
+    found := index.closure_rows.get(row)
+    changed := found == None
+    cached := if found == .Val(kept) -> kept else -> JetDriverComptimeClosureRow{refs: jet_driver_comptime_function_refs(graph, index, checked.module_identity, function)}
+    if asks && local_value && !cached.local_known {
+        cached.local_impurity = jet_driver_comptime_row_impurity(graph, checked, function, true)
+        cached.local_known = true
+        changed = true
+    }
+    if asks && !local_value && !cached.module_known {
+        cached.module_impurity = jet_driver_comptime_row_impurity(graph, checked, function, false)
+        cached.module_known = true
+        changed = true
+    }
+    if changed && row >= 0 -> index.closure_rows[row] = cached.copy()
+    cached
+}
+
+// The functions checked function `function`'s body and parameter defaults
+// reach with no call fact (jet_driver_comptime_body_refs).
+jet_driver_comptime_function_refs: fn(graph: SemaRegistrationGraph, index: &JetDriverComptimeRunIndex, module_identity: ModuleID, function: FnBody) -> [JetDriverComptimeFunctionRef] {
+    defaults := [Int]{}
+    loop parameter in function.params {
+        if parameter.default == Val(value) -> defaults.push(value)
+    }
+    jet_driver_comptime_body_refs(graph, index, module_identity, function.tree, defaults, function.body)
 }
 
 // `environment` is the run's sema_comptime_environment, `program` its tables
@@ -1083,9 +1160,7 @@ jet_driver_comptime_function_closure: fn(
         owner_identity: module_identity ?? return JetDriverComptimeFunctionClosure{functions: [FnBody]{}, waiting_dependencies: [String]{}, complete: false}
         jet_driver_comptime_function_ref_add(queue, queued, owner_identity, function_key)
     }
-    jet_driver_comptime_precise_refs(graph, index, request.expression.tree, [Int]{request.expression.root}, [Int]{}, queue, queued)
-    jet_driver_comptime_codec_refs(graph, index, request.module_identity, request.expression.tree, [Int]{request.expression.root}, [Int]{}, queue, queued)
-    jet_driver_comptime_owner_refs(graph, request.module_identity, request.expression.tree, [Int]{request.expression.root}, [Int]{}, queue, queued)
+    loop found in jet_driver_comptime_body_refs(graph, index, request.module_identity, request.expression.tree, [Int]{request.expression.root}, [Int]{}) -> jet_driver_comptime_function_ref_add(queue, queued, found.module_identity, found.function_key)
     functions := [FnBody]{}
     foreign := [SemaCheckedForeignFunction]{}
     waiting := [String]{}
@@ -1134,9 +1209,9 @@ jet_driver_comptime_function_closure: fn(
             next
         }
         loop dependency in checked.waiting_dependencies -> jet_driver_comptime_wait_add(waiting, dependency)
-        if module_value && impurity == None -> impurity = sema_comptime_call_facts_impurity(graph, checked.call_facts, local_value)
         if {
             !checked.obligations_pending && (!checked.complete || jet_driver_has_errors(checked.diagnostics)) -> {
+                if module_value && impurity == None -> impurity = sema_comptime_call_facts_impurity(graph, checked.call_facts, local_value)
                 loop diagnostic in checked.diagnostics -> diagnostics.push(diagnostic)
                 if checked.incomplete_reasons.len() == 0 && checked.waiting_dependencies.len() == 0 && !jet_driver_has_errors(checked.diagnostics) -> incomplete.push(SemaTotalityRow{owner: module_text(graph.module_table, current.module_identity), function: current.function_key.copy(), reason: "incomplete with no recorded cause"})
                 loop reason in checked.incomplete_reasons -> incomplete.push(SemaTotalityRow{owner: module_text(graph.module_table, current.module_identity), function: current.function_key.copy(), reason: reason})
@@ -1144,23 +1219,18 @@ jet_driver_comptime_function_closure: fn(
             }
             else -> {
                 function: checked.function ?? {
+                    if module_value && impurity == None -> impurity = sema_comptime_call_facts_impurity(graph, checked.call_facts, local_value)
                     diagnostics.push(jet_driver_diagnostic_at_registration_site(graph, request.module_identity, "E0003", request.span, "a complete comptime function result has no published body", "a comptime function is lowered only from a complete typed function", "publish the checked body from the canonical on-demand Sema result"))
                     complete = false
                     next
                 }
-                // #6777: a runtime intrinsic's checked body is a stand-in (the
-                // library build lowers each call as its own operation), so a
-                // value computed from it is not the one the program sees:
-                // `key: rt_static_text("…")` folded to the stand-in's 0.
-                if module_value && impurity == None && ir_runtime_intrinsic(function.name) -> impurity = Val("it calls `{function.name}`, a runtime intrinsic the build lowers as its own operation")
-                if module_value && impurity == None -> impurity = sema_comptime_body_unfoldable(function, local_value)
-                defaults := [Int]{}
-                loop parameter in function.params {
-                    if parameter.default == Val(value) -> defaults.push(value)
-                }
-                jet_driver_comptime_precise_refs(graph, index, function.tree, defaults, function.body, queue, queued)
-                jet_driver_comptime_codec_refs(graph, index, current.module_identity, function.tree, defaults, function.body, queue, queued)
-                jet_driver_comptime_owner_refs(graph, current.module_identity, function.tree, defaults, function.body, queue, queued)
+                // A reused row's body walks ran at the first closure that
+                // read it (JetDriverComptimeClosureRow); a new row is kept
+                // at the position it is pushed to below.
+                kept_row := if reused_row >= 0 -> reused_row else if index.checked_rows.get(checked_key) == None -> checked_functions.len() else -> -1
+                closure_row: jet_driver_comptime_closure_row(graph, index, kept_row, checked, function, module_value && impurity == None, local_value)
+                if module_value && impurity == None -> impurity = if local_value -> closure_row.local_impurity else -> closure_row.module_impurity
+                loop found in closure_row.refs -> jet_driver_comptime_function_ref_add(queue, queued, found.module_identity, found.function_key)
                 functions.push(function)
                 sema_comptime_failure_closure_add(graph, failure_closure, checked)
                 if index.checked_rows.get(checked_key) == None {
@@ -1710,6 +1780,7 @@ jet_driver_comptime_forget_functions: fn(checked_functions: &[SemaComptimeFuncti
     loop checked_functions.len() > mark {
         removed := checked_functions.pop() ?? { break }
         _ := index.checked_rows.remove("{removed.module_identity.id}\n{removed.function_key}")
+        _ := index.closure_rows.remove(checked_functions.len())
     }
 }
 
