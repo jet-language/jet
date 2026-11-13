@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6833,
-    "rev": 101772,
+    "rev": 101773,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -67794,7 +67794,7 @@
       "parentId": "c0xiig3k",
       "needsAcceptance": false,
       "created": "2026-10-29T12:53:32.990Z",
-      "updated": "2026-11-13T21:07:52.019Z",
+      "updated": "2026-11-13T21:17:18.682Z",
       "updatedBy": "Main",
       "criteriaLastN": 3
     },
@@ -201148,6 +201148,191 @@
       "draft": false,
       "status": "open",
       "created": "2026-11-13T20:50:21.601Z"
+    },
+    {
+      "id": "D-CORE-TARGET1",
+      "cardId": "c0q31aks",
+      "group": "language",
+      "title": "Programs for machines without an operating system: how the compiler checks the Core code they call",
+      "situation": "Some programs run on a bare chip or a sandbox with no operating system, so there are no files, no terminal and no ready-made memory heap. For such a program the compiler checks each body the program writes, and a list or map it builds is refused because there is no heap. Core, the standard library, is skipped by name, so the same list built inside a Core function is never refused. A program that calls core.math.combinatorics.count_from therefore passes, even though count_from builds a list. That breaks the rule that Core uses only what any package can use, and it hides a real problem. You are asked how code the program does not own is checked for such a machine. We recommend checking everything the program reaches the same way, and reporting each problem at the program's own call.",
+      "gist": "When a program has no operating system, should Core's code be checked like everyone else's, and where should its problems show up?",
+      "lesson": "A machine without an operating system is like a kitchen with no fridge: a recipe that needs cold storage cannot work there. The compiler reads the program's recipes and refuses the ones that need the fridge. Today it never reads the standard library's recipes, so a program can call one that needs the fridge and nobody says so. This vote decides who reads those recipes and where the warning is posted.",
+      "explainer": "Words used here. A no-OS machine is a target with no operating system, such as a microcontroller board. Core is Jet's standard library; it ships with the compiler. A body is the code inside a function. Reaching a function means the program's run function can call it, directly or through other functions. A dependency is another package the program uses.",
+      "story": "Mia writes firmware for a sensor board with no operating system. Her run calls total(4), which calls combo.count_from(0, 2, n) to make a list. Today the check passes, and the heap that count_from needs does not exist on the board. Under A the check stops at her count_from call and names the line inside count_from that builds the list. Under B the error appears inside Core's own source, which she cannot edit. Under C nothing is reported, as today.",
+      "inWild": "// Rust: a no_std crate cannot call a std function at all.\n#![no_std]\nfn total(n: usize) -> usize {\n    // (0..n).collect::<Vec<_>>().len()  // error: no Vec without alloc\n    n\n}",
+      "detail": "What this ballot decides. How the selected machine's no-OS fact applies to code the program does not own: Core, and dependency packages. The card's criterion is that Compiler/JetSema/Source/Sema/Scopes.jet no longer tests for Core.\n\nPrerequisite. On b16 the selected machine reaches no body check at all, for user code or Core: jet check --target=board.sensor_v1 tests/ui/freestanding_e3303.jet prints ok. That is #6144 c3, staged as SUB G3Core2-noos-sema. Until it lands, no option and no UI snapshot here can be shown from the command line.\n\nToday, as the code reads at 498ba80dd8. sema_scope_environment_no_os (Scopes.jet:544) returns false for every Core module (module_is_core). For any other module it returns the selected machine's no_os.\n\nThree checks read it. E3303 refuses every list and map literal (Expressions/Literals.jet:486 and :608); no allocator fact exists in sema, so it fires on any no-OS build. E3301 refuses calls into OS-only Core modules (Calls/Core.jet:676) and #Live blocks (Statements.jet:10214). A dependency's body gets them at the line inside the dependency; a Core body never does.\n\nHow Core bodies are checked. CoreDemand.jet checks a Core body only once a checked body names it. Trait-impl methods, generated methods, close methods and lowering roots are checked up front. A module taken from the Core record checks no body; its checked packets are reused, and they were checked without any consumer's machine.\n\nThe existing reach walk. sema_target_denial_check (TargetDenials.jet:24-101) runs on any machine that denies an effect, hosted or not. It walks from run and Output roots, but skips a function's edges when its effects cover no denied effect (line 56). A program call into a Core callee with a denied effect is E1123 at the call (line 88); a call into a dependency reports inside the dependency.\n\nA reports at the program's call. Each function gets a no-OS need summary from its own body: allocating list and map literals, OS-only Core module calls and #Live blocks. The summary does not depend on the machine, so the Core record stores it once. Allocation is not an effect, so A adds its own walk on no-OS machines.\n\nThat walk follows call_edges and value_edges from the roots to a fixed point, so recursion terminates. A need in the entry package is reported where it is written, as today. A need in another package, Core included, is reported once at the entry package's call that reaches it, with a note naming the callee's line.\n\nA also replaces TargetDenials' Core test at line 88 with the same entry-package test. So on wasm.browser and every other denying machine, a dependency's E1123 moves to the caller's line too, with the same note. E3311 (sema_target_capability_check, per-module core_usage) is not part of this decision and keeps its own test.\n\nB checks Core in place. The Core test is deleted. Core bodies that demand checks get E3303 and E3301 inside Core's source. Up-front bodies (trait impls, close methods) are checked whether reached or not. Bodies taken from the Core record are not rechecked, so B also needs the record split per machine or bypassed on no-OS builds.\n\nC keeps the skip and publishes it. The Core test becomes a package-level declaration any package may make, for example target_neutral: true in package.jet, and Core makes it. Bodies of such packages are never checked against the selected machine.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Check all reached code; report at the program's call",
+          "detail": "Every function records what its body needs from a machine with no OS: a heap, an OS-only module or a terminal. A program built for such a machine is refused at its own call into code it does not own, when the reached code needs one. The note names the line inside the callee. The program's own lines are reported where they are, as today.",
+          "technical": "Delete the module_is_core test from sema_scope_environment_no_os; the in-place checks run only for the entry package. Record a per-function no-OS need summary (allocating literal, OS-only module call, #Live site), stored in the Core record. On no-OS machines, walk call_edges and value_edges from the run and Output roots to a fixed point, unpruned by effects.\n\nReport E3303 or E3301 at the entry package's reaching call, with a note at the callee's site. Replace module_is_core at TargetDenials.jet:88 with the same entry-package test. UI snapshot: tests/ui/freestanding_core_reach_e3303.",
+          "code": "// Built for a board with no operating system.\nuse combo: core.math.combinatorics\n\ntotal: fn(n: Int) -> Int {\n    // A: E3303 here. Note: count_from builds a list at\n    //    Core/Math/Combinatorics.jet:161 (out := [Int]{}).\n    combo.count_from(0, 2, n).len()\n}\n\nrun: fn() {\n    _: total(4)\n}"
+        },
+        {
+          "key": "B",
+          "name": "Check Core in place, like a dependency today",
+          "detail": "The Core skip is deleted. Core bodies the compile checks get the same errors as a dependency's bodies, at the line inside Core's source.",
+          "technical": "Delete the module_is_core test from sema_scope_environment_no_os. Core bodies checked for the program's machine report E3303 and E3301 in Core files. Bypass the Core record on no-OS builds (or keep one record per machine) so taken bodies are checked too. TargetDenials is unchanged.",
+          "code": "// Built for a board with no operating system.\nuse combo: core.math.combinatorics\n\ntotal: fn(n: Int) -> Int {\n    // B: no error on this line.\n    combo.count_from(0, 2, n).len()\n}\n\nrun: fn() {\n    _: total(4)\n}\n// B: E3303 at Core/Math/Combinatorics.jet:161, out := [Int]{}"
+        },
+        {
+          "key": "C",
+          "name": "Keep the skip and publish it for any package",
+          "detail": "Core keeps its skip, now as a rule any package may claim with a manifest field. Packages that claim it are never checked against the selected machine.",
+          "technical": "Replace module_is_core in sema_scope_environment_no_os with a package flag read from package.jet (target_neutral: true). Core's package row sets it. Document the field in the package manifest reference.",
+          "code": "// Built for a board with no operating system.\nuse combo: core.math.combinatorics\n\ntotal: fn(n: Int) -> Int {\n    // C: no error anywhere, as today.\n    combo.count_from(0, 2, n).len()\n}\n\nrun: fn() {\n    _: total(4)\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "A no_std crate cannot name std at all; alloc is opted into explicitly.",
+          "code": "#![no_std]\nextern crate alloc; // only with a global allocator"
+        },
+        {
+          "lang": "Zig",
+          "note": "Functions that allocate take an Allocator argument, so the caller sees the need at the call.",
+          "code": "const list = try countFrom(allocator, 0, 2, n);"
+        },
+        {
+          "lang": "C",
+          "note": "A freestanding build links without libc; a call to malloc fails only at link time.",
+          "code": "// cc -ffreestanding -nostdlib main.c  -> undefined reference to malloc"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "A removes Core's special case and still puts the error where the programmer can act. Only code the program reaches is reported, and the same placement rule covers E1123, E3301 and E3303.",
+        "gains": [
+          "Core is checked by the same rule as every package.",
+          "Errors land on the programmer's own line, with the cause named.",
+          "Functions the program never reaches are never reported.",
+          "One placement rule for E1123, E3301 and E3303."
+        ],
+        "losses": [
+          {
+            "loss": "A dependency's E3301, E3303 and E1123 move from its own line to the caller's line, on every machine that denies something.",
+            "mitigation": "The note keeps the dependency's line, and the dependency's author still sees it in place when building that package for the machine."
+          },
+          {
+            "loss": "A new walk over every reached function costs compile time on no-OS machines.",
+            "mitigation": "The summaries are per body and machine-free, so Core's come from the record; the walk visits each reached function once and runs only for no-OS machines."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B shows errors in Core files the programmer cannot edit, reports up-front Core bodies the program never reaches, and needs the Core record split per machine."
+          },
+          {
+            "key": "C",
+            "reason": "C keeps the hole: a no-OS program can call code that needs a heap and hear nothing until link or run time."
+          }
+        ],
+        "tradeoff": "Dependency errors move to the caller's line with a note, and no-OS builds pay for one walk, in exchange for one rule for Core and packages."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": "In the Jet repository at 498ba80dd8, read Compiler/JetSema/Source/Sema/Scopes.jet:544 and its readers: Expressions/Literals.jet:486 and :608, Calls/Core.jet:676 and Statements.jet:10214. Read the CoreDemand.jet header and TargetDenials.jet:24-101, whose E1123 walk prunes by effect at line 56. On b16, jet check --target=board.sensor_v1 tests/ui/freestanding_e3303.jet prints ok; #6144 c3 (SUB G3Core2-noos-sema) must land before any option can be shown. Validate this payload with Tools/agent/ballots/Validate.jet.",
+      "surface": {
+        "gist": "For programs with no operating system, check Core like every package, and report problems at the program's own call?",
+        "lesson": "A board with no operating system has no ready memory heap. The compiler refuses a program's own code that needs one. It skips Core's code by name, so calling a Core function that needs a heap passes silently.",
+        "trio": {
+          "current": {
+            "note": "The program's own list is refused; the list inside count_from is not.",
+            "code": "total: fn(n: Int) -> Int {\n    combo.count_from(0, 2, n).len()  // passes today\n}\n\nrun: fn() {\n    _: total(4)\n}"
+          },
+          "wild": {
+            "lang": "Zig",
+            "note": "Code that allocates takes an allocator, so the caller sees it.",
+            "code": "const list = try countFrom(allocator, 0, 2, n);"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Report at the call",
+            "gist": "Everything reached is checked; problems show on the program's own line.",
+            "gains": [
+              "No special case for Core.",
+              "Errors land where the programmer can act."
+            ],
+            "losses": [
+              "Dependency errors move to the caller's line.",
+              "No-OS builds pay for one more walk."
+            ],
+            "proposed": {
+              "code": "combo.count_from(0, 2, n)  // E3303 here, note: Combinatorics.jet:161"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Check Core in place",
+            "gist": "Delete the skip; errors show inside Core's files.",
+            "gains": [
+              "No new walk."
+            ],
+            "losses": [
+              "Errors in files nobody can edit.",
+              "Unreached Core bodies can be reported."
+            ],
+            "proposed": {
+              "code": "// E3303 at Core/Math/Combinatorics.jet:161"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Publish the skip",
+            "gist": "Any package may claim the skip that Core has.",
+            "gains": [
+              "No behaviour change."
+            ],
+            "losses": [
+              "Heap needs still go unreported."
+            ],
+            "proposed": {
+              "code": "// package.jet: target_neutral: true"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "One rule for Core and packages, only reached code is reported, and the error lands on the programmer's own line with its cause named.",
+          "gains": [
+            "No special case for Core.",
+            "Unreached code is never reported."
+          ],
+          "losses": [
+            {
+              "loss": "Dependency errors move to the caller's line.",
+              "mitigation": "The note keeps the dependency's line."
+            },
+            {
+              "loss": "No-OS builds pay for one more walk.",
+              "mitigation": "Each reached function is visited once; Core's summaries are stored."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Errors inside Core files, even unreached ones."
+            },
+            {
+              "key": "C",
+              "reason": "Keeps the silent gap."
+            }
+          ],
+          "tradeoff": "Dependency errors move to the call, for one rule everywhere."
+        }
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-13T21:17:18.682Z"
     }
   ],
   "questions": [
@@ -204493,6 +204678,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-13T21:17:18.682Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-CORE-TARGET1",
+      "note": "Programs for machines without an operating system: how the compiler checks the Core code they call"
+    },
     {
       "at": "2026-11-13T21:10:48.607Z",
       "by": "Main",
