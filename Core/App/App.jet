@@ -15,12 +15,14 @@ SYNC_MAX_TEXT: 1048576
 SYNC_MAX_ENTRIES: 100000
 SYNC_MAX_REPLICAS: 4096
 SYNC_MAX_INT: 9223372036854775807
-// Live bindings are core.web's process-wide registry: `app` names the same
-// bindings. Sync sessions are records of that registry under
-// web.LIVE_SYNC_SOURCE.
+// Live bindings live in one process-wide registry below; sync sessions are
+// records of that registry under LIVE_SYNC_SOURCE.
 use {
-    web: core.web
     unicode: core.text
+    live_json: core.encoding.json
+    core.reactive.loadable.[Loadable]
+    rt: jet.runtime.time
+    rt_web: jet.runtime.web
 }
 
 #Error
@@ -41,10 +43,6 @@ Session: struct {
     expires_at: Int
 }
 
-use {
-    core.web.[Live]
-    core.reactive.loadable.[Loadable]
-}
 auth: fn(users_table: String) -> Auth Never! {
     Auth{users_table: canonical_table(users_table), providers: [String]{}}
 }
@@ -98,21 +96,299 @@ canonical_providers: fn(values: [String]) -> [String] {
     providers
 }
 
-state: fn<T: [Encode, Decode], E: [Encode, Decode]>(binding: Live<T, E>) -> Loadable<T, E> Never! { web.state<T, E>(binding) }
+// A live binding: one source function applied to one argument list. The
+// compiler builds it from `live(source, args...)` or
+// `subscribe(source, args...)`; `state` reads it.
+Live: struct<T, E> {
+    id: Int
+    run: fn() -> T E!
+}
 
-live_stats: fn() -> String Never! { web.live_stats() }
+// One registry binding, named by its source's wire name and its encoded
+// argument list. `value` is the last result, `ok:` or `err:` then its JSON,
+// and empty before the first run; `every_ns` is the poll interval (0: none)
+// and `ran_ns` the monotonic time of the last run.
+LiveRecord: struct {
+    id: Int
+    source: String
+    key: String
+    value: String
+    dirty: Bool
+    every_ns: Int
+    ran_ns: Int
+}
 
-__live_bind: fn<T: [Encode, Decode], E: [Encode, Decode]>(source: String, args: [String], run: &&fn() -> T E!) -> Live<T, E> Never! { web.__live_bind<T, E>(source, args, run) }
+LiveRegistry: struct {
+    next_id: Int
+    invalidations: Int
+    changes: Int
+    evictions: Int
+    ws_pushes: Int
+    records: [LiveRecord]
+}
 
-__live_poll: fn<T: [Encode, Decode], E: [Encode, Decode]>(source: String, args: [String], every: Duration?, run: &&fn() -> T E!) -> Live<T, E> Never! { web.__live_poll<T, E>(source, args, every, run) }
+// The live registry lives in a process-wide runtime byte cell; every update
+// reads the cell, edits the decoded registry and installs it only if the cell
+// is unchanged, retrying otherwise, so concurrent callers never lose an update.
+//
+// The compiler checks `live`, `subscribe`, `push` and `invalidate` against
+// their source function and lowers them to the `__live_*` helpers below.
 
-__live_push: fn<T: Encode>(source: String, args: [String], value: T) Never! { web.__live_push<T>(source, args, value) }
+// The binding's current state. The source re-runs when the binding has no
+// result yet, was invalidated, or its poll interval has passed; the stored
+// result changes only when the re-run's encoding differs.
+state: fn<T: [Encode, Decode], E: [Encode, Decode]>(binding: Live<T, E>) -> Loadable<T, E> Never! {
+    now: rt.clock_mono_ns()
+    if live_current(binding.id, now) == .Val(text) {
+        if live_value_state<T, E>(text) == .Val(current) -> return current
+    }
+    value: binding.run() ?? {
+        if live_json.to_string<E>(err) == .Ok(encoded) -> live_store(binding.id, "err:{encoded}", now)
+        return Loadable.Failed(err)
+    }
+    if live_json.to_string<T>(value) == .Ok(encoded) -> live_store(binding.id, "ok:{encoded}", now)
+    Loadable.Loaded(value)
+}
 
-__live_invalidate: fn(source: String, args: [String]) Never! { web.__live_invalidate(source, args) }
+// `changes` counts stored results that differed from the one before;
+// `ws_pushes` counts the invalidations published to the WebSocket live hub.
+live_stats: fn() -> String Never! {
+    registry: live_decode(live_cell_load()) ?? return "LiveStats(error=live registry unavailable)"
+    "LiveStats(queries={live_query_count(registry)}, limit={LIVE_MAX_QUERIES}, evictions={registry.evictions}, invalidations={registry.invalidations}, changes={registry.changes}, ws_pushes={registry.ws_pushes})"
+}
 
-__live_invalidate_all: fn(source: String) Never! { web.__live_invalidate_all(source) }
+// The live bindings of `registry`; sync's session records are not queries.
+live_query_count: fn(registry: LiveRegistry) -> Int {
+    count := 0
+    loop record in registry.records {
+        if record.source != LIVE_SYNC_SOURCE -> count += 1
+    }
+    count
+}
 
-__live_arg: fn<A: Encode>(value: A) -> String Never! { web.__live_arg<A>(value) }
+// `live(source, args...)`: `args` are the encoded arguments.
+__live_bind: fn<T: [Encode, Decode], E: [Encode, Decode]>(source: String, args: [String], run: &&fn() -> T E!) -> Live<T, E> Never! {
+    Live<T, E>{id: live_register(source, live_key(args), 0), run: run}
+}
+
+// `subscribe(source, args..., every:)`: a binding polled every `every`.
+__live_poll: fn<T: [Encode, Decode], E: [Encode, Decode]>(source: String, args: [String], every: Duration?, run: &&fn() -> T E!) -> Live<T, E> Never! {
+    every_ns := 0
+    if every == .Val(interval) && interval.ns > 0 -> every_ns = interval.ns
+    Live<T, E>{id: live_register(source, live_key(args), every_ns), run: run}
+}
+
+// `push(source, args..., value:)` stores `value` as that binding's result,
+// registering the binding when nothing has read it yet.
+__live_push: fn<T: Encode>(source: String, args: [String], value: T) Never! {
+    encoded: live_json.to_string<T>(value) ?? return
+    key: live_key(args)
+    id: live_register(source, key, 0)
+    live_store(id, "ok:{encoded}", -1)
+}
+
+// `invalidate(source, args...)`: exactly that argument list re-runs.
+__live_invalidate: fn(source: String, args: [String]) Never! { live_invalidate(source, Val(live_key(args))) }
+
+// `invalidate(source)`: every binding of `source` re-runs.
+__live_invalidate_all: fn(source: String) Never! { live_invalidate(source, None) }
+
+// One argument's part of a binding's identity.
+__live_arg: fn<A: Encode>(value: A) -> String Never! { live_json.to_string<A>(value) ?? "_" }
+
+LIVE_MAX_QUERIES: 1024
+LIVE_MAX_PAYLOAD: 4194304
+// The registry source of sync's session records: a session keeps its
+// generation and document as the record's value.
+LIVE_SYNC_SOURCE: "app.sync"
+
+live_cell_load: fn() -> [U8] { rt_web.live_load() }
+
+live_cell_replace: fn(expected: [U8], replacement: &&[U8]) -> Bool { rt_web.live_replace(expected, replacement) }
+
+live_key: fn(args: [String]) -> String { "[{args.join(",")}]" }
+
+// The id of the binding named by `source` and `key`, registered when absent;
+// a full registry evicts its oldest binding. Two registrations of one
+// binding poll at the shorter interval. 0 when the registry is unavailable.
+live_register: fn(source: String, key: String, every_ns: Int) -> Int {
+    loop {
+        seen: live_cell_load()
+        registry := live_decode(seen) ?? return 0
+        found := 0
+        loop index in 0..<registry.records.len() {
+            if registry.records[index].source != source || registry.records[index].key != key -> next
+            found = registry.records[index].id
+            current: registry.records[index].every_ns
+            if every_ns <= 0 || (current > 0 && current <= every_ns) -> return found
+            registry.records[index].every_ns = every_ns
+        }
+        if found == 0 {
+            found = registry.next_id + 1
+            registry.next_id = found
+            if live_query_count(registry) >= LIVE_MAX_QUERIES {
+                kept := [LiveRecord]{}
+                evicted := false
+                loop record in registry.records {
+                    if !evicted && record.source != LIVE_SYNC_SOURCE {
+                        evicted = true
+                        next
+                    }
+                    kept.push(record)
+                }
+                registry.records = kept
+                registry.evictions += 1
+            }
+            // copy: a lost race retries with the same source and key
+            registry.records.push(LiveRecord{id: found, source: source.copy(), key: key.copy(), value: "", dirty: false, every_ns: every_ns, ran_ns: 0})
+        }
+        if live_cell_replace(seen, live_encode(registry)) -> return found
+    }
+}
+
+// The stored result of binding `id` when it is current at `now`; None when
+// the binding must re-run.
+live_current: fn(id: Int, now: Int) -> String? {
+    registry: live_decode(live_cell_load()) ?? return None
+    index: live_index(registry, id) ?? return None
+    record: registry.records[index]
+    if record.value == "" || record.dirty -> return None
+    if record.every_ns > 0 && now - record.ran_ns >= record.every_ns -> return None
+    Val(record.value.copy()) // copy: the registry snapshot is dropped here
+}
+
+live_value_state: fn<T: [Encode, Decode], E: [Encode, Decode]>(text: String) -> Loadable<T, E>? {
+    if text.starts_with("ok:") {
+        value: live_json.decode<T>(text.slice(3, text.len())) ?? return None
+        return Val(Loadable.Loaded(value))
+    }
+    if !text.starts_with("err:") -> return None
+    reason: live_json.decode<E>(text.slice(4, text.len())) ?? return None
+    Val(Loadable.Failed(reason))
+}
+
+// Stores `value` as binding `id`'s result, clean; a value that differs from
+// the stored one counts as a change. `now` < 0 keeps the last run time.
+live_store: fn(id: Int, value: String, now: Int) {
+    if value.len() > LIVE_MAX_PAYLOAD -> return
+    loop {
+        seen: live_cell_load()
+        registry := live_decode(seen) ?? return
+        index: live_index(registry, id) ?? return
+        if registry.records[index].value != value {
+            registry.records[index].value = value.copy() // copy: a lost race retries with the same value
+            registry.changes += 1
+        }
+        registry.records[index].dirty = false
+        if now >= 0 -> registry.records[index].ran_ns = now
+        if live_cell_replace(seen, live_encode(registry)) -> return
+    }
+}
+
+// Marks dirty every binding of `source`, or only the one whose key is `key`,
+// then publishes the invalidation to the WebSocket live hub:
+// topic `live:<source>`, a JSON event every joined server connection receives
+// and a connection that joins later gets replayed as the topic's latest.
+live_invalidate: fn(source: String, key: String?) {
+    loop {
+        seen: live_cell_load()
+        registry := live_decode(seen) ?? return
+        hit := 0
+        loop index in 0..<registry.records.len() {
+            if registry.records[index].source != source -> next
+            if key == .Val(only) && registry.records[index].key != only -> next
+            registry.records[index].dirty = true
+            hit += 1
+        }
+        if hit == 0 -> return
+        registry.invalidations += hit
+        registry.ws_pushes += 1
+        if live_cell_replace(seen, live_encode(registry)) {
+            key_json := "null"
+            if key == .Val(only) -> key_json = live_json.to_string<String>(only) ?? "null"
+            source_json: live_json.to_string<String>(source) ?? "null"
+            rt_web.live_publish("live:{source}", "{{\"live\":\"invalidate\",\"source\":{source_json},\"key\":{key_json},\"invalidations\":{registry.invalidations}}}")
+            return
+        }
+    }
+}
+
+live_index: fn(registry: LiveRegistry, id: Int) -> Int? {
+    loop index in 0..<registry.records.len() {
+        if registry.records[index].id == id -> return Val(index)
+    }
+    None
+}
+
+// The cell holds the registry as length-prefixed fields: next id,
+// invalidations, changes, evictions, WebSocket pushes, then seven fields per
+// binding.
+live_encode: fn(registry: LiveRegistry) -> [U8] {
+    out := [U8]{}
+    live_put(out, "{registry.next_id}")
+    live_put(out, "{registry.invalidations}")
+    live_put(out, "{registry.changes}")
+    live_put(out, "{registry.evictions}")
+    live_put(out, "{registry.ws_pushes}")
+    loop record in registry.records {
+        live_put(out, "{record.id}")
+        live_put(out, record.source)
+        live_put(out, record.key)
+        live_put(out, record.value)
+        live_put(out, if record.dirty -> "1" else -> "0")
+        live_put(out, "{record.every_ns}")
+        live_put(out, "{record.ran_ns}")
+    }
+    out
+}
+
+live_put: fn(out: &[U8], text: String) {
+    loop byte in "{text.len()}:".bytes() -> out.push(byte)
+    loop byte in text.bytes() -> out.push(byte)
+}
+
+// An empty cell is the empty registry; None when the bytes are malformed.
+live_decode: fn(raw: [U8]) -> LiveRegistry? {
+    if raw.len() == 0 -> return Val(LiveRegistry{next_id: 0, invalidations: 0, changes: 0, evictions: 0, ws_pushes: 0, records: [LiveRecord]{}})
+    fields: live_fields(raw) ?? return None
+    if fields.len() < 5 || (fields.len() - 5) % 7 != 0 -> return None
+    next_id: Int.parse(fields[0]) ?? return None
+    invalidations: Int.parse(fields[1]) ?? return None
+    changes: Int.parse(fields[2]) ?? return None
+    evictions: Int.parse(fields[3]) ?? return None
+    ws_pushes: Int.parse(fields[4]) ?? return None
+    records := [LiveRecord]{}
+    at := 5
+    loop at < fields.len() {
+        id: Int.parse(fields[at]) ?? return None
+        every_ns: Int.parse(fields[at + 5]) ?? return None
+        ran_ns: Int.parse(fields[at + 6]) ?? return None
+        records.push(LiveRecord{id: id, source: fields[at + 1], key: fields[at + 2], value: fields[at + 3], dirty: fields[at + 4] == "1", every_ns: every_ns, ran_ns: ran_ns})
+        at += 7
+    }
+    Val(LiveRegistry{next_id: next_id, invalidations: invalidations, changes: changes, evictions: evictions, ws_pushes: ws_pushes, records: records})
+}
+
+// The length-prefixed fields (`<decimal byte length>:<bytes>`) of `raw`.
+live_fields: fn(raw: [U8]) -> [String]? {
+    fields := [String]{}
+    at := 0
+    loop at < raw.len() {
+        length := 0
+        loop {
+            if at >= raw.len() -> return None
+            n: Int.from_u8(raw[at])
+            at += 1
+            if n == 58 -> break
+            if n < 48 || n > 57 -> return None
+            length = length * 10 + n - 48
+        }
+        if at + length > raw.len() -> return None
+        fields.push(String.from_bytes(raw.slice(at, at + length)) ?? return None)
+        at += length
+    }
+    Val(fields)
+}
 
 // Publish the canonical display of a CRDT document onto session `over`
 // (jet_sync_publish). A session keeps its generation and merged document; a
@@ -127,12 +403,12 @@ sync: fn(doc_show: String, over: String) -> String Never! {
     if over.trim() == "" || over.len() > SYNC_MAX_SESSION || unicode.has_control(over) -> return "SyncError(invalid session)"
     document: sync_document_parse(doc_show) ?? return "SyncError(document is not a canonical CRDT value)"
     loop {
-        seen: web.live_cell_load()
-        registry := web.live_decode(seen) ?? return "SyncError(session registry is unavailable)"
+        seen: live_cell_load()
+        registry := live_decode(seen) ?? return "SyncError(session registry is unavailable)"
         found := -1
         sessions := 0
         loop index in 0..<registry.records.len() {
-            if registry.records[index].source != web.LIVE_SYNC_SOURCE -> next
+            if registry.records[index].source != LIVE_SYNC_SOURCE -> next
             sessions += 1
             if registry.records[index].key == over -> found = index
         }
@@ -166,9 +442,9 @@ sync: fn(doc_show: String, over: String) -> String Never! {
         } else {
             id: registry.next_id + 1
             registry.next_id = id
-            registry.records.push(web.LiveRecord{id: id, source: web.LIVE_SYNC_SOURCE, key: over.copy(), value: value, dirty: false, every_ns: 0, ran_ns: 0})
+            registry.records.push(LiveRecord{id: id, source: LIVE_SYNC_SOURCE, key: over.copy(), value: value, dirty: false, every_ns: 0, ran_ns: 0})
         }
-        if web.live_cell_replace(seen, web.live_encode(registry)) -> return receipt
+        if live_cell_replace(seen, live_encode(registry)) -> return receipt
     }
 }
 

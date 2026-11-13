@@ -1,4 +1,4 @@
-// `live`, `subscribe`, `push` and `invalidate` (in `app` and `core.web`) name
+// `live`, `subscribe`, `push` and `invalidate` (in `app`) name
 // a source function and the arguments of one call to it. The checker proves
 // the source is a named function whose result and error types are Encode and
 // Decode (and, for `live`, that it only reads the database), checks the
@@ -58,10 +58,10 @@ sema_live_rejected: fn() -> SemaDirectSpecialCheck Never! { SemaDirectSpecialChe
 
 // Whether `module_name.member` is one of the live-binding calls.
 sema_live_member: fn(module_name: String, member: String) -> Bool Never! {
-    (module_name == "app" || module_name == "core.web") && (member == "live" || member == "subscribe" || member == "push" || member == "invalidate")
+    module_name == "app" && (member == "live" || member == "subscribe" || member == "push" || member == "invalidate")
 }
 
-// A live-binding call through a Core module alias (`use web: core.web`).
+// A live-binding call through a Core module alias (`use app`).
 sema_call_try_live: fn(module_name: String, member: String, alias: String, alias_span: Span, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
     if !sema_live_member(module_name, member) -> return sema_live_unhandled()
     // A nested module path (`alias.leaf.member`) names another module.
@@ -72,7 +72,7 @@ sema_call_try_live: fn(module_name: String, member: String, alias: String, alias
     sema_call_live(member, alias, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
 }
 
-// `alias.member(source, args...)`, where `alias` names `app` or `core.web`
+// `alias.member(source, args...)`, where `alias` names `app`
 // and the import is already recorded.
 sema_call_live: fn(member: String, alias: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
     callee: "{alias}.{member}"

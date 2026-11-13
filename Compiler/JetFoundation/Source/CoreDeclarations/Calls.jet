@@ -438,13 +438,10 @@ core_decl_call_effect: fn(module_name: String, member: String) -> String? Never!
             else -> Val("FS")
         }
         "core.log" -> Val("Log")
-        // core.web's OpenAPI helpers and its live-binding registry: in-process
-        // state (Core/Web/Web.jet), not a browser API; a publish only writes to
-        // connections a server already upgraded under Net. The live cell's load
-        // and swap are run-time only (RUNTIME_ONLY_READS), not an effect, so a
-        // database write invalidates it under its DB row alone.
+        // core.web's OpenAPI helpers: in-process state (Core/Web/Web.jet), not a
+        // browser API.
         "core.web" -> if member == {
-            "__openapi_inputs" | "__openapi_render" | "__contract_stop" | "__live_load" | "__live_replace" | "__live_publish" | "live_stats" -> None
+            "__openapi_inputs" | "__openapi_render" | "__contract_stop" -> None
             else -> Val("Browser")
         }
         "core.mod" -> if member == {

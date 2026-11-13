@@ -2,6 +2,7 @@
 // of the canonical router, query, form, table, virtual-window, and store APIs;
 // no browser adapter or second state model is introduced.
 use {
+    app
     http: core.http
     time: core.time
     web: core.web
@@ -75,14 +76,14 @@ store_update: fn(value: Int) { print(value) }
 user_count: fn(role: String) -[DB.Read]> Int StateError! { role.len() }
 
 app_surface: fn() {
-    live: web.live(user_count, "admin")
-    _live_state: web.state(live)
-    web.invalidate(user_count, "admin")
-    web.invalidate(user_count)
-    _live_stats: web.live_stats()
-    subscriber: web.subscribe(user_count, "guest", every: time.duration_seconds(5))
-    web.push(user_count, "guest", value: 3)
-    _pushed_state: web.state(subscriber)
+    live: app.live(user_count, "admin")
+    _live_state: app.state(live)
+    app.invalidate(user_count, "admin")
+    app.invalidate(user_count)
+    _live_stats: app.live_stats()
+    subscriber: app.subscribe(user_count, "guest", every: time.duration_seconds(5))
+    app.push(user_count, "guest", value: 3)
+    _pushed_state: app.state(subscriber)
     auth: web.auth("session")
     _auth_routes: web.auth_routes(auth)
     _auth_show: web.auth_show(auth)

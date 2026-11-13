@@ -1,6 +1,6 @@
 use {
     db: core.db
-    web: core.web
+    app
     net: core.net
     ws: core.net.ws
     server: core.http.server
@@ -48,7 +48,7 @@ run: fn() {
     alice: conn.with_policy(policy, "alice")
     _: db.migrate(alice, "tasks-v1", [db.SQL]{SQL{"CREATE TABLE tasks (owner TEXT, title TEXT)"}}) ?? panic("migrate")
     mine: alice.live(SQL{"SELECT title FROM tasks ORDER BY title"}) ?? panic("live")
-    print("bound {titles(web.state(mine))}")
+    print("bound {titles(app.state(mine))}")
     insert(alice, "one")
 
     listener: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
@@ -64,7 +64,7 @@ run: fn() {
     serving.join() ?? panic("server join")
 
     insert(alice, "three")
-    print("offline {titles(web.state(mine))}")
+    print("offline {titles(app.state(mine))}")
     again_listener: net.tcp_listen("127.0.0.1:0") ?? panic("listen again")
     again_addr: again_listener.local_addr() ?? panic("address again")
     again_mux: server.mux()
@@ -74,5 +74,5 @@ run: fn() {
     print("reconnect replayed {next_text(again)}")
     again.close(1000, "") ?? panic("close again")
     again_serving.join() ?? panic("server join again")
-    print(web.live_stats())
+    print(app.live_stats())
 }

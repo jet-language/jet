@@ -4,18 +4,18 @@ package: {
 }
 
 use {
+    app
     compute: core.compute
     files: jet.runtime.files
     host: core.ui.host
     tasks: core.tasks
-    web: core.web
 }
 
 // The same reads as local values: each runs when the program does.
 run: fn() {
     profile: compute.profile_f32_strict()
     caps: host.capabilities()
-    stats: web.live_stats()
+    stats: app.live_stats()
     id: tasks.current_task()
     family: files.os_family()
     print(profile.contains("vector_width="))

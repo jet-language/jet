@@ -5131,10 +5131,36 @@ choices, not implicit scheduler behavior. A scope owns the lifetime of its
 subscriptions.
 The event family is a typed Core value with no additional event syntax (`D-EVENT1`). Scope ownership, ordered dispatch, explicit cancellation, and bounded asynchronous pressure remain the governing rules (`D-EVENT2=A`; `D-EVENT-CONTINUE1=C`).
 
-### `core.web` — server-rendered applications and live state
+### `app` — live bindings
+
+`app` keeps the process-wide live-binding registry. The module source is
+[`Core/App/App.jet`](../../../Core/App/App.jet).
+
+| Signature | Result | Description |
+|---|---|---|
+| `live(query, args...) -> Live<T, E>` | binding | Bind `query: fn(args...) -[DB.Read]> T E!` to one argument list. The arguments are checked as a call to `query`, evaluated once and kept by the binding; the same source and arguments return the existing binding. |
+| `subscribe(source, args..., every: Duration? = None) -> Live<T, E>` | binding | Bind any named `source: fn(args...) -> T E!` to one argument list; with `every`, a read re-runs the source once the interval has passed since its last run. |
+| `state(binding: Live<T, E>) -> Loadable<T, E>` | state | Read the binding's snapshot: `Loaded(value)` or `Failed(reason)`, running the source first when the binding is new, invalidated, or due to poll. |
+| `push(source, args..., value: T)` | — | Publish `value` as the result of that source and argument list without running the source. |
+| `invalidate(source)` / `invalidate(source, args...)` | — | Re-run every binding of `source` on its next read, or exactly the binding for that argument list. |
+| `live_stats() -> String` | text | Report the registry's binding count, its 1024-binding limit, evictions, invalidations and value changes. |
+
+A source must be a named function, not a closure: its module path and name
+identify it on the wire. `T` and `E` must be `Encode` and `Decode`, and the
+encoded arguments tell bindings of one source apart (an argument type without
+`Encode`, such as a database scope, does not). A stored value that equals the
+previous one is not a change, so readers wake only when the value changed.
+`Live<T, E>` is an identity, not a snapshot: reads, invalidation and
+statistics always use the one registry. A full registry evicts its oldest
+binding. A signature names the type after `use app.[Live]`. The registry
+lives in one runtime byte cell that only `app` reaches, through the private
+`jet.runtime.web` bindings, and an invalidation goes to the WebSocket live hub
+as topic `live:<source>`.
+
+### `core.web` — server-rendered applications
 
 `core.web` builds server-rendered applications on top of `core.http`. An
-`App` owns routes, live state, sessions, and storage adapters; the browser
+`App` owns routes, sessions, and storage adapters; the browser
 surface is represented by typed effects rather than an assumed browser DOM.
 The module source is [`Core/Web/Web.jet`](../../../Core/Web/Web.jet).
 `App` and `WebPage` are opaque compiler-owned carriers, not constructible source
@@ -5157,24 +5183,7 @@ boundary. The renderer consumes those facts instead of copying the route list.
 | `auth_oauth(auth: Auth, client_id: String) -> Auth` | auth | Add OAuth client identity to an auth carrier. |
 | `auth_routes(auth: Auth) -> [String]` | paths | Return authentication route paths. |
 | `auth_show(auth: Auth) -> String` | text | Render the source auth summary. |
-| `live(query, args...) -> Live<T, E>` | binding | Bind `query: fn(args...) -[DB.Read]> T E!` to one argument list. The arguments are checked as a call to `query`, evaluated once and kept by the binding; the same source and arguments return the existing binding. |
-| `subscribe(source, args..., every: Duration? = None) -> Live<T, E>` | binding | Bind any named `source: fn(args...) -> T E!` to one argument list; with `every`, a read re-runs the source once the interval has passed since its last run. |
-| `state(binding: Live<T, E>) -> Loadable<T, E>` | state | Read the binding's snapshot: `Loaded(value)` or `Failed(reason)`, running the source first when the binding is new, invalidated, or due to poll. |
-| `push(source, args..., value: T)` | — | Publish `value` as the result of that source and argument list without running the source. |
-| `invalidate(source)` / `invalidate(source, args...)` | — | Re-run every binding of `source` on its next read, or exactly the binding for that argument list. |
-| `live_stats() -> String` | text | Report the registry's binding count, its 1024-binding limit, evictions, invalidations and value changes. |
 | `sync(key: String, data: String) -> String` | text | Format a synchronized key/value update. |
-
-`app` and `core.web` live bindings share one process-wide registry. A source
-must be a named function, not a closure: its module path and name identify it
-on the wire. `T` and `E` must be `Encode` and `Decode`, and the encoded
-arguments tell bindings of one source apart (an argument type without
-`Encode`, such as a database scope, does not). A stored value that equals the
-previous one is not a change, so readers wake only when the value changed.
-`Live<T, E>` is an identity, not a snapshot: reads, invalidation and
-statistics always use the one registry. A full registry evicts its oldest
-binding. The type is `core.web.Live`; `app` returns the same type and does
-not declare its own, so a signature names it after `use core.web.[Live]`.
 
 `core.web` delegates HTTP transport to `core.http`; route handlers should use
 that typed request/response contract rather than opening sockets directly.
@@ -5756,7 +5765,7 @@ subquery from another table) is refused.
 | `decode<T: Decode>(row: [String: DBValue]) -[DB]> T [FieldError]!` | `T` | Decode a row into a typed value. A field's column is its `Rename(db:)` name, else its shared name. |
 | `transaction(scope: DBScope, name: String, steps: [SQL]) -[DB, Time.Wait]> Int DBError!` | count | Execute a checked transaction. |
 | `migrate(scope: DBScope, name: String, steps: [SQL]) -[DB, Time.Wait]> Int DBError!` | count | Apply a migration under its checksum. |
-| `scope.live(sql: SQL) -[DB.Read]> Live<[[String: DBValue]], DBError> DBError!` | binding | Bind one policy-checked `SELECT` in the shared `core.web` live registry; read it with `core.web.state`. |
+| `scope.live(sql: SQL) -[DB.Read]> Live<[[String: DBValue]], DBError> DBError!` | binding | Bind one policy-checked `SELECT` in the shared `app` live registry; read it with `app.state`. |
 
 Scoped connection and pool handles provide checked `query`, `query_one`,
 `execute`, lease, `begin`, and close operations. A policy expression
@@ -5781,12 +5790,12 @@ A commit that fails rolls the transaction back before it reports the error.
 `SELECT` and applies the scope's policy before binding, so a refused query
 fails at the call. The binding is identified by the scope's user, the
 policy-applied SQL and its bound values: the same query from the same user
-returns the same binding, and another user's gets its own. `core.web.state`
+returns the same binding, and another user's gets its own. `app.state`
 runs the query on first read and again, with the policy applied anew, after a
 scope write (`execute`, `transaction`, `migrate`) to the table it reads, or
 after a rollback that undid one. A write to another table leaves it current.
-No WebSocket transport carries these results yet (core.net.ws, #4957), so
-`live_stats()` keeps reporting `ws_pushes=0`.
+Each invalidation also goes to the WebSocket live hub, and `app.live_stats()`
+counts it as `ws_pushes`.
 
 `DBPool.acquire(deadline:)` admits waiters first come, first served. A waiter
 leaves the queue when it gets a lease, when its deadline passes, when the pool

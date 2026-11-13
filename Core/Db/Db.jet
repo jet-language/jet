@@ -23,9 +23,9 @@ use {
     encoding: core.encoding
     core.encoding.[Dyn]
     stream: __core_encoding_stream
-    // DBScope.live bindings share core.web's process-wide live registry.
-    web: core.web
-    core.web.[Live]
+    // DBScope.live bindings share app's process-wide live registry.
+    app
+    app.[Live]
 }
 
 // core.db owns its SQL values, typed row selection and conversion. The private
@@ -730,7 +730,7 @@ DBScope: struct {
     policy: RowPolicy
     user: String
 
-    // A live binding over one policy-checked SELECT. `core.web.state` reads
+    // A live binding over one policy-checked SELECT. `app.state` reads
     // it; each re-run applies this scope's policy again, and a write to the
     // table it reads (or a rollback of one) re-runs it on the next read. The
     // user, the policy-applied SQL and its values identify the binding.
@@ -738,11 +738,11 @@ DBScope: struct {
         scoped: __policy_apply(sql, self.policy, self.user, false) ?? return Err(err)
         tokens: __sql_tokens(scoped.text.bytes())
         if tokens.len() == 0 || tokens[0].word != "select" -> return Err(__db_error("a live query must be one SELECT"))
-        key := [String]{web.__live_arg<String>(self.user), web.__live_arg<String>(scoped.text)}
-        loop value in scoped.values -> key.push(web.__live_arg<DBValue>(value))
+        key := [String]{app.__live_arg<String>(self.user), app.__live_arg<String>(scoped.text)}
+        loop value in scoped.values -> key.push(app.__live_arg<DBValue>(value))
         scope: self.copy()
         query: sql.copy()
-        Ok(web.__live_bind<[[String: DBValue]], DBError>(__live_source(__sql_table(scoped) ?? ""), key, fn() { __scope_query(scope, query, false) }))
+        Ok(app.__live_bind<[[String: DBValue]], DBError>(__live_source(__sql_table(scoped) ?? ""), key, fn() { __scope_query(scope, query, false) }))
     }
     close: fn(self) -[DB]> Bool Never! { __db_shutdown(self.state) }
 
@@ -807,7 +807,7 @@ __db_rollback: fn(state: Shared<__DBState>) DBError! {
     guard := state.guard_edit()
     if __driver_closed(guard.value.driver) -> return Err(__db_error("could not roll back: the database is closed"))
     rolled: __driver_rollback(guard.value.driver)
-    loop table in guard.value.written -> web.__live_invalidate_all(__live_source(table))
+    loop table in guard.value.written -> app.__live_invalidate_all(__live_source(table))
     guard.value.written = [String]{}
     if !rolled -> return Err(__db_error("could not roll back the transaction"))
     Ok()
@@ -825,7 +825,7 @@ __scope_execute: fn(scope: DBScope, sql: SQL, allow_schema: Bool) -> Int DBError
     changed: __driver_execute(guard.value.driver, scoped.text, scoped.values) ?? return Err(err)
     if __sql_table(scoped) == .Val(table) {
         if !guard.value.written.contains(table) -> guard.value.written.push(table.copy())
-        web.__live_invalidate_all(__live_source(table))
+        app.__live_invalidate_all(__live_source(table))
     }
     Ok(changed)
 }

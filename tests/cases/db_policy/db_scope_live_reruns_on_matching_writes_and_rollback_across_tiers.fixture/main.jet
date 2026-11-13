@@ -1,6 +1,6 @@
 use {
     db: core.db
-    web: core.web
+    app
     core.reactive.loadable.[Loadable]
 }
 
@@ -26,20 +26,20 @@ run: fn() {
     first: "one"
     _: alice.execute(SQL{"INSERT INTO tasks (owner, title) VALUES ({owner}, {first})"}) ?? panic("insert one")
     mine: alice.live(SQL{"SELECT title FROM tasks ORDER BY title"}) ?? panic("live")
-    print("alice {titles(web.state(mine))}")
+    print("alice {titles(app.state(mine))}")
     second: "two"
     _: bob.execute(SQL{"INSERT INTO tasks (owner, title) VALUES ({owner}, {second})"}) ?? panic("bob insert")
-    print("after bob write {titles(web.state(mine))}")
+    print("after bob write {titles(app.state(mine))}")
     third: "three"
     _: alice.execute(SQL{"INSERT INTO tasks (owner, title) VALUES ({owner}, {third})"}) ?? panic("insert three")
-    print("after write {titles(web.state(mine))}")
+    print("after write {titles(app.state(mine))}")
     tx: alice.begin() ?? panic("begin")
     _: alice.execute(SQL{"DELETE FROM tasks"}) ?? panic("delete")
-    print("in tx {titles(web.state(mine))}")
+    print("in tx {titles(app.state(mine))}")
     tx.rollback() ?? panic("rollback")
-    print("after rollback {titles(web.state(mine))}")
+    print("after rollback {titles(app.state(mine))}")
     theirs: bob.live(SQL{"SELECT title FROM tasks ORDER BY title"}) ?? panic("bob live")
-    print("bob {titles(web.state(theirs))}")
+    print("bob {titles(app.state(theirs))}")
     again: alice.live(SQL{"SELECT title FROM tasks ORDER BY title"}) ?? panic("again")
     print("same binding {again.id == mine.id}, per user {theirs.id != mine.id}")
     if alice.live(SQL{"DELETE FROM tasks"}) == {
@@ -50,5 +50,5 @@ run: fn() {
         .Ok(_ok) -> print("join live: accepted")
         .Err(failure) -> print("join live: rejected")
     }
-    print(web.live_stats())
+    print(app.live_stats())
 }
