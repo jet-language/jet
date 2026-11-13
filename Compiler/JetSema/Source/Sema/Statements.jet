@@ -3882,6 +3882,25 @@ sema_stmt_destructure_names: fn(pattern: BindPattern) -> [BindName] Never! {
     }
 }
 
+// The L0528 candidate a written `:=` binding declares: the start of each name
+// it binds (as that name's symbol carries it) and the text from the end of the
+// name or pattern through `:=`.
+sema_stmt_mutable_binding: fn(binding: Binding, sigil: Span) -> SemaOwnershipMutableBinding Never! {
+    pattern: binding.pattern ?? return SemaOwnershipMutableBinding{name: binding.name, name_span: binding.name_span, sigil: Span{start: binding.name_span.end, end: sigil.end}, starts: [Int]{binding.name_span.start}}
+    starts := [Int]{}
+    names := [String]{}
+    loop bound in sema_stmt_destructure_names(pattern) {
+        if bound.rename == .Val(rename) {
+            starts.push(rename.span.start)
+            names.push(rename.name)
+        } else {
+            starts.push(bound.span.start)
+            names.push(bound.name)
+        }
+    }
+    SemaOwnershipMutableBinding{name: names.join(", "), name_span: binding.name_span, sigil: Span{start: binding.name_span.end, end: sigil.end}, starts: starts}
+}
+
 sema_stmt_destructure_local: fn(name: BindName, ty: Type, mutable: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, diagnostics: &[Diagnostic]) -> TLocal? {
     local_name := if name.rename == .Val(rename) -> rename.name else -> name.name
     local_span := if name.rename == .Val(rename) -> rename.span else -> name.span
@@ -6237,6 +6256,7 @@ sema_stmt_check_local_assignment: fn(name: String, name_span: Span, op: BinOp?, 
             return sema_stmt_check_module_storage_assignment(binding.symbol, name, name_span, op, op_span, expr, environment, program, scopes, state, tail_store, context, diagnostics)
         }
     }
+    if binding.mutable -> sema_ownership_note_mutation(state, binding.symbol.span.start)
     if !binding.mutable && !sema_stmt_binding_is_write_window(state, binding.symbol.id.key) {
         diagnostic := sema_error("E0111", name_span, "`{name}` was made with `:`, so it can't change", "only `:=` bindings and parameters declared with the write mark `&` can be changed", "declare it with `{name} := ...` instead")
         if binding.binding_sigil == .Val(sigil) -> diagnostic = diagnostic_with_edit(diagnostic, TextEdit{span: sigil, new_text: " :="})
@@ -8770,6 +8790,7 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, environment: S
                         sema_stmt_empty_start_report(binding, statements, index, return_type, context.value_tail_span, environment, scopes, diagnostics)
                         if !binding.mutable && binding.pattern == None && sema_shared_cycle_kept_init(binding.init) -> sema_scope_mark_fresh_cell(scopes, binding.name, binding.init)
                         if !binding.mutable && binding.pattern == None && sema_scope_own_cell_init(binding.init) -> sema_scope_mark_own_cell(scopes, binding.name)
+                        if binding.mutable && !binding.uninit && !binding.is_comptime && binding.name != "_" && binding.sigil_span == .Val(sigil) -> sema_ownership_note_mutable_binding(state, sema_stmt_mutable_binding(binding, sigil))
                     }
                     .None -> {
                         sema_stmt_empty_start_report(binding, statements, index, return_type, context.value_tail_span, environment, scopes, diagnostics)
@@ -9426,6 +9447,7 @@ sema_stmt_check_unreachable_statement: fn(statement: Stmt, index: Int, statement
         dead_result: sema_check_statements([Stmt]{statement}, return_type, environment, program, scopes, dead_state, tail_store, context, diagnostics, loop_depth)
         if !dead_result.complete -> complete = false
     }
+    sema_ownership_keep_mutations(state, dead_state)
     dead_edges := [String]{}
     // A dead `break value` still types its loop (`loop { break(outer, 1)
     // break 2 }` is an Int loop): the frames open at the mark keep the result
@@ -10071,6 +10093,7 @@ sema_stmt_check_scoped_statement: fn(statement: Stmt, return_type: Type?, enviro
                     erased_state := sema_ownership_state_snapshot(state)
                     erased_mark: sema_check_context_mark(context)
                     checked: sema_check_statements(body, return_type, environment, program, scopes, erased_state, tail_store, context, diagnostics, loop_depth)
+                    sema_ownership_keep_mutations(state, erased_state)
                     erased_reasons := [String]{}
                     loop reason_index in erased_mark.incomplete_reasons..<context.incomplete_reasons.len() -> erased_reasons.push(context.incomplete_reasons[reason_index])
                     if release_only -> sema_check_context_rollback_keep_expr_ids(context, erased_mark.move()) else -> sema_check_context_rollback(context, erased_mark.move())

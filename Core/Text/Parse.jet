@@ -41,7 +41,7 @@ split: fn(text: String, sep: String) -> [String] Never! {
 rsplit: fn(text: String, sep: String, maxsplit: Int) -> [String] Never! {
     parts: split(text, sep)
     if maxsplit < 0 || parts.len() <= maxsplit + 1 -> return parts
-    keep := parts.len() - maxsplit
+    keep: parts.len() - maxsplit
     head := ""
     i := 0
     loop i < keep {
@@ -276,8 +276,8 @@ is_alnum: fn(text: String) -> Bool Never! {
     if text.bytes().len() == 0 -> return false
     loop b in text.bytes() {
         n: b
-        letter := (n >= 65 && n <= 90) || (n >= 97 && n <= 122)
-        digit := n >= 48 && n <= 57
+        letter: (n >= 65 && n <= 90) || (n >= 97 && n <= 122)
+        digit: n >= 48 && n <= 57
         if !letter && !digit -> return false
     }
     true
@@ -331,7 +331,7 @@ splitlines: fn(text: String, keepends: Bool) -> [String] Never! {
     loop i < raw.len() {
         n: raw[i]
         if n == 10 || n == 13 {
-            end := i
+            end: i
             eat := 1
             if n == 13 && i + 1 < raw.len() && raw[i + 1] == (U8{10}) -> eat = 2
             if keepends -> out.push(slice_b(raw, start, i + eat)) else {
@@ -373,21 +373,21 @@ strip: fn(text: String) -> String Never! { lstrip(rstrip(text)) }
 
 ljust: fn(text: String, width: Int, fill: String) -> String Never! {
     pad: fill_to(fill)
-    n := width - text.bytes().len()
+    n: width - text.bytes().len()
     if n <= 0 -> return text.copy()
     "{text}{repeat_char(pad, n)}"
 }
 
 rjust: fn(text: String, width: Int, fill: String) -> String Never! {
     pad: fill_to(fill)
-    n := width - text.bytes().len()
+    n: width - text.bytes().len()
     if n <= 0 -> return text.copy()
     "{repeat_char(pad, n)}{text}"
 }
 
 center: fn(text: String, width: Int, fill: String) -> String Never! {
     pad: fill_to(fill)
-    n := width - text.bytes().len()
+    n: width - text.bytes().len()
     if n <= 0 -> return text.copy()
     left: n /% 2
     "{repeat_char(pad, left)}{text}{repeat_char(pad, n - left)}"
@@ -401,7 +401,7 @@ zfill: fn(text: String, width: Int) -> String Never! {
         sign = slice_b(raw, 0, 1)
         rest = slice_b(raw, 1, raw.len())
     }
-    n := width - text.bytes().len()
+    n: width - text.bytes().len()
     if n <= 0 -> return text.copy()
     "{sign}{repeat_char("0", n)}{rest}"
 }
@@ -425,7 +425,7 @@ title: fn(text: String) -> String Never! {
     word := true
     loop b in raw {
         n: b
-        letter := (n >= 65 && n <= 90) || (n >= 97 && n <= 122)
+        letter: (n >= 65 && n <= 90) || (n >= 97 && n <= 122)
         if letter {
             out.push(ascii_case(b, word))
             word = false
@@ -588,7 +588,7 @@ is_identifier: fn(text: String) -> Bool Never! {
     raw: text.bytes()
     if raw.len() == 0 -> return false
     n0: raw[0]
-    ok0 := n0 == 95 || (n0 >= 65 && n0 <= 90) || (n0 >= 97 && n0 <= 122)
+    ok0: n0 == 95 || (n0 >= 65 && n0 <= 90) || (n0 >= 97 && n0 <= 122)
     if !ok0 -> return false
     loop b in raw {
         n: b

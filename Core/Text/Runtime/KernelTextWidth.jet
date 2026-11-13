@@ -21,7 +21,7 @@ decode_scalars: fn(text: String) -> [Int] Never! {
     out := [Int]{}
     i := 0
     loop i < raw.len() {
-        first := Int.from_u8(raw[i])
+        first: Int.from_u8(raw[i])
         width: width_string.utf8_width_at(raw, i)
         if width == 1 {
             out.push(if first < 128 -> first else -> 65533)
@@ -35,7 +35,7 @@ decode_scalars: fn(text: String) -> [Int] Never! {
         valid := true
         k := 1
         loop k < width {
-            byte := Int.from_u8(raw[i + k])
+            byte: Int.from_u8(raw[i + k])
             if byte < 128 || byte >= 192 {
                 valid = false
                 break

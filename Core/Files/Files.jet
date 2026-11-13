@@ -1308,7 +1308,7 @@ split_slash: fn(path: String) -> [String] Never! { split_slash_impl(path) }
 collapse_impl: fn(path: String) -> String Never! {
     raw: path.bytes()
     if raw.len() == 0 -> return "."
-    absolute := is_abs_impl(path)
+    absolute: is_abs_impl(path)
     drive := ""
     start := 0
     if raw.len() >= 2 && is_letter(raw[0]) && raw[1] == (U8{58}) {
@@ -1497,7 +1497,7 @@ dirname_impl: fn(path: String) -> String Never! {
     loop i >= 0 {
         if is_separator(raw[i]) {
             if i == 0 -> return "/"
-            prefix := slice(raw, 0, i)
+            prefix: slice(raw, 0, i)
             if prefix.bytes().len() == 2 && prefix.bytes()[1] == (U8{58}) {
                 return "{prefix}/"
             }
@@ -1801,7 +1801,7 @@ glob_parts_for: fn(path: String) -> [String] Never! {
     raw: path.bytes()
     out := [String]{}
     drive := ""
-    absolute := is_abs_impl(path)
+    absolute: is_abs_impl(path)
     start := 0
     if raw.len() >= 2 && is_letter(raw[0]) && raw[1] == (U8{58}) {
         drive = slice(raw, 0, 2)
@@ -2518,7 +2518,7 @@ write_lines: fn(path: String, lines: [String]) IOError! -[FS]> {
 commonpath: fn(paths: [String]) -> String Never! {
     if paths.len() == 0 -> return ""
     first: collapse_impl(paths[0])
-    anchor := anchor_of(first)
+    anchor: anchor_of(first)
     parts := path_parts(first)
     loop p in paths {
         cur: collapse_impl(p)
@@ -2670,11 +2670,11 @@ expandvars: fn(path: String) -[Env]> String IOError! {
                 braced = true
                 i = i + 1
             }
-            start := i
+            start: i
             loop i < raw.len() {
                 n: raw[i]
                 if braced && n == 125 -> break
-                letter := (n >= 65 && n <= 90) || (n >= 97 && n <= 122) || n == 95 || (n >= 48 && n <= 57)
+                letter: (n >= 65 && n <= 90) || (n >= 97 && n <= 122) || n == 95 || (n >= 48 && n <= 57)
                 if !braced && !letter -> break
                 i = i + 1
             }
@@ -2921,7 +2921,7 @@ priv scope_reads: module {
         loop index in 0..<(parts.len() - 1) {
             directories.push(directories[directories.len() - 1].open_directory(parts[index]))
         }
-        reader := directories[directories.len() - 1].open(parts[parts.len() - 1])
+        reader: directories[directories.len() - 1].open(parts[parts.len() - 1])
         opened: reader.stat()
         if !opened.is_file -> return Err(scope_input_error(requested, "file authority input is not a regular file"))
         if opened.links != 1 -> return Err(scope_input_error(requested, "file authority input has multiple hard links"))

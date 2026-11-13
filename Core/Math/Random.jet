@@ -229,7 +229,7 @@ bounded: fn(span: Int) -[Rand]> Int Never! {
 }
 normalize_angle: fn(angle: Float) -> Float Never! {
     tau: math.TAU
-    reduced := math.fmod(angle, tau)
+    reduced: math.fmod(angle, tau)
     if reduced < (Float{0.0}) -> return reduced + tau
     reduced
 }
@@ -276,8 +276,8 @@ float_range: fn(lo: Float, hi: Float) -[Rand]> Float Never! {
     if nonfinite(lo) || nonfinite(hi) || hi <= lo -> return lo
     u: unit()
     if lo >= (Float{0.0}) || hi <= (Float{0.0}) -> return lo + (hi - lo) * u
-    negative := -lo
-    positive := hi
+    negative: -lo
+    positive: hi
     if positive >= negative {
         probability: (Float{1.0}) / ((Float{1.0}) + negative / positive)
         if u < probability -> return positive * (u / probability)

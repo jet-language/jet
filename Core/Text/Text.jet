@@ -432,8 +432,8 @@ decode_indexed: fn(text: String) -> [IndexedCp] Never! {
     i := 0
     loop {
         if i >= raw.len() -> return out
-        start := i
-        first := Int.from_u8(raw[i])
+        start: i
+        first: Int.from_u8(raw[i])
         width: text_unicode_string.utf8_width_at(raw, i)
         if width == 1 {
             if first < 128 {
@@ -451,7 +451,7 @@ decode_indexed: fn(text: String) -> [IndexedCp] Never! {
         valid := true
         k := 1
         loop k < width {
-            byte := Int.from_u8(raw[i + k])
+            byte: Int.from_u8(raw[i + k])
             if byte < 128 || byte >= 192 {
                 valid = false
                 break
@@ -711,7 +711,7 @@ canon_order: fn(cps: [Int]) -> [Int] {
         cc: combining_class(out[i])
         prev: combining_class(out[i - 1])
         if cc != 0 && prev > cc {
-            tmp := out[i]
+            tmp: out[i]
             out[i] = out[i - 1]
             out[i - 1] = tmp
             if i > 1 {
@@ -1166,7 +1166,7 @@ split_lines: fn(text: String) -> [String] {
 
 
 hex_cp: fn(cp: Int) -> String {
-    hex := "0123456789ABCDEF"
+    hex: "0123456789ABCDEF"
     hb: hex.bytes()
     n := cp
     digits := [U8]{}

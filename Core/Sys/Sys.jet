@@ -2293,7 +2293,7 @@ config_entries: fn(prefix: String, dotenv: String?, allow: [String], process: [(
 }
 
 config_insert: fn(&&tree: ConfigTree, segments: [String], at: Int, value: String) -> ConfigTree Never! {
-    owned := tree.move()
+    owned: tree.move()
     if owned.move() == {
         .Object(pairs) -> {
             out := pairs.move()
@@ -2301,12 +2301,12 @@ config_insert: fn(&&tree: ConfigTree, segments: [String], at: Int, value: String
             loop index in 0..<out.len() {
                 matches: ascii_lower(out[index].key) == ascii_lower(segment)
                 if matches && at + 1 == segments.len() {
-                    pair := out.remove(index, .Slot) ?? panic("checked config entry")
+                    pair: out.remove(index, .Slot) ?? panic("checked config entry")
                     out.insert(index, (key: pair.key.move(), value: ConfigTree.Text(value)))
                     return ConfigTree.Object(out)
                 }
                 if matches && out[index].value == .Object(_) {
-                    pair := out.remove(index, .Slot) ?? panic("checked config entry")
+                    pair: out.remove(index, .Slot) ?? panic("checked config entry")
                     child: config_insert(pair.value.move(), segments, at + 1, value)
                     out.insert(index, (key: pair.key.move(), value: child))
                     return ConfigTree.Object(out)
@@ -2321,7 +2321,7 @@ config_insert: fn(&&tree: ConfigTree, segments: [String], at: Int, value: String
 }
 
 config_tree: fn(&&tree: ConfigTree) -> Dyn Never! {
-    owned := tree.move()
+    owned: tree.move()
     if owned.move() == {
         .Text(text) -> Dyn.Text(text)
         .Object(pairs) -> {

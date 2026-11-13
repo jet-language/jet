@@ -304,7 +304,7 @@ sema_call_try_game_method: fn(receiver: Expr, receiver_value: TExpr, method: Str
         }
         .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> ""
     }
-    if edit_api != "" -> sema_game_needs_edit(receiver, edit_api, scopes, diagnostics)
+    if edit_api != "" -> sema_game_needs_edit(receiver, edit_api, scopes, state, diagnostics)
     if receiver_value.ty == (Type.Named{name: "GameScene"}) -> return sema_game_check_scene_method(receiver, receiver_value, method, args, type_args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     if receiver_value.ty == (Type.Named{name: "GameAssets"}) -> return sema_game_check_assets_method(receiver, receiver_value, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     if receiver_value.ty == (Type.Named{name: "GameInputMap"}) || receiver_value.ty == (Type.Named{name: "GameInputSnapshot"}) -> return sema_game_check_input_method(receiver, receiver_value, method, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
@@ -312,9 +312,10 @@ sema_call_try_game_method: fn(receiver: Expr, receiver_value: TExpr, method: Str
     None
 }
 
-sema_game_needs_edit: fn(receiver: Expr, api: String, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) {
+sema_game_needs_edit: fn(receiver: Expr, api: String, scopes: SemaScopeTable, state: &SemaOwnershipState, diagnostics: &[Diagnostic]) {
     root: sema_receiver_mark_place_root(receiver) ?? return
     index: sema_scope_resolve_index(scopes, root) ?? return
+    if scopes.bindings[index].mutable -> sema_ownership_note_mutation(state, scopes.bindings[index].symbol.span.start)
     if !scopes.bindings[index].mutable {
         diagnostics.push(sema_ownership_diag_unchangeable(scopes.bindings[index], root, expr_span(receiver), "`{api}` changes durable scene state, so `{root}` must be mutable (`:=`)"))
     }

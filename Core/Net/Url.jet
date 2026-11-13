@@ -536,7 +536,7 @@ parse_recipe: fn(text: String, normalize: Bool) -> URL URLError! {
     input: trim_ascii(text)
     raw: input.bytes()
     if raw.len() == 0 -> return Err(URLError.Syntax)
-    colon := scheme_colon(raw)
+    colon: scheme_colon(raw)
     if colon <= 0 -> return Err(URLError.Syntax)
     scheme: ascii_lower(slice(raw, 0, colon))
     if !valid_scheme(scheme) -> return Err(URLError.Syntax)
@@ -558,11 +558,11 @@ parse_recipe: fn(text: String, normalize: Bool) -> URL URLError! {
         }
         authority: slice(raw, rest_i, auth_end)
         if authority.bytes().len() == 0 -> return Err(URLError.Syntax)
-        at := last_index(authority.bytes(), 64)
+        at: last_index(authority.bytes(), 64)
         hostport := authority.copy()
         if at >= 0 {
             info: slice(authority.bytes(), 0, at)
-            sep := index_of(info.bytes(), 58)
+            sep: index_of(info.bytes(), 58)
             if sep >= 0 {
                 user = percent_decode(slice(info.bytes(), 0, sep)) ?? return Err(URLError.Percent)
                 password = percent_decode(slice(info.bytes(), sep + 1, info.bytes().len())) ?? return Err(URLError.Percent)
@@ -574,7 +574,7 @@ parse_recipe: fn(text: String, normalize: Bool) -> URL URLError! {
         if hostport.bytes().len() == 0 -> return Err(URLError.Syntax)
         hp: hostport.bytes()
         if hp[0] == (U8{91}) {
-            rb := index_of(hp, 93)
+            rb: index_of(hp, 93)
             if rb < 0 -> return Err(URLError.Syntax)
             host = ascii_lower(if normalize -> slice(hp, 1, rb) else -> slice(hp, 0, rb + 1))
             if rb + 1 < hp.len() {
@@ -588,7 +588,7 @@ parse_recipe: fn(text: String, normalize: Bool) -> URL URLError! {
                 }
             }
         } else {
-            col := last_index(hp, 58)
+            col: last_index(hp, 58)
             if col >= 0 {
                 if index_of(hp, 58) != col -> return Err(URLError.Syntax)
                 host = host_to_ascii(ascii_lower(slice(hp, 0, col)))
@@ -769,14 +769,14 @@ join_url: fn(parsed: URL, rel: String) -> URL URLError! {
         if !valid_percent(query) -> return Err(URLError.Percent)
         return with_parts(parsed, parsed.path_text, escape_query(query), "")
     }
-    hash := index_of(rel.bytes(), 35)
-    rel_no_frag := if hash >= 0 -> slice(rel.bytes(), 0, hash) else -> rel
-    frag_raw := if hash >= 0 -> slice(rel.bytes(), hash + 1, rel.bytes().len()) else -> ""
+    hash: index_of(rel.bytes(), 35)
+    rel_no_frag: if hash >= 0 -> slice(rel.bytes(), 0, hash) else -> rel
+    frag_raw: if hash >= 0 -> slice(rel.bytes(), hash + 1, rel.bytes().len()) else -> ""
     frag: percent_decode(frag_raw) ?? return Err(URLError.Percent)
-    qpos := index_of(rel_no_frag.bytes(), 63)
-    rel_path_raw := if qpos >= 0 -> slice(rel_no_frag.bytes(), 0, qpos) else -> rel_no_frag
+    qpos: index_of(rel_no_frag.bytes(), 63)
+    rel_path_raw: if qpos >= 0 -> slice(rel_no_frag.bytes(), 0, qpos) else -> rel_no_frag
     rel_path: percent_decode(rel_path_raw) ?? return Err(URLError.Percent)
-    rel_query := if qpos >= 0 -> slice(rel_no_frag.bytes(), qpos + 1, rel_no_frag.bytes().len()) else -> ""
+    rel_query: if qpos >= 0 -> slice(rel_no_frag.bytes(), qpos + 1, rel_no_frag.bytes().len()) else -> ""
     if !valid_percent(rel_query) -> return Err(URLError.Percent)
     path := parsed.path_text
     query := parsed.query_text
@@ -1011,7 +1011,7 @@ urlencode: fn(pairs: [[String]]) -> String Never! { encode_query(pairs) }
 
 split_fragment: fn(url: String) -> (fragment: String, url: String) Never! {
     raw: url.bytes()
-    i := index_of(raw, 35)
+    i: index_of(raw, 35)
     if i < 0 -> return (fragment: "", url: url)
     (fragment: slice(raw, i + 1, raw.len()), url: slice(raw, 0, i))
 }
@@ -1037,7 +1037,7 @@ urlunsplit: fn(url: URL) -> String Never! { unparse(url) }
 
 urldefrag: fn(text: String) -> (url: String, fragment: String) Never! {
     raw: text.bytes()
-    i := index_of(raw, 35)
+    i: index_of(raw, 35)
     if i < 0 -> return (url: text, fragment: "")
     (url: slice(raw, 0, i), fragment: slice(raw, i + 1, raw.len()))
 }
@@ -1288,7 +1288,7 @@ slice: fn(raw: [U8], start: Int, end: Int) -> String Never! {
 
 slice_bytes: fn(raw: [U8], start: Int, end: Int) -> [U8] Never! {
     out := [U8]{}
-    limit := if end < raw.len() -> end else -> raw.len()
+    limit: if end < raw.len() -> end else -> raw.len()
     if start < 0 || start >= limit -> return out
     loop i in start..<limit -> out.push(raw[i])
     out

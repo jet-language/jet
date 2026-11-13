@@ -565,7 +565,7 @@ dns_query: fn(server: I64, name: I64, qtype: I64, milliseconds: I64, packet_out:
     bind: jet_rt_alloc(I64{56}, I64{8})
     thread_zero(bind, I64{56})
     net_put(bind, I64{0}, net_word(address, I64{0}))
-    state := jet_socket_create_raw(net_word(address, I64{0}), I64{2}, I64{0}, scratch)
+    state: jet_socket_create_raw(net_word(address, I64{0}), I64{2}, I64{0}, scratch)
     failure := I64{0}
     if (state == I64{0} || jet_socket_bind_raw(state, bind, scratch) < I64{0}) {
         failure = dns_cause(rt_static_text("dns socket bind failed: "), net_word(scratch, I64{8}))
@@ -688,7 +688,7 @@ dns_record_name: fn(packet: I64, record: I64, error: I64) -> I64 {
 // (count in `count_out`); false with the message.
 dns_matching: fn(packet: I64, records: I64, count: I64, name: I64, qtype: I64, indices_out: I64, count_out: I64, error: I64) -> Bool {
     current := rt_text_copy(rt_text_data(name), dns_trim_dots_length(name))
-    visited := jet_rt_alloc(I64{17} * I64{8}, I64{8})
+    visited: jet_rt_alloc(I64{17} * I64{8}, I64{8})
     visits := I64{0}
     hops := I64{0}
     result := false

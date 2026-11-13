@@ -316,7 +316,7 @@ CBORPull: struct {
             integer: Int.from_u64(n)
             event = DataEvent.Int(if major == 0 -> integer else -> -integer - 1)
         } else if major == 2 || major == 3 {
-            bytes := self.string(major, additional, start) ?? return Err(err)
+            bytes: self.string(major, additional, start) ?? return Err(err)
             if major == 2 -> event = DataEvent.Bytes(bytes)
             else {
                 rt.utf8_validate(bytes) ?? return Err(error(.Syntax, start, self.path(), "CBOR text is not UTF-8"))

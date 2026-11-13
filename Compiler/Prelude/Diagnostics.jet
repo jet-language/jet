@@ -5358,18 +5358,18 @@ RawMultilineHtml: struct {
 }
 
 MutableNeverReassigned: struct {
+    name: String
+
     impl Diagnostic {
         code: "L0528"
-        severity: .Lint
-        lint_name: "mutable_never_reassigned"
-        meaning: "Mutable binding is never reassigned"
+        meaning: "A `:=` name is never written"
         detail: true
         structured_fix: .SourceEdit
         no_fix: None
-        fix_safety: .Formatting
-        what: fn(self) -> String { "This mutable binding receives no later write, so its mutability is unused" }
-        why: fn(self) -> String { "The binding is marked mutable but receives no later write." }
-        fix: fn(self) -> String { "Declare it with `:` instead of `:=`" }
+        fix_safety: .BehaviorPreserving
+        what: fn(self) -> String { "`{self.name}` never changes, so declare it with `:`" }
+        why: fn(self) -> String { "`:=` tells the reader the value changes later, but nothing in its scope writes it" }
+        fix: fn(self) -> String { "Write `{self.name}: …` instead of `{self.name} := …`" }
     }
 }
 

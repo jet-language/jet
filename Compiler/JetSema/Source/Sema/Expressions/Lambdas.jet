@@ -2027,6 +2027,7 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, e
             body_start: diagnostics.len()
             checked_value := sema_check_expression(value, sema_expression_lambda_value_expected(value, body_expected, expected_ret, environment, lambda_scopes), environment, program, lambda_scopes, lambda_state, tail_store, lambda_context, diagnostics)
             sema_ownership_keep_share_found(state, lambda_state)
+            sema_ownership_keep_mutations(state, lambda_state)
             checked: checked_value ?? {
                 if !inline_loop && expected_ret == .Val(required) && !sema_expression_lambda_type_is_result(required) -> sema_expression_lambda_return_replace_mismatch(required, value, lambda.span, body_start, environment, program, lambda_scopes, lambda_state, tail_store, lambda_context, diagnostics)
                 return None
@@ -2059,6 +2060,7 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, e
             checked_block: sema_check_statements(statement_body, statement_return, environment, program, lambda_scopes, lambda_state, tail_store, lambda_context, diagnostics, 0)
             lambda_context.value_tail_span = saved_value_tail
             sema_ownership_keep_share_found(state, lambda_state)
+            sema_ownership_keep_mutations(state, lambda_state)
             if !checked_block.complete {
                 loop reason in lambda_context.incomplete_reasons -> sema_check_unsupported(context, "closure body: {reason}")
                 return None
@@ -2073,6 +2075,7 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, e
                     tail: tail_source ?? Expr.Unit{span: lambda.span, id: AST_NODE_GENERATED}
                     checked_tail_value := sema_check_expression(tail, sema_expression_lambda_value_expected(tail, body_expected, expected_ret, environment, lambda_scopes), environment, program, lambda_scopes, lambda_state, tail_store, lambda_context, diagnostics)
                     sema_ownership_keep_share_found(state, lambda_state)
+                    sema_ownership_keep_mutations(state, lambda_state)
                     checked_tail: checked_tail_value ?? return None
                     // An earlier `return` gave an open callback its type; the
                     // last line hands back the same type.
@@ -2487,6 +2490,7 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, e
     fn_ty := Type.Fn{params: param_types, ret: ret_slot, effect_bound: effect_bound, param_contract: expected_contract, call_metadata: lambda_metadata, return_view_provenance: lambda_return_provenance}
     captures_facts := TCaptureFacts{escapes: escapes, needs_fn_mut: lambda_work.meta.needs_fn_mut, mutable: lambda_work.meta.mut_captures, cloned: lambda_work.meta.cloned_captures, frozen: lambda_work.meta.frozen_captures, materialized: lambda_work.meta.materialized_captures, moved: lambda_work.meta.moved_captures}
     sema_ownership_note_lambda(state, lambda_state, lambda.span, captures_facts)
+    sema_ownership_keep_mutations(state, lambda_state)
     // A deferred body's reads and writes of enclosing bindings count for
     // them (the unused-binding lints); its moves and write windows stay with
     // the body's own state (an inline loop joins its whole state below).

@@ -342,9 +342,26 @@ SemaOwnershipState: struct {
     // (`return`, `break`). A fork rollback drops a leaving path's references,
     // but its reads are still uses for L0101/L0102.
     used_keys: [String:Bool]{[String:Bool]{}}
+    // The `:=` bindings this body declares (L0528 candidates) and the name
+    // starts of the bindings a checked write needed `:=` for. Like
+    // `used_keys`, neither is rolled back: a write in a branch, a lambda, an
+    // unreached line or a discarded check still counts.
+    mutable_bindings: [SemaOwnershipMutableBinding]{[SemaOwnershipMutableBinding]{}}
+    mutable_sigils: [Int:Bool]{[Int:Bool]{}}
+    mutated_starts: [Int:Bool]{[Int:Bool]{}}
     // The places the active task groups lend to running children, as the
     // parent sees them; empty while a child's own body is checked.
     group_loans: [SemaOwnershipGroupLoan]{[SemaOwnershipGroupLoan]{}}
+}
+
+// A written `name := value` (or `{a, b} := value`): the names it declares,
+// by name start, and the text from the end of the name through `:=`, which
+// the L0528 edit replaces with `:`.
+SemaOwnershipMutableBinding: struct {
+    name: String
+    name_span: Span
+    sigil: Span
+    starts: [Int]
 }
 
 // First/last declaration rows and total reference/write counts for one key.
@@ -575,6 +592,9 @@ sema_ownership_state_snapshot: fn(source: SemaOwnershipState) -> SemaOwnershipSt
     snapshot.forks = source.forks
     snapshot.trail = source.trail
     snapshot.used_keys = source.used_keys
+    snapshot.mutable_bindings = source.mutable_bindings
+    snapshot.mutable_sigils = source.mutable_sigils
+    snapshot.mutated_starts = source.mutated_starts
     loop loan in source.group_loans -> snapshot.group_loans.push(SemaOwnershipGroupLoan{name: loan.name, group: loan.group, place: sema_ownership_place_snapshot(loan.place), access: loan.access})
     snapshot
 }
@@ -2264,6 +2284,7 @@ sema_ownership_open_write_reference: fn(state: &SemaOwnershipState, expr: Expr, 
     }
     binding: sema_ownership_binding_for_expr(state, expr, scopes) ?? return false
     info: binding
+    if info.mutable -> sema_ownership_note_mutation(state, info.symbol.span.start)
     if sema_ownership_writes_read_shared_guard(expr, scopes) {
         diagnostics.push(sema_ownership_diag_read_shared_guard_write(span))
         return false
@@ -2410,6 +2431,46 @@ sema_ownership_note_share_found: fn(state: &SemaOwnershipState, found: SemaOwner
 // it stopped) or never reaches the join; the next pass treats it as a share.
 sema_ownership_keep_share_found: fn(state: &SemaOwnershipState, branch: SemaOwnershipState) Never! {
     loop site in branch.share_found -> sema_ownership_note_share_found(state, site)
+}
+
+// A written `:=` binding this body declares, once per sigil.
+sema_ownership_note_mutable_binding: fn(state: &SemaOwnershipState, binding: &&SemaOwnershipMutableBinding) Never! {
+    if state.mutable_sigils.get(binding.sigil.start) != None -> return
+    state.mutable_sigils[binding.sigil.start] = true
+    state.mutable_bindings.push(binding)
+}
+
+// A write that needed the `:=` of the binding whose name starts at `start`.
+sema_ownership_note_mutation: fn(state: &SemaOwnershipState, start: Int) Never! {
+    state.mutated_starts[start] = true
+}
+
+// The `:=` bindings and writes a sub-state (a branch, a lambda body, an
+// unreached line, a deferred arm) saw belong to the function whatever
+// becomes of that state.
+sema_ownership_keep_mutations: fn(state: &SemaOwnershipState, branch: SemaOwnershipState) Never! {
+    loop binding in branch.mutable_bindings {
+        if state.mutable_sigils.get(binding.sigil.start) != None -> next
+        state.mutable_sigils[binding.sigil.start] = true
+        // copy: `branch` is the caller's sub-state, read here; the function's state keeps its own row.
+        state.mutable_bindings.push(binding.copy())
+    }
+    loop (start, _) in branch.mutated_starts -> state.mutated_starts[start] = true
+}
+
+// L0528: a `:=` binding nothing in its scope writes. Any checked write counts,
+// whether or not it can run; the edit swaps ` :=` for `:`.
+sema_ownership_report_never_written: fn(state: SemaOwnershipState, diagnostics: &[Diagnostic]) {
+    row: diagnostic_registry_row("L0528") ?? panic("L0528 has no registry row")
+    loop binding in state.mutable_bindings {
+        written := false
+        loop start in binding.starts {
+            if state.mutated_starts.get(start) != None -> written = true
+        }
+        if written -> next
+        diagnostic: sema_error("L0528", binding.name_span, row.what.replace("{{name}}", binding.name), row.why, row.fix.replace("{{name}}", binding.name))
+        diagnostics.push(diagnostic_with_edit_grade(diagnostic, TextEdit{span: binding.sigil, new_text: ":"}, DiagnosticFixApplicability.Safe, DiagnosticFixSafety.BehaviorPreserving))
+    }
 }
 
 // E0121 names the consumer every move recorder supplies and points a labelled
@@ -2919,6 +2980,7 @@ sema_ownership_write_capability: fn(state: &SemaOwnershipState, expr: Expr, acti
     }
     binding: sema_ownership_binding_for_expr(state, expr, scopes) ?? return false
     info: binding
+    if info.mutable -> sema_ownership_note_mutation(state, info.symbol.span.start)
     guard_refused: sema_ownership_writes_read_shared_guard(expr, scopes)
     if guard_refused {
         diagnostics.push(sema_ownership_diag_read_shared_guard_write(expr_span(expr)))
@@ -5962,6 +6024,8 @@ sema_ownership_join_paths: fn(state: &SemaOwnershipState, before: SemaOwnershipS
     sema_ownership_fork_apply(state, joined)
     loop (key, _) in then_state.used_keys -> state.used_keys[key] = true
     loop (key, _) in else_state.used_keys -> state.used_keys[key] = true
+    sema_ownership_keep_mutations(state, then_state)
+    sema_ownership_keep_mutations(state, else_state)
 }
 
 // This rule branch merge (Rust `UninitState::merge_paths`): a binding left
@@ -6323,6 +6387,7 @@ sema_ownership_check_statement: fn(state: &SemaOwnershipState, statement: Stmt, 
             }
             state.moved = joined.moved
             state.loans = joined.loans
+            sema_ownership_keep_mutations(state, joined)
             SemaOwnershipFlowResult{complete: valid, falls_through: true}
         }
         .Unsafe(_, _, body, _) -> sema_ownership_check_scoped_body(state, body, scopes, diagnostics)

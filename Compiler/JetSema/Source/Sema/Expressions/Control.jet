@@ -2577,6 +2577,7 @@ sema_expression_if: fn(condition: Expr, then_body: [Stmt], then_value: Expr, els
         // deferred then arm is its own E0308, not hidden by the else arm's.
         if defer_then && !defer_then_err && !quiet_then && sema_expression_bare_absent_arm(else_value, true) {
             _ := sema_check_expression(then_value, expected, environment, program, deferred_then_scopes, deferred_then_state, tail_store, context, diagnostics)
+            sema_ownership_keep_mutations(state, deferred_then_state)
         }
         return None
     }
@@ -2591,12 +2592,14 @@ sema_expression_if: fn(condition: Expr, then_body: [Stmt], then_value: Expr, els
         deferred_expected: if defer_then_err -> sema_expression_err_sibling(Val(else_checked)) else -> sema_expression_absent_sibling(Val(else_checked))
         sema_check_expression(then_value, deferred_expected, environment, program, deferred_then_scopes, deferred_then_state, tail_store, context, diagnostics) ?? {
             sema_scope_leave(deferred_then_scopes, deferred_then_state)
+            sema_ownership_keep_mutations(state, deferred_then_state)
             sema_ownership_fork_drop(state, fork, deferred_then_state.share_found, else_path.share_found)
             if quiet_then -> loop diagnostics.len() > deferred_diagnostic_start -> _ := diagnostics.pop()
             return None
         }
     }
     if quiet_then -> loop diagnostics.len() > deferred_diagnostic_start -> _ := diagnostics.pop()
+    sema_ownership_keep_mutations(state, deferred_then_state)
     then_reaches_merge: !sema_stmt_block_has_no_fallthrough(then_body) && then_checked.ty != Type.Named{name: "Never"}
     if defer_then {
         sema_single_use_check_scope_end(deferred_then_state, diagnostics)

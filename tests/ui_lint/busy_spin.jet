@@ -42,8 +42,8 @@ receiving: fn(flag: Shared<Flag>, rx: Receiver<Int>) {
 }
 
 run: fn() {
-    flag := Shared{Flag{ ready: true, ticks: 0 }}
-    changed := Condition.new()
+    flag: Shared{Flag{ ready: true, ticks: 0 }}
+    changed: Condition.new()
     { sender: _tx, receiver: rx }: channel<Int>()
     busy_spin(flag, changed)
     allowed_spin(flag)

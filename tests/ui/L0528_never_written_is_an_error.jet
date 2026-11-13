@@ -1,0 +1,25 @@
+// A `:=` name that nothing in its scope writes is an error. Reading it,
+// moving it, passing it by value and writing through a `Shared` it holds are
+// not writes.
+Counter: struct {
+    n: Int
+}
+
+bounds: fn() -> (low: Int, high: Int) { (low: 0, high: 10) }
+
+show: fn(names: [String]) -> Int { names.len() }
+
+run: fn() {
+    names := [String]{"a"}
+    total := 0
+    moved := [Int]{1, 2}
+    cell := Shared{Counter{n: 0}}
+    (low, high) := bounds()
+    print(show(names))
+    print(total + 1)
+    taken: moved.move()
+    print(taken.len())
+    cell.n = 3
+    print(cell.n)
+    print(low + high)
+}

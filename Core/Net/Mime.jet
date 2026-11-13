@@ -79,7 +79,7 @@ parse: fn(text: String) -> MIME MIMEError! {
         if i == bytes.len() || bytes[i] == (U8{59}) {
             parameter: trim_ascii(slice(bytes, start, i))
             if parameter.bytes().len() > 0 {
-                eq := index_of(parameter.bytes(), 61)
+                eq: index_of(parameter.bytes(), 61)
                 if eq <= 0 -> return Err(MIMEError.Syntax)
                 name: ascii_lower(trim_ascii(slice(parameter.bytes(), 0, eq)))
                 if !mime_token(name) -> return Err(MIMEError.Syntax)

@@ -1,0 +1,45 @@
+// Every kind of write keeps a `:=` name legal, wherever it sits in the
+// name's scope and whether or not it can run.
+Point: struct {
+    x: Int
+    y: Int
+
+    nudge: fn(&self) { self.x += 1 }
+}
+
+bump: fn(n: &Int) { n += 1 }
+
+parse: fn(text: String) -> Int? { text.to_int() }
+
+run: fn() {
+    assigned := 0
+    assigned = 2
+    compound := 1
+    compound += 1
+    field := Point{x: 1, y: 2}
+    field.y = 5
+    indexed := [Int]{1, 2}
+    indexed[0] = 5
+    passed := 0
+    bump(&passed)
+    receiver := Point{x: 0, y: 0}
+    &receiver.nudge()
+    in_lambda := 0
+    add: fn() { in_lambda += 1 }
+    add()
+    in_branch := 0
+    if assigned > 1 -> in_branch = 1
+    in_loop := 0
+    loop n in [1, 2, 3] -> in_loop += n
+    in_fallback := 0
+    got: parse("x") ?? {
+        in_fallback = 1
+        0
+    }
+    never_runs := 0
+    if false -> never_runs = 1
+    never_called := 0
+    _later: fn() { never_called = 1 }
+    print("{assigned} {compound} {field.y} {indexed[0]} {passed} {receiver.x}")
+    print("{in_lambda} {in_branch} {in_loop} {in_fallback} {got} {never_runs} {never_called}")
+}

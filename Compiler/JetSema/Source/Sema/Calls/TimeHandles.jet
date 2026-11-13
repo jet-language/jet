@@ -220,6 +220,7 @@ sema_time_rng_generic_method: fn(receiver: Expr, receiver_value: TExpr, method: 
     updated_args := args
     if sema_expr_place_root_ident(receiver) == .Val(root) {
         if sema_scope_resolve_index(scopes, root) == .Val(index) {
+            if scopes.bindings[index].mutable -> sema_ownership_note_mutation(state, scopes.bindings[index].symbol.span.start)
             if !scopes.bindings[index].mutable && scopes.bindings[index].access != AccessConvention.Write {
                 why: "every `RNG` draw advances the stream, so its receiver needs write access"
                 if scopes.bindings[index].symbol.kind == SymbolKind.Parameter {
