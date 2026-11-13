@@ -1,17 +1,21 @@
 package: {
     name: "ui_surface"
     version: "0.1.0"
+    deps: {
+        font: "0.1.0",
+    }
     authority: {
         allow: [IO, Mem.Alloc, Browser, Env]
-        needs: [UI.FileDialog, UI.Clipboard, UI.IME, UI.DragDrop, UI.Shortcuts, UI.Accessibility, UI.FontShaping]
+        needs: [UI.FileDialog, UI.Clipboard, UI.IME, UI.DragDrop, UI.Shortcuts, UI.Accessibility]
     }
 }
 
-// One portable source witness for the core UI, TUI, font, and host-service
-// vocabulary.  The null backend keeps the tree executable without inventing a
-// platform adapter; host calls retain their typed cancellation/error results.
+// One portable source witness for the core UI, TUI, and host-service
+// vocabulary, with typography from the first-party font battery.  The null
+// backend keeps the tree executable without inventing a platform adapter;
+// host calls retain their typed cancellation/error results.
 use {
-    font: core.font
+    font
     tui: core.tui
     ui: core.ui
     core.ui.[previews]

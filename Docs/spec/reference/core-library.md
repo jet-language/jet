@@ -6349,7 +6349,6 @@ The built-module inventory is a source-facing registry, not a missing-domain led
 - `core.files`
 - `core.encoding.yaml`
 - `core.files.path`
-- `core.font`
 - `core.game`
 - `core.git`
 - `core.http`

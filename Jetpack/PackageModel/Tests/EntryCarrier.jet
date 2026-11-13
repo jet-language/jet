@@ -405,7 +405,7 @@ pkg_entry_test_failure: fn(cache: &WorkspaceDeclarationCache, entry: String) -[F
     if !sys.is_unix() -> return
     cache := WorkspaceDeclarationCache.new()
     root: pkg_entry_test_root("shared-package")
-    pkg_entry_test_write(root, "package.jet", "name: \"fixture\"\nversion: \"0.1.0\"\nauthority: {{ allow: [IO], needs: [UI.FontShaping] }}\n")
+    pkg_entry_test_write(root, "package.jet", "name: \"fixture\"\nversion: \"0.1.0\"\nauthority: {{ allow: [IO], needs: [UI.Clipboard] }}\n")
     pkg_entry_test_write(root, "run.jet", "run: fn() {{}}\n")
     files.set_mode(root, 0o777) ?? panic("chmod shared")
     expected: files.canonicalize(root) ?? panic("canonical root")
@@ -414,7 +414,7 @@ pkg_entry_test_failure: fn(cache: &WorkspaceDeclarationCache, entry: String) -[F
         .Err(error) -> panic("explicit manifest")
     }, Val(expected))
     facts: pkg_entry_test_facts(cache, files.join(root, "run.jet"))
-    assert_eq(facts.authority.needs, [String]{"UI.FontShaping"})
+    assert_eq(facts.authority.needs, [String]{"UI.Clipboard"})
     files.set_mode(root, 0o700) ?? panic("restore mode")
     files.remove_all(root) ?? panic("cleanup")
 }

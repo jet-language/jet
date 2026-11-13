@@ -1,8 +1,9 @@
 // #2815: the first-party GUI battery keeps editor state,
 // Unicode-safe editing, persistence policy, and view composition in ordinary Jet
-// code. Host boundaries remain the canonical core.ui.host/core.font calls.
+// code. Host boundaries remain the canonical core.ui.host calls; typography is
+// the first-party font battery.
 use {
-    font: core.font
+    font
     text: core.text
     ui: core.ui
     host: core.ui.host
@@ -486,9 +487,9 @@ focus_group: fn() -> [UINode] {
 
 save_button: fn() -> UINode { ui.node_shortcut(ui.button("Save"), UIShortcut.cmd("s")) }
 
-system_font: fn(style: FontStyle) -> FontFace { font.system(style) }
+system_font: fn(style: font.FontStyle) -> font.FontFace { font.system(style) }
 
-shape_text: fn(value: String, face: FontFace) -> GlyphRun { font.shape(value, face) }
+shape_text: fn(value: String, face: font.FontFace) -> font.GlyphRun { font.shape(value, face) }
 
 host_capabilities: fn() -> UICapabilityFacts { host.capabilities() }
 

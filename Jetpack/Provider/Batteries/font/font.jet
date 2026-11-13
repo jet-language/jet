@@ -1,21 +1,10 @@
-package: {
-    name: "core.font"
-    version: "0.0.1"
-    edition: "2026"
-    description: "Font faces and glyph shaping."
-    license: "MIT"
-    outputs: {
-        font: .Library{ entry: font }
-    }
-    authority: { needs: [UI.FontShaping] }
-}
-use core: core
-
-// core.font — one face/run model across native and headless tiers.
+// The first-party font battery: one face/run model across native and
+// headless tiers.
 //
-// `shape` is the provider seam: the host owns real shaping and returns a
-// canonical run.  `shape_with` is the explicit portable fallback for callers
-// that need deterministic, approximate advances without a shaping provider.
+// `shape` validates the face and returns the canonical run every tier
+// produces today: approximate, deterministic advances from the face size.
+// `shape_with` is the same portable run without the validation, for callers
+// that build faces they already trust.
 FontStyle: enum {
     Body
     Title
@@ -58,16 +47,12 @@ system: fn(style: FontStyle) -> FontFace Never! {
 }
 
 shape_with: fn(face: FontFace, text: String) -> GlyphRun Never! {
-    // This is the explicit opt-in for deterministic approximate metrics.
-    // `shape` is the only path that requests the FontShaping capability.
     shape_fallback(face, text)
 }
 
 shape: fn(text: String, face: FontFace) -> GlyphRun Never! {
-    if core.font.__shape_text(text, face) == {
-        .Ok(run) -> run
-        .Err(cause) -> panic("font shaping host contract failure: {cause}")
-    }
+    if !(face.size > 0.0 && face.size - face.size == 0.0) -> panic("font shaping contract failure: font size must be finite and positive")
+    shape_fallback(face, text)
 }
 
 shape_fallback: fn(face: FontFace, text: String) -> GlyphRun {
@@ -165,4 +150,18 @@ decode_cp: fn(raw: [U8], i: Int) -> DecodePair {
     assert_eq(title.size, 24.0)
     assert_eq(mono.family, "monospace")
     assert_eq(mono.size, 14.0)
+}
+
+#Test("shape returns one approximate glyph per scalar at its byte cluster") {
+    face: system(.Body)
+    run: shape("aé\n", face)
+    assert_eq(run.advance_x, shape_with(face, "aé\n").advance_x)
+    assert_eq(run.glyphs.len(), 3)
+    assert_eq(run.glyphs[0].id, 97)
+    assert_eq(run.glyphs[1].id, 233)
+    assert_eq(run.glyphs[1].cluster, 1)
+    assert_eq(run.glyphs[2].cluster, 3)
+    assert_eq(run.glyphs[1].advance_x, 14.0)
+    assert_eq(run.glyphs[2].advance_x, 0.0)
+    assert(run.shaper == GlyphShaper.HeadlessFallback && run.deterministic && run.approximate)
 }

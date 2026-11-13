@@ -797,8 +797,6 @@ Examples establish the intended distinction:
 - `core.compute` uses its checked CPU oracle for `auto`; an explicit CUDA,
   Metal, Vulkan, or WebGPU request reports a typed device or unsupported error
   rather than silently using the CPU.
-- `core.font.shape` requests the font-shaping provider, while
-  `core.font.shape_with` is an explicit deterministic approximate fallback.
 - `core.crypto.random` uses the operating-system CSPRNG. A missing or rejected
   provider returns `CryptoError.Unavailable`; it never falls back to a weak or
   deterministic generator.

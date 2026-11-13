@@ -1,34 +1,35 @@
 // A program's own declarations keep their identity when a loaded Core module
-// declares types with the same names. `core.font` declares `FontStyle: enum
-// { Body Title Monospace }` and `FontFace: struct { family size style }`; the
-// declarations below reuse both names with a different variant order and a
-// different field order. Folded `#run` constants, field reads and matches must
-// all resolve to these declarations, never to Core's (#4003).
-use core.font
+// declares types with the same names. `core.ui.host` declares
+// `UICancellation: enum { User Closed Headless Superseded Programmatic }` and
+// `UIFileFilter: struct { label extensions mime_types }`; the declarations
+// below reuse both names with other variants and other fields. Folded `#run`
+// constants, field reads and matches must all resolve to these declarations,
+// never to Core's (#4003).
+use core.ui.host
 
-FontStyle: enum {
+UICancellation: enum {
     Monospace
     Title
     Body
 }
 
-FontFace: struct {
+UIFileFilter: struct {
     size: Int
-    style: FontStyle?
+    style: UICancellation?
     family: String
 }
 
 FACES: #run {
-    [FontFace]{
-        FontFace{family: "Serif", size: 12, style: Val(FontStyle.Body)},
-        FontFace{family: "Code", size: 10, style: Val(FontStyle.Monospace)},
-        FontFace{family: "Plain", size: 9, style: None},
+    [UIFileFilter]{
+        UIFileFilter{family: "Serif", size: 12, style: Val(UICancellation.Body)},
+        UIFileFilter{family: "Code", size: 10, style: Val(UICancellation.Monospace)},
+        UIFileFilter{family: "Plain", size: 9, style: None},
     }
 }
 
-ORDER: #run { [FontStyle]{FontStyle.Title, FontStyle.Body} }
+ORDER: #run { [UICancellation]{UICancellation.Title, UICancellation.Body} }
 
-describe: fn(style: FontStyle) -> String {
+describe: fn(style: UICancellation) -> String {
     if style == {
         .Monospace -> "fixed-width"
         .Title -> "heading"
