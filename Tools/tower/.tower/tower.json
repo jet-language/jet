@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6833,
-    "rev": 101774,
+    "rev": 101775,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -58306,6 +58306,11 @@
         {
           "at": "2026-11-13",
           "by": "Main",
+          "text": "Decision (Main): the Core library lowering into jet_core.o, added to the runtime step by S7a (d901c1eb13), leaves the default compiler build until S7b gives it its first consumer. G11Speed-5 measured it: 223k lines of Core checked from source and every non-generic Core fn lowered at O1 (a 56 MB object, the runtime image 5 MB to 37 MB), taking the runtime step from 12 s to 87 s, while nothing calls jet_core_fn_*. The code stays, and S7b turns the step back on with its consumer in the same change, so no build pays for an output it does not use."
+        },
+        {
+          "at": "2026-11-13",
+          "by": "Main",
           "text": "Cold A/B 2026-11-13: same fresh sweep2 tree (903,380 lines), quiet machine, jet build --profile dev Compiler. b15 2:32.8 wall, 187.0 s user, 9.22 GB; b16 (sweep2) 2:39.7, 195.9 s, 9.57 GB (+4%). The jet image takes 59.2 vs 62.8 s and the runtime step (runtime plus separate Core library lowering) 84.9 vs 87.3 s. New in b16: comptime.body.recheck (12 s), sema.late (1.1 s), sema.effects +1.0 s. Data: $JET_STATE_ROOT/lander3-tmp/ab. Next (G11Speed-5): the duplicate Core lowering in the runtime step, the recheck pass, then #6793 S2b and S3."
         },
         {
@@ -58608,7 +58613,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-23T14:31:32.550Z",
-      "updated": "2026-11-13T20:58:00.016Z",
+      "updated": "2026-11-13T21:24:33.390Z",
       "updatedBy": "Main",
       "goals": [
         "G11"
@@ -204683,6 +204688,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-13T21:24:33.390Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c031o59x",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-13T21:22:47.762Z",
       "by": "Main",
