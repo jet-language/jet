@@ -14,8 +14,10 @@
 // the C ABI lets a call clobber, so around every call inside its range the
 // slot is stored to its home and loaded back (X64Select.jet
 // ir_x64_call_out), except a stop poll's, which keeps them and every
-// general register but rax (X64Select.jet ir_x64_stop_poll). Selection
-// then uses rax, rcx,
+// general register but rax (X64Select.jet ir_x64_stop_poll). A Float slot
+// whose references at its hottest level weigh no more than those two moves
+// per call inside its range at that level or hotter (ir_x64_heat,
+// ir_x64_clobbers) lives in its home instead. Selection then uses rax, rcx,
 // rdx, rsi, rdi, r8-r11, xmm0 and xmm1 as scratch inside one instruction
 // only (r8 and r9 only for the arguments of a call no route makes, and
 // xmm0-xmm7 for the Float arguments of a call), and structured control
@@ -363,6 +365,57 @@ ir_x64_silent_slots: fn(m: IRModule, f: IRFunction, consts: [Bool], values: [Int
     loop slot in 0..<starts.len() -> general[slot] && slot >= f.param_count && starts[slot] >= 0 && noisy[ends[slot] + 1] == noisy[starts[slot]]
 }
 
+// Per instruction, its heat for the Float cost rule: the loops whose turns
+// run it (as for its spill weight), less one inside an If arm of its
+// innermost Loop, which may run on few of the Loop's turns; between 0 and 3.
+ir_x64_heat: fn(hot: Int, armed: Bool) -> Int Never! {
+    level: if armed -> hot - 1 else -> hot
+    if level <= 0 -> return 0
+    if level >= 3 -> return 3
+    level
+}
+
+// The spill weight of one reference at loop level `level` (0 to 3).
+ir_x64_level_weight: fn(level: Int) -> Int Never! {
+    if level <= 0 -> return 1
+    if level == 1 -> return IR_X64_LOOP_WEIGHT
+    if level == 2 -> return IR_X64_LOOP_WEIGHT * IR_X64_LOOP_WEIGHT
+    IR_X64_LOOP_WEIGHT * IR_X64_LOOP_WEIGHT * IR_X64_LOOP_WEIGHT
+}
+
+// Per heat level 0 to 3 and per instruction (row level * (len + 1) + at),
+// the weight of the instructions before it, at that heat (ir_x64_heat) or
+// hotter, that may call and so clobber every xmm register (ir_x64_silent),
+// less the stop polls and traps, which keep them (X64Select.jet
+// ir_x64_call_out). Each costs a Float slot in an xmm register a store and
+// a load; a slot in its home pays one memory access per reference instead.
+// The rule weighs both at the slot's hottest level only, so calls colder
+// than every use of the slot (a cold arm, the code after its loop) never
+// cost its hot loop a register.
+ir_x64_clobbers: fn(m: IRModule, f: IRFunction, consts: [Bool], values: [Int], heats: [Int]) -> [Int] Never! {
+    clobbers := [Int]{}
+    loop level in 0..<4 {
+        sum := 0
+        clobbers.push(0)
+        loop at in 0..<f.op.len() {
+            keeps: heats[at] < level || ir_x64_silent(m, f, consts, values, at) || (f.op[at] == .Call && ir_x64_is_poll(m, f.a[at]))
+            if !keeps -> sum += ir_x64_level_weight(heats[at])
+            clobbers.push(sum)
+        }
+    }
+    clobbers
+}
+
+// The weight of the clobbering calls at heat `level` or hotter strictly
+// inside the range `start`..`end`: the call of a Call that ends or starts
+// the range reads its arguments before and writes its result after the
+// call (ir_x64_keeps_xmm).
+ir_x64_clobbered: fn(clobbers: [Int], count: Int, level: Int, start: Int, end: Int) -> Int Never! {
+    if end <= start + 1 -> return 0
+    row: level * (count + 1)
+    clobbers[row + end] - clobbers[row + start + 1]
+}
+
 // Whether selecting `f` makes no call, in its body or in a slow path, so
 // its General slots may live in r8 and r9: every instruction is silent
 // (ir_x64_silent), and its General arguments (an aggregate result's hidden
@@ -551,11 +604,27 @@ ir_x64_allocate: fn(m: IRModule, f: IRFunction) -> IRX64Allocation Never! {
     }
     around := [Int]{}
     openers := [Int]{}
+    // Per open construct, the Ifs open inside the innermost Loop (it
+    // included), and per instruction whether one holds it (ir_x64_heat).
+    arms := [Int]{}
+    armed := [Bool]{}
     loop at in 0..<f.op.len() {
         op: f.op[at]
-        if op == .End -> _ := openers.pop()
+        if op == .End {
+            _ := openers.pop()
+            _ := arms.pop()
+        }
         around.push(if openers.len() > 0 -> openers[openers.len() - 1] else -> -1)
-        if op == .Block || op == .Loop || op == .If -> openers.push(at)
+        outer: if arms.len() > 0 -> arms[arms.len() - 1] else -> 0
+        armed.push(outer > 0)
+        if op == .Block || op == .Loop || op == .If {
+            openers.push(at)
+            arms.push(if {
+                op == .Loop -> 0
+                op == .If -> outer + 1
+                else -> outer
+            })
+        }
     }
     bases := loop _ in 0..<f.op.len() -> 0
     loop at in 0..<f.op.len() {
@@ -564,15 +633,16 @@ ir_x64_allocate: fn(m: IRModule, f: IRFunction) -> IRX64Allocation Never! {
         ir_x64_one_shot(f, depths, around, bases, at, at + 1, middle - 1)
         if middle < f.c[at] -> ir_x64_one_shot(f, depths, around, bases, at, middle + 1, f.c[at] - 1)
     }
-    weight_at := [Int]{}
-    loop at in 0..<f.op.len() {
-        hot: depths[at] - bases[at]
-        weight_at.push(if hot <= 0 -> 1 else if hot == 1 -> IR_X64_LOOP_WEIGHT else if hot == 2 -> IR_X64_LOOP_WEIGHT * IR_X64_LOOP_WEIGHT else -> IR_X64_LOOP_WEIGHT * IR_X64_LOOP_WEIGHT * IR_X64_LOOP_WEIGHT)
-    }
+    weight_at := loop at in 0..<f.op.len() -> ir_x64_level_weight(depths[at] - bases[at])
+    heats := loop at in 0..<f.op.len() -> ir_x64_heat(depths[at] - bases[at], armed[at])
     reads := [Int]{}
     writes := [Int]{}
     last_write := [Int]{}
     weights := [Int]{}
+    // Per slot, the hottest heat of its references and their weight there
+    // (the Float cost rule, ir_x64_clobbers).
+    peaks := [Int]{}
+    peak_weights := [Int]{}
     // References per slot, as the code reads them: a frame home's count of
     // rbp displacements (homes below).
     refs := [Int]{}
@@ -584,6 +654,8 @@ ir_x64_allocate: fn(m: IRModule, f: IRFunction) -> IRX64Allocation Never! {
         last_write.push(-1)
         weights.push(0)
         refs.push(0)
+        peaks.push(0)
+        peak_weights.push(0)
     }
     loop at in 0..<f.op.len() {
         ir_x64_reads_into(f, at, reads)
@@ -598,6 +670,11 @@ ir_x64_allocate: fn(m: IRModule, f: IRFunction) -> IRX64Allocation Never! {
             if at > ends[slot] -> ends[slot] = at
             weights[slot] = weights[slot] + weight_at[at]
             refs[slot] = refs[slot] + 1
+            if heats[at] > peaks[slot] {
+                peaks[slot] = heats[at]
+                peak_weights[slot] = 0
+            }
+            if heats[at] == peaks[slot] -> peak_weights[slot] = peak_weights[slot] + ir_x64_level_weight(heats[at])
         }
         written: ir_x64_write(f, at)
         if written >= 0 && written < count {
@@ -609,6 +686,11 @@ ir_x64_allocate: fn(m: IRModule, f: IRFunction) -> IRX64Allocation Never! {
             writes[written] = writes[written] + 1
             weights[written] = weights[written] + weight_at[at]
             refs[written] = refs[written] + 1
+            if heats[at] > peaks[written] {
+                peaks[written] = heats[at]
+                peak_weights[written] = 0
+            }
+            if heats[at] == peaks[written] -> peak_weights[written] = peak_weights[written] + ir_x64_level_weight(heats[at])
             last_write[written] = at
         }
         left_reads.push(left)
@@ -728,9 +810,9 @@ ir_x64_allocate: fn(m: IRModule, f: IRFunction) -> IRX64Allocation Never! {
     // a leaf every slot's range is such a one), and for those whose ranges
     // also hold exact Int routes (ir_x64_int_calls), whose calls are all in
     // slow paths, r8 and r9 once the callee-saved registers are taken; the
-    // Float slots over
-    // xmm8-xmm15 and, for those whose ranges hold no call passing more than
-    // two Floats, xmm2-xmm7 (IR_X64_XMM_REGISTERS). A
+    // Float slots worth a register (ir_x64_clobbers) over xmm8-xmm15 and, for
+    // those whose ranges hold no call passing more than two Floats, xmm2-xmm7
+    // (IR_X64_XMM_REGISTERS). A
     // slot that starts with its write may take the register of one its
     // writer reads last, that of the writer's first operand first
     // (`partners`), an If's result that of its then arm's source
@@ -741,7 +823,8 @@ ir_x64_allocate: fn(m: IRModule, f: IRFunction) -> IRX64Allocation Never! {
     // register, all of them holding the same value, and after it load them
     // all back.
     general: loop slot in 0..<count -> starts[slot] <= ends[slot] && !consts[slot] && !addressed[slot] && classes[slot] == .General
-    floating: loop slot in 0..<count -> starts[slot] <= ends[slot] && classes[slot] == .Float
+    clobbers: ir_x64_clobbers(m, f, consts, values, heats)
+    floating: loop slot in 0..<count -> starts[slot] <= ends[slot] && classes[slot] == .Float && peak_weights[slot] > 2 * ir_x64_clobbered(clobbers, f.op.len(), peaks[slot], starts[slot], ends[slot])
     fresh: loop slot in 0..<count -> first_writes[slot] && starts[slot] >= 0 && ir_x64_write(f, starts[slot]) == slot
     partners: loop slot in 0..<count -> if fresh[slot] && left_reads[starts[slot]] -> f.a[starts[slot]] else -> -1
     phis: ir_x64_phis(m, f, starts, ends, last_write, writes, classes, consts, addressed, around)
@@ -1371,6 +1454,83 @@ ir_x64_lighter: fn(a: Int, a_end: Int, b: Int, b_end: Int) -> Bool Never! {
         assert(al.xmms[x] < 2 || al.xmms[x] >= 8)
         assert_eq(low == 0, crowded)
         assert_eq(homed > 0, crowded)
+    }
+}
+
+// f(x) = x * x read twice after `calls` calls: its write and two reads
+// against a store and a load per call. Past one call the square keeps its
+// xmm register; past three it lives in its home, where those reads cost
+// less than six moves around the calls. The sum after them keeps its own.
+#Test("A Float slot that lives across more calls than it is used goes home") {
+    loop calls in [1, 3] {
+        m := ir_module_new()
+        float: ir_type_row(m, Type.Float) ?? panic("no Float row")
+        f := ir_function_new("f", "test:keep.jet::f", "", "keep.jet", 1)
+        x: ir_slot(f, float, IRSlotKind.Param, ir_intern_name(m, "x"), 1)
+        f.result = float
+        square: ir_slot(f, float, IRSlotKind.Temp, -1, 0)
+        _ := ir_emit(f, IROp.Mul, square, x, x, -1, 2)
+        loop _ in 0..<calls {
+            none: ir_args(f, [Int]{})
+            _ := ir_emit(f, IROp.CallRuntime, -1, ir_intern_name(m, "tick"), none, 0, 3)
+        }
+        sum: ir_slot(f, float, IRSlotKind.Temp, -1, 0)
+        _ := ir_emit(f, IROp.Add, sum, square, square, -1, 4)
+        _ := ir_emit(f, IROp.Return, -1, sum, -1, -1, 4)
+        al: ir_x64_allocate(m, f)
+        assert_eq(al.xmms[square] >= 0, calls == 1)
+        assert(al.homes[square] < 0)
+        assert(al.xmms[sum] >= 0)
+    }
+}
+
+// A total doubled twice per turn of a Loop, across four calls per turn and
+// four more after the Loop. Straight in the Loop's body the calls cost more
+// moves than the total's six references there, and it lives in its home.
+// In an If arm, which may run on few turns, and after the Loop they are
+// colder than every use of it inside, so it keeps its xmm register.
+#Test("A Float slot keeps its register over calls colder than its uses") {
+    loop cold in [false, true] {
+        m := ir_module_new()
+        float: ir_type_row(m, Type.Float) ?? panic("no Float row")
+        word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
+        flag: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
+        tick: ir_intern_name(m, "tick")
+        f := ir_function_new("f", "test:cold.jet::f", "", "cold.jet", 1)
+        rare: ir_slot(f, flag, IRSlotKind.Param, ir_intern_name(m, "rare"), 1)
+        f.result = float
+        total: ir_slot(f, float, IRSlotKind.Local, ir_intern_name(m, "total"), 2)
+        i: ir_slot(f, word, IRSlotKind.Local, ir_intern_name(m, "i"), 2)
+        n: ir_slot(f, word, IRSlotKind.Temp, -1, 0)
+        one: ir_slot(f, word, IRSlotKind.Temp, -1, 0)
+        done: ir_slot(f, flag, IRSlotKind.Temp, -1, 0)
+        _ := ir_emit(f, IROp.Const, total, 4607182418800017408, -1, -1, 2)
+        _ := ir_emit(f, IROp.Const, i, 0, -1, -1, 2)
+        _ := ir_emit(f, IROp.Const, n, 100, -1, -1, 2)
+        _ := ir_emit(f, IROp.Const, one, 1, -1, -1, 2)
+        _: ir_open(f, IROp.Block, 3)
+        _: ir_open(f, IROp.Loop, 3)
+        _ := ir_emit(f, IROp.Ge, done, i, n, -1, 3)
+        _ := ir_emit(f, IROp.BrIf, -1, done, 1, -1, 3)
+        _ := ir_emit(f, IROp.Add, total, total, total, -1, 4)
+        _ := ir_emit(f, IROp.Add, total, total, total, -1, 4)
+        if cold -> _ := ir_open_if(f, rare, 5)
+        loop _ in 0..<4 {
+            none: ir_args(f, [Int]{})
+            _ := ir_emit(f, IROp.CallRuntime, -1, tick, none, 0, 5)
+        }
+        if cold -> ir_end(f, 5)
+        _ := ir_emit(f, IROp.Add, i, i, one, IR_OVERFLOW_WRAP, 6)
+        _ := ir_emit(f, IROp.Br, -1, 0, -1, -1, 6)
+        ir_end(f, 6)
+        ir_end(f, 6)
+        loop _ in 0..<4 {
+            none: ir_args(f, [Int]{})
+            _ := ir_emit(f, IROp.CallRuntime, -1, tick, none, 0, 7)
+        }
+        _ := ir_emit(f, IROp.Return, -1, total, -1, -1, 7)
+        al: ir_x64_allocate(m, f)
+        assert_eq(al.xmms[total] >= 0, cold)
     }
 }
 
