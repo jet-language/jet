@@ -6092,11 +6092,15 @@ root, beside `.jet/cache/api/`, and builds the guest into the host. At load the
 host reads the same path from its working directory, so it runs from the
 package root. The loader reads the component under explicit resource-scoped
 `FS.Read` authority, checks that it matches the built guest, and preflights
-every declared WIT import. The guest's
-`authority.needs` and the narrowed host authority must cover each import before
-linking or instantiation. Unknown, wrong-shape, missing, or denied imports fail
-closed before guest code runs. A guest with no declared imports has an explicit
-empty capability set, never an ambient fallback. Registered imports re-check
+every declared WIT import. Each import's right must be declared in the loading
+package's `authority.needs` and held by the narrowed host authority before
+linking or instantiation. Otherwise the load fails as `PluginError.Denied`
+with export `load`, which every export call reports, and no guest code runs,
+on every tier. The loading package is the entry package whose root the
+artifact path is read under; a package with no `needs` loads only import-free
+components. Unknown, wrong-shape, or missing imports fail closed before guest
+code runs too. A guest with no declared imports has an explicit empty
+capability set, never an ambient fallback. Registered imports re-check
 the same typed decision at the call edge and retain resource scope. Failure is a
 clean `Err`, not a host crash. Guest-local `Mem` effects support Component text
 ABI values but do not grant host capabilities.

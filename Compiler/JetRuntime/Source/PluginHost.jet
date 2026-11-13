@@ -16,7 +16,8 @@
 //   13-14 tables (min, max), 15-16 globals (init bits),
 //   17-18 data (active, memory, offset, bytes, len),
 //   19-20 elements (mode, table, offset, items, count; an item is fid + 1),
-//   21-22 functions (name, name len, module, module len, signature class).
+//   21-22 functions (name, name len, module, module len, signature class),
+//   23-24 the loading package's `authority.needs` (one right per line).
 // Value codes: 0 bool, 1 s8, 2 u8, 3 s16, 4 u16, 5 s32, 6 u32, 7 s64, 8 u64,
 // 9 f32, 10 f64, 11 char, 12 string, 13 unsupported; result -1 is none.
 
@@ -831,10 +832,12 @@ pg_separator: fn(byte: I64) -> Bool { byte == I64{58} || byte == I64{47} || byte
 
 pg_is: fn(text: I64, other: I64) -> Bool { jet_rt_string_eq(text, other) }
 
-// Import preflight: every import names a right family the
-// load authority holds, before anything runs.
+// Import preflight: every import names a right family that the loading
+// package's `authority.needs` declares and the load authority holds, before
+// anything runs.
 pg_preflight: fn(plugin: I64, desc: I64, path: I64) -> I64 {
     wire: pg_word(wrapping(plugin + PG_PLUGIN_WIRE))
+    needs: pg_desc_text(desc, I64{23})
     count: pg_desc(desc, I64{9})
     records: wrapping(desc + pg_desc(desc, I64{10}))
     at := I64{0}
@@ -849,6 +852,13 @@ pg_preflight: fn(plugin: I64, desc: I64, path: I64) -> I64 {
             jet_rt_string_builder_push(detail, name)
             jet_rt_string_builder_push(detail, rt_static_text("` has no declared authority fact"))
             kind = PLUGIN_ERROR_GUEST
+        } else if !pg_holds_family(needs, right) {
+            jet_rt_string_builder_push(detail, rt_static_text("plugin host import `"))
+            jet_rt_string_builder_push(detail, name)
+            jet_rt_string_builder_push(detail, rt_static_text("` denied: the loading package's `authority.needs` does not declare `"))
+            jet_rt_string_builder_push(detail, right)
+            rt_text_push_word(detail, I64{96}, I64{1})
+            kind = PLUGIN_ERROR_DENIED
         } else if !pg_holds_family(wire, right) {
             jet_rt_string_builder_push(detail, rt_static_text("plugin host import `"))
             jet_rt_string_builder_push(detail, name)
@@ -862,11 +872,13 @@ pg_preflight: fn(plugin: I64, desc: I64, path: I64) -> I64 {
             message: pg_path_detail(rt_static_text("plugin `"), path, rt_static_text("` host-import preflight failed: "))
             jet_rt_string_builder_push(message, detail)
             jet_rt_string_drop(detail)
+            jet_rt_string_drop(needs)
             return pg_load_failure(kind, message)
         }
         jet_rt_string_drop(detail)
         at += I64{1}
     }
+    jet_rt_string_drop(needs)
     I64{0}
 }
 

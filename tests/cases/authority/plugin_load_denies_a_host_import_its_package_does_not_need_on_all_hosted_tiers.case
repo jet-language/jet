@@ -1,0 +1,32 @@
+# Claim: a package with no `authority.needs` loads a component whose host import
+# needs FS.Read as PluginError.Denied at load, before any guest code runs, even
+# though the load authority holds FS.Read; an import-free component still loads
+# and runs, and the host keeps running, on jet run and jet run --release.
+# A core start function runs at load: the import-free start_trap.wat fails its
+# load with its start function's trap. importing_start_trap.wat has the same
+# start function behind an FS.Read import, and its load is the needs denial
+# with no instantiation failure, so its start function never ran.
+fixture: plugin_load_denies_a_host_import_its_package_does_not_need_on_all_hosted_tiers.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet run main.jet
+exit: 0
+stdout: ~ "denied at load with 0 frames\n" # default: the denial is the load's, with no guest frames
+stdout: ~ "plugin host import `read` denied: the loading package's `authority.needs` does not declare `FS.Read`" # default: the needs check names the import and its right
+stdout: ~ "import-free: 7\n" # default: an import-free component still loads and runs
+stdout: !~ "guest ran" # default: no guest code ran in the denied component
+stdout: ~ "start_trap.wat failed: plugin `" # default: the import-free component's start function ran at load and trapped
+stdout: ~ "start_trap.wat` couldn't be instantiated under its authority scope: " # default: the trap is the start function's, at instantiation
+stdout: ~ "importing_start_trap.wat denied: plugin `importing_start_trap.wat` host-import preflight failed: plugin host import `read` denied: the loading package's `authority.needs` does not declare `FS.Read`" # default: the importing component is refused by the needs check
+stdout: !~ "importing_start_trap.wat` couldn't be instantiated" # default: its start function never ran, so its trap never happened
+step: jet run --release main.jet
+exit: 0
+stdout: ~ "denied at load with 0 frames\n" # release: the denial is the load's, with no guest frames
+stdout: ~ "plugin host import `read` denied: the loading package's `authority.needs` does not declare `FS.Read`" # release: the needs check names the import and its right
+stdout: ~ "import-free: 7\n" # release: an import-free component still loads and runs
+stdout: !~ "guest ran" # release: no guest code ran in the denied component
+stdout: ~ "start_trap.wat failed: plugin `" # release: the import-free component's start function ran at load and trapped
+stdout: ~ "start_trap.wat` couldn't be instantiated under its authority scope: " # release: the trap is the start function's, at instantiation
+stdout: ~ "importing_start_trap.wat denied: plugin `importing_start_trap.wat` host-import preflight failed: plugin host import `read` denied: the loading package's `authority.needs` does not declare `FS.Read`" # release: the importing component is refused by the needs check
+stdout: !~ "importing_start_trap.wat` couldn't be instantiated" # release: its start function never ran, so its trap never happened

@@ -533,7 +533,7 @@ jet_cli_eval_result: fn(file: String, source: String, color: Bool, json: Bool, r
         loop failure in built.failures -> jet_driver_ice_record(census, "{failure.name} [{failure.key}]", "ir.build", "unlowered", "{failure.message} at {failure.source_file}:{failure.span.start}..{failure.span.end}")
         jet_cli_finish(jet_cli_ice("the Jet evaluator failed on `{file}`: {jet_driver_ice_text(census)}"))
     }
-    jet_plugin_link(built.program, jet_driver_entry_root_path(snapshot))
+    jet_plugin_link(built.program, jet_driver_entry_root_path(snapshot), jet_cli_plugin_needs(result))
     entry: name_rows_value(built.program.function_rows, entry_key) ?? jet_cli_finish(jet_cli_ice("the slot IR of `{file}` has no `run` function"))
     config := jet_cli_eval_config()
     config.runtime_execution = true
@@ -1164,6 +1164,14 @@ JetCLINativeProgram: struct {
     failure: JetCLINativeFailure?
 }
 
+// The entry package's `authority.needs`, which bounds every literal plugin
+// artifact's host imports (jet_plugin_link); none for a file without a
+// manifest.
+jet_cli_plugin_needs: fn(result: JetDriverCompileResult) -> [String] Never! {
+    if result.authority_policy == .Val(policy) -> return policy.needs.copy()
+    [String]{}
+}
+
 jet_cli_native_program: fn(result: JetDriverCompileResult, inputs: &&JetDriverLoweringInputs, harness: IRTestHarness?, options: BuildOptions, runtime: JetCLIRuntimeExports, census: &[JetDriverIceRow], file: String, root: String) -[FS, Env, Time, Exec.Args]> JetCLINativeProgram Never! {
     trace_sink: result.trace_sink
     level: jet_cli_native_level(options)
@@ -1217,7 +1225,7 @@ jet_cli_native_program: fn(result: JetDriverCompileResult, inputs: &&JetDriverLo
         jet_cli_ice_trap(census, built.program, failure.key, "ir.build", "unlowered", message)
     }
     // Each literal plugin artifact becomes this program's own code (JetPlugin).
-    jet_plugin_link(built.program, root)
+    jet_plugin_link(built.program, root, jet_cli_plugin_needs(result))
     // A program whose stops need no process root owns its main (JetIR
     // EntryOwned.jet): its stop points go before Lint and the optimizer.
     if harness == None -> _ := ir_entry_own(built.program)

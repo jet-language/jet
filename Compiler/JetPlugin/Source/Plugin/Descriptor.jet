@@ -1,11 +1,13 @@
 // The descriptor blob a guest entry answers to op -1 (PluginHost.jet reads
-// it): a header of 24 words, a heap of texts, bytes and word lists, then the
+// it): a header of 26 words, a heap of texts, bytes and word lists, then the
 // tables of exports, imports, memories, tables, globals, data and element
 // segments and functions. Every offset is relative to the descriptor start.
+// Header words 23-24 are the loading package's `authority.needs`, one right
+// per line: the rights the guest's host imports may use.
 use jet_wasm.[wasm_put_fixed]
 
-PLUG_DESC_VERSION: 1
-PLUG_DESC_HEADER: 24
+PLUG_DESC_VERSION: 2
+PLUG_DESC_HEADER: 26
 
 PlugDesc: struct {
     out: [U8]
@@ -66,9 +68,11 @@ plug_thunk_op: fn(thunks: [Int:Int], fid: Int) -> Int Never! {
 }
 
 // The descriptor of flat instance `flat`: `thunks` maps a function to its
-// entry op, `sigs` gives each function's signature class.
-plug_descriptor: fn(flat: PlugFlat, name: String, artifact: [U8], thunks: [Int:Int], sigs: [Int]) -> [U8] Never! {
+// entry op, `sigs` gives each function's signature class, `needs` the
+// loading package's `authority.needs`.
+plug_descriptor: fn(flat: PlugFlat, name: String, artifact: [U8], thunks: [Int:Int], sigs: [Int], needs: [String]) -> [U8] Never! {
     d := plug_desc_new(name, artifact)
+    d.text(23, needs.join("\n"))
     export_names := [Int]{}
     export_params := [Int]{}
     loop export in flat.exports {

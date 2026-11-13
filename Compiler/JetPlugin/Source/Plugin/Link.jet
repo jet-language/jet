@@ -8,7 +8,8 @@
 // A relative artifact path is read under `root`, the entry's package root,
 // where its `.jet/cache/api` snapshot also lives (jet_driver_plugin_facts):
 // the program loads the same path from its working directory, so it runs
-// from that root.
+// from that root. `needs` is that package's `authority.needs`, which the
+// descriptor carries so the host refuses a host import outside it at load.
 use {
     plug_files: core.files
     jet_foundation.[name_rows_set]
@@ -16,7 +17,7 @@ use {
     jet_wasm.[WasmError, WasmFuncType, WASM_EXTERN_FUNC, WASM_FUNCREF, WASM_OP_REF_FUNC, wasm_load_component]
 }
 
-jet_plugin_link: fn(m: &IRModule, root: String) Never! -[FS]> {
+jet_plugin_link: fn(m: &IRModule, root: String, needs: [String]) Never! -[FS]> {
     count: m.functions.len()
     loop id in 0..<count {
         key: m.functions[id].key
@@ -33,7 +34,7 @@ jet_plugin_link: fn(m: &IRModule, root: String) Never! -[FS]> {
         }
         name: plug_stem(artifact)
         if detail == "" {
-            if plug_link_component(m, id, artifact, name, bytes) == .Err(err) -> detail = err.render()
+            if plug_link_component(m, id, artifact, name, bytes, needs) == .Err(err) -> detail = err.render()
         }
         if detail != "" {
             desc: ir_intern_bytes(m, plug_failure_descriptor(name, bytes, detail))
@@ -72,7 +73,7 @@ plug_thunk_add: fn(thunks: &[Int:Int], fids: &[Int], fid: Int) Never! {
     fids.push(fid)
 }
 
-plug_link_component: fn(m: &IRModule, id: Int, artifact: String, name: String, bytes: [U8]) WasmError! {
+plug_link_component: fn(m: &IRModule, id: Int, artifact: String, name: String, bytes: [U8], needs: [String]) WasmError! {
     flat: plug_flatten(wasm_load_component(bytes.copy()))
     sig_keys := [String:Int]{}
     sig_types := [WasmFuncType]{}
@@ -163,7 +164,7 @@ plug_link_component: fn(m: &IRModule, id: Int, artifact: String, name: String, b
     loop fid in thunk_fids -> m.functions.push(plug_thunk(kit, fid, flat.funcs[fid].ty))
     loop (class, ty) in sig_types -> m.functions.push(plug_dispatcher(kit, class, ty, targets[class]))
     loop made in base..<m.functions.len() -> name_rows_set(m.function_rows, m.functions[made].key, made)
-    desc: ir_intern_bytes(m, plug_descriptor(flat, name, bytes, thunks, sigs))
+    desc: ir_intern_bytes(m, plug_descriptor(flat, name, bytes, thunks, sigs, needs))
     plug_guest_entry(m, id, desc, kit.thunk_base, thunk_fids, base, flat.starts)
 }
 

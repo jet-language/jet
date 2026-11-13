@@ -1846,8 +1846,9 @@ is involved. Three stages own it:
   bounds inline; exports and lowered imports become canonical-ABI thunks,
   `call_indirect` goes through one dispatcher per signature class, and a
   descriptor blob records the exports, imports, memories, tables, globals,
-  segments and function names. A component it cannot translate becomes a
-  descriptor whose load fails with the translation error.
+  segments, function names and the entry package's `authority.needs`, which
+  bounds the rights of the guest's host imports. A component it cannot
+  translate becomes a descriptor whose load fails with the translation error.
 - `Compiler/JetRuntime/Source/PluginHost.jet` is the one host interface. It
   owns the instance state (linear memory, tables, globals, fuel, depth,
   frames), the canonical ABI lifting and lowering, host imports, budgets and

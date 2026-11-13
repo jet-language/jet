@@ -1,0 +1,52 @@
+use plugin: core.plugin
+
+// The package declares no `authority.needs`, so a component with an FS.Read
+// host import is denied at load although the load authority holds FS.Read:
+// no guest code runs, not even the import-free `normal` export. A core start
+// function runs at load, so an import-free component whose start function
+// traps fails its load with that trap; behind an FS.Read import, the same
+// start function never runs, because the load is refused first. An
+// import-free component still loads and runs.
+run: fn() {
+    policy: Authority.from_rights(["FS.Read(\".\")"])
+    importing: plugin.load("failure_guest.wat", policy)
+    if importing.normal() == {
+        .Ok(value) -> { print("guest ran: {value}") }
+        .Err(error) -> {
+            if error == {
+                .Denied(fault) -> {
+                    print("denied at {fault.export} with {fault.frames.len()} frames")
+                    print(fault.message)
+                }
+                .Guest(_) | .Defect(_) | .Budget(_, _) -> print("not a denial")
+            }
+        }
+    }
+    trapping: plugin.load("start_trap.wat", policy)
+    if trapping.seven() == {
+        .Ok(value) -> print("start_trap.wat loaded: {value}")
+        .Err(error) -> {
+            if error == {
+                .Guest(fault) -> print("start_trap.wat failed: {fault.message}")
+                .Denied(fault) -> print("start_trap.wat failed: {fault.message}")
+                .Defect(fault) -> print("start_trap.wat failed: {fault.message}")
+                .Budget(_, fault) -> print("start_trap.wat failed: {fault.message}")
+            }
+        }
+    }
+    guarded: plugin.load("importing_start_trap.wat", policy)
+    if guarded.seven() == {
+        .Ok(value) -> print("importing_start_trap.wat loaded: {value}")
+        .Err(error) -> {
+            if error == {
+                .Denied(fault) -> print("importing_start_trap.wat denied: {fault.message}")
+                .Guest(fault) -> print("importing_start_trap.wat failed: {fault.message}")
+                .Defect(fault) -> print("importing_start_trap.wat failed: {fault.message}")
+                .Budget(_, fault) -> print("importing_start_trap.wat failed: {fault.message}")
+            }
+        }
+    }
+    plain: plugin.load("plain.wat", policy)
+    seven: plain.seven() ?? panic("the import-free component failed")
+    print("import-free: {seven}")
+}
