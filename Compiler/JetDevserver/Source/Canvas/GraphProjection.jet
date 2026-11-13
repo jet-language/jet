@@ -1,262 +1,478 @@
+// The canonical Canvas projection of one checked program: function graphs,
+// the edit anchors and node references the actions read, and the blueprint
+// facts the editor panels show.
 use {
-    AST: jet_parser.AST
-    jet_parser.AST.[Expr, Item, Stmt]
-    jet_foundation.[Span, Expr, Item, Stmt, type_name]
-    jet_semindex.[SemIndex, SourceSpan, StateGraphFact]
-    jet_devserver.Canvas.GraphHelpers.[assignment_title, binding_type, call_has_effects, call_ret, effect_badges, expr_title, expr_type, graph_id, insert_offset, lvalue_type, pure_leaf, snippet, span_through_closing_parens, starts_uppercase, text_matches, wire_ident_refs]
-    jet_devserver.Canvas.GraphJson.[add_arm_pin, add_authority_region, add_execution_overlay, add_inline, add_node, add_pin, add_region, add_source_comment_regions, add_wire, add_wire_with_span, graph_to_json, meta_attr_json, node_catalog, set_pin_append, set_pin_source_span, ledger_function_visibility]
-    jet_devserver.Canvas.SchemaApi.[GRAPH_SCHEMA_VERSION]
-    jet_devserver.Canvas.SourceModel.[source_revision]
-    jet_devserver.Canvas.ValidationJson.[json_str, span_json]
-    core.files.[OSPath]
+    jet_driver.[JetDriverDocModule]
+    jet_foundation.[DerivationRecord, EnumDef, Expr, Func, ImportDecl, Item, NameDeclaration, NameLedger, NamedType, Span, TraitDef, TraitMethodSig, access_sigil, ast_visit_body, derivation_record_json, expr_span, name_facts_leaf, name_ledger_display_path, name_ledger_display_path_at, name_ledger_visible, type_name]
+    jet_parser.[jfmt_format_source_in]
+    jet_semindex.[SEMINDEX_SCHEMA_VERSION, SemAnchor, SemDef, SemIndex, SemOutput, SemRef, SemStateGraph]
 }
-InlineExpr: struct { id: String; span: SourceSpan }
-GraphEditAnchor: struct { graph_id: String; insert_offset: USize; fallible: Bool }
-NodeQueryRef: struct { graph_id: String; node_id: String; kind: String; title: String; span: SourceSpan }
-CanvasCallableExport: struct { module_path: String; span: SourceSpan; callee: String }
-Projection: struct { json: String; inline_exprs: [InlineExpr]; graph_anchors: [GraphEditAnchor]; node_refs: [NodeQueryRef]; callable_exports: [CanvasCallableExport]; game_facts: [CanvasGameFact] }
-CanvasGameFact: struct { source_id: String; kind: String; operation: String; field: String; value_source: String; source_span: SourceSpan; field_span: SourceSpan?; authored_instance_id: String }
+
+InlineExpr: struct {
+    id: String
+    span: Span
+}
+
+GraphEditAnchor: struct {
+    graph_id: String
+    insert_offset: Int
+    fallible: Bool
+}
+
+NodeQueryRef: struct {
+    graph_id: String
+    node_id: String
+    kind: String
+    title: String
+    span: Span
+}
+
+CanvasCallableExport: struct {
+    module_path: String
+    span: Span
+    callee: String
+}
+
+Projection: struct {
+    json: String
+    inline_exprs: [InlineExpr]
+    graph_anchors: [GraphEditAnchor]
+    node_refs: [NodeQueryRef]
+    callable_exports: [CanvasCallableExport]
+    game_facts: [CanvasGameFact]
+}
+
+CanvasGameFact: struct {
+    source_id: String
+    kind: String
+    operation: String
+    field: String
+    value_source: String
+    source_span: Span
+    field_span: Span?
+    authored_instance_id: String
+}
+
 GraphBuilder: struct {
-    graph_id: String{""}; nodes: [NodeRec]{}; pins: [PinRec]{}; wires: [WireRec]{}
-    regions: [String]{}; inline_exprs: [InlineRec]{}
-    local_pins: [String:String]{}; local_types: [String:String]{}; getter_pins: [String:String]{}; next_wire: USize{0}
+    graph_id: String{""}
+    nodes: [NodeRec]{[NodeRec]{}}
+    pins: [PinRec]{[PinRec]{}}
+    wires: [WireRec]{[WireRec]{}}
+    regions: [String]{[String]{}}
+    inline_exprs: [InlineRec]{[InlineRec]{}}
+    local_pins: [String:String]{[String:String]{}}
+    local_types: [String:String]{[String:String]{}}
+    getter_pins: [String:String]{[String:String]{}}
+    next_wire: Int{0}
 }
-NodeRec: struct { id: String; kind: String; archetype: String; title: String; span: SourceSpan; x: I32; y: I32; badges: [String]; affordances: [String]; meta_json: String? }
+
+NodeRec: struct {
+    id: String
+    kind: String
+    archetype: String
+    title: String
+    span: Span
+    x: Int
+    y: Int
+    badges: [String]
+    affordances: [String]
+    meta_json: String?
+}
+
 PinRec: struct {
-    id: String; node_id: String; name: String; direction: String; ty: String; role: String?
-    pattern_source: String?; ability: String; fallible: Bool; effect_grant_need: String?
-    span: SourceSpan; pattern_source_span: SourceSpan?; append_op: String?; element_index: USize?
+    id: String
+    node_id: String
+    name: String
+    direction: String
+    ty: String
+    role: String?
+    pattern_source: String?
+    ability: String
+    fallible: Bool
+    effect_grant_need: String?
+    span: Span
+    pattern_source_span: Span?
+    append_op: String?
+    element_index: Int?
 }
-WireRec: struct { id: String; from_pin: String; to_pin: String; kind: String; span: SourceSpan?; from_span: SourceSpan?; to_span: SourceSpan? }
-InlineRec: struct { id: String; node_id: String; role: String; source: String; span: SourceSpan }
-canvas_reasoning_family: fn(record: jet_foundation.Facts.DerivationRecord) -> String {
-    text := "{record.subject} {record.claim} {record.rule} {record.producer}".to_ascii_lowercase()
-    families := [(String, [String])]{[
-        (_0: "value", _1: ["value", "observed"]), (_0: "ownership", _1: ["owner", "ownership", "lifetime", "borrow"]),
-        (_0: "state", _1: ["state", "transition"]), (_0: "effects", _1: ["effect", "event", "callback", "task"]),
-        (_0: "dependencies", _1: ["depend", "premise", "input"]), (_0: "impact", _1: ["impact", "changed", "change"]),
-        (_0: "optimization", _1: ["optim", "copy", "cost", "vector"]), (_0: "counterexamples", _1: ["counterexample", "witness"])
-    ]}
-    families.iter().find_map(fn(family) { if family._1.iter().any(fn(needle) { text.contains(needle) }) -> .Val(family._0) else -> .None }).unwrap_or("relationships")
+
+WireRec: struct {
+    id: String
+    from_pin: String
+    to_pin: String
+    kind: String
+    span: Span?
+    from_span: Span?
+    to_span: Span?
 }
-canvas_reasoning_json: fn(path: OSPath, index: SemIndex) -> String {
-    source_path := path.to_string_lossy().replace('\\', "/")
-    records := [String]{}; lens_rows := [String:[String]]{}
-    loop record in index.derivations() {
-        source_span := index.definition_facts().iter().find(fn(fact) { fact.stable_id == record.subject }).map(fn(fact) { span_json(fact.span) }).unwrap_or_else(fn() { "null".to_string() })
-        records.push("{{\"derivation\":{record.to_json()},\"source_span\":{source_span}}}")
-        lens_rows.entry(canvas_reasoning_family(record)).or_default().push(json_str(record.id))
+
+InlineRec: struct {
+    id: String
+    node_id: String
+    role: String
+    source: String
+    span: Span
+}
+
+// Everything the function graphs of a program add to the projection.
+CanvasGraphSink: struct {
+    graphs: [String]
+    inline_exprs: [InlineExpr]
+    anchors: [GraphEditAnchor]
+    node_refs: [NodeQueryRef]
+}
+
+// One reasoning lens and the words in a derivation that place it there.
+CanvasReasoningFamily: struct {
+    name: String
+    needles: [String]
+}
+
+// One source spelling of a task or channel operation and its fact kind.
+CanvasTaskNeedle: struct {
+    needle: String
+    kind: String
+}
+
+// A named value a call reads: the event receiver or the scope argument.
+CanvasEventOperand: struct {
+    name: String
+    ty: String
+    span: Span
+}
+
+canvas_reasoning_families: fn() -> [CanvasReasoningFamily] {
+    [CanvasReasoningFamily]{
+        CanvasReasoningFamily{name: "value", needles: [String]{"value", "observed"}},
+        CanvasReasoningFamily{name: "ownership", needles: [String]{"owner", "ownership", "lifetime", "borrow"}},
+        CanvasReasoningFamily{name: "state", needles: [String]{"state", "transition"}},
+        CanvasReasoningFamily{name: "effects", needles: [String]{"effect", "event", "callback", "task"}},
+        CanvasReasoningFamily{name: "dependencies", needles: [String]{"depend", "premise", "input"}},
+        CanvasReasoningFamily{name: "impact", needles: [String]{"impact", "changed", "change"}},
+        CanvasReasoningFamily{name: "optimization", needles: [String]{"optim", "copy", "cost", "vector"}},
+        CanvasReasoningFamily{name: "counterexamples", needles: [String]{"counterexample", "witness"}},
     }
-    lenses := ["value", "ownership", "state", "effects", "dependencies", "impact", "optimization", "counterexamples", "relationships"].iter().map(fn(name) {
-        rows := lens_rows.get(name).map(fn(rows) { rows.join(",") }).unwrap_or_default()
-        "{{\"name\":{json_str(name)},\"records\":[{rows}]}}"
-    }).collect().join(",")
-    "{{\"kind\":\"jet.reasoning/v1\",\"source\":{json_str(source_path)},\"selection\":\"all\",\"records\":[{records.join(",")}],\"lenses\":[{lenses}],\"limits\":{{\"records\":{index.derivations().len()},\"records_truncated\":false,\"expanded\":true}}}}"
 }
-project_checked: fn(path: OSPath, source_id: String, src: String, bundle: AST.ProgramBundle, facts: SemIndexEffectFacts, package_facts: jet_driver.Package.PackageFacts?, workspace_overlay_policy: jet_env_model.Overlay.OverlayPolicy?, runtime_events: String?) -> Projection {
-    index := jet_semindex.from_checked(bundle, facts)
-    if package_facts == .Val(package) -> index.attach_package_facts(package)
-    if workspace_overlay_policy == .Val(policy) -> index.attach_workspace_overlay_policy(policy)
-    graph_json := [String]{}; inline_spans := [InlineExpr]{}; anchors := [GraphEditAnchor]{}; node_refs := [NodeQueryRef]{}
-    callable_exports := canvas_callable_exports(bundle, facts)
-    loop (module_idx, module_ref) in bundle.modules.iter().enumerate() ->
-        collect_item_graphs(path, src, index, facts.name_ledger, module_idx, bundle.entry, module_ref.display, module_ref.source, module_ref.items, .None, graph_json, inline_spans, anchors, node_refs)
-    game_facts := canvas_game_facts(source_id, src, bundle)
-    fmt := jet_driver.Formatter.format_source(src).unwrap_or_else(fn(_) { src.to_string() })
-    blueprint := canvas_blueprint_facts_json(path, src, bundle, index, runtime_events, game_facts)
-    enum_catalog := enum_catalog_json(bundle); pattern_catalog := pattern_catalog_json(bundle)
-    effect_projection := jet_semindex.render_effect_projection_object(index.effect_projection())
-    reasoning := canvas_reasoning_json(path, index)
-    json := "{{\"protocol\":\"jet.canvas.graph\",\"schema_version\":{GRAPH_SCHEMA_VERSION},\"source_id\":{json_str(source_id)},\"revision\":{json_str(source_revision(src))},\"fmt_fingerprint\":{json_str(source_revision(fmt))},\"source_text\":{json_str(src)},\"node_descriptors\":{node_catalog.catalog_json()},\"graphs\":[{graph_json.join(",")}],\"diagnostics\":[],\"facts\":{{\"semindex_schema_version\":{index.schema_version()},\"handles\":[\"definitions\",\"references\",\"calls\",\"effects\",\"members\",\"outputs\",\"state_graphs\",\"assets\",\"components\"],\"effect_projection\":{effect_projection},\"enum_variants\":{enum_catalog},\"pattern_variants\":{pattern_catalog},\"blueprint\":{blueprint},\"reasoning\":{reasoning}}}}}"
-    Projection { json: json, inline_exprs: inline_spans, graph_anchors: anchors, node_refs: node_refs, callable_exports: callable_exports, game_facts: game_facts }
+
+// The lens a derivation belongs to: the first family one of whose words its
+// subject, claim, rule or producer contains, else `relationships`.
+canvas_reasoning_family: fn(record: DerivationRecord) -> String {
+    text: "{record.subject} {record.claim} {record.rule} {record.producer}".to_lower()
+    loop family in canvas_reasoning_families() {
+        loop needle in family.needles {
+            if text.contains(needle) -> return family.name
+        }
+    }
+    "relationships"
 }
-canvas_callable_exports: fn(bundle: AST.ProgramBundle, facts: SemIndexEffectFacts) -> [CanvasCallableExport] {
-    facts.name_ledger.declarations().filter(fn(declaration) { declaration.kind == "function" })
-        .filter(fn(declaration) { bundle.modules.get(declaration.module_ref).is_some_and(fn(module_ref) { !is_foreign_module(module_ref.display) }) })
-        .filter(fn(declaration) { facts.name_ledger.visible(bundle.entry, declaration.module_ref, declaration.name) })
-        .filter_map(fn(declaration) { bundle.modules.get(declaration.module_ref).map(fn(module_ref) {
-            CanvasCallableExport { module_path: module_ref.display.clone(), span: declaration.span.into(), callee: canvas_callable_callee(bundle, declaration) }
-        }) }).collect()
+
+canvas_reasoning_json: fn(source_path: String, index: SemIndex) -> String {
+    records := [String]{}
+    lens_rows := [String:[String]]{}
+    loop record in index.derivations {
+        source_span := "null"
+        loop fact in index.definition_facts {
+            if fact.stable_id == record.subject {
+                source_span = span_json(fact.span)
+                break
+            }
+        }
+        records.push("{{\"derivation\":{derivation_record_json(record)},\"source_span\":{source_span}}}")
+        family: canvas_reasoning_family(record)
+        rows := lens_rows.get(family) ?? [String]{}
+        rows.push(json_str(record.id))
+        lens_rows[family] = rows
+    }
+    names := [String]{}
+    loop family in canvas_reasoning_families() -> names.push(family.name)
+    names.push("relationships")
+    lenses: loop name in names -> {
+        rows: lens_rows.get(name) ?? [String]{}
+        "{{\"name\":{json_str(name)},\"records\":[{rows.join(",")}]}}"
+    }
+    shown_path: source_path.split("\\").join("/")
+    "{{\"kind\":\"jet.reasoning/v1\",\"source\":{json_str(shown_path)},\"selection\":\"all\",\"records\":[{records.join(",")}],\"lenses\":[{lenses.join(",")}],\"limits\":{{\"records\":{index.derivations.len()},\"records_truncated\":false,\"expanded\":true}}}}"
 }
-is_foreign_module: fn(display: String) -> Bool {
-    display.split_once('.').and_then(fn(parts) { AST.ForeignLanguage.from_root(parts._0) }).is_some()
+
+// The position in `modules` of the module read from `path`, else of the one
+// whose text is `src`, else the first.
+canvas_entry_module: fn(path: String, src: String, modules: [JetDriverDocModule]) -> Int {
+    loop (position, doc_module) in modules {
+        if doc_module.physical_path == path || doc_module.path == path -> return position
+    }
+    loop (position, doc_module) in modules {
+        if doc_module.source == src -> return position
+    }
+    0
 }
-canvas_callable_callee: fn(bundle: AST.ProgramBundle, declaration: jet_foundation.Names.NameDeclaration) -> String {
-    module_alias := bundle.modules.get(declaration.module_ref).map(fn(module_ref) { module_ref.alias.as_str() }).unwrap_or("")
-    source_path := source_item_path(bundle.name_ledger, declaration.module_ref, module_alias, declaration.name, declaration.span, [])
-    leaf := source_path.rsplit_once('.').map_or(source_path.as_str(), fn(parts) { parts._1 })
-    if declaration.module_ref == bundle.entry -> return source_path
-    if bundle.name_ledger.aliases().find(fn(alias) {
-        alias.module_ref == bundle.entry && alias.target_module == .Val(declaration.module_ref) &&
-        alias.target.rsplit_once('.').map_or(alias.target.as_str(), fn(parts) { parts.1 }) == leaf
-    }) == .Val(alias) -> return alias.name.clone()
-    module_alias = if module_alias.is_empty() -> leaf else -> module_alias
-    prefix := bundle.name_ledger.aliases().find(fn(alias) { alias.module_ref == bundle.entry && alias.target_module == .Val(declaration.module_ref) && alias.target == module_alias })
-        .map(fn(alias) { alias.name.as_str() }).unwrap_or(module_alias)
-    "{prefix}.{source_path}"
+
+project_checked: fn(path: String, source_id: String, src: String, modules: [JetDriverDocModule], index: SemIndex, runtime_events: String?) -> Projection {
+    entry: canvas_entry_module(path, src, modules)
+    sink := CanvasGraphSink{graphs: [String]{}, inline_exprs: [InlineExpr]{}, anchors: [GraphEditAnchor]{}, node_refs: [NodeQueryRef]{}}
+    loop (position, doc_module) in modules {
+        collect_item_graphs(sink, index, src, doc_module, position == entry, doc_module.items, None)
+    }
+    callable_exports: canvas_callable_exports(modules, entry)
+    game_facts: if entry < modules.len() -> canvas_game_facts(source_id, src, modules[entry]) else -> [CanvasGameFact]{}
+    formatted: jfmt_format_source_in(src, false, false)
+    fmt: if formatted.ok -> formatted.text else -> src
+    blueprint: canvas_blueprint_facts_json(path, src, modules, index, runtime_events, game_facts)
+    enums := [EnumDef]{}
+    loop doc_module in modules -> collect_enums(doc_module.items, enums)
+    enums.sort_by(fn(left: EnumDef, right: EnumDef) { left.name <=> right.name })
+    projection: index.effect_projection
+    effect_projection: "{{\"required_effects\":[{json_strs(projection.required)}],\"granted_effects\":[{json_strs(projection.granted)}],\"denied_effects\":[{json_strs(projection.denied)}],\"authority\":{json_str(projection.authority)}}}"
+    reasoning: canvas_reasoning_json(path, index)
+    json: "{{\"protocol\":\"jet.canvas.graph\",\"schema_version\":{GRAPH_SCHEMA_VERSION},\"source_id\":{json_str(source_id)},\"revision\":{json_str(source_revision(src))},\"fmt_fingerprint\":{json_str(source_revision(fmt))},\"source_text\":{json_str(src)},\"node_descriptors\":{catalog_json()},\"graphs\":[{sink.graphs.join(",")}],\"diagnostics\":[],\"facts\":{{\"semindex_schema_version\":{SEMINDEX_SCHEMA_VERSION},\"handles\":[\"definitions\",\"references\",\"calls\",\"effects\",\"members\",\"outputs\",\"state_graphs\",\"assets\",\"components\"],\"effect_projection\":{effect_projection},\"enum_variants\":{enum_catalog_json(enums)},\"pattern_variants\":{pattern_catalog_json(enums)},\"blueprint\":{blueprint},\"reasoning\":{reasoning}}}}}"
+    Projection{json: json, inline_exprs: sink.inline_exprs, graph_anchors: sink.anchors, node_refs: sink.node_refs, callable_exports: callable_exports, game_facts: game_facts}
 }
-enum_catalog_json: fn(bundle: AST.ProgramBundle) -> String {
-    catalog := [String:[String]]{}
-    loop module_ref in bundle.modules -> collect_enum_variants(module_ref.items, catalog)
-    keys := catalog.keys().collect(); keys.sort()
-    entries := keys.iter().map(fn(name) {
-        variants := catalog[name].iter().map(fn(variant) { "{{\"name\":{json_str(variant)},\"source\":{json_str("{name}.{variant}")}}}" }).collect().join(",")
-        "{json_str(name)}:[{variants}]"
-    }).collect().join(",")
-    "{{{entries}}}"
+
+// The module of `modules` the name ledger numbers `name_index`.
+canvas_module_at_name_index: fn(modules: [JetDriverDocModule], name_index: Int) -> JetDriverDocModule? {
+    loop doc_module in modules {
+        if doc_module.name_module_index == name_index -> return Val(doc_module)
+    }
+    None
 }
-collect_enum_variants: fn(items: &[Item], catalog: &[String:[String]]) {
+
+// Every function of the program's own modules the entry module can call,
+// with the callee spelling an insertion there writes.
+canvas_callable_exports: fn(modules: [JetDriverDocModule], entry: Int) -> [CanvasCallableExport] {
+    exports := [CanvasCallableExport]{}
+    if entry >= modules.len() -> return exports
+    entry_module: modules[entry]
+    storage: entry_module.name_ledger ?? return exports
+    permit: storage.guard_read()
+    entry_index: entry_module.name_module_index
+    loop declaration in permit.value.facts.declarations {
+        if declaration.kind != "function" -> next
+        owner: canvas_module_at_name_index(modules, declaration.module_index) ?? next
+        if !name_ledger_visible(permit.value, entry_index, declaration.module_index, declaration.name) {
+            next
+        }
+        exports.push(CanvasCallableExport{module_path: owner.path, span: declaration.span, callee: canvas_callable_callee(permit.value, entry_index, declaration, owner.alias)})
+    }
+    exports
+}
+
+canvas_callable_callee: fn(ledger: NameLedger, entry_index: Int, declaration: NameDeclaration, module_alias: String) -> String {
+    source_path: source_item_path(ledger, declaration.module_index, module_alias, declaration.name, declaration.span, [String]{})
+    if declaration.module_index == entry_index -> return source_path
+    leaf: name_facts_leaf(source_path)
+    loop alias in ledger.facts.aliases {
+        if alias.module_index == entry_index && alias.target_module == .Val(target) && target == declaration.module_index && name_facts_leaf(alias.target) == leaf {
+            return alias.name
+        }
+    }
+    prefix_alias: if module_alias == "" -> leaf else -> module_alias
+    loop alias in ledger.facts.aliases {
+        if alias.module_index == entry_index && alias.target_module == .Val(target) && target == declaration.module_index && alias.target == prefix_alias {
+            return "{alias.name}.{source_path}"
+        }
+    }
+    "{prefix_alias}.{source_path}"
+}
+
+// The program's enums, the first declaration of each name only.
+collect_enums: fn(items: [Item], enums: &[EnumDef]) {
     loop item in items {
         if item == {
-            .Enum(def) -> {
-                variants := def.variants.iter().filter(fn(variant) { if variant.payload == {
-                    .Unit -> true
-                    else -> false
-                } }).map(fn(variant) { variant.name.clone() }).collect()
-                _: catalog.entry(def.name.clone()).or_insert(variants)
+            .Enum(definition) -> {
+                known := false
+                loop seen in enums {
+                    if seen.name == definition.name -> known = true
+                }
+                if !known -> enums.push(definition)
             }
-            .CodeModule(module_ref) -> { if module_ref.body == .Val(body) -> collect_enum_variants(body, catalog) } else -> {}
+            .CodeModule(module_value) -> {
+                if module_value.body == .Val(body) -> collect_enums(body, enums)
+            }
+            else -> {}
         }
     }
 }
-pattern_catalog_json: fn(bundle: AST.ProgramBundle) -> String {
-    catalog := [String:[(String, USize)]]{}
-    loop module_ref in bundle.modules -> collect_pattern_variants(module_ref.items, catalog)
-    keys := catalog.keys().collect(); keys.sort()
-    entries := keys.iter().map(fn(name) {
-        variants := catalog[name].iter().map(fn(variant) { "{{\"name\":{json_str(variant._0)},\"arity\":{variant._1}}}" }).collect().join(",")
-        "{json_str(name)}:[{variants}]"
-    }).collect().join(",")
-    "{{{entries}}}"
-}
-collect_pattern_variants: fn(items: &[Item], catalog: &[String:[(String, USize)]]) {
-    loop item in items {
-        if item == {
-            .Enum(def) -> {
-                variants := def.variants.iter().map(fn(variant) {
-                    arity := if variant.payload == {
-                        .Unit -> 0
-                        .Single(_, _) -> 1
-                        .Named(fields) -> fields.len()
-                    }
-                    (_0: variant.name.clone(), _1: arity)
-                }).collect()
-                _: catalog.entry(def.name.clone()).or_insert(variants)
+
+// Each enum's payload-free variants, keyed by enum name.
+enum_catalog_json: fn(enums: [EnumDef]) -> String {
+    entries: loop definition in enums -> {
+        variants := [String]{}
+        loop variant in definition.variants {
+            if variant.payload == .Unit {
+                variants.push("{{\"name\":{json_str(variant.name)},\"source\":{json_str("{definition.name}.{variant.name}")}}}")
             }
-            .CodeModule(module_ref) -> { if module_ref.body == .Val(body) -> collect_pattern_variants(body, catalog) } else -> {}
         }
+        "{json_str(definition.name)}:[{variants.join(",")}]"
     }
+    "{{{entries.join(",")}}}"
 }
-collect_item_graphs: fn(entry_path: &OSPath, entry_src: String, index: &SemIndex, ledger: &jet_foundation.Names.NameLedger, module_idx: USize, entry_module_idx: USize, module_display: String, module_src: String, items: &[Item], owner: String?, out: &[String], inline_spans: &[InlineExpr], anchors: &[GraphEditAnchor], node_refs: &[NodeQueryRef]) {
+
+// Each enum's variants with their payload arity, keyed by enum name.
+pattern_catalog_json: fn(enums: [EnumDef]) -> String {
+    entries: loop definition in enums -> {
+        variants: loop variant in definition.variants -> {
+            arity: if variant.payload == {
+                .Unit -> 0
+                .Single(_, _) -> 1
+                .Named(fields) -> fields.len()
+            }
+            "{{\"name\":{json_str(variant.name)},\"arity\":{arity}}}"
+        }
+        "{json_str(definition.name)}:[{variants.join(",")}]"
+    }
+    "{{{entries.join(",")}}}"
+}
+
+collect_item_graphs: fn(sink: &CanvasGraphSink, index: SemIndex, entry_src: String, doc_module: JetDriverDocModule, is_entry: Bool, items: [Item], owner: String?) {
     loop item in items {
         if item == {
-            .Func(f) -> {
-                graph := project_func(index, module_display, module_src, f)
-                ledger_name := owner.map(fn(owner) { jet_foundation.Names.member_name(owner, f.name) }).unwrap_or_else(fn() { f.name.clone() })
-                visibility := ledger_function_visibility(ledger, module_idx, ledger_name)
-                inline_spans.extend(graph.inline_exprs.iter().map(fn(i) { InlineExpr { id: i.id.clone(), span: i.span } }))
-                if module_idx == entry_module_idx -> anchors.push(GraphEditAnchor { graph_id: graph.graph_id.clone(), insert_offset: insert_offset(entry_src, f), fallible: function_is_fallible(f) })
-                collect_node_refs(graph, node_refs); out.push(graph_to_json(graph, f, module_src, visibility))
+            .Func(function) -> {
+                ledger_name: if owner == .Val(name) -> "{name}.{function.name}" else -> function.name
+                collect_function_graph(sink, index, entry_src, doc_module, is_entry, function, ledger_name)
             }
-            .Struct(s) -> {
-                loop method in s.methods {
-                    graph := project_func(index, module_display, module_src, method)
-                    visibility := ledger_function_visibility(ledger, module_idx, "{s.name}.{method.name}")
-                    inline_spans.extend(graph.inline_exprs.iter().map(fn(i) { InlineExpr { id: i.id.clone(), span: i.span } }))
-                    if module_idx == entry_module_idx -> anchors.push(GraphEditAnchor { graph_id: graph.graph_id.clone(), insert_offset: insert_offset(entry_src, method), fallible: function_is_fallible(method) })
-                    collect_node_refs(graph, node_refs); out.push(graph_to_json(graph, method, module_src, visibility))
+            .Struct(structure) -> {
+                loop method in structure.methods {
+                    collect_function_graph(sink, index, entry_src, doc_module, is_entry, method, "{structure.name}.{method.name}")
                 }
             }
-            .Impl(i) -> {
-                loop method in i.methods {
-                    graph := project_func(index, module_display, module_src, method)
-                    visibility := ledger_function_visibility(ledger, module_idx, "{i.type_name}.{method.name}")
-                    inline_spans.extend(graph.inline_exprs.iter().map(fn(e) { InlineExpr { id: e.id.clone(), span: e.span } }))
-                    if module_idx == entry_module_idx -> anchors.push(GraphEditAnchor { graph_id: graph.graph_id.clone(), insert_offset: insert_offset(entry_src, method), fallible: function_is_fallible(method) })
-                    collect_node_refs(graph, node_refs); out.push(graph_to_json(graph, method, module_src, visibility))
+            .Impl(implementation) -> {
+                loop method in implementation.methods {
+                    collect_function_graph(sink, index, entry_src, doc_module, is_entry, method, "{implementation.type_name}.{method.name}")
                 }
             }
-            .CodeModule(m) -> { if m.body == .Val(body) -> collect_item_graphs(entry_path, entry_src, index, ledger, module_idx, entry_module_idx, module_display, module_src, body, .Val(m.name), out, inline_spans, anchors, node_refs) } else -> {}
+            .CodeModule(module_value) -> {
+                if module_value.body == .Val(body) {
+                    collect_item_graphs(sink, index, entry_src, doc_module, is_entry, body, Val(module_value.name))
+                }
+            }
+            else -> {}
         }
     }
-    _: entry_path
 }
-function_is_fallible: fn(f: AST.Func) -> Bool { if f.return_type.as_ref() == {
-    .Val(.Result { .. }) -> true
-    else -> false
-} }
-canvas_blueprint_facts_json: fn(path: OSPath, src: String, bundle: AST.ProgramBundle, index: SemIndex, runtime_events: String?, game_facts: [CanvasGameFact]) -> String {
+
+collect_function_graph: fn(sink: &CanvasGraphSink, index: SemIndex, entry_src: String, doc_module: JetDriverDocModule, is_entry: Bool, function: Func, ledger_name: String) {
+    graph: project_func(index, doc_module.path, doc_module.source, function)
+    loop inline in graph.inline_exprs {
+        sink.inline_exprs.push(InlineExpr{id: inline.id, span: inline.span})
+    }
+    if is_entry {
+        sink.anchors.push(GraphEditAnchor{graph_id: graph.graph_id, insert_offset: insert_offset(entry_src, function), fallible: function_is_fallible(function)})
+    }
+    collect_node_refs(graph, sink.node_refs)
+    sink.graphs.push(graph_to_json(graph, function, doc_module.source, canvas_function_visibility(doc_module, ledger_name)))
+}
+
+// `private`, `package` or `public`, as the module's name ledger declares it.
+canvas_function_visibility: fn(doc_module: JetDriverDocModule, name: String) -> String {
+    storage: doc_module.name_ledger ?? return "private"
+    permit: storage.guard_read()
+    ledger_function_visibility(permit.value, doc_module.name_module_index, name)
+}
+
+function_is_fallible: fn(f: Func) -> Bool {
+    ty: f.return_type ?? return false
+    if ty == .Result(_, _) -> true else -> false
+}
+
+canvas_blueprint_facts_json: fn(path: String, src: String, modules: [JetDriverDocModule], index: SemIndex, runtime_events: String?, game_facts: [CanvasGameFact]) -> String {
     interfaces := [String]{}
-    loop (module_idx, module_ref) in bundle.modules.iter().enumerate() {
-        items := module_ref.items.iter().collect()
-        collect_interface_facts(items, interfaces, [], module_ref.source, module_idx, module_ref.alias, bundle.name_ledger)
+    loop doc_module in modules -> collect_module_interfaces(doc_module, interfaces)
+    outputs: loop output in index.outputs -> output_fact_json(output)
+    state_graphs: loop graph in index.state_graphs -> state_graph_json(graph)
+    assets := [String]{}
+    components := [String]{}
+    loop fact in game_facts {
+        if fact.kind == "asset" -> assets.push(canvas_game_fact_json(fact))
+        if fact.kind == "component" -> components.push(canvas_game_fact_json(fact))
     }
-    task_flows := task_flow_facts(src).join(",")
-    outputs := index.outputs().iter().map(output_fact_json).collect().join(",")
-    package_facts := index.package_facts().map(jet_semindex.package_facts_json).unwrap_or_else(fn() { "null".to_string() })
-    workspace_overlays := index.workspace_overlay_policy().map(jet_semindex.workspace_overlay_policy_json).unwrap_or_else(fn() { "null".to_string() })
-    event_dispatchers := event_dispatcher_facts(path, src, bundle, index).join(",")
-    state_graphs := index.state_graphs().iter().map(state_graph_json).collect().join(",")
-    assets := game_facts.iter().filter(fn(fact) { fact.kind == "asset" }).map(canvas_game_fact_json).collect().join(",")
-    components := game_facts.iter().filter(fn(fact) { fact.kind == "component" }).map(canvas_game_fact_json).collect().join(",")
-    "{{\"runtime_events\":{runtime_events.unwrap_or("null")},\"event_dispatchers\":[{event_dispatchers}],\"interfaces\":[{interfaces.join(",")}],\"task_flows\":[{task_flows}],\"outputs\":[{outputs}],\"state_graphs\":[{state_graphs}],\"assets\":[{assets}],\"components\":[{components}],\"package_facts\":{package_facts},\"workspace_overlays\":{workspace_overlays},\"source_truth\":\"ordinary_jet_source\"}}"
+    "{{\"runtime_events\":{runtime_events ?? "null"},\"event_dispatchers\":[{event_dispatcher_facts(path, src, modules, index).join(",")}],\"interfaces\":[{interfaces.join(",")}],\"task_flows\":[{task_flow_facts(src).join(",")}],\"outputs\":[{outputs.join(",")}],\"state_graphs\":[{state_graphs.join(",")}],\"assets\":[{assets.join(",")}],\"components\":[{components.join(",")}],\"package_facts\":null,\"workspace_overlays\":null,\"source_truth\":\"ordinary_jet_source\"}}"
 }
+
 canvas_game_fact_json: fn(fact: CanvasGameFact) -> String {
-    field_span := fact.field_span.map(span_json).unwrap_or_else(fn() { "null".to_string() })
-    fields := "{{{json_str(fact.field)}:{{\"source_span\":{field_span},\"source\":{json_str(fact.value_source)}}}}}"
+    field_span: if fact.field_span == .Val(span) -> span_json(span) else -> "null"
+    fields: "{{{json_str(fact.field)}:{{\"source_span\":{field_span},\"source\":{json_str(fact.value_source)}}}}}"
     "{{\"kind\":{json_str(fact.kind)},\"operation\":{json_str(fact.operation)},\"source_id\":{json_str(fact.source_id)},\"source_span\":{span_json(fact.source_span)},\"authored_instance_id\":{json_str(fact.authored_instance_id)},\"field\":{json_str(fact.field)},\"value\":{json_str(fact.value_source)},\"fields\":{fields},\"source_truth\":\"ordinary_jet_source\",\"fact_source\":\"checked_game_call\"}}"
 }
-canvas_game_facts: fn(source_id: String, src: String, bundle: &AST.ProgramBundle) -> [CanvasGameFact] {
+
+// The asset and component calls the entry module's function bodies make, in
+// source order.
+canvas_game_facts: fn(source_id: String, src: String, entry_module: JetDriverDocModule) -> [CanvasGameFact] {
     facts := [CanvasGameFact]{}
-    module_ref := bundle.modules.get(bundle.entry) ?? return facts
-    collect_game_items(module_ref.items, source_id, src, facts)
-    facts.sort_by_key(fn(fact) { (_0: fact.source_span.start, _1: fact.source_span.end) }); facts
+    collect_game_items(entry_module.items, source_id, src, facts)
+    facts.sort_by(fn(left: CanvasGameFact, right: CanvasGameFact) { (left.source_span.start <=> right.source_span.start).then(left.source_span.end <=> right.source_span.end) })
+    facts
 }
-collect_game_items: fn(items: &[Item], source_id: String, src: String, out: &[CanvasGameFact]) {
+
+collect_game_items: fn(items: [Item], source_id: String, src: String, out: &[CanvasGameFact]) {
     loop item in items {
         if item == {
-            .Func(function) -> collect_game_statements(function.body, source_id, src, out)
-            .Struct(structure) -> { loop method in structure.methods -> collect_game_statements(method.body, source_id, src, out) }
-            .Impl(implementation) -> { loop method in implementation.methods -> collect_game_statements(method.body, source_id, src, out) }
-            .CodeModule(module_ref) -> { if module_ref.body == .Val(body) -> collect_game_items(body, source_id, src, out) } else -> {}
+            .Func(function) -> {
+                ast_visit_body(function.body, fn(expression: Expr) { note_game_call(out, source_id, src, expression) }, true)
+            }
+            .Struct(structure) -> {
+                loop method in structure.methods {
+                    ast_visit_body(method.body, fn(expression: Expr) { note_game_call(out, source_id, src, expression) }, true)
+                }
+            }
+            .Impl(implementation) -> {
+                loop method in implementation.methods {
+                    ast_visit_body(method.body, fn(expression: Expr) { note_game_call(out, source_id, src, expression) }, true)
+                }
+            }
+            .CodeModule(module_value) -> {
+                if module_value.body == .Val(body) -> collect_game_items(body, source_id, src, out)
+            }
+            else -> {}
         }
     }
 }
-collect_game_statements: fn(statements: &[Stmt], source_id: String, src: String, out: &[CanvasGameFact]) {
-    loop statement in statements {
-        statement.for_each_expr(fn(expr) {
-            (receiver, method, method_span, owner_type_args, type_args, args) := if expr == {
-                .MethodCall { receiver, method, method_span, owner_type_args, type_args, args, .. } -> (_0: receiver, _1: method, _2: method_span, _3: owner_type_args, _4: type_args, _5: args)
-                else -> { return }
+
+// Records `expression` when it is `….assets.image(path)`,
+// `….assets.sound(path)` or `.component<T>()` / `.component(value)`.
+note_game_call: fn(out: &[CanvasGameFact], source_id: String, src: String, expression: Expr) {
+    if expression == .MethodCall(receiver, method, method_span, owner_type_args, type_args, args, _) {
+        source_span: game_method_call_span(src, receiver, method_span)
+        operation := ""
+        field := ""
+        value_source := ""
+        field_span := Span?{None}
+        if (method == "image" || method == "sound") && game_assets_receiver(receiver) {
+            if args.len() == 0 {
+                return
             }
-            source_span := game_method_call_span(src, receiver, method_span)
-            (operation, field, value_source, field_span) := if {
-                (method == "image" || method == "sound") && game_assets_receiver(receiver) -> {
-                    argument := args.first() ?? return
-                    span := SourceSpan{argument.expr.span().into()}
-                    (_0: "scene.assets.{method}", _1: "path", _2: source_span_text(src, span), _3: .Val(span))
-                }
-                method == "component" -> {
-                    type_arg := type_args.first().or_else(fn() { owner_type_args.first() })
-                    (field, value_source, field_span) := if {
-                        type_arg == .Val(type_arg) -> {
-                            value := type_arg.name(); span := game_type_name_span(src, source_span, method_span, value)
-                            (_0: "component", _1: value, _2: span)
-                        }
-                        args.first() == .Val(argument) -> {
-                            span := SourceSpan{argument.expr.span().into()}
-                            (_0: "component", _1: source_span_text(src, span), _2: .Val(span))
-                        }
-                        else -> { return }
-                    }
-                    (_0: "scene.component", _1: field, _2: value_source, _3: field_span)
-                }
-                else -> { return }
+            span: expr_span(args[0].expr)
+            operation = "scene.assets.{method}"
+            field = "path"
+            value_source = snippet(src, span)
+            field_span = Val(span)
+        } else if method == "component" {
+            operation = "scene.component"
+            field = "component"
+            if type_args.len() > 0 || owner_type_args.len() > 0 {
+                written: if type_args.len() > 0 -> type_args[0] else -> owner_type_args[0]
+                value_source = type_name(written)
+                field_span = game_type_name_span(src, source_span, method_span, value_source)
+            } else if args.len() > 0 {
+                span: expr_span(args[0].expr)
+                value_source = snippet(src, span)
+                field_span = Val(span)
+            } else {
+                return
             }
-            authored_instance_id := "{source_id}:game:{operation}:{source_span.start}-{source_span.end}"
-            out.push(CanvasGameFact { source_id: source_id.to_string(), kind: if operation == "scene.component" -> "component" else -> "asset",
-                operation: operation, field: field, value_source: value_source, source_span: source_span, field_span: field_span, authored_instance_id: authored_instance_id })
-        })
+        } else {
+            return
+        }
+        out.push(
+            CanvasGameFact{
+                source_id: source_id,
+                kind: if operation == "scene.component" -> "component" else -> "asset",
+                operation: operation,
+                field: field,
+                value_source: value_source,
+                source_span: source_span,
+                field_span: field_span,
+                authored_instance_id: "{source_id}:game:{operation}:{source_span.start}-{source_span.end}",
+            },
+        )
     }
 }
 
@@ -267,369 +483,433 @@ game_assets_receiver: fn(expr: Expr) -> Bool {
         else -> false
     }
 }
-game_receiver_start: fn(expr: Expr) -> USize {
+
+game_receiver_start: fn(expr: Expr) -> Int {
     if expr == {
-        .Field(base, ..) | .Paren(base, .., _) -> game_receiver_start(base)
-        else -> expr.span().start
+        .Field(base, _, _, _) -> game_receiver_start(base)
+        .Paren(base, _, _) -> game_receiver_start(base)
+        else -> expr_span(expr).start
     }
 }
-game_method_call_span: fn(src: String, receiver: &Expr, method_span: Span) -> SourceSpan {
-    fallback := SourceSpan{method_span.into()}
-    start := game_receiver_start(receiver)
-    open_relative := src.get(method_span.end..).and_then(fn(tail) { tail.find('(') }) ?? return fallback
-    open := method_span.end + open_relative
-    close := matching_call_close(src, open) ?? return fallback
-    SourceSpan { start: start, end: close }
+
+// From the receiver chain's first byte through the call's closing paren.
+game_method_call_span: fn(src: String, receiver: Expr, method_span: Span) -> Span {
+    close: call_close_after(src, method_span.end) ?? return method_span
+    Span{start: game_receiver_start(receiver), end: close}
 }
-matching_call_close: fn(src: String, open: USize) -> USize? {
-    bytes := src.as_bytes(); depth := USize{1}; in_string := false; escaped := false
-    loop index in open + 1..bytes.len() {
-        byte := bytes[index]
+
+// The byte just past the `)` that closes the first `(` at or after `from`;
+// string literals are skipped.
+call_close_after: fn(src: String, from: Int) -> Int? {
+    if from < 0 || from > src.len() -> return None
+    open: src.slice(from, src.len()).index_of("(") ?? return None
+    bytes: src.bytes()
+    depth := 0
+    in_string := false
+    escaped := false
+    loop index in from + open..<bytes.len() {
+        byte: Int.from_u8(bytes[index])
         if in_string {
-            if escaped { escaped = false } else if byte == ((U8{'\\'})) { escaped = true } else if byte == (((U8{'"'}))) { in_string = false }
+            if escaped -> escaped = false else if byte == 92 -> escaped = true else if byte == 34 {
+                in_string = false
+            }
             next
         }
-        if byte == {
-            U8{'"'} -> in_string = true, U8{'('} -> depth += 1
-            U8{')'} -> { depth = depth.saturating_sub(1); if depth == 0 -> return .Val(index + 1) } else -> {}
+        if byte == 34 -> in_string = true else if byte == 40 -> depth += 1 else if byte == 41 {
+            depth -= 1
+            if depth == 0 -> return Val(index + 1)
         }
     }
-    .None
+    None
 }
-game_type_name_span: fn(src: String, enclosing: SourceSpan, method_span: Span, type_name: String) -> SourceSpan? {
-    start := method_span.end.min(enclosing.end); end := enclosing.end.min(src.len())
-    if start >= end -> return .None
-    relative := src.get(start..end)?.find(type_name)
-    token_start := start + relative
-    .Val(SourceSpan { start: token_start, end: token_start + type_name.len() })
+
+game_type_name_span: fn(src: String, enclosing: Span, method_span: Span, written: String) -> Span? {
+    start: if method_span.end < enclosing.end -> method_span.end else -> enclosing.end
+    end: if enclosing.end < src.len() -> enclosing.end else -> src.len()
+    if start < 0 || start >= end -> return None
+    relative: src.slice(start, end).index_of(written) ?? return None
+    Val(Span{start: start + relative, end: start + relative + written.len()})
 }
-source_span_text: fn(src: String, span: SourceSpan) -> String {
-    text := src.get(span.start..span.end).unwrap_or("").trim() // #4303
-    text.to_string()
+
+state_graph_json: fn(graph: SemStateGraph) -> String {
+    states: loop state in graph.states -> {
+        reachable: if state.reachable == .Val(value) -> json_bool(value) else -> "null"
+        "{{\"name\":{json_str(state.name)},\"terminal\":{json_bool(state.terminal)},\"reachable\":{reachable},\"span\":{span_json(state.span)}}}"
+    }
+    transitions: loop transition in graph.transitions -> "{{\"operation\":{json_str(transition.operation)},\"from\":{json_optional_str(transition.from)},\"to\":{json_str(transition.to)}}}"
+    "{{\"owner\":{json_str(graph.owner)},\"module\":{json_str(graph.module_path)},\"states\":[{states.join(",")}],\"transitions\":[{transitions.join(",")}]}}"
 }
-state_graph_json: fn(graph: StateGraphFact) -> String {
-    states := graph.states.iter().map(fn(state) {
-        reachable := state.reachable.map_or_else(fn() { "null".to_string() }, fn(value) { value.to_string() })
-        "{{\"name\":{json_str(state.name)},\"terminal\":{state.terminal},\"reachable\":{reachable},\"span\":{span_json(state.span)}}}"
-    }).collect().join(",")
-    transitions := graph.transitions.iter().map(fn(transition) {
-        from := transition.from.as_ref().map_or_else(fn() { "null".to_string() }, fn(value) { json_str(value) })
-        "{{\"operation\":{json_str(transition.operation)},\"from\":{from},\"to\":{json_str(transition.to)}}}"
-    }).collect().join(",")
-    "{{\"owner\":{json_str(graph.owner)},\"module\":{json_str(graph.module_path)},\"states\":[{states}],\"transitions\":[{transitions}]}}"
+
+output_fact_json: fn(output: SemOutput) -> String {
+    entry: output.entry
+    "{{\"binding\":{json_str(output.binding)},\"kind\":{json_str(output.kind)},\"name\":{json_str(output.name)},\"entry\":{{\"identity\":{json_str(entry.identity)},\"name\":{json_str(entry.name)},\"module_path\":{json_str(entry.module_path)},\"definition_span\":{span_json(entry.definition_span)},\"reference_span\":{span_json(entry.reference_span)},\"params\":[{json_strs(entry.params)}],\"return_type\":{json_optional_str(entry.return_type)},\"failure_contract\":{json_str(entry.failure_contract)},\"failure_source\":{json_str(entry.failure_source)},\"authority\":{json_str(entry.authority)},\"effects\":[{json_strs(entry.effects)}]}},\"fact_source\":\"semindex_resolved_output\"}}"
 }
-output_fact_json: fn(output: jet_semindex.OutputFact) -> String {
-    effects := output.entry.effects.iter().map(json_str).collect().join(",")
-    params := output.entry.params.iter().map(json_str).collect().join(",")
-    ret := output.entry.return_type.as_deref().map(json_str).unwrap_or_else(fn() { "null".to_string() })
-    "{{\"binding\":{json_str(output.binding)},\"kind\":{json_str(output.kind)},\"name\":{json_str(output.name)},\"entry\":{{\"identity\":{json_str(output.entry.identity)},\"name\":{json_str(output.entry.name)},\"module_path\":{json_str(output.entry.module_path)},\"definition_span\":{span_json(output.entry.definition_span)},\"reference_span\":{span_json(output.entry.reference_span)},\"params\":[{params}],\"return_type\":{ret},\"failure_contract\":{json_str(output.entry.failure_contract)},\"failure_source\":{json_str(output.entry.failure_source)},\"authority\":{json_str(output.entry.authority)},\"effects\":[{effects}]}},\"fact_source\":\"semindex_resolved_output\"}}"
+
+collect_module_interfaces: fn(doc_module: JetDriverDocModule, out: &[String]) {
+    storage: doc_module.name_ledger ?? return
+    permit: storage.guard_read()
+    collect_interface_facts(doc_module.items, out, [String]{}, doc_module.source, doc_module.name_module_index, doc_module.alias, permit.value)
 }
-collect_interface_facts: fn(items: &[&Item], out: &[String], scope: &[String], src: String, module_idx: USize, module_alias: String, name_ledger: &jet_foundation.Names.NameLedger) {
+
+collect_interface_facts: fn(items: [Item], out: &[String], scope: [String], src: String, module_index: Int, module_alias: String, ledger: NameLedger) {
     loop item in items {
         if item == {
-            .Trait(t) -> {
-                trait_path := source_item_path(name_ledger, module_idx, module_alias, t.name, t.name_span, scope)
-                out.push(trait_fact_json(src, t, trait_path))
+            .Trait(definition) -> {
+                out.push(trait_fact_json(src, definition, source_item_path(ledger, module_index, module_alias, definition.name, definition.name_span, scope)))
             }
-            .Impl(i) && i.trait_name.is_some() && !i.is_generated_serde -> {
-                type_path := source_item_path(name_ledger, module_idx, module_alias, i.type_name, i.type_span, scope)
-                trait_name := i.trait_name.as_deref().unwrap_or("")
-                trait_path := source_item_path(name_ledger, module_idx, module_alias, trait_name, i.trait_span.unwrap_or(i.type_span), scope)
-                out.push(impl_fact_json(i, type_path, trait_path))
-            }
-            .Struct(s) -> {
-                loop block in s.trait_impls.iter().filter(fn(block) { !block.compiler_generated }) {
-                    type_path := source_item_path(name_ledger, module_idx, module_alias, s.name, s.name_span, scope)
-                    trait_path := source_item_path(name_ledger, module_idx, module_alias, block.trait_name, block.trait_span, scope)
-                    out.push(inline_trait_impl_fact_json(type_path, trait_path, block))
+            .Impl(implementation) -> {
+                if implementation.trait_name == .Val(trait_name) && !implementation.is_generated_serde {
+                    type_path: source_item_path(ledger, module_index, module_alias, implementation.type_name, implementation.type_span, scope)
+                    trait_path: source_item_path(ledger, module_index, module_alias, trait_name, implementation.trait_span ?? implementation.type_span, scope)
+                    out.push(trait_impl_fact_json(type_path, trait_path, implementation.methods, implementation.assoc_type_impls, implementation.delegation_field, implementation.type_span))
                 }
             }
-            .Enum(e) -> {
-                loop block in e.trait_impls.iter().filter(fn(block) { !block.compiler_generated }) {
-                    type_path := source_item_path(name_ledger, module_idx, module_alias, e.name, e.name_span, scope)
-                    trait_path := source_item_path(name_ledger, module_idx, module_alias, block.trait_name, block.trait_span, scope)
-                    out.push(inline_trait_impl_fact_json(type_path, trait_path, block))
+            .Struct(structure) -> {
+                loop block in structure.trait_impls {
+                    if block.compiler_generated -> next
+                    type_path: source_item_path(ledger, module_index, module_alias, structure.name, structure.name_span, scope)
+                    trait_path: source_item_path(ledger, module_index, module_alias, block.trait_name, block.trait_span, scope)
+                    out.push(trait_impl_fact_json(type_path, trait_path, block.methods, block.assoc_type_impls, block.delegation_field, block.trait_span))
                 }
             }
-            .CodeModule(m) -> {
-                if m.body == .Val(body) {
-                    nested := body.iter().collect(); nested_scope := scope.to_vec(); nested_scope.push(m.name.clone())
-                    collect_interface_facts(nested, out, nested_scope, src, module_idx, module_alias, name_ledger)
+            .Enum(definition) -> {
+                loop block in definition.trait_impls {
+                    if block.compiler_generated -> next
+                    type_path: source_item_path(ledger, module_index, module_alias, definition.name, definition.name_span, scope)
+                    trait_path: source_item_path(ledger, module_index, module_alias, block.trait_name, block.trait_span, scope)
+                    out.push(trait_impl_fact_json(type_path, trait_path, block.methods, block.assoc_type_impls, block.delegation_field, block.trait_span))
+                }
+            }
+            .CodeModule(module_value) -> {
+                if module_value.body == .Val(body) {
+                    nested_scope := [String]{}
+                    loop name in scope -> nested_scope.push(name)
+                    nested_scope.push(module_value.name)
+                    collect_interface_facts(body, out, nested_scope, src, module_index, module_alias, ledger)
                 }
             }
             else -> {}
         }
     }
 }
-source_item_path: fn(name_ledger: jet_foundation.Names.NameLedger, module_idx: USize, module_alias: String, internal_name: String, span: Span, fallback_scope: [String]) -> String {
-    loop candidate in ["{module_alias}.{internal_name}", if fallback_scope.is_empty() -> "{module_alias}.{internal_name}" else -> "{module_alias}.{fallback_scope.join(".")}.{internal_name}"] {
-        if name_ledger.display_path(module_idx, candidate, .Val(module_idx)) == .Val(path) -> return strip_module_alias(path, module_alias)
+
+// The path source in the module writes for an item, without the module's
+// own alias.
+source_item_path: fn(ledger: NameLedger, module_index: Int, module_alias: String, internal_name: String, span: Span, scope: [String]) -> String {
+    candidates := [String]{"{module_alias}.{internal_name}"}
+    if scope.len() > 0 -> candidates.push("{module_alias}.{scope.join(".")}.{internal_name}")
+    loop candidate in candidates {
+        if name_ledger_display_path(ledger, module_index, candidate, Val(module_index)) == .Val(path) {
+            return strip_module_alias(path, module_alias)
+        }
     }
-    if name_ledger.canonical_path_at(module_idx, span.start, span.end) == .Val(path) -> return strip_module_alias(path, module_alias)
-    fallback := if fallback_scope.is_empty() || internal_name.contains('.') -> internal_name.to_string() else -> "{fallback_scope.join(".")}.{internal_name}"
+    if name_ledger_display_path_at(ledger, module_index, span, internal_name, None, Val(module_index)) == .Val(path) {
+        return strip_module_alias(path, module_alias)
+    }
+    fallback: if scope.len() == 0 || internal_name.contains(".") -> internal_name else -> "{scope.join(".")}.{internal_name}"
     strip_module_alias(fallback, module_alias)
 }
+
 strip_module_alias: fn(path: String, module_alias: String) -> String {
-    path.strip_prefix(module_alias).and_then(fn(rest) { rest.strip_prefix('.') }).unwrap_or(path).to_string()
-}
-trait_fact_json: fn(src: String, t: &AST.TraitDef, display_path: String) -> String {
-    (scope, trait_name) := display_path.rsplit_once('.').map_or((_0: "", _1: display_path), fn(parts) { parts })
-    associated_types := t.assoc_types.iter().map(fn(entry) { json_str(entry._0) }).collect().join(",")
-    methods := t.methods.iter().map(fn(m) {
-        effects := m.declared_effects.as_ref().map(fn(effects) { effects.iter().map(fn(entry) { json_str(entry._0) }).collect().join(",") }).unwrap_or_default()
-        "{{\"name\":{json_str(m.name)},\"signature\":{json_str(trait_method_signature(src, m))},\"required\":{m.default_body.is_none()},\"default\":{m.default_body.is_some()},\"pure\":{m.is_pure},\"effects\":[{effects}],\"source_span\":{span_json(m.span.into())}}}"
-    }).collect().join(",")
-    "{{\"kind\":\"trait_interface\",\"trait\":{json_str(trait_name)},\"scope\":{json_str(scope)},\"associated_types\":[{associated_types}],\"methods\":[{methods}],\"source_span\":{span_json(t.name_span.into())},\"authoring\":[\"create_trait_impl\",\"jump_trait_to_impls\",\"palette_trait_methods\"]}}"
-}
-impl_fact_json: fn(i: AST.ImplDef, type_path: String, trait_path: String) -> String {
-    methods := i.methods.iter().map(fn(m) { json_str(m.name) }).collect().join(",")
-    associated_types := i.assoc_type_impls.iter().map(fn(entry) { json_str(entry._0) }).collect().join(",")
-    delegation := i.delegation_field.as_deref().map(json_str).unwrap_or_else(fn() { "null".to_string() })
-    trait_name := trait_path.rsplit_once('.').map_or(trait_path, fn(parts) { parts._1 })
-    scope := trait_path.rsplit_once('.').map_or("", fn(parts) { parts._0 })
-    "{{\"kind\":\"trait_impl\",\"type\":{json_str(type_path)},\"trait\":{json_str(trait_name)},\"scope\":{json_str(scope)},\"methods\":[{methods}],\"associated_types\":[{associated_types}],\"delegation_field\":{delegation},\"source_span\":{span_json(i.type_span.into())},\"diagnostic_affordance\":\"surface_missing_trait_members\"}}"
-}
-inline_trait_impl_fact_json: fn(type_path: String, trait_path: String, block: &AST.TraitImplBlock) -> String {
-    methods := block.methods.iter().map(fn(m) { json_str(m.name) }).collect().join(",")
-    associated_types := block.assoc_type_impls.iter().map(fn(entry) { json_str(entry._0) }).collect().join(",")
-    delegation := block.delegation_field.as_deref().map(json_str).unwrap_or_else(fn() { "null".to_string() })
-    trait_name := trait_path.rsplit_once('.').map_or(trait_path, fn(parts) { parts._1 })
-    scope := trait_path.rsplit_once('.').map_or("", fn(parts) { parts._0 })
-    "{{\"kind\":\"trait_impl\",\"type\":{json_str(type_path)},\"trait\":{json_str(trait_name)},\"scope\":{json_str(scope)},\"methods\":[{methods}],\"associated_types\":[{associated_types}],\"delegation_field\":{delegation},\"source_span\":{span_json(block.trait_span.into())},\"diagnostic_affordance\":\"surface_missing_trait_members\"}}"
-}
-trait_method_signature: fn(src: String, m: &AST.TraitMethodSig) -> String {
-    params := m.params.iter().enumerate().flat_map(fn(entry) {
-        (i, p) := entry; parts := [String]{}
-        if p.zone == .LabelOnly && !m.params[0..<i].iter().any(fn(previous) { previous.zone == .LabelOnly }) -> parts.push("*")
-        parts.push(trait_param_signature(src, p))
-        if p.zone == .PositionalOnly && m.params.get(i + 1).is_none_or(fn(next) { next.zone != .PositionalOnly }) -> parts.push("/")
-        parts
-    }).collect().join(", ")
-    ret := m.return_type.as_ref().map(fn(t) { " {t.name()}" }).unwrap_or_default()
-    provenance := trait_return_view_from(m, m.params)
-    arrow := if {
-        m.declared_effects == .Val(row) -> {
-            " -[{row.iter().map(fn(entry) { entry._0.as_str() }).collect().join(", ")}]>"
-        }
-        m.is_pure -> { " -[]>" }
-        else -> { " ->" }
-    }
-    "{m.name}: fn({params}){arrow}{ret}{provenance}"
+    prefix: "{module_alias}."
+    if path.starts_with(prefix) -> return path.remove_prefix(prefix)
+    path
 }
 
-event_dispatcher_facts: fn(path: OSPath, source: String, bundle: AST.ProgramBundle, index: SemIndex) -> [String] {
-    path_text := path.to_string_lossy()
-    module_ref := bundle.modules.iter().find(fn(module_ref) { module_ref.display == path_text.as_ref() }).or_else(fn() { bundle.modules.iter().find(fn(module_ref) { module_ref.source == source }) }) ?? return []
-    src := module_ref.source.as_str()
-    index.call_edges().iter().filter(fn(call) { call.module_path == module_ref.display }).filter_map(fn(call) {
-        aliases := event_module_aliases(src)
-        call_source_span := event_call_span(src, call.call_span).unwrap_or(call.call_span)
-        call_source := src.get(call_source_span.start..call_source_span.end).unwrap_or(call.callee)
-        function Object() { [native code] } := event_constructor_kind(src, call.call_span, call.callee.as_str(), call_source, aliases)
-        receiver := event_receiver(src, index, call.call_span, module_ref.display)
-        kind := function Object() { [native code] }.or_else(fn() {
-            receiver_type := receiver.as_ref().map(fn(receiver) { receiver.1.as_str() })?
-            event_method_kind(receiver_type, call.callee.as_str())
-        })?
-        scope := event_scope_argument(index, call_source_span, module_ref.display)
-        receiver_type := constructor_type(call.callee.as_str(), call_source).or_else(fn() { receiver.as_ref().map(fn(receiver) { receiver._1.clone() }) })
-        receiver_name := receiver.as_ref().map(fn(receiver) { receiver._0.as_str() }).map(json_str).unwrap_or_else(fn() { "null".to_string() })
-        receiver_span := receiver.as_ref().map(fn(receiver) { span_json(receiver._2) }).unwrap_or_else(fn() { "null".to_string() })
-        scope_name := scope.as_ref().map(fn(scope) { scope._0.as_str() }).map(json_str).unwrap_or_else(fn() { "null".to_string() })
-        scope_span := scope.as_ref().map(fn(scope) { span_json(scope._1) }).unwrap_or_else(fn() { "null".to_string() })
-        receiver_json := receiver_type.as_deref().map(json_str).unwrap_or_else(fn() { "null".to_string() })
-        .Val("{{\"kind\":{json_str(kind)},\"source\":{json_str(call_source)},\"source_span\":{span_json(call_source_span)},\"receiver\":{receiver_name},\"receiver_source_span\":{receiver_span},\"receiver_type\":{receiver_json},\"scope\":{scope_name},\"scope_source_span\":{scope_span},\"fact_source\":\"semindex_checked_call\",\"lifetime\":\"EventScope-owned\",\"observables\":[\"listener_count\",\"blocked_count\",\"queued_count\",\"running_count\",\"DispatchReport.trace\"],\"semantics\":\"core.event_source_truth\"}}")
-    }).collect()
+// The part of a dotted path before its last segment, else "".
+path_scope: fn(path: String) -> String {
+    if path.cut_last(".") == .Val(parts) -> parts.before else -> ""
 }
-event_module_aliases: fn(src: String) -> [String] {
-    aliases := [String]{}
-    loop raw_line in src.lines() {
-        line := raw_line.split("//").next().unwrap_or("").trim() // #4303
-        rest := line.strip_prefix("use core.") ?? next
-        full := "core.{rest}"
-        (module_ref, alias) := full.split_once(" as ").map(fn(parts) { (_0: parts._0.trim(), _1: parts._1.trim()) }).unwrap_or_else(fn() {
-            module_ref := full.trim() // #4303
-            (_0: module_ref, _1: module_ref.rsplit('.').next().unwrap_or(""))
-        })
-        if module_ref == "core.event" && !alias.is_empty() -> aliases.push(alias.to_string())
+
+trait_fact_json: fn(src: String, definition: TraitDef, display_path: String) -> String {
+    associated_types: loop entry in definition.assoc_types -> json_str(entry.name)
+    methods: loop method in definition.methods -> trait_method_json(src, method)
+    "{{\"kind\":\"trait_interface\",\"trait\":{json_str(name_facts_leaf(display_path))},\"scope\":{json_str(path_scope(display_path))},\"associated_types\":[{associated_types.join(",")}],\"methods\":[{methods.join(",")}],\"source_span\":{span_json(definition.name_span)},\"authoring\":[\"create_trait_impl\",\"jump_trait_to_impls\",\"palette_trait_methods\"]}}"
+}
+
+trait_method_json: fn(src: String, method: TraitMethodSig) -> String {
+    effects := [String]{}
+    if method.declared_effects == .Val(row) {
+        loop entry in row -> effects.push(json_str(entry.name))
     }
-    aliases.sort(); aliases.dedup(); aliases
+    "{{\"name\":{json_str(method.name)},\"signature\":{json_str(trait_method_signature(src, method))},\"required\":{json_bool(method.default_body == None)},\"default\":{json_bool(method.default_body != None)},\"pure\":{json_bool(method.is_pure)},\"effects\":[{effects.join(",")}],\"source_span\":{span_json(method.span)}}}"
 }
-event_constructor_kind: fn(src: String, call_span: SourceSpan, callee: String, _source: String, aliases: &[String]) -> String? {
-    before := src.get(..call_span.start.min(src.len()))?.trim_end() // #4303
-    if !aliases.iter().any(fn(alias) { before.ends_with("{alias}.") }) -> return .None
-    if callee == {
-        "new" -> .Val("event_stream_create"), "with_policy" -> .Val("event_stream_create_with_policy")
-        "async_result" -> .Val("async_event_create"), "hook" -> .Val("hook_create")
-        "decision_hook" -> .Val("decision_hook_create"), "scope" -> .Val("event_scope_create")
-        "policy_sync" -> .Val("event_policy_sync"), _ -> .None
+
+// The requirement as its trait writes it: the source of the signature, up
+// to a default body's opening brace.
+trait_method_signature: fn(src: String, method: TraitMethodSig) -> String {
+    text: snippet(src, method.span)
+    if method.default_body != None && text.index_of("{{") == .Val(open) {
+        return text.slice(0, open).trim()
     }
+    text
 }
-constructor_type: fn(callee: String, source: String) -> String? {
-    type_args := source.find('<').and_then(fn(start) { source[start + 1..<source.len()].find('>').map(fn(end) { source[start + 1..start + 1 + end] }) }).map(fn(s) { s.trim() }).filter(fn(args) { !args.is_empty() })
-    if callee == {
-        "new" | "with_policy" -> type_args.map(fn(args) { "Event<{args}>" })
-        "async_result" -> type_args.map(fn(args) { "AsyncEvent<{args}>" })
-        "hook" -> type_args.map(fn(args) { "Hook<{args}>" })
-        "decision_hook" -> type_args.map(fn(args) { "DecisionHook<{args}>" })
-        "scope" -> .Val("EventScope"), "policy_sync" -> .Val("EventPolicy"), _ -> .None
-    }
+
+trait_impl_fact_json: fn(type_path: String, trait_path: String, methods: [Func], associated: [NamedType], delegation_field: String?, span: Span) -> String {
+    method_names: loop method in methods -> json_str(method.name)
+    associated_types: loop entry in associated -> json_str(entry.name)
+    "{{\"kind\":\"trait_impl\",\"type\":{json_str(type_path)},\"trait\":{json_str(name_facts_leaf(trait_path))},\"scope\":{json_str(path_scope(trait_path))},\"methods\":[{method_names.join(",")}],\"associated_types\":[{associated_types.join(",")}],\"delegation_field\":{json_optional_str(delegation_field)},\"source_span\":{span_json(span)},\"diagnostic_affordance\":\"surface_missing_trait_members\"}}"
 }
-event_call_span: fn(src: String, callee_span: SourceSpan) -> SourceSpan? {
-    tail := src.get(callee_span.end..)?
-    open_offset := tail.find('(')?; open := callee_span.end + open_offset
-    bytes := src.as_bytes(); depth := USize{0}; quoted := false; escaped := false
-    loop (offset, byte) in bytes.iter().enumerate().skip(open) {
-        ch := Char{byte}
-        if quoted {
-            if escaped { escaped = false } else if ch == '\\' { escaped = true } else if ch == '"' { quoted = false }
-            next
-        }
-        if ch == '"' { quoted = true; next }
-        if ch == '(' { depth += 1 } else if ch == ')' {
-            depth = depth.saturating_sub(1)
-            if depth == 0 -> return .Val(SourceSpan { start: callee_span.start, end: offset + 1 })
-        }
-    }
-    .None
-}
-event_receiver: fn(src: String, index: &SemIndex, call_span: SourceSpan, module_path: String) -> (String, String, SourceSpan)? {
-    reference := index.references().iter().filter(fn(reference) { reference.module_path == module_path })
-        .filter(fn(reference) { reference.span.end <= call_span.start })
-        .filter(fn(reference) { src.get(reference.span.end..call_span.start).is_some_and(fn(between) { between.trim() == "." }) })
-        .max_by_key(fn(reference) { reference.span.end })
-    target := reference.target.as_ref()
-    definition := index.definitions().iter().find(fn(definition) { definition.module_path == target.module_path && definition.def_span == target.def_span })
-    ty := if definition.kind == {
-        .Local { ty: .Val(ty), .. } | .Param { ty } -> ty.clone()
-        else -> { return .None }
-    }
-    .Val((_0: reference.name.clone(), _1: ty, _2: reference.span))
-}
-event_scope_argument: fn(index: SemIndex, call_span: SourceSpan, module_path: String) -> (String, SourceSpan)? {
-    index.references().iter().filter(fn(reference) { reference.module_path == module_path })
-        .filter(fn(reference) { reference.span.start >= call_span.start && reference.span.end <= call_span.end })
-        .filter_map(fn(reference) {
-            target := reference.target.as_ref()
-            definition := index.definitions().iter().find(fn(definition) { definition.module_path == target.module_path && definition.def_span == target.def_span })
-            is_scope := if definition.kind == {
-                .Local { ty: .Val(ty), .. } if ty == "EventScope" -> true else -> false
-            }
-            if is_scope -> .Val((_0: reference.name.clone(), _1: reference.span)) else -> .None
-        }).min_by_key(fn(entry) { entry.1.start })
-}
-event_method_kind: fn(receiver_type: String, method: String) -> String? {
-    kind := if {
-        receiver_type == ty && method == "on") if is_event_handler_type(fn(ty) { "event_subscribe" },
-        receiver_type == ty && method == "once") if is_event_handler_type(fn(ty) { "event_subscribe_once" },
-        receiver_type == ty && method == "on_priority") if is_event_handler_type(fn(ty) { "event_subscribe_priority" },
-        receiver_type == ty && method == "emit") if ty.starts_with("Event<" -> "event_emit",
-        receiver_type == ty && method == "emit_async") if ty.starts_with("AsyncEvent<" -> "event_emit_async",
-        receiver_type == ty && method == "close") if ty.starts_with("AsyncEvent<" -> "event_close",
-        receiver_type == ty && method == "listener_count") if is_event_handler_type(fn(ty) { "event_listener_count" },
-        receiver_type == ty && method == "queued_count") if ty.starts_with("AsyncEvent<" -> "event_queued_count",
-        receiver_type == ty && method == "running_count") if ty.starts_with("AsyncEvent<" -> "event_running_count",
-        receiver_type == ty && method == "blocked_count") if ty.starts_with("AsyncEvent<" -> "event_pending_count",
-        receiver_type == ty && method == "run") if ty.starts_with("Hook<" -> "hook_run",
-        receiver_type == ty && method == "run") if ty.starts_with("DecisionHook<" -> "decision_hook_run",
-        receiver_type == "EventScope" && method == "cancel" -> "event_scope_cancel", fn("EventScope", "active_count") { "event_scope_active_count" },
-        receiver_type == "Subscription" && method == "unsubscribe" -> "event_unsubscribe", fn("Subscription", "is_active") { "event_subscription_active" },
-        receiver_type == "EventTrace" && method == "summary" -> "event_trace_summary",
-        receiver_type == "EventTrace" && method == "delivered".bit_or("queued").bit_or("dropped") -> "event_trace_count",
-        receiver_type == ty && method == "accepted") if ty.starts_with("DispatchReport<" -> "event_report_accepted",
-        receiver_type == ty && method == "delivered_handlers") if ty.starts_with("DispatchReport<" -> "event_report_delivered",
-        receiver_type == ty && method == "state") if ty.starts_with("DispatchReport<" -> "event_report_state",
-        receiver_type == ty && method == "failures") if ty.starts_with("DispatchReport<" -> "event_report_failures",
-        receiver_type == ty && method == "trace") if ty.starts_with("DispatchReport<" -> "event_report_trace",
-        fn(_) { return .None }
-    }
-    .Val(kind)
-}
-is_event_handler_type: fn(ty: String) -> Bool {
-    ty.starts_with("Event<") || ty.starts_with("AsyncEvent<") || ty.starts_with("Hook<") || ty.starts_with("DecisionHook<")
-}
-trait_param_signature: fn(src: String, p: &AST.Param) -> String {
-    is_self := p.name == "self" && p.ty.name().is_empty(); out := String.new()
-    if p.root -> out.push_str("#Root ")
-    if is_self { out.push_str(p.convention.sigil()); out.push_str(p.name); return out }
-    if p.public_label == .Val((label, _)) { out.push_str(label); out.push(' ') }
-    out.push_str(p.name); out.push_str(": "); out.push_str(p.convention.sigil())
-    if p.variadic -> out.push_str("...")
-    if p.variadic_bound_list == .Val(bounds) { out.push('['); out.push_str(bounds.join(", ")); out.push(']') } else { out.push_str(p.ty.name()) }
-    if p.declared_view_from_names == .Val(names) && !names.is_empty() { out.push_str(" from "); out.push_str(names.join(" | ")) }
-    if p.default == .Val(default) { out.push('{'); out.push_str(snippet(src, default.span())); out.push('}') }
-    out
-}
-trait_return_view_from: fn(m: AST.TraitMethodSig, params: [AST.Param]) -> String {
-    map := m.declared_return_view_provenance.as_ref() ?? return String.new()
-    if map.is_empty() -> return String.new()
-    source_union := fn(provenance: AST.ViewProvenance) {
-        provenance.sources.iter().map(fn(path) {
-            source := if path.source == {
-                .Receiver -> "self".to_string()
-                .Parameter(index) -> params.iter().filter(fn(param) { param.name != "self" }).nth(index).map(fn(param) { param.name.clone() }).unwrap_or_else(fn() { "param{index}" })
-                .Static { module_path, name } -> if module_path.is_empty() -> "static.{name}" else -> "static.{module_path}.{name}"
-            }
-            loop projection in path.projections {
-                if projection == .Field(field) { source.push('.'); source.push_str(field) }
-            }
-            source
-        }).collect().join(" | ")
-    }
-    keys := map.keys().collect(); keys.sort() // GATE #4499: view path keys keep structural order.
-    body := if {
-        map.len() == 1 -> {
-            path := keys.first().expect("non-empty view map"); provenance := map[path]
-            if path.is_empty() -> source_union(provenance) else -> "{path.join(".")}: {source_union(provenance)}"
-        }
-        else -> {
-            keys.iter().map(fn(path) { "{path.join(".")}: {source_union(map[path])}" }).collect().join(", ")
-        }
-    }
-    if map.len() == 1 && keys.first().is_some_and(fn(path) { path.is_empty() }) -> " from {body}" else -> " from ({body})"
-}
-task_flow_facts: fn(src: String) -> [String] {
+
+// The `core.event` operations the module read from `path` performs, one
+// fact per checked call.
+event_dispatcher_facts: fn(path: String, source: String, modules: [JetDriverDocModule], index: SemIndex) -> [String] {
     facts := [String]{}
-    // Task.group / task / task.all|race|any.
-    loop (needle, kind) in [(_0: "task.group", _1: "structured_task_scope"), (_0: "task ", _1: "task_spawn"),
-        (_0: "task.all", _1: "task_all"), (_0: "task.race", _1: "task_race"), (_0: "task.any", _1: "task_any"), (_0: ".join(", _1: "join_task"),
-        (_0: "channel", _1: "channel_create"), (_0: ".send(", _1: "channel_send"), (_0: ".receive(", _1: "channel_receive"), (_0: "#Context", _1: "deadline_context")] {
-        loop span in text_matches(src, needle) ->
-            facts.push("{{\"kind\":{json_str(kind)},\"source\":{json_str(needle)},\"source_span\":{span_json(span)},\"rail\":\"async\",\"semantics\":\"core.tasks_source_truth\"}}")
+    position: canvas_event_module(path, source, modules) ?? return facts
+    doc_module: modules[position]
+    src: doc_module.source
+    aliases: event_module_aliases(doc_module.imports)
+    loop call in index.calls {
+        if call.module_path != doc_module.path -> next
+        call_source_span: event_call_span(src, call.span) ?? call.span
+        call_source: if call_source_span.end <= src.len() -> src.slice(call_source_span.start, call_source_span.end) else -> call.callee
+        receiver: event_receiver(src, index, call.span, doc_module.path)
+        kind := event_constructor_kind(src, call.span, call.callee, aliases)
+        if kind == None && receiver == .Val(found) {
+            kind = event_method_kind(found.ty, call.callee)
+        }
+        found_kind: kind ?? next
+        scope: event_scope_argument(index, call_source_span, doc_module.path)
+        receiver_type := constructor_type(call.callee, call_source)
+        if receiver_type == None && receiver == .Val(found) -> receiver_type = Val(found.ty)
+        receiver_name: if receiver == .Val(found) -> json_str(found.name) else -> "null"
+        receiver_span: if receiver == .Val(found) -> span_json(found.span) else -> "null"
+        scope_name: if scope == .Val(found) -> json_str(found.name) else -> "null"
+        scope_span: if scope == .Val(found) -> span_json(found.span) else -> "null"
+        facts.push("{{\"kind\":{json_str(found_kind)},\"source\":{json_str(call_source)},\"source_span\":{span_json(call_source_span)},\"receiver\":{receiver_name},\"receiver_source_span\":{receiver_span},\"receiver_type\":{json_optional_str(receiver_type)},\"scope\":{scope_name},\"scope_source_span\":{scope_span},\"fact_source\":\"semindex_checked_call\",\"lifetime\":\"EventScope-owned\",\"observables\":[\"listener_count\",\"blocked_count\",\"queued_count\",\"running_count\",\"DispatchReport.trace\"],\"semantics\":\"core.event_source_truth\"}}")
     }
     facts
 }
-project_func: fn(index: SemIndex, module_display: String, module_src: String, f: AST.Func) -> GraphBuilder {
-    id := graph_id(module_display, f)
-    g := GraphBuilder { graph_id: id.clone() }
-    entry_id := "{id}:entry"; entry_descriptor := node_catalog.descriptor_for_id("entry")
-    g.nodes.push(NodeRec { id: entry_id.clone(), kind: entry_descriptor.kind.to_string(), archetype: entry_descriptor.archetype.to_string(),
-        title: f.name.clone(), span: f.name_span.into(), x: 40, y: 40,
-        badges: effect_badges(index, f.name).into_iter().map(fn(s) { s.to_string() }).collect(),
-        affordances: ["source_jump", "insert_call", "rename_function", "edit_function_signature", "create_function"],
-        meta_json: meta_attr_json(f.meta.as_ref()) })
-    loop (i, p) in f.params.iter().enumerate() {
-        pin_id := "{entry_id}:out:{p.name}"; ty := p.ty.name()
-        _: g.local_pins.insert(p.name.clone(), pin_id.clone()); _: g.local_types.insert(p.name.clone(), ty.clone())
-        g.pins.push(PinRec { id: pin_id, node_id: entry_id.clone(), name: p.name.clone(), direction: "output", ty: ty, role: .None,
-            pattern_source: .None, ability: p.convention.sigil().to_string(), fallible: false, effect_grant_need: .None,
-            span: p.name_span.into(), pattern_source_span: .None, append_op: .None, element_index: .None })
-        _: i
+
+canvas_event_module: fn(path: String, source: String, modules: [JetDriverDocModule]) -> Int? {
+    loop (position, doc_module) in modules {
+        if doc_module.path == path || doc_module.physical_path == path -> return Val(position)
     }
-    loop def in index.definitions() {
-        if def.kind == {
-            .Local { ty, .. } -> { if ty == .Val(t) -> _: g.local_types.insert(def.name.clone(), t.clone()) }
-            .Param { ty } -> _: g.local_types.insert(def.name.clone(), ty.clone()), _ -> {}
+    loop (position, doc_module) in modules {
+        if doc_module.source == source -> return Val(position)
+    }
+    None
+}
+
+// The names the module imports `core.event` under.
+event_module_aliases: fn(imports: [ImportDecl]) -> [String] {
+    aliases := [String]{}
+    loop import in imports {
+        if import.kind == .Module(name, _) && name == "core.event" && import.alias != "" && !aliases.contains(import.alias) {
+            aliases.push(import.alias)
+        }
+    }
+    aliases
+}
+
+event_constructor_kind: fn(src: String, call_span: Span, callee: String, aliases: [String]) -> String? {
+    end: if call_span.start < src.len() -> call_span.start else -> src.len()
+    before: src.slice(0, end).trim_end()
+    qualified := false
+    loop alias in aliases {
+        if before.ends_with("{alias}.") -> qualified = true
+    }
+    if !qualified -> return None
+    if callee == {
+        "new" -> Val("event_stream_create")
+        "with_policy" -> Val("event_stream_create_with_policy")
+        "async_result" -> Val("async_event_create")
+        "hook" -> Val("hook_create")
+        "decision_hook" -> Val("decision_hook_create")
+        "scope" -> Val("event_scope_create")
+        "policy_sync" -> Val("event_policy_sync")
+        else -> None
+    }
+}
+
+// The type a constructor call makes, from the type arguments it writes.
+constructor_type: fn(callee: String, source: String) -> String? {
+    if callee == "scope" -> return Val("EventScope")
+    if callee == "policy_sync" -> return Val("EventPolicy")
+    start: source.index_of("<") ?? return None
+    rest: source.slice(start + 1, source.len())
+    close: rest.index_of(">") ?? return None
+    args: rest.slice(0, close).trim()
+    if args == "" -> return None
+    if callee == {
+        "new" | "with_policy" -> Val("Event<{args}>")
+        "async_result" -> Val("AsyncEvent<{args}>")
+        "hook" -> Val("Hook<{args}>")
+        "decision_hook" -> Val("DecisionHook<{args}>")
+        else -> None
+    }
+}
+
+// From the callee through the call's closing paren.
+event_call_span: fn(src: String, callee_span: Span) -> Span? {
+    close: call_close_after(src, callee_span.end) ?? return None
+    Val(Span{start: callee_span.start, end: close})
+}
+
+// The definition a reference resolves to.
+definition_for_anchor: fn(index: SemIndex, target: SemAnchor) -> SemDef? {
+    loop definition in index.definitions {
+        if definition.def.module_path == target.module_path && definition.def.def_span == target.def_span {
+            return Val(definition.def)
+        }
+    }
+    None
+}
+
+// The local or parameter written just before `.callee(…)`, with its type.
+event_receiver: fn(src: String, index: SemIndex, call_span: Span, module_path: String) -> CanvasEventOperand? {
+    best := SemRef?{None}
+    loop reference in index.references {
+        if reference.module_path != module_path || reference.span.end > call_span.start || call_span.start > src.len() {
+            next
+        }
+        if src.slice(reference.span.end, call_span.start).trim() != "." -> next
+        if best == .Val(current) && current.span.end > reference.span.end -> next
+        best = Val(reference)
+    }
+    found: best ?? return None
+    target: found.target ?? return None
+    definition: definition_for_anchor(index, target) ?? return None
+    if definition.kind == {
+        .Local(_, ty) -> {
+            written: ty ?? return None
+            Val(CanvasEventOperand{name: found.name, ty: type_name(written), span: found.span})
+        }
+        .Param(ty) -> Val(CanvasEventOperand{name: found.name, ty: type_name(ty), span: found.span})
+        else -> None
+    }
+}
+
+// The first `EventScope` local the call's text reads.
+event_scope_argument: fn(index: SemIndex, call_span: Span, module_path: String) -> CanvasEventOperand? {
+    best := CanvasEventOperand?{None}
+    loop reference in index.references {
+        if reference.module_path != module_path || reference.span.start < call_span.start || reference.span.end > call_span.end {
+            next
+        }
+        target: reference.target ?? next
+        definition: definition_for_anchor(index, target) ?? next
+        if definition.kind == .Local(_, .Val(ty)) && type_name(ty) == "EventScope" {
+            if best == .Val(current) && current.span.start <= reference.span.start -> next
+            best = Val(CanvasEventOperand{name: reference.name, ty: "EventScope", span: reference.span})
+        }
+    }
+    best
+}
+
+// The `core.event` operation `receiver_type.method(…)` performs.
+event_method_kind: fn(receiver_type: String, method: String) -> String? {
+    handler: is_event_handler_type(receiver_type)
+    stream: receiver_type.starts_with("Event<")
+    async_stream: receiver_type.starts_with("AsyncEvent<")
+    report: receiver_type.starts_with("DispatchReport<")
+    if handler && method == "on" -> return Val("event_subscribe")
+    if handler && method == "once" -> return Val("event_subscribe_once")
+    if handler && method == "on_priority" -> return Val("event_subscribe_priority")
+    if handler && method == "listener_count" -> return Val("event_listener_count")
+    if stream && method == "emit" -> return Val("event_emit")
+    if async_stream && method == "emit_async" -> return Val("event_emit_async")
+    if async_stream && method == "close" -> return Val("event_close")
+    if async_stream && method == "queued_count" -> return Val("event_queued_count")
+    if async_stream && method == "running_count" -> return Val("event_running_count")
+    if async_stream && method == "blocked_count" -> return Val("event_pending_count")
+    if receiver_type.starts_with("Hook<") && method == "run" -> return Val("hook_run")
+    if receiver_type.starts_with("DecisionHook<") && method == "run" {
+        return Val("decision_hook_run")
+    }
+    if receiver_type == "EventScope" && method == "cancel" -> return Val("event_scope_cancel")
+    if receiver_type == "EventScope" && method == "active_count" {
+        return Val("event_scope_active_count")
+    }
+    if receiver_type == "Subscription" && method == "unsubscribe" -> return Val("event_unsubscribe")
+    if receiver_type == "Subscription" && method == "is_active" {
+        return Val("event_subscription_active")
+    }
+    if receiver_type == "EventTrace" && method == "summary" -> return Val("event_trace_summary")
+    if receiver_type == "EventTrace" && (method == "delivered" || method == "queued" || method == "dropped") {
+        return Val("event_trace_count")
+    }
+    if report && method == "accepted" -> return Val("event_report_accepted")
+    if report && method == "delivered_handlers" -> return Val("event_report_delivered")
+    if report && method == "state" -> return Val("event_report_state")
+    if report && method == "failures" -> return Val("event_report_failures")
+    if report && method == "trace" -> return Val("event_report_trace")
+    None
+}
+
+is_event_handler_type: fn(ty: String) -> Bool {
+    ty.starts_with("Event<") || ty.starts_with("AsyncEvent<") || ty.starts_with("Hook<") || ty.starts_with("DecisionHook<")
+}
+
+task_flow_facts: fn(src: String) -> [String] {
+    needles: [CanvasTaskNeedle]{
+        CanvasTaskNeedle{needle: "task.group", kind: "structured_task_scope"},
+        CanvasTaskNeedle{needle: "task ", kind: "task_spawn"},
+        CanvasTaskNeedle{needle: "task.all", kind: "task_all"},
+        CanvasTaskNeedle{needle: "task.race", kind: "task_race"},
+        CanvasTaskNeedle{needle: "task.any", kind: "task_any"},
+        CanvasTaskNeedle{needle: ".join(", kind: "join_task"},
+        CanvasTaskNeedle{needle: "channel", kind: "channel_create"},
+        CanvasTaskNeedle{needle: ".send(", kind: "channel_send"},
+        CanvasTaskNeedle{needle: ".receive(", kind: "channel_receive"},
+        CanvasTaskNeedle{needle: "#Context", kind: "deadline_context"},
+    }
+    facts := [String]{}
+    loop entry in needles {
+        loop span in text_matches(src, entry.needle) {
+            facts.push("{{\"kind\":{json_str(entry.kind)},\"source\":{json_str(entry.needle)},\"source_span\":{span_json(span)},\"rail\":\"async\",\"semantics\":\"core.tasks_source_truth\"}}")
+        }
+    }
+    facts
+}
+
+project_func: fn(index: SemIndex, module_display: String, module_src: String, f: Func) -> GraphBuilder {
+    id: graph_id(module_display, f)
+    g := GraphBuilder{graph_id: id}
+    entry_id: "{id}:entry"
+    entry_descriptor: descriptor_for_id("entry")
+    g.nodes.push(
+        NodeRec{
+            id: entry_id,
+            kind: entry_descriptor.kind,
+            archetype: entry_descriptor.archetype,
+            title: f.name,
+            span: f.name_span,
+            x: 40,
+            y: 40,
+            badges: effect_badges(index, f.name),
+            affordances: [String]{"source_jump", "insert_call", "rename_function", "edit_function_signature", "create_function"},
+            meta_json: meta_attr_json(f.meta),
+        },
+    )
+    loop param in f.params {
+        pin_id: "{entry_id}:out:{param.name}"
+        ty: type_name(param.ty)
+        g.local_pins[param.name] = pin_id
+        g.local_types[param.name] = ty
+        g.pins.push(PinRec{id: pin_id, node_id: entry_id, name: param.name, direction: "output", ty: ty, role: None, pattern_source: None, ability: access_sigil(param.convention), fallible: false, effect_grant_need: None, span: param.name_span, pattern_source_span: None, append_op: None, element_index: None})
+    }
+    loop definition in index.definitions {
+        found: definition.def
+        if found.kind == {
+            .Local(_, ty) -> {
+                if ty == .Val(written) -> g.local_types[found.name] = type_name(written)
+            }
+            .Param(ty) -> g.local_types[found.name] = type_name(ty)
+            else -> {}
         }
     }
     project_stmt_block(g, index, module_src, f.body, 0, 220, 170)
-    add_source_comment_regions(g, module_src, f); add_execution_overlay(g, module_src, f.body)
+    add_source_comment_regions(g, module_src, f)
+    add_execution_overlay(g, module_src, f.body)
     g
 }
-collect_node_refs: fn(graph: &GraphBuilder, out: &[NodeQueryRef]) {
-    loop node in graph.nodes ->
-        out.push(NodeQueryRef { graph_id: graph.graph_id.clone(), node_id: node.id.clone(), kind: node.kind.clone(), title: node.title.clone(), span: node.span })
-    loop inline in graph.inline_exprs ->
-        out.push(NodeQueryRef { graph_id: graph.graph_id.clone(), node_id: inline.node_id.clone(), kind: "inline:{inline.role}", title: inline.source.clone(), span: inline.span })
-}
 
+collect_node_refs: fn(graph: GraphBuilder, out: &[NodeQueryRef]) {
+    loop node in graph.nodes {
+        out.push(NodeQueryRef{graph_id: graph.graph_id, node_id: node.id, kind: node.kind, title: node.title, span: node.span})
+    }
+    loop inline in graph.inline_exprs {
+        out.push(NodeQueryRef{graph_id: graph.graph_id, node_id: inline.node_id, kind: "inline:{inline.role}", title: inline.source, span: inline.span})
+    }
+}
