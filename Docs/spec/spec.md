@@ -2148,6 +2148,9 @@ the incompatible operation, prints the full call path, and names the denial and
 its provenance. An open-world dispatch needs a sealed target set or signed
 dependency summary; otherwise the strict fact is unprovable and rejected
 (D-AUTHORITY-MEM1, D-MEM-FACTS1).
+`!Mem.Gc` forbids collection by the opt-in tracing collector (D-DENY-COST1); a
+row, a `#FX(…)` cap or an authority `deny:` names it like any other deny-only
+leaf, and the denial follows every reachable call.
 
 ```jet
 integrate: fn(e: &Entity, dt: Float) -[!Mem.Alloc]> {

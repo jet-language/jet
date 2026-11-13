@@ -108,12 +108,15 @@ Panic: struct {
     impl Effect {}
 }
 
-// `Mem.Stack` is only ever denied with a byte ceiling,
+// Hidden memory costs: allocation, reference counting, stack use and
+// collection by the opt-in tracing collector. A `-[!Mem.Gc]>` row proves the
+// code never collects. `Mem.Stack` is only ever denied with a byte ceiling,
 // `!Mem.Stack(above: N)`.
 Mem: enum {
     Alloc
     Rc
     Stack
+    Gc
 
     impl Effect {}
 }
