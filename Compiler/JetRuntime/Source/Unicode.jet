@@ -1,8 +1,110 @@
 // Native Unicode kernels over the one E4 {ptr,len,cap} UTF-8 text carrier.
-// Pinned mapping/property decisions are generated in UnicodeTables.jet.
+// Pinned mapping/property tables are generated in UnicodeTables.jet.
 // Reuses the stream/trim/scalar-offset policies of the prior Jet
 // Core/Text/Runtime/KernelUnicodeString.jet port, with fixed-word storage
 // and L3a's audited byte helpers instead of Core lists or exact Int indexing.
+
+// Every generated lookup (UnicodeTables.jet, UnicodeText<n>.jet,
+// UnicodeNormalizeTables.jet) answers a scalar below 128 from its dense ASCII
+// block and searches a table of sorted, disjoint [lo, hi, value] records in
+// immortal text for the rest: lo and hi of `key_digits` digits, then the
+// value of `value_digits`. A digit holds six bits, low digit first: digit d
+// is the byte 35 + d below 57 and 36 + d from 57 (Tools/agent/UnicodeTables.jet
+// table_digits), so a four-digit field read as a little-endian word orders
+// as its value does.
+unicode_table_field: fn(address: I64, digits: I64) -> I64 Never! {
+    value := I64{0}
+    scale := I64{1}
+    at := I64{0}
+    loop at < digits {
+        byte: rt_text_byte(wrapping(address + at))
+        digit: if (byte < I64{92}) -> wrapping(byte - I64{35}) else -> wrapping(byte - I64{36})
+        value = wrapping(value + wrapping(digit * scale))
+        scale = wrapping(scale * I64{64})
+        at = wrapping(at + I64{1})
+    }
+    value
+}
+
+// The `digits`-digit value of scalar `cp` (below 128) in a dense ASCII block.
+unicode_table_dense: fn(ascii: I64, cp: I64, digits: I64) -> I64 Never! {
+    unicode_table_field(wrapping(rt_text_data(ascii) + wrapping(cp * digits)), digits)
+}
+
+// `key` (0 to 2^24 - 1) as its four digit bytes, low digit first, in one
+// little-endian word.
+unicode_table_code: fn(key: I64) -> I64 Never! {
+    code := I64{0}
+    rest := key
+    scale := I64{1}
+    at := I64{0}
+    loop at < I64{4} {
+        digit: rest.bit_and(I64{63})
+        byte: if (digit < I64{57}) -> wrapping(digit + I64{35}) else -> wrapping(digit + I64{36})
+        code = wrapping(code + wrapping(byte * scale))
+        scale = wrapping(scale * I64{256})
+        rest = rest >> I64{6}
+        at = wrapping(at + I64{1})
+    }
+    code
+}
+
+// The index of the record of `table` (`count` records) whose [lo, hi] holds
+// `key`, or -1 when none does. Four-digit keys compare as words: one load
+// reads a record's lo and hi.
+unicode_table_find: fn(table: I64, count: I64, key_digits: I64, value_digits: I64, key: I64) -> I64 Never! {
+    if (key < I64{0}) { return I64{-1} }
+    data: rt_text_data(table)
+    stride: wrapping(wrapping(key_digits * I64{2}) + value_digits)
+    low := I64{0}
+    high := count
+    if (key_digits == I64{4}) {
+        if (key >= I64{16777216}) { return I64{-1} }
+        code: unicode_table_code(key)
+        loop low < high {
+            middle: wrapping(low + high) >> I64{1}
+            word: rt_text_word(wrapping(data + wrapping(middle * stride)))
+            if (code < word.bit_and(I64{4294967295})) {
+                high = middle
+            } else {
+                if (code <= (word >> I64{32})) { return middle }
+                low = wrapping(middle + I64{1})
+            }
+        }
+        return I64{-1}
+    }
+    loop low < high {
+        middle: wrapping(low + high) >> I64{1}
+        record: wrapping(data + wrapping(middle * stride))
+        if (key < unicode_table_field(record, key_digits)) {
+            high = middle
+        } else {
+            if (key <= unicode_table_field(wrapping(record + key_digits), key_digits)) { return middle }
+            low = wrapping(middle + I64{1})
+        }
+    }
+    I64{-1}
+}
+
+// The value of the record of `table` holding `key`, or `missing`.
+unicode_table_value: fn(table: I64, count: I64, key_digits: I64, value_digits: I64, key: I64, missing: I64) -> I64 Never! {
+    index: unicode_table_find(table, count, key_digits, value_digits, key)
+    if (index < I64{0}) { return missing }
+    stride: wrapping(wrapping(key_digits * I64{2}) + value_digits)
+    unicode_table_field(wrapping(rt_text_data(table) + wrapping(index * stride) + wrapping(key_digits * I64{2})), value_digits)
+}
+
+// A scalar's mapping from a table of scalar records (four-digit fields): a
+// value below 8388608 is the scalar delta plus 4194304, any other is 8388608
+// plus the index of an eleven-digit full mapping in `pool`. A scalar outside
+// every record maps to itself.
+unicode_table_mapping: fn(table: I64, count: I64, pool: I64, cp: I64) -> I64 Never! {
+    value: unicode_table_value(table, count, I64{4}, I64{4}, cp, I64{-1})
+    if (value < I64{0}) { return cp }
+    if (value < I64{8388608}) { return wrapping(cp + wrapping(value - I64{4194304})) }
+    unicode_table_field(wrapping(rt_text_data(pool) + wrapping(wrapping(value - I64{8388608}) * I64{11})), I64{11})
+}
+
 // Emit every scalar of a full mapping into the caller's one text builder.
 // The generator validates <=3 nonzero scalar lanes. Unmapped NUL occupies
 // the first lane and is still emitted; zero only terminates later lanes.

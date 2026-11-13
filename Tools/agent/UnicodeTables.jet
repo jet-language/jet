@@ -1,8 +1,8 @@
 #!/usr/bin/env jet
 // Generates every Unicode 17.0.0 table from the vendored UCD (card #298):
-//   Compiler/JetRuntime/Source/UnicodeTables.jet, UnicodeNormalizeTables.jet,
-//     UnicodeNormalize<Lookup><n>.jet and UnicodeText<n>.jet: the runtime's
-//     static I64 decision trees (no heap, no Core indexing);
+//   Compiler/JetRuntime/Source/UnicodeTables.jet, UnicodeNormalizeTables.jet
+//     and UnicodeText<n>.jet: the runtime's static range tables (no heap, no
+//     Core indexing);
 //   Core/Text/SegmentationTables.jet and Core/Text/Runtime/Assets/*.jet: the
 //     JUCD schema-1 assets, with Assets.jet and manifest.json;
 //   the generated string-asset block of Core/Text/Runtime/KernelUnicodeString.jet.
@@ -51,9 +51,6 @@ WORD_TAGS: [String]{"Other", "CR", "LF", "Newline", "Extend", "ZWJ", "Regional_I
 SENTENCE_TAGS: [String]{"Other", "CR", "LF", "Extend", "Sep", "Format", "Sp", "Lower", "Upper", "OLetter", "Numeric", "ATerm", "SContinue", "STerm", "Close", "SContinue"}
 // GB9c Indic_Conjunct_Break; None is the unlisted default.
 INCB_TAGS: [String]{"None", "Linker", "Consonant", "Extend"}
-// Normalization lookups split into units of this many rows, so each lexer
-// and parser input stays bounded without changing the balanced search.
-NORMALIZE_CHUNK: 128
 SCALAR_LANE: 2097152
 MAX_SCALAR: 1114111
 HEX_DIGITS: "0123456789ABCDEF"
@@ -97,11 +94,11 @@ NameRow: struct {
     name: String
 }
 
-// One decision-tree leaf: scalars lo..=hi return `value`.
+// One table record: keys lo..=hi carry `value`.
 Leaf: struct {
     lo: Int
     hi: Int
-    value: String
+    value: Int
 }
 
 Output: struct {
@@ -476,46 +473,105 @@ compose_pairs: fn(ucd: Ucd) -> [Int] {
     out
 }
 
-// --- runtime decision trees ------------------------------------------------------
+// --- runtime range tables --------------------------------------------------------
 
-tree: fn(out: &[String], leaves: [Leaf], start: Int, end: Int, missing: String, indent: String) {
-    if start == end {
-        out.push("{indent}return {missing}\n")
-        return
+// A runtime lookup answers a scalar below 128 from a dense ASCII block and
+// searches a table of sorted, disjoint [lo, hi, value] records for the rest,
+// both in immortal text (rt_static_text, the runtime's static storage); the
+// search is JetRuntime Unicode.jet unicode_table_find. Every field is a fixed
+// run of six-bit digits, low digit first: digit d is the byte 35 + d below 57
+// and 36 + d from 57, so the text holds no quote, backslash or brace, and a
+// four-digit field read as a little-endian word orders as its value does.
+SCALAR_DIGITS: 4
+// A full mapping's three 21-bit scalar lanes.
+POOL_DIGITS: 11
+// A mapping record's value: its scalar delta plus DELTA_BIAS below POOL_FLAG,
+// or POOL_FLAG plus the index of its full mapping in the pool text.
+DELTA_BIAS: 4194304
+POOL_FLAG: 8388608
+ASCII_SCALARS: 128
+
+table_digits: fn(out: &[U8], value: Int, width: Int) TableError! {
+    if value < 0 || value >= 1 << (6 * width) -> return Err(fail("table field {value} exceeds {width} digits"))
+    loop at in 0..<width {
+        digit: (value >> (6 * at)).bit_and(63)
+        out.push(U8{if digit < 57 -> 35 + digit else -> 36 + digit})
     }
-    mid: start + (end - start) /% 2
-    out.push("{indent}if {{\n")
-    tree_arm(out, "(cp < I64{{{leaves[mid].lo}}})", leaves, start, mid, missing, indent)
-    tree_arm(out, "(cp > I64{{{leaves[mid].hi}}})", leaves, mid + 1, end, missing, indent)
-    out.push("{indent}    else -> return {leaves[mid].value}\n")
-    out.push("{indent}}}\n")
+    Ok()
 }
 
-tree_arm: fn(out: &[String], guard: String, leaves: [Leaf], start: Int, end: Int, missing: String, indent: String) {
-    if start == end {
-        out.push("{indent}    {guard} -> return {missing}\n")
-        return
+// The fewest digits holding every value up to `max`.
+digits_for: fn(max: Int) -> Int {
+    digits := 1
+    loop max >= 1 << (6 * digits) -> digits += 1
+    digits
+}
+
+// The records of `leaves`: lo and hi of `key_digits` each, then the value
+// of `value_digits` (none for a property).
+table_text: fn(leaves: [Leaf], key_digits: Int, value_digits: Int) -> String TableError! {
+    out := [U8]{}
+    loop leaf in leaves {
+        table_digits(out, leaf.lo, key_digits)
+        table_digits(out, leaf.hi, key_digits)
+        if value_digits > 0 -> table_digits(out, leaf.value, value_digits)
     }
-    out.push("{indent}    {guard} -> {{\n")
-    tree(out, leaves, start, end, missing, "{indent}        ")
-    out.push("{indent}    }}\n")
+    Ok(String.from_bytes_lossy(out))
 }
 
-lookup_fn: fn(signature: String, leaves: [Leaf], missing: String) -> String {
-    out := [String]{signature.copy()}
-    tree(out, leaves, 0, leaves.len(), missing, "    ")
-    out.push("}}\n")
-    out.join("")
+// The lookup line answering a scalar below 128 from the dense ASCII block of
+// `values` (one per scalar), its value followed by `test`.
+ascii_line: fn(values: [Int], test: String) -> String TableError! {
+    high := 0
+    loop value in values {
+        if value > high -> high = value
+    }
+    digits: digits_for(high)
+    out := [U8]{}
+    loop value in values -> table_digits(out, value, digits)
+    Ok("    if (cp < I64{{{ASCII_SCALARS}}}) {{ return unicode_table_dense(rt_static_text(\"{String.from_bytes_lossy(out)}\"), cp, I64{{{digits}}}){test} }}\n")
 }
 
-// Mapping leaves: adjacent one-scalar mappings with the same delta coalesce;
-// a full mapping packs up to three 21-bit scalars (low lane first) in one I64.
-mapping_leaves: fn(mapping: Mapping) -> [Leaf] TableError! {
-    los := [Int]{}
-    his := [Int]{}
-    deltas := [Int]{}
-    singles := [Bool]{}
-    packs := [Int]{}
+// The value of the leaf holding `key`, or `missing`.
+leaf_value: fn(leaves: [Leaf], key: Int, missing: Int) -> Int {
+    loop leaf in leaves {
+        if leaf.lo <= key && key <= leaf.hi -> return leaf.value
+    }
+    missing
+}
+
+// A lookup of `leaves` returning the value of the record holding cp, or
+// `missing` outside every record. Scalar keys take four digits and the
+// dense ASCII block; any other key takes the digits its largest needs.
+value_lookup: fn(signature: String, leaves: [Leaf], missing: Int, scalar_keys: Bool) -> String TableError! {
+    high := 0
+    value := 0
+    loop leaf in leaves {
+        if leaf.hi > high -> high = leaf.hi
+        if leaf.value > value -> value = leaf.value
+    }
+    key_digits: if scalar_keys -> SCALAR_DIGITS else -> digits_for(high)
+    value_digits: digits_for(value)
+    ascii := ""
+    if scalar_keys {
+        values := [Int]{}
+        loop cp in 0..<ASCII_SCALARS -> values.push(leaf_value(leaves, cp, missing))
+        ascii = ascii_line(values, "")
+    }
+    Ok("{signature}{ascii}    unicode_table_value(rt_static_text(\"{table_text(leaves, key_digits, value_digits)}\"), I64{{{leaves.len()}}}, I64{{{key_digits}}}, I64{{{value_digits}}}, cp, I64{{{missing}}})\n}}\n")
+}
+
+// A mapping's records and pool: adjacent one-scalar mappings with the same
+// delta coalesce into one record; a full mapping packs up to three 21-bit
+// scalars (low lane first) into one pool entry.
+MappingTable: struct {
+    leaves: [Leaf]
+    pool: [Int]
+}
+
+mapping_table: fn(mapping: Mapping) -> MappingTable TableError! {
+    leaves := [Leaf]{}
+    pool := [Int]{}
     loop entry in entries(mapping) {
         if entry.seq.len() < 1 || entry.seq.len() > 3 -> return Err(fail("mapping cannot fit the Jet scalar lanes: {entry.cp}"))
         packed := 0
@@ -524,53 +580,56 @@ mapping_leaves: fn(mapping: Mapping) -> [Leaf] TableError! {
             if scalar <= 0 || scalar > MAX_SCALAR -> return Err(fail("mapping cannot fit the Jet scalar lanes: {entry.cp}"))
             packed = packed.bit_or(scalar << (lane * 21))
         }
-        single: entry.seq.len() == 1
-        delta: if single -> entry.seq[0] - entry.cp else -> 0
-        n: los.len()
-        if single && n > 0 && singles[n - 1] && his[n - 1] + 1 == entry.cp && deltas[n - 1] == delta {
-            his[n - 1] = entry.cp
+        if entry.seq.len() > 1 {
+            leaves.push(Leaf{lo: entry.cp, hi: entry.cp, value: POOL_FLAG + pool.len()})
+            pool.push(packed)
             next
         }
-        los.push(entry.cp)
-        his.push(entry.cp)
-        deltas.push(delta)
-        singles.push(single)
-        packs.push(packed)
-    }
-    leaves := [Leaf]{}
-    loop at in 0..<los.len() {
-        value: if {
-            !singles[at] -> "I64{{{packs[at]}}}"
-            deltas[at] == 0 -> "cp"
-            else -> "wrapping(cp + I64{{{deltas[at]}}})"
+        value: entry.seq[0] - entry.cp + DELTA_BIAS
+        if value < 0 || value >= POOL_FLAG -> return Err(fail("mapping delta exceeds the table field: {entry.cp}"))
+        n: leaves.len()
+        if n > 0 && leaves[n - 1].hi + 1 == entry.cp && leaves[n - 1].value == value {
+            leaves[n - 1] = Leaf{lo: leaves[n - 1].lo, hi: entry.cp, value: value}
+            next
         }
-        leaves.push(Leaf{lo: los[at], hi: his[at], value: value})
+        leaves.push(Leaf{lo: entry.cp, hi: entry.cp, value: value})
     }
-    Ok(leaves)
+    Ok(MappingTable{leaves: leaves, pool: pool})
 }
 
-tag_leaves: fn(spans: [Span]) -> [Leaf] {
-    out := [Leaf]{}
-    loop span in spans -> out.push(Leaf{lo: span.a, hi: span.b, value: "I64{{{span.label}}}"})
-    out
+// The lookup `function` of a mapping: cp maps to itself outside every record.
+mapping_lookup: fn(function: String, mapping: Mapping) -> String TableError! {
+    table: mapping_table(mapping)
+    pool := [U8]{}
+    loop packed in table.pool -> table_digits(pool, packed, POOL_DIGITS)
+    records: table_text(table.leaves, SCALAR_DIGITS, SCALAR_DIGITS)
+    ascii := [Int]{}
+    loop cp in 0..<ASCII_SCALARS {
+        seq: mapping.seqs.get(cp) ?? [Int]{cp}
+        if seq.len() != 1 -> return Err(fail("{function}: ASCII scalar {cp} has a full mapping"))
+        ascii.push(seq[0])
+    }
+    Ok("{function}: fn(cp: I64) -> I64 Never! {{\n{ascii_line(ascii, "")}    unicode_table_mapping(rt_static_text(\"{records}\"), I64{{{table.leaves.len()}}}, rt_static_text(\"{String.from_bytes_lossy(pool)}\"), cp)\n}}\n")
 }
 
 jet_mapping: fn(name: String, mapping: Mapping) -> String TableError! {
-    Ok(lookup_fn("unicode_{name}_mapping: fn(cp: I64) -> I64 Never! {{\n", mapping_leaves(mapping), "cp"))
+    Ok(mapping_lookup("unicode_{name}_mapping", mapping))
 }
 
-jet_property: fn(name: String, spans: [Span]) -> String {
+jet_property: fn(name: String, spans: [Span]) -> String TableError! {
     leaves := [Leaf]{}
-    loop span in merge_pairs(spans) -> leaves.push(Leaf{lo: span.a, hi: span.b, value: "true"})
-    lookup_fn("unicode_is_{name}: fn(cp: I64) -> Bool Never! {{\n", leaves, "false")
+    loop span in merge_pairs(spans) -> leaves.push(Leaf{lo: span.a, hi: span.b, value: 1})
+    ascii := [Int]{}
+    loop cp in 0..<ASCII_SCALARS -> ascii.push(leaf_value(leaves, cp, 0))
+    Ok("unicode_is_{name}: fn(cp: I64) -> Bool Never! {{\n{ascii_line(ascii, " != I64{{0}}")}    unicode_table_find(rt_static_text(\"{table_text(leaves, SCALAR_DIGITS, 0)}\"), I64{{{leaves.len()}}}, I64{{{SCALAR_DIGITS}}}, I64{{0}}, cp) >= I64{{0}}\n}}\n")
 }
 
-jet_tagged: fn(name: String, spans: [Span], missing: Int) -> String {
-    kept := [Span]{}
+jet_tagged: fn(name: String, spans: [Span], missing: Int) -> String TableError! {
+    leaves := [Leaf]{}
     loop span in spans {
-        if span.label != missing -> kept.push(span.copy())
+        if span.label != missing -> leaves.push(Leaf{lo: span.a, hi: span.b, value: span.label})
     }
-    lookup_fn("unicode_{name}: fn(cp: I64) -> I64 Never! {{\n", tag_leaves(kept), "I64{{{missing}}}")
+    Ok(value_lookup("unicode_{name}: fn(cp: I64) -> I64 Never! {{\n", leaves, missing, true))
 }
 
 pascal: fn(name: String) -> String {
@@ -597,31 +656,11 @@ lower_ascii: fn(name: String) -> String {
     String.from_bytes_lossy(out)
 }
 
-// A normalization lookup split into NORMALIZE_CHUNK-row units, each its own
-// file, behind one dispatch tree over the units' scalar ranges.
-normalize_lookup: fn(name: String, leaves: [Leaf], missing: String, header: String, limit: Int, units: &[Output]) -> String TableError! {
-    dispatch := [Leaf]{}
-    count: (leaves.len() + NORMALIZE_CHUNK - 1) /% NORMALIZE_CHUNK
-    loop index in 0..<count {
-        start: index * NORMALIZE_CHUNK
-        end: if start + NORMALIZE_CHUNK < leaves.len() -> start + NORMALIZE_CHUNK else -> leaves.len()
-        function: "unicode_{name}_{index}"
-        out := [String]{header.copy(), "{function}: fn(cp: I64) -> I64 Never! {{\n"}
-        tree(out, leaves, start, end, missing, "    ")
-        out.push("}}\n")
-        text: out.join("")
-        if byte_len(text) > limit -> return Err(fail("{function} exceeds existing UnicodeTables.jet size"))
-        units.push(Output{path: "{RUNTIME_DIR}/UnicodeNormalize{pascal(name)}{index}.jet", text: text})
-        dispatch.push(Leaf{lo: leaves[start].lo, hi: leaves[end - 1].hi, value: "{function}(cp)"})
-    }
-    Ok(lookup_fn("unicode_{name}: fn(cp: I64) -> I64 Never! {{\n", dispatch, missing))
-}
-
 runtime_outputs: fn(ucd: Ucd, sums: String) -> [Output] TableError! {
     tables: [String]{
         HEADER,
-        "// Static balanced tables: I64 only, no allocation or Core indexing.\n",
-        "// Mapping results contain three 21-bit scalar lanes (low lane first).\n",
+        "// Static range tables: I64 only, no allocation or Core indexing.\n",
+        "// Full mappings pack three 21-bit scalar lanes (low lane first).\n",
         jet_mapping("lower", ucd.lower), "\n",
         jet_mapping("upper", ucd.upper), "\n",
         jet_property("white_space", ucd.white_space), "\n",
@@ -634,21 +673,21 @@ runtime_outputs: fn(ucd: Ucd, sums: String) -> [Output] TableError! {
     }
     header_lines := [String]{HEADER}
     loop name in INPUTS -> header_lines.push("// SHA256 {name}: {pinned_digest(sums, name)}\n")
-    header_lines.push("// NFC canonical-only tables; static I64 decisions, no allocation/Core indexing.\n")
+    header_lines.push("// NFC canonical-only tables; static range tables, no allocation/Core indexing.\n")
     header_lines.push("// Canonical mappings pack two 21-bit scalar lanes (low lane first).\n")
-    normalize_header: header_lines.join("")
-    chunks := [Output]{}
     pairs: compose_pairs(ucd)
     compose := [Leaf]{}
     loop at in 0..<pairs.len() /% 3 {
         key: (pairs[at * 3] << 21).bit_or(pairs[at * 3 + 1])
-        compose.push(Leaf{lo: key, hi: key, value: "I64{{{pairs[at * 3 + 2]}}}"})
+        compose.push(Leaf{lo: key, hi: key, value: pairs[at * 3 + 2]})
     }
+    ccc := [Leaf]{}
+    loop span in merge_tagged(ucd.ccc) -> ccc.push(Leaf{lo: span.a, hi: span.b, value: span.label})
     normalize: [String]{
-        normalize_header,
-        normalize_lookup("canonical_mapping", mapping_leaves(ucd.canon), "cp", normalize_header, limit, chunks), "\n",
-        normalize_lookup("normal_ccc", tag_leaves(merge_tagged(ucd.ccc)), "I64{{0}}", normalize_header, limit, chunks), "\n",
-        normalize_lookup("normal_compose_key", compose, "I64{{-1}}", normalize_header, limit, chunks), "\n",
+        header_lines.join(""),
+        mapping_lookup("unicode_canonical_mapping", ucd.canon), "\n",
+        value_lookup("unicode_normal_ccc: fn(cp: I64) -> I64 Never! {{\n", ccc, 0, true), "\n",
+        value_lookup("unicode_normal_compose_key: fn(cp: I64) -> I64 Never! {{\n", compose, -1, false), "\n",
         "unicode_normal_compose: fn(a: I64, b: I64) -> I64 Never! {{\n    unicode_normal_compose_key((a << I64{{21}}).bit_or(b))\n}}\n",
     }.join("")
     // Native text-method lookups, packed in order into UnicodeText<n>.jet units
@@ -675,8 +714,8 @@ runtime_outputs: fn(ucd: Ucd, sums: String) -> [Output] TableError! {
     }
     text_header: [String]{
         HEADER,
-        "// Native text-method lookups; static I64 decisions, no allocation/Core indexing.\n",
-        "// Mapping results contain three 21-bit scalar lanes (low lane first).\n",
+        "// Native text-method lookups; static range tables, no allocation/Core indexing.\n",
+        "// Full mappings pack three 21-bit scalar lanes (low lane first).\n",
     }.join("")
     units := [Output]{}
     loop lookup in lookups {
@@ -693,7 +732,6 @@ runtime_outputs: fn(ucd: Ucd, sums: String) -> [Output] TableError! {
         Output{path: "{RUNTIME_DIR}/UnicodeTables.jet", text: tables},
         Output{path: "{RUNTIME_DIR}/UnicodeNormalizeTables.jet", text: normalize},
     }
-    loop chunk in chunks -> outputs.push(chunk.copy())
     loop unit in units -> outputs.push(unit.copy())
     Ok(outputs)
 }
@@ -950,23 +988,27 @@ tables_main: fn(args: [String]) -[FS]> String TableError! {
 
 run: fn() { print(tables_main(process.args()) ?? process.fail(1, err.message)) }
 
-#Test("a decision tree splits at the middle leaf and returns the missing value outside") {
-    leaves: [Leaf]{Leaf{lo: 1, hi: 2, value: "a"}, Leaf{lo: 5, hi: 5, value: "b"}}
-    assert_eq(lookup_fn("f: fn(cp: I64) -> I64 Never! {{\n", leaves, "m"), "f: fn(cp: I64) -> I64 Never! {{\n    if {{\n        (cp < I64{{5}}) -> {{\n            if {{\n                (cp < I64{{1}}) -> return m\n                (cp > I64{{2}}) -> return m\n                else -> return a\n            }}\n        }}\n        (cp > I64{{5}}) -> return m\n        else -> return b\n    }}\n}}\n")
+#Test("a range table writes lo, hi and value as six-bit digits, low digit first, that avoid quotes, backslashes and braces") {
+    leaves: [Leaf]{Leaf{lo: 1, hi: 2, value: 5}, Leaf{lo: 70, hi: 70, value: 57}}
+    assert_eq(value_lookup("f: fn(cp: I64) -> I64 Never! {{\n", leaves, -1, false) ?? err.message, "f: fn(cp: I64) -> I64 Never! {{\n    unicode_table_value(rt_static_text(\"$#%#()$)$]\"), I64{{2}}, I64{{2}}, I64{{1}}, cp, I64{{-1}})\n}}\n")
+    out := [U8]{}
+    table_digits(out, 63, 1) ?? panic(err.message)
+    assert_eq(String.from_bytes_lossy(out), "c")
 }
 
-#Test("one-scalar mappings with one delta coalesce; full mappings pack three lanes") {
+#Test("one-scalar mappings with one delta coalesce; full mappings pack three lanes into the pool") {
     mapping := new_mapping()
     put(mapping, 65, [Int]{97})
     put(mapping, 66, [Int]{98})
     put(mapping, 223, [Int]{115, 115})
     put(mapping, 300, [Int]{300})
-    leaves: mapping_leaves(mapping) ?? panic(err.message)
-    assert_eq(leaves.len(), 3)
-    assert_eq(leaves[0].hi, 66)
-    assert_eq(leaves[0].value, "wrapping(cp + I64{{32}})")
-    assert_eq(leaves[1].value, "I64{{{115 + (115 << 21)}}}")
-    assert_eq(leaves[2].value, "cp")
+    table: mapping_table(mapping) ?? panic(err.message)
+    assert_eq(table.leaves.len(), 3)
+    assert_eq(table.leaves[0].hi, 66)
+    assert_eq(table.leaves[0].value, DELTA_BIAS + 32)
+    assert_eq(table.leaves[1].value, POOL_FLAG)
+    assert_eq(table.pool, [Int]{115 + (115 << 21)})
+    assert_eq(table.leaves[2].value, DELTA_BIAS)
 }
 
 #Test("adjacent spans merge after a stable sort; overlapping spans stay apart") {
@@ -982,5 +1024,5 @@ run: fn() { print(tables_main(process.args()) ?? process.fail(1, err.message)) }
 }
 
 #Test("the checked-in tables match the vendored inputs") {
-    assert_eq(tables_main([String]{"--check"}) ?? err.message, "unicode-tables: 71 outputs are current")
+    assert_eq(tables_main([String]{"--check"}) ?? err.message, "unicode-tables: 42 outputs are current")
 }
