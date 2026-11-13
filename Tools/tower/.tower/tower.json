@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6833,
-    "rev": 101807,
+    "nextNum": 6834,
+    "rev": 101818,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -53027,12 +53027,12 @@
       "criteria": [
         {
           "n": 1,
-          "text": "(was #6127) An owner ballot is ratified for each of: sized booleans, C strings, runtime type values (typeid), a dynamically typed value (any), and pointer-sized integers (uintptr). Each choice states the safe beginner path and the expert opt-in path.",
+          "text": "(was #6127) An owner ballot is ratified for each of: sized booleans, C strings, runtime type values (typeid), and pointer-sized integers. The dynamically typed value (any, D-PRIM-ANY1) moved to #6833 by owner order 2026-11-13.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-31T01:38:40.151Z"
+          "at": "2026-11-13T23:01:47.743Z"
         },
         {
           "n": 2,
@@ -53078,7 +53078,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-16T10:54:07.706Z",
-      "updated": "2026-11-11T12:41:42.493Z",
+      "updated": "2026-11-13T23:02:22.379Z",
       "updatedBy": "Main",
       "goals": [
         "G6"
@@ -58629,8 +58629,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-23T14:31:32.550Z",
-      "updated": "2026-11-13T22:56:54.013Z",
-      "updatedBy": "owner",
+      "updated": "2026-11-13T23:03:04.923Z",
+      "updatedBy": "Main",
       "goals": [
         "G11"
       ],
@@ -97878,6 +97878,57 @@
       "updated": "2026-11-13T20:22:15.728Z",
       "updatedBy": "Main",
       "criteriaLastN": 1
+    },
+    {
+      "id": "c0reo0hk",
+      "num": 6833,
+      "title": "A dynamically typed value (any) and explicit Any construction (D-PRIM-ANY1)",
+      "body": "Split out of #5021 (Jai parity, G6) by owner order 2026-11-13: the dynamically typed value is its own card and belongs to no goal. D-PRIM-ANY1 asks whether hiding an arbitrary concrete type requires explicit Any construction. The owner has paused that ballot; this card waits on it.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "D-PRIM-ANY1 is ratified by the owner (the ballot is owner-paused).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T23:01:45.501Z"
+        },
+        {
+          "n": 2,
+          "text": "If adopted: the any value has its registry row, an executable example with golden output on every tier, and a UI snapshot for its misuse diagnostic. If refused: the spec lists it with its reason and the Jet mechanism that covers the use case.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T23:01:46.676Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "owner-paused",
+        "types"
+      ],
+      "goals": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-13T23:01:38.012Z",
+      "updated": "2026-11-13T23:02:23.383Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 2
     }
   ],
   "decisions": [
@@ -181516,250 +181567,6 @@
       "ratifiedAt": "2026-11-10"
     },
     {
-      "id": "D-PRIM-ANY1",
-      "cardId": "c02y3vkg",
-      "group": "types",
-      "title": "Should hiding an arbitrary concrete type require explicit Any construction?",
-      "situation": "Should hiding an arbitrary concrete type require explicit Any construction? A plugin may return a type its host has never named, yet the host may need that exact type later. Our small example stores 14 and recovers it to print 14. Ordinary typed storage covers known cases, but does not settle open concrete recovery. We recommend an explicit box using ordinary trait ownership, not another dynamic value system.",
-      "gist": "Should hiding an arbitrary concrete type require explicit Any construction?",
-      "lesson": "Any hides a concrete type but keeps its checked identity. A trait instead exposes shared operations; an enum lists known alternatives. Hiding a type must never hide its cleanup, lifetime, permissions or secrecy.",
-      "explainer": "A carrier owns a hidden payload and remembers its exact type. A duty names how a value must finish. Erasure may hide the concrete type, but cannot hide duties, effects or safety facts.",
-      "story": "Lin stores 14, then recovers and prints it. All options do that job; only the Any options admit previously unnamed plugin types.",
-      "inWild": "Checked borrowed recovery; illustrative excerpt from the documented Any API, not executed here.",
-      "detail": "origin/dev:Compiler/JetSema/Source/Sema/Expressions/Constructors.jet:721-734 constructs the existing TraitBox. Both Any choices extend that identity and ownership route. The enum choice uses ordinary enum checking; it adds no erasure mechanism.\n\nA adds a Core Any trait carrier and Any{value} construction. A proposed .Int(n) pattern on that carrier checks exact canonical identity and lends the payload within its arm. An open carrier requires else. No display-name comparison, arbitrary cast or second Dyn representation is allowed. E has identical recovery but admits ordinary implicit trait coercion. B deliberately has no arbitrary concrete recovery; an enum or a shared behavioral trait remains the better design when sufficient.\n\nBeginners keep concrete types, enums or behavioral traits. Experts use Any only for genuine open recovery. Preserve transitive loans, allocator provenance, secrecy tags and callable effects. A nontransferable payload stays nontransferable. Ordinary trait-interface facts retain sendability, finishing obligations and normalized cleanup/failure effects; do not create Any.Send, Any.Owes or parallel duty syntax. Full resource payload support is required, not a data-only implementation. Reject unrepresentable loans or obligation-erasing callable conversions rather than treating them as plain data.\n\nConsuming extraction: take<T>(&&self) -> T TakeMismatch<Self>!. TakeMismatch<C> is an ordinary error struct with original: C. On mismatch it retains the unchanged carrier and every obligation; on success ownership and duties transfer to T. Construction failure preserves source ownership and drops partial storage once. Containers enforce duties per element. Unwinding settles owned payloads once; plugin code stays loaded while its values or loans survive. Hiding a secret-selected type preserves the control-flow tag on its identity test. No inline-size or allocation-elimination promise is part of this vote.\n\nFresh review, 2026-11-11. Removed invented carrier families and the duplicate data box; restored dot-prefixed patterns and retained mismatch, secrecy and plugin lifetime obligations.\n\nprobes/any.jet: check exited 1 with E0119.\n\nprobes/enum.jet: run exited 0; output: \"14\".\n\nprobes/D-PRIM-ANY1-A.jet: check exited 1 with E0119, E0107. This result is not proof of the proposed semantics.\n\nprobes/D-PRIM-ANY1-E.jet: check exited 1 with E0119, E0107. This result is not proof of the proposed semantics.\n\nprobes/D-PRIM-ANY1-B.jet: check exited 0. This result is not proof of the proposed semantics.",
-      "options": [
-        {
-          "key": "A",
-          "name": "Explicit box",
-          "detail": "Proposed Any recovery extends ordinary type patterns, including the existing leading dot. The box is explicit; a matching arm borrows its payload. Intended output: 14.",
-          "code": "run: fn() { value: Any{14}\n    if value == {\n        .Int(n) -> print(n)\n        else -> print(\"other\")\n    }\n}",
-          "technical": "origin/dev:Compiler/JetSema/Source/Sema/Expressions/Constructors.jet:721-734 constructs the existing TraitBox. Both Any choices extend that identity and ownership route. The enum choice uses ordinary enum checking; it adds no erasure mechanism."
-        },
-        {
-          "key": "E",
-          "name": "Implicit trait conversion",
-          "detail": "Proposed Any coercion in an ordinary parameter position. It shares the same carrier, dot-prefixed patterns, recovery and duties as A. Intended output: 14.",
-          "code": "show: fn(value: Any) {\n    if value == {\n        .Int(n) -> print(n)\n        else -> print(\"other\")\n    } }\nrun: fn() { show(14) }",
-          "technical": "origin/dev:Compiler/JetSema/Source/Sema/Expressions/Constructors.jet:721-734 constructs the existing TraitBox. Both Any choices extend that identity and ownership route. The enum choice uses ordinary enum checking; it adds no erasure mechanism."
-        },
-        {
-          "key": "B",
-          "name": "Known alternatives only",
-          "detail": "Ordinary enum storage for the same value. Unknown plugin behavior can use traits, but adding a recoverable concrete case changes the enum. Output is checked separately in probes/enum.jet.",
-          "code": "Payload: enum { Count(Int) }\nrun: fn() { value: Payload.Count(14)\n    if value == { .Count(n) -> print(n) }\n}",
-          "technical": "origin/dev:Compiler/JetSema/Source/Sema/Expressions/Constructors.jet:721-734 constructs the existing TraitBox. Both Any choices extend that identity and ownership route. The enum choice uses ordinary enum checking; it adds no erasure mechanism."
-        }
-      ],
-      "comparisons": [],
-      "rec": "A",
-      "recommendation": {
-        "rec": "A",
-        "why": "Keep exact recovery available without making broad type hiding invisible. Reuse trait ownership rather than add another dynamic storage system.",
-        "gains": [
-          "Visible type hiding",
-          "Checked recovery for open types"
-        ],
-        "losses": [
-          {
-            "loss": "Erased identity has real storage and checking costs.",
-            "mitigation": "Keep typed storage when possible; reuse trait storage and measure layout changes separately."
-          }
-        ],
-        "whyNot": [
-          {
-            "key": "E",
-            "reason": "Shorter and conversion-uniform, but a reader can miss the type-hiding boundary."
-          },
-          {
-            "key": "B",
-            "reason": "Best for known alternatives or shared operations, but cannot recover a previously unnamed concrete plugin type."
-          }
-        ],
-        "tradeoff": "Open recovery is useful, not free. No fixed box size or speed advantage is promised."
-      },
-      "hybrid": null,
-      "ballotMode": "full",
-      "shortAuthorizedBy": null,
-      "ballotProcessVersion": 5,
-      "reviewPasses": {
-        "adversarial": "Author model family: Claude Opus. Adversarial model family: GPT. Fresh agent: BallotFix-3. Removed invented carrier families and the duplicate data box; restored dot-prefixed patterns and retained mismatch, secrecy and plugin lifetime obligations. Ran seed-t22 probes and recorded their exact outcomes in detail; proposal success is not claimed."
-      },
-      "checkInstructions": "Probes used seed-t22 under a MemoryMax=16G systemd scope. Run open plugin recovery, exact generic identity, mismatch retention, move-only resources, loans, task transfer, cleanup effects and secret-selected type tests on every applicable tier. Unsupported proposal syntax is not a passing behavior test.",
-      "surface": {
-        "gist": "Should hiding an arbitrary concrete type require explicit Any construction?",
-        "lesson": "Any hides a concrete type but keeps its checked identity. A trait instead exposes shared operations; an enum lists known alternatives. Hiding a type must never hide its cleanup, lifetime, permissions or secrecy.",
-        "trio": {
-          "current": {
-            "note": "Any construction is refused with E0119; the enum baseline prints 14. check exited 1 with E0119.",
-            "code": "run: fn() { value: Any{14}\n    print(value) }"
-          },
-          "wild": {
-            "lang": "Rust documentation",
-            "note": "Checked borrowed recovery; illustrative excerpt from the documented Any API, not executed here.",
-            "code": "// Given a borrowed Any value named boxed:\nlet recovered: Option<&i32> = boxed.downcast_ref();\nif let Some(n) = recovered { println!(\"{}\", n); }"
-          }
-        },
-        "options": [
-          {
-            "key": "A",
-            "name": "Explicit box",
-            "gist": "Write the type-hiding step where it happens.",
-            "gains": [
-              "Visible type hiding",
-              "Checked recovery for open types"
-            ],
-            "losses": [
-              "Runtime identity and storage cost"
-            ],
-            "proposed": {
-              "code": "run: fn() { value: Any{14}\n    if value == {\n        .Int(n) -> print(n)\n        else -> print(\"other\")\n    }\n}"
-            }
-          },
-          {
-            "key": "E",
-            "name": "Implicit trait conversion",
-            "gist": "Use ordinary expected-type conversion into the same carrier.",
-            "gains": [
-              "Uniform trait conversion",
-              "Less construction syntax"
-            ],
-            "losses": [
-              "Type hiding is less visible"
-            ],
-            "proposed": {
-              "code": "show: fn(value: Any) {\n    if value == {\n        .Int(n) -> print(n)\n        else -> print(\"other\")\n    } }\nrun: fn() { show(14) }"
-            }
-          },
-          {
-            "key": "B",
-            "name": "Known alternatives only",
-            "gist": "Use an enum or shared behavior instead of arbitrary recovery.",
-            "gains": [
-              "No erased payload identity",
-              "Existing typed design"
-            ],
-            "losses": [
-              "No open concrete recovery"
-            ],
-            "proposed": {
-              "code": "Payload: enum { Count(Int) }\nrun: fn() { value: Payload.Count(14)\n    if value == { .Count(n) -> print(n) }\n}"
-            }
-          }
-        ],
-        "recommendation": {
-          "rec": "A",
-          "why": "Keep exact recovery available without making broad type hiding invisible. Reuse trait ownership rather than add another dynamic storage system.",
-          "gains": [
-            "Visible type hiding",
-            "Checked recovery for open types"
-          ],
-          "losses": [
-            {
-              "loss": "Erased identity has real storage and checking costs.",
-              "mitigation": "Keep typed storage when possible; reuse trait storage and measure layout changes separately."
-            }
-          ],
-          "whyNot": [
-            {
-              "key": "E",
-              "reason": "Shorter and conversion-uniform, but a reader can miss the type-hiding boundary."
-            },
-            {
-              "key": "B",
-              "reason": "Best for known alternatives or shared operations, but cannot recover a previously unnamed concrete plugin type."
-            }
-          ],
-          "tradeoff": "Open recovery is useful, not free. No fixed box size or speed advantage is promised."
-        }
-      },
-      "draft": false,
-      "status": "open",
-      "created": "2026-11-09T19:57:00.621Z",
-      "designAway": [
-        {
-          "option": "A",
-          "loss": "Hidden finishing or cleanup effects.",
-          "attempts": [
-            "Carry normalized effect rows with erased cleanup and on_fail.",
-            "Retain duty in failed take results and containers."
-          ],
-          "result": "Required build work; omitted effect syntax is not purity."
-        },
-        {
-          "option": "A",
-          "loss": "Secrecy can flow through chosen payload identity.",
-          "attempts": [
-            "Track control-flow tags into identity, patterns and dispatch.",
-            "Require ratified fixed-time and storage protection before tagged delivery."
-          ],
-          "result": "Required, not excused because the current checker has a general gap."
-        },
-        {
-          "option": "A",
-          "loss": "A second internal layout persists.",
-          "attempts": [
-            "Use existing heap representation, keeping carrier allocations.",
-            "G migrates all trait carriers to inline storage."
-          ],
-          "result": "Not irremovable; G trades it for a broader layout cutover."
-        },
-        {
-          "option": "B",
-          "loss": "No arbitrary concrete recovery.",
-          "attempts": [
-            "Expose a behavior interface and typed resource fields."
-          ],
-          "result": "Meets plugin behavior needs, not concrete recovery."
-        },
-        {
-          "option": "C",
-          "loss": "Implicit top conversion can erase unintended values.",
-          "attempts": [
-            "Keep checked recovery and explicit parameter types."
-          ],
-          "result": "Safe recovery does not detect intent; runtime duplication is unnecessary."
-        },
-        {
-          "option": "D",
-          "loss": "Resources cannot be recovered from its data box.",
-          "attempts": [
-            "Keep resources typed beside settings."
-          ],
-          "result": "The workload still works, with mixed storage."
-        },
-        {
-          "option": "E",
-          "loss": "Broad erasure can be implicit.",
-          "attempts": [
-            "Use a uniform trait conversion rule."
-          ],
-          "result": "Less ceremony, but intent is less visible."
-        },
-        {
-          "option": "F",
-          "loss": "Implicit trait construction sites migrate.",
-          "attempts": [
-            "One coordinated source cutover without compatibility aliases."
-          ],
-          "result": "Real migration cost remains; reads need not change."
-        },
-        {
-          "option": "G",
-          "loss": "Every trait carrier may become larger.",
-          "attempts": [
-            "Measure dense arrays and large payloads as well as small values."
-          ],
-          "result": "Unmeasured layout tradeoff; not a guaranteed win."
-        }
-      ],
-      "reports": [
-        {
-          "title": "Rust Any identity and lifetime limits",
-          "url": "https://doc.rust-lang.org/std/any/trait.Any.html"
-        }
-      ]
-    },
-    {
       "id": "D-CORE-HELPERS1",
       "cardId": "c0w1wcfc",
       "group": "visibility",
@@ -200007,204 +199814,6 @@
       "ratifiedAt": "2026-11-13"
     },
     {
-      "id": "D-SPEED-PGO1",
-      "cardId": "c031o59x",
-      "group": "other",
-      "title": "When should the jet compiler itself be built using a record of real runs?",
-      "situation": "A compiler can make a program faster by first watching it run, then rebuilding it with that record: hot code is laid out together and branches are arranged for the common case. Jet has already decided that users' release builds may read such a record. The speed plan has no step that does this for the jet compiler itself; its last step, tuning the compiler's own machine code, waits until the language is mostly stable. You are asked whether to build the compiler with a record earlier. We recommend A: build the record-reading feature now and use it for every compiler release, with a fresh record of a fixed, broad set of runs.",
-      "gist": "Should Jet build its own compiler with a record of real runs (profile-guided optimization) now, or at its last speed step?",
-      "lesson": "The fastest code layout depends on what actually runs, and a broad, fresh record prevents tuning for one benchmark or an old compiler.",
-      "explainer": "A profile, or run record, is a list of which code ran how often. Profile-guided optimization (PGO) rebuilds a program using it. Post-link layout (BOLT) reorders the finished machine code using it.",
-      "story": "Compilers spend much of their time waiting on instruction fetches, because their code is large and jumps around. Rebuilding a compiler with a record of its own runs puts the hot paths together; the BOLT paper (CGO 2019) reports up to 20% on Clang and GCC.",
-      "inWild": "Chrome, Firefox, Clang and the Rust compiler ship builds made with profile-guided optimization, and several use BOLT. Go added profile-guided optimization in Go 1.21.",
-      "detail": "D-ADAPTIVE-TIER1 is ratified as B: a release build reads a record of real runs (its option A), plus an opt-in in-program optimizer. The record is the existing .jettrace file. A record kept in the package is used automatically. `--profile` already names build profiles, so the flag that picks another record still needs its own word. The decision lists gaps: .jettrace profile rows attribute only to `fn run`, with no stack samples, and the code generator reads no record yet.\n\n#5479's plan has no step that builds the compiler with a record. Its step 6 (#5479 c9) is the compiler compiled well: register allocation, inlining, bounds-check hoisting and SIMD selection. It starts once the language is mostly stable, so tuning is not wiped out by later changes. It requires every gain to be general, applying to all generated code (owner, 2026-10-23).\n\nUnder A, the record-reading build of D-ADAPTIVE-TIER1 is built now, as the general user feature, starting with code layout. Each release build of the compiler runs in two stages. A plain build runs the #5479 c1 corpus, Examples and the test suites to write a record, and the release build reads it.\n\nThe record is an input to the toolchain build, collected fresh per release, not a cache across compiles. Because it is re-taken every release, language changes cannot leave it stale, which is why step 6 waits. The compiler's output is byte-identical with or without the record.",
-      "options": [
-        {
-          "key": "A",
-          "name": "Build the record feature now; every compiler release uses a fresh broad record",
-          "gist": "Start now, for users and for the compiler, with a fixed public set of recorded runs re-taken each release.",
-          "detail": "The run set is fixed and public, the record is re-taken every release, and the compiler's output is identical with or without it.",
-          "code": "# Release build of the compiler (proposed):\n$ jet build Compiler\n# 1. a plain build runs the c1 corpus, Examples and the suites,\n#    writing a record (a .jettrace file)\n# 2. the release build reads that record\n# The jet it makes compiles every program to the same bytes."
-        },
-        {
-          "key": "B",
-          "name": "Wait for plan step 6",
-          "gist": "Keep the current plan: after the language is mostly stable.",
-          "detail": "No change.",
-          "code": "$ jet build Compiler\n# no record until step 6"
-        },
-        {
-          "key": "C",
-          "name": "Never",
-          "gist": "Keep compiler builds without run records.",
-          "detail": "The compiler is never built with a record.",
-          "code": "$ jet build Compiler"
-        },
-        {
-          "key": "D",
-          "name": "Post-link layout of the jet binary only (BOLT)",
-          "gist": "Reorder the finished jet binary's machine code with an outside tool, as Clang and rustc releases do, without building the user feature.",
-          "detail": "An outside post-link optimizer (llvm-bolt) rearranges the shipped jet binary using a recorded run. Users' programs get nothing.",
-          "code": "$ jet build Compiler\n$ llvm-bolt jet -o jet.bolt -data=perf.fdata   # outside tool, Linux only"
-        }
-      ],
-      "comparisons": [],
-      "rec": "A",
-      "recommendation": {
-        "rec": "A",
-        "why": "A takes the gain before step 6, builds the decided user feature with it, and re-records every release.",
-        "gains": [
-          "Faster compiler sooner",
-          "The user feature arrives with it"
-        ],
-        "losses": [
-          {
-            "loss": "Each compiler release build takes a second build and a corpus run.",
-            "mitigation": "Only release builds pay it, and the corpus run is the c1 throughput cell the plan already runs."
-          },
-          {
-            "loss": "The record goes stale as the compiler changes.",
-            "mitigation": "Each release build re-takes it from the fixed run set, so a release never uses a stale record."
-          }
-        ],
-        "whyNot": [
-          {
-            "key": "B",
-            "reason": "B delays a known gain."
-          },
-          {
-            "key": "C",
-            "reason": "C gives the gain up entirely."
-          },
-          {
-            "key": "D",
-            "reason": "D gives only the compiler a gain, through an outside tool, which the plan's rule that every gain is general rules out."
-          }
-        ],
-        "tradeoff": "Building a decided feature earlier, and a longer release build, in exchange for compiler speed now."
-      },
-      "hybrid": null,
-      "ballotMode": "full",
-      "shortAuthorizedBy": null,
-      "ballotProcessVersion": 5,
-      "reviewPasses": {
-        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: G5DevX-2. Checked D-ADAPTIVE-TIER1 (ratified B; record = .jettrace; flag word unchosen), #5479 c9 and cli.md; `jet build --profile dev` and A's `--record` flag were invalid or invented, and step 6 never names records. Changed: snippets and detail match the decision and step 6, the two-build release cost is a mitigated loss, the 20% figure cites the BOLT paper, and BOLT-only option D is added."
-      },
-      "checkInstructions": "Read decision D-ADAPTIVE-TIER1 on Tower (its option A, the gaps and the flag-word note) and #5479's plan, step 6 (#5479 c9).",
-      "surface": {
-        "gist": "Should Jet build its own compiler with a record of real runs (profile-guided optimization) now, or at its last speed step?",
-        "lesson": "The fastest code layout depends on what actually runs, and a broad, fresh record prevents tuning for one benchmark or an old compiler.",
-        "trio": {
-          "current": {
-            "note": "Today the compiler is built without a run record.",
-            "code": "$ jet build Compiler\n# no run record is read"
-          },
-          "wild": {
-            "lang": "Go",
-            "note": "Go 1.21 rebuilds with a CPU profile placed beside the main package.",
-            "code": "$ go build -pgo=default.pgo ./cmd/server"
-          }
-        },
-        "options": [
-          {
-            "key": "A",
-            "name": "Build the record feature now; every compiler release uses a fresh broad record",
-            "gist": "Start now, for users and for the compiler, with a fixed public set of recorded runs re-taken each release.",
-            "gains": [
-              "Compiler speed gain before step 6",
-              "Users get the same feature"
-            ],
-            "losses": [
-              "Each compiler release build runs twice plus a corpus run"
-            ],
-            "proposed": {
-              "code": "# Release build of the compiler (proposed):\n$ jet build Compiler\n# 1. a plain build runs the c1 corpus, Examples and the suites,\n#    writing a record (a .jettrace file)\n# 2. the release build reads that record\n# The jet it makes compiles every program to the same bytes."
-            }
-          },
-          {
-            "key": "B",
-            "name": "Wait for plan step 6",
-            "gist": "Keep the current plan: after the language is mostly stable.",
-            "gains": [
-              "No work now"
-            ],
-            "losses": [
-              "The gain waits"
-            ],
-            "proposed": {
-              "code": "$ jet build Compiler\n# no record until step 6"
-            }
-          },
-          {
-            "key": "C",
-            "name": "Never",
-            "gist": "Keep compiler builds without run records.",
-            "gains": [
-              "Simplest builds"
-            ],
-            "losses": [
-              "Leaves a known gain unused"
-            ],
-            "proposed": {
-              "code": "$ jet build Compiler"
-            }
-          },
-          {
-            "key": "D",
-            "name": "Post-link layout of the jet binary only (BOLT)",
-            "gist": "Reorder the finished jet binary's machine code with an outside tool, as Clang and rustc releases do, without building the user feature.",
-            "gains": [
-              "A layout gain without new Jet features"
-            ],
-            "losses": [
-              "Adds an outside LLVM tool to the release build",
-              "Linux binaries only",
-              "A compiler-only gain, against the plan's rule that every gain is general"
-            ],
-            "proposed": {
-              "code": "$ jet build Compiler\n$ llvm-bolt jet -o jet.bolt -data=perf.fdata   # outside tool, Linux only"
-            }
-          }
-        ],
-        "recommendation": {
-          "rec": "A",
-          "why": "A takes the gain before step 6, builds the decided user feature with it, and re-records every release.",
-          "gains": [
-            "Faster compiler sooner",
-            "The user feature arrives with it"
-          ],
-          "losses": [
-            {
-              "loss": "Each compiler release build takes a second build and a corpus run.",
-              "mitigation": "Only release builds pay it, and the corpus run is the c1 throughput cell the plan already runs."
-            },
-            {
-              "loss": "The record goes stale as the compiler changes.",
-              "mitigation": "Each release build re-takes it from the fixed run set, so a release never uses a stale record."
-            }
-          ],
-          "whyNot": [
-            {
-              "key": "B",
-              "reason": "B delays a known gain."
-            },
-            {
-              "key": "C",
-              "reason": "C gives the gain up entirely."
-            },
-            {
-              "key": "D",
-              "reason": "D gives only the compiler a gain, through an outside tool, which the plan's rule that every gain is general rules out."
-            }
-          ],
-          "tradeoff": "Building a decided feature earlier, and a longer release build, in exchange for compiler speed now."
-        }
-      },
-      "draft": false,
-      "status": "open",
-      "created": "2026-11-13T15:24:07.418Z"
-    },
-    {
       "id": "D-SPEED-SIMDCHECK1",
       "cardId": "c031o59x",
       "group": "other",
@@ -200949,6 +200558,250 @@
       "draft": false,
       "status": "open",
       "created": "2026-11-13T21:17:18.682Z"
+    },
+    {
+      "id": "D-PRIM-ANY1",
+      "cardId": "c0reo0hk",
+      "group": "types",
+      "title": "Should hiding an arbitrary concrete type require explicit Any construction?",
+      "situation": "Should hiding an arbitrary concrete type require explicit Any construction? A plugin may return a type its host has never named, yet the host may need that exact type later. Our small example stores 14 and recovers it to print 14. Ordinary typed storage covers known cases, but does not settle open concrete recovery. We recommend an explicit box using ordinary trait ownership, not another dynamic value system.",
+      "gist": "Should hiding an arbitrary concrete type require explicit Any construction?",
+      "lesson": "Any hides a concrete type but keeps its checked identity. A trait instead exposes shared operations; an enum lists known alternatives. Hiding a type must never hide its cleanup, lifetime, permissions or secrecy.",
+      "explainer": "A carrier owns a hidden payload and remembers its exact type. A duty names how a value must finish. Erasure may hide the concrete type, but cannot hide duties, effects or safety facts.",
+      "story": "Lin stores 14, then recovers and prints it. All options do that job; only the Any options admit previously unnamed plugin types.",
+      "inWild": "Checked borrowed recovery; illustrative excerpt from the documented Any API, not executed here.",
+      "detail": "origin/dev:Compiler/JetSema/Source/Sema/Expressions/Constructors.jet:721-734 constructs the existing TraitBox. Both Any choices extend that identity and ownership route. The enum choice uses ordinary enum checking; it adds no erasure mechanism.\n\nA adds a Core Any trait carrier and Any{value} construction. A proposed .Int(n) pattern on that carrier checks exact canonical identity and lends the payload within its arm. An open carrier requires else. No display-name comparison, arbitrary cast or second Dyn representation is allowed. E has identical recovery but admits ordinary implicit trait coercion. B deliberately has no arbitrary concrete recovery; an enum or a shared behavioral trait remains the better design when sufficient.\n\nBeginners keep concrete types, enums or behavioral traits. Experts use Any only for genuine open recovery. Preserve transitive loans, allocator provenance, secrecy tags and callable effects. A nontransferable payload stays nontransferable. Ordinary trait-interface facts retain sendability, finishing obligations and normalized cleanup/failure effects; do not create Any.Send, Any.Owes or parallel duty syntax. Full resource payload support is required, not a data-only implementation. Reject unrepresentable loans or obligation-erasing callable conversions rather than treating them as plain data.\n\nConsuming extraction: take<T>(&&self) -> T TakeMismatch<Self>!. TakeMismatch<C> is an ordinary error struct with original: C. On mismatch it retains the unchanged carrier and every obligation; on success ownership and duties transfer to T. Construction failure preserves source ownership and drops partial storage once. Containers enforce duties per element. Unwinding settles owned payloads once; plugin code stays loaded while its values or loans survive. Hiding a secret-selected type preserves the control-flow tag on its identity test. No inline-size or allocation-elimination promise is part of this vote.\n\nFresh review, 2026-11-11. Removed invented carrier families and the duplicate data box; restored dot-prefixed patterns and retained mismatch, secrecy and plugin lifetime obligations.\n\nprobes/any.jet: check exited 1 with E0119.\n\nprobes/enum.jet: run exited 0; output: \"14\".\n\nprobes/D-PRIM-ANY1-A.jet: check exited 1 with E0119, E0107. This result is not proof of the proposed semantics.\n\nprobes/D-PRIM-ANY1-E.jet: check exited 1 with E0119, E0107. This result is not proof of the proposed semantics.\n\nprobes/D-PRIM-ANY1-B.jet: check exited 0. This result is not proof of the proposed semantics.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Explicit box",
+          "detail": "Proposed Any recovery extends ordinary type patterns, including the existing leading dot. The box is explicit; a matching arm borrows its payload. Intended output: 14.",
+          "code": "run: fn() { value: Any{14}\n    if value == {\n        .Int(n) -> print(n)\n        else -> print(\"other\")\n    }\n}",
+          "technical": "origin/dev:Compiler/JetSema/Source/Sema/Expressions/Constructors.jet:721-734 constructs the existing TraitBox. Both Any choices extend that identity and ownership route. The enum choice uses ordinary enum checking; it adds no erasure mechanism."
+        },
+        {
+          "key": "E",
+          "name": "Implicit trait conversion",
+          "detail": "Proposed Any coercion in an ordinary parameter position. It shares the same carrier, dot-prefixed patterns, recovery and duties as A. Intended output: 14.",
+          "code": "show: fn(value: Any) {\n    if value == {\n        .Int(n) -> print(n)\n        else -> print(\"other\")\n    } }\nrun: fn() { show(14) }",
+          "technical": "origin/dev:Compiler/JetSema/Source/Sema/Expressions/Constructors.jet:721-734 constructs the existing TraitBox. Both Any choices extend that identity and ownership route. The enum choice uses ordinary enum checking; it adds no erasure mechanism."
+        },
+        {
+          "key": "B",
+          "name": "Known alternatives only",
+          "detail": "Ordinary enum storage for the same value. Unknown plugin behavior can use traits, but adding a recoverable concrete case changes the enum. Output is checked separately in probes/enum.jet.",
+          "code": "Payload: enum { Count(Int) }\nrun: fn() { value: Payload.Count(14)\n    if value == { .Count(n) -> print(n) }\n}",
+          "technical": "origin/dev:Compiler/JetSema/Source/Sema/Expressions/Constructors.jet:721-734 constructs the existing TraitBox. Both Any choices extend that identity and ownership route. The enum choice uses ordinary enum checking; it adds no erasure mechanism."
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "Keep exact recovery available without making broad type hiding invisible. Reuse trait ownership rather than add another dynamic storage system.",
+        "gains": [
+          "Visible type hiding",
+          "Checked recovery for open types"
+        ],
+        "losses": [
+          {
+            "loss": "Erased identity has real storage and checking costs.",
+            "mitigation": "Keep typed storage when possible; reuse trait storage and measure layout changes separately."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "E",
+            "reason": "Shorter and conversion-uniform, but a reader can miss the type-hiding boundary."
+          },
+          {
+            "key": "B",
+            "reason": "Best for known alternatives or shared operations, but cannot recover a previously unnamed concrete plugin type."
+          }
+        ],
+        "tradeoff": "Open recovery is useful, not free. No fixed box size or speed advantage is promised."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: GPT. Fresh agent: BallotFix-3. Removed invented carrier families and the duplicate data box; restored dot-prefixed patterns and retained mismatch, secrecy and plugin lifetime obligations. Ran seed-t22 probes and recorded their exact outcomes in detail; proposal success is not claimed."
+      },
+      "checkInstructions": "Probes used seed-t22 under a MemoryMax=16G systemd scope. Run open plugin recovery, exact generic identity, mismatch retention, move-only resources, loans, task transfer, cleanup effects and secret-selected type tests on every applicable tier. Unsupported proposal syntax is not a passing behavior test.",
+      "surface": {
+        "gist": "Should hiding an arbitrary concrete type require explicit Any construction?",
+        "lesson": "Any hides a concrete type but keeps its checked identity. A trait instead exposes shared operations; an enum lists known alternatives. Hiding a type must never hide its cleanup, lifetime, permissions or secrecy.",
+        "trio": {
+          "current": {
+            "note": "Any construction is refused with E0119; the enum baseline prints 14. check exited 1 with E0119.",
+            "code": "run: fn() { value: Any{14}\n    print(value) }"
+          },
+          "wild": {
+            "lang": "Rust documentation",
+            "note": "Checked borrowed recovery; illustrative excerpt from the documented Any API, not executed here.",
+            "code": "// Given a borrowed Any value named boxed:\nlet recovered: Option<&i32> = boxed.downcast_ref();\nif let Some(n) = recovered { println!(\"{}\", n); }"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Explicit box",
+            "gist": "Write the type-hiding step where it happens.",
+            "gains": [
+              "Visible type hiding",
+              "Checked recovery for open types"
+            ],
+            "losses": [
+              "Runtime identity and storage cost"
+            ],
+            "proposed": {
+              "code": "run: fn() { value: Any{14}\n    if value == {\n        .Int(n) -> print(n)\n        else -> print(\"other\")\n    }\n}"
+            }
+          },
+          {
+            "key": "E",
+            "name": "Implicit trait conversion",
+            "gist": "Use ordinary expected-type conversion into the same carrier.",
+            "gains": [
+              "Uniform trait conversion",
+              "Less construction syntax"
+            ],
+            "losses": [
+              "Type hiding is less visible"
+            ],
+            "proposed": {
+              "code": "show: fn(value: Any) {\n    if value == {\n        .Int(n) -> print(n)\n        else -> print(\"other\")\n    } }\nrun: fn() { show(14) }"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Known alternatives only",
+            "gist": "Use an enum or shared behavior instead of arbitrary recovery.",
+            "gains": [
+              "No erased payload identity",
+              "Existing typed design"
+            ],
+            "losses": [
+              "No open concrete recovery"
+            ],
+            "proposed": {
+              "code": "Payload: enum { Count(Int) }\nrun: fn() { value: Payload.Count(14)\n    if value == { .Count(n) -> print(n) }\n}"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Keep exact recovery available without making broad type hiding invisible. Reuse trait ownership rather than add another dynamic storage system.",
+          "gains": [
+            "Visible type hiding",
+            "Checked recovery for open types"
+          ],
+          "losses": [
+            {
+              "loss": "Erased identity has real storage and checking costs.",
+              "mitigation": "Keep typed storage when possible; reuse trait storage and measure layout changes separately."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "E",
+              "reason": "Shorter and conversion-uniform, but a reader can miss the type-hiding boundary."
+            },
+            {
+              "key": "B",
+              "reason": "Best for known alternatives or shared operations, but cannot recover a previously unnamed concrete plugin type."
+            }
+          ],
+          "tradeoff": "Open recovery is useful, not free. No fixed box size or speed advantage is promised."
+        }
+      },
+      "designAway": [
+        {
+          "option": "A",
+          "loss": "Hidden finishing or cleanup effects.",
+          "attempts": [
+            "Carry normalized effect rows with erased cleanup and on_fail.",
+            "Retain duty in failed take results and containers."
+          ],
+          "result": "Required build work; omitted effect syntax is not purity."
+        },
+        {
+          "option": "A",
+          "loss": "Secrecy can flow through chosen payload identity.",
+          "attempts": [
+            "Track control-flow tags into identity, patterns and dispatch.",
+            "Require ratified fixed-time and storage protection before tagged delivery."
+          ],
+          "result": "Required, not excused because the current checker has a general gap."
+        },
+        {
+          "option": "A",
+          "loss": "A second internal layout persists.",
+          "attempts": [
+            "Use existing heap representation, keeping carrier allocations.",
+            "G migrates all trait carriers to inline storage."
+          ],
+          "result": "Not irremovable; G trades it for a broader layout cutover."
+        },
+        {
+          "option": "B",
+          "loss": "No arbitrary concrete recovery.",
+          "attempts": [
+            "Expose a behavior interface and typed resource fields."
+          ],
+          "result": "Meets plugin behavior needs, not concrete recovery."
+        },
+        {
+          "option": "C",
+          "loss": "Implicit top conversion can erase unintended values.",
+          "attempts": [
+            "Keep checked recovery and explicit parameter types."
+          ],
+          "result": "Safe recovery does not detect intent; runtime duplication is unnecessary."
+        },
+        {
+          "option": "D",
+          "loss": "Resources cannot be recovered from its data box.",
+          "attempts": [
+            "Keep resources typed beside settings."
+          ],
+          "result": "The workload still works, with mixed storage."
+        },
+        {
+          "option": "E",
+          "loss": "Broad erasure can be implicit.",
+          "attempts": [
+            "Use a uniform trait conversion rule."
+          ],
+          "result": "Less ceremony, but intent is less visible."
+        },
+        {
+          "option": "F",
+          "loss": "Implicit trait construction sites migrate.",
+          "attempts": [
+            "One coordinated source cutover without compatibility aliases."
+          ],
+          "result": "Real migration cost remains; reads need not change."
+        },
+        {
+          "option": "G",
+          "loss": "Every trait carrier may become larger.",
+          "attempts": [
+            "Measure dense arrays and large payloads as well as small values."
+          ],
+          "result": "Unmeasured layout tradeoff; not a guaranteed win."
+        }
+      ],
+      "reports": [
+        {
+          "title": "Rust Any identity and lifetime limits",
+          "url": "https://doc.rust-lang.org/std/any/trait.Any.html"
+        }
+      ],
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-13T23:02:23.383Z"
     }
   ],
   "questions": [
@@ -203446,9 +203299,11 @@
       "by": "owner",
       "kind": "question",
       "text": "delete this ballot. i do not want to decide on this now but dont want to rule it out forever",
-      "status": "open",
-      "answer": "",
-      "created": "2026-11-13T22:53:43.313Z"
+      "status": "answered",
+      "answer": "Done. The ballot is deleted, and the idea is kept on the ideas list (\"Build the jet compiler itself from a record of real runs\"), so it is not ruled out. The speed plan on #5479 does not depend on it.",
+      "created": "2026-11-13T22:53:43.313Z",
+      "answeredAt": "2026-11-13",
+      "answeredBy": "Main"
     },
     {
       "id": "q11ay6zi",
@@ -204360,6 +204215,84 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-13T23:03:04.923Z",
+      "by": "Main",
+      "action": "decision.delete",
+      "ref": "D-SPEED-PGO1",
+      "note": "When should the jet compiler itself be built using a record of real runs?"
+    },
+    {
+      "at": "2026-11-13T23:03:03.896Z",
+      "by": "Main",
+      "action": "question.answer",
+      "ref": "q0orba5q",
+      "note": ""
+    },
+    {
+      "at": "2026-11-13T23:02:23.383Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-PRIM-ANY1",
+      "note": "Should hiding an arbitrary concrete type require explicit Any construction?"
+    },
+    {
+      "at": "2026-11-13T23:02:22.379Z",
+      "by": "Main",
+      "action": "decision.delete",
+      "ref": "D-PRIM-ANY1",
+      "note": "Should hiding an arbitrary concrete type require explicit Any construction?"
+    },
+    {
+      "at": "2026-11-13T23:02:21.197Z",
+      "by": "Main",
+      "action": "decision.delete",
+      "ref": "D-PRIM-ANY1-TEST",
+      "note": "Should hiding an arbitrary concrete type require explicit Any construction?",
+      "draft": true
+    },
+    {
+      "at": "2026-11-13T23:02:13.866Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-PRIM-ANY1-TEST",
+      "note": "Should hiding an arbitrary concrete type require explicit Any construction? (draft)"
+    },
+    {
+      "at": "2026-11-13T23:01:49.005Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-PRIM-ANY1",
+      "note": ""
+    },
+    {
+      "at": "2026-11-13T23:01:47.743Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c02y3vkg",
+      "note": "#1: Owner order 2026-11-13: any is a separate card, outside G6.; was: (was #6127) An owner ballot is ratified for each of: sized booleans, C strings, runtime type values (typeid), a dynamically typed value (any), and pointer-sized integers (uintptr). Each choice states "
+    },
+    {
+      "at": "2026-11-13T23:01:46.676Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0reo0hk",
+      "note": "#2 If adopted: the any value has its registry row, an executabl"
+    },
+    {
+      "at": "2026-11-13T23:01:45.501Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0reo0hk",
+      "note": "#1 D-PRIM-ANY1 is ratified by the owner (the ballot is owner-pa"
+    },
+    {
+      "at": "2026-11-13T23:01:38.012Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0reo0hk",
+      "note": "A dynamically typed value (any) and explicit Any construction (D-PRIM-ANY1)"
+    },
     {
       "at": "2026-11-13T23:00:40.127Z",
       "by": "Main",
