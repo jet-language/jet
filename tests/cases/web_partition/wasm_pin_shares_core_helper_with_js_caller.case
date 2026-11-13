@@ -1,0 +1,31 @@
+# A Wasm-pinned function calls a pure Core helper (`math.gcd`) that a JS
+# function also calls. The JS caller pulls the helper's bucket to JS; the
+# Core helper uses no Browser, so the Wasm call is no partition crossing and
+# the program builds and runs at O0, O1 and O2.
+requires: tool:node
+fixture: wasm_pin_shares_core_helper_with_js_caller.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet build --target web --optimize=none main.jet
+exit: 0
+stderr: !~ "E-WEB-CROSS-PARTITION" # the Wasm call to the shared Core helper is no crossing
+copy: harness.mjs .jet/build/harness.mjs
+step: node harness.mjs
+cwd: .jet/build
+exit: 0
+stdout: = "18\n"
+step: jet build --target web --optimize=basic main.jet
+exit: 0
+stderr: !~ "E-WEB-CROSS-PARTITION" # the Wasm call to the shared Core helper is no crossing
+step: node harness.mjs
+cwd: .jet/build
+exit: 0
+stdout: = "18\n"
+step: jet build --target web --optimize=full main.jet
+exit: 0
+stderr: !~ "E-WEB-CROSS-PARTITION" # the Wasm call to the shared Core helper is no crossing
+step: node harness.mjs
+cwd: .jet/build
+exit: 0
+stdout: = "18\n"
