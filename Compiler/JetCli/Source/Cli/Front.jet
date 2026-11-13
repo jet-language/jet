@@ -1353,13 +1353,29 @@ jet_cli_build_options: fn(jet_argv: [String], command: String, file: String, sou
     // `jet build --target web` is the web build (BuildWeb.jet), and so is the
     // web preview of `jet dev`: its OS is web. The preview is a `jet dev`
     // build, so its stock level is dev's (AGENTS.md I9), under any profile.
+    // With no `--target` or `--os`, a file `#Target(Web)` selects the web
+    // build too, unless the program is a full-stack App, which runs natively.
     web := os_web
+    marked := false
     if os_web -> written.insert(0, BuildOptionChoice{name: "optimize", value: build_options_value(build_options_stock("dev"), "optimize"), layer: BuildOptionLayer.Stock, written: "", site: "", pinned: false})
-    if jet_cli_target_flag(jet_argv) == .Named(target) {
-        if target == "web" -> web = true
+    if jet_cli_target_flag(jet_argv) == {
+        .Named(target) -> {
+            if target == "web" -> web = true
+        }
+        .Absent -> {
+            if command == "build" && !flags.any(fn(flag) { flag.name == "os" }) && jet_cli_declares_web_target(source) && !jet_cli_declares_web_app(source) {
+                web = true
+                marked = true
+            }
+        }
+        .Missing -> {}
     }
     if command == "build" && web {
-        written_as: if os_web -> "the web preview of `jet dev`" else -> "--target web"
+        written_as: if {
+            os_web -> "the web preview of `jet dev`"
+            marked -> "the file's `#Target(Web)`"
+            else -> "--target web"
+        }
         loop flag in flags {
             if flag.name == "os" && flag.value != "web" -> return JetCLIBuildOptions.Refused{plan: jet_cli_fail("E2104", "`{flag.written}` and {written_as} disagree", jet_cli_why("E2104"), "pass one of them", color, JET_DRIVER_EXIT_USAGE)}
         }
@@ -1377,6 +1393,7 @@ jet_cli_build_options: fn(jet_argv: [String], command: String, file: String, sou
             selected.settings = settings
             selected.gates = gates
             selected.deep_checks = deep_checks
+            selected.explain_partition = command == "build" && jet_cli_flag_before_separator(jet_argv, "--explain-partition")
             return JetCLIBuildOptions.Selected{options: selected, notes: text}
         }
     }

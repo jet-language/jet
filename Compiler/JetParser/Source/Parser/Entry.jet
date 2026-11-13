@@ -1139,11 +1139,14 @@ parser_target_selects_file_web_at: fn(state: &JetParserState, name_offset: Int) 
 }
 
 // One run of file rules, bare or in `#[…]` lists. Two distinct rules belong
-// in one list (E0999); each rule then sets its program field.
+// in one list (E0999); each rule then sets its program field. A bare rule
+// with `module` after it on the same line heads that module
+// (`heads_module`); one that ends its line stays on the file.
 parser_parse_file_directive: fn(state: &JetParserState, program: &Program) {
     markers := [Marker]{}
     chunks := 0
     bracket_chunks := 0
+    heads_module := false
     sequence := parser_current(state).span
     loop parser_file_directive_ahead(state) && !parser_aborting(state) {
         if parser_kind_at(state, 1) == TOKEN_LBRACKET {
@@ -1155,16 +1158,17 @@ parser_parse_file_directive: fn(state: &JetParserState, program: &Program) {
             marker: parser_parse_marker(state)
             markers.push(marker.copy())
             sequence.end = marker.span.end
+            heads_module = parser_current_kind(state) == TOKEN_KW_MODULE
             parser_skip_semicolons(state)
         }
         chunks += 1
     }
     parser_report_adjacent_markers(state, markers, chunks, bracket_chunks, sequence, "file")
     single: chunks == 1 && bracket_chunks == 0
-    loop marker in markers -> parser_apply_file_marker(state, program, marker, single)
+    loop marker in markers -> parser_apply_file_marker(state, program, marker, single, single && heads_module)
 }
 
-parser_apply_file_marker: fn(state: &JetParserState, program: &Program, marker: Marker, single: Bool) {
+parser_apply_file_marker: fn(state: &JetParserState, program: &Program, marker: Marker, single: Bool, heads_module: Bool) {
     program.rule_facts.push(AppliedRuleApplication{marker: marker, target: None, site: Val(RuleSite.File)})
     hash: Span{start: marker.span.start, end: marker.span.start + 1}
     repeat_span: if single -> hash else -> marker.span
@@ -1176,7 +1180,7 @@ parser_apply_file_marker: fn(state: &JetParserState, program: &Program, marker: 
             }
             program.no_prelude = true
         }
-        "Target" -> parser_apply_file_target(state, program, marker, single)
+        "Target" -> parser_apply_file_target(state, program, marker, single, heads_module)
         "HTML" -> {
             if program.html_path != None {
                 parser_add_error(state, marker.span, "only one `#HTML(…)` marker is allowed per file", "a file may declare at most one companion host page", "remove the duplicate `#HTML(…)` marker")
@@ -1204,7 +1208,7 @@ parser_html_page_path: fn(page: Expr) -> String? {
 // (Rust `web_target_from_marker`):
 // `#Target(Web)` picks the file's default CLI backend, `#Target(Wasm|JS)`
 // caps its web partition, and `#Target(OS.…)` only gates an `impl`.
-parser_apply_file_target: fn(state: &JetParserState, program: &Program, marker: Marker, single: Bool) {
+parser_apply_file_target: fn(state: &JetParserState, program: &Program, marker: Marker, single: Bool, heads_module: Bool) {
     values: parser_bind_marker_arguments(state, marker, [String]{"target"}, 1) ?? return
     target: values[0] ?? return
     name: parser_marker_target_path(target) ?? {
@@ -1227,7 +1231,7 @@ parser_apply_file_target: fn(state: &JetParserState, program: &Program, marker: 
         return
     }
     if name == "Web" {
-        if single && parser_current_kind(state) == TOKEN_KW_MODULE {
+        if heads_module {
             parser_add_error(state, here, "`#Target(Web)` isn't valid on a module", "`Web` is a file-level default-backend marker, not a partition ceiling", "move `#Target(Web)` to the top of the file, outside any module; use `#Target(Wasm)` or `#Target(JS)` on a module")
             return
         }

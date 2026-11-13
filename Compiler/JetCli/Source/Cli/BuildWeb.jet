@@ -20,7 +20,7 @@ use {
         jet_driver_entry_root_path,
         jet_driver_ice_record,
     ]
-    jet_foundation.[BuildOptions, cli_schema_embed_wasm_record]
+    jet_foundation.[BuildOptions, FnBody, cli_schema_embed_wasm_record]
     jet_web.[web_app_js, web_dom_runtime_js, web_index_html, web_program]
 }
 
@@ -32,13 +32,15 @@ JET_CLI_RUNTIME_WEB_RECEIPT_FILE: "jet_runtime.wasm.tsv"
 // The web build of a compile with no errors whose authority is allowed
 // (jet_cli_build_result). The IR is the native route's (jet_cli_native_program):
 // every fault, a web selection finding among them, is one ICE row, all
-// reported at once with exit 101.
+// reported at once with exit 101. Under `--explain-partition` the build's
+// stdout is the partition report (jet_cli_web_partition_report).
 jet_cli_build_web: fn(file: String, color: Bool, options: BuildOptions, result: JetDriverCompileResult, inputs: &&JetDriverLoweringInputs?, snapshot: JetDriverAuthorizedSourceSnapshot) -[Env, FS, Time, Exec.Args]> JetDriverVerbOutput Never! {
     if result.internal_problem == .Val(problem) -> return jet_cli_ice(problem)
     if !result.complete -> return jet_cli_ice("the Jet compiler stopped before finishing `{file}`")
     if jet_cli_build_option_gate_refusal(snapshot.roots[0].canonical_path, options, color) == .Val(refused) -> return refused
     checked := inputs.move() ?? return jet_cli_ice("the Jet compiler finished `{file}` without its checked functions")
     if checked.entry_key == None -> return jet_cli_native_report(file, "build", JetCLINativeFailure.NoEntry, color)
+    report: if options.explain_partition -> jet_cli_web_partition_report(checked.functions) else -> ""
     runtime_dir: jet_cli_runtime_dir()
     runtime: jet_cli_runtime_exports(runtime_dir)
     if runtime.failure == .Val(failure) -> return jet_cli_native_report(file, "build", failure, color)
@@ -68,7 +70,47 @@ jet_cli_build_web: fn(file: String, color: Bool, options: BuildOptions, result: 
     if jet_cli_web_write_text(file, color, "{build_dir}/app.js", web_app_js()) == .Val(failure) -> return failure
     if jet_cli_web_write_text(file, color, "{build_dir}/jet_dom_runtime.js", web_dom_runtime_js()) == .Val(failure) -> return failure
     if jet_cli_web_write_text(file, color, "{build_dir}/index.html", web_index_html()) == .Val(failure) -> return failure
-    JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    JetDriverVerbOutput{stdout: report, stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+}
+
+// `jet build --explain-partition`: one row per function of the program's own
+// sources, named with its module and in key order, with the partition sema
+// solved for it and why: its marker, else the Browser effect or entry that
+// settled it.
+jet_cli_web_partition_report: fn(functions: [FnBody]) -> String Never! {
+    // Each row is `<key>\t<shown row>`, so sorting the rows orders them by key.
+    rows := [String]{}
+    loop function in functions {
+        if function.synthetic || function.module_identity.starts_with("<corelib>/") -> next
+        bucket: function.web_bucket ?? next
+        name: if function.module_name != "" -> "{function.module_name}.{function.name}" else -> function.name.copy()
+        browser: function.effects.solved.contains("Browser")
+        reason: if function.web_marker == {
+            .Val(.WasmExport) -> "#Export(wasm)"
+            .Val(.Wasm) -> "#Target(Wasm)"
+            .Val(.JS) -> "#Target(JS)"
+            .None -> if {
+                browser -> "inferred: Browser effect"
+                function.name == "run" -> "entry"
+                else -> "inferred: no Browser effect"
+            }
+        }
+        partition: if bucket == {
+            .JS -> "JS"
+            .Wasm -> "Wasm"
+        }
+        effects := function.effects.solved.copy()
+        effects.sort()
+        shown: if effects.len() == 0 -> "(pure)" else -> effects.join(", ")
+        rows.push("{function.key}\t{name} -> {partition}  {reason}  effects: {shown}")
+    }
+    rows.sort()
+    text := "Web partition report\n"
+    loop row in rows {
+        shown: row.slice(row.find("\t") + 1, row.len())
+        text = "{text}{shown}\n"
+    }
+    text
 }
 
 // Write one file of a web build, or the report of why it can't be.

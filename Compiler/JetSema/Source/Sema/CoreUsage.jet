@@ -1304,10 +1304,18 @@ sema_core_module_context: fn(graph: SemaRegistrationGraph, registration_module: 
     registered := sema_core_registration_type_names(registration_module)
     sema_core_generated_context_markers(graph, registration_module, registered)
     owner: if registration_module.module_identity.starts_with("<corelib>/") -> registration_module.module_name else -> ""
+    // An import row names its target by module identity (a Core module's is
+    // `<corelib>/…`, as `use sys: core.sys` or `use core.sys.[get]` registers
+    // it); a Core usage is keyed by the module's name.
+    imports := sema_core_registration_imports(registration_module)
+    loop index in 0..<imports.len() {
+        target: sema_registration_module_index(graph, imports[index].module_name) ?? next
+        imports[index].module_name = graph.modules[target].module_name.copy()
+    }
     SemaCoreModuleContext{
         owner: owner,
         unshared: sema_core_source_unshared_functions(registration_module, call_facts),
-        imports: sema_core_registration_imports(registration_module),
+        imports: imports.move(),
         registered: registered.move(),
     }
 }
