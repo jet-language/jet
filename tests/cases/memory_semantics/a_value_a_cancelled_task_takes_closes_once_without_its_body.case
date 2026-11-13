@@ -1,0 +1,13 @@
+# A value a `task &&name` capture takes closes exactly once even when the
+# task is cancelled before its body starts, on every tier.
+fixture: a_value_a_cancelled_task_takes_closes_once_without_its_body.fixture
+env: NO_COLOR=1
+step: jet run --optimize=none main.jet
+exit: 0
+stdout: = a_value_a_cancelled_task_takes_closes_once_without_its_body.out
+step: jet run --optimize=basic main.jet
+exit: 0
+stdout: = a_value_a_cancelled_task_takes_closes_once_without_its_body.out
+step: jet run --optimize=full main.jet
+exit: 0
+stdout: = a_value_a_cancelled_task_takes_closes_once_without_its_body.out

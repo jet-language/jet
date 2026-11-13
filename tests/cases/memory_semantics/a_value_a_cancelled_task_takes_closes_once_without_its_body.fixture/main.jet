@@ -1,0 +1,46 @@
+// A task whose body never runs still ends what its `&&owned` capture took.
+// `outer` spawns `blocker` into a group whose one slot it then holds, says
+// it is ready, and spawns `late`, which waits for that slot. The cancel
+// stops `late` while it waits, so its body never starts and its box closes
+// `owned`. `outer` stops, and its `gate` closes `wake` as it leaves, so
+// `blocker` ends and the group joins. The value closes exactly once, before
+// the join returns.
+Res: struct {
+    name: String
+
+    impl Close {
+        close: fn(&&self) { print("close {self.name}") }
+    }
+}
+
+Gate: struct {
+    wake: Sender<Int>
+
+    impl Close {
+        close: fn(&&self) { self.wake.close() }
+    }
+}
+
+run: fn() {
+    { sender: wake, receiver: hold }: channel<Int>()
+    { sender: ready, receiver: started }: channel<Int>()
+    owned := Res{name: "unstarted"}
+    outer: task &&owned {
+        task.group limited(limit: 1) {
+            blocker: task {
+                _ := hold.receive() ?? 0
+            }
+            gate := Gate{wake: wake}
+            ready.send(1)
+            late: task &&owned {
+                owned.name.len()
+            }
+        }
+    }
+    _ := started.receive() ?? 0
+    outer.cancel()
+    if outer.join() == {
+        .Err(_) -> print("outer stopped")
+        .Ok(_) -> print("outer finished")
+    }
+}

@@ -124,13 +124,26 @@ ir_closure_slot: fn(m: IRModule, b: IRBuilder, slot: Int) -> Bool Never! {
     slot >= 0 && m.types[b.f.slot_type[slot]].clone == ir_closure_share()
 }
 
+// The word of a task body's box that the body sets as it starts: a task
+// cancelled before its body ran never took the captures its body owns, so
+// the release helper ends them. A task box's captures start after it.
+IR_TASK_STARTED: 24
+
 // A new box of `bytes` bytes (row `row`) holding one owner and the release
 // helper of its capture shape; the caller stores the code at 8 and the
-// captures (`captures`: by value, or a held place's address).
+// captures (`captures`: by value, or a held place's address). A box whose
+// body owns captures starts unstarted (IR_TASK_STARTED).
 ir_closure_box: fn(m: &IRModule, b: &IRBuilder, row: Int, bytes: Int, captures: [IRCaptureSlot]) -> Int Never! {
     boxed: ir_box_alloc(m, b, bytes, row)
     one: ir_word_const(m, b, 1)
     ir_emit(b.f, IROp.Store, -1, boxed, 0, one, b.line)
+    loop capture in captures {
+        if capture.body_owned {
+            zero: ir_word_const(m, b, 0)
+            ir_emit(b.f, IROp.Store, -1, boxed, IR_TASK_STARTED, zero, b.line)
+            break
+        }
+    }
     pointer_row: ir_pointer_row(m)
     release_id: ir_closure_release(m, bytes, captures)
     release: ir_temp(m, b, pointer_row)
@@ -141,12 +154,21 @@ ir_closure_box: fn(m: &IRModule, b: &IRBuilder, row: Int, bytes: Int, captures: 
 
 // The release helper of a box of `bytes` bytes with `captures`: drops each
 // capture the box owns as an aggregate's glue drops its members
-// (ir_glue_drops), never a held place, then frees the box. One per capture
+// (ir_glue_drops), never a held place, then frees the box. A capture the
+// body owns ends with the body; when the body never started, the helper
+// closes and drops it as the body's scope end would have. One per capture
 // shape.
 ir_closure_release: fn(m: &IRModule, bytes: Int, captures: [IRCaptureSlot]) -> Int Never! {
     owned := [IRCaptureSlot]{}
+    unstarted := [IRCaptureSlot]{}
     key := "#closure.release<{ir_align8(bytes)}"
     loop capture in captures {
+        if capture.body_owned {
+            if capture.close < 0 && m.types[capture.row].drop == "" -> next
+            key = "{key}|{capture.offset}~{ir_row_key(m, capture.row)}"
+            unstarted.push(capture.copy())
+            next
+        }
         dropped: if capture.owned_row >= 0 -> capture.owned_row else -> capture.row
         if capture.by_ref || !ir_glue_drops(m, dropped) -> next
         key = "{key}|{capture.offset}:{ir_row_key(m, dropped)}"
@@ -160,6 +182,20 @@ ir_closure_release: fn(m: &IRModule, bytes: Int, captures: [IRCaptureSlot]) -> I
     name_rows_set(m.function_rows, key, id)
     a := ir_builder_new(m.functions[id].copy())
     boxed: ir_new_slot(a, ir_pointer_row(m), IRSlotKind.Param, ir_intern_name(m, "boxed"))
+    if unstarted.len() > 0 {
+        word_row: ir_word_row(m)
+        started: ir_load_at(m, a, boxed, IR_TASK_STARTED, word_row)
+        zero: ir_word_const(m, a, 0)
+        never: ir_new_slot(a, ir_type_row(m, Type.Bool) ?? 0, IRSlotKind.Temp, -1)
+        ir_emit(a.f, IROp.Eq, never, started, zero, -1, a.line)
+        ir_open_if(a.f, never, a.line)
+        loop capture in unstarted {
+            value: ir_load_at(m, a, boxed, capture.offset, capture.row)
+            if capture.close >= 0 -> ir_close_call(a, capture.close, value)
+            if m.types[capture.row].drop != "" -> ir_emit(a.f, IROp.Drop, -1, value, -1, -1, a.line)
+        }
+        ir_end(a.f, a.line)
+    }
     loop capture in owned {
         value: ir_load_at(m, a, boxed, capture.offset, capture.row)
         ir_emit(a.f, IROp.Drop, -1, value, -1, -1, a.line)
@@ -256,10 +292,8 @@ ir_task_spawn: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, task_ty: Type, grou
     checked.ret = if element == (Type.Named{name: "Unit"}) -> None else -> Val(element.copy())
     checked.failure_carrier = ir_failure_carrier_for_type(element)
     closure_ty: ir_lambda_function_type(checked)
-    env: ir_lambda(m, p, b, closure_ty, checked, span)
+    env: ir_lambda_box(m, p, b, closure_ty, checked, true, span)
     if ir_failed(b) || env < 0 -> return -1
-    // ir_lambda queued the body's job last.
-    m.lambdas[m.lambdas.len() - 1].task_body = true
     invoke_id: ir_lazy_helper(m, p, b, "callback", closure_ty, span)
     if invoke_id < 0 -> return -1
     invoke: ir_lazy_address(m, b, invoke_id)

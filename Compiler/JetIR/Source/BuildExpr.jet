@@ -7150,13 +7150,15 @@ ir_window_subject: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, place: Int, pla
 
 // ---------------------------------------------------------------------------
 // Closures: a counted box (ir_closure_box) with its code at 8 and the
-// captures from 24. The code takes the box as its hidden first parameter. A
-// capture the body of a non-escaping lambda writes is held by address: its
-// variable becomes a frame cell from the closure's creation on. A written
-// alias of another holder's storage (a write window or write parameter) is
-// held by address too, so a scoped task's writes land on the owner. Any
-// other capture is a copy the box owns until its release helper drops it;
-// an escaping lambda's writes stay in that copy, which outlives the frame.
+// captures from 24 (from 32 in a task body's box, whose word at 24 records
+// that the body started). The code takes the box as its hidden first
+// parameter. A capture the body of a non-escaping lambda writes is held by
+// address: its variable becomes a frame cell from the closure's creation
+// on. A written alias of another holder's storage (a write window or write
+// parameter) is held by address too, so a scoped task's writes land on the
+// owner. Any other capture is a copy the box owns until its release helper
+// drops it; an escaping lambda's writes stay in that copy, which outlives
+// the frame. A task body owns its copies instead (ir_lambda_box).
 //
 // The lambda's function is keyed by its enclosing function, its own source
 // span and its occurrence there: the merge shares functions by key, and the
@@ -7164,9 +7166,18 @@ ir_window_subject: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, place: Int, pla
 // would hand every branch the first branch's body.
 
 ir_lambda: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, lambda: BodyLambda, span: Span) -> Int Never! {
+    ir_lambda_box(m, p, b, ty, lambda, false, span)
+}
+
+// The closure box of `lambda` with its code queued. A task body
+// (`task_body`) runs once, so it owns each capture the box holds by value:
+// the body closes and drops what it does not move on (ir_build_lambda), and
+// the box's release helper ends those captures only when the body never
+// started (IR_TASK_STARTED, the word before a task box's captures).
+ir_lambda_box: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, lambda: BodyLambda, task_body: Bool, span: Span) -> Int Never! {
     row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
     captures := [IRCaptureSlot]{}
-    offset := 24
+    offset := if task_body -> IR_TASK_STARTED + 8 else -> 24
     loop capture in lambda.captures {
         binding: ir_lookup_binding(b, capture.source) ?? ir_lookup_binding(b, capture.local.name) ?? return ir_fail_slot(b, span, "capture of unknown local {capture.source}")
         by_ref: (!lambda.capture_facts.escapes || binding.write) && (lambda.capture_facts.mutable.contains(capture.source) || lambda.capture_facts.mutable.contains(capture.local.name))
@@ -7181,7 +7192,10 @@ ir_lambda: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, lambda: BodyL
                 owned_row = ir_value_type(m, p, owned) ?? return ir_type_fail(b, span, owned)
             }
         }
-        captures.push(IRCaptureSlot{name: capture.local.name, offset: offset, row: value_row, by_ref: by_ref, owned_row: owned_row})
+        body_owned: task_body && !by_ref && owned_row < 0
+        close: if body_owned -> ir_close_glue(m, p, b, value_row, false, span) else -> -1
+        if ir_failed(b) -> return -1
+        captures.push(IRCaptureSlot{name: capture.local.name, offset: offset, row: value_row, by_ref: by_ref, owned_row: owned_row, body_owned: body_owned, close: close})
         offset += size
     }
     boxed: ir_closure_box(m, b, row, offset, captures)
@@ -7195,12 +7209,23 @@ ir_lambda: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, lambda: BodyL
         } else {
             // A capture copies the variable, which stays its own owner;
             // the box owns the copy: a materialized window's own List of
-            // its elements, read through the window's header.
+            // its elements, read through the window's header. A value a
+            // task body takes (`task &&name`) moves into the box instead:
+            // the variable stops owning and closing it, so the body alone
+            // ends it.
             captured: ir_read_binding(m, b, binding)
-            kept: if {
+            taken: slot.body_owned && ir_owned_binding(b, captured) && (lambda.capture_facts.moved.contains(capture.source) || lambda.capture_facts.moved.contains(capture.local.name))
+            kept := if {
+                taken -> captured
                 slot.owned_row >= 0 -> ir_lambda_owned_window(m, p, b, captured, slot.owned_row, span)
                 m.types[b.f.slot_type[captured]].kind == .Aggregate -> ir_copy_value(m, p, b, captured, span)
                 else -> captured
+            }
+            if taken {
+                moving: b.moving
+                b.moving = captured
+                kept = ir_own(m, p, b, captured)
+                b.moving = moving
             }
             if ir_failed(b) -> return -1
             ir_store_at(m, p, b, boxed, slot.offset, kept)
@@ -7212,7 +7237,7 @@ ir_lambda: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, lambda: BodyL
     b.lambdas[base_key] = occurrence + 1
     lambda_key: if occurrence == 0 -> base_key else -> "{base_key}#{occurrence}"
     m.functions.push(ir_hashed_function("{b.f.name}.lambda@{lambda.source_span.start}", lambda_key, "{b.f.symbol}__lambda_", b.f.source_file, b.line))
-    m.lambdas.push(IRLambdaJob{lambda: lambda, captures: captures, source_file: b.f.source_file, line: b.line, instance: b.instance, row: b.row, made: b.made, next_node: b.next_node})
+    m.lambdas.push(IRLambdaJob{lambda: lambda, captures: captures, source_file: b.f.source_file, line: b.line, instance: b.instance, row: b.row, made: b.made, next_node: b.next_node, task_body: task_body})
     m.queue.push(IRQueued{row: -1, id: id, args: [Type]{}, lambda: m.lambdas.len() - 1})
     pointer_row: ir_pointer_row(m)
     code: ir_temp(m, b, pointer_row)
@@ -7266,9 +7291,20 @@ ir_build_lambda: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, job: IRLambdaJob)
         write: index < conventions.len() && conventions[index] == .Write
         if ir_param_slot(m, p, b, ty, write, false, name) == None -> return ir_fail(b, span, "lambda parameter type {ir_type_name(ty)}")
     }
+    if job.task_body {
+        started: ir_word_const(m, b, 1)
+        ir_emit(b.f, IROp.Store, -1, env, IR_TASK_STARTED, started, b.line)
+    }
     loop capture in job.captures {
         aggregate: m.types[capture.row].kind == .Aggregate
-        if capture.by_ref {
+        if capture.body_owned && m.types[capture.row].kind != .Unit {
+            // The task body owns this capture as a function owns a taken
+            // parameter: its scope end closes and drops what the body did
+            // not move on.
+            value: ir_load_at(m, b, env, capture.offset, capture.row)
+            b.bindings.push(IRBinding{name: capture.name, slot: value, owned: ir_has_drop(m, b, value)})
+            ir_close_arm(m, p, b, value, false, span)
+        } else if capture.by_ref {
             pointer_row: ir_pointer_row(m)
             address: ir_temp(m, b, if aggregate -> capture.row else -> pointer_row)
             ir_emit(b.f, IROp.Load, address, env, capture.offset, -1, b.line)

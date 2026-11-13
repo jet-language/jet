@@ -1,0 +1,21 @@
+// A `task &&owned` capture inside a task group hands the value to the task.
+// The task body only reads it, so the value closes when the body ends,
+// before the join returns, and never again.
+Res: struct {
+    name: String
+
+    impl Close {
+        close: fn(&&self) { print("close {self.name}") }
+    }
+}
+
+run: fn() {
+    owned := Res{name: "group"}
+    task.group g {
+        child: task &&owned {
+            owned.name.len()
+        }
+        print("joined {child.join() ?? 0}")
+    }
+    print("done")
+}

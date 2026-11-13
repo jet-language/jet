@@ -556,8 +556,9 @@ IRLambdaJob: struct {
 }
 
 // One closure capture: the name the body reads, its byte offset in the box,
-// its value type row, and whether the box holds its address (a capture the
-// body writes) instead of its value.
+// its value type row, whether the box holds its address (a capture the
+// body writes) instead of its value, and whether the body owns the value (a
+// task body, which runs once: ir_build_lambda) instead of the box.
 IRCaptureSlot: struct {
     name: String
     offset: Int
@@ -567,6 +568,10 @@ IRCaptureSlot: struct {
     // reads: a window the lambda keeps past its owner is held as a List of
     // its elements, read through the same header.
     owned_row: Int{-1}
+    body_owned: Bool{false}
+    // The close glue of a body-owned capture (-1: nothing closes), which the
+    // release helper runs when the body never started.
+    close: Int{-1}
 }
 
 ir_program_new: fn(functions: &&[FnBody], decls: DeclTable, type_defs: &&[TTypeDef], impl_defs: &&[TImplDef], sources: &&[String:String], constant_defs: &&[TConstantDef]) -> IRProgram Never! {
