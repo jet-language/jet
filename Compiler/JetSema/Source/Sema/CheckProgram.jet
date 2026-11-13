@@ -2278,14 +2278,17 @@ sema_function_check_pass: fn(func: Func, owner_id: SymbolID, function_kind: TFun
     if returns_value && func.body.len() > 0 && func.body[func.body.len() - 1] == .Unsafe(_, _, unsafe_body, _) {
         context.value_tail_span = sema_stmt_value_tail_marker(unsafe_body)
     }
-    // Imported Core bodies and generated functions have no user source to fix.
-    if returns_value && !func.compiler_generated && !updated.module_identity.starts_with("<corelib>/") -> sema_stmt_value_block_tail_lints(func.body, diagnostics)
+    // A fallback-free arm table followed by a default return needs no `else`
+    // arm; imported Core bodies and generated functions have no user source
+    // to fix, so only user code is linted (L0513, L0530).
+    if returns_value -> sema_stmt_value_block_tail_lints(func.body, !func.compiler_generated && !updated.module_identity.starts_with("<corelib>/"), updated, program, context.fallback_tables, diagnostics)
     statements := sema_check_statements(func.body, Val(effective_return), updated, program, scopes, state, tail_store, context, diagnostics, 0)
     // The caller's group joins every task this body spawned into a `Group`
     // parameter, so those handles owe no `join` here.
     sema_taskgroup_mark_spawns_owned(context, SemaTaskGroupOrigin.Parameter, scopes, state, diagnostics)
     context.lost_tail_span = None
     context.value_tail_span = None
+    context.fallback_tables = [Int]{}
     loop site in state.share_found -> share_found.push(site)
     loop retype in context.number_retypes_found -> number_found.push(retype)
     if !statements.complete -> complete = false

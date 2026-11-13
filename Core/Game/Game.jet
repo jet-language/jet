@@ -17,9 +17,10 @@ use core
 // Scene, Replay, and Backend are opaque compiler-owned handles. Their
 // registered constructors retain scene assets, input, replay, and scheduling
 // state; a plain source record cannot represent those runtime identities.
-// Runs the scene's frame loop and returns its transcript.
+// Runs the scene's frame loop and returns its transcript. The loop borrows
+// the scene mutably, so the scene is a `:=` name, not a temporary.
 // The qualified call is deliberate: inside this package it selects the
 // runtime's frame-loop leaf.
-run: fn(scene: GameScene, replay: GameReplay? {None}, backend: GameBackend? {None}, frames: Int? {None}) -> String {
+run: fn(&scene: GameScene, replay: GameReplay? {None}, backend: GameBackend? {None}, frames: Int? {None}) -> String {
     core.game.run(scene, replay, backend, frames)
 }

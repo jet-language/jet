@@ -424,7 +424,20 @@ sema_infer_callable: fn(graph: SemaRegistrationGraph?, context: &SemaInferenceCo
         }
     }
     if context.expected == .Val(expected_ty) && return_type == .Val(declared_return) {
-        if !sema_inference_unify_inner(context, sema_inference_expected_return_view(declared_return, expected_ty), expected_ty, bindings, "the expected result type", conflict) {
+        // The declared return and the expectation resolve like the
+        // parameters and arguments, so a source `Stack<T>` meets the
+        // caller's `Stack<Int>` under one declaration identity.
+        if graph == .Val(registered) {
+            resolved_expected: sema_type_resolve_declared_with_generics(registered, expected_ty, context.caller_module_identity, generic_scope)
+            expected_view: sema_inference_expected_return_view(sema_type_resolve_declared_with_generics(registered, declared_return, context.caller_module_identity, generic_scope), resolved_expected)
+            if !sema_inference_unify_inner(context, expected_view, resolved_expected, bindings, "the expected result type", conflict) {
+                if conflict == .Val(row) {
+                    sema_inference_conflict_diagnostic(row, span, diagnostics)
+                    return None
+                }
+                compatible = false
+            }
+        } else if !sema_inference_unify_inner(context, sema_inference_expected_return_view(declared_return, expected_ty), expected_ty, bindings, "the expected result type", conflict) {
             if conflict == .Val(row) {
                 sema_inference_conflict_diagnostic(row, span, diagnostics)
                 return None

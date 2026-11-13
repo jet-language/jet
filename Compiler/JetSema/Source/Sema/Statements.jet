@@ -838,27 +838,38 @@ sema_stmt_has_structural_control_flow: fn(statement: Stmt) -> Bool Never! {
 // fallback-free arm table of direct returns is followed by a default return,
 // and L0530 when the last line is `return value`, which only
 // repeats the implicit return. A last-line table hands its arms the value, and
-// a last-line `#Unsafe` region its body.
-sema_stmt_value_block_tail_lints: fn(statements: [Stmt], diagnostics: &[Diagnostic]) {
+// a last-line `#Unsafe` region its body. Each such arm table's start joins
+// `tables` whether or not `lint` is set: the table's miss falls through to the
+// default return, so its check asks for no `else` arm (E0003).
+sema_stmt_value_block_tail_lints: fn(statements: [Stmt], lint: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, tables: &[Int], diagnostics: &[Diagnostic]) {
     count: statements.len()
     if count == 0 -> return
     if count >= 2 && sema_stmt_redundant_arm_table_span(statements[count - 2], statements[count - 1]) == .Val(table_span) {
-        diagnostics.push(sema_lint("L0513", table_span, "this arm table is followed by a default return that can be its explicit `else` arm", "the value-table form keeps all outcomes together and lets the block return its final expression", "replace the table and fallback with an explicit `else` arm"))
+        tables.push(table_span.start)
+        // Rust check_redundant_arm_table_return: the lint is its rewrite, so a
+        // table whose source the rewrite cannot read is not reported.
+        if lint {
+            if sema_stmt_redundant_arm_table_edit(statements[count - 2], statements[count - 1], environment, program) == .Val(edit) {
+                lint_row: sema_lint("L0513", table_span, "this arm table is followed by a default return that can be its explicit `else` arm", "the value-table form keeps all outcomes together and lets the block return its final expression", "replace the table and fallback with an explicit `else` arm")
+                diagnostics.push(diagnostic_with_edit_grade(lint_row, edit, DiagnosticFixApplicability.Safe, DiagnosticFixSafety.Formatting))
+            }
+        }
     }
     if statements[count - 1] == {
         .Return(value, span) -> {
+            if !lint -> return
             if value == .Val(returned) {
                 // The fix deletes `return` and the blank run after it, so the
                 // value is left as the block tail.
-                lint: sema_lint("L0530", Span{start: span.start, end: span.start + "return".len()}, "an explicit `return` is used on the final value line", "an unadorned expression on the final value line is Jet's implicit return; `return` is for early exits", "remove the final `return` and leave the expression as the block tail")
-                diagnostics.push(diagnostic_with_edit_grade(lint, TextEdit{span: Span{start: span.start, end: expr_source_start(returned)}, new_text: ""}, DiagnosticFixApplicability.Safe, DiagnosticFixSafety.Formatting))
+                tail_lint: sema_lint("L0530", Span{start: span.start, end: span.start + "return".len()}, "an explicit `return` is used on the final value line", "an unadorned expression on the final value line is Jet's implicit return; `return` is for early exits", "remove the final `return` and leave the expression as the block tail")
+                diagnostics.push(diagnostic_with_edit_grade(tail_lint, TextEdit{span: Span{start: span.start, end: expr_source_start(returned)}, new_text: ""}, DiagnosticFixApplicability.Safe, DiagnosticFixSafety.Formatting))
             }
         }
         .Switch(_, arms, else_body, _) -> {
-            loop arm in arms -> sema_stmt_value_block_tail_lints(arm.body, diagnostics)
-            if else_body == .Val(rest) -> sema_stmt_value_block_tail_lints(rest, diagnostics)
+            loop arm in arms -> sema_stmt_value_block_tail_lints(arm.body, lint, environment, program, tables, diagnostics)
+            if else_body == .Val(rest) -> sema_stmt_value_block_tail_lints(rest, lint, environment, program, tables, diagnostics)
         }
-        .Unsafe(_, _, body, _) -> sema_stmt_value_block_tail_lints(body, diagnostics)
+        .Unsafe(_, _, body, _) -> sema_stmt_value_block_tail_lints(body, lint, environment, program, tables, diagnostics)
         .Expr(_) | .Val(_) | .Assign(_, _, _, _) | .While(_, _, _, _, _) | .For(_, _, _, _, _, _, _, _, _) | .Break(_) | .BreakValue(_, _) | .Continue(_) | .BreakLabel(_, _) | .BreakLabelValue(_, _, _, _) | .ContinueLabel(_, _) | .Loop(_, _, _, _) | .CountedLoop(_, _, _, _, _, _, _) | .Impure(_, _, _, _) | .Reactive(_, _) | .Shield(_, _) | .Switched(_, _, _) | .Region(_, _, _, _) | .Policy(_, _, _) | .TaskGroup(_, _, _, _, _) | .Layout(_, _, _, _) | .AuthorityScope(_, _, _, _, _) | .ComptimeIf(_, _, _, _, _, _) | .ComptimeSwitch(_, _, _, _) | .ComptimeBlock(_, _, _) | .ContextBlock(_, _, _) | .Live(_, _) | .AssumeDet(_, _, _, _) | .Transact(_, _, _, _, _) | .Yield(_, _) | .ScopeMember(_, _, _, _, _, _, _, _) | .DeferClose(_, _) -> {}
     }
 }
@@ -877,6 +888,175 @@ sema_stmt_redundant_arm_table_span: fn(table: Stmt, fallback: Stmt) -> Span? Nev
         return Val(span)
     }
     None
+}
+
+// Rust redundant_arm_table_edit: one edit from the table's `if` to the end of
+// its default return. Each arm loses its `return` keyword (and an authored
+// `;`), the table gains `else -> { default }` before its closing brace, and
+// the default return goes; every comment and space stays where it was
+// written. None when the source does not hold the parts in order. Only a
+// reported table copies the module's bytes.
+sema_stmt_redundant_arm_table_edit: fn(table: Stmt, fallback: Stmt, environment: SemaScopeEnvironment, program: SemaProgramTables) -> TextEdit? {
+    graph: program.registration_graph ?? return None
+    caller: sema_scope_caller_index(environment, graph) ?? return None
+    if table == .Switch(_, arms, _, span) {
+        if fallback == .Return(fallback_value, fallback_span) {
+            if fallback_value == .Val(default) {
+                raw: graph.modules[caller].source.bytes()
+                // The cuts run in source order; inserts[i] replaces cuts[i].
+                cuts := [Span]{}
+                inserts := [String]{}
+                loop arm in arms {
+                    if !sema_stmt_is_value_return(arm.body[0]) -> return None
+                    if arm.body[0] == .Return(arm_value, return_span) {
+                        if arm_value == .Val(returned) {
+                            cuts.push(sema_stmt_return_keyword(raw, return_span.start) ?? return None)
+                            inserts.push("")
+                            if sema_stmt_authored_semicolon(raw, expr_source_span(returned).end) == .Val(semicolon) {
+                                cuts.push(Span{start: semicolon, end: semicolon + 1})
+                                inserts.push("")
+                            }
+                        }
+                    }
+                }
+                close: sema_stmt_table_close(raw, span.start) ?? return None
+                default_span: expr_source_span(default)
+                default_text: sema_stmt_source_text(raw, default_span) ?? return None
+                prefix: if close > span.start && !sema_stmt_ascii_space(raw[close - 1]) -> " " else -> ""
+                cuts.push(Span{start: close, end: close})
+                inserts.push("{prefix}else -> {{ {default_text} }}")
+                cuts.push(sema_stmt_return_keyword(raw, fallback_span.start) ?? return None)
+                inserts.push("")
+                end := default_span.end
+                cuts.push(default_span)
+                inserts.push("")
+                // The fallback's `;` goes too, so no stray terminator follows the table.
+                if sema_stmt_authored_semicolon(raw, end) == .Val(semicolon) {
+                    end = semicolon + 1
+                    cuts.push(Span{start: semicolon, end: end})
+                    inserts.push("")
+                }
+                text := ""
+                at := span.start
+                loop index in 0..<cuts.len() {
+                    cut: cuts[index]
+                    if cut.start < at || cut.end > end || cut.start > cut.end -> return None
+                    if cut.start > at {
+                        kept: sema_stmt_source_text(raw, Span{start: at, end: cut.start}) ?? return None
+                        text = "{text}{kept}"
+                    }
+                    text = "{text}{inserts[index]}"
+                    at = cut.end
+                }
+                if end > at {
+                    kept: sema_stmt_source_text(raw, Span{start: at, end: end}) ?? return None
+                    text = "{text}{kept}"
+                }
+                return Val(TextEdit{span: Span{start: span.start, end: end}, new_text: text})
+            }
+        }
+    }
+    None
+}
+
+// The span of the `return` keyword at `start`, None when the source does not
+// spell it there.
+sema_stmt_return_keyword: fn(raw: [U8], start: Int) -> Span? {
+    keyword: Span{start: start, end: start + "return".len()}
+    if sema_stmt_source_text(raw, keyword) != (Val("return")) -> return None
+    Val(keyword)
+}
+
+// Rust find_switch_close: the offset of the `}` that closes the first brace
+// opened at or after `start`, past comments, strings and character literals.
+sema_stmt_table_close: fn(raw: [U8], start: Int) -> Int? {
+    depth := 0
+    at := start
+    loop at < raw.len() {
+        byte: raw[at]
+        if byte == (U8{47}) && at + 1 < raw.len() && raw[at + 1] == (U8{47}) {
+            at = sema_stmt_line_comment_end(raw, at + 2)
+        } else if byte == (U8{47}) && at + 1 < raw.len() && raw[at + 1] == (U8{42}) {
+            at = sema_stmt_block_comment_end(raw, at + 2)
+        } else if byte == (U8{34}) {
+            at = sema_stmt_string_end(raw, at)
+        } else if byte == (U8{39}) {
+            at = sema_stmt_char_end(raw, at + 1)
+        } else if byte == (U8{123}) {
+            depth += 1
+            at += 1
+        } else if byte == (U8{125}) && depth == 1 {
+            return Val(at)
+        } else {
+            if byte == (U8{125}) && depth > 1 -> depth -= 1
+            at += 1
+        }
+    }
+    None
+}
+
+// Rust find_authored_semicolon: the offset of a `;` that follows `from` past
+// spaces and comments, None when anything else comes first.
+sema_stmt_authored_semicolon: fn(raw: [U8], from: Int) -> Int? {
+    at := if from < raw.len() -> from else -> raw.len()
+    loop at < raw.len() {
+        byte: raw[at]
+        if sema_stmt_ascii_space(byte) {
+            at += 1
+        } else if byte == (U8{47}) && at + 1 < raw.len() && raw[at + 1] == (U8{47}) {
+            at = sema_stmt_line_comment_end(raw, at + 2)
+        } else if byte == (U8{47}) && at + 1 < raw.len() && raw[at + 1] == (U8{42}) {
+            at = sema_stmt_block_comment_end(raw, at + 2)
+        } else if byte == (U8{59}) {
+            return Val(at)
+        } else {
+            return None
+        }
+    }
+    None
+}
+
+// The offset of the newline that ends a `//` comment whose text starts at `at`.
+sema_stmt_line_comment_end: fn(raw: [U8], at: Int) -> Int {
+    end := at
+    loop end < raw.len() && raw[end] != (U8{10}) -> end += 1
+    end
+}
+
+// The offset just past the `*/` that ends a `/*` comment whose text starts at `at`.
+sema_stmt_block_comment_end: fn(raw: [U8], at: Int) -> Int {
+    end := at
+    loop end + 1 < raw.len() && !(raw[end] == (U8{42}) && raw[end + 1] == (U8{47})) -> end += 1
+    if end + 2 < raw.len() -> end + 2 else -> raw.len()
+}
+
+// The offset just past the string literal whose opening quote is at `at`: a
+// `"""` block ends at the next `"""`; a plain string skips its escapes.
+sema_stmt_string_end: fn(raw: [U8], at: Int) -> Int {
+    triple: at + 2 < raw.len() && raw[at + 1] == (U8{34}) && raw[at + 2] == (U8{34})
+    end := if triple -> at + 3 else -> at + 1
+    loop end < raw.len() {
+        if triple && end + 2 < raw.len() && raw[end] == (U8{34}) && raw[end + 1] == (U8{34}) && raw[end + 2] == (U8{34}) -> return end + 3
+        if !triple && raw[end] == (U8{34}) -> return end + 1
+        end += if !triple && raw[end] == (U8{92}) -> 2 else -> 1
+    }
+    raw.len()
+}
+
+// The offset just past the `'` that closes a character literal whose text
+// starts at `at`.
+sema_stmt_char_end: fn(raw: [U8], at: Int) -> Int {
+    end := at
+    loop end < raw.len() {
+        if raw[end] == (U8{39}) -> return end + 1
+        end += if raw[end] == (U8{92}) -> 2 else -> 1
+    }
+    raw.len()
+}
+
+// Rust u8::is_ascii_whitespace: space, tab, newline, form feed, return.
+sema_stmt_ascii_space: fn(byte: U8) -> Bool {
+    byte == U8{32} || byte == U8{9} || byte == U8{10} || byte == U8{12} || byte == U8{13}
 }
 
 sema_stmt_is_value_return: fn(statement: Stmt) -> Bool Never! {
@@ -1559,20 +1739,26 @@ sema_stmt_check_switch: fn(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?,
         // Rust `check_switch`: only an all-pattern table can prove that one
         // arm always matches; a text or byte pattern is left to coverage.
         if !multi_head && !sema_stmt_switch_all_patterns(arms) && !sema_stmt_switch_has_text_or_bytes(arms) {
-            diagnostics.push(sema_error("E0003", span, "this `if` needs an `else` arm", "mixed condition arms (or non-pattern arms) must always have a fallback", "add `else -> {{ ... }}` after the last arm"))
-            return SemaStatementResult{value: [TStmt]{}, complete: false}
+            // Rust check_block_inner: a fallback table (L0513) is the old
+            // spelling of one value table; its miss runs on into the default
+            // return after it, so it needs no `else` arm.
+            if !context.fallback_tables.contains(span.start) {
+                diagnostics.push(sema_error("E0003", span, "this `if` needs an `else` arm", "mixed condition arms (or non-pattern arms) must always have a fallback", "add `else -> {{ ... }}` after the last arm"))
+                return SemaStatementResult{value: [TStmt]{}, complete: false}
+            }
+        } else {
+            checked_conditions := [TExpr]{}
+            loop condition in conditions {
+                checked: condition ?? return SemaStatementResult{value: [TStmt]{}, complete: false}
+                checked_conditions.push(checked.value)
+            }
+            sema_coverage_check_table(checked_conditions, multi_head, span, environment, program, diagnostics)
+            // Rust `lower_enum_match`: the miss path of a covered else-less table
+            // is unreachable (codegen ends it in an Unreachable terminator), so it
+            // never falls through to the join, exactly as
+            // sema_stmt_refutable_switch_exits already assumes.
+            else_result = Val([TStmt]{TStmt.ExprStmt{value: sema_node(context, Type.Named{name: "Never"}, NodeKind.Never{reason: "no else arm", line: 0}, span), span: span}})
         }
-        checked_conditions := [TExpr]{}
-        loop condition in conditions {
-            checked: condition ?? return SemaStatementResult{value: [TStmt]{}, complete: false}
-            checked_conditions.push(checked.value)
-        }
-        sema_coverage_check_table(checked_conditions, multi_head, span, environment, program, diagnostics)
-        // Rust `lower_enum_match`: the miss path of a covered else-less table
-        // is unreachable (codegen ends it in an Unreachable terminator), so it
-        // never falls through to the join, exactly as
-        // sema_stmt_refutable_switch_exits already assumes.
-        else_result = Val([TStmt]{TStmt.ExprStmt{value: sema_node(context, Type.Named{name: "Never"}, NodeKind.Never{reason: "no else arm", line: 0}, span), span: span}})
     }
     loop condition in conditions {
         if condition == None -> return SemaStatementResult{value: [TStmt]{}, complete: false}
@@ -8953,8 +9139,12 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, environment: S
                 if !sema_stmt_refutable_loop_body_can_break(body) -> reachable = false
             }
             // Rust flow facts: a table whose every path leaves, or a literal
-            // `true` loop that nothing breaks, ends the reachable path too.
-            .Switch(_, _, _, _) | .While(_, _, _, _, _) | .CountedLoop(_, _, _, _, _, _, _) -> {
+            // `true` loop that nothing breaks, ends the reachable path too. A
+            // fallback table's miss runs on into its default return.
+            .Switch(_, _, _, table_span) -> {
+                if !context.fallback_tables.contains(table_span.start) && sema_stmt_refutable_statement_exits(statements[index]) -> reachable = false
+            }
+            .While(_, _, _, _, _) | .CountedLoop(_, _, _, _, _, _, _) -> {
                 if sema_stmt_refutable_statement_exits(statements[index]) -> reachable = false
             }
             .Unsafe(_, _, body, _) | .Impure(_, _, body, _) | .Shield(body, _) | .Live(body, _) | .AssumeDet(_, _, body, _) | .Region(_, _, body, _) | .AuthorityScope(_, _, _, body, _) -> {

@@ -683,6 +683,10 @@ SemaCheckContext: struct {
     // Source starts of else-less value dispatch chains already proved (E0307);
     // every level of one chain shares its span, and the outermost level wins.
     noelse_chain_starts: [Int]
+    // Source starts of the function's fallback-free arm tables followed by a
+    // default return (L0513): their miss falls through to that return, so
+    // they need no `else` arm (E0003).
+    fallback_tables: [Int]
     // The last statement of a named function with no written
     // return type; a non-Unit value there is thrown away (E0433).
     lost_tail_span: Span?
@@ -1183,6 +1187,7 @@ sema_check_context_init: fn() -> SemaCheckContext Never! {
         function_name: "",
         fallback_err_denial: None,
         noelse_chain_starts: [Int]{},
+        fallback_tables: [Int]{},
         lost_tail_span: None,
         value_tail_span: None,
         failure_edges: [String]{},
@@ -1258,6 +1263,7 @@ sema_check_context_snapshot: fn(source: SemaCheckContext) -> SemaCheckContext Ne
         function_name: source.function_name,
         fallback_err_denial: source.fallback_err_denial,
         noelse_chain_starts: source.noelse_chain_starts.copy(),
+        fallback_tables: source.fallback_tables.copy(),
         lost_tail_span: source.lost_tail_span,
         value_tail_span: source.value_tail_span,
         failure_edges: source.failure_edges.copy(),
@@ -1415,6 +1421,7 @@ sema_check_context_save: fn(context: SemaCheckContext) -> SemaCheckContextMark N
             function_name: context.function_name,
             fallback_err_denial: context.fallback_err_denial,
             noelse_chain_starts: [Int]{},
+            fallback_tables: [Int]{},
             lost_tail_span: context.lost_tail_span,
             value_tail_span: context.value_tail_span,
             failure_edges: [String]{},
