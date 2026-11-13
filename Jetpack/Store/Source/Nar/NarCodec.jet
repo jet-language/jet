@@ -50,8 +50,9 @@ NarByteSource: struct {
     }
 
     zstd: fn(&&reader: ZstdReader) -> NarByteSource Never! {
+        decoder := reader.move()
         NarByteSource{next: fn(limit: Int) {
-            if reader.read(limit) == {
+            if decoder.read(limit) == {
                 .Ok(bytes) -> Ok(bytes)
                 .Err(error) -> Err(IOError.InvalidInput(IOContext{operation: .Read, resource: None, os_code: None, cause: Val("zstd stream is corrupt: {error}")}))
             }
@@ -346,7 +347,7 @@ store_nar_stream_decode: fn(reader: &NarStreamReader, destination: String, expec
     reader.node(destination, destination, 0, 0)
     trailing: reader.read_some(1)
     if trailing.len() != 0 || reader.bytes != expected_nar_size -> return Err(store_nar_invalid("NAR stream has trailing or truncated data"))
-    Ok(NarStats{digest: "sha256:{crypto.digest(reader.hasher.move())}", bytes: reader.bytes, nodes: reader.nodes})
+    Ok(NarStats{digest: "sha256:{reader.hasher.digest()}", bytes: reader.bytes, nodes: reader.nodes})
 }
 
 NarStreamReader: struct {
