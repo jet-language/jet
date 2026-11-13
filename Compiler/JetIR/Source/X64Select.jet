@@ -1965,8 +1965,8 @@ ir_x64_int_binary: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64All
 }
 
 // Fixed-width Add, Sub, Mul of rax and `other` (a register, or with `imm`
-// for Add and Sub an immediate) into rax: wrapping, or (trap) stopping when
-// the result leaves the type's range.
+// an immediate; for a Mul not a trapping unsigned 64-bit one) into rax:
+// wrapping, or (trap) stopping when the result leaves the type's range.
 ir_x64_word_arithmetic: fn(e: &IRX64Emitter, f: IRFunction, tables: IRX64Tables, at: Int, ty: IRX64Shape, other: Int, imm: Int?) Never! {
     op: f.op[at]
     trap: f.c[at] != IR_OVERFLOW_WRAP
@@ -1974,7 +1974,11 @@ ir_x64_word_arithmetic: fn(e: &IRX64Emitter, f: IRFunction, tables: IRX64Tables,
     unsigned: !ty.signed
     operation: if op == .Add -> "add" else if op == .Sub -> "sub" else -> "mul"
     if imm == .Val(value) {
-        x64_alu_ri(e.code, if op == .Add -> X64Alu.Add else -> X64Alu.Sub, X64_RAX, value)
+        if op == .Mul {
+            x64_imul_rri(e.code, X64_RAX, X64_RAX, value)
+        } else {
+            x64_alu_ri(e.code, if op == .Add -> X64Alu.Add else -> X64Alu.Sub, X64_RAX, value)
+        }
     } else {
         if op == {
             .Add -> x64_alu_rr(e.code, X64Alu.Add, X64_RAX, other)
@@ -2188,7 +2192,12 @@ ir_x64_word_binary: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Al
     }
     wide_wrap: f.c[at] == IR_OVERFLOW_WRAP && ir_x64_bits(ty) == 64 && (op == .Add || op == .Sub || op == .Mul)
     if target != X64_RAX && (wide_wrap || op == .BitAnd || op == .BitOr || op == .BitXor) {
-        direct: if op == .Mul -> Int?{None} else -> ir_x64_imm(al, f.b[at])
+        direct: ir_x64_imm(al, f.b[at])
+        // A wrapping Mul by a constant: imul dst, left, imm, with no copy.
+        if op == .Mul && direct == .Val(factor) {
+            left: ir_x64_use(e, m, f, al, f.a[at], target)
+            return x64_imul_rri(e.code, target, left, factor)
+        }
         source: if direct != None -> -1 else -> ir_x64_use(e, m, f, al, f.b[at], X64_RCX)
         alu: if op == {
             .Add -> X64Alu.Add
@@ -2226,11 +2235,23 @@ ir_x64_word_binary: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Al
             return x64_alu_rr(e.code, alu, target, left)
         }
     }
-    ir_x64_load(e, m, f, al, f.a[at], X64_RAX)
+    // A Mul by a constant factor (either side) multiplies by the immediate,
+    // but for a trapping unsigned 64-bit one, whose overflow only MUL shows.
+    factor_right := Int?{None}
+    factor_left := Int?{None}
+    if op == .Mul && !(f.c[at] != IR_OVERFLOW_WRAP && !ty.signed && ir_x64_bits(ty) == 64) {
+        factor_right = ir_x64_imm(al, f.b[at])
+        if factor_right == None -> factor_left = ir_x64_imm(al, f.a[at])
+    }
+    ir_x64_load(e, m, f, al, if factor_left != None -> f.b[at] else -> f.a[at], X64_RAX)
     // Division and shifts take the right operand in rcx; the others read it
     // where it is, or as an immediate.
     simple: op == .Add || op == .Sub || op == .Mul || op == .BitAnd || op == .BitOr || op == .BitXor
-    imm: if simple && op != .Mul -> ir_x64_imm(al, f.b[at]) else -> Int?{None}
+    imm: if {
+        simple && op != .Mul -> ir_x64_imm(al, f.b[at])
+        factor_right != None -> factor_right
+        else -> factor_left
+    }
     other: if imm != None -> -1 else if simple -> ir_x64_use(e, m, f, al, f.b[at], X64_RCX) else -> X64_RCX
     if !simple -> ir_x64_load(e, m, f, al, f.b[at], X64_RCX)
     if op == {
@@ -4564,6 +4585,54 @@ ir_x64_compile_body: fn(m: IRModule, f: IRFunction, tables: IRX64Tables, row: In
         }
     }
     assert(found)
+}
+
+// scale(x) is x * 24 and 3 * x, each a checked Mul: on an I64 each is one
+// imul by the immediate (no constant loaded into rcx first); on a U64,
+// whose overflow only MUL's flags show, neither is.
+#Test("A checked word Mul by a constant multiplies by the immediate") {
+    m := ir_module_new()
+    signs: [Bool]{true, false}
+    factors: [Int]{24, 3}
+    loop signed in signs {
+        word: ir_type_row(m, Type.IntN{signed: signed, bits: 64}) ?? panic("no 64-bit row")
+        f := ir_function_new("scale", "test:scale.jet::scale{signed}", "", "scale.jet", 1)
+        x: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "x"), 1)
+        f.result = word
+        three: ir_slot(f, word, IRSlotKind.Temp, -1, 0)
+        many: ir_slot(f, word, IRSlotKind.Temp, -1, 0)
+        left: ir_slot(f, word, IRSlotKind.Temp, -1, 0)
+        right: ir_slot(f, word, IRSlotKind.Temp, -1, 0)
+        sum: ir_slot(f, word, IRSlotKind.Temp, -1, 0)
+        _ := ir_emit(f, IROp.Const, three, 3, -1, -1, 2)
+        _ := ir_emit(f, IROp.Const, many, 24, -1, -1, 2)
+        _ := ir_emit(f, IROp.Mul, right, x, many, IR_OVERFLOW_TRAP, 2)
+        _ := ir_emit(f, IROp.Mul, left, three, x, IR_OVERFLOW_TRAP, 2)
+        _ := ir_emit(f, IROp.Add, sum, left, right, IR_OVERFLOW_WRAP, 2)
+        _ := ir_emit(f, IROp.Return, -1, sum, -1, -1, 2)
+        m.functions.push(f)
+        code: ir_x64_compile_function(m, ir_x64_tables(m), m.functions.len() - 1).function.code
+        loop factor in factors {
+            wanted := x64_code()
+            x64_imul_rri(wanted, X64_RAX, X64_RAX, factor)
+            want: wanted.bytes
+            found := false
+            loop start in 0..<(code.len() - want.len() + 1) {
+                same := true
+                loop k in 0..<want.len() {
+                    if code[start + k] != want[k] {
+                        same = false
+                        break
+                    }
+                }
+                if same {
+                    found = true
+                    break
+                }
+            }
+            assert_eq(found, signed)
+        }
+    }
 }
 
 // store(data) writes a U8 0 at data and an I64 5 at data + 8: each constant
