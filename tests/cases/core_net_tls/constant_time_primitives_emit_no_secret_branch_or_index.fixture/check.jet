@@ -220,6 +220,12 @@ key_base: fn(key: String) -> String Never! {
     plain.partition("<").head
 }
 
+/// A report names a function or type by its dotted path; the log and the
+/// directives key them `module::name`.
+dotted: fn(text: String) -> String Never! {
+    text.replace("::", ".")
+}
+
 slot_ref: fn(token: String) -> Int Never! {
     Int.parse(token.trim().removeprefix("s")) ?? -1
 }
@@ -1329,13 +1335,13 @@ run: fn() {
         declassify_inlined(c, spec)
         find_elements(c, spec)
         find_addresses(c, spec)
-        loop problem in problems -> print("{path}: {problem}")
+        loop problem in problems -> print("{path}: {dotted(problem)}")
         failed += problems.len()
         // A public member the log does not lay out, or lays out apart in
         // two instances, would exempt nothing or the wrong bytes.
         loop (key, _) in spec.public_fields {
             if (c.field_offset.get(key) ?? -1) < 0 {
-                print("{path}: public-field `{key}` is not laid out once in the log")
+                print("{path}: public-field `{dotted(key)}` is not laid out once in the log")
                 failed += 1
             }
         }
@@ -1358,13 +1364,13 @@ run: fn() {
                 }
             }
             if matched == 0 {
-                print("{path}: root `{root}` is not in the log")
+                print("{path}: root `{dotted(root)}` is not in the log")
                 missing += 1
                 next
             }
             loop name in names {
                 if found.get(name) == None {
-                    print("{path}: root `{root}` has no variable `{name}`")
+                    print("{path}: root `{dotted(root)}` has no variable `{name}`")
                     missing += 1
                 }
             }
@@ -1395,7 +1401,7 @@ run: fn() {
             if spec.checked.len() > 0 && !judged(spec, c.fn_file[f], c.fn_base[f]) -> next
             reached[c.fn_key[f].copy()] = true
             loop line in findings_of(c, spec, inst, seen) {
-                print("{path}: {line}")
+                print("{path}: {dotted(line)}")
                 if line.starts_with("expected `") {
                     expected += 1
                     hit[line.removeprefix("expected `").partition("`").head.copy()] = true
@@ -1410,7 +1416,7 @@ run: fn() {
     // An expected function no log finds anything in is a stale directive.
     loop (base, why) in spec.expected {
         if hit.get(base) == None {
-            print("expected `{base}` ({why}) has no finding in any log")
+            print("expected `{dotted(base)}` ({why}) has no finding in any log")
             failed += 1
         }
     }

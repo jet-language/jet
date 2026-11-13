@@ -38,19 +38,19 @@
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E0721</code>: <code>tests/ui/crypto_secret_nested_provenance.stderr</code>.</p>
 <pre class="diag">Error [jet.UnknownCoreItem]: `core.crypto` exposes `Secret`, but not in this position
-  --&gt; tests/ui/crypto_secret_nested_provenance.jet:27:32
+  --&gt; tests/ui/crypto_secret_nested_provenance.jet:27:30
     |
- 27 |     tagged :: #Reviewed crypto.Secret.from_text(&quot;tagged&quot;)
-    |                                ^^^^^^
+ 27 |     tagged: #Reviewed crypto.Secret.from_text(&quot;tagged&quot;)
+    |                              ^^^^^^
  Why: Standard library modules expose a fixed set of public items, each reachable only where its surface declares
  Fix: Import it directly with `use core.crypto.[Secret]`
 More: jet-lang.dev/e/E1004
 
 Error [jet.UnknownType]: There&#39;s no type called `crypto.Secret`
-  --&gt; tests/ui/crypto_secret_nested_provenance.jet:37:25
+  --&gt; tests/ui/crypto_secret_nested_provenance.jet:37:23
     |
- 37 |     callback :: (value: crypto.Secret) -&gt; value
-    |                         ^^^^^^^^^^^^^
+ 37 |     callback: (value: crypto.Secret) -&gt; value
+    |                       ^^^^^^^^^^^^^
  Why: The types are `Int`, `Float`, `Bool`, and `String` (plus types you define)
  Fix: Check the spelling, or define the struct or enum first
 More: jet-lang.dev/e/E0119

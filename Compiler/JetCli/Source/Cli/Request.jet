@@ -577,18 +577,9 @@ jet_cli_reached_paths: fn(root: String, relative: String, program: Program, pend
 // loader's order (Loader.jet jet_driver_find_module_import_target); none
 // for a name with an unsafe component, which the loader refuses.
 jet_cli_module_candidates: fn(name: String) -> [String] Never! {
-    parts: name.split("::").to_list()
-    module_path := ""
-    pascal_path := ""
-    loop index in 0..<parts.len() {
-        part: parts[index]
-        if part.len() == 0 || part == "." || part == ".." || part.contains("/") || part.contains("\\") -> return [String]{}
-        if module_path.len() > 0 -> module_path = "{module_path}/{part}" else -> module_path = part
-        pascal: jet_driver_pascal_segment(part)
-        if pascal_path.len() > 0 -> pascal_path = "{pascal_path}/{pascal}" else -> pascal_path = pascal
-    }
-    if module_path.len() == 0 -> return [String]{}
-    [String]{"{module_path}.jet", "{pascal_path}.jet", "{module_path}/run.jet", "{pascal_path}/run.jet"}
+    if name.len() == 0 || name == "." || name == ".." || name.contains("/") || name.contains("\\") -> return [String]{}
+    pascal: jet_driver_pascal_segment(name)
+    [String]{"{name}.jet", "{pascal}.jet", "{name}/run.jet", "{pascal}/run.jet"}
 }
 
 jet_cli_held_project_boundary: fn(directory: cli_files.Directory) -[FS]> Bool JetCLIReadError! {

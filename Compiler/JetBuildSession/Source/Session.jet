@@ -647,7 +647,7 @@ build_session_call: fn(session: &BuildSession, method: String, args: [BuildSessi
             .Unit | .List(_) | .Handle(_, _, _) | .Span(_, _, _) -> return build_session_fail(state, "`b.contribute` accepts only Bool, Int, Char, String, or a fieldless enum value")
         }
         // The writer is spelled by the package's name, as `jet explain` and the lock show it.
-        state.contributions.push(BuildSessionContribution{key: "Build.Settings.{name}", value: args[1], source: "{build_session_package_dir(state.package)}::build", start: start, end: end})
+        state.contributions.push(BuildSessionContribution{key: "Build.Settings.{name}", value: args[1], source: "{build_session_package_dir(state.package)}.build", start: start, end: end})
         return BuildSessionReply.Value{value: BuildSessionValue.Unit}
     }
     if method == "error" -> return build_session_project_error(state, args)

@@ -7,7 +7,7 @@
 // probes, so each level's run reports alike.
 use {
     cli_files: core.files
-    jet_foundation.[FnBody, TTestFact, Type, type_name]
+    jet_foundation.[FnBody, TTestFact, Type, type_name, type_unqualified_nominals]
 }
 
 JET_CLI_COVERAGE_ENV: "JET_COV_OUT"
@@ -45,8 +45,8 @@ jet_cli_coverage_functions: fn(file: String, functions: [FnBody], tests: [TTestF
 
 // A method owner's short name: no module path, no type arguments.
 jet_cli_coverage_owner: fn(owner: Type) -> String Never! {
-    bare: type_name(owner).split("[").to_list()[0]
-    parts: bare.replace("::", ".").split(".").to_list()
+    bare: type_name(type_unqualified_nominals(owner)).split("[").to_list()[0]
+    parts: bare.split(".").to_list()
     parts[parts.len() - 1].copy()
 }
 
