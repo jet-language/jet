@@ -6,6 +6,7 @@ Run a lesson from the repository root, for example `jet run Examples/Network/<Le
 
 ## Lessons
 
+- [AppComposition](AppComposition.jet) — An app built by an ordinary function of what it needs, with no container: one catalog is shared by every request, a missing one stops before anything binds and names the calling line, and a fake catalog changes the answers with no global state.
 - [AppLifecycle](AppLifecycle.jet) — A web app over a database pool: the pool is ready before the listener binds, shutdown stops admission before the pool drains, a handler still blocked when the shutdown grace runs out is cancelled and sends nothing, and the pool closes last.
 - [DNSLookup](DNSLookup.jet) — DNS PTR + well-known service port table (core.net).
 - [IPPublicDestination](IPPublicDestination.jet) — Reachable versus safe to fetch.

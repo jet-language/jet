@@ -1,0 +1,102 @@
+// An app is an ordinary function of what it needs; there is no container.
+// `compose` takes the catalog its route uses. The catalog is built once and
+// every request shares it. A missing catalog stops before anything binds and
+// names the line that asked for the app. A fake catalog passed in its place
+// changes the answers while the real app keeps its own, with no global state.
+package: {
+    name: "app_composition"
+    authority: { allow: [FS.Read, IO, Mem.Alloc, Mem.Rc, Net, Time] }
+}
+
+use {
+    http_server: core.http.server
+    net: core.net
+    web: core.web
+}
+
+Lookups: struct { count: Int }
+
+// The app-scoped resource: built once, then shared by every request.
+Catalog: struct {
+    name: String
+    prices: [(item: String, cents: Int)]
+    lookups: Shared<Lookups>
+}
+
+// Counts one lookup in the shared cell; the count so far.
+count_lookup: fn(lookups: Shared<Lookups>) -> Int {
+    lookups.count += 1
+    lookups.count
+}
+
+price: fn(catalog: Catalog, item: String) -> HTTPResponse HTTPError! {
+    seen: count_lookup(catalog.lookups)
+    loop entry in catalog.prices {
+        if entry.item == item -> return Ok(http_server.response(200, "{catalog.name} {item} {entry.cents} (lookup {seen})"))
+    }
+    Ok(http_server.response(404, "{catalog.name} has no {item} (lookup {seen})"))
+}
+
+// The app over `catalog`. With no catalog there is no app, and the line
+// that asked for one is named.
+compose: fn(catalog: Catalog?, at: SourceLocation{#caller}) -> App? {
+    if catalog == {
+        .Val(found) -> {
+            shared: found.copy()
+            return Val(web.app().get("/price/:item", fn(item: String) { price(shared.copy(), item) }))
+        }
+        None -> {
+            print("not composed: {at} asked for an app with no catalog")
+            return None
+        }
+    }
+}
+
+// One GET over a fresh connection; the body of the answer.
+get: fn(addr: String, path: String) -> String NetError! {
+    client: net.tcp_connect(addr) ?? return Err(err)
+    crlf: String.from_bytes([U8]{13, 10}) ?? panic("CRLF")
+    client.write_all("GET {path} HTTP/1.1{crlf}Host: local{crlf}Connection: close{crlf}{crlf}".bytes()) ?? return Err(err)
+    parts := [String]{}
+    loop {
+        part: client.read_text(8192) ?? break
+        if part == "" -> break
+        parts.push(part)
+    }
+    sections: parts.join("").split("{crlf}{crlf}").to_list()
+    Ok(sections[sections.len() - 1])
+}
+
+run: fn() (HTTPError | NetError | TaskFailure)! {
+    // A missing dependency stops here, before anything binds.
+    if compose(None) == {
+        .Val(_) -> print("composed with no catalog")
+        None -> print("nothing bound")
+    }
+
+    shop: Catalog{name: "shop", prices: [(item: "tea", cents: 350), (item: "cake", cents: 420)], lookups: Shared{Lookups{count: 0}}}
+    fake: Catalog{name: "fake", prices: [(item: "tea", cents: 1)], lookups: Shared{Lookups{count: 0}}}
+    live_app: compose(Val(shop.copy())) ?? panic("compose shop")
+    fake_app: compose(Val(fake.copy())) ?? panic("compose fake")
+
+    live: live_app.bind("127.0.0.1:0")
+    live_addr: live.local_addr()
+    live_serving: task { live.serve() ?? panic("serve shop") }
+    stub: fake_app.bind("127.0.0.1:0")
+    stub_addr: stub.local_addr()
+    stub_serving: task { stub.serve() ?? panic("serve fake") }
+
+    // The two apps answer side by side, each from its own catalog.
+    print(get(live_addr, "/price/tea"))
+    print(get(stub_addr, "/price/tea"))
+    print(get(live_addr, "/price/cake"))
+    print(get(stub_addr, "/price/cake"))
+    print(get(live_addr, "/price/tea"))
+
+    _: live.shutdown()
+    _: stub.shutdown()
+    live_serving.join()
+    stub_serving.join()
+    print("shop lookups: {shop.lookups.count} over 3 requests, one catalog for all")
+    print("fake lookups: {fake.lookups.count} over 2 requests")
+}
