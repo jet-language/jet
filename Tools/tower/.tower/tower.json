@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6777,
-    "rev": 101224,
+    "rev": 101225,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -93381,12 +93381,12 @@
         },
         {
           "n": 2,
-          "text": "Every runtime binding that reads ambient state declares the effect it reads, so sema's empty-row rule refuses to fold it at compile time, as clock_mono_ns does now. Found by G4Ports-1, 2026-11-12: live_load, task_identity, simd_lanes, os and os_family, clipboard_get and event_pop have empty effect rows. Proof: each one carries an effect row naming what it reads, a census #Test lists every jet.runtime binding with an empty row and fails unless the reviewed list of pure ones matches it, and a comptime case shows each one runs at run time, not baked into the image.",
+          "text": "Every runtime binding that reads ambient state is never computed while compiling. It either declares the effect it reads (so the empty-row rule refuses to fold it, as clock_mono_ns does), or it is a run-time-only read (RUNTIME_ONLY_READS) when an effect row would spread into user signatures that never perform that effect. live_load and replace reach every Db write, so they are run-time-only reads. Found by G4Ports-1, 2026-11-12: live_load, task_identity, simd_lanes, os and os_family, clipboard_get and event_pop had empty rows. Proof: a census #Test lists every jet.runtime binding with an empty row and no run-time-only listing, and fails unless that list matches the reviewed pure list. A comptime case shows each read runs at run time on O0, O1 and O2 as a local, and is E0643 as a module value.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-12T06:09:27.198Z"
+          "at": "2026-11-13T05:22:19.377Z"
         },
         {
           "n": 3,
@@ -93406,7 +93406,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-12T03:48:27.281Z",
-      "updated": "2026-11-13T05:22:05.711Z",
+      "updated": "2026-11-13T05:22:19.377Z",
       "updatedBy": "Main",
       "criteriaLastN": 3
     },
@@ -197655,6 +197655,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-13T05:22:19.377Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0d72itt",
+      "note": "#2: An effect row on the live cell spread IO into every Db write signature and broke corelib. Run-time-only reads meet the same never-fold intent; see the card log.; was: Every runtime binding that reads ambient state declares the effect it reads, so sema's empty-row rule refuses to fold it at compile time, as clock_mono_ns does now. Found by G4Ports-1, 2026-11-12: liv"
+    },
     {
       "at": "2026-11-13T05:22:05.711Z",
       "by": "Main",
