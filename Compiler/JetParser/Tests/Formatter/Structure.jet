@@ -66,6 +66,23 @@ STRUCTURE_LAID_OUT: "pick: fn(n: Int) -> String {{\n    if {{\n        n == 1 ->
     assert(formatted.text.contains(".Err(e) -> "))
 }
 
+// `Inst.Compare{…}` is the `.Compare{…}` pattern under its enum's name, in
+// an arm head, an or-pattern and a nested slot; the format keeps the name.
+#Test("a qualified case pattern parses as its leading-dot form and keeps its name") {
+    qualified: "kind: fn(inst: Inst) -> String {{\n    if inst == {{\n        Inst.Compare{{left: 0, ..}} -> \"zero\"\n        Inst.Compare{{left, ..}} && left > 9 -> \"big\"\n        Inst.Wrap{{inner: Step.Go{{target}}, label: name}} -> name\n        Inst.Jump{{target}} | Inst.Wrap{{inner: Step.Go(target), ..}} -> \"jump\"\n        Inst.Jump(target) -> \"jump\"\n        .Halt -> \"halt\"\n    }}\n}}\n"
+    structure_kept(qualified, "        Inst.Compare{{left: 0, ..}} -> \"zero\"\n")
+    structure_kept(qualified, "        Inst.Wrap{{inner: Step.Go{{target}}, label: name}} -> name\n")
+    structure_kept(qualified, "        Inst.Jump{{target}} | Inst.Wrap{{inner: Step.Go(target), ..}} -> \"jump\"\n")
+    structure_kept(qualified, "        Inst.Jump(target) -> \"jump\"\n")
+    written: parse_source(qualified.bytes())
+    assert_eq(written.diagnostics.len(), 0)
+    dotted: parse_source(qualified.replace("Inst.", ".").replace("Step.", ".").bytes())
+    assert_eq(dotted.diagnostics.len(), 0)
+    // The qualified spelling keeps its dotless bit; past the name and that
+    // bit the two trees are the same.
+    assert_eq(jfmt_structure(written.program).replace("\"Inst.", "\"").replace("\"Step.", "\"").replace("leading_dot: false", "leading_dot: "), jfmt_structure(dotted.program))
+}
+
 // In a lambda's last place, `loop … -> value` collects a list, so a braced
 // loop body there must keep its braces.
 #Test("a braced method-call loop body keeps its braces") {

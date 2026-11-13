@@ -546,7 +546,21 @@ sema_pattern_place_named_slots: fn(written: [PatSlot], fields: [VariantField], v
     loop slot in placed -> slot ?? PatSlot.Wildcard
 }
 
+// The case a dotless `Name.Case` pattern names when `Name` is the subject's
+// own enum, which it tests exactly as `.Case`. None for any other path.
+sema_pattern_qualified_case: fn(subject_ty: Type, variant: String, env: SemaScopeEnvironment, program: SemaProgramTables) -> String? {
+    qualified: variant.split_once(".") ?? return None
+    if program.registration_graph == .Val(graph) {
+        owner: sema_pattern_nominal_row(graph, env.module_identity, sema_pattern_unwrap_tags(subject_ty)) ?? return None
+        if graph.modules[owner.module_index].nominals[owner.row].symbol.name == qualified.before -> return Val(qualified.after)
+    }
+    None
+}
+
 sema_pattern_validate_variant: fn(subject_ty: Type, variant: String, written_slots: [PatSlot], leading_dot: Bool, span: Span, env: SemaScopeEnvironment, program: SemaProgramTables, writes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic], mutable: Bool) -> SemaPatternValidation {
+    if !leading_dot && sema_pattern_qualified_case(subject_ty, variant, env, program) == .Val(named_case) {
+        return sema_pattern_validate_variant(subject_ty, named_case, written_slots, true, span, env, program, writes, state, tail_store, context, diagnostics, mutable)
+    }
     named: sema_pattern_has_named_slots(written_slots)
     carrier: sema_pattern_unwrap_tags(subject_ty)
     if named && (sema_pattern_is_option(carrier) || sema_pattern_is_result(carrier)) && (variant == "Val" || variant == "None" || variant == "Ok" || variant == "Err") {

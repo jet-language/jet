@@ -1,0 +1,24 @@
+# #6784 c1: a case pattern qualified by its enum, `Inst.Compare{…}`, parses and matches exactly
+# as `.Compare{…}` in `if x == { … }` arms, guarded and or-arms, and nested patterns, with `..`,
+# field bindings and labeled sub-patterns, on every tier. dotted.jet writes the same arms with
+# leading dots and prints the same lines; both sources are `jet fmt` stable.
+fixture: qualified_case_patterns_match_as_leading_dot_on_every_tier.fixture
+step: jet fmt --check qualified.jet
+exit: 0
+step: jet fmt --check dotted.jet
+exit: 0
+step default: jet run qualified.jet
+exit: 0
+stdout: = "compare from zero\ncompare 7 with zero\nlarge compare 300\ncompare 2 3\nouter wraps go 9\nkept stay\nwraps stay\njump 12\nhalt\n5\n-1\n0\n4\n"
+step o0: jet run --optimize=none qualified.jet
+exit: 0
+stdout: == default
+step o1: jet run --optimize=basic qualified.jet
+exit: 0
+stdout: == default
+step o2: jet run --optimize=full qualified.jet
+exit: 0
+stdout: == default
+step dotted: jet run dotted.jet
+exit: 0
+stdout: == default

@@ -426,15 +426,38 @@ parser_named_struct_pattern_ahead: fn(state: &JetParserState, value: Bool) -> Bo
     if token.kind != TOKEN_IDENT || parser_kind_at(state, 1) != TOKEN_LBRACE -> return false
     name: parser_value(state, token)
     if !parser_pascal_name(name) || parser_constant_name(name) || name == "String" -> return false
-    first: parser_lookahead(state, 2)
+    parser_named_pattern_entries_ahead(state, 1, value)
+}
+
+// Whether the `{` `open` tokens ahead starts a body of pattern entries, as
+// parser_named_struct_pattern_ahead reads it.
+parser_named_pattern_entries_ahead: fn(state: &JetParserState, open: Int, value: Bool) -> Bool Never! {
+    first: parser_lookahead(state, open + 1)
     if first.kind == TOKEN_DOT_DOT -> return true
     if first.kind != TOKEN_IDENT || parser_value(state, first) == "_" -> return false
-    second: parser_kind_at(state, 3)
+    second: parser_kind_at(state, open + 2)
     if second == TOKEN_COMMA -> return true
     if second == TOKEN_COLON -> return value || parser_named_pattern_closes_into_body(state, true)
     if second != TOKEN_RBRACE -> return false
-    after: parser_kind_at(state, 4)
+    after: parser_kind_at(state, open + 3)
     after == TOKEN_LBRACE || after == TOKEN_UNIFIED_ARROW || after == TOKEN_COMMA || after == TOKEN_RPAREN || after == TOKEN_RBRACKET || after == TOKEN_RBRACE || after == TOKEN_AND_AND
+}
+
+// `Name.Case{…}` or `Name.Case(…)`: a case named through its enum, every
+// segment a PascalCase name. A `{` body must read as pattern entries, or be a
+// lone `field}` before the `|` of an or-pattern. It is read as the `.Case`
+// pattern it qualifies only as an arm head and inside a pattern; after `==`
+// it stays the value it spells.
+parser_qualified_case_pattern_ahead: fn(state: &JetParserState) -> Bool Never! {
+    token: parser_current(state)
+    if token.kind != TOKEN_IDENT || !parser_pascal_name(parser_value(state, token)) || parser_constant_name(parser_value(state, token)) -> return false
+    open := 1
+    loop parser_kind_at(state, open) == TOKEN_DOT && parser_kind_at(state, open + 1) == TOKEN_IDENT && parser_pascal_name(parser_value_at(state, open + 1)) -> open += 2
+    if open == 1 -> return false
+    if parser_kind_at(state, open) == TOKEN_LPAREN -> return true
+    if parser_kind_at(state, open) != TOKEN_LBRACE -> return false
+    if parser_named_pattern_entries_ahead(state, open, false) -> return true
+    parser_kind_at(state, open + 1) == TOKEN_IDENT && parser_kind_at(state, open + 2) == TOKEN_RBRACE && parser_kind_at(state, open + 3) == TOKEN_PIPE
 }
 
 // Rust `try_typed_pattern_str_body`: `[U8]{"…"}`, `[U8#N]{"…"}` or
@@ -558,11 +581,14 @@ parser_parse_pattern_atom: fn(state: &JetParserState, depth: Int, allow_named: B
         path_span = member.span
     }
     if parser_current_kind(state) == TOKEN_LBRACE {
-        if !leading_dot -> return parser_parse_struct_pattern(state, path_span, depth + 1, Val(PatternTypeHead{name: path, span: path_span}))
+        // `Name.Case{…}` names the case through its enum; sema matches it
+        // as `.Case{…}`. Any other dotless head names a struct.
+        qualified: !leading_dot && path.contains(".") && parser_pascal_name(path)
+        if !leading_dot && !qualified -> return parser_parse_struct_pattern(state, path_span, depth + 1, Val(PatternTypeHead{name: path, span: path_span}))
         if allow_named || parser_named_pattern_brace_ahead(state) {
             named: parser_parse_named_pattern_slots(state, path, depth + 1)
             span: parser_cover(start.span, named.end)
-            return ParsedPattern{pattern: Pattern.Variant{variant: path, bindings: named.slots, leading_dot: true, span: span}, span: span}
+            return ParsedPattern{pattern: Pattern.Variant{variant: path, bindings: named.slots, leading_dot: leading_dot, span: span}, span: span}
         }
     }
     bindings := [PatSlot]{}
@@ -774,7 +800,7 @@ parser_struct_field_nested_pattern_ahead: fn(state: &JetParserState) -> Bool Nev
         }
         TOKEN_LBRACE -> parser_literal_fields_ahead(state)
         TOKEN_LBRACKET -> !parser_typed_literal_head_ahead(state)
-        TOKEN_IDENT -> parser_named_struct_pattern_ahead(state, false)
+        TOKEN_IDENT -> parser_named_struct_pattern_ahead(state, false) || parser_qualified_case_pattern_ahead(state)
         else -> false
     }
 }
@@ -787,6 +813,7 @@ parser_parse_struct_field_nested_pattern: fn(state: &JetParserState, depth: Int)
         TOKEN_LBRACE -> parser_parse_struct_pattern(state, start.span, depth + 1, None)
         TOKEN_LBRACKET -> parser_parse_bracket_pattern(state, depth + 1)
         TOKEN_IDENT -> {
+            if parser_kind_at(state, 1) == TOKEN_DOT -> return parser_parse_pattern(state, depth + 1, true)
             parser_bump(state)
             head: PatternTypeHead{name: parser_value(state, start), span: start.span}
             parser_parse_struct_pattern(state, start.span, depth + 1, Val(head))

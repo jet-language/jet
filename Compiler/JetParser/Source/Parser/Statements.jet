@@ -1031,12 +1031,13 @@ parser_at_arm_through: fn(state: &JetParserState) -> Bool {
 
 // One bare arm head bound to the subject.
 // A range or pattern head tests `pattern_subject`; a pattern may carry a
-// Boolean guard (`.Key(key) && key == "b" ->`). Value heads use the
+// Boolean guard (`.Key(key) && key == "b" ->`), and may name its case
+// through the enum (`Inst.Jump(target) ->`). Value heads use the
 // distributed arm grammar; a redundant `subject OP` prefix reports E0994.
 parser_parse_if_arm_head: fn(state: &JetParserState, subject: Expr, pattern_subject: Expr, op: BinOp) -> Expr {
     range: parser_parse_range_arm_head(state, pattern_subject)
     if range == .Val(head) -> return head
-    if parser_pattern_rhs_ahead(state, false) {
+    if parser_pattern_rhs_ahead(state, false) || parser_qualified_case_pattern_ahead(state) {
         saved_position: state.position
         saved_diagnostics: state.diagnostics.len()
         saved_blocks: state.block_spans.len()

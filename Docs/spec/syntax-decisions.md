@@ -1006,7 +1006,11 @@ Sema places each entry on the positional payload slot its field names, so
 checking, exhaustiveness, and lowering are those of the positional form. In an
 `if` condition, where `{` opens the body, the braces start the pattern only
 when the first entry is `..`, `field:`, `field,`, or a lone `field}` followed
-by the body.
+by the body. An arm head or a pattern inside another may name the case through
+its enum, `Inst.Compare{left, ..}` or `Inst.Jump(target)`: it parses and
+matches exactly as `.Compare{left, ..}` and `.Jump(target)`, and a name other
+than the subject's enum is E0305. After `==`, `Inst.Compare{…}` stays the
+value it spells.
 
 **D-PAT-RECORD1=A — literal-shaped recursive patterns.** A struct pattern
 uses its type and field names: `Point{x: 0, y}`; nested payloads use the same

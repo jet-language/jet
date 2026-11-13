@@ -1,0 +1,50 @@
+// The arms of qualified.jet, each case written with its leading dot.
+Step: enum {
+    Go(target: Int)
+    Stay
+}
+
+Inst: enum {
+    Compare(left: Int, right: Int)
+    Jump(target: Int)
+    Wrap(inner: Step, label: String)
+    Halt
+}
+
+describe: fn(inst: Inst) -> String {
+    if inst == {
+        .Compare{left: 0, ..} -> "compare from zero"
+        .Compare{left, right: 0} -> "compare {left} with zero"
+        .Compare{left, ..} && left > 100 -> "large compare {left}"
+        .Compare{left: low, right: high} -> "compare {low} {high}"
+        .Wrap{inner: .Go{target}, label} -> "{label} wraps go {target}"
+        .Wrap{inner: .Stay, label: "kept"} -> "kept stay"
+        .Wrap{..} -> "wraps stay"
+        .Jump{target} | .Wrap{inner: .Go(target), ..} -> "jump {target}"
+        .Halt -> "halt"
+    }
+}
+
+first_go: fn(found: Step?) -> Int {
+    if found == {
+        .Val(.Go{target}) -> target
+        .Val(_) -> -1
+        .None -> 0
+    }
+}
+
+target_of: fn(step: Step) -> Int {
+    if step == {
+        .Go(target) -> target
+        .Stay -> 0
+    }
+}
+
+run: fn() {
+    insts: [Inst]{.Compare{left: 0, right: 5}, .Compare{left: 7, right: 0}, .Compare{left: 300, right: 1}, .Compare{left: 2, right: 3}, .Wrap{inner: .Go{target: 9}, label: "outer"}, .Wrap{inner: .Stay, label: "kept"}, .Wrap{inner: .Stay, label: "other"}, .Jump{target: 12}, .Halt}
+    loop inst in insts -> print(describe(inst))
+    print(first_go(Val(Step.Go{target: 5})))
+    print(first_go(Val(Step.Stay)))
+    print(first_go(None))
+    print(target_of(Step.Go{target: 4}))
+}

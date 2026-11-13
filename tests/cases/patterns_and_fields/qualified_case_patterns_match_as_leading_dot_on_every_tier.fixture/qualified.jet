@@ -1,0 +1,50 @@
+// Each arm names its case through the enum: `Inst.Compare{…}` matches as `.Compare{…}`.
+Step: enum {
+    Go(target: Int)
+    Stay
+}
+
+Inst: enum {
+    Compare(left: Int, right: Int)
+    Jump(target: Int)
+    Wrap(inner: Step, label: String)
+    Halt
+}
+
+describe: fn(inst: Inst) -> String {
+    if inst == {
+        Inst.Compare{left: 0, ..} -> "compare from zero"
+        Inst.Compare{left, right: 0} -> "compare {left} with zero"
+        Inst.Compare{left, ..} && left > 100 -> "large compare {left}"
+        Inst.Compare{left: low, right: high} -> "compare {low} {high}"
+        Inst.Wrap{inner: Step.Go{target}, label} -> "{label} wraps go {target}"
+        Inst.Wrap{inner: .Stay, label: "kept"} -> "kept stay"
+        Inst.Wrap{..} -> "wraps stay"
+        Inst.Jump{target} | Inst.Wrap{inner: Step.Go(target), ..} -> "jump {target}"
+        .Halt -> "halt"
+    }
+}
+
+first_go: fn(found: Step?) -> Int {
+    if found == {
+        .Val(Step.Go{target}) -> target
+        .Val(_) -> -1
+        .None -> 0
+    }
+}
+
+target_of: fn(step: Step) -> Int {
+    if step == {
+        Step.Go(target) -> target
+        .Stay -> 0
+    }
+}
+
+run: fn() {
+    insts: [Inst]{.Compare{left: 0, right: 5}, .Compare{left: 7, right: 0}, .Compare{left: 300, right: 1}, .Compare{left: 2, right: 3}, .Wrap{inner: .Go{target: 9}, label: "outer"}, .Wrap{inner: .Stay, label: "kept"}, .Wrap{inner: .Stay, label: "other"}, .Jump{target: 12}, .Halt}
+    loop inst in insts -> print(describe(inst))
+    print(first_go(Val(Step.Go{target: 5})))
+    print(first_go(Val(Step.Stay)))
+    print(first_go(None))
+    print(target_of(Step.Go{target: 4}))
+}
