@@ -1,0 +1,18 @@
+# A `#SingleUse` binding returned inside `Ok(...)` or `Val(...)`, as a tail
+# value or through `return`, moves into the wrapper: the function owes no
+# consume, and the caller's `release` takes the duty. The program runs the
+# same on every tier.
+fixture: wrapped_return_moves_the_duty.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet check main.jet
+exit: 0
+step: jet run --optimize=none main.jet
+exit: 0
+stdout: = "opened db\nreleased db\nreleased cache\nreleased log\n"
+step: jet run --optimize=basic main.jet
+exit: 0
+stdout: = "opened db\nreleased db\nreleased cache\nreleased log\n"
+step: jet run --optimize=full main.jet
+exit: 0
+stdout: = "opened db\nreleased db\nreleased cache\nreleased log\n"

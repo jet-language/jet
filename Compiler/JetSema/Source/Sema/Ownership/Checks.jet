@@ -3258,6 +3258,13 @@ sema_ownership_unmarked_moves_name: fn(expr: Expr) -> Bool Never! {
 }
 
 sema_ownership_mark_move_as: fn(state: &SemaOwnershipState, expr: Expr, scopes: SemaScopeTable, consumer: String, unmarked: Bool, diagnostics: &[Diagnostic]) -> Bool {
+    // A `#SingleUse` name an owning position wraps in `Val`, `Ok` or `Err`
+    // (`return Ok(block)`) moves into the wrapper with its duty; it never
+    // copies, so the wrapper's move is the name's own.
+    wrapped: if expr == .Ident(_, _, _) -> false else -> true
+    if unmarked && wrapped && sema_ownership_moved_name(expr) == .Val(inner) && sema_single_use_argument(state, inner, scopes) != None {
+        return sema_ownership_mark_move_as(state, inner, scopes, consumer, unmarked, diagnostics)
+    }
     // A share site copies; the source stays usable.
     if unmarked && sema_ownership_is_share_site(state, expr_span(expr)) -> return true
     if sema_ownership_report_invalidated_view(state, expr, scopes, expr_span(expr), diagnostics) -> return false

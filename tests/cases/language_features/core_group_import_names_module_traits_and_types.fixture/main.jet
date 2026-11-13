@@ -37,7 +37,7 @@ run: fn() {
     region: mem.Region.reserve(4096) ?? panic("reserve")
     print("region of {region.size()} bytes")
     stack := Stack{region: region, kept: [mem.Block]{}}
-    block: stack.allocate(64, 16) ?? panic("allocate")
+    block := stack.allocate(64, 16) ?? panic("allocate")
     print("block of {block.size()} bytes, resized: {stack.resize(block, 16)}")
     stack.release(block)
     print("{stack.kept.len()} block kept, {stack.region.remaining()} bytes left")

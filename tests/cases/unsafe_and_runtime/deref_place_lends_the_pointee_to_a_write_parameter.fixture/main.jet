@@ -1,0 +1,20 @@
+// `bump(pointer.*)` lends the pointee itself to a write parameter: the
+// write lands in `c`, so `c.n` reads the bumped value.
+use core.mem
+
+Counter: struct {
+    n: Int
+}
+
+bump: fn(c: &Counter) {
+    c.n += 1
+}
+
+run: fn() {
+    c := Counter{n: 1}
+    #Unsafe("c lives in place until `run` returns") {
+        pointer := mem.from_addr<Counter>(mem.address_of(c))
+        bump(pointer.*)
+    }
+    print(c.n)
+}

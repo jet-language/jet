@@ -211,7 +211,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 <!-- unsafe-ratchet:data
 {
   "schema": 1,
-  "total": 1463,
+  "total": 1466,
   "counts": {
     "Compiler": 770,
     "Core": 178,
@@ -219,7 +219,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     "Examples": 41,
     "Jetpack": 9,
     "Tools": 6,
-    "tests": 451
+    "tests": 454
   },
   "regions": [
     {
@@ -7966,6 +7966,27 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     },
     {
       "package": "tests",
+      "file": "tests/cases/unsafe_and_runtime/deref_place_lends_the_pointee_to_a_write_parameter.fixture/main.jet",
+      "line": 15,
+      "column": 5,
+      "reason": "c lives in place until `run` returns"
+    },
+    {
+      "package": "tests",
+      "file": "tests/cases/unsafe_and_runtime/deref_place_receives_a_trait_self_method_through_a_pointer.fixture/main.jet",
+      "line": 21,
+      "column": 5,
+      "reason": "address is the address of a live A that outlives this call"
+    },
+    {
+      "package": "tests",
+      "file": "tests/cases/unsafe_and_runtime/deref_place_receives_a_trait_self_method_through_a_pointer.fixture/main.jet",
+      "line": 30,
+      "column": 5,
+      "reason": "c lives in place until `run` returns"
+    },
+    {
+      "package": "tests",
       "file": "tests/cases/unsafe_and_runtime/every_unsafe_region_kind_enters_its_own_sentry_scope.fixture/regions.jet",
       "line": 1,
       "column": 1,
@@ -10477,8 +10498,8 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Examples | 41 |
 | Jetpack | 9 |
 | Tools | 6 |
-| tests | 451 |
-| **total** | **1463** |
+| tests | 454 |
+| **total** | **1466** |
 
 ### Regions
 
@@ -11590,6 +11611,9 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | tests | tests/cases/single_use/reuse_after_drop_is_e0121.fixture/source-1.jet | 15:5 | "done with it" |
 | tests | tests/cases/target_machines/fixtures/selected_target_machine_rejects_direct_mmio_outside_region/main.jet | 4:5 | "this address is intentionally outside the board MMIO region" |
 | tests | tests/cases/target_machines/fixtures/selected_target_machine_validates_direct_mmio_accesses/main.jet | 4:5 | "timer register is mapped by board.sensor_v1" |
+| tests | tests/cases/unsafe_and_runtime/deref_place_lends_the_pointee_to_a_write_parameter.fixture/main.jet | 15:5 | "c lives in place until `run` returns" |
+| tests | tests/cases/unsafe_and_runtime/deref_place_receives_a_trait_self_method_through_a_pointer.fixture/main.jet | 21:5 | "address is the address of a live A that outlives this call" |
+| tests | tests/cases/unsafe_and_runtime/deref_place_receives_a_trait_self_method_through_a_pointer.fixture/main.jet | 30:5 | "c lives in place until `run` returns" |
 | tests | tests/cases/unsafe_and_runtime/every_unsafe_region_kind_enters_its_own_sentry_scope.fixture/regions.jet | 1:1 | "the cell is live on this frame" |
 | tests | tests/cases/unsafe_and_runtime/every_unsafe_region_kind_enters_its_own_sentry_scope.fixture/regions.jet | 9:5 | "call the gated reader" |
 | tests | tests/cases/unsafe_and_runtime/every_unsafe_region_kind_enters_its_own_sentry_scope.fixture/regions.jet | 15:5 | "test region calls the gated reader" |

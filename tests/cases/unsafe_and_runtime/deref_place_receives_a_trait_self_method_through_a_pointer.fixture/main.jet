@@ -1,0 +1,35 @@
+// `pointer.*.bump(by)` calls a trait `&self` method on the value at a raw
+// pointer: each call writes the `Counter` that `address` names in place.
+use core.mem
+
+Counter: struct {
+    n: Int
+}
+
+Bumps: trait {
+    bump: fn(&self, by: Int) -> Int
+}
+
+impl Counter.Bumps {
+    bump: fn(&self, by: Int) -> Int {
+        self.n += by
+        self.n
+    }
+}
+
+bump_at: fn<A: Bumps>(address: Int, by: Int) -> Int {
+    #Unsafe("address is the address of a live A that outlives this call") {
+        pointer := mem.from_addr<A>(address)
+        return pointer.*.bump(by)
+    }
+}
+
+run: fn() {
+    c := Counter{n: 1}
+    address := 0
+    #Unsafe("c lives in place until `run` returns") { address = mem.address_of(c) }
+    f: (at: Int, by: Int) -> bump_at<Counter>(at, by)
+    print(f(address, 2))
+    print(f(address, 3))
+    print(c.n)
+}

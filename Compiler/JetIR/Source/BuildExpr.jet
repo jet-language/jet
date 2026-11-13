@@ -4149,6 +4149,24 @@ ir_place_address: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, place: Int, back
         ir_emit(b.f, IROp.Offset, address, payload, 0, -1, b.line)
         return address
     }
+    // `ptr.*` as a write place (`ptr.*.method()` on a `&self` method): the
+    // pointee's own storage at the pointer, once the sentry passes the write.
+    if ir_body_node(p, b, place).kind == .Deref(pointer) {
+        row: ir_value_type(m, p, place_ty) ?? return ir_type_fail(b, span, place_ty)
+        target := -1
+        if ir_allocator_view_type(ir_ty(p, b, pointer)) {
+            target = ir_view_address(m, p, b, pointer, span)
+        } else {
+            raw: ir_expr(m, p, b, pointer)
+            if ir_failed(b) || raw < 0 -> return -1
+            target = ir_sentry_access(m, p, b, raw, row, "write", span)
+        }
+        if ir_failed(b) || target < 0 -> return -1
+        pointer_row: ir_pointer_row(m)
+        address: if m.types[row].kind == .Aggregate -> ir_temp(m, b, row) else -> ir_temp(m, b, pointer_row)
+        ir_emit(b.f, IROp.Offset, address, target, 0, -1, b.line)
+        return address
+    }
     // `&total` of a `#Persist` binding: its module storage cell, written in
     // place (sema admits only `#Persist` module state as a write place).
     if ir_body_node(p, b, place).kind == .ConstRef(symbol) {
