@@ -1,0 +1,15 @@
+// A String's in-place edits change the text they are called on, so each one
+// needs a writable place; a `:` binding rejects every one of them.
+run: fn() {
+    a: "abc"
+    a.insert(0, "x")
+    b: "abc"
+    b.remove(0, 1)
+    c: "abc"
+    c.truncate(1)
+    d: "abc"
+    d.reserve(8)
+    e: "abc"
+    e.try_push("x") ?? panic("no memory")
+    print("{a}{b}{c}{d}{e}")
+}

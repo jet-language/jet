@@ -552,6 +552,192 @@ rt_text_append_owner: fn(left: I64, right: I64, served: Bool) -> I64 {
     rt_static_text("")
 }
 
+// The in-place edits of a String write place: `s.insert(at, text)`,
+// `s.remove(from, to)`, `s.truncate(n)` and `s.reserve(n)` (JetIR
+// ir_string_edit). Each consumes the place's owner and returns the edited
+// text, which the caller stores back. A sole heap owner is edited in its own
+// buffer (its cache word cleared by rt_text_writable); a shared, static or
+// frame text keeps its bytes, and the result is a fresh owner while this
+// owner is released (as jet_rt_string_append). Positions count characters,
+// as `slice` does. A position outside the text is the call's stop, reported
+// at `file`:`line`; on a stop the place's owner is not released and the
+// result is 0.
+
+// The byte offset of character `at` of `value`, or -1 when `at` is negative
+// or past its end.
+rt_text_char_offset: fn(value: I64, at: I64) -> I64 {
+    if (at < I64{0}) -> return I64{-1}
+    rt_text_skip(rt_text_data(value), rt_text_len(value), I64{0}, at)
+}
+
+// Whether `value` is a sole heap owner, which may be written in place.
+rt_text_edit_in_place: fn(value: I64) -> Bool {
+    !rt_text_immortal(value) && jet_rt_rc_unique(wrapping(value - I64{8}))
+}
+
+// Reports the edit's stop: `message` (consumed) at the call's location.
+rt_text_edit_stop: fn(message: I64, file: I64, file_len: I64, line: I64) {
+    location: rt_text_lossy(file, file_len)
+    trap_simple(I64{0}, rt_text_data(location), rt_text_len(location), trap_line(line), rt_text_data(message), rt_text_len(message))
+    // The published stop copied the reason; these two builders remain ours.
+    jet_rt_string_drop(message)
+    jet_rt_string_drop(location)
+}
+
+// Ends `message` with " is outside a text of N characters" for `value` and
+// reports it.
+rt_text_edit_outside: fn(message: I64, value: I64, file: I64, file_len: I64, line: I64) {
+    jet_rt_string_builder_push(message, rt_static_text(" is outside a text of "))
+    rt_text_push_number(message, jet_char_len(value))
+    jet_rt_string_builder_push(message, rt_static_text(" characters"))
+    rt_text_edit_stop(message, file, file_len, line)
+}
+
+// A fresh owner of `value`'s bytes [0, keep) then `extra` bytes from
+// `source` then `value`'s bytes [resume, len), or 0 on a stop.
+rt_text_spliced: fn(value: I64, keep: I64, source: I64, extra: I64, resume: I64) -> I64 {
+    data: rt_text_data(value)
+    tail: rt_text_len(value) - resume
+    if (extra > I64{9223372036854775807} - keep - tail) {
+        rt_text_capacity_stop()
+        return I64{0}
+    }
+    len: keep + extra + tail
+    header: rt_text_builder_with_capacity(len)
+    if (header == I64{0}) -> return I64{0}
+    target: rt_text_data(header)
+    rt_text_bytes_copy(target, data, keep)
+    rt_text_bytes_copy(wrapping(target + keep), source, extra)
+    rt_text_bytes_copy(wrapping(target + keep + extra), wrapping(data + resume), tail)
+    rt_text_store(wrapping(header + I64{8}), len)
+    header
+}
+
+// `s.insert(at, text)`: `text` goes before character `at`; `at` may be the
+// character count, which appends. A `text` that reads `value`'s own bytes
+// takes the fresh-owner path, so no byte moves under its reader.
+#Export(c) jet_rt_string_insert: fn(value: I64, at: I64, text: I64, file: I64, file_len: I64, line: I64) -> I64 {
+    offset: rt_text_char_offset(value, at)
+    if (offset < I64{0}) {
+        message: jet_rt_string_builder_new()
+        jet_rt_string_builder_push(message, rt_static_text("insert position "))
+        rt_text_push_number(message, at)
+        rt_text_edit_outside(message, value, file, file_len, line)
+        return I64{0}
+    }
+    extra: rt_text_len(text)
+    if (extra == I64{0}) -> return value
+    used: rt_text_len(value)
+    source: rt_text_data(text)
+    old: rt_text_data(value)
+    reads_self: source >= old && source < wrapping(old + used)
+    if (!reads_self && rt_text_edit_in_place(value)) {
+        data: rt_text_reserve_extra(value, old, used, extra)
+        if (data == I64{0}) -> return I64{0}
+        jet_rt_mem_move(wrapping(data + offset + extra), wrapping(data + offset), used - offset)
+        rt_text_bytes_copy(wrapping(data + offset), source, extra)
+        rt_text_store(wrapping(value + I64{8}), used + extra)
+        return value
+    }
+    spliced: rt_text_spliced(value, offset, source, extra, offset)
+    if (spliced == I64{0}) -> return I64{0}
+    jet_rt_string_drop(value)
+    spliced
+}
+
+// `s.remove(from, to)`: drops characters `from` up to, not including, `to`.
+#Export(c) jet_rt_string_remove: fn(value: I64, from: I64, to: I64, file: I64, file_len: I64, line: I64) -> I64 {
+    start: rt_text_char_offset(value, from)
+    end: if (start < I64{0} || to < from) -> I64{-1} else -> rt_text_skip(rt_text_data(value), rt_text_len(value), start, to - from)
+    if (end < I64{0}) {
+        message: jet_rt_string_builder_new()
+        jet_rt_string_builder_push(message, rt_static_text("remove range "))
+        rt_text_push_number(message, from)
+        jet_rt_string_builder_push(message, rt_static_text(" to "))
+        rt_text_push_number(message, to)
+        rt_text_edit_outside(message, value, file, file_len, line)
+        return I64{0}
+    }
+    if (end == start) -> return value
+    used: rt_text_len(value)
+    if rt_text_edit_in_place(value) {
+        if !rt_text_writable(value) -> return I64{0}
+        data: rt_text_data(value)
+        jet_rt_mem_move(wrapping(data + start), wrapping(data + end), used - end)
+        rt_text_store(wrapping(value + I64{8}), used - (end - start))
+        return value
+    }
+    spliced: rt_text_spliced(value, start, I64{0}, I64{0}, end)
+    if (spliced == I64{0}) -> return I64{0}
+    jet_rt_string_drop(value)
+    spliced
+}
+
+// `s.truncate(n)`: keeps the first `n` characters, all of them when there
+// are no more than `n`.
+#Export(c) jet_rt_string_truncate: fn(value: I64, count: I64, file: I64, file_len: I64, line: I64) -> I64 {
+    if (count < I64{0}) {
+        message: jet_rt_string_builder_new()
+        jet_rt_string_builder_push(message, rt_static_text("truncate length "))
+        rt_text_push_number(message, count)
+        rt_text_edit_outside(message, value, file, file_len, line)
+        return I64{0}
+    }
+    used: rt_text_len(value)
+    end: rt_text_skip(rt_text_data(value), used, I64{0}, count)
+    if (end < I64{0} || end == used) -> return value
+    if rt_text_edit_in_place(value) {
+        if !rt_text_writable(value) -> return I64{0}
+        rt_text_store(wrapping(value + I64{8}), end)
+        return value
+    }
+    kept: rt_text_copy(rt_text_data(value), end)
+    if (kept == I64{0}) -> return I64{0}
+    jet_rt_string_drop(value)
+    kept
+}
+
+// `s.reserve(n)`: makes room for at least `n` more bytes, so the next edits
+// that fit write in place.
+#Export(c) jet_rt_string_reserve: fn(value: I64, extra: I64, file: I64, file_len: I64, line: I64) -> I64 {
+    if (extra < I64{0}) {
+        message: jet_rt_string_builder_new()
+        jet_rt_string_builder_push(message, rt_static_text("reserve count "))
+        rt_text_push_number(message, extra)
+        jet_rt_string_builder_push(message, rt_static_text(" is negative"))
+        rt_text_edit_stop(message, file, file_len, line)
+        return I64{0}
+    }
+    used: rt_text_len(value)
+    if rt_text_edit_in_place(value) {
+        if (rt_text_reserve_extra(value, rt_text_data(value), used, extra) == I64{0}) -> return I64{0}
+        return value
+    }
+    if (extra > I64{9223372036854775807} - used) {
+        rt_text_capacity_stop()
+        return I64{0}
+    }
+    header: rt_text_builder_with_capacity(used + extra)
+    if (header == I64{0}) -> return I64{0}
+    rt_text_bytes_copy(rt_text_data(header), rt_text_data(value), used)
+    rt_text_store(wrapping(header + I64{8}), used)
+    jet_rt_string_drop(value)
+    header
+}
+
+// `String.with_capacity(n)`: an empty owner whose buffer holds `n` bytes.
+#Export(c) jet_rt_string_with_capacity: fn(capacity: I64, file: I64, file_len: I64, line: I64) -> I64 {
+    if (capacity < I64{0}) {
+        message: jet_rt_string_builder_new()
+        jet_rt_string_builder_push(message, rt_static_text("capacity "))
+        rt_text_push_number(message, capacity)
+        jet_rt_string_builder_push(message, rt_static_text(" is negative"))
+        rt_text_edit_stop(message, file, file_len, line)
+        return I64{0}
+    }
+    rt_text_builder_with_capacity(capacity)
+}
+
 // Release one owner; the last owner frees a separate buffer and the block.
 // Static rt_static_text headers are immortal and never freed.
 #Export(c) jet_rt_string_drop: fn(value: I64) {

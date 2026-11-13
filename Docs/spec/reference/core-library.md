@@ -3608,6 +3608,25 @@ compile time), so the value can key a hash table. It is not cryptographic, and
 the value may differ between runs and compiler versions: never persist it or
 compare it across processes.
 
+A `:=` String, a String field reached through one, or a `&String` parameter
+is edited in place with plain calls. Each call writes its receiver, so a `:`
+binding rejects it with E0111 and an unmarked parameter with E0205.
+Positions count characters, as `slice` does, and a position outside the text
+stops the program with the call's location:
+
+| Method | Meaning |
+|--------|---------|
+| `s.insert(at: Int, text: String)` | `text` goes before character `at`; `at` may be `s.len()`, which appends. |
+| `s.remove(from: Int, to: Int)` | Drops characters `from` up to, not including, `to`. |
+| `s.truncate(n: Int)` | Keeps the first `n` characters; all of them when there are fewer. |
+| `s.reserve(n: Int)` | Makes room for at least `n` more bytes. |
+| `s.capacity()` | The bytes `s` holds before it must grow (`Int`). |
+| `String.with_capacity(n: Int)` | An empty String whose buffer holds `n` bytes. |
+
+A String that is the only owner of its buffer is edited in that buffer. A
+String that shares its text (a `copy()` taken earlier, a literal) keeps the
+other holder's text unchanged: the edit makes the String its own text.
+
 Shell-style line and field work is a set of String methods. They need no
 import, and the line methods follow the `lines()` rule (LF ends a line, one
 CR before it is dropped, and a final LF adds no empty line). All but `words`

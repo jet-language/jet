@@ -1,0 +1,46 @@
+// A `:=` String or a `&String` parameter is edited in place with plain
+// calls. Positions count characters, as `slice` does: `insert(at, text)`
+// puts `text` before character `at`, `remove(from, to)` drops characters
+// `from` up to, not including, `to`, and `truncate(n)` keeps the first `n`
+// (all of them when there are fewer). `String.with_capacity(n)` and
+// `reserve(n)` set bytes aside up front, and `capacity()` counts them. A
+// copy taken before an edit keeps its own text.
+Row: struct { label: String }
+
+bracket: fn(text: &String) {
+    text.insert(0, "[")
+    text.insert(text.len(), "]")
+}
+
+run: fn() {
+    s := "héllo"
+    s.insert(5, " wörld")
+    print(s)
+    s.insert(0, "¿")
+    print(s)
+    s.remove(0, 1)
+    s.remove(1, 2)
+    print(s)
+    s.truncate(4)
+    print(s)
+    s.truncate(10)
+    print("{s} {s.len()}")
+
+    kept: s.copy()
+    s.insert(0, ">")
+    print("{kept} {s}")
+    bracket(s)
+    print(s)
+
+    row := Row{label: "ab"}
+    row.label.insert(1, "-")
+    print(row.label)
+
+    buffer := String.with_capacity(100)
+    print(buffer.capacity() >= 100)
+    print(buffer.len())
+    buffer += "abc"
+    buffer.reserve(200)
+    print(buffer.capacity() >= 203)
+    print(buffer)
+}

@@ -89,6 +89,17 @@ BUILTIN_METHOD_ROWS: #run { [BuiltinMethodRow]{
     {receiver: BuiltinMethodReceiver.String, name: "hash", parameters: [Type]{}, result: Type.IntN{signed: false, bits: 64}, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Builtin{operation: TBuiltinOp.StringMethod{method: "hash"}}},
     {receiver: BuiltinMethodReceiver.String, name: "is_empty", parameters: [Type]{}, result: Type.Bool, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Builtin{operation: TBuiltinOp.IsEmpty}},
     {receiver: BuiltinMethodReceiver.String, name: "try_push", parameters: [Type]{Type.String}, result: Type.Result{ok: Type.Named{name: "Unit"}, err: Type.Named{name: "AllocError"}}, access: AccessConvention.Write, lowering: BuiltinMethodLowering.Builtin{operation: TBuiltinOp.TryStringPush}},
+    // In-place edits of a `:=` String or a `&String` parameter. Positions
+    // count characters, as `slice` does: `insert` puts `text` before
+    // character `at`, `remove` drops characters `from` up to (not
+    // including) `to`, `truncate` keeps the first `n` (all when there are
+    // fewer), and `reserve` makes room for `n` more bytes. A sole owner is
+    // edited in its own buffer; `capacity` is that buffer's size in bytes.
+    {receiver: BuiltinMethodReceiver.String, name: "insert", parameters: [Type]{Type.Int, Type.String}, result: Type.Named{name: "Unit"}, access: AccessConvention.Write, lowering: BuiltinMethodLowering.Builtin{operation: TBuiltinOp.StringEdit{method: "insert"}}},
+    {receiver: BuiltinMethodReceiver.String, name: "remove", parameters: [Type]{Type.Int, Type.Int}, result: Type.Named{name: "Unit"}, access: AccessConvention.Write, lowering: BuiltinMethodLowering.Builtin{operation: TBuiltinOp.StringEdit{method: "remove"}}},
+    {receiver: BuiltinMethodReceiver.String, name: "truncate", parameters: [Type]{Type.Int}, result: Type.Named{name: "Unit"}, access: AccessConvention.Write, lowering: BuiltinMethodLowering.Builtin{operation: TBuiltinOp.StringEdit{method: "truncate"}}},
+    {receiver: BuiltinMethodReceiver.String, name: "reserve", parameters: [Type]{Type.Int}, result: Type.Named{name: "Unit"}, access: AccessConvention.Write, lowering: BuiltinMethodLowering.Builtin{operation: TBuiltinOp.StringEdit{method: "reserve"}}},
+    {receiver: BuiltinMethodReceiver.String, name: "capacity", parameters: [Type]{}, result: Type.Int, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Builtin{operation: TBuiltinOp.StringMethod{method: "capacity"}}},
     {receiver: BuiltinMethodReceiver.String, name: "contains", parameters: [Type]{Type.String}, result: Type.Bool, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Builtin{operation: TBuiltinOp.Contains}},
     {receiver: BuiltinMethodReceiver.String, name: "starts_with", parameters: [Type]{Type.String}, result: Type.Bool, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Builtin{operation: TBuiltinOp.StartsWith}},
     {receiver: BuiltinMethodReceiver.String, name: "startswith", parameters: [Type]{Type.String}, result: Type.Bool, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Builtin{operation: TBuiltinOp.StartsWith}},

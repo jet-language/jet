@@ -26,6 +26,7 @@ Run a lesson from the repository root, for example `jet run Examples/Text/<Lesso
 - [SliceRange](SliceRange.jet)
 - [StreamLines](StreamLines.jet)
 - [StringAffixPad](StringAffixPad.jet) — `remove_prefix`/`remove_suffix` drop one exact edge (else the text is unchanged); `pad_start`/`pad_end` pad to a width with whole fill units.
+- [StringEdits](StringEdits.jet) — A `:=` String or a `&String` parameter is edited in place with plain calls.
 - [StringHash](StringHash.jet) — `s.hash()` is a non-cryptographic U64 of the string's UTF-8 bytes.
 - [StringMethodSurface](StringMethodSurface.jet) — The built-in String, Bytes and number method surface: one call per method that the other text examples do not already exercise.
 - [StringParse](StringParse.jet) — String parsing and line splitting for *small in-memory* text only.

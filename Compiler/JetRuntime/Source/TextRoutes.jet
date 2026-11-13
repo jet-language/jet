@@ -3,6 +3,13 @@
 #Export(c) jet_string_copy: fn(value: I64) -> I64 { jet_rt_string_clone(value) }
 #Export(c) jet_string_count_bytes: fn(value: I64) -> I64 { jet_int_owned_from_i64(rt_text_len(value)) }
 
+// `s.capacity()`: the bytes `s` holds before it must grow; a static text
+// or a frame view (no buffer of its own to grow) answers its length.
+#Export(c) jet_string_capacity: fn(value: I64) -> I64 {
+    cap: rt_text_word(wrapping(value + I64{16}))
+    jet_int_owned_from_i64(if (cap > I64{0}) -> cap else -> rt_text_len(value))
+}
+
 // `s.compare(other)` (Rust `str::cmp`): -1, 0 or 1 by lexicographic UTF-8
 // byte order, read in place; a proper prefix orders first.
 #Export(c) jet_text_compare: fn(left: I64, right: I64) -> I64 {

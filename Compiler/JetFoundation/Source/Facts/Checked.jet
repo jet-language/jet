@@ -540,6 +540,9 @@ TBuiltinOp: enum {
     TryReserve
     TryInsertMap
     TryStringPush
+    // `s.insert(at, text)`, `s.remove(from, to)`, `s.truncate(n)` and
+    // `s.reserve(n)` on a String write place (JetIR ir_string_edit).
+    StringEdit(method: String)
     Pop
     PriorityQueuePop
     InsertMap
@@ -582,6 +585,8 @@ TBuiltinOp: enum {
     Bytes(owned: Bool)
     StringFromBytes
     StringFromBytesLossy
+    // `String.with_capacity(n)`: the Int argument is the receiver.
+    StringWithCapacity
     Trim
     TrimStart
     TrimEnd
