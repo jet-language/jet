@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6777,
-    "rev": 101126,
+    "rev": 101150,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -29833,15 +29833,6 @@
           "at": "2026-11-09T19:36:35.860Z"
         },
         {
-          "n": 39,
-          "text": "(was #3290) O0, O1 and O2 agree on the Examples/features/cli/*.jet and Examples/features/io/args_*.jet goldens; diagnostics stay registered. (was #4275 c111)",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T19:36:38.241Z"
-        },
-        {
           "n": 40,
           "text": "(was #3290) `jet test Compiler --profile golden cli/marker_builder_pair` shows equivalent #CLI and builder grammars producing identical values, help, errors and completion on O0, O1 and O2. (was #4275 c112)",
           "status": "open",
@@ -29888,12 +29879,12 @@
         },
         {
           "n": 45,
-          "text": "A #CLI struct with any number of command fns checks with no warning from its own desugar: CliEntry emits one table dispatch over the command name, not one adjacent if per command (which drew L0514 jet.SameSubjectDispatch at the line after the struct). A case with 1, 2, 3 and 6 command fns shows 0 warnings under jet check and runs each command on O0, O1 and O2, and the Tools/gauntlet drivers kept to 2 commands to dodge it are restored to their natural command set.",
+          "text": "A #CLI struct with any number of command fns checks with no finding from its own desugar: CliEntry emits one table dispatch over the command name, not one adjacent if per command (which drew L0514 jet.SameSubjectDispatch at the line after the struct). Proof: a case with 1, 2, 3 and 6 command fns shows 0 problems under `jet check` and runs each command on O0, O1 and O2 (`jet test Compiler --profile cases --filter cli_entry_dispatch`), and the Tools/gauntlet drivers kept to 2 commands to dodge it are restored to their natural command set.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-12T16:32:50.755Z"
+          "at": "2026-11-13T02:22:46.312Z"
         }
       ],
       "refs": [
@@ -29926,7 +29917,7 @@
       "parentId": "c0u5tm84",
       "needsAcceptance": false,
       "created": "2026-09-12T14:30:20.532Z",
-      "updated": "2026-11-12T16:32:50.755Z",
+      "updated": "2026-11-13T02:22:59.691Z",
       "updatedBy": "Main",
       "workOrder": 141,
       "goals": [
@@ -41224,12 +41215,12 @@
         },
         {
           "n": 50,
-          "text": "(was #3703) [#3702] A marker application counts as an import use: no false L0103, while a genuinely unused import still warns. An unknown or qualified marker gives one E0927 per site whose Why/Fix matches D-META-USER1 and names the declaring import. A parse error in an imported file renders with that file's path, line and text. UI snapshots cover all three.",
+          "text": "A marker application counts as an import use: no false L0103, while a genuinely unused import is still reported as the registered tidy error (listed by jet check, never stopping jet run). An unknown or qualified marker gives one E0927 per site whose Why/Fix matches D-META-USER1 and names the declaring import. A parse error in an imported file renders with that file's path, line and text. Proof: UI snapshots for all three under `jet test Compiler --profile ui --filter marker_import`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-31T01:15:36.344Z"
+          "at": "2026-11-13T02:22:47.716Z"
         },
         {
           "n": 51,
@@ -41275,15 +41266,6 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-09T19:20:14.203Z"
-        },
-        {
-          "n": 57,
-          "text": "(was #2176 c1) A lint or warning renders source carets with the exact yellow warning style used by its header Proof: a tests/ui snapshot, a tests/cases row or the named check, run in a gate (precut audit 2026-11: unproven at 9c7ddf1359).",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T19:20:16.200Z"
         },
         {
           "n": 58,
@@ -41499,7 +41481,7 @@
       "parentId": "c0xnvmrf",
       "needsAcceptance": false,
       "created": "2026-09-28T17:48:29.940Z",
-      "updated": "2026-11-13T01:50:58.893Z",
+      "updated": "2026-11-13T02:23:01.118Z",
       "updatedBy": "Main",
       "goals": [
         "G5"
@@ -43468,12 +43450,12 @@
         },
         {
           "n": 8,
-          "text": "(was #4876) L0503 prefer_compound_assign: UI snapshot / diagnostic text capitalized; the ratified lint contract requires lowercase",
+          "text": "prefer_compound_assign (L0503) is a style point: `jet fmt` rewrites `x = x + n` to `x += n`, and L0503 leaves the registry in one cutover. Proof: a jet fmt fixture shows the rewrite, and `git grep -n L0503 -- Compiler tests` finds no live row or snapshot.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-28T20:14:03.228Z"
+          "at": "2026-11-13T02:22:49.129Z"
         },
         {
           "n": 9,
@@ -43513,12 +43495,12 @@
         },
         {
           "n": 17,
-          "text": "(was #697 c2) The paired tests/ui snapshot is enforced by the UI and diagnostics coverage harnesses and passes independent review [precut audit: failing on 9c7ddf1359: C:build_entry/locked_generated_drift_fails_before_materialization KNOWN-FAILING #4833 (Jet build --locked not ported). PENDING-SAME-HEAD; nominal subclaims below are not replaced by CLI success.: exit 1; expected 0; C:build_entry/locked_action_output_drift_rolls_back_filesystem KNOWN-FAILING #4833 (Jet build…]",
+          "text": "The paired tests/ui snapshot for E3512 (jet build --locked drift) is enforced by the UI and diagnostics coverage harnesses. Proof: `jet test tests/guards --filter diagnostics_coverage` passes with E3512 credited to a producer-checked snapshot.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-04T23:44:04.456Z"
+          "at": "2026-11-13T02:22:50.602Z"
         },
         {
           "n": 25,
@@ -43576,7 +43558,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-02T16:50:50.627Z",
-      "updated": "2026-11-12T15:08:14.592Z",
+      "updated": "2026-11-13T02:22:50.602Z",
       "updatedBy": "Main",
       "goals": [
         "G5"
@@ -50791,15 +50773,6 @@
           "at": "2026-10-31T01:15:44.151Z"
         },
         {
-          "n": 12,
-          "text": "(was #6164) LSP tests pass with no lost cases.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:15:45.086Z"
-        },
-        {
           "n": 13,
           "text": "(was #6164) (from #6165 Formatter spells literals and reserved names from the lexer') The formatter has no private escape or float-spelling table and no `__jet_` prefix test.",
           "status": "open",
@@ -50836,15 +50809,6 @@
           "at": "2026-10-31T01:15:48.760Z"
         },
         {
-          "n": 17,
-          "text": "(was #6164) (from #6166 REPL classifies input with the parser) REPL tests pass with no lost cases.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:15:49.848Z"
-        },
-        {
           "n": 24,
           "text": "(was #4625) tests/lsp fixture: typing `nums.app` on `nums: [Int]` returns an item labelled `push` whose filter text is `append` and whose edit inserts `push`; the same for `.length`/`.size` → `len` and `push_back` → `push`.",
           "status": "open",
@@ -50879,15 +50843,6 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-10-31T01:27:53.637Z"
-        },
-        {
-          "n": 28,
-          "text": "(was #4625) Verified in VS Code, Zed and Neovim through the real server (#3413 acceptance pattern).",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:27:54.576Z"
         },
         {
           "n": 29,
@@ -50969,15 +50924,6 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-09T19:26:06.993Z"
-        },
-        {
-          "n": 38,
-          "text": "(was #2370 c2) The targeted LSP regression covers the 970-line dogfood plan module shape without source-text assertions [precut audit: failing on 9c7ddf1359: C:lsp/lsp_document_symbol_returns_symbols_for_imported_package_module KNOWN-FAILING #6386 unbuilt: DAP debug wire (jet debug) (stdout ended before recv was satisfied; stdout seen:): stdout ended before recv was satisfied; stdout s (known-failing #6386:…] (was #6386 c74)",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T19:26:09.189Z"
         },
         {
           "n": 39,
@@ -51178,15 +51124,6 @@
           "at": "2026-11-09T19:34:15.032Z"
         },
         {
-          "n": 61,
-          "text": "Every LSP 3.18 protocol/lifecycle item has executable applicability and a reason for each N/A; unknown and missing behavior cannot pass. (merged from #3410 c1)",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-13T01:51:22.954Z"
-        },
-        {
           "n": 62,
           "text": "The real initialize response and registrations advertise only complete applicable handlers and respect negotiated client capabilities. (merged from #3410 c2)",
           "status": "open",
@@ -51205,31 +51142,13 @@
           "at": "2026-11-13T01:51:25.830Z"
         },
         {
-          "n": 64,
-          "text": "Freshness and cancellation evidence from #3196 is incorporated without a parallel scheduler or stale-result path. (merged from #3410 c4)",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-13T01:51:27.116Z"
-        },
-        {
-          "n": 65,
-          "text": "No canned response, empty/no-op handler, or narrowed protocol version substitutes for applicable behavior. (merged from #3410 c5)",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-13T01:51:28.392Z"
-        },
-        {
           "n": 66,
-          "text": "A Jet LSP conformance test runs every case generated from Tools/lsp/lsp-3.18-inventory.json. Each applicable row names a witness test that exercises it through the real stdio transport, each N/A row carries a concrete reason, and `node Tools/lsp/check-inventory.mjs` fails on any row that is unknown, missing a witness, or marked N/A because it is unimplemented. (merged from #3410 c6)",
+          "text": "A Jet LSP conformance test runs every case of an LSP 3.18 inventory checked in beside the LSP tests. Each applicable row names a witness test that exercises it through the real stdio transport, each N/A row carries a concrete reason, and the test fails on any row that is unknown, has no witness, or is marked N/A because it is unimplemented. Proof: `jet test Compiler --profile cases --filter lsp_conformance` passes.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-13T01:51:29.622Z"
+          "at": "2026-11-13T02:22:52.083Z"
         },
         {
           "n": 67,
@@ -51278,7 +51197,7 @@
       "parentId": "c0bk3yid",
       "needsAcceptance": false,
       "created": "2026-10-09T18:06:22.233Z",
-      "updated": "2026-11-13T01:51:34.592Z",
+      "updated": "2026-11-13T02:23:11.396Z",
       "updatedBy": "Main",
       "goals": [
         "G5"
@@ -56495,15 +56414,6 @@
           "at": "2026-11-07T03:04:51.856Z"
         },
         {
-          "n": 29,
-          "text": "The web test drivers are Jet. Owner ruling 11-07 (Docs/spec/philosophy.md priority 6): Jet fills every role; a capability Core lacks is a Core gap to close, never a reason to use sh, node, Python or C. Tools/web-test (acceptance.mjs, live-reload.mjs, serve.mjs, sourcemap.mjs) and Tools/web-dev-test (hybrid.mjs, reference_app.mjs) are ported to Jet and deleted. node or a browser may still run Jet's own JS or Wasm output as the subject under test.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T16:32:09.049Z"
-        },
-        {
           "n": 30,
           "text": "A Wasm-pinned function that calls a pure Core helper compiles when a JS-side Core function also calls that helper. Today it gets E-WEB-CROSS-PARTITION, because the JS caller pulls the helper into the JS partition and the Core-callee exemption in sema_web_partition_check applies only when the caller itself uses Browser. A tests/cases row pins the fixed behavior on O0, O1 and O2.",
           "status": "open",
@@ -56529,7 +56439,7 @@
       "parentId": "c022g7qw",
       "needsAcceptance": false,
       "created": "2026-10-23T04:11:56.439Z",
-      "updated": "2026-11-12T22:26:49.340Z",
+      "updated": "2026-11-13T02:23:12.886Z",
       "updatedBy": "Main",
       "goals": [
         "G9"
@@ -58742,15 +58652,6 @@
           "at": "2026-11-09T19:22:37.341Z"
         },
         {
-          "n": 8,
-          "text": "jet check Compiler/JetDevserver with the admitted jet reports 0 problems (1057 across 39 files at 88586c4419), with no #Unsafe block or known-failing row added to reach it. (was #6582 c1)",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-09T19:22:58.147Z"
-        },
-        {
           "n": 9,
           "text": "Every jet dev case row (tests/cases/web_dev and tests/cases/devserver*) passes on the default tier with no known-failing row added; the jet dev golden examples pass on O0, O1 and O2. (was #6582 c2)",
           "status": "open",
@@ -58803,7 +58704,7 @@
       "parentId": "c0bk3yid",
       "needsAcceptance": false,
       "created": "2026-10-24T19:25:14.992Z",
-      "updated": "2026-11-11T19:42:37.747Z",
+      "updated": "2026-11-13T02:23:14.373Z",
       "updatedBy": "Main",
       "goals": [
         "G5"
@@ -74440,15 +74341,6 @@
           "at": "2026-10-31T01:24:10.587Z"
         },
         {
-          "n": 43,
-          "text": "(was #582 c4) Docs assign shared-law enforcement to #560 and reserve exposure spelling, transport mapping, auth, stream, cancellation, version, wire-type, and access-policy choices for later owner ballots [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:34:02.429Z"
-        },
-        {
           "n": 85,
           "text": "(was #2486 c1) The live world inspector runs through the actual native host with typed scene projection, property/action routing, paused-frame evaluation and draw stepping, proven by a tests/cases row.",
           "status": "open",
@@ -74474,15 +74366,6 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-07T02:57:37.034Z"
-        },
-        {
-          "n": 88,
-          "text": "(was #2947 c1) Canonical source-backed producer/carrier/consumer paths and the ordinary CLI/editor surfaces work end to end, proven by tests/cases rows, with explicit owner acceptance of the human/visual result.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T02:57:37.926Z"
         },
         {
           "n": 112,
@@ -74537,15 +74420,6 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-07T02:29:02.157Z"
-        },
-        {
-          "n": 120,
-          "text": "The developer-tool test drivers are Jet. Owner ruling 11-07 (Docs/spec/philosophy.md priority 6): Jet fills every role; a capability Core lacks is a Core gap to close, never a reason to use sh, node, Python or C. Tools/canvas-test (driver.mjs, driver-lifecycle.mjs, gecko-lifecycle.mjs, native-lifecycle.mjs, run.mjs, scenario.mjs) and Tools/notebook-test/acceptance.mjs are ported to Jet and deleted. A browser driven by the test remains the subject under test.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T16:32:07.236Z"
         },
         {
           "n": 121,
@@ -74655,7 +74529,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T20:11:53.653Z",
-      "updated": "2026-11-12T04:20:29.853Z",
+      "updated": "2026-11-13T02:23:18.834Z",
       "updatedBy": "Main",
       "criteriaLastN": 131
     },
@@ -76273,15 +76147,6 @@
           "closure": "obsolete"
         },
         {
-          "n": 49,
-          "text": "(was #638 c2) Targeted cli budget tests pass, including the two repaired tests under parallel execution [precut audit: failing on 9c7ddf1359: C:cli_parts_budget/budget_unreadable_compiler_identity_rejects_before_artifact KNOWN-FAILING #6418 `jet budget` is not built yet (E2104): exit 2; expected 1 (known-failing #6418: `jet budget` is not built yet (E2104))]",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:32:20.293Z"
-        },
-        {
           "n": 52,
           "text": "(was #662 c3) Shared test server recovers poisoned mutex state while preserving the original failing assertion and isolation [precut audit: failing on 9c7ddf1359: C:lsp/lsp_semantic_tokens_classify_ownership_markers_and_skip_retired_words KNOWN-FAILING #6418 `jet self lsp` is not built yet (E2104): stdout ended before recv was satisfied; stdout seen: (known-failing #6418: `jet self lsp` is not built…]",
           "status": "met",
@@ -77063,7 +76928,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T01:11:55.199Z",
-      "updated": "2026-11-13T02:09:32.639Z",
+      "updated": "2026-11-13T02:23:20.290Z",
       "updatedBy": "Main",
       "criteriaLastN": 151
     },
@@ -78327,21 +78192,21 @@
         },
         {
           "n": 21,
-          "text": "(moved from #4717 c74) (was #4766) (was #3919) [#3554] one_shot_mut_adjacent warns once with no machine edit. Read-between, capture, later-write and loop cases stay quiet.",
+          "text": "[#3554] one_shot_mut_adjacent is reported once as a registered tidy error with no machine edit (listed by jet check, never stopping jet run); read-between, capture, later-write and loop cases stay quiet. Proof: a tests/ui_lint snapshot under `jet test Compiler --profile ui --filter one_shot_mut_adjacent`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T02:40:26.959Z"
+          "at": "2026-11-13T02:22:53.549Z"
         },
         {
           "n": 22,
-          "text": "(moved from #4717 c75) (was #4766) (was #3919) [#4207] A write to a local after an escaping lambda copied it warns, with a registered code and snapshot. Read-only captures are quiet.",
+          "text": "[#4207] A write to a local after an escaping lambda copied it is a registered tidy error with a UI snapshot (listed by jet check, never stopping jet run); read-only captures are quiet. Proof: `jet test Compiler --profile ui --filter escaping_capture_write`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T02:40:29.107Z"
+          "at": "2026-11-13T02:22:55.066Z"
         },
         {
           "n": 23,
@@ -78365,7 +78230,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T07:25:24.208Z",
-      "updated": "2026-11-12T23:52:31.820Z",
+      "updated": "2026-11-13T02:22:55.066Z",
       "updatedBy": "Main",
       "criteriaLastN": 23
     },
@@ -85975,12 +85840,12 @@
         },
         {
           "n": 66,
-          "text": "The 88 canvas scenarios of Tools/canvas-test/scenario.mjs (deleted in the #6035 c3 cutover; its last commit is logged on this card) are ported to Jet against Tools/canvas-test/Harness.jet, each keeping its assertions and messages, and `jet run Tools/canvas-test/Run.jet -- scenario --scenario N` passes for every N on the running canvas. (was #6418 c145)",
+          "text": "The 88 canvas scenarios deleted with Tools/canvas-test/scenario.mjs in the #6035 c3 cutover (last commit logged on this card) are restored, each keeping its assertions and messages, as the original driver or as Tools/canvas-test/Harness.jet scenarios. Proof: every scenario passes on the running canvas (`jet run Tools/canvas-test/Run.jet -- scenario --scenario N` for each ported N, or the restored driver for the rest).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T19:25:14.394Z"
+          "at": "2026-11-13T02:22:56.622Z"
         },
         {
           "n": 67,
@@ -86018,7 +85883,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-06T23:23:54.761Z",
-      "updated": "2026-11-12T06:36:44.691Z",
+      "updated": "2026-11-13T02:22:56.622Z",
       "updatedBy": "Main",
       "criteriaLastN": 69
     },
@@ -86088,12 +85953,12 @@
         },
         {
           "n": 6,
-          "text": "(was #6020) A `.jetnb` file holds only source and cell markers; outputs are cached under `.jet/`, and editing one cell changes only that cell's lines in `git diff` (test). (was #6386 c6)",
+          "text": "A `.jetnb` file holds only source and cell markers; outputs are recomputed when the notebook runs and are not stored between runs, and editing one cell changes only that cell's lines in `git diff`. Proof: a tests/cases notebook row under `jet test Compiler --profile cases --filter jetnb`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-09T19:25:34.723Z"
+          "at": "2026-11-13T02:22:58.074Z"
         },
         {
           "n": 7,
@@ -86140,7 +86005,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-06T23:24:24.911Z",
-      "updated": "2026-11-09T19:34:37.089Z",
+      "updated": "2026-11-13T02:22:58.074Z",
       "updatedBy": "Main",
       "criteriaLastN": 10
     },
@@ -197049,6 +196914,174 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-13T02:23:20.290Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0hn7w1n",
+      "note": "#49: duplicate of #6418 c3: The cli budget rows (from Rust-era tests/cli.rs, #638) fail only because `jet budget` is unbuilt (E2104); c3 builds jet budget and passes every cases row that reported E2104 for it.; was [open]: (was #638 c2) Targeted cli budget tests pass, including the two repaired tests under parallel execution [precut audit: failing on 9c7ddf1359: C:cli_parts_budget/budget_unreadable_compiler_identity_rej"
+    },
+    {
+      "at": "2026-11-13T02:23:18.834Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0ozzmvc",
+      "note": "#43: Restates standing policy rather than a deliverable (AGENTS.md:257-263: new syntax, public API, commands and dependencies are owner ballots); nothing to prove on this card. 'Docs reserve exposure, transport, auth ... choices for later owner ballots' (archived #582) has no deliverable.; was [open]: (was #582 c4) Docs assign shared-law enforcement to #560 and reserve exposure spelling, transport mapping, auth, stream, cancellation, version, wire-type, and access-policy choices for later owner bal"
+    },
+    {
+      "at": "2026-11-13T02:23:17.350Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0ozzmvc",
+      "note": "#88: Archived criterion text with no surviving deliverable (the source card's criterion text was lost or names retired machinery); unprovable as worded. Archived #2947 ('canonical source-backed producer/carrier/consumer paths ... with explicit owner acceptance') names no surface.; was [open]: (was #2947 c1) Canonical source-backed producer/carrier/consumer paths and the ordinary CLI/editor surfaces work end to end, proven by tests/cases rows, with explicit owner acceptance of the human/vis"
+    },
+    {
+      "at": "2026-11-13T02:23:15.845Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0ozzmvc",
+      "note": "#120: G4 ruling (#5072 c20, owner 2026-11-12): G4 ports only the repository management tools (Tools/agent, Tools/release, Tools/ci and the gates and generators they call); everything else stays in its own language, including browser-executed assets and test drivers for product surfaces. Tools/canvas-test and Tools/notebook-test stay in their own language.; was [open]: The developer-tool test drivers are Jet. Owner ruling 11-07 (Docs/spec/philosophy.md priority 6): Jet fills every role; a capability Core lacks is a Core gap to close, never a reason to use sh, node, "
+    },
+    {
+      "at": "2026-11-13T02:23:14.373Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0c209zc",
+      "note": "#8: duplicate of #5931 c13: c13 is the same 0-problem jet check of Compiler/JetDevserver, plus fmt-clean and removal from the fmt guard's exclusion.; was [open]: jet check Compiler/JetDevserver with the admitted jet reports 0 problems (1057 across 39 files at 88586c4419), with no #Unsafe block or known-failing row added to reach it. (was #6582 c1)"
+    },
+    {
+      "at": "2026-11-13T02:23:12.886Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0m58g8t",
+      "note": "#29: G4 ruling (#5072 c20, owner 2026-11-12): G4 ports only the repository management tools (Tools/agent, Tools/release, Tools/ci and the gates and generators they call); everything else stays in its own language, including browser-executed assets and test drivers for product surfaces. Tools/web-test and Tools/web-dev-test stay in their own language.; was [open]: The web test drivers are Jet. Owner ruling 11-07 (Docs/spec/philosophy.md priority 6): Jet fills every role; a capability Core lacks is a Core gap to close, never a reason to use sh, node, Python or C"
+    },
+    {
+      "at": "2026-11-13T02:23:11.396Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c03183d1",
+      "note": "#12: Owner ruling 11 (OVERNIGHT-ORDERS.md:48): suites passing with no lost rows is a standing gate, not a card criterion. The sibling criteria of the same #6164 cutover carry the deliverable (the scanners are gone and the parser or lexer is used).; was [open]: (was #6164) LSP tests pass with no lost cases."
+    },
+    {
+      "at": "2026-11-13T02:23:09.938Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c03183d1",
+      "note": "#17: Owner ruling 11 (OVERNIGHT-ORDERS.md:48): suites passing with no lost rows is a standing gate, not a card criterion. The sibling criteria of the same #6164 cutover carry the deliverable (the scanners are gone and the parser or lexer is used).; was [open]: (was #6164) (from #6166 REPL classifies input with the parser) REPL tests pass with no lost cases."
+    },
+    {
+      "at": "2026-11-13T02:23:08.494Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c03183d1",
+      "note": "#28: duplicate of #4917 c70: Same acceptance (VS Code, Zed and Neovim against the real server, the #3413 pattern); c70 is the merged #3410 statement.; was [open]: (was #4625) Verified in VS Code, Zed and Neovim through the real server (#3413 acceptance pattern)."
+    },
+    {
+      "at": "2026-11-13T02:23:07.058Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c03183d1",
+      "note": "#38: duplicate of #4917 c37: The dogfood plan module no longer exists (no dogfood/ tree on dev); the documentSymbol regression on an opened package module is c37.; was [open]: (was #2370 c2) The targeted LSP regression covers the 970-line dogfood plan module shape without source-text assertions [precut audit: failing on 9c7ddf1359: C:lsp/lsp_document_symbol_returns_symbols_"
+    },
+    {
+      "at": "2026-11-13T02:23:05.618Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c03183d1",
+      "note": "#61: duplicate of #4917 c66: c66 is the executable form of c61 (a conformance test over the LSP 3.18 inventory, with a witness or reasoned N/A per row).; was [open]: Every LSP 3.18 protocol/lifecycle item has executable applicability and a reason for each N/A; unknown and missing behavior cannot pass. (merged from #3410 c1)"
+    },
+    {
+      "at": "2026-11-13T02:23:04.144Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c03183d1",
+      "note": "#64: duplicate of #4917 c59: Same rule: no parallel scheduler or new scheduling policy for freshness and cancellation (c56-c59 are the #3196 rows).; was [open]: Freshness and cancellation evidence from #3196 is incorporated without a parallel scheduler or stale-result path. (merged from #3410 c4)"
+    },
+    {
+      "at": "2026-11-13T02:23:02.573Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c03183d1",
+      "note": "#65: duplicate of #4917 c62: c62 already requires that only complete applicable handlers are advertised; 'no canned response or no-op handler' restates it and AGENTS.md's no-stub rule.; was [open]: No canned response, empty/no-op handler, or narrowed protocol version substitutes for applicable behavior. (merged from #3410 c5)"
+    },
+    {
+      "at": "2026-11-13T02:23:01.118Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0o8f1p4",
+      "note": "#57: D-NO-WARNINGS1=A (ratified 2026-11-10; #6281 c129): Jet has no warnings. Style points are jet fmt rewrites. Tidiness findings are errors that jet check and jet build list (exit non-zero) and that never stop jet run or jet dev. There is no warning severity, so 'a lint or warning renders carets in the yellow warning style' has no subject; c58 keeps the error style.; was [open]: (was #2176 c1) A lint or warning renders source carets with the exact yellow warning style used by its header Proof: a tests/ui snapshot, a tests/cases row or the named check, run in a gate (precut au"
+    },
+    {
+      "at": "2026-11-13T02:22:59.691Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0ym70o1",
+      "note": "#39: Owner ruling 11 (OVERNIGHT-ORDERS.md:48): passing examples/goldens is a standing blocker for compiler releases, not a card criterion; 'full-suite proof at epoch closeout' names a retired gate (Closure rule, OVERNIGHT-ORDERS.md:21: no extra sweep or review holds a card or goal). O0/O1/O2 agreement on Examples goldens is the standing I9 gate.; was [open]: (was #3290) O0, O1 and O2 agree on the Examples/features/cli/*.jet and Examples/features/io/args_*.jet goldens; diagnostics stay registered. (was #4275 c111)"
+    },
+    {
+      "at": "2026-11-13T02:22:58.074Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0xhxet9",
+      "note": "#6: Owner ruling (BRIEF; #5479 plan 'Ruled out'; AGENTS.md:205-209 'No script cache, build-action reuse or other compile cache ... every compile cache is off by default'): no incremental compilation and no cross-run cache, store restore or result reuse. The old text kept cell outputs 'cached under .jet/' across runs.; was: (was #6020) A `.jetnb` file holds only source and cell markers; outputs are cached under `.jet/`, and editing one cell changes only that cell's lines in `git diff` (test). (was #6386 c6)"
+    },
+    {
+      "at": "2026-11-13T02:22:56.622Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c02vsnvm",
+      "note": "#66: G4 ruling (#5072 c20, owner 2026-11-12): G4 ports only the repository management tools (Tools/agent, Tools/release, Tools/ci and the gates and generators they call); everything else stays in its own language, including browser-executed assets and test drivers for product surfaces. The coverage must come back; the language of the driver is not a criterion.; was: The 88 canvas scenarios of Tools/canvas-test/scenario.mjs (deleted in the #6035 c3 cutover; its last commit is logged on this card) are ported to Jet against Tools/canvas-test/Harness.jet, each keepin"
+    },
+    {
+      "at": "2026-11-13T02:22:55.066Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c01oyhqk",
+      "note": "#22: D-NO-WARNINGS1=A (ratified 2026-11-10; #6281 c129): Jet has no warnings. Style points are jet fmt rewrites. Tidiness findings are errors that jet check and jet build list (exit non-zero) and that never stop jet run or jet dev.; was: (moved from #4717 c75) (was #4766) (was #3919) [#4207] A write to a local after an escaping lambda copied it warns, with a registered code and snapshot. Read-only captures are quiet."
+    },
+    {
+      "at": "2026-11-13T02:22:53.549Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c01oyhqk",
+      "note": "#21: D-NO-WARNINGS1=A (ratified 2026-11-10; #6281 c129): Jet has no warnings. Style points are jet fmt rewrites. Tidiness findings are errors that jet check and jet build list (exit non-zero) and that never stop jet run or jet dev.; was: (moved from #4717 c74) (was #4766) (was #3919) [#3554] one_shot_mut_adjacent warns once with no machine edit. Read-between, capture, later-write and loop cases stay quiet."
+    },
+    {
+      "at": "2026-11-13T02:22:52.083Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c03183d1",
+      "note": "#66: Tools/lsp (lsp-3.18-inventory.json, check-inventory.mjs) does not exist on dev, so the old proof names a missing file and a node checker.; was: A Jet LSP conformance test runs every case generated from Tools/lsp/lsp-3.18-inventory.json. Each applicable row names a witness test that exercises it through the real stdio transport, each N/A row c"
+    },
+    {
+      "at": "2026-11-13T02:22:50.602Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0xnvmrf",
+      "note": "#17: AGENTS.md:283-285: a milestone gets one commit-bound sweep and one fresh-context review; individual cards do not wait for that gate. Owner ruling 1 (OVERNIGHT-ORDERS.md:38): no review needs a reviewer from a different model family. 'Passes independent review' is a per-card review gate.; was: (was #697 c2) The paired tests/ui snapshot is enforced by the UI and diagnostics coverage harnesses and passes independent review [precut audit: failing on 9c7ddf1359: C:build_entry/locked_generated_d"
+    },
+    {
+      "at": "2026-11-13T02:22:49.129Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0xnvmrf",
+      "note": "#8: D-NO-WARNINGS1=A (ratified 2026-11-10; #6281 c129): Jet has no warnings. Style points are jet fmt rewrites. Tidiness findings are errors that jet check and jet build list (exit non-zero) and that never stop jet run or jet dev. The old text only fixed the capitalization of a lint message.; was: (was #4876) L0503 prefer_compound_assign: UI snapshot / diagnostic text capitalized; the ratified lint contract requires lowercase"
+    },
+    {
+      "at": "2026-11-13T02:22:47.716Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0o8f1p4",
+      "note": "#50: D-NO-WARNINGS1=A (ratified 2026-11-10; #6281 c129): Jet has no warnings. Style points are jet fmt rewrites. Tidiness findings are errors that jet check and jet build list (exit non-zero) and that never stop jet run or jet dev.; was: (was #3703) [#3702] A marker application counts as an import use: no false L0103, while a genuinely unused import still warns. An unknown or qualified marker gives one E0927 per site whose Why/Fix mat"
+    },
+    {
+      "at": "2026-11-13T02:22:46.312Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0ym70o1",
+      "note": "#45: D-NO-WARNINGS1=A (ratified 2026-11-10; #6281 c129): Jet has no warnings. Style points are jet fmt rewrites. Tidiness findings are errors that jet check and jet build list (exit non-zero) and that never stop jet run or jet dev.; was: A #CLI struct with any number of command fns checks with no warning from its own desugar: CliEntry emits one table dispatch over the command name, not one adjacent if per command (which drew L0514 jet"
+    },
     {
       "at": "2026-11-13T02:22:39.336Z",
       "by": "Main",
