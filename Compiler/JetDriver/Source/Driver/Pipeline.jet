@@ -887,6 +887,34 @@ JetDriverComptimeRunIndex: struct {
     // result itself (JetDriverComptimeClosureRow), so each later closure
     // that reuses the row skips its body walks.
     closure_rows: [Int:JetDriverComptimeClosureRow]{[Int:JetDriverComptimeClosureRow]{}}
+    // `module\nkey` -> its node in `nodes` (JetDriverComptimeClosureNode),
+    // one per function any closure of the run queued.
+    node_ids: [String:Int]{[String:Int]{}}
+    nodes: [JetDriverComptimeClosureNode]{[JetDriverComptimeClosureNode]{}}
+}
+
+// A function whose visit is the same in every closure of the run, `settled`
+// at the first closure that visits it so: a reused checked row `row` (complete
+// or obligation-pending) with a body and no waits whose reachable keys each
+// have one owner, or a foreign function (`foreign`, its check, which reads
+// only the graph). Such a visit adds no report and changes no run state, and
+// it queues `successors` (nodes, in the order the visit queues them) every
+// time, so a closure whose functions are all settled walks the nodes alone
+// (jet_driver_comptime_settled_closure) and gives what the full walk gives.
+// A forgotten row unsettles its node. `obligations`: the function adds
+// failure obligations to its closure's (sema_comptime_failure_closure_add).
+// The impurities are the row's closure row's (JetDriverComptimeClosureRow)
+// once a closure asked.
+JetDriverComptimeClosureNode: struct {
+    settled: Bool{false}
+    row: Int{-1}
+    foreign: SemaComptimeFunctionResult?{None}
+    successors: [Int]{[Int]{}}
+    obligations: Bool{false}
+    module_known: Bool{false}
+    module_impurity: String?{None}
+    local_known: Bool{false}
+    local_impurity: String?{None}
 }
 
 // What a closure reads of one checked function row besides its result, the
@@ -949,6 +977,11 @@ JetDriverComptimeFunctionRef: struct {
 
 JetDriverComptimeFunctionClosure: struct {
     functions: [FnBody]
+    // A closure walked over settled nodes (jet_driver_comptime_settled_closure)
+    // names its bodies by their rows of the run's checked functions instead,
+    // in closure order; a batch takes them as `functions`
+    // (jet_driver_comptime_closure_bodies).
+    rows: [Int]{[Int]{}}
     waiting_dependencies: [String]
     complete: Bool
     // Each incomplete reachable function's recorded causes (its function key).
@@ -1113,6 +1146,88 @@ jet_driver_comptime_function_refs: fn(graph: SemaRegistrationGraph, index: &JetD
     jet_driver_comptime_body_refs(graph, index, module_identity, function.tree, defaults, function.body)
 }
 
+// The node (JetDriverComptimeClosureNode) of function `function_key` of
+// `module_identity`, added unsettled the first time a closure visits or
+// queues it.
+jet_driver_comptime_node_id: fn(index: &JetDriverComptimeRunIndex, module_identity: ModuleID, function_key: String) -> Int Never! {
+    key: "{module_identity.id}\n{function_key}"
+    if index.node_ids.get(key) == .Val(found) -> return found
+    id: index.nodes.len()
+    index.node_ids[key] = id
+    index.nodes.push(JetDriverComptimeClosureNode{})
+    id
+}
+
+// The closure of the functions in `roots` (the item's queue, in order) when
+// every function it reaches is settled: the nodes walked in the order the
+// full walk visits them, which is the order their successors queue them, so
+// it gives the same rows, foreign functions, first impurity and failure
+// settle. None at the first function that is not settled; the full walk
+// (jet_driver_comptime_function_closure) runs then. `impurity`,
+// `module_value` and `local_value` are the full walk's.
+jet_driver_comptime_settled_closure: fn(graph: SemaRegistrationGraph, index: &JetDriverComptimeRunIndex, checked_functions: [SemaComptimeFunctionResult], roots: [JetDriverComptimeFunctionRef], module_value: Bool, local_value: Bool, impurity: String?, diagnostics: &[Diagnostic]) -> JetDriverComptimeFunctionClosure? {
+    order := [Int]{}
+    queued := [Int:Bool]{}
+    loop root in roots {
+        root_id: index.node_ids.get("{root.module_identity.id}\n{root.function_key}") ?? return None
+        if queued.get(root_id) != None -> next
+        queued[root_id] = true
+        order.push(root_id)
+    }
+    found := impurity
+    obligations := false
+    cursor := 0
+    loop cursor < order.len() {
+        id: order[cursor]
+        cursor += 1
+        if !index.nodes[id].settled -> return None
+        if index.nodes[id].obligations -> obligations = true
+        if module_value && found == None && index.nodes[id].row >= 0 -> found = jet_driver_comptime_node_impurity(graph, index, checked_functions, id, local_value)
+        loop successor in index.nodes[id].successors {
+            if queued.get(successor) != None -> next
+            queued[successor] = true
+            order.push(successor)
+        }
+    }
+    rows := [Int]{}
+    foreign := [SemaCheckedForeignFunction]{}
+    // The failure closure is built only when a function adds obligations:
+    // with none, its settle discharges everything.
+    failure_closure := SemaComptimeFailureClosure{}
+    loop id in order {
+        row: index.nodes[id].row
+        if row >= 0 {
+            rows.push(row)
+            if obligations -> sema_comptime_failure_closure_add(graph, failure_closure, checked_functions[row])
+            next
+        }
+        result: index.nodes[id].foreign ?? next
+        if result.foreign == .Val(foreign_row) -> foreign.push(foreign_row.copy())
+        if obligations -> sema_comptime_failure_closure_add(graph, failure_closure, result)
+    }
+    complete: !obligations || sema_comptime_failure_closure_settle(graph, failure_closure, diagnostics)
+    Val(JetDriverComptimeFunctionClosure{functions: [FnBody]{}, rows: rows, waiting_dependencies: [String]{}, complete: complete, impurity: found, foreign: foreign})
+}
+
+// Settled node `id`'s impurity for a module value (`local_value`: a local
+// value), its row's closure row's (jet_driver_comptime_closure_row), kept on
+// the node once asked.
+jet_driver_comptime_node_impurity: fn(graph: SemaRegistrationGraph, index: &JetDriverComptimeRunIndex, checked_functions: [SemaComptimeFunctionResult], id: Int, local_value: Bool) -> String? {
+    if local_value && index.nodes[id].local_known -> return index.nodes[id].local_impurity.copy()
+    if !local_value && index.nodes[id].module_known -> return index.nodes[id].module_impurity.copy()
+    row: index.nodes[id].row
+    function: checked_functions[row].function ?? return None
+    closure_row: jet_driver_comptime_closure_row(graph, index, row, checked_functions[row], function, true, local_value)
+    if local_value {
+        index.nodes[id].local_known = true
+        index.nodes[id].local_impurity = closure_row.local_impurity.copy()
+        return closure_row.local_impurity
+    }
+    index.nodes[id].module_known = true
+    index.nodes[id].module_impurity = closure_row.module_impurity.copy()
+    closure_row.module_impurity
+}
+
 // `environment` is the run's sema_comptime_environment, `program` its tables
 // (sema_comptime_program) and `available` its constant keys: every function
 // check re-targets the environment instead of copying the graph per function.
@@ -1172,6 +1287,8 @@ jet_driver_comptime_function_closure: fn(
     // that reads the task context, and a module value that reads it is
     // refused: the build's root context would stand in for the caller's.
     impurity := if local_value && sema_comptime_tree_reads_phase(request.expression.tree) -> Val("it reads `#phase`, the phase of the copy that runs it") else if module_value && sema_comptime_tree_reads_context(request.expression.tree) -> Val("it reads `context`, the task context of the code that runs it") else -> String?{None}
+    // A closure of settled functions walks their nodes alone.
+    if jet_driver_comptime_settled_closure(graph, index, checked_functions, queue, module_value, local_value, impurity, diagnostics) == .Val(settled) -> return settled
     // #3708: obligations against unannotated callees settle over the closure.
     failure_closure := SemaComptimeFailureClosure{}
     cursor := 0
@@ -1179,6 +1296,11 @@ jet_driver_comptime_function_closure: fn(
         current := queue[cursor]
         cursor += 1
         checked_key: "{current.module_identity.id}\n{current.function_key}"
+        // The visit settles the function's node when it is the same in
+        // every closure (JetDriverComptimeClosureNode).
+        node: jet_driver_comptime_node_id(index, current.module_identity, current.function_key)
+        successors := [Int]{}
+        obligation_mark: failure_closure.obligations.len()
         reused_row := -1
         if index.checked_rows.get(checked_key) == .Val(row) {
             if checked_functions[row].complete || checked_functions[row].obligations_pending -> reused_row = row
@@ -1207,8 +1329,10 @@ jet_driver_comptime_function_closure: fn(
             // An `#Import(c)`'s failure row (sema_check_comptime_function):
             // its callers' obligations against it settle over the closure.
             sema_comptime_failure_closure_add(graph, failure_closure, checked)
+            if checked.waiting_dependencies.len() == 0 && !index.nodes[node].settled -> index.nodes[node] = JetDriverComptimeClosureNode{settled: true, foreign: Val(checked.copy()), obligations: failure_closure.obligations.len() > obligation_mark}
             next
         }
+        settles := reused_row >= 0 && checked.waiting_dependencies.len() == 0 && !index.nodes[node].settled
         loop dependency in checked.waiting_dependencies -> jet_driver_comptime_wait_add(waiting, dependency)
         if {
             !checked.obligations_pending && (!checked.complete || jet_driver_has_errors(checked.diagnostics)) -> {
@@ -1217,6 +1341,7 @@ jet_driver_comptime_function_closure: fn(
                 if checked.incomplete_reasons.len() == 0 && checked.waiting_dependencies.len() == 0 && !jet_driver_has_errors(checked.diagnostics) -> incomplete.push(SemaTotalityRow{owner: module_text(graph.module_table, current.module_identity), function: current.function_key.copy(), reason: "incomplete with no recorded cause"})
                 loop reason in checked.incomplete_reasons -> incomplete.push(SemaTotalityRow{owner: module_text(graph.module_table, current.module_identity), function: current.function_key.copy(), reason: reason})
                 complete = false
+                settles = false
             }
             else -> {
                 function: checked.function ?? {
@@ -1231,7 +1356,10 @@ jet_driver_comptime_function_closure: fn(
                 kept_row := if reused_row >= 0 -> reused_row else if index.checked_rows.get(checked_key) == None -> checked_functions.len() else -> -1
                 closure_row: jet_driver_comptime_closure_row(graph, index, kept_row, checked, function, module_value && impurity == None, local_value)
                 if module_value && impurity == None -> impurity = if local_value -> closure_row.local_impurity else -> closure_row.module_impurity
-                loop found in closure_row.refs -> jet_driver_comptime_function_ref_add(queue, queued, found.module_identity, found.function_key)
+                loop found in closure_row.refs {
+                    if settles -> successors.push(jet_driver_comptime_node_id(index, found.module_identity, found.function_key))
+                    jet_driver_comptime_function_ref_add(queue, queued, found.module_identity, found.function_key)
+                }
                 functions.push(function)
                 sema_comptime_failure_closure_add(graph, failure_closure, checked)
                 if index.checked_rows.get(checked_key) == None {
@@ -1240,7 +1368,10 @@ jet_driver_comptime_function_closure: fn(
                 }
             }
         }
-        loop call in checked.calls -> jet_driver_comptime_function_ref_add(queue, queued, call.module_identity, call.callee_key)
+        loop call in checked.calls {
+            if settles -> successors.push(jet_driver_comptime_node_id(index, call.module_identity, call.callee_key))
+            jet_driver_comptime_function_ref_add(queue, queued, call.module_identity, call.callee_key)
+        }
         loop function_key in checked.reachable_function_keys {
             if !index.owners_built -> jet_driver_comptime_owners_build(graph, index)
             module_identity := jet_driver_comptime_function_owner(index, function_key)
@@ -1248,13 +1379,16 @@ jet_driver_comptime_function_closure: fn(
                 module_identity == None -> {
                     diagnostics.push(jet_driver_diagnostic_at_registration_site(graph, request.module_identity, "E0003", request.span, "a nested comptime-reachable function has no unique registered module owner", "on-demand Sema function checks use the exact canonical module and symbol key", "retain the registered owner identity for every reachable function"))
                     complete = false
+                    settles = false
                 }
                 else -> {
                     owner_identity: module_identity ?? return JetDriverComptimeFunctionClosure{functions: functions, waiting_dependencies: waiting, complete: false, incomplete: incomplete}
+                    if settles -> successors.push(jet_driver_comptime_node_id(index, owner_identity, function_key))
                     jet_driver_comptime_function_ref_add(queue, queued, owner_identity, function_key)
                 }
             }
         }
+        if settles -> index.nodes[node] = JetDriverComptimeClosureNode{settled: true, row: reused_row, successors: successors, obligations: failure_closure.obligations.len() > obligation_mark}
     }
     // A waiting closure is checked again once its dependencies land; its rows
     // are not all checked yet, so its obligations settle then.
@@ -1782,6 +1916,9 @@ jet_driver_comptime_forget_functions: fn(checked_functions: &[SemaComptimeFuncti
         removed := checked_functions.pop() ?? { break }
         _ := index.checked_rows.remove("{removed.module_identity.id}\n{removed.function_key}")
         _ := index.closure_rows.remove(checked_functions.len())
+    }
+    loop at in 0..<index.nodes.len() {
+        if index.nodes[at].row >= mark -> index.nodes[at] = JetDriverComptimeClosureNode{}
     }
 }
 
@@ -2466,7 +2603,7 @@ jet_driver_comptime_run: fn(
                 closure_diagnostic_start: diagnostics.len()
                 if request.trace_sink == .Val(sink) -> sink.begin_item("comptime.closure", source.source_file, source.name)
                 closure := jet_driver_comptime_function_closure(environments[0], programs[0], probe, available, run_index, memory_plan, values, checked_functions, comptime_request, source.module_value || source.local_value, source.local_value, diagnostics)
-                jet_driver_trace_step_end(request.trace_sink, "comptime.closure", closure.functions.len())
+                jet_driver_trace_step_end(request.trace_sink, "comptime.closure", closure.functions.len() + closure.rows.len())
                 if batch.entries.len() > 0 && jet_driver_comptime_reads_batch(batch.keys, closure.waiting_dependencies, !source.local_value && (diagnostics.len() > item_diagnostic_start || !closure.complete)) {
                     loop diagnostics.len() > item_diagnostic_start {
                         _ := diagnostics.pop()
@@ -2564,6 +2701,10 @@ jet_driver_comptime_run: fn(
                     }
                 }
                 scanned_functions = checked_functions.len()
+                // A settled closure names its bodies by checked row.
+                loop row in closure.rows {
+                    if checked_functions[row].function == .Val(function) -> closure.functions.push(function.copy())
+                }
                 if jet_driver_comptime_batchable(source) {
                     jet_driver_comptime_batch_add(batch, source, comptime_request, closure.functions, closure.foreign)
                     next
