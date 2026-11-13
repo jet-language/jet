@@ -250,20 +250,22 @@ sema_module_body_rows_put: fn(modules: &[SemaGraphModuleResult], index: Int, row
 // `old` and `new`, named for the refusal's trace counter
 // (sema_local_splice_refused), or None when they all agree: all but the
 // bodies, the body comptime sites and the diagnostics, which
-// sema_local_splice_holds compares itself.
+// sema_local_splice_holds compares itself. Rows compare by value, in
+// place: formatting both sides of every owner module's rows to compare
+// their texts cost seconds on the compiler's own pass.
 sema_module_body_rows_difference: fn(old: SemaModuleBodyRows, new: SemaModuleBodyRows) -> String? Never! {
-    if "{old.call_facts:Debug}" != "{new.call_facts:Debug}" -> return Val("rows_calls")
-    if "{old.hardware_use:Debug}" != "{new.hardware_use:Debug}" -> return Val("rows_hardware")
-    if "{old.name_references:Debug}" != "{new.name_references:Debug}" -> return Val("rows_names")
-    if "{old.comptime_requests:Debug}" != "{new.comptime_requests:Debug}" -> return Val("rows_requests")
-    if "{old.compute_facts:Debug}" != "{new.compute_facts:Debug}" -> return Val("rows_compute")
+    if old.call_facts != new.call_facts -> return Val("rows_calls")
+    if old.hardware_use != new.hardware_use -> return Val("rows_hardware")
+    if old.name_references != new.name_references -> return Val("rows_names")
+    if old.comptime_requests != new.comptime_requests -> return Val("rows_requests")
+    if old.compute_facts != new.compute_facts -> return Val("rows_compute")
     if old.exact_int_reachable != new.exact_int_reachable -> return Val("rows_exact")
-    if "{old.copy_events:Debug}" != "{new.copy_events:Debug}" -> return Val("rows_copies")
+    if old.copy_events != new.copy_events -> return Val("rows_copies")
     if old.complete != new.complete -> return Val("rows_complete")
-    if "{old.failure_facts:Debug}" != "{new.failure_facts:Debug}" -> return Val("rows_failures")
-    if "{old.incomplete_reasons:Debug}" != "{new.incomplete_reasons:Debug}" -> return Val("rows_incomplete")
-    if "{old.injected_function_keys:Debug}" != "{new.injected_function_keys:Debug}" -> return Val("rows_injected")
-    if "{old.tests:Debug}" != "{new.tests:Debug}" -> return Val("rows_tests")
+    if old.failure_facts != new.failure_facts -> return Val("rows_failures")
+    if old.incomplete_reasons != new.incomplete_reasons -> return Val("rows_incomplete")
+    if old.injected_function_keys != new.injected_function_keys -> return Val("rows_injected")
+    if old.tests != new.tests -> return Val("rows_tests")
     None
 }
 
@@ -323,6 +325,16 @@ sema_local_splice_slot: fn(functions: [FnBody], key: String) -> Int? Never! {
         found = Val(index)
     }
     found
+}
+
+// sema_local_splice_slot for every key of `functions` at once: the position
+// of the one function of each key, -1 for a key more than one function has.
+sema_local_splice_slots: fn(functions: [FnBody]) -> [String:Int] Never! {
+    slots := [String:Int]{}
+    loop index in 0..<functions.len() {
+        slots[functions[index].key] = if slots.get(functions[index].key) == None -> index else -> -1
+    }
+    slots
 }
 
 // Puts on a freshly checked `body` what the whole-program passes after the
@@ -394,7 +406,7 @@ sema_local_splice_holds: fn(modules: [SemaGraphModuleResult], owner_modules: [In
         new: after[position]
         module_index: owner_modules[position]
         if sema_module_body_rows_difference(old, new) == .Val(difference) -> return Val(difference)
-        if "{old.diagnostics:Debug}" != "{new.diagnostics:Debug}" {
+        if old.diagnostics != new.diagnostics {
             // `diagnostics_added`: the second check reports one the first
             // does not; `diagnostics_unclaimed`: the first reports one no
             // comptime result brings; `diagnostics_module`: one the owner
@@ -408,21 +420,23 @@ sema_local_splice_holds: fn(modules: [SemaGraphModuleResult], owner_modules: [In
         // failure keeps the initializer as run-time code, calls and all.
         if stamped && sema_local_splice_inner_call(old, computed) -> return Val("inner_call")
         sema_local_splice_unlanded(old.comptime_body_sources, landed)
-        if "{old.comptime_body_sources:Debug}" != "{new.comptime_body_sources:Debug}" -> return Val("sources")
+        if old.comptime_body_sources != new.comptime_body_sources -> return Val("sources")
         if old.functions.len() != new.functions.len() -> return Val("bodies")
         checked := old.functions.move()
+        slots: sema_local_splice_slots(modules[module_index].functions)
         index := checked.len()
         loop checked.len() > 0 {
             index -= 1
             function := checked.pop() ?? break
             if new.functions[index].key != function.key -> return Val("bodies")
             if owners.get(function.key) == None {
-                if "{function:Debug}" != "{new.functions[index]:Debug}" -> return Val("bodies")
+                if function != new.functions[index] -> return Val("bodies")
                 next
             }
-            slot: sema_local_splice_slot(modules[module_index].functions, function.key) ?? return Val("bodies")
+            slot: slots.get(function.key) ?? -1
+            if slot < 0 -> return Val("bodies")
             if stamped -> sema_local_splice_settle(function, modules[module_index].functions[slot])
-            if "{function:Debug}" != "{modules[module_index].functions[slot]:Debug}" -> return Val("finalized_bodies")
+            if function != modules[module_index].functions[slot] -> return Val("finalized_bodies")
             settled_owners += 1
         }
     }
@@ -707,6 +721,7 @@ sema_local_splice_owners: fn(
     pass_demand: sema_local_splice_demand_swap(graph, finalized_demand)
     after := [SemaModuleBodyRows]{}
     loop module_index in owner_modules -> after.push(sema_module_body_rows_take(modules, module_index))
+    if trace_sink == .Val(sink) -> sink.begin("sema.local_values.compare", "", -1, -1)
     owners = graph.core_wave_rows.move()
     graph.core_wave_rows = [String:Bool]{}
     row := owner_modules.len()
@@ -733,11 +748,13 @@ sema_local_splice_owners: fn(
         !same_demand -> Val("demand")
         else -> sema_local_splice_holds(modules, owner_modules, owners, valued, computed, sema_local_splice_diagnostic_texts(replayed_diagnostics), before, after, into, dropped)
     }
+    if trace_sink == .Val(sink) -> sink.end("sema.local_values.compare", owners.len())
     if refusal == .Val(reason) {
         sema_local_splice_refused(trace_sink, reason, owners.len())
         return SemaLocalValueSplice{graph: graph.move(), spliced: false, valued: [String:Bool]{}}
     }
     if trace_sink == .Val(sink) -> sink.progress("counters.sema.local_values_spliced", owners.len(), -1)
+    if trace_sink == .Val(sink) -> sink.begin("sema.local_values.splice", "", -1, -1)
     stamped: sema_local_splice_stamped(into)
     row = owner_modules.len()
     loop after.len() > 0 {
@@ -745,16 +762,19 @@ sema_local_splice_owners: fn(
         rows := after.pop() ?? break
         module_index: owner_modules[row]
         checked := rows.functions.move()
+        slots: sema_local_splice_slots(modules[module_index].functions)
         loop checked.len() > 0 {
             function := checked.pop() ?? break
             if owners.get(function.key) == None -> next
-            slot: sema_local_splice_slot(modules[module_index].functions, function.key) ?? panic("a spliced local value lost its owner function")
+            slot: slots.get(function.key) ?? -1
+            if slot < 0 -> panic("a spliced local value lost its owner function")
             if stamped -> sema_local_splice_settle(function, modules[module_index].functions[slot])
             modules[module_index].functions[slot] = function.move()
         }
         sema_local_splice_drop_diagnostics(modules[module_index].diagnostics, dropped[row])
         sema_local_splice_unlanded(modules[module_index].comptime_body_sources, valued)
     }
+    if trace_sink == .Val(sink) -> sink.end("sema.local_values.splice", owners.len())
     SemaLocalValueSplice{graph: graph.move(), spliced: true, valued: valued.move()}
 }
 
