@@ -36,23 +36,14 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Use it from inside its enclosing module, or remove `priv` from the module or field.</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E0605</code>: <code>tests/ui/forged_file_writer_literal/stderr</code>.</p>
-<pre class="diag">Error [jet.ComputedFieldAssigned]: `path` is a computed field on `FileWriter` — it can&#39;t be set
-  --&gt; tests/ui/forged_file_writer_literal/run.jet:6:24
+<p>First UI snapshot mentioning <code>E0605</code>: <code>tests/ui/directory_literal_is_private/stderr</code>.</p>
+<pre class="diag">Error [jet.PrivateItem]: `handle` is private to its module
+  --&gt; tests/ui/directory_literal_is_private/run.jet:6:29
     |
-  6 |     forged: FileWriter{path: &quot;/etc/passwd&quot;}
-    |                        ^^^^
- Why: `path` is declared `path -&gt; …` — its value always comes from that formula, never from a struct literal
- Fix: Remove `path` from this `.{ … }`
-More: jet-lang.dev/e/E0339
-
-Error [jet.PrivateItem]: `FileWriter` can&#39;t be built here: its field `stored_path` is private to its module
-  --&gt; tests/ui/forged_file_writer_literal/run.jet:6:13
-    |
-  6 |     forged: FileWriter{path: &quot;/etc/passwd&quot;}
-    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  6 |     forged: files.Directory{handle: 3}
+    |                             ^^^^^^
  Why: A `priv module` is usable only by its enclosing module (`priv(package)`: by its package), and a `priv` field only by its type&#39;s module
- Fix: Get a `FileWriter` from a function of its module, or remove `priv` from `stored_path`
+ Fix: Use `handle` from inside its module, or remove `priv` from its module or field
 More: jet-lang.dev/e/E0605
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

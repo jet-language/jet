@@ -36,14 +36,14 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Declare the caller with `{source}` as its failure domain, or add `impl {source} -&gt; {target} { … }`; otherwise handle `{callee}` locally with `??`</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E2404</code>: <code>tests/ui/callback_error_generic_mismatch.stderr</code>.</p>
-<pre class="diag">Error [jet.ErrorNotPropagatable]: `sort_by` fails with `PriceError`, which can&#39;t propagate into `KeyError` here
-  --&gt; tests/ui/callback_error_generic_mismatch.jet:30:5
+<p>First UI snapshot mentioning <code>E2404</code>: <code>tests/ui/E2404_alloc_error_into_never.stderr</code>.</p>
+<pre class="diag">Error [jet.ErrorNotPropagatable]: `try_push()` fails with `AllocError`, which can&#39;t propagate into `Never` here
+  --&gt; tests/ui/E2404_alloc_error_into_never.jet:5:10
     |
- 30 |     sort_by(names, parse_price)
-    |     ^^^^^^^
- Why: `sort_by` is defined at `callback_error_generic_mismatch.jet:15:1` with effective failure contract `explicit E!`; the caller&#39;s `explicit KeyError!` contract has no route from `PriceError` to `KeyError`
- Fix: Declare the caller with `PriceError` as its failure domain, or add `impl PriceError -&gt; KeyError { … }`; otherwise handle `sort_by` locally with `??`
+  5 |     rows.try_push(1)
+    |          ^^^^^^^^
+ Why: `try_push()` is defined at `Core or generated callable (no user source location)` with effective failure contract `inferred failure contract`; the caller&#39;s `explicit Never! (proven unreachable)` contract has no route from `AllocError` to `Never`
+ Fix: Declare the caller with `AllocError` as its failure domain, or add `impl AllocError -&gt; Never { … }`; otherwise handle `try_push()` locally with `??`
 More: jet-lang.dev/e/E2404
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

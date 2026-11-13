@@ -36,14 +36,14 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Use the receiver form named by the diagnostic, or correct the method name</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E0311</code>: <code>tests/ui/clone_not_a_method.stderr</code>.</p>
-<pre class="diag">Error [jet.UnknownMethod]: `clone` isn&#39;t a method on this value
-  --&gt; tests/ui/clone_not_a_method.jet:3:10
+<p>First UI snapshot mentioning <code>E0311</code>: <code>tests/ui/call_spelling_function_dot.stderr</code>.</p>
+<pre class="diag">Error [jet.UnknownMethod]: `double` is a function, not a method
+  --&gt; tests/ui/call_spelling_function_dot.jet:7:13
     |
-  3 |     t: s.clone()
-    |          ^^^^^
- Why: This `String` value has no instance method named `clone`
- Fix: Check the spelling of `clone`
+  7 |     print(n.double())
+    |             ^^^^^^
+ Why: A free function is called as `double(value, …)`; only a method, or a free function whose first parameter is `#Root`, is called after a value and a dot
+ Fix: Write `double(value, …)`, or mark the first parameter of `double` `#Root` so it takes both spellings
 More: jet-lang.dev/e/E0311
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

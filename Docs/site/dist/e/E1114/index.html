@@ -36,12 +36,12 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Give the owned value to the task with `task &amp;&amp;name`, use `Shared`/`Cell` for deliberate shared state, or rebuild a plain owned value</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E1114</code>: <code>tests/ui/freeze_shared_source.stderr</code>.</p>
-<pre class="diag">Error [jet.FreezeNotSnapshotable]: `freeze` cannot snapshot `Shared&lt;Int&gt;`: the value contains `Shared`, whose lock-backed handle would keep shared mutation
-  --&gt; tests/ui/freeze_shared_source.jet:3:12
+<p>First UI snapshot mentioning <code>E1114</code>: <code>tests/ui/freeze_resource_source.stderr</code>.</p>
+<pre class="diag">Error [jet.FreezeNotSnapshotable]: `freeze` cannot snapshot `Resource`: a resource has one cleanup owner and cannot be duplicated into a snapshot
+  --&gt; tests/ui/freeze_resource_source.jet:11:12
     |
-  3 |     freeze(handle)
-    |            ^^^^^^
+ 11 |     freeze(resource)
+    |            ^^^^^^^^
  Why: A frozen value must be an owned cloneable value with no shared handle, resource, function, trait value, or mutable view inside it.
  Fix: Give the owned value to the task with `task &amp;&amp;name`, use `Shared`/`Cell` for deliberate shared state, or rebuild a plain owned value
 More: jet-lang.dev/e/E1114

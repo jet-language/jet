@@ -4976,6 +4976,8 @@ StateLoopNeverAdvances: struct {
 
     impl Diagnostic {
         code: "E0513"
+        safety_class: .Opinion
+        safety_reason: "A loop whose condition never changes would run safely until it is stopped, and Jet refuses it so a loop that cannot end is caught before it runs."
         meaning: "A state loop's condition reads its header binding, which nothing in the loop changes"
         detail: true
         structured_fix: .SourceEdit
@@ -10027,6 +10029,8 @@ UpwardCoreLayerReference: struct {
 
     impl Diagnostic {
         code: "E1012"
+        safety_class: .Opinion
+        safety_reason: "A Core module that names a higher layer's module would run safely, and Jet refuses it so Core's layers stay ordered and each layer builds without the ones above it."
         stage: [.Jet]
         meaning: "A Core module names a module of a higher Core layer"
         no_fix: .Design

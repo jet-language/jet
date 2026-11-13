@@ -36,14 +36,14 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Use a named enum when a member needs an open shape.</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E0363</code>: <code>tests/ui/union_generic_open.stderr</code>.</p>
-<pre class="diag">Error [jet.InvalidUnionMember]: `T` can&#39;t be a union member
-  --&gt; tests/ui/union_generic_open.jet:2:28
+<p>First UI snapshot mentioning <code>E0363</code>: <code>tests/ui/union_case_reuses_type_name.stderr</code>.</p>
+<pre class="diag">Error [jet.InvalidUnionMember]: `Kelvin(Float)` can&#39;t be a union member
+  --&gt; tests/ui/union_case_reuses_type_name.jet:4:18
     |
-  2 | choose: fn&lt;T&gt;(value: T) -&gt; Int | T { value.copy() }
-    |                            ^^^^^^^
- Why: Anonymous unions hold concrete closed types — not type parameters, trait objects, or function types
- Fix: Use a named enum when a member needs an open shape
+  4 | reading: fn() -&gt; Kelvin(Float) | Kelvin { .Kelvin(1.5) }
+    |                  ^^^^^^^^^^^^^^^^^^^^^^
+ Why: The named case `Kelvin` reuses the name of a member type of this union
+ Fix: Rename the case so no member type of the union has its name
 More: jet-lang.dev/e/E0363
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

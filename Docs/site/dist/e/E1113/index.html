@@ -36,12 +36,12 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Create a new value, freeze a new snapshot, or use `Shared`/`Cell` when shared mutation is intentional</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E1113</code>: <code>tests/ui/frozen_write.stderr</code>.</p>
-<pre class="diag">Error [jet.FrozenValueWrite]: `frozen` cannot be assigned; it was frozen at `freeze(...)` at line 7, column 15
-  --&gt; tests/ui/frozen_write.jet:8:12
+<p>First UI snapshot mentioning <code>E1113</code>: <code>tests/ui/frozen_mutating_method.stderr</code>.</p>
+<pre class="diag">Error [jet.FrozenValueWrite]: `frozen` cannot be changed by `.push()`; it was frozen at `freeze(...)` at line 3, column 15
+  --&gt; tests/ui/frozen_mutating_method.jet:4:5
     |
-  8 |     frozen.value = 2
-    |            ^^^^^
+  4 |     frozen.push(4)
+    |     ^^^^^^
  Why: `freeze(...)` creates a deeply immutable owned snapshot so a task can read it without a race. A write through any field or index would change that snapshot.
  Fix: Create a new value, freeze a new snapshot, or use `Shared`/`Cell` when shared mutation is intentional
 More: jet-lang.dev/e/E1113

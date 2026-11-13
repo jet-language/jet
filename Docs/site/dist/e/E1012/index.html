@@ -36,7 +36,16 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Move the code that names `{to}` up to layer `{to_layer}`, or move what it names down to layer `{from_layer}` or lower</p>
 <h2>Worked example</h2>
-<p>No UI snapshot currently mentions this code.</p>
+<p>First UI snapshot mentioning <code>E1012</code>: <code>tests/ui/core_layer_upward_name/stderr</code>.</p>
+<pre class="diag">Error [jet.UpwardCoreLayerReference]: `core.collections.set` in Core layer `data` names `core.files` of the higher layer `system`
+  --&gt; &lt;corelib&gt;/Core/Collections/Set.jet:3:31
+    |
+  3 | use upward_layer_probe_files: core.files
+    |                               ^^^^^^^^^^
+ Why: Core&#39;s `layers:` table in `Core/package.jet` orders Core&#39;s modules lowest first, and a module names only modules of its own layer or a lower one, so a program that reaches a low layer never loads a higher one
+ Fix: Move the code that names `core.files` up to layer `system`, or move what it names down to layer `data` or lower
+More: jet-lang.dev/e/E1012
+</pre>
 <p><a href="../index.html">Back to all error codes</a></p>
 </article>
 </main>
