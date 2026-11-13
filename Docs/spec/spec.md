@@ -6147,7 +6147,7 @@ run: fn() {
 }
 ```
 
-`plugin.load(path, authority)` exposes only frozen named exports. Sema checks
+`plugin.load(path, authority)` exposes only its Component's named exports. Sema checks
 parameter and result contracts before code generation. There is no dynamic
 export lookup or missing-export fallback. Each parameter and the result of an
 export is `Int`, `Float`, `Bool`, or `Text`, mixed freely across positions, or
@@ -6155,11 +6155,13 @@ a recursively closed `#Codable` record, list, `Option`, or `Result` of those
 (E1260). A sandbox export must return a value; fixed widths, maps, tuples,
 unions, handles, and generic applications do not cross the Component boundary.
 The `packages/sandbox_mathkit` golden exercises `Bool` results and UTF-8 text
-round trips, including a non-ASCII name; its checked-in interface snapshot
-lists every named export used by the host.
+round trips, including a non-ASCII name; every named export the host uses comes
+from the guest Component it loads.
 
 The path is a literal. The compiler reads a relative path under the package
-root, beside `.jet/cache/api/`, and builds the guest into the host. At load the
+root, takes the guest's interface from that Component on every compile, and
+builds the guest into the host; no cached snapshot stands in for the
+Component. At load the
 host reads the same path from its working directory, so it runs from the
 package root. The loader reads the component under explicit resource-scoped
 `FS.Read` authority, checks that it matches the built guest, and preflights
@@ -6202,8 +6204,9 @@ A fault keeps at most 32 guest frames.
 
 The manifest `export:` target names the interface and defaults to the package
 name. The frozen public interface is keyed as `plugin__<export>` in
-`.jet/cache/api/`. Sema resolves a host's calls against that frozen interface,
-and a call to an export it does not list is E1257. E1260 reports an unsupported
+`.jet/cache/api/`. Sema resolves a host's calls against the interface it reads
+from the loaded Component, and a call to an export the Component does not list,
+or through a path that names no readable Component, is E1257. E1260 reports an unsupported
 export shape on
 either the sandbox Component boundary or the native `#Export(c)` C boundary
 (D-PLUGIN1, D-PLUGIN-EXPORT1, D-PLUGIN-VERSION1, D-EMBED2).

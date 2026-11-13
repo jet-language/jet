@@ -1,5 +1,6 @@
-// A Plugin handle is a statically identified frozen Component interface. These
-// bodies consume the immutable interface facts built at the bundle boundary.
+// A Plugin handle is statically identified by its Component's interface,
+// which the driver read from the artifact itself. These bodies consume those
+// immutable interface facts.
 use jet_foundation.[
     AccessConvention,
     CallArg,
@@ -30,8 +31,8 @@ sema_plugin_load_type: fn(facts: SemaPluginInterfaceFacts, artifact: String) -> 
 }
 
 // `core.plugin.load("artifact", authority)` with a literal artifact whose
-// frozen interface the project registered is `Plugin<identity>`; any other
-// load keeps the declared opaque `Plugin`, whose exports never resolve.
+// Component the compiler read is `Plugin<identity>`; any other load keeps
+// the declared opaque `Plugin`, whose exports never resolve.
 sema_call_core_plugin_load_type: fn(record: CoreCallRecord, values: [TExpr], declared: Type, program: SemaProgramTables) -> Type Never! {
     if record.module_name != "core.plugin" || record.member != "load" || values.len() == 0 -> return declared.copy()
     artifact: sema_plugin_literal_text(values[0]) ?? return declared.copy()
@@ -57,6 +58,9 @@ sema_plugin_literal_text: fn(value: TExpr) -> String? {
     }
 }
 
+// The compiler-owned plugin handle `ty` resolves to: `Plugin<identity>` gives
+// its identity, and the opaque `Plugin` of a load whose artifact the compiler
+// could not read gives "", which no interface carries.
 sema_plugin_handle_identity: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> String? {
     resolved := sema_call_resolved_type(ty, environment, program)
     identity := if resolved == {
@@ -69,7 +73,8 @@ sema_plugin_handle_identity: fn(ty: Type, environment: SemaScopeEnvironment, pro
             }
             else -> None
         }
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> None
+        .Named(name) -> if name == "Plugin" -> Val("") else -> None
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> None
     }
     value: identity ?? return None
     if program.registration_graph == .Val(graph) {
@@ -156,16 +161,16 @@ sema_plugin_infer_args: fn(args: [CallArg], environment: SemaScopeEnvironment, p
 sema_plugin_method_diagnostic: fn(method: String, interface: SemaPluginInterface?, span: Span, diagnostics: &[Diagnostic]) {
     if interface == {
         .Val(value) -> {
-            diagnostics.push(sema_error("E1257", span, "plugin interface `{value.artifact}` has no export `{method}`", "a loaded plugin exposes only the exports in its registered Component interface", "use a registered export name or update the plugin interface snapshot"))
+            diagnostics.push(sema_error("E1257", span, "plugin interface `{value.artifact}` has no export `{method}`", "a loaded plugin exposes only its Component's function exports, with `-` in a name written `_`", "call one of the Component's exports, or rebuild the plugin with this export"))
         }
         .None -> {
-            diagnostics.push(sema_error("E1257", span, "plugin export `{method}` has no registered Component interface", "plugin members are resolved only from a statically known artifact and its frozen interface", "pass a literal registered artifact to `core.plugin.load`, then call one of its exports"))
+            diagnostics.push(sema_error("E1257", span, "plugin export `{method}` has no Component interface", "plugin members resolve only through a literal artifact path whose Component the compiler reads while it builds the host", "pass `core.plugin.load` a literal path, from the package root, of a readable WebAssembly Component"))
         }
     }
 }
 
 sema_plugin_retired_method_diagnostic: fn(method: String, span: Span, diagnostics: &[Diagnostic]) {
-    diagnostics.push(sema_error("E1257", span, "`Plugin.{method}` is not a plugin method", "plugin handles expose the frozen named exports of their registered Component interface", "write the plugin's exported method directly, for example `plugin.index(rows)`"))
+    diagnostics.push(sema_error("E1257", span, "`Plugin.{method}` is not a plugin method", "plugin handles expose their Component's named function exports", "write the plugin's exported method directly, for example `plugin.index(rows)`"))
 }
 
 sema_plugin_record_exec: fn(method: String, success: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool Never! {
@@ -181,6 +186,10 @@ sema_plugin_record_exec: fn(method: String, success: Type, span: Span, environme
 
 sema_plugin_unsupported_component_diagnostic: fn(export_name: String, ty: Type, span: Span, diagnostics: &[Diagnostic]) {
     diagnostics.push(sema_error("E1260", span, "plugin export `{export_name}` uses unsupported Component value `{type_name(ty)}`", "plugin parameters and results must use recursively closed Component Model shapes", "use Int, Float, Bool, String, or a #Codable record/list/Option/Result shape"))
+}
+
+sema_plugin_unsupported_export_diagnostic: fn(export: SemaPluginInterfaceExport, span: Span, diagnostics: &[Diagnostic]) {
+    diagnostics.push(sema_error("E1260", span, "plugin export `{export.name}` uses unsupported Component value `{export.unsupported}`", "plugin parameters and results must use Component Model shapes with a Jet spelling", "export it with Int, Float, Bool, String, or a list/option/result of them"))
 }
 
 sema_call_try_plugin_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, facts: SemaPluginInterfaceFacts, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
@@ -209,6 +218,12 @@ sema_call_try_plugin_method: fn(receiver: Expr, receiver_value: TExpr, method: S
     export_value: found_export ?? {
         if !sema_plugin_record_exec(method, Type.Named{name: "Unit"}, span, environment, program, scopes, context, diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
         sema_plugin_method_diagnostic(method, Val(interface_value), span, diagnostics)
+        sema_plugin_infer_args(args, environment, program, scopes, state, tail_store, context, diagnostics)
+        return SemaMethodSpecialCheck{handled: true, value: None}
+    }
+    if export_value.unsupported != "" {
+        if !sema_plugin_record_exec(method, Type.Named{name: "Unit"}, span, environment, program, scopes, context, diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+        sema_plugin_unsupported_export_diagnostic(export_value, span, diagnostics)
         sema_plugin_infer_args(args, environment, program, scopes, state, tail_store, context, diagnostics)
         return SemaMethodSpecialCheck{handled: true, value: None}
     }

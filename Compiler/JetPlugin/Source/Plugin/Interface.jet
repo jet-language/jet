@@ -1,0 +1,91 @@
+// The interface a Component presents to its host, read from the Component
+// itself whenever a host program compiles (jet_driver_plugin_facts): each
+// function export as a Jet signature. The runtime binds an export with `-`
+// folded to `_` (PluginHost.jet), so `is-enabled` is the method `is_enabled`;
+// a parameter label folds the same way. An export whose types include one
+// with no Jet spelling (a record, variant, enum, flags, tuple or resource)
+// stays in the interface with `unsupported` naming that type, so a call to it
+// reports the type rather than a missing export.
+use {
+    jet_foundation.[ComponentExportFact, ComponentExportParam, Type]
+    jet_wasm.[
+        WasmComponent, WasmError, WASM_CT_BORROW, WASM_CT_ENUM, WASM_CT_FLAGS, WASM_CT_LIST, WASM_CT_NONE, WASM_CT_OPTION,
+        WASM_CT_OWN, WASM_CT_PRIMITIVE, WASM_CT_RECORD, WASM_CT_RESOURCE, WASM_CT_RESULT, WASM_CT_TUPLE, WASM_CT_VARIANT,
+        WASM_PRIM_BOOL, WASM_PRIM_CHAR, WASM_PRIM_F32, WASM_PRIM_F64, WASM_PRIM_S8, WASM_PRIM_STRING, WASM_PRIM_U64,
+        WASM_SORT_FUNC, wasm_load_component,
+    ]
+}
+
+// The function exports of the Component in `bytes` (binary or text).
+jet_plugin_component_exports: fn(bytes: &&[U8]) -> [ComponentExportFact] WasmError! {
+    c: wasm_load_component(bytes)
+    exports := [ComponentExportFact]{}
+    loop export in c.exports {
+        if export.sort != WASM_SORT_FUNC -> next
+        func: c.func_type(export.index) ?? next
+        unsupported := ""
+        params := [ComponentExportParam]{}
+        loop (k, ty) in func.types {
+            label: if k < func.names.len() -> func.names[k] else -> "arg{k + 1}"
+            params.push(ComponentExportParam{name: label.replace("-", "_"), ty: plug_interface_type(c, ty)})
+            if unsupported == "" -> unsupported = plug_interface_gap(c, ty)
+        }
+        result := Type?{None}
+        if func.ok != WASM_CT_NONE {
+            result = Val(plug_interface_type(c, func.ok))
+            if unsupported == "" -> unsupported = plug_interface_gap(c, func.ok)
+        }
+        exports.push(ComponentExportFact{name: export.name.replace("-", "_"), params: params, result: result, unsupported: unsupported})
+    }
+    Ok(exports)
+}
+
+// The Jet type of Component value type `ty` (a primitive's negative code or
+// a type index). A type with no Jet spelling is named by its Component kind;
+// plug_interface_gap reports it.
+plug_interface_type: fn(c: WasmComponent, ty: Int) -> Type Never! {
+    code := ty
+    if code >= 0 {
+        resolved: c.resolve_type(code) ?? return Type.Named{name: plug_interface_gap(c, ty)}
+        if resolved.kind == WASM_CT_LIST -> return Type.List{element: plug_interface_type(c, resolved.ok)}
+        if resolved.kind == WASM_CT_OPTION -> return Type.Option{inner: plug_interface_type(c, resolved.ok)}
+        if resolved.kind == WASM_CT_RESULT -> return Type.Result{ok: plug_interface_side(c, resolved.ok), err: plug_interface_side(c, resolved.err)}
+        if resolved.kind != WASM_CT_PRIMITIVE -> return Type.Named{name: plug_interface_gap(c, ty)}
+        code = resolved.ok
+    }
+    if code == WASM_PRIM_BOOL -> return Type.Bool
+    if code >= WASM_PRIM_S8 && code <= WASM_PRIM_U64 -> return Type.Int
+    if code == WASM_PRIM_F32 -> return Type.Float32
+    if code == WASM_PRIM_F64 -> return Type.Float
+    if code == WASM_PRIM_CHAR -> return Type.Char
+    if code == WASM_PRIM_STRING -> return Type.String
+    Type.Named{name: plug_interface_gap(c, ty)}
+}
+
+// A result side: a side without a type is Unit.
+plug_interface_side: fn(c: WasmComponent, ty: Int) -> Type Never! {
+    if ty == WASM_CT_NONE -> return Type.Named{name: "Unit"}
+    plug_interface_type(c, ty)
+}
+
+// The first type inside `ty` with no Jet spelling, by its Component kind; ""
+// when every type inside it has one.
+plug_interface_gap: fn(c: WasmComponent, ty: Int) -> String Never! {
+    if ty == WASM_CT_NONE -> return ""
+    if ty < 0 -> return if ty >= WASM_PRIM_BOOL && ty <= WASM_PRIM_STRING -> "" else -> "value type {ty}"
+    resolved: c.resolve_type(ty) ?? return "type {ty}"
+    kind: resolved.kind
+    if kind == WASM_CT_PRIMITIVE -> return plug_interface_gap(c, resolved.ok)
+    if kind == WASM_CT_LIST || kind == WASM_CT_OPTION -> return plug_interface_gap(c, resolved.ok)
+    if kind == WASM_CT_RESULT {
+        ok: plug_interface_gap(c, resolved.ok)
+        return if ok != "" -> ok else -> plug_interface_gap(c, resolved.err)
+    }
+    if kind == WASM_CT_RECORD -> return "record"
+    if kind == WASM_CT_VARIANT -> return "variant"
+    if kind == WASM_CT_TUPLE -> return "tuple"
+    if kind == WASM_CT_FLAGS -> return "flags"
+    if kind == WASM_CT_ENUM -> return "enum"
+    if kind == WASM_CT_OWN || kind == WASM_CT_BORROW || kind == WASM_CT_RESOURCE -> return "resource"
+    "type {ty}"
+}

@@ -1,12 +1,13 @@
-// Frozen Component interfaces are immutable semantic facts. Snapshot decoding
-// belongs to the bundle boundary; callers pass its complete typed result here.
+// Plugin interfaces are immutable semantic facts. The driver reads each
+// literal artifact's Component (jet_driver_plugin_facts); callers pass its
+// complete typed exports here.
 use {
     jet_foundation.[
         AccessConvention,
         BinOp,
+        ComponentExportFact,
         Dimension,
         Expr,
-        Func,
         InternalTag,
         Item,
         Type,
@@ -26,18 +27,17 @@ use {
         measure_expression,
         sha256_hex_bytes,
         type_name,
-        failure_contract_of_function,
-    ]
-    jet_parser.[
-        parse_source,
     ]
 }
 
+// `unsupported` is the first Component type the export uses that has no Jet
+// spelling ("" when every type has one); a call to it reports that type.
 SemaPluginInterfaceExport: struct {
     name: String
     signature: String
     params: [SemaPluginExportParam]
     return_type: Type?
+    unsupported: String
 }
 
 SemaPluginExportParam: struct {
@@ -61,7 +61,6 @@ SemaPluginInterfaceFacts: struct {
     interfaces: [SemaPluginInterface]
     artifacts: [SemaPluginArtifactAlias]
     digest: String
-    complete: Bool
 }
 
 sema_plugin_put_export: fn(exports: &[SemaPluginInterfaceExport], export: SemaPluginInterfaceExport) Never! {
@@ -135,14 +134,15 @@ sema_plugin_normalize_artifact: fn(raw: String) -> String? {
     Val(stem)
 }
 
+// Each literal artifact path keeps its own interface: two artifacts that share
+// a file name are different Components.
 sema_plugin_put_alias: fn(aliases: &[SemaPluginArtifactAlias], artifact: String, identity: String) Never! {
-    normalized: sema_plugin_normalize_artifact(artifact) ?? return
     loop alias in aliases {
-        if alias.artifact == normalized {
+        if alias.artifact == artifact {
             return
         }
     }
-    aliases.push(SemaPluginArtifactAlias{artifact: normalized, identity: identity})
+    aliases.push(SemaPluginArtifactAlias{artifact: artifact, identity: identity})
 }
 
 sema_plugin_identity: fn(artifact: String, digest: String) -> String Never! {
@@ -176,61 +176,13 @@ sema_plugin_unit_ratio: fn(value: UnitRatio) -> String Never! {
     return "{value.numerator}/{value.denominator}"
 }
 
-// `export_boundary_return_type`: an export publishes the success value of its
-// failure contract (the failure-set solve may already have turned a written `->
-// T` into a span-less `T Never!` carrier). Optional and `Never` carriers have
-// no success value to publish and keep their written type.
-sema_plugin_export_boundary_return_type: fn(function: Func) -> Type? {
-    written: function.return_type ?? return None
-    if failure_contract_of_function(function.return_type, function.return_type_span) == {
-        .Default(success, _) | .Explicit(success, _) | .Inferred(success, _) -> Val(success)
-        .Converted(success, _, _) -> Val(success)
-        .ProvenUnreachable(success) | .InferredNever(success) -> Val(success)
-        .Optional(_) | .DeclaredNever -> Val(written)
-    }
-}
-
 sema_plugin_sha256: fn(text: String) -> String Never! {
     sha256_hex_bytes(text.bytes())
 }
 
-sema_plugin_snapshot_signature_source: fn(signature: String) -> String? {
-    effect_parts := signature.split(" -[").to_list()
-    before_effects: effect_parts[0]
-    metadata_parts := before_effects.split(" ;").to_list()
-    canonical := metadata_parts[0].trim()
-    bytes := canonical.bytes()
-    open := -1
-    loop index in 0..<bytes.len() {
-        if bytes[index] == (U8{40}) {
-            open = index
-            break
-        }
-    }
-    if open < 0 -> return None
-    depth := 0
-    close := -1
-    loop index in open..<bytes.len() {
-        if bytes[index] == (U8{40}) -> depth += 1
-        if bytes[index] == (U8{41}) {
-            depth -= 1
-            if depth == 0 {
-                close = index
-                break
-            }
-        }
-    }
-    if close < 0 -> return None
-    prefix: String.from_bytes(bytes.slice(0, close + 1)) ?? return None
-    result: String.from_bytes(bytes.slice(close + 1, bytes.len())) ?? return None
-    if result.trim() == "" -> return Val("{prefix} {{}}")
-    Val("{prefix} -> {result.trim()} {{}}")
-}
-
 sema_plugin_interface_by_artifact: fn(facts: SemaPluginInterfaceFacts, artifact: String) -> SemaPluginInterface? {
-    normalized: sema_plugin_normalize_artifact(artifact) ?? return None
     found: loop alias in facts.artifacts {
-        if alias.artifact == normalized {
+        if alias.artifact == artifact {
             break alias.identity
         }
     } ?? return None
@@ -251,56 +203,43 @@ sema_plugin_interface_by_identity: fn(facts: SemaPluginInterfaceFacts, identity:
     None
 }
 
-// One `.jet/cache/api/plugin__<stem>.api` snapshot as the driver read it:
-// `stem` is the artifact stem (`mathkit`), `text` the file's exact bytes.
-SemaPluginSnapshot: struct {
-    stem: String
-    text: String
+// One plugin artifact the driver read: `artifact` the literal path a
+// `.load("…")` call names, `exports` its Component's function exports
+// (JetPlugin jet_plugin_component_exports).
+SemaPluginComponent: struct {
+    artifact: String
+    exports: [ComponentExportFact]
 }
 
-// The frozen interfaces of a project's plugin snapshots. Each snapshot names
-// its artifact by stem (`plugin__mathkit` for `…/mathkit.wasm`); its identity
-// pins the snapshot bytes, so a changed interface is a different type. An
-// export line is `name: fn(a: T, …) R [-[effects]>]`. A line that does not
-// parse leaves the facts incomplete instead of guessing a signature.
-sema_plugin_interface_facts: fn(snapshots: [SemaPluginSnapshot]) -> SemaPluginInterfaceFacts Never! {
+// The interfaces of the project's plugins, read from their Components. An
+// interface is named by its artifact's stem (`mathkit` for `…/mathkit.wasm`)
+// and its identity pins the exports' signatures, so a changed Component is a
+// different type.
+sema_plugin_interface_facts: fn(components: [SemaPluginComponent]) -> SemaPluginInterfaceFacts Never! {
     interfaces := [SemaPluginInterface]{}
     aliases := [SemaPluginArtifactAlias]{}
-    complete := true
     digests := ""
-    loop snapshot in snapshots {
-        stem: snapshot.stem
-        digest: sema_plugin_sha256(snapshot.text)
-        identity: sema_plugin_identity(stem, digest)
+    loop component in components {
+        stem: sema_plugin_normalize_artifact(component.artifact) ?? next
         exports := [SemaPluginInterfaceExport]{}
-        loop raw in snapshot.text.split("\n") {
-            line: raw.trim()
-            if !line.contains(": fn") -> next
-            export: sema_plugin_snapshot_export(line) ?? {
-                complete = false
-                next
-            }
-            sema_plugin_put_export(exports, export)
-        }
+        loop fact in component.exports -> sema_plugin_put_export(exports, sema_plugin_component_export(fact))
         sema_plugin_sort_exports(exports)
+        signatures: (loop export in exports -> export.signature).join("\n")
+        digest: sema_plugin_sha256(signatures)
+        identity: sema_plugin_identity(stem, digest)
         sema_plugin_put_interface(interfaces, SemaPluginInterface{artifact: stem, identity: identity, digest: digest, exports: exports})
-        sema_plugin_put_alias(aliases, stem, identity)
+        sema_plugin_put_alias(aliases, component.artifact, identity)
         digests = "{digests}{identity}\n"
     }
     sema_plugin_sort_interfaces(interfaces)
-    SemaPluginInterfaceFacts{interfaces: interfaces, artifacts: aliases, digest: sema_plugin_sha256(digests), complete: complete}
+    SemaPluginInterfaceFacts{interfaces: interfaces, artifacts: aliases, digest: sema_plugin_sha256(digests)}
 }
 
-sema_plugin_snapshot_export: fn(line: String) -> SemaPluginInterfaceExport? {
-    source: sema_plugin_snapshot_signature_source(line) ?? return None
-    parsed: parse_source(source.bytes())
-    if parsed.diagnostics.len() != 0 || parsed.program.items.len() != 1 -> return None
-    if parsed.program.items[0] == {
-        .Func(function) -> {
-            params: loop parameter in function.params -> SemaPluginExportParam{convention: parameter.convention, ty: parameter.ty}
-            signature: line.split(" -[").to_list()[0].trim()
-            return Val(SemaPluginInterfaceExport{name: function.name, signature: signature, params: params, return_type: sema_plugin_export_boundary_return_type(function)})
-        }
-        .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> return None
-    }
+// A Component export as a plugin method: each parameter is read, and the
+// signature spells the export as `name: fn(a: T, …) R`.
+sema_plugin_component_export: fn(fact: ComponentExportFact) -> SemaPluginInterfaceExport Never! {
+    params: loop parameter in fact.params -> SemaPluginExportParam{convention: AccessConvention.Read, ty: parameter.ty}
+    labels: loop parameter in fact.params -> "{parameter.name}: {type_name(parameter.ty)}"
+    result: if fact.result == .Val(ty) -> " {type_name(ty)}" else -> ""
+    SemaPluginInterfaceExport{name: fact.name, signature: "{fact.name}: fn({labels.join(", ")}){result}", params: params, return_type: fact.result, unsupported: fact.unsupported}
 }

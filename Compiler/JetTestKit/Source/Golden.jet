@@ -118,13 +118,13 @@ kit_golden_stream_verdict: fn(id: String, stem: String, tier: String, result: Ki
     error: kit_exec_optional("{expected}.err.out")
     if error == .Val(report) {
         code: if front_end -> 1 else -> kit_golden_failure_exit(stem, report) ?? return kit_expect_verdict("FAIL", "failure report has no exact exit oracle")
-        if result.code != code -> return kit_expect_verdict("FAIL", "exit {result.code}; expected {code}")
+        if result.code != code -> return kit_expect_verdict("FAIL", "exit {result.code}; expected {code}: {result.stderr}")
         stdout: kit_exec_optional("{expected}.out") ?? ""
         output: kit_expect_exact(id, "{expected}.out", Val(stdout), result.stdout, bless, false)
         if output.status != "PASS" -> return output
         return kit_expect_exact(id, "{expected}.err.out", error, result.stderr, bless, false)
     }
-    if result.code != 0 -> return kit_expect_verdict("FAIL", "exit {result.code}; expected 0")
+    if result.code != 0 -> return kit_expect_verdict("FAIL", "exit {result.code}; expected 0: {result.stderr}")
     stdout := result.stdout
     if argv0 != "" -> stdout = kit_expect_argv0(stdout, argv0, source_name)
     verdict: kit_expect_exact(id, "{expected}.out", kit_exec_optional("{expected}.out"), stdout, bless, false)

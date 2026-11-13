@@ -1,8 +1,8 @@
 // A plugin runs under the narrow Authority the host hands it. Every guest
-// failure (a trap, a denied read, a spent fuel budget, a malformed module)
-// comes back as a typed error, and the host keeps running.
-// The host accepts this Component text fixture directly.
-// The guests' frozen interfaces are checked in under .jet/cache/api.
+// failure (a trap, a denied read, a spent fuel budget) comes back as a typed
+// error, and the host keeps running.
+// The host accepts this Component text fixture directly; the compiler reads
+// its interface from the same file.
 // Run this host unchanged with jet run and jet build, from this directory:
 // the artifact paths name files in the package root.
 use plugin: core.plugin
@@ -44,14 +44,5 @@ run: fn() {
     value: normal.normal()
     assert(value == 42)
     print("normal:Ok {value}")
-    malformed: plugin.load("malformed_guest.wasm", policy)
-    if malformed.normal() == {
-        .Err(.Guest(fault)) -> {
-            assert(fault.export == "load")
-            assert(fault.frames.len() == 0)
-            print("malformed:Guest export={fault.export} frames={fault.frames.len()}")
-        }
-        .Ok(_) | .Err(.Denied(_)) | .Err(.Budget(_, _)) | .Err(.Defect(_)) -> assert(false)
-    }
     print("host:still-running")
 }

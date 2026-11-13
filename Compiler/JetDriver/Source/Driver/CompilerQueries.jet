@@ -411,6 +411,7 @@ jet_driver_compiler_check: fn(input: JetDriverCompilerCheckInput) -> JetDriverCo
         }
     }
     registration_count: core_seeds.len() + registration_inputs.len()
+    plugin_facts: jet_driver_plugin_facts(input.request, registration_inputs, load.package_identity)
     registration := sema_registration_prepare_graph(
         registration_inputs,
         core_seeds,
@@ -431,7 +432,7 @@ jet_driver_compiler_check: fn(input: JetDriverCompilerCheckInput) -> JetDriverCo
         _: jet_driver_core_record_take(registration, record, core_values) ?? return jet_driver_compiler_check_failure(load, JetDriverStage.Check, Val("the Core record can't seed the graph: {err}"))
     }
     if input.retain_projection -> registration.retain_programs = true
-    registration.plugin_facts = jet_driver_plugin_facts(input.request)
+    registration.plugin_facts = plugin_facts
     if input.request.mode == JetDriverCompileMode.Test -> registration.test_mode = true
     if input.request.mode == JetDriverCompileMode.Check -> registration.check_tests = true
     output_intent: if input.request.mode == JetDriverCompileMode.Test -> SemaOutputIntent.Test else -> input.request.output_intent

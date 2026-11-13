@@ -85,6 +85,22 @@ ComponentSignatureDescriptor: struct {
     result: ComponentTypeDescriptor
 }
 
+// One function export of a Component, read from the Component itself: its
+// name as a Jet method (`is-enabled` is `is_enabled`), its labeled parameters
+// and its result as Jet types, and `unsupported`, the first Component type it
+// uses that has no Jet spelling ("" when every type has one).
+ComponentExportFact: struct {
+    name: String
+    params: [ComponentExportParam]
+    result: Type?
+    unsupported: String
+}
+
+ComponentExportParam: struct {
+    name: String
+    ty: Type
+}
+
 // The built-in boundary typed heads; boundary_head_owner_module names each
 // one's owner module.
 BOUNDARY_TYPED_HEADS: [String]{"Path", "URL", "DateTime", "HTML", "Sh", "SQL"}

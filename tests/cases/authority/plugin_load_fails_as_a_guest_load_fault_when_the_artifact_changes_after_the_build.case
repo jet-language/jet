@@ -1,0 +1,27 @@
+# Claim: a host built against a valid Component, whose artifact is then replaced by a malformed one, fails the load at run time as PluginError.Guest with export `load` and no frames, and keeps running; on the default and release tiers
+# The compiler reads the guest's interface from guest.wat when it builds the host; the run-time load reads the same path again and refuses bytes that differ from the built guest
+fixture: plugin_load_fails_as_a_guest_load_fault_when_the_artifact_changes_after_the_build.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+copy: guest.wat good.wat
+step: jet build main.jet
+exit: 0
+step: built
+exit: 0
+stdout: = "normal:Ok 42\nhost:still-running\n"
+copy: malformed.wasm guest.wat
+step: built
+exit: 0
+stdout: ~ "normal:Guest export=load frames=0" # default tier: the changed artifact fails its load as a Guest fault without frames
+stdout: ~ "the artifact changed since this program was built" # default tier: the fault names the changed artifact
+stdout: ~ "host:still-running" # default tier: the host keeps running
+copy: good.wat guest.wat
+step: jet build --release main.jet
+exit: 0
+copy: malformed.wasm guest.wat
+step: built
+exit: 0
+stdout: ~ "normal:Guest export=load frames=0" # release tier: the changed artifact fails its load as a Guest fault without frames
+stdout: ~ "the artifact changed since this program was built" # release tier: the fault names the changed artifact
+stdout: ~ "host:still-running" # release tier: the host keeps running

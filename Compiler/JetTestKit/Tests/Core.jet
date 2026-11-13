@@ -321,20 +321,18 @@ kit_test_pool_report: fn(env: KitEnv, root: String, index: Int, done: Sender<Int
     files.remove_all(root) ?? panic("remove fixture .jet scratch")
 }
 
-#Test("a source tree keeps the checked-in parts of its .jet: binding caches and frozen plugin interfaces") {
+#Test("a source tree keeps the checked-in part of its .jet: binding caches") {
     root: kit_test_core_scratch("source-checked-in-state")
     fixture: files.join(root, "fixture")
     kit_exec_write(files.join(fixture, "host/run.jet"), "run: fn() {{}}\n")
-    kit_exec_write(files.join(fixture, "host/.jet/cache/api/plugin__guest.api"), "api_version = 3\n")
     kit_exec_write(files.join(fixture, "host/.jet/bindings/c/c.jet"), "// binding\n")
     kit_exec_write(files.join(fixture, "host/.jet/lock"), "version = 1\n")
     kit_exec_write(files.join(fixture, "host/.jet/cache/build/out"), "local\n")
     source_work: files.join(root, "source")
     kit_exec_copy_tree(fixture, source_work, true, false)
-    assert_eq(files.read(files.join(source_work, "host/.jet/cache/api/plugin__guest.api")) ?? panic("read copied interface: {err}"), "api_version = 3\n")
     assert_eq(files.read(files.join(source_work, "host/.jet/bindings/c/c.jet")) ?? panic("read copied binding: {err}"), "// binding\n")
     assert(!files.exists(files.join(source_work, "host/.jet/lock")), "a source tree's local .jet state is not copied")
-    assert(!files.exists(files.join(source_work, "host/.jet/cache/build")), "only cache/api of .jet/cache is checked in")
+    assert(!files.exists(files.join(source_work, "host/.jet/cache")), "a source tree's .jet/cache is never copied")
     files.remove_all(root) ?? panic("remove checked-in state scratch")
 }
 

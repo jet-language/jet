@@ -4051,6 +4051,7 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
     registration_inputs.push(canonical_effect_module)
     registration_module_count := core_seeds.len() + registration_inputs.len()
     package_policies: jet_driver_registration_package_policies(request, load)
+    plugin_facts: jet_driver_plugin_facts(request, registration_inputs, load.package_identity)
     // #4319: the graph counts its lookups only while a trace is open.
     counting := false
     if request.trace_sink == .Val(sink) {
@@ -4088,7 +4089,7 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
     jet_driver_trace_lookup_counters(request.trace_sink, "register", register_lookups, SemaLookupCounters{module_lookups: 0, name_lookups: 0, scope_lookups: 0, scope_compares: 0})
     if kg.enabled -> registration_graph.keep_going = true
     if request.mode == JetDriverCompileMode.Test -> registration_graph.test_mode = true
-    registration_graph.plugin_facts = jet_driver_plugin_facts(request)
+    registration_graph.plugin_facts = plugin_facts
     if request.mode == JetDriverCompileMode.Check -> registration_graph.check_tests = true
     if checked_projection || request.mode == JetDriverCompileMode.Doc -> registration_graph.retain_programs = true
     if request.doc_core_on_demand -> registration_graph.retained_core_demand = true
