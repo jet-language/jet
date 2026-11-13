@@ -1,0 +1,23 @@
+// Raw pointer tools: one audited block takes heap bytes, views them as Ints,
+// fills, steps, copies and windows over them, and releases them once. A
+// refused allocation is `None`, never a null pointer to forget to check.
+use core.mem
+
+run: fn() {
+    #Unsafe("the block is used only through pointers derived from it, every index stays inside its four Ints, and it is released once") {
+        if mem.alloc_raw(32, 8) == .Val(bytes) {
+            ints: bytes.cast<Int>()
+            mem.fill(ints, 0, 4)
+            mem.volatile_write(ints.offset(2), 7)
+            third: ints.offset(2).*
+            print("third: {third}")
+            mem.copy(ints, ints.offset(2), 1)
+            readings := mem.window(ints, 4)
+            readings[3] = third * 6
+            print("window: {readings[0]} {readings[1]} {readings[2]} {readings[3]} of {readings.len()}")
+            mem.free_raw(bytes)
+        } else {
+            print("the heap refused 32 bytes")
+        }
+    }
+}

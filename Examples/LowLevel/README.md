@@ -18,6 +18,7 @@ Run a lesson from the repository root, for example `jet run Examples/LowLevel/<L
 - [MMIOBoardWrite](MMIOBoardWrite.jet) — MMIO-style board write.
 - [OSTargetGating](OSTargetGating.jet)
 - [PointerCastDeref](PointerCastDeref.jet) — Jai's compact cast+deref chain slot.value_pointer.(*Bool).* is rejected outright as a single expression.
+- [RawPointerTools](RawPointerTools.jet) — Raw pointer tools: one audited block takes heap bytes, views them as Ints, fills, steps, copies and windows over them, and releases them once.
 - [SIMDWide](SIMDWide.jet) — Native AOT acceleration is the default for the complete portable lane family.
 - [SizedFloats](SizedFloats.jet) — Sized-float math is precision-correct.
 - [SizedIntegers](SizedIntegers.jet) — Fixed-width integer types for expert and FFI/binary work.

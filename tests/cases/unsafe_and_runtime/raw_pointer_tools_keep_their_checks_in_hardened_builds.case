@@ -1,0 +1,44 @@
+# A hardened build keeps the memory sentry on the raw pointer tools: a step
+# past a local's storage is R0801 at O0, O1 and O2, a read through a kept
+# copy of a released `alloc_raw` block is R0802, and a misaligned typed read
+# is R0803, each after the in-range access before it has printed. The
+# default profile stops the same way.
+fixture: raw_pointer_tools_keep_their_checks_in_hardened_builds.fixture
+env: NO_COLOR=1
+step rangedev: jet run range.jet
+exit: 70
+stdout: = "4\n"
+stderr: ~ "Runtime fault [R0801]" # the report also carries the gate and the obligation
+step rangenone: jet run --profile=hardened --optimize=none range.jet
+exit: 70
+stdout: = "4\n"
+stderr: ~ "Runtime fault [R0801]" # O0: the step past the tuple stops
+stderr: ~ "range.jet:5, in #Unsafe gate" # the fault is located at its gate, whose audit text follows
+step rangebasic: jet run --profile=hardened --optimize=basic range.jet
+exit: 70
+stdout: = "4\n"
+stderr: ~ "Runtime fault [R0801]" # O1: the step past the tuple stops
+stderr: ~ "range.jet:5, in #Unsafe gate" # the fault is located at its gate, whose audit text follows
+step rangefull: jet run --profile=hardened range.jet
+exit: 70
+stdout: = "4\n"
+stderr: ~ "Runtime fault [R0801]" # O2, the profile's own level: the step past the tuple stops
+stderr: ~ "range.jet:5, in #Unsafe gate" # the fault is located at its gate, whose audit text follows
+step freeddev: jet run freed.jet
+exit: 70
+stdout: = "6\n"
+stderr: ~ "Runtime fault [R0802]" # the report also carries the gate and the obligation
+step freedhard: jet run --profile=hardened freed.jet
+exit: 70
+stdout: = "6\n"
+stderr: ~ "Runtime fault [R0802]" # the report also carries the gate and the obligation
+stderr: ~ "freed.jet:4, in #Unsafe gate" # the fault is located at its gate, whose audit text follows
+step aligndev: jet run misaligned.jet
+exit: 70
+stdout: = "2\n"
+stderr: ~ "Runtime fault [R0803]" # the report also carries the address and the alignment
+step alignhard: jet run --profile=hardened misaligned.jet
+exit: 70
+stdout: = "2\n"
+stderr: ~ "Runtime fault [R0803]" # the report also carries the address and the alignment
+stderr: ~ "is not aligned to 8 bytes" # the detail names the alignment the Int read needs
