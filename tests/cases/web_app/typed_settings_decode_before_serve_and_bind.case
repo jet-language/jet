@@ -1,0 +1,52 @@
+# Claim (#3078 c14): `web.serve<Settings>(prefix:, build:)` and
+# `web.bind<Settings>(address, prefix:, build:)` decode the typed settings
+# record before any socket binds. Settings that do not decode stop with E2416
+# and exit 78: every failure on its own line with its variable and field path,
+# a secret-named value hidden, and nothing listens. Good settings build the app
+# that serves (its home route answers with them) or the bound server.
+fixture: typed_settings_decode_before_serve_and_bind.fixture
+env: NO_COLOR=1
+mkdir: client
+copy: {root}/tests/cases/web_app/fixtures/request.jet client/request.jet
+
+step serve_refuses: jet run -A serve.jet
+env: JET_APP_PORT={free-port:app}
+env: APP_POOL_SIZE=lots
+env: APP_API_TOKEN=tok-abc
+exit: 78
+stdout: = ""
+stderr: = "Stop [E2416]: The app's settings did not decode, so it does not listen:\n  E2416: env var APP_GREETING -> greeting: E2410: missing required field `greeting`\n  E2416: env var APP_POOL_SIZE -> pool_size: expected Int, found text \"lots\"\n  E2416: env var APP_API_TOKEN -> api_token: secret value rejected\n"
+
+step bind_refuses: jet run -A bind.jet
+env: APP_POOL_SIZE=lots
+env: APP_API_TOKEN=tok-abc
+exit: 78
+stdout: = ""
+stderr: = "Stop [E2416]: The app's settings did not decode, so it does not listen:\n  E2416: env var APP_GREETING -> greeting: E2410: missing required field `greeting`\n  E2416: env var APP_POOL_SIZE -> pool_size: expected Int, found text \"lots\"\n  E2416: env var APP_API_TOKEN -> api_token: secret value rejected\n"
+
+step binds: jet run -A bind.jet
+env: APP_GREETING=hello
+env: APP_POOL_SIZE=4
+env: APP_API_TOKEN=42
+exit: 0
+stdout: = "bound true\n"
+
+spawn server: jet run -A serve.jet
+env: JET_APP_PORT={free-port:app}
+env: APP_GREETING=hello
+env: APP_POOL_SIZE=4
+env: APP_API_TOKEN=42
+stdout: file server.stdout
+stderr: file server.stderr
+step: jet run client/request.jet
+env: S6_WEB_PORT={free-port:app}
+env: S6_WEB_METHOD=GET
+env: S6_WEB_PATH=/
+env: S6_WEB_RESPONSE={work}/page.http
+exit: 0
+file: page.http ^= "HTTP/1.1 200" # the app built from the settings answers
+file: page.http ~ "hello x4" # with the decoded greeting and pool size
+signal server: KILL
+wait: server
+exit: any # the case kills the server; its status is not part of this proof
+file: server.stdout = "serving http://127.0.0.1:{free-port:app}\n" # the ready line, after the settings decoded

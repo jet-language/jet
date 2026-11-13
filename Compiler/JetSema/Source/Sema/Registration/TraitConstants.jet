@@ -4,7 +4,7 @@
 // parameter. A value is a literal, an enum case, a record of them, a list of
 // them or an optional one, checked against the declared type here and stored
 // on the implementation's checked row, so a read needs no code to run.
-use jet_foundation.[CallArg, Diagnostic, Expr, ExprField, ImplConstValue, ModuleID, NodeKind, Span, StructDef, TComptimeEnumArg, TComptimeField, TComptimeReport, TComptimeValue, TTraitConstantValue, TraitConstDecl, TraitDef, TraitImplBlock, Type, UnOp, expr_span, type_name]
+use jet_foundation.[CallArg, Diagnostic, Expr, ExprField, ImplConstValue, ModuleID, NodeKind, Span, StructDef, TComptimeEnumArg, TComptimeField, TComptimeReport, TComptimeValue, TTraitConstantValue, TraitConstDecl, TraitDef, TraitImplBlock, Type, TypeTupleField, UnOp, expr_span, module_is_core, type_name]
 
 // What checking a trait constant's value found.
 SemaTraitConstantEval: enum {
@@ -480,8 +480,20 @@ sema_trait_constant_type_path: fn(base: Expr) -> String? Never! {
 // `Type.member` or `T.member` reading a trait constant; unhandled when
 // `member` names no trait constant of the type.
 sema_expression_trait_constant: fn(type_name: String, member: String, member_span: Span, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    if member == SEMA_DECODE_ENV_NAMES && module_is_core(environment.module_identity) && sema_trait_constant_names_generic(environment, type_name) {
+        value: sema_node(context, sema_decode_env_names_type(), NodeKind.TraitConst{owner: Type.Named{name: type_name.copy()}, trait_name: "Decode", name: member.copy()}, span)
+        return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, diagnostics)}
+    }
     if program.registration_graph == .Val(graph) -> return sema_expression_trait_constant_in(graph, type_name, member, member_span, span, expected, environment, program, scopes, context, diagnostics)
     SemaMethodSpecialCheck{handled: false, value: None}
+}
+
+// Whether `type_name` is one of the enclosing function's type parameters.
+sema_trait_constant_names_generic: fn(environment: SemaScopeEnvironment, type_name: String) -> Bool Never! {
+    loop parameter in environment.generic_params {
+        if parameter.name == type_name -> return true
+    }
+    false
 }
 
 sema_expression_trait_constant_in: fn(graph: SemaRegistrationGraph, type_name: String, member: String, member_span: Span, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
@@ -518,6 +530,19 @@ sema_expression_trait_constant_in: fn(graph: SemaRegistrationGraph, type_name: S
     stored: found[0].value ?? return SemaMethodSpecialCheck{handled: true, value: None}
     value: sema_tree_node(found[0].ty, TExprKind.CtLit{value: stored.copy()}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, diagnostics)}
+}
+
+// `T.__env_names` in core.sys `decode<T: Decode>`: the checked env name and
+// decode key of each stored field of the record T is, as a
+// `Decode` constant the build answers from each instance's concrete record
+// (JetIR ir_decode_env_names). So `env.decode<T>()` in any generic function
+// reads the renames of the T that instance is made for. Only Core code reads
+// it, and the check needs no registration graph, so the every-body check of
+// the Core record reads it as a build does.
+SEMA_DECODE_ENV_NAMES: "__env_names"
+
+sema_decode_env_names_type: fn() -> Type Never! {
+    Type.List{element: Type.Tuple{fields: [TypeTupleField]{TypeTupleField{name: "env_name", ty: Type.String}, TypeTupleField{name: "key", ty: Type.String}}}}
 }
 
 // The nominal name a resolved owner type heads.

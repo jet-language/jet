@@ -1,0 +1,40 @@
+// `env.decode<T>()` inside generic functions, one and two levels deep: each
+// instance reads the env names of the record it is made for, so the renamed
+// `stripe` field (variable APP_STRIPE_SECRET) decodes, and a failure names
+// that variable. Prints the decoded record or each framed failure.
+package: {
+    name: "env_decode_in_generic_functions"
+    authority: { allow: [Env, FS, Exec, IO] }
+}
+
+use env: core.sys
+
+#[Debug, Decode]
+Settings: struct {
+    port: Int
+    #Rename("stripe", env: "STRIPE_SECRET") stripe: Int
+}
+
+#[Debug, Decode]
+Mail: struct {
+    #Rename("relay", env: "SMTP_RELAY") relay: String
+}
+
+load: fn<T: Decode>(prefix: String) -[FS, Env, Exec]> T [FieldError]! {
+    env.decode<T>(prefix: prefix, file: "")
+}
+
+load_twice_removed: fn<T: Decode>(prefix: String) -[FS, Env, Exec]> T [FieldError]! {
+    load<T>(prefix)
+}
+
+run: fn() {
+    if load<Settings>("APP_") == {
+        .Ok(settings) -> print("settings: port {settings.port} stripe {settings.stripe}")
+        .Err(errors) -> { loop error in errors -> print("settings: {error.reason}") }
+    }
+    if load_twice_removed<Mail>("APP_") == {
+        .Ok(mail) -> print("mail: relay {mail.relay}")
+        .Err(errors) -> { loop error in errors -> print("mail: {error.reason}") }
+    }
+}

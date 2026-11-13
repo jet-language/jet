@@ -1,0 +1,20 @@
+# Claim (#3078 c14): `env.decode<T>()` resolves the env-name table of the T
+# each instance is made for, in any generic function: a renamed field
+# (`#Rename(env: "STRIPE_SECRET")`) decodes from APP_STRIPE_SECRET through
+# one generic level and APP_SMTP_RELAY through two, and a bad renamed value
+# is framed with its own variable, value hidden.
+fixture: decode_in_a_generic_function_reads_the_instance_renames.fixture
+env: NO_COLOR=1
+
+step decodes: jet run -A main.jet
+env: APP_PORT=8080
+env: APP_STRIPE_SECRET=7
+env: APP_SMTP_RELAY=mail.example.test
+exit: 0
+stdout: = "settings: port 8080 stripe 7\nmail: relay mail.example.test\n"
+
+step fails: jet run -A main.jet
+env: APP_PORT=8080
+env: APP_STRIPE_SECRET=sk-live-123
+exit: 0
+stdout: = "settings: E2416: env var APP_STRIPE_SECRET -> stripe: secret value rejected\nmail: E2416: env var APP_SMTP_RELAY -> relay: E2410: missing required field `relay`\n"

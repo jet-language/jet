@@ -1,0 +1,30 @@
+// `web.bind<Settings>`: the settings decode before the listener binds; a bound
+// server names its address and shuts down without serving.
+package: {
+    name: "typed_settings_bind"
+    authority: { allow: [Env, IO, Net, FS, Exec, Time] }
+}
+
+use {
+    server: core.http.server
+    web: core.web
+}
+
+#[Debug, Decode]
+Settings: struct {
+    greeting: String
+    pool_size: Int
+    api_token: Int
+}
+
+build: fn(settings: Settings) -> App {
+    greeting: settings.greeting
+    web.app().get("/", fn() { Ok(server.response(200, greeting)) })
+}
+
+run: fn() HTTPError! {
+    bound: web.bind<Settings>("127.0.0.1:0", prefix: "APP_", build: build)
+    address: bound.local_addr()
+    print("bound {address.starts_with("127.0.0.1:")}")
+    _: bound.shutdown()
+}

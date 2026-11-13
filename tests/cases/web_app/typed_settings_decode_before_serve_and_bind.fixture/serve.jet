@@ -1,0 +1,28 @@
+// `web.serve<Settings>`: the app is built from the typed settings the
+// environment holds under APP_, and its home route answers with them.
+package: {
+    name: "typed_settings_serve"
+    authority: { allow: [Env, IO, Net, FS, Exec, Time] }
+}
+
+use {
+    server: core.http.server
+    web: core.web
+}
+
+#[Debug, Decode]
+Settings: struct {
+    greeting: String
+    pool_size: Int
+    api_token: Int
+}
+
+build: fn(settings: Settings) -> App {
+    greeting: settings.greeting
+    pool: settings.pool_size
+    web.app().get("/", fn() { Ok(server.response(200, "{greeting} x{pool}")) })
+}
+
+run: fn() {
+    web.serve<Settings>(prefix: "APP_", build: build)
+}

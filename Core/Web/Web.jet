@@ -452,6 +452,49 @@ app: fn() -> App Never! {
     }}}
 }
 
+// `web.serve<Settings>(prefix:, build:)`: decode the typed settings record
+// from the environment (`prefix:` names its variables, `APP_PORT` for field
+// `port` under "APP_", the project `.env` under them), then serve the app
+// `build` makes from it as `App.serve(port)` does. Settings that do not decode,
+// or a `build` that fails, stop the program before any socket binds
+// (__app_settings, __app_build_failure).
+serve: fn<Settings: Decode>(*, prefix: String, build: fn(Settings) -> App, port: Int{8080}) Never! -[Env, IO, Net, FS, Exec, Time]> {
+    settings: __app_settings<Settings>(prefix)
+    app: build(settings) ?? core.process.fail(C_APP_SETTINGS_EXIT, __app_build_failure("{err}"))
+    __app_serve(app, __app_port(port))
+}
+
+// `web.bind<Settings>(address, prefix:, build:)`: `serve`'s settings step,
+// then `App.bind` of the app `build` makes on `address`.
+bind: fn<Settings: Decode>(address: String, *, prefix: String, build: fn(Settings) -> App, tls: HTTPServerTLS?{None}, deadline: Duration?{None}) -[Env, IO, Net, FS, Exec, Time]> HTTPServer HTTPError! {
+    settings: __app_settings<Settings>(prefix)
+    app: build(settings) ?? core.process.fail(C_APP_SETTINGS_EXIT, __app_build_failure("{err}"))
+    http_server.__bind(address, __app_table(app), tls, deadline)
+}
+
+// The stop report of a `build` that fails on the decoded settings: the app
+// was never made, so nothing listens.
+__app_build_failure: fn(failure: String) -> String Never! {
+    "Stop: The app's build failed on its settings, so it does not listen:\n  {failure}"
+}
+
+// sysexits.h EX_CONFIG: the program's configuration is wrong.
+C_APP_SETTINGS_EXIT: 78
+
+// The settings record `env.decode<Settings>(prefix:)` builds. A failure is
+// the E2416 stop with exit 78: every failure on its own line, naming the
+// variable and field path, a secret value hidden (core.sys __decode_errors).
+__app_settings: fn<Settings: Decode>(prefix: String) -[Env, IO, FS, Exec, Time]> Settings Never! {
+    if core.sys.decode<Settings>(prefix: prefix) == {
+        .Ok(settings) -> return settings
+        .Err(errors) -> {
+            report := "Stop [E2416]: The app's settings did not decode, so it does not listen:"
+            loop error in errors -> report = "{report}\n  {error.reason}"
+            core.process.fail(C_APP_SETTINGS_EXIT, report)
+        }
+    }
+}
+
 __app_mode: fn(app: App, mode: String) -> App Never! {
     guard := app.__state.guard_edit()
     guard.value.mode = mode

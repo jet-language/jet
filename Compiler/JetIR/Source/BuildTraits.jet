@@ -5,7 +5,7 @@
 // same box, and the last owner drops the payload and frees the box
 // (ir_trait_drop_body).
 
-use jet_foundation.[Span, SymbolID, BodyCallArg, NodeKind, TMethodRef, TTryConvert, Type, name_rows_set, name_rows_value, sha256_bytes, type_carrier_identity]
+use jet_foundation.[Span, SymbolID, BodyCallArg, NodeKind, TComptimeField, TComptimeValue, TMethodRef, TTryConvert, Type, name_rows_set, name_rows_value, sha256_bytes, type_carrier_identity]
 
 // The payload key of concrete type `ty`: a function of its identity alone
 // (56 bits of the identity's SHA-256, from 1), so it does not depend on the
@@ -194,10 +194,42 @@ ir_trait_constant_key: fn(trait_short: String, owner: String, name: String) -> S
 // `Box<Int>`).
 ir_trait_constant: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, owner: Type, trait_short: String, name: String, span: Span) -> Int Never! {
     concrete: ir_fact(p, b, owner, span)
+    if trait_short == "Decode" && name == IR_DECODE_ENV_NAMES -> return ir_decode_env_names(m, p, b, ty, concrete, span)
     exact: ir_trait_constant_key(trait_short, ir_trait_identity(p, concrete), name)
     if p.constants.get(exact) != None -> return ir_constant(m, p, b, ty, exact, span)
     head: ir_trait_head_identity(p, concrete) ?? return ir_fail_slot(b, span, "no `{trait_short}` constant `{name}` for {ir_type_name(concrete)}")
     ir_constant(m, p, b, ty, ir_trait_constant_key(trait_short, head, name), span)
+}
+
+// The `Decode` constant core.sys `decode<T>` reads as `T.__env_names`
+// (JetSema sema_expression_trait_constant).
+IR_DECODE_ENV_NAMES: "__env_names"
+
+// `T.__env_names` for the instance's concrete `owner`: the checked env
+// name and decode key (its JSON shape name, else its shared name) of each
+// stored, non-skipped field of the record, as JetSema's Registration/Checked
+// sema_checked_field_shape_names gave them. A T that is no record has
+// none. Built as a literal is (NodeKind.CtLit).
+ir_decode_env_names: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, owner: Type, span: Span) -> Int Never! {
+    rows := [TComptimeValue]{}
+    if ir_nominal_name(ir_untag(owner)) == .Val(nominal) {
+        if ir_type_def(p, nominal) == .Val(row) {
+            if p.types[row].kind == .Struct(fields, _) {
+                loop field in fields {
+                    if field.computed || field.skip -> next
+                    env_name: TComptimeValue.String{value: field.shape_names.env.copy()}
+                    key: TComptimeValue.String{value: (field.shape_names.json ?? field.shape_names.text).copy()}
+                    rows.push(TComptimeValue.Struct{type_name: "Tuple", fields: [TComptimeField]{TComptimeField{name: "env_name", value: env_name}, TComptimeField{name: "key", value: key}}})
+                }
+            }
+        }
+    }
+    value: TComptimeValue.List{values: rows}
+    if !ir_host_value_held(p, ty) {
+        borrowed: ir_static_literal_read(m, p, b, ty, value)
+        if borrowed >= 0 -> return borrowed
+    }
+    ir_comptime(m, p, b, ty, value, span)
 }
 
 // The concrete owner of function `row` when it implements a method of the

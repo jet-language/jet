@@ -2653,7 +2653,8 @@ their field paths and `E2416` provenance, naming the variable that supplied the
 value or, for a missing value, the variable that would have (`APP_DB_URL`). The
 rejected value is hidden when the field path or the variable's name after the
 prefix contains `secret`, `password`, `token` or `key` in any case
-(`APP_DB_PASSWORD`, `APP_API_KEY`).
+(`APP_DB_PASSWORD`, `APP_API_KEY`). A generic function's `sys.decode<T>()`
+reads the env names (`#Rename(env:)`) of the record each instance is made for.
 ---
 
 ### `core.process` — process execution
@@ -5284,6 +5285,8 @@ route list.
 |---|---|---|
 | `app() -> App` | app | Create the default application carrier. |
 | `page(title: String, body: String) -> WebPage` | page | Build a server-rendered page. |
+| `serve<Settings: Decode>(prefix: String, build: fn(Settings) -> App, port: Int = 8080)` | never returns | Decode the typed settings, then serve the app `build` makes; a decode failure stops with E2416, exit 78. |
+| `bind<Settings: Decode>(address: String, prefix: String, build: fn(Settings) -> App, tls:, deadline:) -> HTTPServer HTTPError!` | server | Decode the typed settings, then bind the app `build` makes on `address`. |
 | `form(Model, action: handler) -> WebFormTyped` | form | Derive typed inputs and the named action contract at compile time (D-WEBFORM1=A). |
 | `openapi(routes: App or HTTPRouter) -> String OpenAPIError!` | text | Render OpenAPI from the checked facts of the same route value that is served. |
 | `storage() -> String` | text | Select the local storage namespace. |
@@ -5305,6 +5308,16 @@ adds ` (live reload)` to the ready line, and serves live reload: every HTML
 page carries a script that reads the run's boot id from the `/__jet/reload`
 event stream, and reloads the page once `jet dev` has restarted the program
 after a change and a new run answers with another id.
+
+`web.serve<Settings>(prefix:, build:, port = 8080)` and
+`web.bind<Settings>(address, prefix:, build:, tls:, deadline:)` decode the
+typed settings record with `sys.decode<Settings>(prefix:)` before any socket
+binds, then serve (as `App.serve(port)`) or bind (as `App.bind`) the app
+`build(settings)` makes. Settings that do not decode stop the program with
+E2416 and exit 78 (`EX_CONFIG`): every decoder failure on its own line, with
+its variable and field path and a secret-named value hidden. A `build` that
+fails stops the program the same way, with exit 78 and its failure on one
+line, so no socket binds for an app that was never made.
 
 A `web.app()` owns one route table. Pages (`GET`), server functions (`POST
 /actions/<name>`), handler mounts, single routes (`app.get(path, handler)`,

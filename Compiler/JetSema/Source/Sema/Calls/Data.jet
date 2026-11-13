@@ -1260,22 +1260,6 @@ sema_data_core_decode_contract: fn(module_name: String, member: String, target: 
     None
 }
 
-// The checked env name and decode key (its JSON shape name) of every
-// non-skipped stored field of the record `target`, as a list literal.
-sema_data_env_names: fn(target: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, span: Span) -> Expr Never! {
-    rows := [Expr]{}
-    definition: sema_http_route_find_struct(environment, program, target, environment.module_identity) ?? return Expr.ListLit{elements: rows, span: span, id: AST_NODE_GENERATED}
-    row_type: Type.Tuple{fields: [TypeTupleField]{TypeTupleField{name: "env_name", ty: Type.String}, TypeTupleField{name: "key", ty: Type.String}}}
-    loop field in definition.fields {
-        if field.computed != None || sema_checked_marker(field.serde_markers, "Skip") != None || sema_checked_marker(field.serde_markers, "skip") != None -> next
-        names: sema_checked_field_shape_names(definition, field)
-        env_name: Expr.Str{parts: [StrPart]{StrPart.Lit{text: names.env}}, span: span, id: AST_NODE_GENERATED}
-        key: Expr.Str{parts: [StrPart]{StrPart.Lit{text: names.json ?? names.text}}, span: span, id: AST_NODE_GENERATED}
-        rows.push(Expr.TupleLit{fields: [TupleField]{TupleField{name: "env_name", value: env_name}, TupleField{name: "key", value: key}}, span: span, ty: Val(row_type.copy()), id: AST_NODE_GENERATED})
-    }
-    Expr.ListLit{elements: rows, span: span, id: AST_NODE_GENERATED}
-}
-
 sema_data_db_names_row_type: fn() -> Type Never! {
     Type.Tuple{fields: [TypeTupleField]{TypeTupleField{name: "db_name", ty: Type.String}, TypeTupleField{name: "key", ty: Type.String}}}
 }
@@ -1387,7 +1371,9 @@ sema_data_db_decode_args: fn(args: [CallArg], type_args: [Type], span: Span, env
 }
 
 // `env.decode<T>()` binds its labeled config fields to their registered
-// defaults, then passes the checked env names of T's fields.
+// defaults. Its env-name table is no argument: decode reads
+// `T.__env_names`, which each instance answers for its concrete record
+// (sema_expression_trait_constant, JetIR ir_decode_env_names).
 sema_data_sys_decode_args: fn(args: [CallArg], type_args: [Type], span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> [CallArg]? {
     bound := args
     params := [SemaCallParam]{
@@ -1399,14 +1385,13 @@ sema_data_sys_decode_args: fn(args: [CallArg], type_args: [Type], span: Span, en
         sema_data_check_discarded_arguments(bound, environment, program, scopes, state, tail_store, context, diagnostics)
         return None
     }
-    target: sema_data_core_target_type(type_args, "decode", span, environment, program, diagnostics) ?? return None
+    if sema_data_core_target_type(type_args, "decode", span, environment, program, diagnostics) == None -> return None
     // The bound arguments are in parameter order, with omitted ones filled as
     // unlabelled defaults; a written label before them would leave a bare
     // argument after a labelled one, so every argument passes by position.
     loop index in 0..<bound.len() {
         bound[index].label = None
     }
-    bound.push(CallArg{convention: AccessConvention.Read, expr: sema_data_env_names(target, environment, program, span), span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false})
     Val(bound)
 }
 
