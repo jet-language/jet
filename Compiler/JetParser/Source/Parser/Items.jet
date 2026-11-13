@@ -2807,7 +2807,7 @@ parser_parse_impl: fn(state: &JetParserState, modifiers: ParsedItemModifiers) ->
         parser_bump(state)
         field: parser_expect_name(state, "after `using` for the delegation field")
         parser_finish_statement(state)
-        return Item.Impl{value: ImplDef{span: parser_cover(start.span, field.span), type_name: type_name, type_span: type_span, trait_name: trait_name, trait_span: trait_span, operator_rhs: operator_rhs, operator_marker: operator_marker, methods: [Func]{}, delegation_field: Val(parser_value(state, field)), assoc_type_impls: [NamedType]{}, constants: [ImplConstValue]{}, is_generated_serde: false, os_target: parser_impl_os_target(modifiers.markers), markers: modifiers.markers, type_params: type_params}}
+        return Item.Impl{value: ImplDef{span: parser_cover(start.span, field.span), type_name: type_name, type_span: type_span, trait_name: trait_name, trait_span: trait_span, operator_rhs: operator_rhs, operator_marker: operator_marker, methods: [Func]{}, delegation_field: Val(parser_value(state, field)), assoc_type_impls: [NamedType]{}, constants: [ImplConstValue]{}, is_generated_serde: false, os_target: parser_impl_os_target(state, modifiers.markers), markers: modifiers.markers, type_params: type_params}}
     }
     parser_expect(state, TOKEN_LBRACE, "`{{` to open the `impl` body")
     methods := [Func]{}
