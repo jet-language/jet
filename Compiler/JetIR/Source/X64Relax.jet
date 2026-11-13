@@ -5,7 +5,9 @@
 // each listed branch whose target is within reach the rel8 form (jmp EB cb,
 // jcc 70+cc cb) and moves the code after it up, and puts no-ops before each
 // listed loop head so that the head starts on its alignment
-// (ir_x64_loop_align) in the relaxed code.
+// (ir_x64_loop_align) in the relaxed code. Before that, a jcc that only
+// jumps over the listed jmp right after it takes the jmp's target with the
+// inverse condition, and the jmp goes (ir_x64_relax_fuse).
 //
 // The pass starts from every branch long and shortens, to a fixed point,
 // each branch whose displacement fits in a signed byte in the layout so far.
@@ -17,24 +19,27 @@
 // map to the relaxed code by ir_x64_relaxed_at; the caller moves its
 // relocations, line rows, debug positions and frame-description offsets with
 // it. Code that is not a listed branch (calls and tail jumps, whose rel32 a
-// relocation fills) is copied unchanged.
+// relocation fills) is copied unchanged. A fused jmp's old offsets map to
+// the instruction after it.
 
 use jet_backend.[X64_FUNCTION_ALIGN, x64_nops, x64_patch_rel32]
 
 // The relaxed layout: each listed branch (by its rel32 field, in code
 // order) with the instruction's first offset and its length in the old
 // layout, whether it is short now, whether it may not be (an earlier pass
-// found it out of reach), and how many bytes the code up to and including
-// each branch shrank by; each loop head (old offset, in code order) with
-// its loop's end, the no-ops before it, and how many bytes of no-ops the
-// code up to and including it gained; and the largest alignment a head
-// takes, the function's own (at least X64_FUNCTION_ALIGN).
+// found it out of reach), whether it is gone (a jmp ir_x64_relax_fuse
+// folded into the jcc before it), and how many bytes the code up to and
+// including each branch shrank by; each loop head (old offset, in code
+// order) with its loop's end, the no-ops before it, and how many bytes of
+// no-ops the code up to and including it gained; and the largest alignment
+// a head takes, the function's own (at least X64_FUNCTION_ALIGN).
 IRX64Relax: struct {
     sites: [Int]
     starts: [Int]
     lengths: [Int]
     short: [Bool]
     stays_long: [Bool]
+    gone: [Bool]
     shrunk: [Int]
     heads: [Int]
     ends: [Int]
@@ -61,7 +66,7 @@ ir_x64_loop_align: fn(length: Int) -> Int Never! {
 ir_x64_relax: fn(code: &[U8], sites: [Int], heads: [Int], ends: [Int]) -> IRX64Relax Never! {
     ordered := sites.copy()
     ordered.sort()
-    r := IRX64Relax{sites: [Int]{}, starts: [Int]{}, lengths: [Int]{}, short: [Bool]{}, stays_long: [Bool]{}, shrunk: [Int]{}, heads: [Int]{}, ends: [Int]{}, pads: [Int]{}, padded: [Int]{}, align: X64_FUNCTION_ALIGN}
+    r := IRX64Relax{sites: [Int]{}, starts: [Int]{}, lengths: [Int]{}, short: [Bool]{}, stays_long: [Bool]{}, gone: [Bool]{}, shrunk: [Int]{}, heads: [Int]{}, ends: [Int]{}, pads: [Int]{}, padded: [Int]{}, align: X64_FUNCTION_ALIGN}
     targets := [Int]{}
     loop site in ordered {
         if r.sites.len() > 0 && r.sites[r.sites.len() - 1] == site -> next
@@ -71,6 +76,7 @@ ir_x64_relax: fn(code: &[U8], sites: [Int], heads: [Int], ends: [Int]) -> IRX64R
         r.lengths.push(if jump -> 5 else -> 6)
         r.short.push(false)
         r.stays_long.push(false)
+        r.gone.push(false)
         r.shrunk.push(0)
         targets.push(site + 4 + ir_x64_rel32_at(code, site))
     }
@@ -91,6 +97,8 @@ ir_x64_relax: fn(code: &[U8], sites: [Int], heads: [Int], ends: [Int]) -> IRX64R
             at -= 1
         }
     }
+    ir_x64_relax_fuse(code, r, targets)
+    ir_x64_relax_shrink(r)
     changed := true
     loop changed {
         changed = false
@@ -112,7 +120,7 @@ ir_x64_relax: fn(code: &[U8], sites: [Int], heads: [Int], ends: [Int]) -> IRX64R
         }
         shorten := [Int]{}
         loop index in 0..<r.sites.len() {
-            if r.short[index] || r.stays_long[index] -> next
+            if r.short[index] || r.stays_long[index] || r.gone[index] -> next
             end: r.starts[index] + r.lengths[index]
             saving: r.lengths[index] - 2
             // Where this branch would end, and its target would be, were it
@@ -146,6 +154,10 @@ ir_x64_relax: fn(code: &[U8], sites: [Int], heads: [Int], ends: [Int]) -> IRX64R
         start: r.starts[index]
         loop at in copied..<start -> out.push(code[at])
         end: r.starts[index] + r.lengths[index]
+        if r.gone[index] {
+            copied = end
+            next
+        }
         target: ir_x64_relaxed_at(r, targets[index])
         jump: r.lengths[index] == 5
         if r.short[index] {
@@ -171,12 +183,44 @@ ir_x64_relax: fn(code: &[U8], sites: [Int], heads: [Int], ends: [Int]) -> IRX64R
 }
 
 // How many bytes the code up to and including each branch shrank by, from
-// the branches short now.
+// the branches short now and the jmps gone.
 ir_x64_relax_shrink: fn(r: &IRX64Relax) Never! {
     total := 0
     loop index in 0..<r.sites.len() {
-        if r.short[index] -> total += r.lengths[index] - 2
+        if r.gone[index] {
+            total += r.lengths[index]
+        } else if r.short[index] {
+            total += r.lengths[index] - 2
+        }
         r.shrunk[index] = total
+    }
+}
+
+// A jcc whose target is the end of the listed jmp right after it (jcc L;
+// jmp T; L:) takes T with the inverse condition (j!cc T), and the jmp goes:
+// the path to T takes one branch instead of two, and the path to L falls
+// through instead of taking one. A loop test whose false side is the exit
+// has this shape. It is left alone when another listed branch lands on the
+// jmp or a loop head starts there, as that code would no longer exist. A
+// tail jump is a relocation, not a listed branch, so it never fuses.
+ir_x64_relax_fuse: fn(code: &[U8], r: &IRX64Relax, targets: &[Int]) Never! {
+    landed := targets.copy()
+    landed.sort()
+    seen := 0
+    index := 0
+    loop index + 1 < r.sites.len() {
+        jump: index + 1
+        start: r.starts[jump]
+        loop seen < landed.len() && landed[seen] < start { seen += 1 }
+        if r.lengths[index] == 6 && r.lengths[jump] == 5 && r.starts[index] + 6 == start && targets[index] == start + 5 && !(seen < landed.len() && landed[seen] == start) && !r.heads.contains(start) {
+            opcode: r.starts[index] + 1
+            code[opcode] = U8{Int.from_u8(code[opcode]).bit_xor(1)}
+            targets[index] = targets[jump]
+            r.gone[jump] = true
+            index += 2
+        } else {
+            index += 1
+        }
     }
 }
 
@@ -285,4 +329,43 @@ ir_x64_relax_padded: fn(r: IRX64Relax, at: Int, inclusive: Bool) -> Int Never! {
     assert_eq(Int.from_u8(code[0]), 0xe9)
     assert_eq(ir_x64_rel32_at(code, 1), 126)
     assert_eq(Int.from_u8(code[129]), 0xeb)
+}
+
+// je over a jmp to a ret 9 filler bytes on: the je becomes a short jne to
+// the ret, and the jmp goes; its offsets map to the filler after it.
+#Test("A jcc over the jmp after it takes the jmp's target inverted") {
+    code := [U8]{0x0f, 0x84, 0, 0, 0, 0, 0xe9, 0, 0, 0, 0}
+    loop _ in 0..<9 -> code.push(U8{0x90})
+    code.push(U8{0xc3})
+    x64_patch_rel32(code, 2, 11)
+    x64_patch_rel32(code, 7, 20)
+    r: ir_x64_relax(code, [Int]{2, 7}, [Int]{}, [Int]{})
+    assert_eq(code.len(), 12)
+    assert_eq(Int.from_u8(code[0]), 0x75)
+    assert_eq(Int.from_u8(code[1]), 9)
+    assert_eq(Int.from_u8(code[2]), 0x90)
+    assert_eq(Int.from_u8(code[11]), 0xc3)
+    assert_eq(ir_x64_relaxed_at(r, 6), 2)
+    assert_eq(ir_x64_relaxed_at(r, 11), 2)
+    assert_eq(ir_x64_relaxed_at(r, 20), 11)
+}
+
+// The same shape, but a later jmp lands on the jmp: both stay, short.
+#Test("A jmp another branch lands on stays after the jcc over it") {
+    code := [U8]{0x0f, 0x84, 0, 0, 0, 0, 0xe9, 0, 0, 0, 0}
+    loop _ in 0..<9 -> code.push(U8{0x90})
+    code.push(U8{0xe9})
+    loop _ in 0..<4 -> code.push(U8{0})
+    x64_patch_rel32(code, 2, 11)
+    x64_patch_rel32(code, 7, 20)
+    x64_patch_rel32(code, 21, 6)
+    r: ir_x64_relax(code, [Int]{2, 7, 21}, [Int]{}, [Int]{})
+    assert_eq(code.len(), 15)
+    assert_eq(Int.from_u8(code[0]), 0x74)
+    assert_eq(Int.from_u8(code[1]), 2)
+    assert_eq(Int.from_u8(code[2]), 0xeb)
+    assert_eq(Int.from_u8(code[3]), 9)
+    assert_eq(Int.from_u8(code[13]), 0xeb)
+    assert_eq(Int.from_u8(code[14]), 256 - 13)
+    assert_eq(ir_x64_relaxed_at(r, 20), 13)
 }
