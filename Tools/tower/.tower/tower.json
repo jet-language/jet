@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6833,
-    "rev": 101758,
+    "rev": 101763,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -26460,6 +26460,11 @@
         {
           "at": "2026-11-13",
           "by": "Main",
+          "text": "D-APP-READY1 draft dropped: the adversarial review (Docs/audits/2026-11-13-d-app-ready1-review.md, G6Meta-4) fails it, because D-VERDICT-3086-1=A already rules that serve decodes a typed settings record before it binds. The review gaps are filed as new criteria. Main chose S1 (generic serve and bind with build:), with env.decode<T> resolved at generic instantiation."
+        },
+        {
+          "at": "2026-11-13",
+          "by": "Main",
           "text": "c5 split (Main decision): part a, where fresh run and each jet dev restart share host registration, is SUB G12Docs-3078c5a. The hot-swap leg depends on in-process hot swap, which #6625 (Live hot-reload that keeps state, c2 and c13) owns. It is written and proved there once #6625 lands, not built under #3078."
         },
         {
@@ -26611,6 +26616,42 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-10-04T18:28:27.852Z"
+        },
+        {
+          "n": 13,
+          "text": "env.decode hides the value of any field whose environment name has a segment containing secret, password, token or key (APP_DB_PASSWORD and APP_API_KEY print redacted), and a missing variable names the variable (APP_DB_URL), not only the field path. Proof: a case under tests/cases that decodes such a record with bad and missing values.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T20:24:35.398Z"
+        },
+        {
+          "n": 14,
+          "text": "web.serve<Settings>(prefix:, build:) and web.bind<Settings>(address, prefix:, build:) decode the typed settings record before binding (D-VERDICT-3086-1=A); a failure is a coded E2416 stop with exit 78 listing every redacted field path and never binds; env.decode<T> resolves inside any generic function. Proof: a web case for serve and bind, and a non-web generic case.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T20:24:36.591Z"
+        },
+        {
+          "n": 15,
+          "text": "An explicit serve(settings.port) and JET_APP_PORT follow one documented precedence rule, and the server reports which source chose the port. Proof: a case that sets both.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T20:24:37.776Z"
+        },
+        {
+          "n": 16,
+          "text": "Readiness (not ready, ready, draining, closed) is a state that a probe can read through drain. Proof: the Examples/Network/AppLifecycle golden prints each state as a probe sees it.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T20:24:39.010Z"
         }
       ],
       "refs": [
@@ -26645,13 +26686,13 @@
       "parentId": "c0u5tm84",
       "needsAcceptance": false,
       "created": "2026-09-12T12:53:32.615Z",
-      "updated": "2026-11-13T20:14:11.098Z",
+      "updated": "2026-11-13T20:24:40.161Z",
       "updatedBy": "Main",
       "workOrder": 87,
       "goals": [
         "G9"
       ],
-      "criteriaLastN": 12
+      "criteriaLastN": 16
     },
     {
       "id": "c0c4k3fw",
@@ -204204,6 +204245,41 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-13T20:24:40.161Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0uasubv",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-13T20:24:39.010Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0uasubv",
+      "note": "#16 Readiness (not ready, ready, draining, closed) is a state th"
+    },
+    {
+      "at": "2026-11-13T20:24:37.776Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0uasubv",
+      "note": "#15 An explicit serve(settings.port) and JET_APP_PORT follow one"
+    },
+    {
+      "at": "2026-11-13T20:24:36.591Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0uasubv",
+      "note": "#14 web.serve<Settings>(prefix:, build:) and web.bind<Settings>("
+    },
+    {
+      "at": "2026-11-13T20:24:35.398Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0uasubv",
+      "note": "#13 env.decode hides the value of any field whose environment na"
+    },
     {
       "at": "2026-11-13T20:22:15.728Z",
       "by": "Main",
