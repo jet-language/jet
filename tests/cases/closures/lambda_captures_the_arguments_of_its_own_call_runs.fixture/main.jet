@@ -1,0 +1,26 @@
+package: { name: "lock_capture", authority: { allow: [FS, IO] } }
+use files: core.files
+
+Entry: struct {
+    name: String
+    version: String
+}
+
+with_lock: fn<T>(repo: String, name: String, action: fn() -[FS]> T IOError!) -[FS]> T IOError! {
+    _: files.exists(files.join(repo, name))
+    action()
+}
+
+write_locked: fn(repo: String, entry: Entry) -[FS]> Bool IOError! {
+    Ok(files.exists(files.join(repo, "{entry.name}-{entry.version}")))
+}
+
+// The read parameters are passed to the call and also captured by its lambda.
+write_entry: fn(repo: String, entry: Entry) IOError! -[FS]> {
+    _: with_lock<Bool>(repo, entry.name, () -> write_locked(repo, entry))
+}
+
+run: fn() {
+    write_entry("index", Entry{name: "pkg", version: "1.0.0"}) ?? panic("write failed")
+    print("written")
+}

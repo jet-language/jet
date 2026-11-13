@@ -889,6 +889,13 @@ parser_parse_prefix: fn(state: &JetParserState, depth: Int, allow_struct_lit: Bo
         parser_add_error_code(state, "E0391", span, "`#run {{ … }}` is used as a value in a form this compiler does not support yet", "Jet makes the block's final expression its value; today only `name: #run value` with a single final expression is evaluated while building", "write `name: #run value` with one final expression, or bind the result inside a `#run {{ … }}` statement block")
         return ParsedExpr{expr: Expr.Unit{span: span, id: parser_node_id(state)}, span: span}
     }
+    // `#run operand` inside a larger value, such as a field of a literal, gets
+    // the same answer: only a binding's whole value is evaluated while building.
+    if allow_struct_lit && parser_prep_operand_ahead(state, 0) {
+        operand: parser_parse_prep_operand(state)
+        parser_add_error_code(state, "E0391", operand.span, "`#run value` is used inside a larger value, which this compiler does not support yet", "today only a binding's whole value, `name: #run value`, is evaluated while building", "bind the value as `name: #run value` first, then use `name` here")
+        return ParsedExpr{expr: Expr.Unit{span: operand.span, id: parser_node_id(state)}, span: operand.span}
+    }
     if allow_struct_lit && parser_typed_literal_head_ahead(state) {
         typed: parser_try_parse_typed_literal(state, depth + 1)
         if typed == .Val(parsed) -> return parsed

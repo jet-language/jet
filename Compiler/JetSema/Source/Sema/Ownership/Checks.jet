@@ -987,11 +987,7 @@ sema_ownership_leave_scope: fn(state: &SemaOwnershipState) Never! {
         // A deferred `close` of this scope has now taken its value.
         if state.moved[index].origin.deferred_depth == .Val(deferred) && deferred >= depth -> state.moved[index].origin.deferred_depth = None
     }
-    index = state.loans.len()
-    loop index > 0 {
-        index -= 1
-        if state.loans[index].scope_depth >= depth -> _ := state.loans.remove(index, .Slot)
-    }
+    sema_ownership_release_loans_from(state, depth)
     index = state.views.len()
     loop index > 0 {
         index -= 1
@@ -1003,6 +999,17 @@ sema_ownership_leave_scope: fn(state: &SemaOwnershipState) Never! {
         if state.lambda_write_borrows[index].scope_depth >= depth -> _ := state.lambda_write_borrows.remove(index, .Slot)
     }
     state.scope_depth = depth - 1
+}
+
+// Loans opened at `depth` or deeper end. A lambda body's windows end with the
+// body, so its escaping captures, which move in when the lambda is made, are
+// checked only against the windows open around the lambda.
+sema_ownership_release_loans_from: fn(state: &SemaOwnershipState, depth: Int) Never! {
+    index := state.loans.len()
+    loop index > 0 {
+        index -= 1
+        if state.loans[index].scope_depth >= depth -> _ := state.loans.remove(index, .Slot)
+    }
 }
 
 // Rust `view_is_live_now`: a view stays live while this statement or a later

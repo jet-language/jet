@@ -1,0 +1,21 @@
+# A returned lambda escapes, so it owns its captures: the FileReader it reads
+# can't be cloned, so it moves in when the lambda is made. The windows the
+# body opens on the reader end with the body, so they don't hold the move
+# back, and each call reads the next line through the lambda's reader.
+fixture: escaping_lambda_owns_the_file_reader_it_reads_on_every_tier.fixture
+env: NO_COLOR=1
+step o0: jet run --optimize=none main.jet
+env: JET_STORE_DIR={work}/cache/o0
+exit: 0
+stdout: = "first\nsecond\nend\n"
+stderr: = ""
+step o1: jet run --optimize=basic main.jet
+env: JET_STORE_DIR={work}/cache/o1
+exit: 0
+stdout: = "first\nsecond\nend\n"
+stderr: = ""
+step o2: jet run --optimize=full main.jet
+env: JET_STORE_DIR={work}/cache/o2
+exit: 0
+stdout: = "first\nsecond\nend\n"
+stderr: = ""

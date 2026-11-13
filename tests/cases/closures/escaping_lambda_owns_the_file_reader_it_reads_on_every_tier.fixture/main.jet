@@ -1,0 +1,22 @@
+package: { name: "escaping_reader", authority: { allow: [FS, IO] } }
+use files: core.files
+
+// The returned lambda escapes, so it owns its captures. A FileReader can't be
+// cloned, so it moves into the lambda, and each call reads the next line
+// through the lambda's own reader.
+line_reader: fn(path: String) -[FS.Read]> fn() -[FS.Read]> String {
+    reader := files.open(path) ?? panic("open failed")
+    () -> {
+        if reader.read_line() == {
+            .Ok(line) -> line ?? "end"
+            .Err(_) -> "read failed"
+        }
+    }
+}
+
+run: fn() {
+    next_line: line_reader("lines.txt")
+    print(next_line())
+    print(next_line())
+    print(next_line())
+}

@@ -676,6 +676,8 @@ scope, and `lanes: #run calculate()` in a block, where names stay
 snake_case (D-SHAPE-CASE1), force evaluation of the single final expression
 while building: a failure stops the build with E3010 (D-PREP-SURFACE2=A).
 Names bound inside a `#run { … }` statement block stay readable after it.
+A `#run` inside a larger value, such as a field of a literal or an argument,
+is E0391: bind it as `name: #run value` first and use the name.
 At file scope, `name := value` bindings remain runtime module globals; they do
 not require `#Persist`. `#Static NAME: value` requests a
 stable-address Rust static when the contract needs one, and `#Inline NAME:

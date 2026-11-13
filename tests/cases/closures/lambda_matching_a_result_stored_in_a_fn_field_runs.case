@@ -1,0 +1,13 @@
+# A lambda stored in a fn-typed field whose body matches a Result,
+# `if f() == {.Ok(v) -> Ok(…) .Err(e) -> Err(e)}`, checks and runs: the arms
+# build the lambda's own Result, on every tier.
+fixture: lambda_matching_a_result_stored_in_a_fn_field_runs.fixture
+env: NO_COLOR=1
+step o0: jet run --optimize=none main.jet
+env: JET_STORE_DIR={work}/cache/o0
+exit: 0
+stdout: = "4\n-1\n"
+step o2: jet run --optimize=full main.jet
+env: JET_STORE_DIR={work}/cache/o2
+exit: 0
+stdout: = "4\n-1\n"

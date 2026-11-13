@@ -2271,6 +2271,8 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, e
         if taken -> state.moved.push(moved)
     }
 
+    // The body has run its course: its windows end before the captures move in.
+    sema_ownership_release_loans_from(lambda_state, lambda_parent_state.scope_depth + 1)
     found_capture_keys := [String]{}
     index = 0
     // Only a capture key can match; a capture-free lambda skips the table walk.
