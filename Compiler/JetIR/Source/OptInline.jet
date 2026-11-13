@@ -1,11 +1,12 @@
 // Inlining (O1, O2): bottom-up over the call graph (Opt.jet
 // ir_opt_bottom_up), so a callee is cloned in its final, already simplified
 // form and wrapper chains collapse into their callers. A direct Call is
-// replaced by the callee's body when the callee is not recursive, its size
-// (ir_opt_size) is at most the level's callee limit and the caller's budget
-// still covers it, it never writes a parameter, it reveals no fixed value
-// (IRFunction.slot_fixed) to a call whose result is public, it is not a
-// last-owner routine (BuildOwn.jet IR_LAST_OWNER: one shared copy the drop
+// replaced by the callee's body when the callee is not recursive, its cost
+// (ir_opt_inline_cost) is at most the level's callee limit and the caller's
+// budget still covers it, the caller's real growth (ir_opt_size) stays
+// within the level's cap, it never writes a parameter, it reveals no fixed
+// value (IRFunction.slot_fixed) to a call whose result is public, it is not
+// a last-owner routine (BuildOwn.jet IR_LAST_OWNER: one shared copy the drop
 // sites call), and its stops name the caller's source file (selection
 // reports a stop at the function's file, so a callee whose arithmetic can
 // stop is inlined only into its own file). At O2
@@ -30,10 +31,17 @@
 // Each site taken is one IROptReport.inlines row with the reason it was
 // taken; `jet inspect choices` lists them as its inlining choices.
 
+use jet_foundation.[Type, name_rows_set, name_rows_value]
+
 IR_OPT_INLINE_CALLEE_O1: 40
 IR_OPT_INLINE_BUDGET_O1: 200
 IR_OPT_INLINE_CALLEE_O2: 60
 IR_OPT_INLINE_BUDGET_O2: 400
+// The real instructions (ir_opt_size) the budgeted inlines may add to one
+// caller, half again the budget: cold arms cost nothing against the budget,
+// but their copies still grow the code.
+IR_OPT_INLINE_GROWTH_O1: 300
+IR_OPT_INLINE_GROWTH_O2: 600
 // A once-called callee (O2), and the caller size past which none is taken.
 IR_OPT_INLINE_ONCE_O2: 1500
 IR_OPT_INLINE_ONCE_CALLER_O2: 3000
@@ -60,6 +68,7 @@ IROptInlined: struct {
 ir_opt_inline_build: fn(m: IRModule, bodies: [[IRFunction]], caller: IRFunction, recursive: [Bool], sites: [Int], once_called: Bool, level: Int, inline: IROptInline, report: &IROptReport) -> IRFunction? Never! {
     limit: if level >= 2 -> IR_OPT_INLINE_CALLEE_O2 else -> IR_OPT_INLINE_CALLEE_O1
     budget := if level >= 2 -> IR_OPT_INLINE_BUDGET_O2 else -> IR_OPT_INLINE_BUDGET_O1
+    growth := if level >= 2 -> IR_OPT_INLINE_GROWTH_O2 else -> IR_OPT_INLINE_GROWTH_O1
     grown := ir_opt_size(caller)
     selected_sites := [Bool]{}
     any := false
@@ -71,15 +80,17 @@ ir_opt_inline_build: fn(m: IRModule, bodies: [[IRFunction]], caller: IRFunction,
             if selected -> reason = "marked #Inline(Always)"
         } else {
             once: once_called && caller.op[at] == .Call && caller.a[at] >= 0 && caller.a[at] < sites.len() && sites[caller.a[at]] == 1
-            size: if caller.op[at] != .Call -> -1 else if once -> ir_opt_inline_size(m, bodies, caller, at, recursive, IR_OPT_INLINE_ONCE_O2) else -> ir_opt_inline_size(m, bodies, caller, at, recursive, limit)
-            if size >= 0 && once && size > limit {
+            cost: if caller.op[at] != .Call -> -1 else if once -> ir_opt_inline_size(m, bodies, caller, at, recursive, IR_OPT_INLINE_ONCE_O2) else -> ir_opt_inline_size(m, bodies, caller, at, recursive, limit)
+            size: if cost >= 0 -> ir_opt_size(bodies[caller.a[at]][0]) else -> 0
+            if cost >= 0 && once && cost > limit {
                 selected = grown + size <= IR_OPT_INLINE_ONCE_CALLER_O2
                 if selected -> reason = "its only call, size {size} within the once-called limit {IR_OPT_INLINE_ONCE_O2}"
-            } else if size >= 0 {
-                selected = size <= budget
+            } else if cost >= 0 {
+                selected = cost <= budget && size <= growth
                 if selected {
-                    reason = "size {size} within the O{level} limit {limit} and the caller's remaining budget {budget}"
-                    budget -= size
+                    reason = "cost {cost} within the O{level} limit {limit}, the caller's remaining budget {budget} and its growth {growth}"
+                    budget -= cost
+                    growth -= size
                 }
             }
             if selected -> grown += size
@@ -115,9 +126,10 @@ ir_opt_inline_build: fn(m: IRModule, bodies: [[IRFunction]], caller: IRFunction,
     Val(out)
 }
 
-// The size of the callee of the Call at `at` when it may be inlined there,
-// else -1. An asm leaf's code is its template, never IR to inline; a host
-// provider leaf (IR.jet IR_HOST_PROVIDER) stays a call its host can replace.
+// The cost (ir_opt_inline_cost) of the callee of the Call at `at` when it
+// may be inlined there, else -1. An asm leaf's code is its template, never
+// IR to inline; a host provider leaf (IR.jet IR_HOST_PROVIDER) stays a call
+// its host can replace.
 ir_opt_inline_size: fn(m: IRModule, bodies: [[IRFunction]], caller: IRFunction, at: Int, recursive: [Bool], limit: Int) -> Int Never! {
     callee_id: caller.a[at]
     if callee_id < 0 || callee_id >= bodies.len() || recursive[callee_id] || bodies[callee_id].len() == 0 -> return -1
@@ -136,21 +148,43 @@ ir_opt_inline_size: fn(m: IRModule, bodies: [[IRFunction]], caller: IRFunction, 
     loop slot in 0..<callee.param_count {
         if caller.slot_type[caller.args[caller.b[at] + slot]] != callee.slot_type[slot] -> return -1
     }
-    size: ir_opt_size(callee)
-    if size > limit -> return -1
+    cost: ir_opt_inline_cost(m, callee)
+    if cost > limit -> return -1
     loop k in 0..<callee.op.len() {
         written: ir_x64_write(callee, k)
         if written >= 0 && written < callee.param_count -> return -1
         if callee.source_file != caller.source_file && ir_opt_located(m, callee, k) -> return -1
     }
-    size
+    cost
 }
 
-// The largest ir_opt_size of `callee` that ir_opt_inline_build may inline at
-// one of its call sites: the once-called limit for a callee called once
-// (`once_called`, O2), else the level's callee limit. Under `inline` Marked
-// a `marked` callee has no limit and no other callee is inlined; under Off
-// none is (-1).
+// The size inlining weighs: `f`'s instructions that do something
+// (ir_opt_size), less those in its cold arms, each of which counts as its
+// one If. A cold arm is the arm of an If with no Else that either ends in
+// Unreachable (a failed bounds check, unwrap or assertion, a panic: control
+// never comes back from it, and selection lays it out after the epilogue)
+// or tests what the stop poll or trap just before it returned (the stop
+// edge's cleanup and return). Every inlined copy carries these arms, but no
+// pass through the code runs them, so a small checked helper costs what its
+// hot path does. ir_opt_inline_build caps the real growth they add.
+ir_opt_inline_cost: fn(m: IRModule, f: IRFunction) -> Int Never! {
+    poll: name_rows_value(m.name_rows, IR_STOP_POLL_KEY) ?? -2
+    trap: name_rows_value(m.name_rows, IR_STOP_TRAP_KEY) ?? -2
+    cost := 0
+    at := 0
+    loop at < f.op.len() {
+        if f.op[at] != .Nop && f.op[at] != .End -> cost += 1
+        cold: f.op[at] == .If && f.b[at] < 0 && f.c[at] > at + 1 && (f.op[f.c[at] - 1] == .Unreachable || (at > 0 && f.op[at - 1] == .Call && (f.a[at - 1] == poll || f.a[at - 1] == trap) && f.dst[at - 1] >= 0 && f.a[at] == f.dst[at - 1]))
+        at = if cold -> f.c[at] + 1 else -> at + 1
+    }
+    cost
+}
+
+// The largest ir_opt_inline_cost of `callee` that ir_opt_inline_build may
+// inline at one of its call sites: the once-called limit for a callee
+// called once (`once_called`, O2), else the level's callee limit. Under
+// `inline` Marked a `marked` callee has no limit and no other callee is
+// inlined; under Off none is (-1).
 ir_opt_inline_reach: fn(sites: [Int], callee: Int, once_called: Bool, level: Int, inline: IROptInline, marked: Bool) -> Int Never! {
     if inline == {
         .Off -> return -1
@@ -270,4 +304,37 @@ ir_opt_emit_mapped: fn(f: &IRFunction, callee: IRFunction, k: Int, map: [Int], l
         b = start
     }
     _ := ir_emit(f, op, dst, a, b, c, line)
+}
+
+#Test("The inline cost leaves out fail arms and stop edges, not other Ifs") {
+    m := ir_module_new()
+    poll: ir_stop_poll(m, IR_STOP_POLL_KEY)
+    name_rows_set(m.name_rows, IR_STOP_POLL_KEY, poll)
+    int: ir_type_row(m, Type.Int) ?? panic("no Int row")
+    flag: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
+    f := ir_function_new("f", "test:cost.jet::f", "", "cost.jet", 1)
+    n: ir_slot(f, int, IRSlotKind.Param, -1, 1)
+    f.result = int
+    bad: ir_slot(f, flag, IRSlotKind.Temp, -1, 0)
+    zero: ir_slot(f, int, IRSlotKind.Temp, -1, 0)
+    _ := ir_emit(f, IROp.Lt, bad, n, n, -1, 2)
+    // A fail arm: its four instructions count as its If.
+    _ := ir_open_if(f, bad, 2)
+    loop _ in 0..<3 -> _ := ir_emit(f, IROp.Const, zero, 0, -1, -1, 2)
+    _ := ir_emit(f, IROp.Unreachable, -1, -1, -1, -1, 2)
+    ir_end(f, 2)
+    // A stop edge after the poll: its Return counts as its If.
+    stopped: ir_slot(f, flag, IRSlotKind.Temp, -1, 0)
+    none: ir_args(f, [Int]{})
+    _ := ir_emit(f, IROp.Call, stopped, poll, none, 0, 3)
+    _ := ir_open_if(f, stopped, 3)
+    _ := ir_emit(f, IROp.Return, -1, -1, -1, -1, 3)
+    ir_end(f, 3)
+    // An If whose arm falls through counts in full.
+    _ := ir_open_if(f, bad, 4)
+    _ := ir_emit(f, IROp.Const, zero, 1, -1, -1, 4)
+    ir_end(f, 4)
+    _ := ir_emit(f, IROp.Return, -1, n, -1, -1, 5)
+    assert_eq(ir_opt_size(f), 12)
+    assert_eq(ir_opt_inline_cost(m, f), 7)
 }

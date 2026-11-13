@@ -900,9 +900,9 @@ ir_opt_caller_edges: fn(count: Int, callee_start: [Int], callees: [Int], caller_
 // matches a callee by key sees every callee), which functions are
 // recursive, how many direct call sites each has, and the options; per
 // function its body in a cell of its own (taken out while its passes run,
-// final once it is done), its final ir_opt_size (-1 until it is done) and
-// how many of the callees it waits for are not done; the edges both ways;
-// and `ring`, the functions in the order they became ready (-1 at a
+// final once it is done), its final ir_opt_inline_cost (-1 until it is
+// done) and how many of the callees it waits for are not done; the edges
+// both ways; and `ring`, the functions in the order they became ready (-1 at a
 // position not yet published), with `head` the next position a thread
 // claims and `tail` the next one a finished function publishes into. A
 // thread changes only the atomics and the cells of the functions it claims.
@@ -1045,7 +1045,7 @@ ir_opt_scheduled_thread: fn(graph: Shared<IROptGraph>) -> IROptReport {
         }
         body := ir_opt_cell_take(reads.value.cells[id])
         optimized := ir_opt_function(reads.value.views[0], callees, reads.value.keys, body, reads.value.recursive, reads.value.sites, reads.value.options, reads.value.lint, report)
-        size: ir_opt_size(optimized)
+        size: ir_opt_inline_cost(reads.value.views[0], optimized)
         ir_opt_cell_put(reads.value.cells[id], optimized)
         loop k in first..<last -> callees[reads.value.callees[k]] = [IRFunction]{}
         reads.value.sizes[id].value.store(size)
