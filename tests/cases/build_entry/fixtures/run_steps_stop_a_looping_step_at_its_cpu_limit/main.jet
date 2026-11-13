@@ -1,0 +1,15 @@
+build: fn(b: Build) -[Exec, FS]> {
+    #Impure("run the declared step") {
+    shell: b.probe("shell", "find_program", "sh")
+    // Two spinning subshells per processor in /proc/cpuinfo, with shell
+    // builtins only: the tree uses every core until its CPU limit stops it.
+    spin: b.run("spin", b.found(shell), ["Exec", "FS"])
+    spin.arg("-c")
+    spin.arg("while read -r key rest; do case $key in processor) (while :; do :; done) & (while :; do :; done) & ;; esac; done < /proc/cpuinfo; wait")
+    spin.output("never.txt")
+    spin.timeout(1s)
+    app: b.add_executable("app", ["main.jet"], [spin])
+    b.default(app)
+    }
+}
+run: fn() {}

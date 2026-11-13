@@ -1,0 +1,14 @@
+# A step's limit is CPU time: its process tree may use the step's `.timeout`
+# on each of the host's cores, and other load on the host does not count
+# against it. A step that loops on every core is stopped at that limit with
+# E3505, long before its wall-clock hang guard (ten times the limit).
+fixture: fixtures/run_steps_stop_a_looping_step_at_its_cpu_limit
+requires: os-name:linux
+requires: tool:sh
+requires: tool:bwrap
+env: NO_COLOR=1
+step: jet build main.jet --allow=Exec,FS
+exit: 1
+stderr: ~ "E3505" # the action failure
+stderr: ~ "build action `spin` used " # names the step
+stderr: ~ "ms of CPU time, past its limit of 1000ms on each of the host's " # the CPU limit, not the wall guard

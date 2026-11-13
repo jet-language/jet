@@ -6296,9 +6296,14 @@ option (stock `30s`; the profile field `action_timeout: 10min`, the call
 `b.action_timeout(10min)` and the flag `--action-timeout=10min`) bounds every
 step that sets no limit of its own. Both take a whole number and one unit
 (`ns`, `us`, `ms`, `s`, `min` or `h`) that comes to at least 1ms, and no cache
-key names the limit. A step that runs past
-its limit is stopped and reported with E3505. Example:
-[`tests/cases/build_entry/run_steps_chain_a_found_tool_and_a_made_file.case`](../../tests/cases/build_entry/run_steps_chain_a_found_tool_and_a_made_file.case);
+key names the limit. On Linux the limit is CPU time: the step's process tree
+may use that much on each of the host's cores, which other load on the host
+does not raise, so a loaded host slows a step without failing it. Its wall
+clock is only a hang guard at ten times the limit. Elsewhere the limit is wall
+time. A step that runs past either is stopped and reported with E3505, which
+names the limit it hit. Examples:
+[`tests/cases/build_entry/run_steps_chain_a_found_tool_and_a_made_file.case`](../../tests/cases/build_entry/run_steps_chain_a_found_tool_and_a_made_file.case),
+[`tests/cases/build_entry/run_steps_stop_a_looping_step_at_its_cpu_limit.case`](../../tests/cases/build_entry/run_steps_stop_a_looping_step_at_its_cpu_limit.case);
 a generator built and run in one build, whose output another target compiles:
 [`tests/cases/build_entry/run_steps_run_a_host_tool.case`](../../tests/cases/build_entry/run_steps_run_a_host_tool.case).
 

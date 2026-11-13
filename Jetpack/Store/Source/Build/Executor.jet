@@ -43,8 +43,14 @@ BuildExecutionError: enum {
     // No native sandbox can run the action here; `reason` says why.
     SandboxUnavailable(reason: String)
     IO(action: String, detail: String)
-    // The action ran past its time limit, in milliseconds, and was killed.
+    // The action ran past its wall-clock limit, in milliseconds, and was
+    // killed. Where the host can read a process tree's CPU time, that limit
+    // is only the hang guard (BUILD_WALL_GUARD times the step's limit).
     TimedOut(action: String, limit_ms: Int)
+    // The action's process tree used more CPU time than its limit allows,
+    // `limit_ms` on each of the host's `cores`, and was killed; `used_ms` is
+    // the CPU time it had used.
+    OverCPU(action: String, limit_ms: Int, cores: Int, used_ms: Int)
     ProbeFailed(probe: String, detail: String)
     // The find_folder probe `probe` found no folder holding a `file` that
     // fits; `searched` is each folder it looked in, with why it passed it.
@@ -60,7 +66,7 @@ BuildExecutionError: enum {
     report: fn(self) -> DiagnosticBuildError? Never! {
         if self == {
             .Reported(report) -> Val(report)
-            .MissingGrant(_, _) | .SandboxUnavailable(_) | .IO(_, _) | .TimedOut(_, _) | .ProbeFailed(_, _) | .FolderNotFound(_, _, _) | .InvalidGraph(_) | .HandEdited(_, _) -> None
+            .MissingGrant(_, _) | .SandboxUnavailable(_) | .IO(_, _) | .TimedOut(_, _) | .OverCPU(_, _, _, _) | .ProbeFailed(_, _) | .FolderNotFound(_, _, _) | .InvalidGraph(_) | .HandEdited(_, _) -> None
         }
     }
 
@@ -223,6 +229,31 @@ BuildActionRun: struct {
     command: NativeSandboxCommand
     // The store the run is published to: set only for a reused action.
     reuse: BuildArtifactStoreHandle?
+    // The CPU time, in ms on each of the host's cores, the action's process
+    // tree may use; 0 where the host cannot read a tree's CPU time, and the
+    // command's wall-clock timeout is the step's limit.
+    cpu_limit_ms: Int
+}
+
+// The wall-clock guard on an action with a CPU limit is this many times the
+// step's limit: a hang guard only, so a loaded host that slows a working
+// action never reaches it.
+BUILD_WALL_GUARD: 10
+
+// How often a running action's process tree has its CPU time sampled, in ns.
+BUILD_CPU_SAMPLE_NS: 100000000
+
+// The CPU watch on one running action child: the run it is, when it samples
+// next (ns on the batch's clock), its tree's CPU limit and the CPU time at
+// the last sample (ns), whether the watch killed it, and whether it still
+// runs.
+BuildActionWatch: struct {
+    run: Int
+    due_ns: Int
+    limit_ns: Int
+    used_ns: Int
+    stopped: Bool
+    live: Bool
 }
 
 BuildActionStart: enum {
@@ -271,23 +302,103 @@ build_execute_actions: fn(plan: HermeticBuildPlan, ids: [Int], project_root: Str
     }
     stamps.save(project_root).drop("the stamp table only saves rehashing; a lost one costs speed, never a wrong key")
     if runs.len() == 0 -> return results
-    specs: loop run in runs -> run.command.spec
-    if process.run_all(specs, if jobs < 1 -> 1 else -> jobs) == {
-        .Ok(receipts) -> loop index in 0..<runs.len() {
-            slot: slots[index]
-            if receipts[index] == {
-                .Ok(receipt) -> if build_finish_action(runs[index], receipt, project_root) == {
-                    .Ok(outcome) -> results[slot] = Ok(outcome)
-                    .Err(error) -> results[slot] = Err(error)
-                }
-                .Err(error) -> results[slot] = Err(build_abandon_action(runs[index], NativeSandboxError.IO("{error}")))
+    outcomes := build_run_actions(runs, if jobs < 1 -> 1 else -> jobs)
+    loop index in 0..<runs.len() {
+        slot: slots[index]
+        if outcomes[index] == {
+            .Ok(receipt) -> if build_finish_action(runs[index], receipt, project_root) == {
+                .Ok(outcome) -> results[slot] = Ok(outcome)
+                .Err(error) -> results[slot] = Err(error)
             }
-        }
-        .Err(error) -> loop index in 0..<runs.len() {
-            results[slots[index]] = Err(build_abandon_action(runs[index], NativeSandboxError.IO("{error}")))
+            .Err(error) -> results[slot] = Err(error)
         }
     }
     results
+}
+
+// Runs the staged actions' children, at most `jobs` at once: one receipt or
+// error per run, in order. Each child's process tree may use its CPU limit on
+// each of the host's cores (core.sys.tree_cpu_time, sampled every 100 ms),
+// which other load on the host does not raise, so a loaded host slows an
+// action without failing it. A tree past its limit is stopped by killing the
+// child: the Linux sandbox runs the tree in a pid namespace that dies with
+// it. The command's wall-clock timeout is only the hang guard. With no CPU
+// limit on any run (a host whose process tree's CPU time cannot be read),
+// run_all runs them under their wall-clock limits.
+build_run_actions: fn(runs: [BuildActionRun], jobs: Int) -[FS, Env, Exec, Time, Time.Wait]> [Result<ProcessReceipt, BuildExecutionError>] Never! {
+    results := [Result<ProcessReceipt, BuildExecutionError>]{}
+    if !runs.any(run -> run.cpu_limit_ms > 0) {
+        specs: loop run in runs -> run.command.spec
+        if process.run_all(specs, jobs) == {
+            .Ok(receipts) -> loop index in 0..<runs.len() {
+                if receipts[index] == {
+                    .Ok(receipt) -> results.push(Ok(receipt))
+                    .Err(error) -> results.push(Err(build_abandon_action(runs[index], NativeSandboxError.IO("{error}"))))
+                }
+            }
+            .Err(error) -> loop index in 0..<runs.len() -> results.push(Err(build_abandon_action(runs[index], NativeSandboxError.IO("{error}"))))
+        }
+        return results
+    }
+    cores: sys.cpu_count()
+    finished := [Result<ProcessReceipt, BuildExecutionError>?]{}
+    loop _ in 0..<runs.len() -> finished.push(None)
+    children := [ProcessChild]{}
+    watches := [BuildActionWatch]{}
+    clock: time.instant()
+    started := 0
+    running := 0
+    pause := 1
+    loop started < runs.len() || running > 0 {
+        loop started < runs.len() && running < jobs {
+            if runs[started].command.spec.spawn() == {
+                .Ok(child) -> {
+                    children.push(child)
+                    watches.push(BuildActionWatch{run: started, due_ns: clock.elapsed().ns, limit_ns: runs[started].cpu_limit_ms * 1000000 * cores, used_ns: 0, stopped: false, live: true})
+                    running += 1
+                }
+                .Err(error) -> finished[started] = Val(Err(build_abandon_action(runs[started], NativeSandboxError.IO("{error}"))))
+            }
+            started += 1
+        }
+        loop at in 0..<children.len() {
+            if !watches[at].live -> next
+            run: watches[at].run
+            if children[at].exited() ?? true {
+                watches[at].live = false
+                running -= 1
+                finished[run] = Val(build_wait_action(runs[run], children[at], watches[at], cores))
+                pause = 1
+                next
+            }
+            now: clock.elapsed().ns
+            if watches[at].stopped || watches[at].limit_ns <= 0 || now < watches[at].due_ns -> next
+            watches[at].due_ns = now + BUILD_CPU_SAMPLE_NS
+            used: sys.tree_cpu_time(children[at].id()) ?? next
+            watches[at].used_ns = used.ns
+            if used.ns > watches[at].limit_ns && children[at].kill() == .Ok(_) -> watches[at].stopped = true
+        }
+        if running > 0 {
+            time.sleep(time.duration_ms(pause))
+            if pause < 10 -> pause = if pause * 2 > 10 -> 10 else -> pause * 2
+        }
+    }
+    loop outcome in finished -> results.push(outcome ?? panic("every staged action ends with a receipt or an error"))
+    results
+}
+
+// The receipt of a child that exited, or, when its watch killed it past its
+// CPU limit, the action's OverCPU failure with its work tree removed. The
+// receipt counts the children the child waited for; the last sample also
+// counts descendants that were live then.
+build_wait_action: fn(run: BuildActionRun, child: ProcessChild, watch: BuildActionWatch, cores: Int) -[FS, Exec, Time.Wait]> ProcessReceipt BuildExecutionError! {
+    receipt: child.wait() ?? return Err(build_abandon_action(run, NativeSandboxError.IO("{err}")))
+    if !watch.stopped -> return Ok(receipt)
+    files.remove_all(run.sandbox).drop("the action sandbox is removed best-effort; the CPU limit is reported")
+    waited: (receipt.user_cpu_ns ?? 0) + (receipt.system_cpu_ns ?? 0)
+    used: if watch.used_ns > waited -> watch.used_ns else -> waited
+    // copy: the error names the action the run still owns.
+    Err(BuildExecutionError.OverCPU{action: run.action.name.copy(), limit_ms: run.cpu_limit_ms, cores, used_ms: used /% 1000000})
 }
 
 // Snapshot the action's inputs and the files of the folders it reads whole
@@ -408,12 +519,17 @@ build_start_action: fn(plan: HermeticBuildPlan, declared: HermeticBuildAction, p
         runtime_args[passed.at - 1] = "{passed.flag}{foundation_sandbox_program_argument(programs[index], mounts)}"
     }
     share_network: build_action_shares_network(grants, action.caps)
-    timeout: time.duration_ms(action.timeout_ms ?? NATIVE_SANDBOX_DEFAULT_ACTION_TIMEOUT_MS)
+    limit_ms: action.timeout_ms ?? NATIVE_SANDBOX_DEFAULT_ACTION_TIMEOUT_MS
+    // Where the host can read a process tree's CPU time, the step's limit is
+    // CPU time and the wall clock only a far-out hang guard; elsewhere the
+    // limit stays wall-clock time.
+    cpu_limit_ms: if sys.is_linux() -> limit_ms else -> 0
+    timeout: time.duration_ms(if cpu_limit_ms > 0 -> limit_ms * BUILD_WALL_GUARD else -> limit_ms)
     command: foundation_native_sandbox_command(executable, runtime_args, sandbox, None, runtime_env, share_network, mounts, programs, Val(timeout)) ?? {
         files.remove_all(sandbox).drop("the action sandbox is removed best-effort; the sandbox error is reported")
         return Err(build_native_sandbox_error(action, err))
     }
-    Ok(BuildActionStart.Ready{run: BuildActionRun{action, key, sandbox, rebuild_status, command, reuse}})
+    Ok(BuildActionStart.Ready{run: BuildActionRun{action, key, sandbox, rebuild_status, command, reuse, cpu_limit_ms}})
 }
 
 // `action` with each found folder bound from the folder its find_folder

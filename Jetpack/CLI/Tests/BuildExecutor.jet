@@ -297,7 +297,7 @@ build_test_record_misses: fn(store: BuildArtifactStoreHandle, key: String) -[FS,
                 assert_eq(action, "write")
                 assert(detail.contains("is a symlink"))
             }
-            .MissingGrant(_, _) | .SandboxUnavailable(_) | .TimedOut(_, _) | .ProbeFailed(_, _) | .FolderNotFound(_, _, _) | .Reported(_) | .InvalidGraph(_) | .HandEdited(_, _) -> panic("a symlinked sandbox root must be an I/O refusal")
+            .MissingGrant(_, _) | .SandboxUnavailable(_) | .TimedOut(_, _) | .OverCPU(_, _, _, _) | .ProbeFailed(_, _) | .FolderNotFound(_, _, _) | .Reported(_) | .InvalidGraph(_) | .HandEdited(_, _) -> panic("a symlinked sandbox root must be an I/O refusal")
         }
         .Ok(_) -> panic("a symlinked sandbox root must be refused")
     }
@@ -753,7 +753,7 @@ build_test_output_action: fn(outputs: [String]) -[Rand]> HermeticBuildAction Nev
                 assert_eq(searched[1], "{lib}: no `jet-test-no-such-file.a`")
                 assert_eq(searched[searched.len() - 1], "/usr/local/musl/lib: no `jet-test-no-such-file.a`")
             }
-            .MissingGrant(_, _) | .SandboxUnavailable(_) | .IO(_, _) | .TimedOut(_, _) | .ProbeFailed(_, _) | .Reported(_) | .InvalidGraph(_) | .HandEdited(_, _) -> panic("a probe that finds no folder fails as FolderNotFound")
+            .MissingGrant(_, _) | .SandboxUnavailable(_) | .IO(_, _) | .TimedOut(_, _) | .OverCPU(_, _, _, _) | .ProbeFailed(_, _) | .Reported(_) | .InvalidGraph(_) | .HandEdited(_, _) -> panic("a probe that finds no folder fails as FolderNotFound")
         }
         .Ok(_) -> panic("a probe that finds no folder must fail the build")
     }

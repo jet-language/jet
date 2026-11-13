@@ -700,7 +700,8 @@ jet_cli_build_execution_error: fn(error: BuildExecutionError, member: String?, c
         }
         .SandboxUnavailable(reason) -> jet_cli_build_refusal("E3505", "build actions run only in the native sandbox, and none is available here: {reason}", JET_CLI_BUILD_SANDBOX_WHY, None, "{NATIVE_SANDBOX_FIX}; Jet never runs a build action outside the sandbox", color)
         .IO(action, detail) -> jet_cli_build_execution_failed("E3505", "build action `{action}` failed: {detail}", None, "fix the action's command, toolchain, or input and output declarations", color)
-        .TimedOut(action, limit_ms) -> jet_cli_build_execution_failed("E3505", "build action `{action}` ran past its time limit of {limit_ms}ms and was stopped", None, "raise the limit with `.timeout(10min)` on the step, or the `action_timeout` build option for every step", color)
+        .TimedOut(action, limit_ms) -> jet_cli_build_execution_failed("E3505", "build action `{action}` ran past its wall-clock limit of {limit_ms}ms and was stopped", None, "look for a hang in the step's command, or raise the limit with `.timeout(10min)` on the step or the `action_timeout` build option for every step", color)
+        .OverCPU(action, limit_ms, cores, used_ms) -> jet_cli_build_execution_failed("E3505", "build action `{action}` used {used_ms}ms of CPU time, past its limit of {limit_ms}ms on each of the host's {cores} cores, and was stopped", None, "raise the limit with `.timeout(10min)` on the step, or the `action_timeout` build option for every step", color)
         .ProbeFailed(probe, detail) -> jet_cli_build_execution_failed("E3505", "build probe `{probe}` failed: {detail}", None, "install what the probe looks for, or declare it on the probe's toolchain", color)
         .FolderNotFound(probe, file, searched) -> {
             // Jet links static musl, so find_folder takes only musl's `libc.a`.
