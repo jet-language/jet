@@ -1122,12 +1122,26 @@ sema_expr_never_none: fn(ty: Type) -> Bool Never! {
     }
 }
 
+// Whether `ty` names a struct or an enum declaration through the
+// registration graph. Its values are never None, unlike an alias or a type
+// parameter, which may stand for an optional.
+sema_expr_names_value_declaration: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
+    if program.registration_graph == .Val(graph) {
+        row: sema_type_resolve_nominal_row(graph, sema_expr_unwrap_tag(ty), environment.module_identity) ?? return false
+        // Matched in place: a pattern on the indexed path copies the whole item.
+        if graph.modules[row.module_index].nominals[row.row].source == .SourceAST(item) {
+            if item == .Struct(_) || item == .Enum(_) -> return true
+        }
+    }
+    false
+}
+
 // The refusal of `value == None` or `value != None` (`equal` tells which)
 // when `ty` is never None: the comparison answers the same every time. One
 // E0109 for both spellings, whether `== None` reached sema as a pattern test
 // or as a comparison.
-sema_expr_none_comparison_refused: fn(ty: Type, equal: Bool, span: Span) -> Diagnostic? {
-    if !sema_expr_never_none(ty) -> return None
+sema_expr_none_comparison_refused: fn(ty: Type, equal: Bool, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Diagnostic? {
+    if !sema_expr_never_none(ty) && !sema_expr_names_value_declaration(ty, environment, program) -> return None
     answer: if equal -> "false" else -> "true"
     Val(sema_error("E0109", span, "only an optional value can be compared with `None`, but this is {sema_type_show(ty)}", "a value whose type isn't optional is never None, so this comparison is always {answer}", "remove the comparison, or give the value an optional type such as `{type_name(ty)}?` if it can be missing"))
 }
@@ -5387,7 +5401,7 @@ sema_expr_check_binary_operands: fn(op: BinOp, left: Expr, right: Expr, span: Sp
             else -> Type?{None}
         }
         if compared == .Val(value_ty) {
-            if sema_expr_none_comparison_refused(value_ty, op == BinOp.Eq, span) == .Val(refused) {
+            if sema_expr_none_comparison_refused(value_ty, op == BinOp.Eq, span, environment, program) == .Val(refused) {
                 diagnostics.push(refused)
                 return None
             }
@@ -6748,7 +6762,7 @@ sema_expr_check_pattern_test: fn(subject: Expr, pattern: Pattern, span: Span, ex
     checked_subject: subject_value ?? return None
     if sema_pattern_test_reused_payload_name(pattern, scopes, diagnostics) -> return None
     if sema_pattern_tests_absence(pattern) {
-        if sema_expr_none_comparison_refused(checked_subject.ty, true, span) == .Val(refused) {
+        if sema_expr_none_comparison_refused(checked_subject.ty, true, span, environment, program) == .Val(refused) {
             diagnostics.push(refused)
             return None
         }

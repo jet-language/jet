@@ -1,0 +1,36 @@
+# Comparing a value with None is decided in sema on every type. A FileLock?
+# from files.try_lock compares with None as a presence test on every tier,
+# as a local, a parameter and a struct field. The plain FileLock that
+# `try_lock(p) ?? panic(..)` yields can never be None, so `lock != None` is
+# E0109 at check and at run, not an ir.build fault; so is comparing a
+# declared struct or enum value with None.
+fixture: file_lock_compared_with_none_checks_in_sema.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet run --optimize=none optional/main.jet
+exit: 0
+stdout: = file_lock_compared_with_none_checks_in_sema.out
+stderr: empty
+step: jet run --optimize=basic optional/main.jet
+exit: 0
+stdout: = file_lock_compared_with_none_checks_in_sema.out
+stderr: empty
+step: jet run --optimize=full optional/main.jet
+exit: 0
+stdout: = file_lock_compared_with_none_checks_in_sema.out
+stderr: empty
+step: jet check plain/main.jet
+exit: 1
+stderr: count "[jet.OperatorTypeMismatch]" = 1 # the one `lock != None`
+stderr: ~ "Only an optional value can be compared with `None`" # E0109's text
+stderr: ~ "E0109" # the registered code
+stderr: !~ "internal compiler error" # sema refuses it; ir.build never sees it
+step: jet run plain/main.jet
+exit: 1
+stderr: ~ "E0109" # run checks first and stops there
+stderr: !~ "internal compiler error" # no backend fault
+step: jet check declared/main.jet
+exit: 1
+stderr: count "[jet.OperatorTypeMismatch]" = 2 # `point != None` and `mode == None`
+stderr: !~ "internal compiler error" # both refused in sema

@@ -1,0 +1,10 @@
+// `try_lock(p) ?? panic(..)` yields a plain FileLock, which is never None,
+// so comparing it with None is refused in sema.
+use {
+    files: core.files
+}
+
+run: fn() {
+    lock: files.try_lock("held.lock") ?? panic("try_lock held.lock")
+    print("held: {lock != None}")
+}

@@ -1,0 +1,31 @@
+// A resource optional compares with None like any other optional: a held
+// FileLock? is not None and an absent one is, whether it is a local, a
+// parameter or a struct field.
+use {
+    files: core.files
+}
+
+Holder: struct {
+    lock: files.FileLock?
+}
+
+state: fn(lock: files.FileLock?) -> String {
+    if lock != None -> "held" else -> "absent"
+}
+
+run: fn() {
+    if files.try_lock("held.lock") == {
+        .Ok(lock) -> {
+            print("local: {lock != None}")
+            print("parameter: {state(lock)}")
+            holder: Holder{lock: lock}
+            print("field: {holder.lock != None}")
+        }
+        .Err(error) -> print("try_lock failed: {error}")
+    }
+    absent: files.FileLock?{None}
+    print("absent local: {absent != None}")
+    print("absent parameter: {state(absent)}")
+    empty: Holder{lock: None}
+    print("absent field: {empty.lock == None}")
+}
