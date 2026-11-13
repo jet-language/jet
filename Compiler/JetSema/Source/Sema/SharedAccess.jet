@@ -261,15 +261,26 @@ sema_shared_access_expr_touches_shared: fn(value: Expr, scopes: SemaScopeTable) 
     false
 }
 
-sema_shared_access_payload: fn(span: Span) -> Expr Never! {
-    Expr.Ident{name: SEMA_SHARED_PAYLOAD_PARAM, span: span, id: AST_NODE_GENERATED}
+// The payload parameter name for a callback built here: the first of
+// `__jet_shared_value`, `__jet_shared_value_1`, … not already in scope, so a
+// lambda inside one cell's callback (`cell.items.push(fn() { other.name })`)
+// reads another cell through a callback of its own.
+sema_shared_access_payload_name: fn(scopes: SemaScopeTable) -> String {
+    if sema_scope_resolve_index(scopes, SEMA_SHARED_PAYLOAD_PARAM) == None -> return SEMA_SHARED_PAYLOAD_PARAM
+    depth := 1
+    loop sema_scope_resolve_index(scopes, "{SEMA_SHARED_PAYLOAD_PARAM}_{depth}") != None -> depth += 1
+    "{SEMA_SHARED_PAYLOAD_PARAM}_{depth}"
 }
 
-sema_shared_access_callback: fn(body: LambdaBody, span: Span) -> Expr Never! {
+sema_shared_access_payload: fn(span: Span, name: String) -> Expr Never! {
+    Expr.Ident{name: name, span: span, id: AST_NODE_GENERATED}
+}
+
+sema_shared_access_callback: fn(body: LambdaBody, span: Span, name: String) -> Expr Never! {
     lambda_meta: ast_empty_lambda_meta()
     lambda: Lambda{
         take_names: [NamedSpan]{},
-        params: [LambdaParam]{LambdaParam{name: SEMA_SHARED_PAYLOAD_PARAM, name_span: span, ty: None, ty_span: None, convention: AccessConvention.Read}},
+        params: [LambdaParam]{LambdaParam{name: name, name_span: span, ty: None, ty_span: None, convention: AccessConvention.Read}},
         effects: None,
         body: body,
         span: span,
@@ -278,8 +289,8 @@ sema_shared_access_callback: fn(body: LambdaBody, span: Span) -> Expr Never! {
     Expr.Lambda{lambda: lambda, id: AST_NODE_GENERATED}
 }
 
-sema_shared_access_call: fn(handle: Expr, method: String, body: LambdaBody, span: Span) -> Expr Never! {
-    callback: sema_shared_access_callback(body, span)
+sema_shared_access_call: fn(handle: Expr, method: String, body: LambdaBody, span: Span, name: String) -> Expr Never! {
+    callback: sema_shared_access_callback(body, span, name)
     flags := ast_empty_call_arg_flags()
     flags.shared_access_desugar = true
     argument: CallArg{convention: AccessConvention.Read, expr: callback, span: span, flags: flags, label: None, spread: false}
@@ -289,10 +300,11 @@ sema_shared_access_call: fn(handle: Expr, method: String, body: LambdaBody, span
 // `handle.field` -> the internal locked-read callback. The caller supplies the
 // already checked receiver type so this helper never re-infers or emits a
 // diagnostic while deciding whether the rewrite applies.
-sema_shared_access_desugar_field_read: fn(handle: Expr, field: String, span: Span, receiver_ty: Type) -> Expr? {
+sema_shared_access_desugar_field_read: fn(handle: Expr, field: String, span: Span, receiver_ty: Type, scopes: SemaScopeTable) -> Expr? {
     if !sema_shared_access_is_shared_type(receiver_ty) -> return None
-    projection: Expr.Field{base: sema_shared_access_payload(span), member: field, span: span, id: AST_NODE_GENERATED}
-    Val(sema_shared_access_call(handle, "read", LambdaBody.Expr{value: projection}, span))
+    name: sema_shared_access_payload_name(scopes)
+    projection: Expr.Field{base: sema_shared_access_payload(span, name), member: field, span: span, id: AST_NODE_GENERATED}
+    Val(sema_shared_access_call(handle, "read", LambdaBody.Expr{value: projection}, span, name))
 }
 
 // Probe stored place types without checking (and therefore copying) the place.
@@ -345,18 +357,22 @@ sema_shared_access_field_type: fn(owner_ty: Type, member: String, environment: S
     None
 }
 
-// Split at the cell, retaining every field/index below it in the edit callback.
-sema_shared_access_project_place: fn(value: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable) -> (handle: Expr, place: Expr)? {
+// Split at the cell, retaining every field/index below it in the edit callback
+// whose payload parameter is `name`.
+sema_shared_access_project_place: fn(value: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable) -> (handle: Expr, place: Expr, name: String)? {
     ty := sema_shared_access_place_type(value, environment, program, scopes)
-    if ty == .Val(known) && sema_shared_access_is_shared_type(known) -> return Val((handle: value, place: sema_shared_access_payload(expr_span(value))))
+    if ty == .Val(known) && sema_shared_access_is_shared_type(known) {
+        name: sema_shared_access_payload_name(scopes)
+        return Val((handle: value, place: sema_shared_access_payload(expr_span(value), name), name: name))
+    }
     if value == {
         .Field(base, member, span, node) -> {
             projected: sema_shared_access_project_place(base, environment, program, scopes) ?? return None
-            return Val((handle: projected.handle, place: Expr.Field{base: projected.place, member: member, span: span, id: node}))
+            return Val((handle: projected.handle, place: Expr.Field{base: projected.place, member: member, span: span, id: node}, name: projected.name))
         }
         .Index(base, index, span, kind, node) -> {
             projected: sema_shared_access_project_place(base, environment, program, scopes) ?? return None
-            return Val((handle: projected.handle, place: Expr.Index{base: projected.place, index: index, span: span, kind: kind, id: node}))
+            return Val((handle: projected.handle, place: Expr.Index{base: projected.place, index: index, span: span, kind: kind, id: node}, name: projected.name))
         }
         .Paren(inner, _, _) -> { return sema_shared_access_project_place(inner, environment, program, scopes) }
         .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> { return None }
@@ -365,23 +381,23 @@ sema_shared_access_project_place: fn(value: Expr, environment: SemaScopeEnvironm
 
 // True when a projected place is the cell's whole value (the place was the
 // `Shared` handle itself).
-sema_shared_access_is_payload: fn(place: Expr) -> Bool Never! {
-    if place == .Ident(name, _, _) -> return name == SEMA_SHARED_PAYLOAD_PARAM
+sema_shared_access_is_payload: fn(place: Expr, name: String) -> Bool Never! {
+    if place == .Ident(found, _, _) -> return found == name
     false
 }
 
 // The locked-edit callback spans the whole written place, from its first
 // byte: the payload name the projection reads (spanned at the cell handle)
 // resolves against the callback parameter, which must not start after it.
-sema_shared_access_write_place: fn(target: LValue, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable) -> (handle: Expr, target: LValue, span: Span)? {
+sema_shared_access_write_place: fn(target: LValue, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable) -> (handle: Expr, target: LValue, span: Span, name: String)? {
     if target == {
         .Field(base, field, span) -> {
             projected: sema_shared_access_project_place(base, environment, program, scopes) ?? return None
-            return Val((handle: projected.handle, span: Span{start: sema_shared_access_place_start(base), end: span.end}, target: LValue.Field{base: projected.place, field: field, span: span}))
+            return Val((handle: projected.handle, span: Span{start: sema_shared_access_place_start(base), end: span.end}, target: LValue.Field{base: projected.place, field: field, span: span}, name: projected.name))
         }
         .Index(base, index, span, kind) -> {
             projected: sema_shared_access_project_place(base, environment, program, scopes) ?? return None
-            return Val((handle: projected.handle, span: Span{start: sema_shared_access_place_start(base), end: span.end}, target: LValue.Index{base: projected.place, index: index, span: span, kind: kind}))
+            return Val((handle: projected.handle, span: Span{start: sema_shared_access_place_start(base), end: span.end}, target: LValue.Index{base: projected.place, index: index, span: span, kind: kind}, name: projected.name))
         }
         .Local(_, _) -> { return None }
     }
@@ -396,27 +412,28 @@ sema_shared_access_place_start: fn(value: Expr) -> Int Never! {
     }
 }
 
-sema_shared_access_desugar_place_write: fn(handle: Expr, target: LValue, op: BinOp?, op_span: Span, value: Expr, span: Span) -> Expr Never! {
+sema_shared_access_desugar_place_write: fn(handle: Expr, target: LValue, op: BinOp?, op_span: Span, value: Expr, span: Span, name: String) -> Expr Never! {
     assignment: Stmt.Assign{target: target, op: op, op_span: op_span, value: value}
-    sema_shared_access_call(handle, "edit", LambdaBody.Block{body: [Stmt]{assignment}}, span)
+    sema_shared_access_call(handle, "edit", LambdaBody.Block{body: [Stmt]{assignment}}, span, name)
 }
 
 // `handle.place.method(args)` -> the locked-edit callback, so a writing call
 // edits the stored value rather than a read copy of it.
-sema_shared_access_desugar_place_call: fn(handle: Expr, place: Expr, place_span: Span, method: String, method_span: Span, owner_type_args: [Type], type_args: [Type], args: [CallArg], span: Span) -> Expr Never! {
+sema_shared_access_desugar_place_call: fn(handle: Expr, place: Expr, place_span: Span, method: String, method_span: Span, owner_type_args: [Type], type_args: [Type], args: [CallArg], span: Span, name: String) -> Expr Never! {
     call: Expr.MethodCall{receiver: Expr.Place{value: place, access: PlaceAccess.Write, span: place_span, id: AST_NODE_GENERATED}, method: method, method_span: method_span, owner_type_args: owner_type_args, type_args: type_args, args: args, id: AST_NODE_GENERATED}
-    sema_shared_access_call(handle, "edit", LambdaBody.Expr{value: call}, span)
+    sema_shared_access_call(handle, "edit", LambdaBody.Expr{value: call}, span, name)
 }
 
 // The shared cell a writing call `place.method(…)` edits: the cell handle,
-// the place below it, and the call's span from the place's first byte. None
-// when the receiver is not a written place inside a cell.
-sema_shared_access_call_place: fn(receiver: Expr, method_span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable) -> (handle: Expr, place: Expr, place_span: Span, span: Span)? {
+// the place below it, the call's span from the place's first byte, and the
+// edit callback's payload name. None when the receiver is not a written place
+// inside a cell.
+sema_shared_access_call_place: fn(receiver: Expr, method_span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable) -> (handle: Expr, place: Expr, place_span: Span, span: Span, name: String)? {
     if receiver == .Place(value, access, place_span, _) {
         if access != PlaceAccess.Write -> return None
         projected: sema_shared_access_project_place(value, environment, program, scopes) ?? return None
-        if sema_shared_access_is_payload(projected.place) -> return None
-        return Val((handle: projected.handle, place: projected.place, place_span: place_span, span: Span{start: sema_shared_access_place_start(value), end: method_span.end}))
+        if sema_shared_access_is_payload(projected.place, projected.name) -> return None
+        return Val((handle: projected.handle, place: projected.place, place_span: place_span, span: Span{start: sema_shared_access_place_start(value), end: method_span.end}, name: projected.name))
     }
     None
 }

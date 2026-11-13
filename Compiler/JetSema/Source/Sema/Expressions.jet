@@ -6437,7 +6437,7 @@ sema_expr_check_method_call_expr: fn(receiver: Expr, method: String, method_span
     written_place: sema_stmt_binding_is_write_place(receiver)
     if written_place {
         if sema_shared_access_call_place(receiver, method_span, environment, program, scopes) == .Val(cell) {
-            rewritten: sema_shared_access_desugar_place_call(cell.handle, cell.place, cell.place_span, method, method_span, owner_type_args, type_args, args, cell.span)
+            rewritten: sema_shared_access_desugar_place_call(cell.handle, cell.place, cell.place_span, method, method_span, owner_type_args, type_args, args, cell.span, cell.name)
             edited: sema_check_expression(rewritten, expected, environment, program, scopes, state, tail_store, context, diagnostics)
             if receiver == .Place(value, _, _, _) -> sema_shared_cycle_check_call(value, args, environment, program, scopes, state, diagnostics)
             return edited
@@ -6451,7 +6451,7 @@ sema_expr_check_method_call_expr: fn(receiver: Expr, method: String, method_span
         place: Expr.Place{value: receiver, access: PlaceAccess.Write, span: expr_span(receiver), id: AST_NODE_GENERATED}
         if sema_shared_access_call_place(place, method_span, environment, program, scopes) == .Val(cell) {
             if sema_expr_shared_place_call_writes(receiver, method, method_span, owner_type_args, type_args, args, environment, program, scopes, state, tail_store, context) {
-                rewritten: sema_shared_access_desugar_place_call(cell.handle, cell.place, cell.place_span, method, method_span, owner_type_args, type_args, args, cell.span)
+                rewritten: sema_shared_access_desugar_place_call(cell.handle, cell.place, cell.place_span, method, method_span, owner_type_args, type_args, args, cell.span, cell.name)
                 edited: sema_check_expression(rewritten, expected, environment, program, scopes, state, tail_store, context, diagnostics)
                 sema_shared_cycle_check_call(receiver, args, environment, program, scopes, state, diagnostics)
                 return edited

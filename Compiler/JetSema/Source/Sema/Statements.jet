@@ -6997,7 +6997,7 @@ sema_stmt_check_shared_transaction: fn(transaction: Stmt, environment: SemaScope
     }
 }
 
-sema_stmt_check_shared_place_assignment: fn(handle: Expr, target: LValue, op: BinOp?, op_span: Span, expr: Expr, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TStmt? {
+sema_stmt_check_shared_place_assignment: fn(handle: Expr, target: LValue, op: BinOp?, op_span: Span, expr: Expr, span: Span, payload: String, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TStmt? {
     needs_transaction := sema_shared_access_expr_touches_shared(expr, scopes)
     value := expr
     body := [Stmt]{}
@@ -7006,7 +7006,7 @@ sema_stmt_check_shared_place_assignment: fn(handle: Expr, target: LValue, op: Bi
         body.push(Stmt.Val{binding: binding})
         value = Expr.Ident{name: SEMA_SHARED_HOISTED_RHS, span: expr_span(expr), id: AST_NODE_GENERATED}
     }
-    rewritten_expr: sema_shared_access_desugar_place_write(handle, target, op, op_span, value, span)
+    rewritten_expr: sema_shared_access_desugar_place_write(handle, target, op, op_span, value, span, payload)
     if needs_transaction {
         body.push(Stmt.Expr{expr: rewritten_expr})
         transaction_span := Span{start: span.start, end: expr_span(expr).end}
@@ -7078,7 +7078,7 @@ sema_stmt_check_projected_assignment: fn(target: LValue, op: BinOp?, op_span: Sp
     exit_reasons: context.incomplete_reasons.len()
     // Keep nested fields and indexes below the cell inside its locked edit.
     projected := sema_shared_access_write_place(target, environment, program, scopes)
-    if projected == .Val(place) -> return sema_stmt_check_shared_place_assignment(place.handle, place.target, op, op_span, expr, place.span, environment, program, scopes, state, tail_store, context, diagnostics)
+    if projected == .Val(place) -> return sema_stmt_check_shared_place_assignment(place.handle, place.target, op, op_span, expr, place.span, place.name, environment, program, scopes, state, tail_store, context, diagnostics)
     if target == {
         .Index(_, _, span, _) -> {
             if op != None {

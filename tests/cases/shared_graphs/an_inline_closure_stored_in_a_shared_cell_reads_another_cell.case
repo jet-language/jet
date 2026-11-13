@@ -1,0 +1,19 @@
+# A lambda written inline at a shared field write or a writing call on a
+# shared place is checked inside the cell's edit callback; a field read of
+# another cell in its body gets a callback of its own, so the program checks
+# clean (no internal-name clash) and each lambda reads the other cell when it
+# is called, on every tier.
+fixture: an_inline_closure_stored_in_a_shared_cell_reads_another_cell.fixture
+env: NO_COLOR=1
+step check: jet check main.jet
+exit: 0
+stderr: !~ "__jet_" # no diagnostic names a compiler-internal symbol
+step o0: jet run --optimize=none main.jet
+exit: 0
+stdout: = "seen prices\nseen close\n"
+step o1: jet run --optimize=basic main.jet
+exit: 0
+stdout: = "seen prices\nseen close\n"
+step o2: jet run --optimize=full main.jet
+exit: 0
+stdout: = "seen prices\nseen close\n"

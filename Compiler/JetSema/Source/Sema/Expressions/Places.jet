@@ -709,7 +709,7 @@ sema_expression_field: fn(field: Expr, base: Expr, member: String, span: Span, e
     checked_base_value: sema_check_expression(base, None, environment, program, scopes, state, tail_store, context, diagnostics)
     context.suppress_partial_move_root_read = previous_root_read
     if checked_base_value == .Val(probe_value) {
-        rewritten := sema_shared_access_desugar_field_read(base, member, span, probe_value.ty)
+        rewritten := sema_shared_access_desugar_field_read(base, member, span, probe_value.ty, scopes)
         if rewritten == None -> rewritten = sema_expression_rows_view(base, member, span, probe_value.ty, environment, program, scopes)
         if rewritten == None -> rewritten = sema_expression_computed_field_read(base, member, span, probe_value.ty, environment, program, scopes)
         if rewritten == None {
