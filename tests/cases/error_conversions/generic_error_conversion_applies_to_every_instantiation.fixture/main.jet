@@ -1,0 +1,45 @@
+// A generic error type with one declared conversion into the default Err:
+// every instantiation (Unsent<Int>, Unsent<String>) converts through it.
+#Error
+Unsent: struct<T> {
+    value: T
+}
+
+impl Unsent -> Err {
+    return Err("send on a closed channel")
+}
+
+send_one: fn(v: Int) Unsent<Int>! {
+    if v > 0 -> return Err(Unsent<Int>{value: v})
+}
+
+send_any: fn<T>(v: T, fail: Bool) Unsent<T>! {
+    if fail -> return Err(Unsent<T>{value: v})
+}
+
+asked: fn(v: Int) -> Int Err! {
+    send_one(v)?("sending")
+    v
+}
+
+bare: fn(v: Int) -> Int Err! {
+    send_one(v)
+    v
+}
+
+forwarded: fn<T>(v: T, fail: Bool) -> Int Err! {
+    send_any(v, fail)
+    1
+}
+
+run: fn() {
+    send_one(7) ?? print("kept {err.value}")
+    print(asked(0) ?? -1)
+    print(asked(5) ?? -1)
+    print(bare(0) ?? -1)
+    print(bare(4) ?? -1)
+    print(forwarded("text", false) ?? -1)
+    print(forwarded("text", true) ?? -1)
+    send_one(3)
+    print("not reached")
+}

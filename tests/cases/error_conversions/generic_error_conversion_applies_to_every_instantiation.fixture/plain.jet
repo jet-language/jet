@@ -1,0 +1,32 @@
+#Error
+Unsent: struct {
+    value: Int
+}
+
+impl Unsent -> Err {
+    return Err("send on a closed channel")
+}
+
+send_one: fn(v: Int) Unsent! {
+    if v > 0 -> return Err(Unsent{value: v})
+}
+
+asked: fn(v: Int) -> Int Err! {
+    send_one(v)?("sending")
+    v
+}
+
+bare: fn(v: Int) -> Int Err! {
+    send_one(v)
+    v
+}
+
+run: fn() {
+    send_one(7) ?? print("kept {err.value}")
+    print(asked(0) ?? -1)
+    print(asked(5) ?? -1)
+    print(bare(0) ?? -1)
+    print(bare(4) ?? -1)
+    send_one(3)
+    print("not reached")
+}

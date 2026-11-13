@@ -581,12 +581,27 @@ sema_failure_conversion_leaf: fn(ty: Type) -> String Never! {
 // A declared conversion is one registered function under the canonical name;
 // the checked route carries that routine's symbol key, the identity lowering
 // resolves. 's standard-library family takes the same route
-// through `sema_prelude_error_conversion_key`.
+// through `sema_prelude_error_conversion_key`. Every instantiation of a
+// generic error type (`Unsent<Int>`) converts through the one routine its
+// type's conversion builds (`impl Unsent -> Err`, generic over the type's
+// parameters), which only the file declaring that type builds.
 sema_failure_declared_conversion: fn(source: Type, target: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> String? {
-    name: sema_failure_declared_conversion_name(sema_failure_conversion_leaf(source), sema_failure_conversion_leaf(target))
-    index: sema_scope_resolve_index(scopes, name) ?? return sema_failure_namespace_conversion(name, environment, program)
+    head := String?{None}
+    if sema_expr_unwrap_tag(source) == .Apply(applied, _) -> head = Val(sema_error_conversion_leaf(applied))
+    instance: head != None
+    name: sema_failure_declared_conversion_name(head ?? sema_failure_conversion_leaf(source), sema_failure_conversion_leaf(target))
+    index: sema_scope_resolve_index(scopes, name) ?? return if instance -> None else -> sema_failure_namespace_conversion(name, environment, program)
     if scopes.bindings[index].symbol.kind != SymbolKind.Function -> return None
+    if instance && !sema_failure_conversion_takes_instance(sema_scope_binding_symbol(environment, scopes, index).ty) -> return None
     Val(scopes.bindings[index].symbol.id.key)
+}
+
+// Whether a conversion routine's `self` is a generic instance (`Unsent<T>`).
+sema_failure_conversion_takes_instance: fn(routine: Type?) -> Bool Never! {
+    if routine == .Val(function_type) {
+        if function_type == .Fn(params, _, _, _, _, _) -> return params.len() == 1 && params[0] == .Apply(_, _)
+    }
+    false
 }
 
 // A conversion declared in another member file of the same package. Its routine is a
@@ -934,13 +949,17 @@ sema_failure_no_carrier: fn(error: Type, span: Span, implicit: Bool) -> Diagnost
 
 sema_failure_no_default_conversion: fn(error: Type, span: Span, implicit: Bool) -> Diagnostic {
     name: type_name(error)
+    // An impl of a generic type names the type bare, so `Unsent<Int>` is
+    // converted by `impl Unsent -> Err`.
+    written := name.copy()
+    if sema_expr_unwrap_tag(error) == .Apply(head, _) -> written = sema_error_conversion_leaf(head)
     // A written conversion source is one named type, so a list of errors has
     // no `impl … -> Err` to suggest.
     listed: sema_failure_list_domain(error)
-    route: if listed -> "a conversion source is one named type, so `{name}` has no `impl … -> Err`" else -> "`{name}` can reach `Err` only through `impl {name} -> Err`"
-    conversion: if listed -> "" else -> ", add `impl {name} -> Err {{ … }}`"
+    route: if listed -> "a conversion source is one named type, so `{name}` has no `impl … -> Err`" else -> "`{name}` can reach `Err` only through `impl {written} -> Err`"
+    conversion: if listed -> "" else -> ", add `impl {written} -> Err {{ … }}`"
     if implicit -> return sema_error("E2402", span, "this implicit fallible call can't convert `{name}` into `Err` — no declared conversion exists", "ordinary fallible calls propagate automatically; {route}", "handle this call locally with `??`{conversion}, or change the return type")
-    fix: if listed -> "handle the result locally with `??`, or change the return type" else -> "add `impl {name} -> Err {{ … }}` before this function, or change the return type"
+    fix: if listed -> "handle the result locally with `??`, or change the return type" else -> "add `impl {written} -> Err {{ … }}` before this function, or change the return type"
     sema_error("E2402", span, "`?` can't convert `{name}` into `Err` — no declared conversion exists", "`?` uses the declared conversion rail; {route}", fix)
 }
 

@@ -30,6 +30,7 @@ use {
         TFuncKind,
         TextEdit,
         Type,
+        TypeParam,
         ast_func,
         core_call_typed_signature,
         core_module_export,
@@ -234,16 +235,26 @@ sema_error_conversion_items: fn(items: &[Item], facts: &[AppliedRuleApplication]
     if !has_conversion -> return
     local_types := sema_error_conversion_local_types(items)
     loop name in package_types -> local_types.push(name.copy())
+    // A conversion from a generic type this file declares is generic over
+    // that type's own parameters, so it converts every instantiation; one
+    // entry per conversion, in file order.
+    conversion_params := [[TypeParam]]{}
+    loop item in items {
+        if item == .ErrorConv(definition) -> conversion_params.push(sema_error_conversion_type_params(items, definition.from_ty))
+    }
     edges := [SemaErrorConversionEdge]{}
     output := [Item]{}
     // Each item moves from `items` into `output`, in order; a conversion is
     // replaced by its checked routine or dropped.
     items.reverse()
+    converted := 0
     loop items.len() > 0 {
         item := items.pop() ?? break
         if item == .ErrorConv(definition) {
             loop marker in definition.markers -> facts.push(AppliedRuleApplication{marker: marker, target: Val(definition.from_span), site: Val(RuleSite.Impl)})
-            routine := sema_error_conversion_routine(definition, local_types, edges, diagnostics) ?? next
+            type_params: conversion_params[converted].copy()
+            converted += 1
+            routine := sema_error_conversion_routine(definition, type_params, local_types, edges, diagnostics) ?? next
             output.push(routine)
             next
         }
@@ -252,9 +263,24 @@ sema_error_conversion_items: fn(items: &[Item], facts: &[AppliedRuleApplication]
     items = output.move()
 }
 
+// The type parameters of the generic struct or enum `name` that `items`
+// declares; none for any other name.
+sema_error_conversion_type_params: fn(items: [Item], name: String) -> [TypeParam] {
+    loop item in items {
+        if item == .Struct(definition) {
+            if definition.name == name -> return definition.type_params.copy()
+        }
+        if item == .Enum(definition) {
+            if definition.name == name -> return definition.type_params.copy()
+        }
+    }
+    [TypeParam]{}
+}
+
 // The checked routine of one declared conversion, or None when it is
-// rejected; an accepted conversion's route joins `edges`.
-sema_error_conversion_routine: fn(definition: ErrorConvDef, local_types: [String], edges: &[SemaErrorConversionEdge], diagnostics: &[Diagnostic]) -> Item? {
+// rejected; an accepted conversion's route joins `edges`. A source with
+// `type_params` makes the routine generic over them (`self: Unsent<T>`).
+sema_error_conversion_routine: fn(definition: ErrorConvDef, type_params: [TypeParam], local_types: [String], edges: &[SemaErrorConversionEdge], diagnostics: &[Diagnostic]) -> Item? {
     from_ty: definition.from_ty
     to_ty: definition.to_ty
     span: definition.from_span
@@ -293,7 +319,10 @@ sema_error_conversion_routine: fn(definition: ErrorConvDef, local_types: [String
     }
     // The source is a written type name; a primitive name is that primitive
     // (`impl String -> Err` takes a `String` self).
-    Val(Item.Func{value: sema_error_conversion_function(sema_failure_declared_conversion_name(sema_error_conversion_leaf(from_ty), sema_error_conversion_leaf(to_ty)), definition.from_span, to_ty, definition.to_span, foundation_named_type(from_ty), definition.body, definition.body_span)})
+    source: if type_params.len() == 0 -> foundation_named_type(from_ty) else -> sema_derive_owner_type(from_ty, type_params)
+    routine := sema_error_conversion_function(sema_failure_declared_conversion_name(sema_error_conversion_leaf(from_ty), sema_error_conversion_leaf(to_ty)), definition.from_span, to_ty, definition.to_span, source, definition.body, definition.body_span)
+    routine.type_params = type_params.copy()
+    Val(Item.Func{value: routine})
 }
 
 // The canonical Prelude conversion of one family member into

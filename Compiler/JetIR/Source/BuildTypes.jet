@@ -3283,7 +3283,10 @@ ir_try_reraise: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, subject: Int, conv
                 ir_release(m, b, payload)
             } else {
                 row: ir_function_row(p, function_name) ?? return ir_fail_slot(b, span, "error conversion {function_name} outside the checked program")
-                callee: ir_function_id(m, p, function_name, [Type]{}) ?? return ir_fail_slot(b, span, "call of {function_name}")
+                // A conversion declared for a generic error type is built for
+                // the failing value's own instantiation (`Unsent<Int>`).
+                type_args: if p.functions[row].generic_params.len() > 0 -> ir_row_args(m, source_row) else -> [Type]{}
+                callee: ir_function_id(m, p, function_name, type_args) ?? return ir_fail_slot(b, span, "call of {function_name}")
                 routine_return: ir_executable_return(p.functions[row]) ?? return ir_fail_slot(b, span, "error conversion {function_name} without a result")
                 returned_row: ir_value_type(m, p, routine_return) ?? return ir_type_fail(b, span, routine_return)
                 returned: ir_fresh_temp(m, b, returned_row)

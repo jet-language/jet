@@ -1506,6 +1506,11 @@ compiler reports an undeclared conversion as E2402, a duplicate as E2405, and a
 violation of the typed-target rule as E2406. (D-ERR-CONV, D-FAIL-CONV1,
 D-FAIL-CONV2)
 
+A conversion from a generic error type names the type bare, as an impl of a
+generic type does (`impl Unsent -> Err`), and applies to every instantiation:
+an `Unsent<Int>` and an `Unsent<String>` failure both convert through it. It is
+declared in the file that declares the type.
+
 A failure whose error type is a member of the enclosing error union widens
 into that union without a declared conversion. So does a failure whose error
 type is itself a union, when every one of its members is a member of the
