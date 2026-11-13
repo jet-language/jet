@@ -1150,29 +1150,34 @@ sema_function_compute_facts: fn(function_key: String, context: SemaCheckContext)
     }
 }
 
-sema_function_failure_facts: fn(function_key: String, context: SemaCheckContext) -> SemaFunctionFailureFacts? Never! {
-    Val(SemaFunctionFailureFacts{
-        function_key: function_key,
-        direct: context.failure_direct_source,
-        edges: context.failure_edges.copy(),
-        union_members: context.failure_union_members.copy(),
-        union_cases: context.failure_union_cases.copy(),
-        union_edges: context.failure_union_edges.copy(),
-        union_general: context.failure_union_general || context.failure_direct_source,
-    })
-}
-
-sema_function_check_incomplete: fn(function_key: String, context: SemaCheckContext) -> SemaFunctionResult Never! {
+// A function's result: `value` when its check completed, None when it did
+// not, with the facts its check gathered taken out of the spent context.
+sema_function_result: fn(value: &&FnBody?, function_key: String, context: &&SemaCheckContext) -> SemaFunctionResult Never! {
+    complete: value != None
     SemaFunctionResult{
-        value: None,
-        complete: false,
+        value: value.move(),
+        complete: complete,
         exact_int_reachable: context.exact_int_reachable,
-        copy_events: context.copy_events.copy(),
+        copy_events: context.copy_events.move(),
         hardware_use: sema_hardware_use_snapshot(context.hardware_use),
-        comptime_body_sources: context.comptime_body_sources.copy(),
-        compute_facts: sema_function_compute_facts(function_key, context),
-        failure: sema_function_failure_facts(function_key, context),
-        incomplete_reasons: context.incomplete_reasons.copy(),
+        comptime_body_sources: context.comptime_body_sources.move(),
+        compute_facts: SemaComputeFunctionFacts{
+            function_key: function_key,
+            compute_calls: context.compute_calls.move(),
+            autodiff_obligations: context.autodiff_obligations.move(),
+            autodiff_safe_panic: context.autodiff_safe_panic,
+            autodiff_unsafe_panic: context.autodiff_unsafe_panic,
+        },
+        failure: Val(SemaFunctionFailureFacts{
+            function_key: function_key,
+            direct: context.failure_direct_source,
+            edges: context.failure_edges.move(),
+            union_members: context.failure_union_members.move(),
+            union_cases: context.failure_union_cases.move(),
+            union_edges: context.failure_union_edges.move(),
+            union_general: context.failure_union_general || context.failure_direct_source,
+        }),
+        incomplete_reasons: if complete -> [String]{} else -> context.incomplete_reasons.move(),
     }
 }
 
@@ -1587,9 +1592,9 @@ sema_register_item: fn(scopes: &SemaScopeTable, declarations: &[SemaScopeDeclara
     false
 }
 
-sema_append_function: fn(functions: &[FnBody], checked: SemaFunctionResult) -> Bool Never! {
-    function: checked.value ?? return false
-    functions.push(function.copy())
+sema_append_function: fn(functions: &[FnBody], value: &&FnBody?) -> Bool Never! {
+    function: value.move() ?? return false
+    functions.push(function)
     true
 }
 
@@ -1788,7 +1793,7 @@ sema_function_check: fn(func: Func, owner_id: SymbolID, function_kind: TFuncKind
     environment.generic_params = generics.merged.copy()
     environment.function_name = func.name
     checked := sema_function_check_passes(func, owner_id, function_kind, raw_protocol_return, environment, program, module_scopes, generics, host_hooks, diagnostics, call_facts, comptime_requests, name_references)
-    environment.generic_params = base_generic_params.copy()
+    environment.generic_params = base_generic_params.move()
     checked
 }
 
@@ -1858,16 +1863,14 @@ sema_function_check_passes: fn(func: Func, owner_id: SymbolID, function_kind: TF
         retypes: sema_expr_number_accept_retypes(number_known, number_found)
         if !shares && !retypes {
             instance: if program.registration_graph == .Val(graph) -> sema_name_instance_span(graph, environment.module_identity, func.name) else -> None
-            loop diagnostic in pass_diagnostics {
-                if instance == .Val(line) {
-                    diagnostics.push(sema_name_at_instance(diagnostic, line))
-                } else {
-                    diagnostics.push(diagnostic)
-                }
+            if instance == .Val(line) {
+                loop diagnostic in pass_diagnostics -> diagnostics.push(sema_name_at_instance(diagnostic, line))
+            } else {
+                diagnostics.extend(pass_diagnostics.move())
             }
-            loop fact in pass_call_facts -> call_facts.push(fact)
-            loop request in pass_comptime_requests -> comptime_requests.push(request)
-            loop reference in pass_name_references -> name_references.push(reference)
+            call_facts.extend(pass_call_facts.move())
+            comptime_requests.extend(pass_comptime_requests.move())
+            name_references.extend(pass_name_references.move())
             return checked
         }
     }
@@ -2296,9 +2299,14 @@ sema_function_check_pass: fn(func: Func, owner_id: SymbolID, function_kind: TFun
     // Unused-binding lints address authored code; a compiler-generated body
     // (derived codec scaffolding) binds every slot it may need.
     if !context.compiler_generated -> sema_ownership_finalize_references(state, diagnostics)
-    loop fact in context.call_facts -> call_facts.push(fact)
-    loop request in context.comptime_requests -> comptime_requests.push(request)
-    loop reference in context.name_references -> name_references.push(reference)
+    // The context's facts move to the caller's lists; each emptied field is
+    // set again so the spent context still moves whole into the result.
+    call_facts.extend(context.call_facts.move())
+    context.call_facts = [SemaCallSiteFact]{}
+    comptime_requests.extend(context.comptime_requests.move())
+    context.comptime_requests = [SemaComptimeRequest]{}
+    name_references.extend(context.name_references.move())
+    context.name_references = [SemaNameReferenceFact]{}
     sema_single_use_leave_scope(scopes, state, diagnostics)
     source_line := sema_source_line_at(updated.source_segments, func.name_span)
     if source_line == None {
@@ -2306,12 +2314,13 @@ sema_function_check_pass: fn(func: Func, owner_id: SymbolID, function_kind: TFun
         sema_check_unsupported(context, "no source segment covers the declaration of `{func.name}` at offset {func.name_span.start}")
     }
     return_view_provenance := sema_function_return_view_provenance(func, context.return_view_provenance, diagnostics, complete)
-    if !complete -> return sema_function_check_incomplete(owner_id.key, context)
-    source_line_value: source_line ?? return sema_function_check_incomplete(owner_id.key, context)
+    if !complete -> return sema_function_result(None, owner_id.key, context.move())
+    source_line_value: source_line ?? return sema_function_result(None, owner_id.key, context.move())
     source_file: sema_source_file_at(updated.source_segments, fallback_source_file, updated.source_origin, func.span)
     visibility := TVisibility.Private
     if func.is_pub -> visibility = TVisibility.Public
-    effects: TEffectFacts{direct: [String]{}, solved: [String]{}, call_edges: [String]{}, maximal: false, direct_spans: [TEffectSpan]{}, module_writes: context.module_writes.copy()}
+    effects: TEffectFacts{direct: [String]{}, solved: [String]{}, call_edges: [String]{}, maximal: false, direct_spans: [TEffectSpan]{}, module_writes: context.module_writes.move()}
+    context.module_writes = [TEffectSpan]{}
     unsafe_gate := TUnsafeGate?{None}
     if func.is_unsafe && unsafe_gate_valid && func.unsafe_reason != None {
         reason: func.unsafe_reason ?? ""
@@ -2371,25 +2380,20 @@ sema_function_check_pass: fn(func: Func, owner_id: SymbolID, function_kind: TFun
         kernel_proof: None,
         uses_stack_sentry: false,
         kind: function_kind,
-        origin_facts: context.origin_facts.copy(),
-        typed_goals: context.typed_goals.copy(),
-        index_proofs: context.index_proofs.copy(),
-        pre: if contract.complete -> contract.pre.copy() else -> [TContract]{},
+        origin_facts: context.origin_facts.move(),
+        typed_goals: context.typed_goals.move(),
+        index_proofs: context.index_proofs.move(),
+        pre: if contract.complete -> contract.pre.move() else -> [TContract]{},
         effect_scope: effect_scope,
         effect_scope_regions: sema_authority_scope_regions(func.body, func.name),
     }
     // The checker's tree ends here, as the function's flat body; nodes the
     // checker gave no id take flat-local ones.
-    SemaFunctionResult{
-        value: Val(body_flat_function(built, context.arena.tree)),
-        complete: true,
-        exact_int_reachable: context.exact_int_reachable,
-        copy_events: context.copy_events.copy(),
-        hardware_use: sema_hardware_use_snapshot(context.hardware_use),
-        comptime_body_sources: context.comptime_body_sources.copy(),
-        compute_facts: sema_function_compute_facts(owner_id.key, context),
-        failure: sema_function_failure_facts(owner_id.key, context),
-    }
+    context.origin_facts = [TOriginProjection]{}
+    context.typed_goals = [TTypedGoal]{}
+    context.index_proofs = [TIndexProof]{}
+    flat: body_flat_function(built, context.arena.tree)
+    sema_function_result(Val(flat), owner_id.key, context.move())
 }
 
 check_program: fn(input: Program, module_name: String, source_file: String, source_segments: [SemaSourceSegment]) -> SemaResult {
@@ -2462,14 +2466,14 @@ check_program: fn(input: Program, module_name: String, source_file: String, sour
                 }
                 checked: sema_function_check(memory_func, symbol_id(SymbolKind.Function, module_name, "", func.name), TFuncKind.TopLevel, false, environment, program, scopes, None, diagnostics, function_call_facts, function_comptime_requests, function_name_references)
                 sema_hardware_use_merge(hardware_use, sema_hardware_use_snapshot(checked.hardware_use))
-                loop source in checked.comptime_body_sources -> comptime_body_sources.push(source)
+                comptime_body_sources.extend(checked.comptime_body_sources.move())
                 compute_facts.push(checked.compute_facts)
                 exact_int_reachable = exact_int_reachable || checked.exact_int_reachable
-                loop event in checked.copy_events -> copy_events.push(event)
-                loop fact in function_call_facts -> call_facts.push(fact)
-                loop request in function_comptime_requests -> comptime_requests.push(request)
-                loop reference in function_name_references -> name_references.push(reference)
-                if !checked.complete || !sema_append_function(functions, checked) -> complete = false
+                copy_events.extend(checked.copy_events.move())
+                call_facts.extend(function_call_facts.move())
+                comptime_requests.extend(function_comptime_requests.move())
+                name_references.extend(function_name_references.move())
+                if !checked.complete || !sema_append_function(functions, checked.value.move()) -> complete = false
             }
             .Struct(_) | .Enum(_) | .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
         }
@@ -2752,7 +2756,7 @@ sema_check_comptime_function: fn(graph: SemaRegistrationGraph, environment: &Sem
     if !owner_generic_complete -> incomplete_reasons.push("its owner's generic parameters could not be resolved")
     if !checked.complete {
         if checked.incomplete_reasons.len() == 0 -> incomplete_reasons.push("body checking is incomplete")
-        loop reason in checked.incomplete_reasons -> incomplete_reasons.push(reason)
+        incomplete_reasons.extend(checked.incomplete_reasons.move())
     }
     settled: memory_complete && checked.complete && owner_generic_complete && waiting.len() == 0
     complete: settled && !sema_has_error_since(diagnostics, 0)
@@ -2768,17 +2772,17 @@ sema_check_comptime_function: fn(graph: SemaRegistrationGraph, environment: &Sem
     SemaComptimeFunctionResult{
         module_identity: module_identity,
         function_key: function_key,
-        function: checked.value,
+        function: checked.value.move(),
         waiting_dependencies: waiting,
         calls: calls,
         reachable_function_keys: reachable,
         call_facts: call_facts,
         hardware_use: sema_hardware_use_snapshot(checked.hardware_use),
         name_references: name_references,
-        comptime_body_sources: checked.comptime_body_sources,
+        comptime_body_sources: checked.comptime_body_sources.move(),
         compute_facts: checked.compute_facts,
         exact_int_reachable: checked.exact_int_reachable,
-        copy_events: checked.copy_events.copy(),
+        copy_events: checked.copy_events.move(),
         diagnostics: diagnostics,
         complete: complete,
         incomplete_reasons: incomplete_reasons,
@@ -2806,12 +2810,12 @@ sema_comptime_environment_reachable_function_keys: fn(environment: SemaScopeEnvi
 
 // The module's reasons for one incomplete function: the causes its check
 // recorded, or the bare fact when it recorded none (a diagnostic explains it).
-sema_check_push_function_reasons: fn(label: String, checked: SemaFunctionResult, reasons: &[String]) Never! {
-    if checked.incomplete_reasons.len() == 0 {
+sema_check_push_function_reasons: fn(label: String, incomplete_reasons: [String], reasons: &[String]) Never! {
+    if incomplete_reasons.len() == 0 {
         reasons.push("{label}: body checking is incomplete")
         return
     }
-    loop reason in checked.incomplete_reasons -> reasons.push("{label}: {reason}")
+    loop reason in incomplete_reasons -> reasons.push("{label}: {reason}")
 }
 
 // JET_KEEP_GOING (SemaRegistrationGraph.keep_going): the typed trap that
@@ -2849,12 +2853,12 @@ sema_keep_going_trap_return_span: fn(func: Func) -> Span? Never! {
 // keep-going report, even when the failure was a post-solve recheck whose
 // reports are settled away. A trap that could not be built or recorded is
 // that row's outcome instead.
-sema_keep_going_push_stub: fn(stub: SemaFunctionResult?, label: String, cause: String, functions: &[FnBody], reasons: &[String]) Never! {
-    checked: stub ?? {
+sema_keep_going_push_stub: fn(stub: &&SemaFunctionResult?, label: String, cause: String, functions: &[FnBody], reasons: &[String]) Never! {
+    checked := stub.move() ?? {
         reasons.push("{label}: its keep-going trap did not check (the declared signature fails): {cause}")
         return
     }
-    if !sema_append_function(functions, checked) {
+    if !sema_append_function(functions, checked.value.move()) {
         reasons.push("{label}: its keep-going trap could not be recorded: {cause}")
         return
     }
@@ -2967,7 +2971,7 @@ sema_function_check_registered: fn(job: SemaBodyJob, module_index: Int, memory_p
     environment.generic_params = generics.merged.copy()
     sema_function_check_registered_name(job, module_index, memory_plan, memory_position, environment, program)
     checked := sema_function_check_registered_passes(job, module_index, memory_plan, memory_position, owner_id, function_kind, raw_protocol_return, environment, program, module_scopes, generics, host_hooks, diagnostics, call_facts, comptime_requests, name_references)
-    environment.generic_params = base_generic_params.copy()
+    environment.generic_params = base_generic_params.move()
     checked
 }
 
@@ -3898,7 +3902,7 @@ sema_check_registration_top_level: fn(module_index: Int, item_index: Int, memory
                 if trace_sink == .Val(sink) -> sink.end("sema.function", 1)
             }
             sema_hardware_use_merge(result.hardware_use, sema_hardware_use_snapshot(checked.hardware_use))
-            loop source in checked.comptime_body_sources -> result.comptime_body_sources.push(source)
+            result.comptime_body_sources.extend(checked.comptime_body_sources.move())
             result.compute_facts.push(checked.compute_facts)
             if checked.failure == .Val(facts) -> result.failure_facts.push(facts.copy())
             if checked.value == .Val(function) {
@@ -3908,7 +3912,7 @@ sema_check_registration_top_level: fn(module_index: Int, item_index: Int, memory
                 }
             }
             result.exact_int_reachable = result.exact_int_reachable || checked.exact_int_reachable
-            loop event in checked.copy_events -> result.copy_events.push(event)
+            result.copy_events.extend(checked.copy_events.move())
             result.call_facts.extend(function_call_facts)
             result.comptime_requests.extend(function_comptime_requests)
             result.name_references.extend(function_name_references)
@@ -3918,7 +3922,7 @@ sema_check_registration_top_level: fn(module_index: Int, item_index: Int, memory
                     cause: sema_keep_going_cause(checked.incomplete_reasons, result.diagnostics, function_diagnostic_start)
                     sema_keep_going_push_stub(sema_keep_going_registered_stub(job, module_index, memory_plan, memory_position, owner_id, TFuncKind.TopLevel, false, environment, program, scopes, host_hooks), "function `{function_name}`", cause, result.functions, result.incomplete_reasons)
                 } else {
-                    sema_check_push_function_reasons("function `{function_name}`", checked, result.incomplete_reasons)
+                    sema_check_push_function_reasons("function `{function_name}`", checked.incomplete_reasons, result.incomplete_reasons)
                 }
             } else if keep_going && sema_check_function_failed(result.diagnostics, function_diagnostic_start, pending_obligations) {
                 cause: sema_keep_going_cause([String]{}, result.diagnostics, function_diagnostic_start)
@@ -3926,7 +3930,7 @@ sema_check_registration_top_level: fn(module_index: Int, item_index: Int, memory
                 result.complete = false
             } else {
                 position: result.functions.len()
-                if sema_append_function(result.functions, checked) {
+                if sema_append_function(result.functions, checked.value.move()) {
                     if checked.prelude_demands == .Val(demands) -> prelude_demands[position] = demands
                 } else {
                     result.complete = false
@@ -4054,13 +4058,13 @@ sema_check_registration_method: fn(job: SemaBodyJob, module_index: Int, memory_p
         keep_going_stub = sema_keep_going_registered_stub(job, module_index, memory_plan, owned_input.memory_position, owner_id, owned_input.function_kind, raw_protocol_return, environment, program, scopes, host_hooks)
     }
     scopes.location_function = previous_location
-    environment.generic_params = base_generic_params.copy()
+    environment.generic_params = base_generic_params.move()
     exact_int_reachable = exact_int_reachable || checked.exact_int_reachable
     sema_hardware_use_merge(hardware_use, sema_hardware_use_snapshot(checked.hardware_use))
-    loop event in checked.copy_events -> copy_events.push(event)
+    copy_events.extend(checked.copy_events.move())
     call_facts.extend(function_call_facts)
     comptime_requests.extend(function_comptime_requests)
-    loop source in checked.comptime_body_sources -> comptime_body_sources.push(source)
+    comptime_body_sources.extend(checked.comptime_body_sources.move())
     compute_facts.push(checked.compute_facts)
     // A method's failure row joins the bundle failure solve, which infers
     // the contract of an inherent method as it does a top-level function's.
@@ -4071,7 +4075,7 @@ sema_check_registration_method: fn(job: SemaBodyJob, module_index: Int, memory_p
         if !memory_complete && owned_input.memory_found -> causes.push("memory plan is incomplete")
         if !owner_generic_complete -> causes.push("generic owner `{type_name(owned_input.normalized_owner_type)}` could not be resolved to a registered nominal")
         if keep_going {
-            sema_keep_going_push_stub(keep_going_stub, label, sema_keep_going_cause(causes, diagnostics, function_diagnostic_start), functions, reasons)
+            sema_keep_going_push_stub(keep_going_stub.move(), label, sema_keep_going_cause(causes, diagnostics, function_diagnostic_start), functions, reasons)
         } else {
             loop cause in causes -> reasons.push("{label}: {cause}")
         }
@@ -4079,14 +4083,14 @@ sema_check_registration_method: fn(job: SemaBodyJob, module_index: Int, memory_p
     }
     if !checked.complete {
         if keep_going {
-            sema_keep_going_push_stub(keep_going_stub, label, sema_keep_going_cause(checked.incomplete_reasons, diagnostics, function_diagnostic_start), functions, reasons)
+            sema_keep_going_push_stub(keep_going_stub.move(), label, sema_keep_going_cause(checked.incomplete_reasons, diagnostics, function_diagnostic_start), functions, reasons)
         } else {
-            sema_check_push_function_reasons(label, checked, reasons)
+            sema_check_push_function_reasons(label, checked.incomplete_reasons, reasons)
         }
         return false
     }
     if check_failed {
-        sema_keep_going_push_stub(keep_going_stub, label, sema_keep_going_cause([String]{}, diagnostics, function_diagnostic_start), functions, reasons)
+        sema_keep_going_push_stub(keep_going_stub.move(), label, sema_keep_going_cause([String]{}, diagnostics, function_diagnostic_start), functions, reasons)
         return false
     }
     if checked.value != None && sema_check_registered_protocol_unit_return(job, module_index, program) {
@@ -4101,7 +4105,7 @@ sema_check_registration_method: fn(job: SemaBodyJob, module_index: Int, memory_p
         checked.value = Val(rewritten.move())
     }
     position: functions.len()
-    if sema_append_function(functions, checked) {
+    if sema_append_function(functions, checked.value.move()) {
         if checked.prelude_demands == .Val(demands) -> prelude_demands[position] = demands
         return true
     }
@@ -4422,7 +4426,7 @@ sema_check_view_summary_method: fn(job: SemaBodyJob, module_index: Int, memory_p
     owner_id: sema_check_registered_function_id(job, module_index, environment, program)
     raw_protocol_return: sema_check_registered_raw_protocol_return(job, module_index, environment, program)
     base_generic_params: environment.generic_params.copy()
-    environment.generic_params = input.generic_params.copy()
+    environment.generic_params = input.generic_params.move()
     // copy: `previous_location` restores scopes.location_function after the check overwrites it.
     previous_location: scopes.location_function.copy()
     sema_function_check_registered_location(job, module_index, memory_plan, input.memory_position, environment, program, scopes)
@@ -4432,7 +4436,7 @@ sema_check_view_summary_method: fn(job: SemaBodyJob, module_index: Int, memory_p
     summary_name_references := [SemaNameReferenceFact]{}
     checked := sema_function_check_registered(job, module_index, memory_plan, input.memory_position, owner_id, input.function_kind, raw_protocol_return, environment, program, scopes, host_hooks, summary_diagnostics, summary_calls, summary_comptime_requests, summary_name_references)
     scopes.location_function = previous_location
-    environment.generic_params = base_generic_params.copy()
+    environment.generic_params = base_generic_params.move()
     provenance := ViewProvenanceMap?{None}
     if checked.value == .Val(function) -> provenance = function.return_view_provenance
     if provenance == .Val(map) -> scopes.method_return_views[owner_id.key] = map

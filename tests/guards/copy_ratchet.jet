@@ -1,0 +1,90 @@
+use copy_ratchet_files: core.files
+
+// The copy ratchet. Each compiler source file may hold at most as many
+// `.copy()` calls as its ledger row names, and a file with no row holds
+// none. A copy goes away by moving the last use of an owned value, by
+// borrowing, or by restructuring the owner; deleting the call so the copy
+// happens implicitly does not remove it. Once a file's count drops, its
+// ceiling drops to match, so the count only shrinks.
+COPY_RATCHET_ROOT: "Compiler"
+COPY_RATCHET_LEDGER: "tests/guards/copy_ratchet/ceilings.tsv"
+COPY_RATCHET_CALL: ".copy()"
+
+copy_ratchet_count: fn(text: String) -> Int {
+    text.split(COPY_RATCHET_CALL).to_list().len() - 1
+}
+
+copy_ratchet_scan: fn(path: String, counts: &[String:Int]) {
+    kind: copy_ratchet_files.stat(path) ?? return
+    if kind.is_symlink -> return
+    if kind.is_dir {
+        loop child in (copy_ratchet_files.list_dir(path) ?? panic("list {path}: {err}")) {
+            if child.name.starts_with(".") || child.name == "target" || child.name == "build" || child.name == "node_modules" -> next
+            copy_ratchet_scan("{path}/{child.name}", counts)
+        }
+        return
+    }
+    if !path.ends_with(".jet") -> return
+    text: copy_ratchet_files.read(path) ?? panic("read {path}: {err}")
+    found: copy_ratchet_count(text)
+    if found > 0 -> counts[path] = found
+}
+
+// Every file whose count differs from its ceiling, and every ledger row
+// that is malformed, repeated or names a file without copies.
+copy_ratchet_problems: fn(counts: [String:Int], ledger: String) -> [String] {
+    problems := [String]{}
+    ceilings := [String:Int]{}
+    loop line in ledger.lines() {
+        if line == "" || line.starts_with("#") -> next
+        row: line.split("\t").to_list()
+        ceiling: if row.len() == 2 -> Int.parse(row[1]) ?? -1 else -> -1
+        if ceiling < 0 {
+            problems.push("malformed ledger row `{line}`: write the path, a tab and the ceiling")
+            next
+        }
+        if ceilings.get(row[0]) != None {
+            problems.push("{row[0]}: the ledger names it twice")
+            next
+        }
+        ceilings[row[0]] = ceiling
+    }
+    loop (path, found) in counts {
+        ceiling: ceilings.get(path) ?? 0
+        if found > ceiling -> problems.push("{path}: {found} copies over its ceiling of {ceiling}; move the last use, borrow or restructure instead of copying")
+        if found < ceiling -> problems.push("{path}: {found} copies under its ceiling of {ceiling}; lower the ceiling to {found}")
+    }
+    loop (path, ceiling) in ceilings {
+        if counts.get(path) == None && ceiling > 0 -> problems.push("{path}: no copies left; delete its ledger row")
+        if ceiling == 0 -> problems.push("{path}: a zero ceiling is no row; delete it")
+    }
+    problems.sort()
+    problems
+}
+
+#Test("no compiler source file holds more copies than its ledger ceiling, and every ceiling matches its file") {
+    guards_enter_root()
+    assert(copy_ratchet_files.is_dir(COPY_RATCHET_ROOT), "the copy ratchet root {COPY_RATCHET_ROOT} must exist")
+    counts := [String:Int]{}
+    copy_ratchet_scan(COPY_RATCHET_ROOT, counts)
+    ledger: copy_ratchet_files.read(COPY_RATCHET_LEDGER) ?? panic("read {COPY_RATCHET_LEDGER}: {err}")
+    assert_eq(copy_ratchet_problems(counts, ledger).join("\n"), "")
+}
+
+#Test("the copy ratchet reports a new copy, a missed drop and a stale row") {
+    assert_eq(copy_ratchet_count("a.copy() b.copy()\n// c.copy()"), 3)
+    assert_eq(copy_ratchet_count("copy() .copy"), 0)
+    ledger: "# comment\nA.jet\t2\nB.jet\t3\nC.jet\t1\n"
+    counts: [String:Int]{"A.jet": 3, "B.jet": 1, "D.jet": 1}
+    assert_eq(copy_ratchet_problems(counts, ledger), [String]{
+        "A.jet: 3 copies over its ceiling of 2; move the last use, borrow or restructure instead of copying",
+        "B.jet: 1 copies under its ceiling of 3; lower the ceiling to 1",
+        "C.jet: no copies left; delete its ledger row",
+        "D.jet: 1 copies over its ceiling of 0; move the last use, borrow or restructure instead of copying",
+    })
+    assert_eq(copy_ratchet_problems([String:Int]{}, "A.jet\tx\nB.jet\t1\nB.jet\t1\n"), [String]{
+        "B.jet: no copies left; delete its ledger row",
+        "B.jet: the ledger names it twice",
+        "malformed ledger row `A.jet\tx`: write the path, a tab and the ceiling",
+    })
+}
