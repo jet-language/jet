@@ -224,3 +224,35 @@ environment_constant: fn(name: String) -> String {
     assert(!environment_registered("JET_BX", sample))
     assert(!environment_registered("JET_", sample))
 }
+
+// The checkout tools' roots table: one line per root, spelled in its source
+// as `NAME=${{NAME:-default}}` (the braces doubled in its Jet string).
+ENVIRONMENT_TOOL_ROOTS: "Tools/agent/orchestrator/Roots.jet"
+
+// The names `text`'s roots table sets, in order.
+environment_tool_roots: fn(text: String) -> [String] {
+    names := [String]{}
+    loop line in text.lines() {
+        trimmed: line.trim()
+        if !trimmed.starts_with("JET_") -> next
+        parts: trimmed.partition("=")
+        if parts.sep == "" || !parts.tail.starts_with("${{{{{parts.head}:-") -> next
+        names.push(parts.head.copy())
+    }
+    names
+}
+
+#Test("the checkout tools' roots are the registry rows that name their table as reader") {
+    guards_enter_root()
+    text: environment_files.read(ENVIRONMENT_TOOL_ROOTS) ?? panic("read {ENVIRONMENT_TOOL_ROOTS}: {err}")
+    table := environment_tool_roots(text)
+    assert(table.len() > 0, "{ENVIRONMENT_TOOL_ROOTS} sets no root")
+    read := [String]{}
+    loop row in environment_rows() {
+        if row.reader == ENVIRONMENT_TOOL_ROOTS -> read.push(row.name.copy())
+    }
+    table.sort()
+    read.sort()
+    assert_eq(read.join(" "), table.join(" "))
+    assert_eq(environment_tool_roots("x\n        JET_A=${{{{JET_A:-a}}}}\n        JET_B=b\n        JET_C=${{{{JET_C:-$JET_A}}}}\n").join(" "), "JET_A JET_C")
+}
