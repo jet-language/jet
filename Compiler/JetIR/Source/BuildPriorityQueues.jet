@@ -453,7 +453,7 @@ ir_list_sort: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, list: Int, elem_row:
     is_list: if ir_untag(list_ty) == {
         .List(_) -> true
         .Apply(name, args) -> (name == "View" || name == "ViewMut") && args.len() == 1
-        .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
+        .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
     }
     if !is_list -> return ir_fail_slot(b, span, "sort of {ir_type_name(list_ty)}")
     float: m.types[elem_row].kind == .Float

@@ -105,7 +105,7 @@ sema_core_type_uses_default_int: fn(ty: Type) -> Bool Never! {
     if ty == {
         .Int -> true
         .List(inner) | .Shared(inner) | .Option(inner) | .FixedList(inner, _) |
-        .Tagged(_, inner) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> sema_core_type_uses_default_int(inner)
+        .Tagged(_, inner) | .Case(_, inner) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> sema_core_type_uses_default_int(inner)
         .Map(key, _, value) -> sema_core_type_uses_default_int(key) || sema_core_type_uses_default_int(value)
         .Result(ok, err) -> sema_core_type_uses_default_int(ok) || sema_core_type_uses_default_int(err)
         .Tuple(fields) -> loop field in fields {
@@ -613,7 +613,7 @@ sema_core_collect_type: fn(ty: Type, registered: [String:Bool], used: &[String],
             }
             sema_core_collect_type(inner, registered, used, spans, span)
         }
-        .List(inner) -> sema_core_collect_type(inner, registered, used, spans, span)
+        .List(inner) | .Case(_, inner) -> sema_core_collect_type(inner, registered, used, spans, span)
         .Option(inner) -> sema_core_collect_type(inner, registered, used, spans, span)
         .Shared(inner) -> {
             if sema_core_generated_marker_has(registered, sema_core_generated_context_marker("shared")) -> sema_core_note_usage(used, spans, "core.mem::pool_shared", None)
@@ -1099,7 +1099,7 @@ sema_core_collect_expr: fn(expr: Expr, imports: [SemaCoreImport], registered: [S
                     .Named(name) -> {
                         sema_core_note_typed_head(used, spans, name, Val(span))
                     }
-                    .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> {}
+                    .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
                 }
             }
             sema_core_collect_typed_literal_body(body, imports, registered, used, spans, callbacks)

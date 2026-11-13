@@ -1443,7 +1443,7 @@ sema_check_type_contains_view: fn(graph: SemaRegistrationGraph, module_identity:
             }
             if ret == .Val(value) -> return sema_check_type_contains_view(graph, module_identity, value, seen)
         }
-        .Int | .Float | .Bool | .String | .Char | .TraitObject(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Union(_) | .Quantity(_, _) | .Measure(_) -> {}
+        .Int | .Float | .Bool | .String | .Char | .TraitObject(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
     }
     false
 }
@@ -1619,11 +1619,11 @@ sema_failure_carrier: fn(return_type: Type?) -> TFailureCarrier Never! {
                 .Named(name) -> {
                     if name == "Never" -> return TFailureCarrier.Infallible
                 }
-                .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> {}
+                .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
             }
             return TFailureCarrier.Result{success: ok, error: err}
         }
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> {}
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
     }
     TFailureCarrier.Result{success: ty, error: Type.Named{name: "Err"}}
 }
@@ -1634,7 +1634,7 @@ sema_function_returns_value: fn(effective_return: Type) -> Bool Never! {
     success: if effective_return == {
         // copy: `ok` is a payload of read parameter `effective_return`, which keeps the original; the assigned `success` owns this one
         .Result(ok, _) -> ok.copy()
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> effective_return
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> effective_return
     }
     if success == (Type.Named{name: "Unit"}) -> return false
     if effective_return == .Apply(name, _) && name == "Stream" -> return false
@@ -1704,7 +1704,7 @@ sema_function_normalize_owner_type: fn(graph: SemaRegistrationGraph, owner_type:
         }
         // copy: the normalized owner type is a new owned Type. For other kinds it equals
         // `owner_type`, the caller's owner type (a read parameter), which the caller keeps.
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> return owner_type.copy()
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> return owner_type.copy()
     }
 }
 
@@ -1717,7 +1717,7 @@ sema_function_owner_generic_params: fn(graph: SemaRegistrationGraph, owner_type:
     nominal: graph.modules[nominal_row.module_index].nominals[nominal_row.row]
     owner_args := if normalized_owner_type == {
         .Apply(_, args) -> args
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> [Type]{}
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> [Type]{}
     }
     if nominal.generic_params.len() != owner_args.len() {
         if nominal.generic_params.len() > 0 || owner_args.len() > 0 -> complete = false
@@ -1937,7 +1937,7 @@ sema_function_type_names_nothing: fn(ty: Type, generic_names: [String], environm
             }
             false
         }
-        .List(inner) | .Shared(inner) | .Option(inner) | .Tagged(_, inner) | .FixedList(inner, _) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> sema_function_type_names_nothing(inner, generic_names, environment, program)
+        .List(inner) | .Shared(inner) | .Option(inner) | .Tagged(_, inner) | .Case(_, inner) | .FixedList(inner, _) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> sema_function_type_names_nothing(inner, generic_names, environment, program)
         .Map(key, _, value) -> sema_function_type_names_nothing(key, generic_names, environment, program) || sema_function_type_names_nothing(value, generic_names, environment, program)
         .Result(ok, error) -> sema_function_type_names_nothing(ok, generic_names, environment, program) || sema_function_type_names_nothing(error, generic_names, environment, program)
         .Union(members) -> {
@@ -2909,7 +2909,7 @@ sema_check_method_input_row: fn(module_identity: String, job: SemaBodyJob, memor
         .None -> {
             if owner_type == {
                 .Apply(_, _) -> owner_generic_complete = false
-                .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> {}
+                .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
             }
         }
     }
@@ -7475,7 +7475,7 @@ sema_comptime_drop_close_keys: fn(graph: SemaRegistrationGraph, tree: BodyTree, 
 // already read.
 sema_comptime_close_methods_add: fn(graph: SemaRegistrationGraph, ty: Type, module_identity: String, seen: &[String:Bool], keys: &[String]) {
     if ty == {
-        .List(element) | .Option(element) | .Shared(element) | .Tagged(_, element) | .FixedList(element, _) -> sema_comptime_close_methods_add(graph, element, module_identity, seen, keys)
+        .List(element) | .Option(element) | .Shared(element) | .Tagged(_, element) | .Case(_, element) | .FixedList(element, _) -> sema_comptime_close_methods_add(graph, element, module_identity, seen, keys)
         .Map(key, _, value) -> {
             sema_comptime_close_methods_add(graph, key, module_identity, seen, keys)
             sema_comptime_close_methods_add(graph, value, module_identity, seen, keys)
@@ -7546,7 +7546,7 @@ sema_comptime_codec_methods: fn(graph: SemaRegistrationGraph, ty: Type, module_i
 
 sema_comptime_codec_methods_add: fn(graph: SemaRegistrationGraph, ty: Type, module_identity: String, encode: Bool, decode: Bool, found: &[(module_identity: String, key: String)]) {
     if ty == {
-        .List(element) | .Option(element) | .Shared(element) | .Tagged(_, element) | .FixedList(element, _) -> sema_comptime_codec_methods_add(graph, element, module_identity, encode, decode, found)
+        .List(element) | .Option(element) | .Shared(element) | .Tagged(_, element) | .Case(_, element) | .FixedList(element, _) -> sema_comptime_codec_methods_add(graph, element, module_identity, encode, decode, found)
         .Map(key, _, value) -> {
             sema_comptime_codec_methods_add(graph, key, module_identity, encode, decode, found)
             sema_comptime_codec_methods_add(graph, value, module_identity, encode, decode, found)
@@ -7613,7 +7613,7 @@ sema_comptime_render_methods: fn(graph: SemaRegistrationGraph, ty: Type, module_
 
 sema_comptime_render_methods_add: fn(graph: SemaRegistrationGraph, ty: Type, module_identity: String, seen: &[String:Bool], found: &[(module_identity: String, key: String)]) {
     if ty == {
-        .List(element) | .Option(element) | .Shared(element) | .Tagged(_, element) | .FixedList(element, _) -> sema_comptime_render_methods_add(graph, element, module_identity, seen, found)
+        .List(element) | .Option(element) | .Shared(element) | .Tagged(_, element) | .Case(_, element) | .FixedList(element, _) -> sema_comptime_render_methods_add(graph, element, module_identity, seen, found)
         .Map(key, _, value) -> {
             sema_comptime_render_methods_add(graph, key, module_identity, seen, found)
             sema_comptime_render_methods_add(graph, value, module_identity, seen, found)
@@ -10450,7 +10450,7 @@ sema_fixed_type: fn(ty: Type, fixed_tags: [String]) -> Bool Never! {
         }
         .List(element) -> return sema_fixed_type(element, fixed_tags)
         .FixedList(element, _) -> return sema_fixed_type(element, fixed_tags)
-        .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Union(_) | .Quantity(_, _) | .Measure(_) -> return false
+        .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> return false
     }
 }
 

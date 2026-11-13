@@ -267,7 +267,7 @@ sema_web_abi_safe: fn(ty: Type, types: SemaWebTypes) -> Bool Never! {
         .Map(key, _, value) -> key == Type.String && sema_web_abi_safe(value, types)
         .Named(name) -> name == "String" || sema_web_codable_named(name, [Type]{}, types)
         .Apply(name, args) -> sema_web_codable_named(name, args, types)
-        .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
+        .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
     }
 }
 
@@ -341,7 +341,7 @@ sema_web_type_show: fn(ty: Type) -> String Never! {
         .List(inner) -> "[{sema_web_type_show(inner)}]"
         .Map(_, _, value) -> "[String: {sema_web_type_show(value)}]"
         .Fn(params, ret, effect_bound, _, _, _) -> sema_web_fn_debug(params, ret, effect_bound)
-        .Shared(_) | .Option(_) | .Result(_, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> sema_web_type_debug(ty)
+        .Shared(_) | .Option(_) | .Result(_, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> sema_web_type_debug(ty)
     }
 }
 
@@ -374,7 +374,7 @@ sema_web_type_debug: fn(ty: Type) -> String Never! {
         .Apply(name, args) -> "Apply {{ name: \"{name}\", args: {sema_web_type_debug_list(args)} }}"
         .IntN(signed, bits) -> "IntN {{ signed: {signed}, bits: {bits} }}"
         .Fn(params, ret, effect_bound, _, _, _) -> sema_web_fn_debug(params, ret, effect_bound)
-        .Map(_, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> type_name(ty)
+        .Map(_, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> type_name(ty)
     }
 }
 

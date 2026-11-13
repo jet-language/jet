@@ -185,7 +185,7 @@ sema_serde_items_codable: fn(items: [Item], facts: SemaDeriveItemIndex, ty: Type
             }
             true
         }
-        .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .InlineRange(_, _, _) | .Tagged(_, _) | .Quantity(_, _) | .Measure(_) -> false
+        .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .InlineRange(_, _, _) | .Tagged(_, _) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
     }
 }
 
@@ -718,7 +718,7 @@ sema_serde_items_zero_expr: fn(ty: Type, span: Span) -> Expr Never! {
         .List(_) | .Map(_, _, _) -> Expr.ListLit{elements: [Expr]{}, span: span, id: AST_NODE_GENERATED}
         .Apply(name, args) -> sema_serde_items_struct_literal(name, args.copy(), [ExprField]{}, span)
         .Named(name) -> sema_serde_items_struct_literal(name, [Type]{}, [ExprField]{}, span)
-        .Char | .Shared(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> sema_serde_items_struct_literal(type_name(ty), [Type]{}, [ExprField]{}, span)
+        .Char | .Shared(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> sema_serde_items_struct_literal(type_name(ty), [Type]{}, [ExprField]{}, span)
     }
 }
 
@@ -1121,7 +1121,7 @@ sema_serde_items_migration_unmatched: fn(span: Span) -> Stmt Never! {
 sema_serde_items_pair_type: fn() -> Type Never! {
     if sema_data_object_pairs_type() == {
         .List(element) -> element
-        .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> panic("the ordered Object payload is a list")
+        .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> panic("the ordered Object payload is a list")
     }
 }
 
@@ -1552,7 +1552,7 @@ sema_codec_type_names: fn(ty: Type, names: &[String]) Never! {
             names.push(sema_serde_named_leaf(name))
             loop arg in args -> sema_codec_type_names(arg, names)
         }
-        .List(inner) | .Option(inner) | .Shared(inner) | .FixedList(inner, _) | .Tagged(_, inner) -> sema_codec_type_names(inner, names)
+        .List(inner) | .Option(inner) | .Shared(inner) | .FixedList(inner, _) | .Tagged(_, inner) | .Case(_, inner) -> sema_codec_type_names(inner, names)
         .Map(key, _, value) -> {
             sema_codec_type_names(key, names)
             sema_codec_type_names(value, names)

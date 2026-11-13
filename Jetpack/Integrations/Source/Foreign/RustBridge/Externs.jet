@@ -140,7 +140,7 @@ FFILink: struct {
 pkg_ffi_is_list: fn(ty: Type) -> Bool Never! {
     if ty == {
         .List(_) -> true
-        .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
+        .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
     }
 }
 
@@ -152,7 +152,7 @@ pkg_ffi_is_string: fn(ty: Type) -> Bool Never! {
 pkg_ffi_is_handle: fn(ty: Type, handle_names: [String]) -> Bool Never! {
     if ty == {
         .Named(name) -> handle_names.contains(name)
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
     }
 }
 
@@ -209,7 +209,7 @@ CRecordDefinitions: struct {
             .FixedList(elem, len) -> self.fixed_list_rust_type(elem, len, stack)
             .Named(name) -> self.named_rust_type(name, stack)
             .Fn(_, _, _, _, _, _) -> Val("*mut core::ffi::c_void")
-            .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .InlineRange(_, _, _) | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> None
+            .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .InlineRange(_, _, _) | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> None
         }
     }
 
@@ -236,7 +236,7 @@ CRecordDefinitions: struct {
 pkg_ffi_named: fn(ty: Type) -> String? Never! {
     if ty == {
         .Named(name) -> Val(name)
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> None
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> None
     }
 }
 
@@ -705,6 +705,7 @@ pkg_ffi_type_key: fn(ty: Type) -> String Never! {
         .FixedList(elem, len) -> "List<{pkg_ffi_type_key(elem)}#{measure_expression(len)}>"
         .Tagged(marker, inner) -> "#{pkg_ffi_tag_marker_text(marker)}:{pkg_ffi_type_key(inner)}"
         .Union(members) -> pkg_ffi_join_type_keys(members, "|")
+        .Case(name, payload) -> "{name}({pkg_ffi_type_key(payload)})"
         .Quantity(base, dimension) -> "Quantity<{pkg_ffi_type_key(base)},{dimension_identity(dimension)}>"
         .Measure(measure) -> measure_expression(measure)
     }

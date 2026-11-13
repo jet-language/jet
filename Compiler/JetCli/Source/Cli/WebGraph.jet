@@ -416,7 +416,7 @@ jet_cli_web_resumable: fn(ty: Type, named: [String]) -> Bool {
     if ty == {
         .Int | .Float | .Bool | .String | .Char | .IntN(_, _) | .Float32 | .Measure(_) -> true
         .List(inner) | .Shared(inner) | .Option(inner) -> jet_cli_web_resumable(inner, named)
-        .InlineRange(inner, _, _) | .Tagged(_, inner) | .Quantity(inner, _) -> jet_cli_web_resumable(inner, named)
+        .InlineRange(inner, _, _) | .Tagged(_, inner) | .Quantity(inner, _) | .Case(_, inner) -> jet_cli_web_resumable(inner, named)
         .FixedList(inner, _) -> jet_cli_web_resumable(inner, named)
         .Map(key, _, value) -> key == Type.String && jet_cli_web_resumable(value, named)
         .Result(ok, err) -> jet_cli_web_resumable(ok, named) && jet_cli_web_resumable(err, named)
@@ -676,7 +676,7 @@ jet_cli_web_route_codec: fn(ty: Type) -> String {
         .Float -> "float"
         .Bool -> "bool"
         .Named(name) -> if name == "JSON" || name == "Dyn" -> "json" else -> "string"
-        .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> "string"
+        .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> "string"
     }
 }
 
@@ -955,7 +955,7 @@ jet_cli_web_form: fn(modules: [JetDriverDocModule], functions: [Func], call_args
                 control = "Checkbox"
             }
             .String -> ty = "String"
-            .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> {}
+            .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
         }
         fields.push(JetCLIWebFormField{name: field.name, ty: ty, required: !jet_cli_web_is_option(field.ty) && field.default == None, default: jet_cli_web_wire_text(field.default), label: jet_cli_web_form_label(field.name), control: control})
     }

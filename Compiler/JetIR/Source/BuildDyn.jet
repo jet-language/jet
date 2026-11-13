@@ -630,7 +630,7 @@ ir_dyn_union_decode: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, rec
 ir_decode_under: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, segment: Int, inner: Int, span: Span) -> Int Never! {
     success: if ir_untag(ty) == {
         .Result(ok, _) -> ok.copy()
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> { return ir_fail_slot(b, span, "FieldError.under as {ir_type_name(ty)}") }
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> { return ir_fail_slot(b, span, "FieldError.under as {ir_type_name(ty)}") }
     }
     key: ir_codec_decode_key(p, "__decode_under") ?? return ir_fail_slot(b, span, "FieldError.under: Core/Encoding/Encoding.jet __decode_under is outside the checked program")
     args: [BodyCallArg]{ir_codec_arg(segment), ir_codec_arg(inner)}
@@ -658,7 +658,7 @@ ir_codec_decode_helper: fn(p: IRProgram, target: Type) -> (name: String, type_ar
             Val((name: "__decode_map", type_args: [Type]{value.copy()}))
         }
         .Float32 -> Val((name: "__decode_f32", type_args: [Type]{}))
-        .Int | .Float | .Bool | .String | .Char | .Shared(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> None
+        .Int | .Float | .Bool | .String | .Char | .Shared(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> None
     }
 }
 
@@ -684,7 +684,7 @@ ir_codec_scalar: fn(target: Type) -> String? Never! {
             if bits != 8 && bits != 16 && bits != 32 && bits != 64 -> return None
             Val("{if signed -> "i" else -> "u"}{bits}")
         }
-        .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> None
+        .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> None
     }
 }
 
@@ -729,7 +729,7 @@ ir_serde_encode: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receive
         .Float | .Float32 -> "Float"
         .Bool -> "Bool"
         .String | .Char -> "Text"
-        .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> ""
+        .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> ""
     }
     if variant == "" || ir_dyn_def(p, ty) == None -> return ir_fail_slot(b, span, "handle method SerdeEncode of {ir_type_name(concrete)}")
     slot: ir_expr(m, p, b, receiver)
@@ -973,7 +973,7 @@ ir_decoding_read: fn(p: IRProgram, function: FnBody, type_args: [Type]) -> (key:
         .List(element) -> {
             bytes: if ir_untag(element) == {
                 .IntN(signed, bits) -> !signed && bits == 8
-                .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
+                .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
             }
             if !bytes {
                 helper = "read_list"
@@ -994,7 +994,7 @@ ir_decoding_read: fn(p: IRProgram, function: FnBody, type_args: [Type]) -> (key:
         .Bool -> helper = "read_bool"
         .Float -> helper = "read_float"
         .String -> helper = "read_string"
-        .Char | .Shared(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> {}
+        .Char | .Shared(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
     }
     if helper == "" -> return None
     args.push(source.copy())

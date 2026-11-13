@@ -108,7 +108,7 @@ core_record_layout_names: fn(ty: Type, names: &[String]) Never! {
         }
         .FixedList(elem, _) -> core_record_layout_names(elem, names)
         .InlineRange(base, _, _) -> core_record_layout_names(base, names)
-        .Tagged(_, inner) -> core_record_layout_names(inner, names)
+        .Tagged(_, inner) | .Case(_, inner) -> core_record_layout_names(inner, names)
         .Union(members) -> {
             loop member in members -> core_record_layout_names(member, names)
         }

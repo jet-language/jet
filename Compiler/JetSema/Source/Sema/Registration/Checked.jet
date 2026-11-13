@@ -394,7 +394,7 @@ sema_checked_failure: fn(return_type: Type?) -> TFailureCarrier Never! {
         .Named(name) -> if name == "Never" -> TFailureCarrier.Diverges{value: ty} else -> TFailureCarrier.Result{success: ty, error: Type.Named{name: "Err"}}
         .Option(value) -> TFailureCarrier.Optional{value: value}
         .Result(ok, err) -> if err == (Type.Named{name: "Never"}) -> TFailureCarrier.Infallible else -> TFailureCarrier.Result{success: ok, error: err}
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> TFailureCarrier.Result{success: ty, error: Type.Named{name: "Err"}}
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> TFailureCarrier.Result{success: ty, error: Type.Named{name: "Err"}}
     }
 }
 
@@ -941,7 +941,7 @@ sema_checked_foreign_type: fn(graph: SemaRegistrationGraph, ty: Type, caller_mod
         }
         .Tagged(_, inner) -> sema_checked_foreign_type(graph, inner, caller_module, c_abi, generated, handles, seen)
         .InlineRange(base, _, _) -> sema_checked_foreign_type(graph, base, caller_module, c_abi, generated, handles, seen)
-        .TraitObject(_) | .Tuple(_) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
+        .TraitObject(_) | .Tuple(_) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
     }
 }
 
@@ -976,7 +976,7 @@ sema_checked_foreign_by_reference_field: fn(graph: SemaRegistrationGraph, ty: Ty
             "I8" | "I16" | "I32" | "I64" | "U8" | "U16" | "U32" | "U64" | "Float" | "F64" | "F32" | "Bool" -> true
             else -> sema_checked_foreign_by_reference_struct(graph, ty, caller_module, seen)
         }
-        .Int | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
+        .Int | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
     }
 }
 
@@ -1012,7 +1012,7 @@ sema_checked_foreign_c_marshals: fn(graph: SemaRegistrationGraph, ty: Type, modu
         .Int | .String | .Char | .Bool -> !written
         .Float32 -> false
         .List(element) -> sema_checked_foreign_c_array_element(graph, element, module_identity)
-        .Option(_) | .Tuple(_) | .Map(_, _, _) | .Result(_, _) | .Shared(_) | .Union(_) | .FixedList(_, _) -> false
+        .Option(_) | .Tuple(_) | .Map(_, _, _) | .Result(_, _) | .Shared(_) | .Union(_) | .Case(_, _) | .FixedList(_, _) -> false
         .Apply(name, args) -> !(name == "Ptr" && args.len() == 1)
         .Tagged(_, inner) -> sema_checked_foreign_c_marshals(graph, inner, module_identity, written)
         .Named(name) -> {
@@ -1048,7 +1048,7 @@ sema_checked_foreign_c_marshals: fn(graph: SemaRegistrationGraph, ty: Type, modu
 sema_checked_foreign_c_array_element: fn(graph: SemaRegistrationGraph, ty: Type, module_identity: String) -> Bool Never! {
     qualified: sema_checked_qualify_type(graph, ty, module_identity)
     if qualified == {
-        .Int | .String | .Char | .List(_) | .Option(_) | .Tuple(_) | .Map(_, _, _) | .Result(_, _) | .Shared(_) | .Union(_) | .FixedList(_, _) | .Fn(_, _, _, _, _, _) -> false
+        .Int | .String | .Char | .List(_) | .Option(_) | .Tuple(_) | .Map(_, _, _) | .Result(_, _) | .Shared(_) | .Union(_) | .Case(_, _) | .FixedList(_, _) | .Fn(_, _, _, _, _, _) -> false
         .Apply(name, args) -> !(name == "Ptr" && args.len() == 1)
         .Tagged(_, inner) -> sema_checked_foreign_c_array_element(graph, inner, module_identity)
         .Named(name) -> {
@@ -1080,7 +1080,7 @@ sema_checked_foreign_type_error: fn(ty: Type, span: Span, c_abi: Bool) -> Diagno
 sema_checked_foreign_integer_type: fn(ty: Type) -> Bool Never! {
     if ty == {
         .Int | .IntN(_, _) | .InlineRange(_, _, _) -> true
-        .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
+        .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
     }
 }
 
@@ -1114,14 +1114,14 @@ sema_checked_foreign_bridge_scalar_type: fn(ty: Type) -> Bool Never! {
     if ty == {
         .Int | .IntN(_, _) | .Float | .Float32 | .Bool -> true
         .InlineRange(base, _, _) | .Tagged(_, base) | .Quantity(base, _) -> sema_checked_foreign_bridge_scalar_type(base)
-        .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .Union(_) | .Measure(_) -> false
+        .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .Union(_) | .Case(_, _) | .Measure(_) -> false
     }
 }
 
 sema_checked_foreign_bridge_array_element: fn(graph: SemaRegistrationGraph, module_identity: String, ty: Type, handles: [SemaCheckedForeignHandle]) -> Bool Never! {
     if ty == {
         .Int | .IntN(_, _) | .Float | .Float32 | .Bool | .Char | .InlineRange(_, _, _) | .Tagged(_, _) | .Quantity(_, _) | .Named(_) -> !sema_checked_foreign_bridge_handle_type(graph, module_identity, ty, handles)
-        .String | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .Union(_) | .Measure(_) -> false
+        .String | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .Union(_) | .Case(_, _) | .Measure(_) -> false
     }
 }
 
@@ -1150,7 +1150,7 @@ sema_checked_foreign_bridge_generated_shape: fn(graph: SemaRegistrationGraph, mo
             .List(inner) -> {
                 if parameter.convention == AccessConvention.Move || !sema_checked_foreign_bridge_array_element(graph, module_identity, inner, handles) || !sema_checked_foreign_bridge_companion_count(params, index) -> return false
             }
-            .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> {
+            .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {
                 if parameter.convention == {
                     .Read -> {}
                     .Write -> {
@@ -1159,7 +1159,7 @@ sema_checked_foreign_bridge_generated_shape: fn(graph: SemaRegistrationGraph, mo
                             .Val(return_value) -> {
                                 if return_value == {
                                     .List(_) -> return_is_list = true
-                                    .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> {}
+                                    .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
                                 }
                             }
                             .None -> {}
@@ -1177,7 +1177,7 @@ sema_checked_foreign_bridge_generated_shape: fn(graph: SemaRegistrationGraph, mo
         .Val(return_value) -> {
             if return_value == {
                 .List(_) -> return sema_checked_foreign_bridge_return_count(params)
-                .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> {}
+                .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
             }
         }
         .None -> {}
@@ -1237,7 +1237,7 @@ sema_checked_foreign_bridge_legacy_shape: fn(graph: SemaRegistrationGraph, modul
                 .Bool -> return params.len() == 0 || sema_checked_foreign_bridge_types_equal(params, [Type]{Type.Bool}) || sema_checked_foreign_bridge_one_handle(graph, module_identity, params, handles)
                 .String -> return sema_checked_foreign_bridge_types_equal(params, [Type]{Type.String}) || sema_checked_foreign_bridge_types_equal(params, [Type]{Type.Int, Type.String}) || sema_checked_foreign_bridge_types_equal(params, [Type]{Type.Int, Type.String, Type.Int}) || sema_checked_foreign_bridge_one_handle(graph, module_identity, params, handles)
                 .Named(_) -> return params.len() == 0 && sema_checked_foreign_bridge_handle_type(graph, module_identity, return_type ?? Type.Named{name: "Unit"}, handles)
-                .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> return false
+                .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> return false
             }
         }
     }
@@ -1264,7 +1264,7 @@ sema_checked_foreign_signature: fn(graph: SemaRegistrationGraph, module_identity
         return_span: registered.declaration.return_type_span ?? registered.declaration.name_span
         pointer_return: if return_type == {
             .Apply(name, _) -> c_abi && name == "Ptr"
-            .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
+            .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
         }
         if {
             pointer_return -> {
@@ -1281,7 +1281,7 @@ sema_checked_foreign_signature: fn(graph: SemaRegistrationGraph, module_identity
         generated_list_return := false
         if return_type == {
             .List(_) -> generated_list_return = true
-            .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> {}
+            .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
         }
         if c_abi && registered.declaration.generated && generated_list_return && !sema_checked_foreign_has_array_length(registered.declaration.params) {
             diagnostics.push(sema_checked_foreign_type_error(return_type, return_span, c_abi))
@@ -1500,7 +1500,7 @@ sema_checked_inline_ffi_scalar: fn(ty: Type) -> Bool Never! {
         .IntN(_, bits) -> bits == 8 || bits == 16 || bits == 32 || bits == 64
         .InlineRange(_, _, _) -> true
         .Named(name) -> name == "Unit"
-        .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
+        .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
     }
 }
 
@@ -1511,7 +1511,7 @@ sema_checked_inline_asm_integer: fn(ty: Type) -> Bool Never! {
         .Int -> true
         .IntN(_, bits) -> bits == 8 || bits == 16 || bits == 32 || bits == 64
         .InlineRange(_, _, _) -> true
-        .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
+        .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
     }
 }
 
@@ -2198,7 +2198,7 @@ sema_checked_type_contains_name: fn(ty: Type, names: [String]) -> Bool Never! {
             }
             false
         }
-        .List(inner) | .Shared(inner) | .Option(inner) | .Tagged(_, inner) | .FixedList(inner, _) | .InlineRange(inner, _, _) -> sema_checked_type_contains_name(inner, names)
+        .List(inner) | .Shared(inner) | .Option(inner) | .Tagged(_, inner) | .Case(_, inner) | .FixedList(inner, _) | .InlineRange(inner, _, _) -> sema_checked_type_contains_name(inner, names)
         .Map(key, _, value) -> sema_checked_type_contains_name(key, names) || sema_checked_type_contains_name(value, names)
         .Result(ok, err) -> sema_checked_type_contains_name(ok, names) || sema_checked_type_contains_name(err, names)
         .Fn(params, ret, _, _, _, _) -> {
@@ -2235,7 +2235,7 @@ sema_checked_layout_is_c: fn(layout: StructLayout?) -> Bool Never! {
 sema_checked_type_is_growable: fn(ty: Type) -> Bool Never! {
     if ty == {
         .String | .List(_) | .Map(_, _, _) -> true
-        .Int | .Float | .Bool | .Char | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
+        .Int | .Float | .Bool | .Char | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
     }
 }
 
@@ -2269,7 +2269,7 @@ sema_checked_type_is_float: fn(ty: Type) -> Bool Never! {
         .Float | .Float32 -> true
         .Tagged(_, inner) -> sema_checked_type_is_float(inner)
         .Quantity(base, _) -> sema_checked_type_is_float(base)
-        .Int | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Union(_) | .Measure(_) -> false
+        .Int | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Union(_) | .Case(_, _) | .Measure(_) -> false
     }
 }
 
@@ -2481,7 +2481,7 @@ sema_checked_box_targets: fn(graph: SemaRegistrationGraph, ty: Type, caller_modu
             sema_checked_box_targets(graph, ok, caller_module, nodes, targets)
             sema_checked_box_targets(graph, err, caller_module, nodes, targets)
         }
-        .Int | .Float | .Bool | .String | .Char | .Shared(_) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> {}
+        .Int | .Float | .Bool | .String | .Char | .Shared(_) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
     }
 }
 
@@ -2774,7 +2774,7 @@ sema_checked_shared_reaches: fn(graph: SemaRegistrationGraph, owner: String, cal
             }
             (cut: false, reaches: false)
         }
-        .Shared(inner) | .Option(inner) | .List(inner) | .FixedList(inner, _) | .Tagged(_, inner) -> sema_checked_shared_reaches(graph, owner, caller, inner, memo, active)
+        .Shared(inner) | .Option(inner) | .List(inner) | .FixedList(inner, _) | .Tagged(_, inner) | .Case(_, inner) -> sema_checked_shared_reaches(graph, owner, caller, inner, memo, active)
         .Map(first, _, second) | .Result(first, second) -> {
             left: sema_checked_shared_reaches(graph, owner, caller, first, memo, active)
             if left.reaches -> return left
@@ -2826,7 +2826,7 @@ sema_checked_shared_witness: fn(graph: SemaRegistrationGraph, owner: String, cal
             result: sema_checked_shared_reaches(graph, owner, caller, inner, memo, active)
             if result.reaches -> Val(type_name(inner)) else -> None
         }
-        .Option(inner) | .List(inner) | .FixedList(inner, _) | .Tagged(_, inner) -> sema_checked_shared_witness(graph, owner, caller, inner, memo, walk)
+        .Option(inner) | .List(inner) | .FixedList(inner, _) | .Tagged(_, inner) | .Case(_, inner) -> sema_checked_shared_witness(graph, owner, caller, inner, memo, walk)
         .Map(first, _, second) | .Result(first, second) -> {
             first_witness: sema_checked_shared_witness(graph, owner, caller, first, memo, walk)
             if first_witness == {
@@ -3338,7 +3338,7 @@ sema_checked_coherence_local_trait: fn(graph: SemaRegistrationGraph, module_row:
 sema_checked_coherence_rhs_local: fn(state: SemaCheckedCoherence, rhs: Type) -> Bool Never! {
     if rhs == {
         .Named(name) | .Apply(name, _) -> sema_checked_coherence_local_type(state, name)
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
     }
 }
 
@@ -3782,7 +3782,7 @@ sema_checked_typed_scalar_literal_type: fn(value: Expr) -> Type? {
         ty: head ?? return None
         if ty == {
             .Int | .IntN(_, _) | .Float | .Float32 | .Bool -> {}
-            .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> { return None }
+            .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> { return None }
         }
         inner: if body == {
             .Value(item) -> item
@@ -4072,7 +4072,7 @@ sema_checked_layout_type_resolutions: fn(graph: SemaRegistrationGraph, module_ro
             loop arg in args -> sema_checked_layout_type_resolutions(graph, module_row, owner_qualified_name, generic_params, arg, resolutions)
         }
         .FixedList(inner, _) | .InlineRange(inner, _, _) | .Tagged(_, inner) | .Quantity(inner, _) -> sema_checked_layout_type_resolutions(graph, module_row, owner_qualified_name, generic_params, inner, resolutions)
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .Float32 | .Union(_) | .Measure(_) -> {}
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .Float32 | .Union(_) | .Case(_, _) | .Measure(_) -> {}
     }
 }
 

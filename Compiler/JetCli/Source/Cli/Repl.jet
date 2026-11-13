@@ -530,7 +530,7 @@ jet_cli_repl_scalar: fn(ty: Type) -> Bool Never! {
         .Int | .Float | .Float32 | .Bool | .Char -> true
         .IntN(_, _) | .InlineRange(_, _, _) -> true
         .Tagged(_, inner) -> jet_cli_repl_scalar(inner)
-        .String | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
+        .String | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
     }
 }
 
@@ -1296,7 +1296,7 @@ jet_cli_repl_eval_json: fn(shown: String, ty: Type?) -> JetCLIStatusValue {
         .Int | .IntN(_, _) -> return jet_cli_status_int(Int.parse(shown) ?? return JetCLIStatusValue.Text{value: shown})
         .Float | .Float32 -> return JetCLIStatusValue.Float{text: shown}
         .Bool -> return jet_cli_status_bool(shown == "true")
-        .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> {}
+        .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
     }
     if jet_cli_repl_is_unit(ty) -> return JetCLIStatusValue.Null
     JetCLIStatusValue.Text{value: shown}

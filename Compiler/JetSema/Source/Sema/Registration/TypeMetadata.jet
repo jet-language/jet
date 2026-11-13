@@ -21,7 +21,7 @@ SemaTypeMetadataAutoDerives: struct {
 sema_type_metadata_field_auto_ok: fn(ty: Type) -> Bool Never! {
     if ty == {
         .Int | .Float | .Bool | .String | .Char | .IntN(_, _) | .Float32 | .Measure(_) -> true
-        .List(inner) | .Option(inner) | .Tagged(_, inner) | .FixedList(inner, _) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> sema_type_metadata_field_auto_ok(inner)
+        .List(inner) | .Option(inner) | .Tagged(_, inner) | .Case(_, inner) | .FixedList(inner, _) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> sema_type_metadata_field_auto_ok(inner)
         .Map(key, _, value) | .Result(key, value) -> sema_type_metadata_field_auto_ok(key) && sema_type_metadata_field_auto_ok(value)
         .Tuple(fields) -> {
             loop field in fields {

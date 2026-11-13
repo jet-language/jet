@@ -612,6 +612,7 @@ sema_inline_rewrite_type: fn(rewrite: SemaInlineRewrite, ty: Type) -> Type Never
             Type.Tuple{fields: mapped}
         }
         .Union(members) -> Type.Union{members: sema_inline_rewrite_types(rewrite, members)}
+        .Case(name, payload) -> Type.Case{name: name, payload: sema_inline_rewrite_type(rewrite, payload)}
         // copy: `dimension` is a payload of read parameter `ty`, which keeps the original; field `dimension` of the new Type.Quantity owns this one
         .Quantity(base, dimension) -> Type.Quantity{base: sema_inline_rewrite_type(rewrite, base), dimension: dimension.copy()}
         .InlineRange(base, lo, hi) -> Type.InlineRange{base: sema_inline_rewrite_type(rewrite, base), lo: lo, hi: hi}

@@ -104,6 +104,7 @@ jet_driver_rust_foreign_type_key: fn(ty: Type) -> String Never! {
             keys: (loop member in members -> jet_driver_rust_foreign_type_key(member))
             return keys.join("|")
         }
+        .Case(name, payload) -> "{name}({jet_driver_rust_foreign_type_key(payload)})"
         .Quantity(base, dimension) -> "Quantity<{jet_driver_rust_foreign_type_key(base)},{dimension_identity(dimension)}>"
         .Measure(value) -> measure_expression(value)
     }
@@ -284,7 +285,7 @@ jet_driver_rust_foreign_record_type: fn(ty: Type, records: JetDriverRustForeignR
             return None
         }
         .Fn(_, _, _, _, _, _) -> Val("*mut core::ffi::c_void")
-        .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .TraitObject(_) | .Tuple(_) | .InlineRange(_, _, _) | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> None
+        .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .TraitObject(_) | .Tuple(_) | .InlineRange(_, _, _) | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> None
     }
 }
 // Whether any module declares an `extern rust` foreign function; without one

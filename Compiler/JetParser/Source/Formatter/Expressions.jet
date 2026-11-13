@@ -174,7 +174,7 @@ jfmt_struct_lit_head_is_redundant: fn(f: JetFmt, type_name: String, type_args: [
             }
             true
         }
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
     }
 }
 
@@ -908,6 +908,13 @@ jfmt_fmt_type_at: fn(f: &JetFmt, ty: Type, source: Span?) {
                 jfmt_fmt_type(f, member)
             }
         }
+        // `Name(T)` — a named case of a union.
+        .Case(name, payload) -> {
+            jfmt_write(f, name)
+            jfmt_write(f, "(")
+            jfmt_fmt_type(f, payload)
+            jfmt_write(f, ")")
+        }
     }
 }
 
@@ -967,7 +974,7 @@ jfmt_is_unit_type: fn(ty: Type) -> Bool Never! {
 jfmt_fmt_marked_type: fn(f: &JetFmt, ty: Type) {
     grouped: if ty == {
         .Union(_) | .Fn(_, _, _, _, _, _) | .Result(_, _) | .Tagged(_, _) -> true
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Quantity(_, _) | .Measure(_) -> false
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
     }
     if grouped {
         jfmt_write(f, "(")

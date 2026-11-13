@@ -644,7 +644,7 @@ ir_precise_rendered_owners: fn(ty: Type, owners: &[String]) Never! {
         .FixedList(element, _) -> ir_precise_rendered_owners(element, owners)
         .Option(inner) -> ir_precise_rendered_owners(inner, owners)
         .Shared(inner) -> ir_precise_rendered_owners(inner, owners)
-        .Tagged(_, inner) -> ir_precise_rendered_owners(inner, owners)
+        .Tagged(_, inner) | .Case(_, inner) -> ir_precise_rendered_owners(inner, owners)
         .Map(key, _, value) -> {
             ir_precise_rendered_owners(key, owners)
             ir_precise_rendered_owners(value, owners)

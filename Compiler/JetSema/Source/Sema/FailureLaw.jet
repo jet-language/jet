@@ -574,7 +574,7 @@ sema_failure_domain_is_error: fn(ty: Type, seen: [String], environment: SemaScop
             if declared == .Val(value) -> return value
             return sema_core_error_type(name)
         }
-        .Tagged(_, inner) -> return sema_failure_domain_is_error(inner, seen, environment, program)
+        .Tagged(_, inner) | .Case(_, inner) -> return sema_failure_domain_is_error(inner, seen, environment, program)
         .Union(members) -> {
             if members.len() == 0 -> return false
             loop member in members {
@@ -630,7 +630,7 @@ sema_check_failure_contract_type: fn(ty: Type, span: Span, in_return: Bool, gene
             }
             sema_check_failure_contract_type(inner, span, false, generic_names, environment, program, diagnostics)
         }
-        .List(inner) | .Shared(inner) | .Tagged(_, inner) | .FixedList(inner, _) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> sema_check_failure_contract_type(inner, span, false, generic_names, environment, program, diagnostics)
+        .List(inner) | .Shared(inner) | .Tagged(_, inner) | .FixedList(inner, _) | .InlineRange(inner, _, _) | .Quantity(inner, _) | .Case(_, inner) -> sema_check_failure_contract_type(inner, span, false, generic_names, environment, program, diagnostics)
         .Map(key, _, value) -> {
             sema_check_failure_contract_type(key, span, false, generic_names, environment, program, diagnostics)
             sema_check_failure_contract_type(value, span, false, generic_names, environment, program, diagnostics)
@@ -777,7 +777,7 @@ sema_union_member_open: fn(ty: Type, generic_names: [String]) -> Bool Never! {
     if ty == {
         .TraitObject(_) | .Fn(_, _, _, _, _, _) -> true
         .Named(name) -> generic_names.contains(name)
-        .List(inner) | .Shared(inner) | .Option(inner) | .Tagged(_, inner) | .FixedList(inner, _) -> sema_union_member_open(inner, generic_names)
+        .List(inner) | .Shared(inner) | .Option(inner) | .Tagged(_, inner) | .FixedList(inner, _) | .Case(_, inner) -> sema_union_member_open(inner, generic_names)
         .Map(key, _, value) -> sema_union_member_open(key, generic_names) || sema_union_member_open(value, generic_names)
         .Result(ok, error) -> sema_union_member_open(ok, generic_names) || sema_union_member_open(error, generic_names)
         .Apply(_, args) | .Union(args) -> {
@@ -813,7 +813,7 @@ sema_public_failure_collect_named: fn(ty: Type, out: &[String]) Never! {
             out.push(name.copy())
             loop arg in args -> sema_public_failure_collect_named(arg, out)
         }
-        .List(inner) | .Shared(inner) | .Option(inner) | .FixedList(inner, _) | .Tagged(_, inner) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> sema_public_failure_collect_named(inner, out)
+        .List(inner) | .Shared(inner) | .Option(inner) | .FixedList(inner, _) | .Tagged(_, inner) | .Case(_, inner) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> sema_public_failure_collect_named(inner, out)
         .Map(key, _, value) -> {
             sema_public_failure_collect_named(key, out)
             sema_public_failure_collect_named(value, out)
@@ -973,7 +973,7 @@ sema_stmt_never_return_rejected: fn(value: Expr?, return_type: Type?, function_n
             allows_failure = ok == Type.Named{name: "Never"}
             allows_failure
         }
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
     }
     if !never_success -> return false
     returned: value ?? {
@@ -1024,7 +1024,7 @@ sema_never_callee_return_diverges: fn(ret: Type) -> Bool Never! {
     declared: sema_expr_unwrap_tag(ret)
     if declared == {
         .Result(ok, err) -> ok == never && err == never
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> declared == never
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> declared == never
     }
 }
 
@@ -1073,7 +1073,7 @@ sema_function_promises_never: fn(func: Func) -> Bool {
     if declared == {
         .Named(name) -> name == "Never"
         .Result(ok, _) -> ok == Type.Named{name: "Never"}
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
     }
 }
 
@@ -1122,6 +1122,6 @@ sema_fallback_err_denial_for: fn(subject: Type) -> String? {
     if sema_expr_unwrap_tag(subject) == {
         .Result(_, _) -> None
         .Option(_) -> Val("E0408")
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> Val("E0409")
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> Val("E0409")
     }
 }

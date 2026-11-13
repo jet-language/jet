@@ -118,14 +118,14 @@ sema_coverage_payload_type: fn(subject_ty: Type, key: String, field: Int, enviro
                 if sema_pattern_union_tag(member) == key -> return Val(member)
             }
         }
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Quantity(_, _) | .Measure(_) -> {}
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
     }
     None
 }
 
 sema_coverage_is_closed: fn(ty: Type) -> Bool Never! {
     if ty == {
-        .Named(_) | .Apply(_, _) | .Option(_) | .Result(_, _) | .Union(_) | .List(_) | .FixedList(_, _) | .Map(_, _, _) -> true
+        .Named(_) | .Apply(_, _) | .Option(_) | .Result(_, _) | .Union(_) | .Case(_, _) | .List(_) | .FixedList(_, _) | .Map(_, _, _) -> true
         .Int | .Float | .Bool | .String | .Char | .Shared(_) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Quantity(_, _) | .Measure(_) -> false
     }
 }
@@ -286,14 +286,14 @@ sema_coverage_integer_interval: fn(ty: Type) -> SemaIntegerRange? {
     if ty == {
         .InlineRange(_, lo, hi) -> Val(SemaIntegerRange{lo: lo, hi: hi})
         .IntN(signed, bits) -> if bits <= 0 || bits > 32 -> None else -> Val(sema_expr_integer_range(signed, bits))
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> None
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> None
     }
 }
 
 sema_coverage_is_open_scalar: fn(ty: Type) -> Bool Never! {
     if ty == {
         .Int | .Char | .IntN(_, _) | .InlineRange(_, _, _) -> true
-        .Float | .Bool | .String | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
+        .Float | .Bool | .String | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
     }
 }
 
@@ -304,7 +304,7 @@ sema_coverage_compiler_enum: fn(ty: Type) -> [String]? {
     name := ""
     if ty == {
         .Named(value) -> name = value
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> return None
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> return None
     }
     if sema_compiler_enum_variants(name) == .Val(variants) -> return Val(variants)
     if core_enum_payload_variants(name) == .Val(variants) -> return Val(variants)
@@ -345,7 +345,7 @@ sema_coverage_missing: fn(subject_ty: Type, keys: [String], environment: SemaSco
                 if !sema_coverage_has_key(keys, member_tag) -> missing.push(member_tag)
             }
         }
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Quantity(_, _) | .Measure(_) -> {}
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
     }
     missing
 }
@@ -686,7 +686,7 @@ sema_coverage_is_else_table: fn(environment: SemaScopeEnvironment, program: Sema
 // structs stay open, so an `else` after their arms can still run.
 sema_coverage_is_closed_set: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
     if ty == {
-        .Option(_) | .Result(_, _) | .Union(_) -> return true
+        .Option(_) | .Result(_, _) | .Union(_) | .Case(_, _) -> return true
         .Named(_) | .Apply(_, _) -> {}
         .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Quantity(_, _) | .Measure(_) -> return false
     }
@@ -806,7 +806,7 @@ sema_coverage_case_pattern: fn(subject_ty: Type, name: String, environment: Sema
             else -> ".Err(_)"
         })
         // A union member is tested by its tag alone (`.Int -> …`).
-        .Union(_) -> return Val(".{name}")
+        .Union(_) | .Case(_, _) -> return Val(".{name}")
         .Named(_) | .Apply(_, _) -> {}
         .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Quantity(_, _) | .Measure(_) -> return None
     }
@@ -1012,7 +1012,7 @@ sema_pattern_matrix_constructors: fn(ty: Type, environment: SemaScopeEnvironment
                 {name: "Err", payload: [Type]{err}},
             }
         }
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> {}
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
     }
     names: sema_coverage_missing(ty, [String]{}, environment, program)
     constructors := [SemaPatternCoverageConstructor]{}
@@ -1093,7 +1093,7 @@ sema_pattern_matrix_complete: fn(written_rows: [SemaPatternCoverageRow], types: 
             }
             return sema_pattern_matrix_complete(settled, tail, environment, program)
         }
-        .Int | .Float | .Bool | .String | .Char | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> {}
+        .Int | .Float | .Bool | .String | .Char | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
     }
     if program.registration_graph == .Val(graph) && sema_pattern_nominal_row(graph, environment.module_identity, ty) == .Val(owner) {
         nominal: graph.modules[owner.module_index].nominals[owner.row]

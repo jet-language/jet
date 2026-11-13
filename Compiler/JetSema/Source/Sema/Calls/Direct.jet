@@ -134,7 +134,7 @@ sema_call_check_special_approx: fn(call: Call, expected: Type?, environment: Sem
     target: if expected == {
         .Val(expected_type) -> if expected_type == {
             .Float32 -> Type.Float32
-            .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> Type.Float
+            .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> Type.Float
         }
         .None -> Type.Float
     }
@@ -154,7 +154,7 @@ sema_call_debug_traceable: fn(ty: Type, environment: SemaScopeEnvironment, progr
     if sema_call_reflection_secret_bearing(ty) -> return false
     if ty == {
         .Int | .Float | .Bool | .String | .Char | .IntN(_, _) | .Float32 | .Quantity(_, _) -> true
-        .Option(inner) | .List(inner) | .FixedList(inner, _) | .Tagged(_, inner) | .InlineRange(inner, _, _) -> sema_call_debug_traceable(inner, environment, program)
+        .Option(inner) | .List(inner) | .FixedList(inner, _) | .Tagged(_, inner) | .Case(_, inner) | .InlineRange(inner, _, _) -> sema_call_debug_traceable(inner, environment, program)
         .Result(ok, err) | .Map(ok, _, err) -> sema_call_debug_traceable(ok, environment, program) && sema_call_debug_traceable(err, environment, program)
         .Named(name) -> {
             if sema_call_reflection_leaf_name(name) == "Unit" || sema_call_reflection_core_shown(name) || sema_call_reflection_leaf_name(name) == "Err" -> return true
@@ -544,7 +544,7 @@ sema_call_ambient_print_refusal: fn(ty: Type, span: Span) -> Diagnostic Never! {
             .Named(name) -> {
                 if sema_call_reflection_leaf_name(name) == "Body" -> fix = "materialize it first: add `.text(limit)` before printing"
             }
-            .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> {}
+            .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
         }
         return sema_error("E0112", span, "`print` cannot show the one-pass source {sema_type_show(ty)}", "reading this value consumes it, so showing it would spend the only pass", fix)
     }
@@ -674,7 +674,7 @@ sema_call_eval_show_item: fn(ty: Type) -> Type? Never! {
     if ty == {
         .List(element) -> Val(element)
         .Apply(name, args) -> if name == "Iter" && args.len() == 1 -> Val(args[0]) else -> None
-        .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> None
+        .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> None
     }
 }
 
@@ -1204,7 +1204,7 @@ sema_call_default_err_result: fn(expected: Type?) -> Type? {
     normalized: sema_expr_unwrap_tag(expected_value)
     if normalized == {
         .Result(ok, err) -> Val(Type.Result{ok: ok, err: err})
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> None
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> None
     }
 }
 
@@ -1321,7 +1321,7 @@ sema_call_default_err_constructor: fn(call: Call, expected: Type?, wrap_result: 
             value: sema_tree_node(Type.Result{ok: ok, err: err}, TExprKind.Err{value: payload}, span)
             sema_expr_expected(value, expected, environment, program, diagnostics)
         }
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> Val(payload)
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> Val(payload)
     }
 }
 
@@ -1512,7 +1512,7 @@ sema_type_never_numeric: fn(ty: Type) -> Bool Never! {
     if ty == {
         .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Tuple(_) | .FixedList(_, _) -> true
         .Tagged(_, inner) -> sema_type_never_numeric(inner)
-        .Int | .Float | .Named(_) | .Measure(_) | .Apply(_, _) | .Quantity(_, _) | .TraitObject(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Shared(_) | .Union(_) -> false
+        .Int | .Float | .Named(_) | .Measure(_) | .Apply(_, _) | .Quantity(_, _) | .TraitObject(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Shared(_) | .Union(_) | .Case(_, _) -> false
     }
 }
 

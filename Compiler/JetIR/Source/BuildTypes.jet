@@ -3,7 +3,7 @@
 // rendering (Display/Show/Debug) and numeric conversions.
 
 use {
-    jet_foundation.[CORE_ENUM_ROWS, IRRuntimeHandle, IR_RUNTIME_HANDLES, Span, SymbolID, Type, TypeTupleField, TBinaryOp, TCLIBinding, TCompilerBuiltin, TComptimeValue, TDeclarationOwnership, TField, FnBody, TGenericParam, TNarrowOutcome, TNumericOp, TSerdeAttribute, TShapeFieldNames, TTextPatternPart, TTryConvert, TTypeDef, TTypeDefKind, TVariant, TVariantPayload, core_source_owns_type, core_source_part_owns_type, ir_host_value_name, jet_target_layout_member_order, measure_literal_value, name_rows_set, name_rows_value, type_carrier_identity, type_name, type_table_intern, type_union_member_tag]
+    jet_foundation.[CORE_ENUM_ROWS, IRRuntimeHandle, IR_RUNTIME_HANDLES, Span, SymbolID, Type, TypeTupleField, TBinaryOp, TCLIBinding, TCompilerBuiltin, TComptimeValue, TDeclarationOwnership, TField, FnBody, TGenericParam, TNarrowOutcome, TNumericOp, TSerdeAttribute, TShapeFieldNames, TTextPatternPart, TTryConvert, TTypeDef, TTypeDefKind, TVariant, TVariantPayload, core_source_owns_type, core_source_part_owns_type, ir_host_value_name, jet_target_layout_member_order, measure_literal_value, name_rows_set, name_rows_value, type_carrier_identity, type_name, type_table_intern, type_union_member_payload, type_union_member_tag]
     jet_sema.[sema_type_def_instance_type]
 }
 
@@ -150,7 +150,7 @@ ir_type_row: fn(m: &IRModule, ty: Type) -> Int? Never! {
             if fields.len() != 0 { return None }
             ir_layout(IRTypeKind.Unit, ty, 0, 1, IRClass.Integer, false, 0, "")
         }
-        .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .FixedList(_, _) | .Union(_) | .Measure(_) -> { return None }
+        .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .FixedList(_, _) | .Union(_) | .Case(_, _) | .Measure(_) -> { return None }
     }
     interned: ir_intern_type(m, type_carrier_identity(ty), row)
     if code >= 0 {
@@ -173,7 +173,7 @@ ir_scalar_code: fn(ty: Type) -> Int Never! {
         .Named(name) -> if name == "Unit" -> 6 else if name == "()" -> 7 else if name == "Never" -> 8 else -> -1
         .Tuple(fields) -> if fields.len() == 0 -> 9 else -> -1
         .IntN(signed, bits) -> if bits >= 1 && bits <= 64 -> 10 + (if signed -> 64 else -> 0) + bits - 1 else -> -1
-        .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> -1
+        .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> -1
     }
 }
 
@@ -437,7 +437,7 @@ ir_atomic_lane: fn(scalar: Type) -> String? Never! {
         .Named(name) -> {
             if name == "Bool" -> return Val("bool")
         }
-        .Float | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Measure(_) -> {}
+        .Float | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Measure(_) -> {}
     }
     None
 }
@@ -620,7 +620,7 @@ ir_host_value_held: fn(p: IRProgram, ty: Type) -> Bool Never! {
                 if ir_host_value_held(p, field.ty) -> return true
             }
         }
-        .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> {}
+        .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
     }
     false
 }
@@ -909,7 +909,7 @@ ir_record_member_crosses: fn(m: &IRModule, p: IRProgram, row: Int) -> Bool Never
         if ir_record_runtime(m, p, inner) != None -> return true
         return if ir_untag(inner) == {
             .String | .Int -> true
-            .Float | .Bool | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
+            .Float | .Bool | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
         }
     }
     if ir_untag(ty) == .List(item) -> return ir_record_byte_list(m, p, row) || ir_record_runtime(m, p, item) != None
@@ -1445,7 +1445,7 @@ ir_option_int_payload: fn(m: &IRModule, p: IRProgram, written: Type, laying: [St
     if ty == {
         .Int -> return true
         .Named(_) | .Apply(_, _) | .InlineRange(_, _, _) | .Quantity(_, _) | .Measure(_) -> {}
-        .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .Float32 | .Tagged(_, _) | .Union(_) -> return false
+        .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) -> return false
     }
     row: ir_option_payload_row(m, p, ty, laying) ?? return false
     m.types[row].kind == .Int
@@ -1463,7 +1463,7 @@ ir_option_scalar_payload: fn(m: &IRModule, p: IRProgram, written: Type, laying: 
         .Bool | .Char -> return true
         .IntN(signed, bits) -> return !signed && bits <= 62
         .Named(_) | .Apply(_, _) | .InlineRange(_, _, _) | .Quantity(_, _) | .Measure(_) -> {}
-        .Int | .Float | .String | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .Float32 | .Tagged(_, _) | .Union(_) -> return false
+        .Int | .Float | .String | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) -> return false
     }
     row: ir_option_payload_row(m, p, ty, laying) ?? return false
     if m.types[row].drop != "" -> return false
@@ -1493,7 +1493,7 @@ ir_enum_def: fn(m: IRModule, p: IRProgram, ty: Int) -> Int? Never! {
     name: if m.types[ty].ty == {
         .Named(name) -> name
         .Apply(name, _) -> name
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> { return None }
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> { return None }
     }
     row: ir_type_def(p, name) ?? return None
     if p.types[row].kind == .Enum(_, _) -> return Val(row)
@@ -1539,7 +1539,7 @@ ir_unit_type: fn(ty: Type) -> Bool Never! {
     if ty == {
         .Named(name) -> name == "Unit" || name == "()"
         .Tuple(fields) -> fields.len() == 0
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
     }
 }
 
@@ -1960,7 +1960,7 @@ ir_nominal_name: fn(ty: Type) -> String? Never! {
     if ty == {
         .Named(name) -> Val(name)
         .Apply(name, _) -> Val(name)
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> None
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> None
     }
 }
 
@@ -2996,9 +2996,9 @@ ir_collect_signature_unions: fn(functions: [FnBody], found: &[Type]) Never! {
 }
 
 // The structural enum of union `key`: one variant per member, named by its
-// union member tag and carrying the member.
+// union member tag and carrying the member, or a named case's payload.
 ir_union_def: fn(module_identity: String, key: String, members: [Type]) -> TTypeDef Never! {
-    variants: loop member in members -> TVariant{name: type_union_member_tag(member), wire_name: type_union_member_tag(member), span: Span{start: 0, end: 0}, payload: TVariantPayload.Single{value: member.copy()}, discriminant: None}
+    variants: loop member in members -> TVariant{name: type_union_member_tag(member), wire_name: type_union_member_tag(member), span: Span{start: 0, end: 0}, payload: TVariantPayload.Single{value: type_union_member_payload(member)}, discriminant: None}
     ir_compiler_owned_def(module_identity, key, TTypeDefKind.Enum{variants: variants, methods: [String]{}})
 }
 
@@ -3021,6 +3021,7 @@ ir_collect_unions: fn(ty: Type, found: &[Type]) Never! {
         }
         .Tuple(fields) -> loop field in fields -> ir_collect_unions(field.ty, found)
         .Apply(_, args) -> loop arg in args -> ir_collect_unions(arg, found)
+        .Case(_, payload) -> ir_collect_unions(payload, found)
         .Int | .Float | .Bool | .String | .Char | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Quantity(_, _) | .Measure(_) -> {}
     }
 }
@@ -3470,7 +3471,7 @@ ir_compiler_owned_def: fn(module_identity: String, name: String, kind: &&TTypeDe
 ir_carrier_type: fn(ty: Type) -> Bool Never! {
     if ir_untag(ty) == {
         .Option(_) | .Result(_, _) -> true
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
     }
 }
 
@@ -3745,7 +3746,7 @@ ir_list_operand: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, span: 
 ir_sequence_element: fn(ty: Type) -> Type? Never! {
     if ir_untag(ty) == {
         .List(element) | .FixedList(element, _) -> Val(element.copy())
-        .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> None
+        .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> None
     }
 }
 
@@ -3895,7 +3896,7 @@ ir_text_pattern_rows: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, parts: [TTex
                         a = ir_word_const(m, b, lo)
                         c = ir_word_const(m, b, hi)
                     }
-                    .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> return ir_fail_slot(b, span, "text pattern hole of {ir_type_name(ty)}")
+                    .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> return ir_fail_slot(b, span, "text pattern hole of {ir_type_name(ty)}")
                 }
                 if name == "" || name == "_" {
                     storage = 5

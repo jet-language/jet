@@ -171,7 +171,7 @@ ir_unzip: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, result_ty: Type, receive
     item: ir_zip_element(input_ty) ?? return ir_fail_slot(b, span, "builtin Unzip over {ir_type_name(receiver_ty)}")
     rows_are_tuples: if ir_untag(item) == {
         .Tuple(_) -> true
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
     }
     if columns_shape.len() == 0 || !rows_are_tuples -> return ir_fail_slot(b, span, "builtin Unzip of {ir_type_name(item)} rows into {ir_type_name(result_ty)}")
     source := ir_expr(m, p, b, receiver)

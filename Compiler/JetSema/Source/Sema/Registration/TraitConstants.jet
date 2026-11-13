@@ -158,7 +158,7 @@ sema_trait_constant_eval: fn(graph: SemaRegistrationGraph, expr: Expr, ty: Type,
             if sema_trait_constant_enum_variants(graph, type_module, name) == .Val(variants) -> return sema_trait_constant_eval_enum(graph, expr, name, variants, module_identity)
             if sema_trait_constant_record(graph, type_module, name) == .Val(record) -> return sema_trait_constant_eval_record(graph, expr, name, record, module_identity)
         }
-        .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> {}
+        .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
     }
     literal: sema_trait_constant_literal(expr) ?? return sema_trait_constant_other(expr)
     fitted: sema_trait_constant_fit(literal, ty) ?? return SemaTraitConstantEval.WrongType
@@ -220,7 +220,7 @@ sema_trait_constant_fit: fn(literal: TComptimeValue, ty: Type) -> TComptimeValue
                     if sema_trait_constant_int_fits(value, signed, bits) -> return Val(TComptimeValue.Int{value: value})
                     return None
                 }
-                .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> return None
+                .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> return None
             }
         }
         .Float(value, bits) -> {
@@ -525,7 +525,7 @@ sema_trait_constant_head: fn(ty: Type) -> String? Never! {
     if ty == {
         .Named(name) -> Val(name.copy())
         .Apply(name, _) -> Val(name.copy())
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> None
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> None
     }
 }
 

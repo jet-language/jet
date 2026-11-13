@@ -917,7 +917,7 @@ ir_declared_owner: fn(declared: [String:String], module_identity: String, owner:
             key: declared.get("{module_identity}|{name}") ?? return None
             return Val(Type.Apply{name: key.copy(), args: args.copy()})
         }
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> return None
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> return None
     }
 }
 
@@ -1061,6 +1061,7 @@ ir_keyed_nominals: fn(p: IRProgram, ty: Type) -> Type Never! {
         // copy: `marker` is a payload of read parameter `ty`; field `marker` of the new Type.Tagged owns this one
         .Tagged(marker, inner) -> Type.Tagged{marker: marker.copy(), inner: ir_keyed_nominals(p, inner)}
         .Union(members) -> Type.Union{members: loop member in members -> ir_keyed_nominals(p, member)}
+        .Case(name, payload) -> Type.Case{name: name, payload: ir_keyed_nominals(p, payload)}
         .Tuple(fields) -> Type.Tuple{fields: loop field in fields -> TypeTupleField{name: field.name, ty: ir_keyed_nominals(p, field.ty)}}
         // copy: a type with no nominal head is returned as a new tree; the
         // caller keeps the read parameter.
@@ -1543,7 +1544,7 @@ ir_entry_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, callee: Int, row: I
             ir_emit(b.f, IROp.Unreachable, -1, -1, -1, -1, b.line)
             ir_end(b.f, b.line)
         }
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> {}
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
     }
     if result >= 0 -> ir_release(m, b, result)
 }
@@ -1966,7 +1967,7 @@ ir_payload_take: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int) -> Int
     if !ir_box_row(m, carrier_row) -> return -1
     if ir_untag(m.types[carrier_row].ty) == {
         .Option(_) | .Result(_, _) -> {}
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> return -1
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> return -1
     }
     ir_close_disarm(b, slot)
     ir_close_disarm(b, carrier)

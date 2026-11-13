@@ -574,6 +574,16 @@ is E0112. Only the value widens: a `&` parameter takes exactly its union type,
 and a list, optional or other container of the smaller union is not one of the
 larger (D-ALT-SUBSET1=A).
 
+A union member may be a named case, written exactly as inside an enum:
+`temp: Celsius(Float) | Fahrenheit(Float)`. Inside a union, `Name(T)` is a
+named case and a bare name is always a type, so named cases mix with type
+members (`Kelvin(Int) | String`). `.Celsius(21.5)` builds a case where the
+union is expected, and `.Celsius(c) ->` matches it and binds its payload. A
+named case carries exactly one payload; it can't reuse the name of a type
+member of the same union, and one name can't carry two payload types (E0363).
+A repeated case with the same payload is one case. Serialization of named
+cases is not promised (D-ALT-CASES1=A).
+
 `loop` supports infinite, conditional, source, map-pair, and explicit-state
 forms:
 

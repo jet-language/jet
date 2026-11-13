@@ -657,6 +657,7 @@ sema_derive_expand_type: fn(expansion: &SemaDeriveExpansion, ty: Type) -> Type N
     if ty == {
         .Named(name) -> Type.Named{name: sema_derive_expand_name(expansion, name, zero)}
         .List(inner) -> Type.List{element: sema_derive_expand_type(expansion, inner)}
+        .Case(name, payload) -> Type.Case{name: name, payload: sema_derive_expand_type(expansion, payload)}
         .Shared(inner) -> Type.Shared{inner: sema_derive_expand_type(expansion, inner)}
         .Option(inner) -> Type.Option{inner: sema_derive_expand_type(expansion, inner)}
         // copy: `len` is a payload of read parameter `ty`, which keeps the original; field `len` of the new Type.FixedList owns this one
@@ -2091,6 +2092,7 @@ sema_derive_replace_provider_type: fn(ty: Type, type_param: String, owner_type: 
         // the caller keeps.
         .Named(name) -> if name == type_param -> owner_type.copy() else -> ty.copy()
         .List(inner) -> Type.List{element: sema_derive_replace_provider_type(inner, type_param, owner_type)}
+        .Case(name, payload) -> Type.Case{name: name, payload: sema_derive_replace_provider_type(payload, type_param, owner_type)}
         .Shared(inner) -> Type.Shared{inner: sema_derive_replace_provider_type(inner, type_param, owner_type)}
         .Option(inner) -> Type.Option{inner: sema_derive_replace_provider_type(inner, type_param, owner_type)}
         // copy: `len` is a payload of read parameter `ty`, which keeps the original; field `len` of the new Type.FixedList owns this one
@@ -2314,7 +2316,7 @@ sema_derive_native_ordering_ready: fn(ty: Type) -> Bool {
             true
         }
         .Named(name) -> name == "U8" || name == "Ordering"
-        .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .InlineRange(_, _, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
+        .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .InlineRange(_, _, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
     }
 }
 
@@ -2354,7 +2356,7 @@ sema_derive_type_ready: fn(readiness: &SemaDeriveReadiness, items: [Item], ty: T
             }
             true
         }
-        .Tagged(_, inner) -> {
+        .Tagged(_, inner) | .Case(_, inner) -> {
             if codec -> return false
             if comparable -> sema_derive_native_ordering_ready(ty) else -> sema_derive_type_ready(readiness, items, inner, type_params)
         }
@@ -2551,7 +2553,7 @@ sema_derive_numeric_base: fn(ty: Type) -> Bool Never! {
     if ty == {
         .Int | .IntN(_, _) | .Float | .Float32 | .Named(_) | .Apply(_, _) | .Quantity(_, _) | .Measure(_) -> true
         .Tagged(_, inner) | .InlineRange(inner, _, _) -> sema_derive_numeric_base(inner)
-        .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .Union(_) -> false
+        .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .Union(_) | .Case(_, _) -> false
     }
 }
 
@@ -2645,7 +2647,7 @@ sema_derive_comparable_marker: fn(derives: [NamedSpan]) -> Span? Never! {
 sema_derive_unordered_type: fn(ty: Type) -> Type? Never! {
     if ty == {
         .Map(_, _, _) | .Fn(_, _, _, _, _, _) -> Val(ty)
-        .List(inner) | .Option(inner) | .FixedList(inner, _) | .Tagged(_, inner) | .InlineRange(inner, _, _) -> sema_derive_unordered_type(inner)
+        .List(inner) | .Option(inner) | .FixedList(inner, _) | .Tagged(_, inner) | .Case(_, inner) | .InlineRange(inner, _, _) -> sema_derive_unordered_type(inner)
         .Result(ok, error) -> {
             if sema_derive_unordered_type(ok) == .Val(held) -> return Val(held)
             sema_derive_unordered_type(error)
@@ -2925,7 +2927,7 @@ sema_derive_builtin_blocks: fn(item: Item, facts: SemaDeriveItemIndex, auto_equa
 sema_derive_holds_function: fn(ty: Type) -> Bool Never! {
     if ty == {
         .Fn(_, _, _, _, _, _) -> true
-        .List(inner) | .Option(inner) | .FixedList(inner, _) | .Tagged(_, inner) | .Shared(inner) -> sema_derive_holds_function(inner)
+        .List(inner) | .Option(inner) | .FixedList(inner, _) | .Tagged(_, inner) | .Case(_, inner) | .Shared(inner) -> sema_derive_holds_function(inner)
         .Map(key, _, value) | .Result(key, value) -> sema_derive_holds_function(key) || sema_derive_holds_function(value)
         .Tuple(members) -> loop member in members {
             if sema_derive_holds_function(member.ty) -> break true

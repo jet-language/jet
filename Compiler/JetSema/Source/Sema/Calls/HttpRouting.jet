@@ -500,7 +500,7 @@ sema_http_route_schema_type: fn(ty: Type, environment: SemaScopeEnvironment, pro
             item: sema_http_route_schema_type(inner, environment, program, module_identity, active) ?? return None
             return Val("{{\"anyOf\":[{item},{{\"type\":\"null\"}}]}}")
         }
-        .Result(ok, _) | .Shared(ok) | .Tagged(_, ok) | .Quantity(ok, _) | .InlineRange(ok, _, _) -> return sema_http_route_schema_type(ok, environment, program, module_identity, active)
+        .Result(ok, _) | .Shared(ok) | .Tagged(_, ok) | .Case(_, ok) | .Quantity(ok, _) | .InlineRange(ok, _, _) -> return sema_http_route_schema_type(ok, environment, program, module_identity, active)
         .Map(_, _, _) -> return Val("{{\"type\":\"object\",\"properties\":{{}},\"additionalProperties\":true}}")
         .Tuple(fields) -> {
             properties := [String]{}
@@ -543,7 +543,7 @@ sema_http_route_schema_type: fn(ty: Type, environment: SemaScopeEnvironment, pro
                 properties.push("{sema_http_route_json_quote(field.symbol.name)}:{field_schema}")
                 if field.ty == {
                     .Option(_) -> {}
-                    .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> { required.push(sema_http_route_json_quote(field.symbol.name)) }
+                    .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> { required.push(sema_http_route_json_quote(field.symbol.name)) }
                 }
             }
             required_json := if required.len() > 0 -> ",\"required\":[{required.join(",")}]" else -> ""
@@ -1063,7 +1063,7 @@ sema_http_route_contract: fn(method: String, wire: String, pattern: String, path
             schema: sema_http_route_schema_type(parameter.ty, environment, program, shape.module_identity, [String]{}) ?? return None
             required := if parameter.ty == {
                 .Option(_) -> false
-                .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> true
+                .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> true
             }
             query_params.push("{{\"name\":{sema_http_route_json_quote(parameter.name)},\"in\":\"query\",\"required\":{required},\"catch_all\":false,\"schema\":{schema}}}")
         }
@@ -1256,7 +1256,7 @@ sema_call_try_http_router: fn(receiver: Expr, receiver_value: TExpr, method: Str
         if body_type == .Val(body_ty) {
             body_model_type := if body_ty == {
                 .Option(inner) -> inner
-                .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> body_ty
+                .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> body_ty
             }
             body_fields := sema_http_route_find_struct(environment, program, body_model_type, handler_shape.module_identity)
             if body_fields == .Val(definition) {

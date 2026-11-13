@@ -28,7 +28,7 @@ jet_driver_rust_foreign_rust_type: fn(ty: Type, user_types: [String]) -> String 
             "{ast_comptime_generated_path(name)}<{types.join(", ")}>"
         }
         .FixedList(elem, len) -> "[{jet_driver_rust_foreign_rust_type(elem, user_types)}; {measure_expression(len)}]"
-        .Union(_) -> panic("anonymous unions are rejected by FFI sema")
+        .Union(_) | .Case(_, _) -> panic("anonymous unions are rejected by FFI sema")
         .Measure(_) -> panic("type measure is not a C-FFI surface type")
     }
 }
@@ -61,7 +61,7 @@ jet_driver_rust_foreign_scalar_type: fn(ty: Type) -> String? Never! {
         .Bool -> Val("bool")
         .Char -> Val("u32")
         .InlineRange(base, _, _) | .Tagged(_, base) | .Quantity(base, _) -> jet_driver_rust_foreign_scalar_type(base)
-        .String | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .Union(_) | .Measure(_) -> None
+        .String | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .Union(_) | .Case(_, _) | .Measure(_) -> None
     }
 }
 
@@ -112,7 +112,7 @@ jet_driver_rust_foreign_trampoline: fn(function: JetDriverRustForeignFunction, r
             .Float32 -> expr = "f32::from_bits(args[{index}].value as u32)"
             .Bool -> expr = "args[{index}].value != 0"
             .Char -> expr = "char::from_u32(args[{index}].value as u32).unwrap_or_else(|| ffi_panic())"
-            .Int | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> expr = "args[{index}].value as {jet_driver_rust_foreign_rust_type(ty, [String]{})}"
+            .Int | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> expr = "args[{index}].value as {jet_driver_rust_foreign_rust_type(ty, [String]{})}"
         }
         args.push(expr)
     }
@@ -142,7 +142,7 @@ jet_driver_rust_foreign_trampoline: fn(function: JetDriverRustForeignFunction, r
                 body.push("    out.ptr = Box::into_raw(bytes) as *mut u8;")
             }
             .Int | .IntN(_, _) | .InlineRange(_, _, _) | .Tagged(_, _) | .Quantity(_, _) -> body.push("    out.value = ({call}) as u64;")
-            .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .Union(_) | .Measure(_) -> return None
+            .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .Union(_) | .Case(_, _) | .Measure(_) -> return None
         }
     }
     body.push("    0")

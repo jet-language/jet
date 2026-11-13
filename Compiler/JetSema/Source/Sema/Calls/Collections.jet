@@ -91,7 +91,7 @@ sema_call_collections_check_argument: fn(argument: CallArg, method: String, inde
         .Fn(_, fn_result, _, _, _, _) -> {
             if fn_result == None -> sema_call_host_callback_assignable(required, value.ty, environment, program) else -> sema_call_type_assignable(required, value.ty, environment, program)
         }
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> sema_call_type_assignable(required, value.ty, environment, program)
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> sema_call_type_assignable(required, value.ty, environment, program)
     }
     if compatible == (Val(true)) -> return Val(value)
     if !callback && sema_expr_numeric_value_widening(value, required) == (Val(true)) {
@@ -122,11 +122,11 @@ sema_call_collections_callback_takes_default_route: fn(receiver: Type, method: S
     receiver_ty: sema_expr_unwrap_tag(receiver)
     sequence: if receiver_ty == {
         .Option(_) | .Map(_, _, _) -> false
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Shared(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> true
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Shared(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> true
     }
     list: if receiver_ty == {
         .List(_) | .FixedList(_, _) -> true
-        .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
+        .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
     }
     return if callback.ty == {
         .Fn(params, ret, _, _, _, _) -> {
@@ -137,7 +137,7 @@ sema_call_collections_callback_takes_default_route: fn(receiver: Type, method: S
             }
             eager && sema_call_collections_return_takes_default_route(ret)
         }
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
     }
 }
 
@@ -148,7 +148,7 @@ sema_call_collections_return_takes_default_route: fn(ret: Type?) -> Bool Never! 
     return if declared == {
         .Named(name) -> name != "Never"
         .Option(_) | .Result(_, _) -> false
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> true
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> true
     }
 }
 
@@ -156,7 +156,7 @@ sema_call_collections_reject_callback_shape: fn(method: String, callback_return:
     if method == "filter" {
         accepted := if callback_return == {
             .Result(ok, _) -> ok == Type.Bool
-            .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> callback_return == Type.Bool
+            .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> callback_return == Type.Bool
         }
         if accepted -> return false
         diagnostics.push(sema_error("E0108", span, "argument 1 to `.filter()` should return Bool or Result<Bool, E>, not {type_name(callback_return)}", "a filter callback decides whether each item stays in the collection", "return a Bool, or a fallible Bool such as `check(item)`"))
@@ -165,7 +165,7 @@ sema_call_collections_reject_callback_shape: fn(method: String, callback_return:
     if method == "flat_map" {
         accepted := if callback_return == {
             .List(_) | .FixedList(_, _) -> true
-            .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
+            .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
         }
         if accepted -> return false
         diagnostics.push(sema_error("E0108", span, "argument 1 to `.flat_map()` should return a list, not {type_name(callback_return)}", "flat_map concatenates each callback-produced list into the output", "return a list from the callback"))
@@ -174,7 +174,7 @@ sema_call_collections_reject_callback_shape: fn(method: String, callback_return:
     if method == "filter_map" {
         accepted := if callback_return == {
             .Option(_) | .Result(_, _) -> true
-            .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
+            .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
         }
         if accepted -> return false
         diagnostics.push(sema_error("E0108", span, "argument 1 to `.filter_map()` should return an Option or a Result, not {type_name(callback_return)}", "filter_map keeps each present or Ok payload and drops the rest", "return `Val(value)` or `None` (or a Result) from the callback, or use `.map()`"))
@@ -418,7 +418,7 @@ sema_call_try_builtin_collections: fn(receiver: Expr, receiver_value: TExpr, met
                         .Apply(name, apply_args) -> {
                             if name == "Iter" && apply_args.len() == 1 -> apply_args[0] else -> Type.Int
                         }
-                        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> Type.Int
+                        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> Type.Int
                     }
                     mapped_type := Type.List{element: inner}
                     mapped := sema_tree_node(mapped_type, TExprKind.ClosureMethod{receiver: set_list, operation: closure, args: typed}, span)
@@ -517,7 +517,7 @@ sema_call_collections_list_element: fn(ty: Type) -> Type? Never! {
         .List(element) -> Val(element.copy())
         // copy: `element` is a payload of read parameter `ty`, which keeps the original; the Val carrier owns this one
         .FixedList(element, _) -> Val(element.copy())
-        .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Union(_) | .Quantity(_, _) | .Measure(_) -> None
+        .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> None
     }
 }
 
@@ -572,6 +572,6 @@ sema_call_collections_list_receiver: fn(ty: Type) -> Bool Never! {
         .List(_) | .FixedList(_, _) -> true
         .Tagged(_, inner) -> sema_call_collections_list_receiver(inner)
         .Result(ok, _) -> sema_call_collections_list_receiver(ok)
-        .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
+        .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
     }
 }

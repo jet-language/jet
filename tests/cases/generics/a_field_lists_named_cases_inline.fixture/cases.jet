@@ -1,0 +1,29 @@
+// A field lists named cases inline, written exactly as inside an enum.
+// `.Celsius(value)` builds a case and matches it; a named case mixes with a
+// type member, and a case bound to a local keeps its payload.
+Settings: struct {
+    temp: Celsius(Float) | Fahrenheit(Float)
+}
+
+show: fn(settings: Settings) -> String {
+    if settings.temp == {
+        .Celsius(c) -> "{c} C"
+        .Fahrenheit(f) -> "{f} F"
+    }
+}
+
+label: fn(reading: Kelvin(Int) | String) -> String {
+    if reading == {
+        .Kelvin(k) -> "{k} K"
+        .String(s) -> "text {s}"
+    }
+}
+
+run: fn() {
+    print(show(Settings{temp: .Celsius(21.5)}))
+    print(show(Settings{temp: .Fahrenheit(70.5)}))
+    print(label(.Kelvin(300)))
+    print(label("n/a"))
+    held: Kelvin(Int) | String = .Kelvin(4)
+    print(label(held))
+}

@@ -253,7 +253,7 @@ sema_copy_walk_key: fn(identity: String, actual: Type) -> String Never! {
             joined: names.join(", ")
             "{identity}<{joined}>"
         }
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> identity
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> identity
     }
 }
 
@@ -338,7 +338,7 @@ sema_copy_copyable_scalar: fn(ty: Type) -> Bool Never! {
         .InlineRange(base, _, _) -> sema_copy_copyable_scalar(base)
         .Apply(name, args) -> name == "Ptr" && args.len() == 1
         .Named(name) -> name == "Complex" || name == "Range" || name == "IOOperation"
-        .String | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .Union(_) -> false
+        .String | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .Union(_) | .Case(_, _) -> false
     }
 }
 
@@ -351,7 +351,7 @@ sema_copy_owned_view_type: fn(ty: Type, string_view: Bool) -> (ty: Type, materia
                 return (materialized: true, ty: Type.List{element: args[0]})
             }
         }
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> {}
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
     }
     (materialized: false, ty: ty)
 }
@@ -364,7 +364,7 @@ sema_copy_generic_bindings: fn(nominal: SemaRegistrationNominal, actual: Type) -
             parameters: sema_inference_registration_params(nominal.generic_params)
             return (bindings: sema_inference_bindings_for_type_args(parameters, args), complete: true)
         }
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> return (bindings: [SemaInferenceBinding]{}, complete: false)
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> return (bindings: [SemaInferenceBinding]{}, complete: false)
     }
 }
 
@@ -467,7 +467,7 @@ sema_copy_generic_param_facts: fn(ty: Type, params: [TGenericParam]) -> SemaCopy
             }
             None
         }
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> None
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> None
     }
 }
 
@@ -483,6 +483,7 @@ sema_copy_type_facts: fn(
     if ty == {
         .Int | .Float | .Bool | .IntN(_, _) | .Float32 | .Char | .Measure(_) -> sema_copy_type_facts_known(true, true, false, false, false, false, true)
         .String -> sema_copy_type_facts_known(false, true, true, false, false, false, true)
+        .Case(_, payload) -> sema_copy_type_facts(payload, graph, table, caller, generic_params, walk)
         .List(inner) -> {
             nested: sema_copy_type_facts(inner, graph, table, caller, generic_params, walk)
             sema_copy_facts_holding(sema_copy_type_facts_known(false, nested.cloneable, true, nested.observable_clock, false, nested.dynamic_loan, nested.complete), nested.holds_resource)
@@ -992,7 +993,7 @@ sema_copy_classify: fn(
     accepted: source_facts.complete && target_facts.complete && !source_facts.resource && (source_facts.copyable || target_facts.cloneable)
     memory: if owned.ty == {
         .Shared(_) -> SemaCopyMemoryKind.RetainRelease
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> if target_facts.heap -> SemaCopyMemoryKind.Allocation else -> SemaCopyMemoryKind.NoEvent
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> if target_facts.heap -> SemaCopyMemoryKind.Allocation else -> SemaCopyMemoryKind.NoEvent
     }
     SemaCopyFacts{
         source: source,
@@ -1018,7 +1019,7 @@ sema_copy_classify: fn(
 sema_copy_observable_clock: fn(ty: Type, env: SemaScopeEnvironment, program: SemaProgramTables, generic_params: [TGenericParam]) -> Bool Never! {
     if ty == {
         .Int | .Float | .Bool | .IntN(_, _) | .Float32 | .Char | .String -> return false
-        .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> {}
+        .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
     }
     caller: if program.registration_graph == .Val(graph) -> sema_type_module_row(graph, env.module_identity) else -> -1
     walk := sema_copy_walk()
@@ -1045,7 +1046,7 @@ sema_copy_holds_fork: fn(ty: Type, env: SemaScopeEnvironment, program: SemaProgr
 sema_copy_names_deterministic_clock: fn(ty: Type) -> Bool Never! {
     if ty == {
         .Tagged(marker, inner) -> (marker == TagMarker.Internal{internal_tag: InternalTag.DeterministicClock} && sema_call_is_clock_type(inner)) || sema_copy_names_deterministic_clock(inner)
-        .List(inner) -> sema_copy_names_deterministic_clock(inner)
+        .List(inner) | .Case(_, inner) -> sema_copy_names_deterministic_clock(inner)
         .Option(inner) -> sema_copy_names_deterministic_clock(inner)
         .FixedList(inner, _) -> sema_copy_names_deterministic_clock(inner)
         .InlineRange(base, _, _) -> sema_copy_names_deterministic_clock(base)
@@ -1081,7 +1082,7 @@ sema_copy_holds_fork_walk: fn(ty: Type, graph: SemaRegistrationGraph?, caller: I
         .Option(inner) -> sema_copy_holds_fork_walk(inner, graph, caller, generic_params, seen)
         .FixedList(inner, _) -> sema_copy_holds_fork_walk(inner, graph, caller, generic_params, seen)
         .InlineRange(base, _, _) -> sema_copy_holds_fork_walk(base, graph, caller, generic_params, seen)
-        .Tagged(_, inner) -> sema_copy_holds_fork_walk(inner, graph, caller, generic_params, seen)
+        .Tagged(_, inner) | .Case(_, inner) -> sema_copy_holds_fork_walk(inner, graph, caller, generic_params, seen)
         .Map(key, _, value) -> sema_copy_holds_fork_walk(key, graph, caller, generic_params, seen) || sema_copy_holds_fork_walk(value, graph, caller, generic_params, seen)
         .Result(ok, err) -> sema_copy_holds_fork_walk(ok, graph, caller, generic_params, seen) || sema_copy_holds_fork_walk(err, graph, caller, generic_params, seen)
         .Tuple(fields) -> {
@@ -1134,7 +1135,7 @@ sema_copy_fork_row_at: fn(ty: Type, graph: SemaRegistrationGraph, caller: Int) -
     name: if ty == {
         .Named(found) -> found
         .Apply(found, _) -> found
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> return None
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> return None
     }
     resolved: sema_type_graph_lookup_symbol_at(graph, caller, name)
     row: sema_type_lookup_nominal_row(graph, resolved, name, caller) ?? return None
@@ -1167,7 +1168,7 @@ sema_copy_diagnostic: fn(facts: SemaCopyFacts, span: Span) -> Diagnostic? {
             .Apply(name, args) -> {
                 if (name == "CellReadGuard" || name == "CellEditGuard") && args.len() == 1 -> shown = "{name}<{type_name(args[0])}>"
             }
-            .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> {}
+            .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
         }
     }
     if {

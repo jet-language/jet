@@ -138,7 +138,7 @@ sema_effect_leaf_check_type: fn(leaves: [SemaEffectLeaf], ty: Type, diagnostics:
             if ret == .Val(value) -> sema_effect_leaf_check_type(leaves, value, diagnostics)
             if effect_bound == .Val(row) -> sema_effect_leaf_check_row(leaves, row, diagnostics)
         }
-        .List(inner) | .Option(inner) | .Shared(inner) | .Tagged(_, inner) | .FixedList(inner, _) -> sema_effect_leaf_check_type(leaves, inner, diagnostics)
+        .List(inner) | .Option(inner) | .Shared(inner) | .Tagged(_, inner) | .Case(_, inner) | .FixedList(inner, _) -> sema_effect_leaf_check_type(leaves, inner, diagnostics)
         .Result(ok, err) -> {
             sema_effect_leaf_check_type(leaves, ok, diagnostics)
             sema_effect_leaf_check_type(leaves, err, diagnostics)

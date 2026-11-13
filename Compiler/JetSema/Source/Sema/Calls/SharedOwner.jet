@@ -39,7 +39,7 @@ sema_call_shared_owner_host_value: fn(receiver_value: TExpr, method: String, arg
     owner: if receiver_value.ty == {
         .Shared(_) -> "Shared"
         .Apply(name, _) -> name
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> type_name(receiver_value.ty)
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> type_name(receiver_value.ty)
     }
     if !sema_effect_record_intrinsic_effects(environment, program, scopes, context, "{owner}.{method}", span, sema_shared_access_effect_row(receiver_value.ty, method, span), diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     value := sema_tree_node(result, TExprKind.HostCall{call: THostCall.Method{receiver: receiver_value, method: method, args: args}}, span)
@@ -117,7 +117,7 @@ sema_call_shared_owner_try_replace: fn(receiver: Expr, receiver_value: TExpr, in
     snapshot: sema_check_expression(updated_args[0].expr, None, environment, program, scopes, state, tail_store, context, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     valid_source := if snapshot.ty == {
         .Apply(name, type_args) -> name == SEMA_SHARED_SNAPSHOT_TYPE && type_args.len() == 2 && type_identity_equal(type_args[0], inner)
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
     }
     if !valid_source {
         diagnostics.push(sema_error("E0112", expr_span(updated_args[0].expr), "`try_replace` needs a `SharedSnapshot<{type_name(inner)}, U>`, got `{type_name(snapshot.ty)}`", "a snapshot ticket is bound to the exact Shared payload type", "capture the snapshot from this Shared value before publishing"))
@@ -439,7 +439,7 @@ sema_call_try_shared_owner_method: fn(receiver: Expr, receiver_value: TExpr, met
             if name == SEMA_SHARED_SNAPSHOT_TYPE && type_args.len() == 2 && method == "value" -> return sema_call_shared_owner_nullary(receiver, receiver_value, method, type_args[1], span, expected, environment, program, scopes, state, context, diagnostics)
             if name == SEMA_SHARED_WEAK_TYPE && type_args.len() == 1 && method == "upgrade" -> return sema_call_shared_owner_nullary(receiver, receiver_value, method, Type.Option{inner: Type.Shared{inner: type_args[0]}}, span, expected, environment, program, scopes, state, context, diagnostics)
         }
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> {}
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
     }
     SemaMethodSpecialCheck{handled: false, value: None}
 }

@@ -138,6 +138,7 @@ sema_registration_canonical_heads: fn(ty: Type, keys: [String:Type]) -> Type Nev
         // copy: `marker` is a payload of read parameter `ty`; field `marker` of the new Type.Tagged owns this one
         .Tagged(marker, inner) -> Type.Tagged{marker: marker.copy(), inner: sema_registration_canonical_heads(inner, keys)}
         .Union(members) -> Type.Union{members: loop member in members -> sema_registration_canonical_heads(member, keys)}
+        .Case(name, payload) -> Type.Case{name: name, payload: sema_registration_canonical_heads(payload, keys)}
         // copy: `dimension` is a payload of read parameter `ty`; field `dimension` of the new Type.Quantity owns this one
         .Quantity(base, dimension) -> Type.Quantity{base: sema_registration_canonical_heads(base, keys), dimension: dimension.copy()}
         .Int | .Float | .Bool | .String | .Char | .Named(_) | .TraitObject(_) | .IntN(_, _) | .Float32 | .Measure(_) -> ty
@@ -150,7 +151,7 @@ sema_registration_canonical_heads: fn(ty: Type, keys: [String:Type]) -> Type Nev
 sema_registration_type_qualified_names: fn(ty: Type, names: &[String]) Never! {
     if ty == {
         .Named(name) -> sema_registration_push_qualified_name(name, names)
-        .List(inner) | .Shared(inner) | .Option(inner) | .Tagged(_, inner) | .FixedList(inner, _) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> sema_registration_type_qualified_names(inner, names)
+        .List(inner) | .Shared(inner) | .Option(inner) | .Tagged(_, inner) | .Case(_, inner) | .FixedList(inner, _) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> sema_registration_type_qualified_names(inner, names)
         .Map(key, _, value) -> {
             sema_registration_type_qualified_names(key, names)
             sema_registration_type_qualified_names(value, names)

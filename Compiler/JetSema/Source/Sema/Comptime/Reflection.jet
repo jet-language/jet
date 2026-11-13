@@ -823,7 +823,7 @@ sema_comptime_reflection_type_dimensions: fn(ty: Type) -> [TComptimeValue] Never
     if ty == {
         .Quantity(_, dimension) -> [TComptimeValue]{sema_comptime_reflection_dimension(dimension)}
         .Tagged(_, inner) -> sema_comptime_reflection_type_dimensions(inner)
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Union(_) | .Measure(_) -> [TComptimeValue]{}
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Union(_) | .Case(_, _) | .Measure(_) -> [TComptimeValue]{}
     }
 }
 
@@ -1009,7 +1009,7 @@ sema_comptime_reflection_layout_type_resolutions: fn(graph: SemaRegistrationGrap
             loop arg in args -> sema_comptime_reflection_layout_type_resolutions(graph, module_identity, owner, generic_params, arg, resolutions)
         }
         .FixedList(inner, _) | .InlineRange(inner, _, _) | .Tagged(_, inner) | .Quantity(inner, _) -> sema_comptime_reflection_layout_type_resolutions(graph, module_identity, owner, generic_params, inner, resolutions)
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .Float32 | .Union(_) | .Measure(_) -> {}
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .Float32 | .Union(_) | .Case(_, _) | .Measure(_) -> {}
     }
 }
 
@@ -1337,6 +1337,7 @@ sema_comptime_reflection_qualified_type: fn(graph: SemaRegistrationGraph, caller
         .Tuple(fields) -> return Type.Tuple{fields: loop field in fields -> TypeTupleField{name: field.name, ty: sema_comptime_reflection_qualified_type(graph, caller, field.ty)}}
         .FixedList(elem, len) -> return Type.FixedList{elem: sema_comptime_reflection_qualified_type(graph, caller, elem), len: len}
         .Union(members) -> return Type.Union{members: loop member in members -> sema_comptime_reflection_qualified_type(graph, caller, member)}
+        .Case(name, payload) -> return Type.Case{name: name, payload: sema_comptime_reflection_qualified_type(graph, caller, payload)}
         .Int | .Float | .Bool | .String | .Char | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Quantity(_, _) | .Measure(_) -> {}
     }
     // copy: a form that names no declared type by name is its own identity.

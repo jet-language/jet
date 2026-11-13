@@ -93,7 +93,7 @@ sema_serde_generic_bound: fn(environment: SemaScopeEnvironment, program: SemaPro
 sema_serde_mentions_parameter: fn(ty: Type, name: String) -> Bool Never! {
     if ty == {
         .Named(candidate) -> candidate == name
-        .List(inner) | .Shared(inner) | .Option(inner) | .FixedList(inner, _) | .InlineRange(inner, _, _) | .Tagged(_, inner) -> sema_serde_mentions_parameter(inner, name)
+        .List(inner) | .Shared(inner) | .Option(inner) | .FixedList(inner, _) | .InlineRange(inner, _, _) | .Tagged(_, inner) | .Case(_, inner) -> sema_serde_mentions_parameter(inner, name)
         .Map(key, _, value) | .Result(key, value) -> sema_serde_mentions_parameter(key, name) || sema_serde_mentions_parameter(value, name)
         .Tuple(fields) -> {
             loop field in fields {
@@ -196,7 +196,7 @@ sema_serde_type_is_admissible_in: fn(environment: SemaScopeEnvironment, program:
             }
             true
         }
-        .Tagged(_, _) -> false
+        .Tagged(_, _) | .Case(_, _) -> false
         .Named(name) -> {
             if name == "Decimal" || name == "Date" || name == "LocalDate" || name == "LocalTime" || name == "DateTime" || name == "Duration" -> return true
             // Rust `is_encodable`/`is_decodable`: Core's ZonedDateTime is the

@@ -241,7 +241,7 @@ jfmt_type_name_is_empty: fn(ty: Type) -> Bool Never! {
         .Named(name) -> name.len() == 0
         .Union(members) -> members.len() == 0
         .TraitObject(bounds) -> bounds.len() == 0
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Quantity(_, _) | .Measure(_) -> false
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
     }
 }
 
@@ -264,6 +264,7 @@ jfmt_substitute_type: fn(ty: Type, params: [TypeParam], args: [Type]) -> Type Ne
             Type.Apply{name: name, args: out}
         }
         .List(inner) -> Type.List{element: jfmt_substitute_type(inner, params, args)}
+        .Case(name, payload) -> Type.Case{name: name, payload: jfmt_substitute_type(payload, params, args)}
         // copy: `len` is a payload of read parameter `ty`, which keeps the original; field `len` of the new Type.FixedList owns this one
         .FixedList(elem, len) -> Type.FixedList{elem: jfmt_substitute_type(elem, params, args), len: len.copy()}
         // copy: `key_span` is a payload of read parameter `ty`, which keeps the original; field `key_span` of the new Type.Map owns this one
@@ -536,7 +537,7 @@ jfmt_decode_shapes: fn(items: [Item], ty: Type, seen: &[String]) -> [SerdeWireSh
         }
         .Named(name) -> return jfmt_decode_named_shapes(items, name, [Type]{}, seen)
         .Apply(name, args) -> return jfmt_decode_named_shapes(items, name, args, seen)
-        .Tagged(_, inner) -> return jfmt_decode_shapes(items, inner, seen)
+        .Tagged(_, inner) | .Case(_, inner) -> return jfmt_decode_shapes(items, inner, seen)
         .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Measure(_) -> return None
     }
     jfmt_finish_shapes(shapes)
@@ -557,7 +558,7 @@ jfmt_has_ambiguous_decode_union: fn(items: [Item], ty: Type) -> Bool {
         }
     }
     if ty == {
-        .List(inner) | .Shared(inner) | .Option(inner) | .Tagged(_, inner) | .FixedList(inner, _) -> jfmt_has_ambiguous_decode_union(items, inner)
+        .List(inner) | .Shared(inner) | .Option(inner) | .Tagged(_, inner) | .Case(_, inner) | .FixedList(inner, _) -> jfmt_has_ambiguous_decode_union(items, inner)
         .Map(key, _, value) | .Result(key, value) -> jfmt_has_ambiguous_decode_union(items, key) || jfmt_has_ambiguous_decode_union(items, value)
         .Fn(params, ret, _, _, _, _) -> {
             loop param in params {

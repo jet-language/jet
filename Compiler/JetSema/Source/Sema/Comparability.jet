@@ -173,7 +173,7 @@ sema_comparability_auto_blocked_type: fn(graph: SemaRegistrationGraph, module_id
             }
             false
         }
-        .Int | .Float | .Bool | .String | .Char | .Shared(_) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
+        .Int | .Float | .Bool | .String | .Char | .Shared(_) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
     }
 }
 
@@ -233,7 +233,7 @@ sema_comparability_native_ordering: fn(environment: SemaScopeEnvironment, progra
                 .Struct(_, _) | .Enum(_, _) | .Distinct(_, _) | .UnitFamily(_, _) -> false
             }
         }
-        .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .InlineRange(_, _, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
+        .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .InlineRange(_, _, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
     }
 }
 
@@ -266,7 +266,7 @@ sema_comparability_structural: fn(environment: SemaScopeEnvironment, program: Se
             true
         }
         .InlineRange(base, _, _) -> sema_comparability_structural(environment, program, module_identity, base, query)
-        .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
+        .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
     }
 }
 
@@ -348,7 +348,7 @@ sema_comparability_incomparable_field: fn(environment: SemaScopeEnvironment, pro
             if found != None -> return found
             sema_comparability_incomparable_field(environment, program, module_identity, err, query)
         }
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> None
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> None
     }
 }
 
@@ -431,7 +431,7 @@ sema_type_equatable: fn(environment: SemaScopeEnvironment, program: SemaProgramT
     if sema_call_reflection_secret_bearing(ty) -> return false
     if ty == {
         .Int | .Bool | .Float | .String | .Char | .IntN(_, _) | .Float32 -> true
-        .Option(inner) | .List(inner) | .FixedList(inner, _) | .Tagged(_, inner) | .InlineRange(inner, _, _) -> sema_type_equatable(environment, program, inner)
+        .Option(inner) | .List(inner) | .FixedList(inner, _) | .Tagged(_, inner) | .Case(_, inner) | .InlineRange(inner, _, _) -> sema_type_equatable(environment, program, inner)
         .Result(ok, err) | .Map(ok, _, err) -> sema_type_equatable(environment, program, ok) && sema_type_equatable(environment, program, err)
         .Named(name) -> {
             leaf := sema_serde_named_leaf(name)
@@ -534,7 +534,7 @@ sema_type_check_declared_map_keys: fn(environment: SemaScopeEnvironment, program
             }
             valid
         }
-        .List(inner) | .Shared(inner) | .Option(inner) | .Tagged(_, inner) | .InlineRange(inner, _, _) -> sema_type_check_declared_map_keys(environment, program, inner, span, diagnostics)
+        .List(inner) | .Shared(inner) | .Option(inner) | .Tagged(_, inner) | .Case(_, inner) | .InlineRange(inner, _, _) -> sema_type_check_declared_map_keys(environment, program, inner, span, diagnostics)
         .Result(ok, err) -> {
             valid := sema_type_check_declared_map_keys(environment, program, ok, span, diagnostics)
             if !sema_type_check_declared_map_keys(environment, program, err, span, diagnostics) -> valid = false
@@ -586,7 +586,7 @@ sema_comparability_map_key: fn(environment: SemaScopeEnvironment, program: SemaP
             query.visited[key] = eligible
             eligible
         }
-        .Float | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Float32 | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
+        .Float | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Float32 | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
     }
 }
 
@@ -626,7 +626,7 @@ sema_type_hashable: fn(environment: SemaScopeEnvironment, program: SemaProgramTa
 sema_comparability_hashable: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, module_identity: String, ty: Type, query: &SemaComparabilityQuery) -> Bool Never! {
     if ty == {
         .Int | .Bool | .String | .Char | .IntN(_, _) -> true
-        .List(inner) | .Option(inner) | .FixedList(inner, _) | .Tagged(_, inner) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> sema_comparability_hashable(environment, program, module_identity, inner, query)
+        .List(inner) | .Option(inner) | .FixedList(inner, _) | .Tagged(_, inner) | .Case(_, inner) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> sema_comparability_hashable(environment, program, module_identity, inner, query)
         .Result(ok, err) -> sema_comparability_hashable(environment, program, module_identity, ok, query) && sema_comparability_hashable(environment, program, module_identity, err, query)
         .Tuple(fields) -> {
             loop field in fields {

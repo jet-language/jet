@@ -555,7 +555,7 @@ jet_target_layout_native_type: fn(engine: TargetLayoutEngine, ty: Type, owner_qu
         .InlineRange(base, _, _) | .Tagged(_, base) | .Quantity(base, _) -> jet_target_layout_native_type(engine, base, owner_qualified_name, query)
         .Named(name) -> jet_target_layout_native_named(engine, name, owner_qualified_name, query)
         .Apply(name, args) -> if (name == "Ptr" && args.len() == 1) || jet_target_layout_bit_set(engine, name, args, owner_qualified_name) -> Val(jet_target_layout_scalar(8)) else -> None
-        .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .Union(_) | .Measure(_) -> None
+        .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .Union(_) | .Case(_, _) | .Measure(_) -> None
     }
 }
 
@@ -741,7 +741,7 @@ jet_target_layout_type_inner: fn(engine: TargetLayoutEngine, ty: Type, owner_qua
             if jet_target_layout_is_atomic_name(name) -> return jet_target_layout_atomic_layout(engine, args)
             jet_target_layout_named_type(engine, name, args, owner_qualified_name, query)
         }
-        .Tuple(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Union(_) | .Measure(_) -> None
+        .Tuple(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Union(_) | .Case(_, _) | .Measure(_) -> None
     }
 }
 
@@ -940,7 +940,7 @@ jet_target_layout_atomic_scalar_type: fn(ty: Type) -> Bool Never! {
             numeric: jet_target_layout_numeric_type(name) ?? return false
             jet_target_layout_atomic_scalar_type(numeric)
         }
-        .Float | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
+        .Float | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
     }
 }
 
@@ -949,7 +949,7 @@ jet_target_layout_atomic_add_type: fn(ty: Type) -> Bool Never! {
     if ty == {
         .Bool -> false
         .Named(name) -> name != "Bool"
-        .Int | .Float | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> true
+        .Int | .Float | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> true
     }
 }
 

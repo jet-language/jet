@@ -250,7 +250,7 @@ parser_parse_type_union_tail: fn(state: &JetParserState, first: ParsedType, dept
     members := [Type]{}
     loop parser_current_kind(state) == TOKEN_PIPE {
         parser_bump(state)
-        next: parser_parse_type_atom(state, depth + 1)
+        next: if parser_union_case_ahead(state, true) -> parser_parse_union_case(state, depth + 1) else -> parser_parse_type_atom(state, depth + 1)
         if members.len() == 0 -> members.push(result.ty)
         members.push(next.ty)
         result.span.end = next.span.end
@@ -259,9 +259,42 @@ parser_parse_type_union_tail: fn(state: &JetParserState, first: ParsedType, dept
     result
 }
 
+// Whether a union's named case `Name(T)` starts here: a name, then a `(` that
+// opens no inline range. After a `|` (`in_union`) that is enough; a first
+// member is a case only when a `|` follows its `)`. A bare name is a type.
+parser_union_case_ahead: fn(state: &JetParserState, in_union: Bool) -> Bool Never! {
+    if state.pending_type_gt || parser_current_kind(state) != TOKEN_IDENT || parser_kind_at(state, 1) != TOKEN_LPAREN -> return false
+    opened: parser_kind_at(state, 2)
+    if opened == TOKEN_INT || opened == TOKEN_MINUS || opened == TOKEN_RPAREN -> return false
+    if in_union -> return true
+    open := 0
+    offset := 1
+    loop {
+        kind: parser_kind_at(state, offset)
+        if kind == TOKEN_EOF -> return false
+        if kind == TOKEN_LPAREN -> open += 1
+        if kind == TOKEN_RPAREN {
+            open -= 1
+            if open == 0 -> return parser_kind_at(state, offset + 1) == TOKEN_PIPE
+        }
+        offset += 1
+    }
+    false
+}
+
+// A union's named case `Name(T)`, written as inside an enum.
+parser_parse_union_case: fn(state: &JetParserState, depth: Int) -> ParsedType {
+    name: parser_bump(state)
+    parser_bump(state)
+    payload: parser_parse_type(state, depth + 1)
+    close: parser_expect(state, TOKEN_RPAREN, "`)` after the named case's payload type")
+    ParsedType{ty: Type.Case{name: parser_value(state, name), payload: payload.ty}, span: parser_cover(name.span, close.span)}
+}
+
 // `?` follows the type it marks and binds tightly, so
 // `[Int?]`, `[Int]?`, `Box<Int?>`, and `Box<Int>?` all differ. `T??` is E0309.
 parser_parse_type_atom: fn(state: &JetParserState, depth: Int) -> ParsedType {
+    if parser_union_case_ahead(state, false) -> return parser_parse_union_case(state, depth + 1)
     parsed: parser_parse_type_base(state, depth + 1)
     base: parser_parse_inline_range(state, parsed) ?? parsed
     kind: parser_current_kind(state)
@@ -269,7 +302,7 @@ parser_parse_type_atom: fn(state: &JetParserState, depth: Int) -> ParsedType {
     mark: parser_bump(state)
     already_optional: if base.ty == {
         .Option(_) -> true
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
     }
     span: parser_cover(base.span, mark.span)
     if kind == TOKEN_QUESTION_QUESTION || already_optional {

@@ -259,6 +259,7 @@ sema_public_api_unit_types: fn(ty: Type, units: [String:String]) -> Type Never! 
         .FixedList(elem, len) -> Type.FixedList{elem: sema_public_api_unit_types(elem, units), len: len.copy()}
         .Tagged(marker, inner) -> Type.Tagged{marker: marker.copy(), inner: sema_public_api_unit_types(inner, units)}
         .Union(members) -> Type.Union{members: loop member in members -> sema_public_api_unit_types(member, units)}
+        .Case(name, payload) -> Type.Case{name: name.copy(), payload: sema_public_api_unit_types(payload, units)}
         .Tuple(fields) -> Type.Tuple{fields: loop field in fields -> TypeTupleField{name: field.name.copy(), ty: sema_public_api_unit_types(field.ty, units)}}
         .Fn(params, ret, effect_bound, param_contract, call_metadata, return_view_provenance) -> {
             shown := Type?{None}

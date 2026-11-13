@@ -642,7 +642,7 @@ ir_lint_type_kinds: fn(ty: Type) -> Int Never! {
         .Named(name) -> if name == "Unit" || name == "()" || name == "Never" -> IR_LINT_UNIT else -> IR_LINT_WORD + IR_LINT_POINTER + IR_LINT_AGGREGATE
         .Tuple(fields) -> if fields.len() == 0 -> IR_LINT_UNIT else -> IR_LINT_AGGREGATE
         .Option(_) -> IR_LINT_WORD + IR_LINT_POINTER
-        .Result(_, _) | .Union(_) | .TraitObject(_) | .Shared(_) | .Fn(_, _, _, _, _, _) -> IR_LINT_POINTER
+        .Result(_, _) | .Union(_) | .Case(_, _) | .TraitObject(_) | .Shared(_) | .Fn(_, _, _, _, _, _) -> IR_LINT_POINTER
         .List(_) | .FixedList(_, _) -> IR_LINT_AGGREGATE
         .Apply(_, _) | .Map(_, _, _) -> IR_LINT_WORD + IR_LINT_POINTER + IR_LINT_AGGREGATE
         .Quantity(_, _) | .Measure(_) -> IR_LINT_ANY
@@ -682,7 +682,7 @@ ir_lint_untag: fn(ty: Type) -> Type Never! {
     if ty == {
         .Tagged(_, inner) -> ir_lint_untag(inner)
         .InlineRange(base, _, _) -> ir_lint_untag(base)
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .Float32 | .Union(_) | .Quantity(_, _) | .Measure(_) -> ty
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .Float32 | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> ty
     }
 }
 
@@ -1169,7 +1169,7 @@ ir_lint_signature_kinds: fn(ty: Type) -> Int Never! {
     if ir_lint_untag(ty) == {
         .Named(name) -> if name == "Unit" || name == "()" || name == "Never" -> IR_LINT_UNIT else -> IR_LINT_ANY
         .Apply(_, _) | .Map(_, _, _) -> IR_LINT_ANY
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> ir_lint_type_kinds(ty)
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> ir_lint_type_kinds(ty)
     }
 }
 

@@ -672,6 +672,16 @@ target lacks is E0112. Only the value converts: a `&` parameter takes exactly
 its union type, and containers of the smaller union are not containers of the
 larger. Declared enums keep their explicit conversion boundary.
 
+**D-ALT-CASES1=A — Named cases inside a union** *(ratified 2026-11-06, card
+#6251)*: a union member may be a named case written exactly as inside an
+enum, as in `temp: Celsius(Float) | Fahrenheit(Float)`. Inside a union
+`Name(T)` is a named case and a bare name is always a type, so named cases mix
+with type members. `.Celsius(value)` builds a case and `.Celsius(c) ->`
+matches it. The set stays closed, flattened and duplicate-free; a named case
+can't reuse a type member's name, and one name with two payload types is an
+error (E0363). Named cases carry exactly one payload, there is no teaching
+diagnostic, and serialization is not promised.
+
 **D-TYPESWITCH1=A — Type tables** *(ratified 2026-10-29, card #6180)*: a
 generic function branches on a type parameter with an ordinary `if` table,
 `if T == { Int -> … Point -> … else -> … }`. Each arm names one type (E0119

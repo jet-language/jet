@@ -54,6 +54,7 @@ use jet_foundation.[
     type_with_effective_fn_returns,
     core_source_owns_type,
     type_name,
+    type_union_member_tag,
     name_rows_get_text,
     core_identity_in_module,
     is_compute_tensor_family,
@@ -81,7 +82,7 @@ sema_union_member_has_open_shape: fn(ty: Type) -> Bool Never! {
         .List(inner) -> sema_union_member_has_open_shape(inner)
         .Shared(inner) -> sema_union_member_has_open_shape(inner)
         .Option(inner) -> sema_union_member_has_open_shape(inner)
-        .Tagged(_, inner) -> sema_union_member_has_open_shape(inner)
+        .Tagged(_, inner) | .Case(_, inner) -> sema_union_member_has_open_shape(inner)
         .FixedList(inner, _) -> sema_union_member_has_open_shape(inner)
         .Map(key, _, value) -> sema_union_member_has_open_shape(key) || sema_union_member_has_open_shape(value)
         .Result(ok, err) -> sema_union_member_has_open_shape(ok) || sema_union_member_has_open_shape(err)
@@ -124,7 +125,7 @@ sema_type_has_forbidden_never: fn(ty: Type, allow_success_never: Bool) -> Bool N
         .List(inner) -> sema_type_has_forbidden_never(inner, false)
         .Shared(inner) -> sema_type_has_forbidden_never(inner, false)
         .Option(inner) -> sema_type_has_forbidden_never(inner, false)
-        .Tagged(_, inner) -> sema_type_has_forbidden_never(inner, false)
+        .Tagged(_, inner) | .Case(_, inner) -> sema_type_has_forbidden_never(inner, false)
         .FixedList(inner, _) -> sema_type_has_forbidden_never(inner, false)
         .InlineRange(base, _, _) -> sema_type_has_forbidden_never(base, false)
         .Quantity(base, _) -> sema_type_has_forbidden_never(base, false)
@@ -284,7 +285,7 @@ sema_type_function_obligations_parts: fn(effect_bound: [EffectRowEntry]?, param_
 sema_type_function_obligations: fn(ty: Type) -> FunctionObligations? {
     if ty == {
         .Fn(_, _, effect_bound, param_contract, call_metadata, return_view_provenance) -> sema_type_function_obligations_parts(effect_bound, param_contract, call_metadata, return_view_provenance)
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> None
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> None
     }
 }
 
@@ -314,11 +315,12 @@ sema_type_obligations_nested: fn(required: Type, offered: Type) -> Bool Never! {
                         }
                     }
                 }
-                .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> {}
+                .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
             }
             return true
         }
         .List(required_inner) -> if offered == .List(offered_inner) -> return sema_type_obligations_nested(required_inner, offered_inner)
+        .Case(required_name, required_payload) -> if offered == .Case(offered_name, offered_payload) -> return required_name == offered_name && sema_type_obligations_nested(required_payload, offered_payload)
         .Option(required_inner) -> if offered == .Option(offered_inner) -> return sema_type_obligations_nested(required_inner, offered_inner)
         .Shared(required_inner) -> if offered == .Shared(offered_inner) -> return sema_type_obligations_nested(required_inner, offered_inner)
         .Result(required_ok, required_err) -> if offered == .Result(offered_ok, offered_err) -> return sema_type_obligations_nested(required_ok, offered_ok) && sema_type_obligations_nested(required_err, offered_err)
@@ -345,7 +347,7 @@ sema_type_obligations_nested: fn(required: Type, offered: Type) -> Bool Never! {
     }
     if offered == {
         .Tagged(marker, inner) -> marker == TagMarker.Internal{internal_tag: InternalTag.CoreCryptoNominal} || sema_type_obligations_nested(required, inner)
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Union(_) | .Quantity(_, _) | .Measure(_) -> true
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> true
     }
 }
 
@@ -356,6 +358,7 @@ sema_type_obligations_satisfy: fn(required: Type, offered: Type) -> Bool Never! 
 sema_type_carrier_compatible: fn(required: Type, offered: Type) -> Bool Never! {
     if required == {
         .List(required_inner) -> if offered == .List(offered_inner) -> return sema_type_carrier_compatible(required_inner, offered_inner)
+        .Case(required_name, required_payload) -> if offered == .Case(offered_name, offered_payload) -> return required_name == offered_name && sema_type_carrier_compatible(required_payload, offered_payload)
         .Option(required_inner) -> if offered == .Option(offered_inner) -> return sema_type_carrier_compatible(required_inner, offered_inner)
         .Shared(required_inner) -> if offered == .Shared(offered_inner) -> return sema_type_carrier_compatible(required_inner, offered_inner)
         .Map(required_key, _, required_value) -> if offered == .Map(offered_key, _, offered_value) -> return sema_type_carrier_compatible(required_key, offered_key) && sema_type_carrier_compatible(required_value, offered_value)
@@ -431,10 +434,10 @@ sema_function_types_compatible: fn(required: Type, offered: Type) -> Bool Never!
                     }
                     return return_compatible && sema_effect_bound_compatible(required_effects, offered_effects)
                 }
-                .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> {}
+                .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
             }
         }
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> {}
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
     }
     false
 }
@@ -511,6 +514,7 @@ sema_type_nested_fn_failure_gap: fn(required: Type, offered: Type, nested: Bool)
         // A tag keeps its payload's representation; one tag over the slot
         // keeps the slot's own nesting.
         .Tagged(_, required_inner) -> return sema_type_nested_fn_failure_gap(required_inner, sema_expr_unwrap_tag(offered), nested)
+        .Case(_, required_payload) -> if offered == .Case(_, offered_payload) -> return sema_type_nested_fn_failure_gap(required_payload, offered_payload, true)
         .Int | .Float | .Bool | .String | .Char | .Named(_) | .TraitObject(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Quantity(_, _) | .Measure(_) -> {}
     }
     None
@@ -571,7 +575,7 @@ sema_type_assignable: fn(required: Type, offered: Type) -> Bool Never! {
             // A container of it does not (sema_type_carrier_compatible).
             if offered == .Union(offered_members) -> return sema_type_union_covers(members, offered_members)
         }
-        .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Quantity(_, _) | .Measure(_) -> {}
+        .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
     }
     false
 }
@@ -707,7 +711,7 @@ sema_type_alias_references: fn(ty: Type, names: &[String]) Never! {
             names.push(name.copy())
             loop arg in args -> sema_type_alias_references(arg, names)
         }
-        .List(inner) | .Shared(inner) | .Option(inner) | .FixedList(inner, _) | .InlineRange(inner, _, _) | .Tagged(_, inner) | .Quantity(inner, _) -> {
+        .List(inner) | .Shared(inner) | .Option(inner) | .FixedList(inner, _) | .InlineRange(inner, _, _) | .Tagged(_, inner) | .Case(_, inner) | .Quantity(inner, _) -> {
             sema_type_alias_references(inner, names)
         }
         .Map(key, _, value) | .Result(key, value) -> {
@@ -894,7 +898,7 @@ sema_type_names_undeclared: fn(graph: SemaRegistrationGraph, caller: Int, ty: Ty
             }
             false
         }
-        .List(inner) | .Option(inner) | .Shared(inner) | .Tagged(_, inner) | .FixedList(inner, _) | .InlineRange(inner, _, _) -> sema_type_names_undeclared(graph, caller, inner, generic_names)
+        .List(inner) | .Option(inner) | .Shared(inner) | .Tagged(_, inner) | .Case(_, inner) | .FixedList(inner, _) | .InlineRange(inner, _, _) -> sema_type_names_undeclared(graph, caller, inner, generic_names)
         .Result(ok, err) | .Map(ok, _, err) -> sema_type_names_undeclared(graph, caller, ok, generic_names) || sema_type_names_undeclared(graph, caller, err, generic_names)
         .Tuple(fields) -> {
             loop field in fields {
@@ -956,7 +960,8 @@ sema_type_graph_declares_name: fn(graph: SemaRegistrationGraph, name: String) ->
 }
 
 // E0119 for every name a declared member type (`field: Foo`, `[Bar]?`,
-// `Foo<Int>`) writes that names nothing, in walk order.
+// `Foo<Int>`) writes that names nothing, in walk order, and E0363 for a
+// named union case whose name another member of its union takes.
 sema_type_unknown_written_names: fn(graph: SemaRegistrationGraph, caller: Int, ty: Type, span: Span, generic_names: [String], diagnostics: &[Diagnostic]) {
     if ty == {
         .Named(name) -> {
@@ -966,7 +971,7 @@ sema_type_unknown_written_names: fn(graph: SemaRegistrationGraph, caller: Int, t
             if sema_type_written_name_unknown(graph, caller, name, generic_names) -> sema_unknown_generic_type_name(name, span, diagnostics)
             loop arg in args -> sema_type_unknown_written_names(graph, caller, arg, span, generic_names, diagnostics)
         }
-        .List(inner) | .Shared(inner) | .Option(inner) | .Tagged(_, inner) | .FixedList(inner, _) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> sema_type_unknown_written_names(graph, caller, inner, span, generic_names, diagnostics)
+        .List(inner) | .Shared(inner) | .Option(inner) | .Tagged(_, inner) | .FixedList(inner, _) | .InlineRange(inner, _, _) | .Quantity(inner, _) | .Case(_, inner) -> sema_type_unknown_written_names(graph, caller, inner, span, generic_names, diagnostics)
         .Map(key, _, value) | .Result(key, value) -> {
             sema_type_unknown_written_names(graph, caller, key, span, generic_names, diagnostics)
             sema_type_unknown_written_names(graph, caller, value, span, generic_names, diagnostics)
@@ -975,9 +980,32 @@ sema_type_unknown_written_names: fn(graph: SemaRegistrationGraph, caller: Int, t
             loop parameter in params -> sema_type_unknown_written_names(graph, caller, parameter, span, generic_names, diagnostics)
             if ret == .Val(value) -> sema_type_unknown_written_names(graph, caller, value, span, generic_names, diagnostics)
         }
-        .Union(members) -> loop member in members -> sema_type_unknown_written_names(graph, caller, member, span, generic_names, diagnostics)
+        .Union(members) -> {
+            sema_type_union_case_conflicts(members, span, diagnostics)
+            loop member in members -> sema_type_unknown_written_names(graph, caller, member, span, generic_names, diagnostics)
+        }
         .Tuple(fields) -> loop field in fields -> sema_type_unknown_written_names(graph, caller, field.ty, span, generic_names, diagnostics)
         .Int | .Float | .Bool | .String | .Char | .TraitObject(_) | .IntN(_, _) | .Float32 | .Measure(_) -> {}
+    }
+}
+
+// E0363 for a named case of the union `members` whose name another member
+// takes: a member type with that name, or an earlier case of that name with
+// another payload type. A case repeated with its payload is one case.
+sema_type_union_case_conflicts: fn(members: [Type], span: Span, diagnostics: &[Diagnostic]) {
+    loop index in 0..<members.len() {
+        if members[index] == .Case(name, payload) {
+            loop other_index in 0..<members.len() {
+                other: members[other_index]
+                if other == .Case(other_name, other_payload) {
+                    if other_index < index && other_name == name && !type_identity_equal(other_payload, payload) {
+                        diagnostics.push(sema_error("E0363", span, "`{type_name(members[index])}` can't be a union member", "the named case `{name}` already carries `{type_name(other_payload)}` in this union", "give each named case one payload type"))
+                    }
+                } else if type_union_member_tag(other) == name {
+                    diagnostics.push(sema_error("E0363", span, "`{type_name(members[index])}` can't be a union member", "the named case `{name}` reuses the name of a member type of this union", "rename the case so no member type of the union has its name"))
+                }
+            }
+        }
     }
 }
 
@@ -995,7 +1023,7 @@ sema_type_unknown_measure_names: fn(graph: SemaRegistrationGraph, caller: Int, t
             sema_type_unknown_measure_names(graph, caller, inner, span, generic_names, diagnostics)
         }
         .Apply(_, args) | .Union(args) -> loop arg in args -> sema_type_unknown_measure_names(graph, caller, arg, span, generic_names, diagnostics)
-        .List(inner) | .Shared(inner) | .Option(inner) | .Tagged(_, inner) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> sema_type_unknown_measure_names(graph, caller, inner, span, generic_names, diagnostics)
+        .List(inner) | .Shared(inner) | .Option(inner) | .Tagged(_, inner) | .InlineRange(inner, _, _) | .Quantity(inner, _) | .Case(_, inner) -> sema_type_unknown_measure_names(graph, caller, inner, span, generic_names, diagnostics)
         .Map(key, _, value) | .Result(key, value) -> {
             sema_type_unknown_measure_names(graph, caller, key, span, generic_names, diagnostics)
             sema_type_unknown_measure_names(graph, caller, value, span, generic_names, diagnostics)
@@ -1079,6 +1107,7 @@ sema_type_resolve_declared_recursive: fn(graph: SemaRegistrationGraph, ty: Type,
         // copy: `marker` is a payload of read parameter `ty`, which keeps the original; field `marker` of the new Type.Tagged owns this one
         .Tagged(marker, inner) -> Type.Tagged{marker: marker.copy(), inner: sema_type_resolve_declared_recursive(graph, inner, caller, generic_params)}
         .Union(members) -> Type.Union{members: loop member in members -> sema_type_resolve_declared_recursive(graph, member, caller, generic_params)}
+        .Case(name, payload) -> Type.Case{name: name, payload: sema_type_resolve_declared_recursive(graph, payload, caller, generic_params)}
         // copy: `dimension` is a payload of read parameter `ty`, which keeps the original; field `dimension` of the new Type.Quantity owns this one
         .Quantity(base, dimension) -> Type.Quantity{base: sema_type_resolve_declared_recursive(graph, base, caller, generic_params), dimension: dimension.copy()}
         // copy: `key_span` is a payload of read parameter `ty`, which keeps the original; field `key_span` of the new Type.Map owns this one
@@ -1370,7 +1399,7 @@ sema_type_graph_base_name: fn(ty: Type) -> String? {
         .Named(name) -> Val(name)
         .Apply(name, _) -> Val(name)
         .Tagged(_, inner) -> sema_type_graph_base_name(inner)
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Union(_) | .Quantity(_, _) | .Measure(_) -> None
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> None
     }
 }
 
@@ -1529,7 +1558,7 @@ sema_type_bound_satisfied_resolved: fn(graph: SemaRegistrationGraph, actual_reso
         .Named(name) -> {
             if sema_type_name_is_generic(generic_params, name) -> return None
         }
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> {}
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
     }
     nominal_row: sema_type_resolve_nominal_row_at(graph, actual_resolved, caller) ?? return sema_type_bound_satisfied_builtin_target(graph, actual_resolved, bound_name, caller)
     trait_symbol: sema_type_graph_trait_symbol_at(graph, caller, bound_name) ?? return None
@@ -1545,7 +1574,7 @@ sema_type_bound_satisfied_resolved: fn(graph: SemaRegistrationGraph, actual_reso
 sema_type_bound_satisfied_builtin_target: fn(graph: SemaRegistrationGraph, actual_resolved: Type, bound_name: String, caller: Int) -> Bool? {
     builtin: if actual_resolved == {
         .Int | .Float | .Bool | .String | .Char | .IntN(_, _) | .Float32 | .List(_) | .Map(_, _, _) | .FixedList(_, _) | .Option(_) | .Tuple(_) -> true
-        .Shared(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .InlineRange(_, _, _) | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
+        .Shared(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .InlineRange(_, _, _) | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
     }
     if !builtin || sema_type_builtin_trait_symbol(bound_name) != None -> return None
     trait_symbol: sema_type_graph_trait_symbol_at(graph, caller, bound_name) ?? return None
@@ -1719,7 +1748,7 @@ sema_type_builtin_bound_satisfied: fn(graph: SemaRegistrationGraph, actual_resol
             // ordering are built in, and it has no nominal row to carry an impl.
             if name == "Duration" && structural -> return Val(true)
         }
-        .Shared(_) | .Apply(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> {}
+        .Shared(_) | .Apply(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
     }
     nominal_row: sema_type_resolve_nominal_row_at(graph, actual_resolved, caller) ?? return None
     // The nominal row is passed in place: binding it copied the declaration.
@@ -1813,7 +1842,7 @@ sema_type_bound_satisfied_at: fn(graph: SemaRegistrationGraph, actual: Type, bou
     if bound_name == "Printable" {
         if actual_resolved == {
             .List(inner) | .Option(inner) | .FixedList(inner, _) -> return sema_type_bound_satisfied_at(graph, inner, bound_name, caller, generic_params)
-            .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> {}
+            .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
         }
         if sema_type_resolve_nominal_row_at(graph, actual_resolved, caller) != None && sema_type_bound_satisfied_at(graph, actual_resolved, "Display", caller, generic_params) == (Val(true)) -> return Val(true)
     }
@@ -1822,7 +1851,7 @@ sema_type_bound_satisfied_at: fn(graph: SemaRegistrationGraph, actual: Type, bou
     // scalar has no nominal row to carry an impl.
     scalar: if actual_resolved == {
         .Int | .Float | .Bool | .String | .Char | .IntN(_, _) | .Float32 -> true
-        .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
+        .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
     }
     if sema_type_builtin_trait_symbol(bound_name) != None && (scalar || sema_type_graph_trait_symbol_at(graph, caller, bound_name) == None) {
         return sema_type_builtin_bound_satisfied(graph, actual_resolved, bound_name, caller, generic_params)
@@ -1853,7 +1882,7 @@ sema_type_codec_structural_bound: fn(graph: SemaRegistrationGraph, actual_resolv
         .Named(name) -> {
             if name == "Dyn" || name == "DateTime" || name == "ZonedDateTime" || name == "JSON" || name == "TOML" || name == "YAML" || name == "CSV" -> return Val(true)
         }
-        .Int | .Float | .Bool | .String | .Char | .Shared(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Quantity(_, _) | .Measure(_) -> {}
+        .Int | .Float | .Bool | .String | .Char | .Shared(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
     }
     None
 }
@@ -1865,7 +1894,7 @@ sema_type_bound_satisfied: fn(graph: SemaRegistrationGraph, actual: Type, bound_
 sema_type_generic_bound_satisfied: fn(graph: SemaRegistrationGraph, actual_resolved: Type, bound_name: String, caller: Int, generic_params: [TGenericParam]) -> Bool? {
     actual_name: if actual_resolved == {
         .Named(name) -> Val(name)
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> None
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> None
     }
     name: actual_name ?? return None
     parameter := TGenericParam?{None}
@@ -1929,7 +1958,7 @@ sema_type_assignable_in_graph_at: fn(graph: SemaRegistrationGraph, required: Typ
             }
             Val(true)
         }
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> Val(sema_type_assignable(sema_type_core_leaf_form(graph, required_resolved, caller), sema_type_core_leaf_form(graph, offered_resolved, caller)))
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> Val(sema_type_assignable(sema_type_core_leaf_form(graph, required_resolved, caller), sema_type_core_leaf_form(graph, offered_resolved, caller)))
     }
 }
 
@@ -1953,7 +1982,7 @@ sema_type_core_leaf_form: fn(graph: SemaRegistrationGraph, ty: Type, caller: Int
         .Map(key, key_span, value) -> Type.Map{key: sema_type_core_leaf_form(graph, key, caller), key_span: key_span.copy(), value: sema_type_core_leaf_form(graph, value, caller)}
         // copy: `marker` is a payload of read parameter `ty`, which keeps the original; field `marker` of the new Type.Tagged owns this one
         .Tagged(marker, inner) -> Type.Tagged{marker: marker.copy(), inner: sema_type_core_leaf_form(graph, inner, caller)}
-        .Int | .Float | .Bool | .String | .Char | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Union(_) | .Quantity(_, _) | .Measure(_) -> ty
+        .Int | .Float | .Bool | .String | .Char | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> ty
     }
 }
 

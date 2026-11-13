@@ -31,7 +31,7 @@ ir_handle_type_without_tags: fn(ty: Type) -> Type Never! {
         .Tagged(_, inner) | .InlineRange(inner, _, _) -> return ir_handle_type_without_tags(inner)
         // copy: the untagged type is a new owned Type. Otherwise it equals `ty`, the caller's
         // checked type (a read parameter), which stays on its node.
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .Float32 | .Union(_) | .Quantity(_, _) | .Measure(_) -> return ty.copy()
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .Float32 | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> return ty.copy()
     }
 }
 
@@ -48,7 +48,7 @@ ir_handle_task_route: fn(receiver: Type, carrier: TFailureCarrier) -> IRHandleRo
             if success != args[0] -> panic("checked task join result disagrees with its task element")
             return ir_handle_core("core.tasks", "join", "jet_std::JetTask::join", [Bool]{false}, None)
         }
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> panic("checked task join has an unsupported receiver type")
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> panic("checked task join has an unsupported receiver type")
     }
 }
 
@@ -67,7 +67,7 @@ ir_handle_allocator_name: fn(receiver: Type) -> String? Never! {
 ir_handle_nominal_name: fn(ty: Type) -> String Never! {
     if ir_handle_type_without_tags(ty) == {
         .Named(name) | .Apply(name, _) -> return name
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> panic("checked route requires a nominal receiver type")
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> panic("checked route requires a nominal receiver type")
     }
 }
 
@@ -224,7 +224,7 @@ ir_handle_reactive_name: fn(ty: Type) -> String? {
     return if ty == {
         .Tagged(_, inner) -> ir_handle_reactive_name(inner)
         .Named(name) | .Apply(name, _) -> Val(name)
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Union(_) | .Quantity(_, _) | .Measure(_) -> None
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> None
     }
 }
 
@@ -818,7 +818,7 @@ ir_general_handle_route: fn(operation: BodyHandleOp, receiver: Type, argument_co
         .ChannelClose -> {
             sender_receiver := if ir_handle_type_without_tags(receiver) == {
                 .Named(name) | .Apply(name, _) -> name == "Sender"
-                .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
+                .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
             }
             if sender_receiver -> return Val(ir_handle_core("core.channels", "sender.close", "jet_std::JetSender::close", [Bool]{true}, None))
             return Val(ir_handle_core("core.channels", "receiver.close", "jet_std::JetReceiver::close", [Bool]{true}, None))

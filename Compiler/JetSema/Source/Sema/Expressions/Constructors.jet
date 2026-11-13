@@ -287,7 +287,7 @@ sema_expression_struct_type: fn(type_name: String, type_args: [Type], expected: 
                 }
                 return Val(SemaExpressionResolvedType{ty: normalized, owner: owner})
             }
-            .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> {
+            .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {
                 diagnostics.push(sema_error("E0119", span, "`{{ ... }}` needs a known struct type", "inferred construction requires a nominal struct type from context", "name the type before the fields"))
                 return None
             }
@@ -309,7 +309,7 @@ sema_expression_struct_type: fn(type_name: String, type_args: [Type], expected: 
     resolved_ty: sema_expr_expected_type(ty, environment, program)
     resolved_name := if resolved_ty == {
         .Named(name) | .Apply(name, _) -> name
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> type_name
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> type_name
     }
     resolved_owner: sema_expression_type_symbol(scopes, environment, program, resolved_name) ?? owner
     Val(SemaExpressionResolvedType{ty: resolved_ty, owner: resolved_owner})
@@ -424,7 +424,7 @@ sema_expression_struct_field_view_escape: fn(field_value: Expr, scopes: SemaScop
         if scopes.bindings[index].string_view || sema_stmt_string_view_type(ty) -> return
         window: if sema_expr_unwrap_tag(ty) == {
             .Apply(view_name, _) -> view_name == "View" || view_name == "ViewMut"
-            .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
+            .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
         }
         if !window -> return
         key: scopes.bindings[index].symbol.id.key
@@ -488,7 +488,7 @@ sema_expression_core_record_name: fn(struct_name: String, type_args: [Type], exp
         expected_ty: expected ?? return None
         name = if sema_expr_unwrap_tag(expected_ty) == {
             .Named(expected_name) -> expected_name
-            .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> { return None }
+            .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> { return None }
         }
     }
     if sema_expression_type_symbol(scopes, environment, program, name) != None -> return None
@@ -583,7 +583,7 @@ sema_expression_struct_literal: fn(struct_name: String, type_args: [Type], field
     names: loop parameter in struct_def.type_params -> parameter.name
     args := if result_ty == {
         .Apply(_, rows) -> rows
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> [Type]{}
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> [Type]{}
     }
     // `Top{value: 1}` writes no type arguments and has none to take from an
     // expected type: its written fields infer them, as a call's arguments do.
@@ -693,7 +693,7 @@ sema_expression_struct_literal: fn(struct_name: String, type_args: [Type], field
         }
         head: if result_ty == {
             .Named(name) -> name
-            .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> type_name(result_ty)
+            .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> type_name(result_ty)
         }
         result_ty = Type.Apply{name: head, args: args}
     }
@@ -729,7 +729,7 @@ sema_expression_struct_literal: fn(struct_name: String, type_args: [Type], field
         resolved_trait: sema_expr_expected_type(Type.Named{name: trait_name}, environment, program)
         target: if resolved_trait == {
             .TraitObject(_) -> resolved_trait
-            .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> Type.TraitObject{bounds: [String]{trait_symbol.name}}
+            .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> Type.TraitObject{bounds: [String]{trait_symbol.name}}
         }
         value = sema_tree_node(target, TExprKind.TraitBox{value: value, target: target}, span)
     }
@@ -746,7 +746,7 @@ sema_expression_enum_literal: fn(type_name: String, type_args: [Type], variant: 
         !leading_dot -> true
         else -> if sema_expr_unwrap_tag(expected ?? Type.Named{name: "Never"}) == {
             .Option(_) -> true
-            .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
+            .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
         }
     }
     if type_name == "" && contextual_allowed && variant == "Val" && args.len() == 1 {
@@ -772,6 +772,13 @@ sema_expression_enum_literal: fn(type_name: String, type_args: [Type], variant: 
             }
         }
     }
+    // `.Celsius(value)` where the expected union lists the named case
+    // `Celsius(Float)` builds that case of the union.
+    if type_name == "" && leading_dot {
+        if sema_expression_union_case_payload(expected, variant) == .Val(payload_ty) {
+            return sema_expression_union_case_literal(sema_expr_unwrap_tag(expected ?? Type.Named{name: "Never"}), variant, payload_ty, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+        }
+    }
     resolved_name := type_name
     if resolved_name == "" {
         expected_ty: expected ?? {
@@ -784,11 +791,11 @@ sema_expression_enum_literal: fn(type_name: String, type_args: [Type], variant: 
             .Apply(name, _) -> name
             .Option(inner) -> if inner == {
                 .Named(name) -> name
-                .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> ""
+                .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> ""
             }
             // A case that exactly one union member declares
             // builds that member.
-            .Union(_) -> sema_pattern_flat_union_owner_name(normalized, variant, environment, program, span) ?? ""
+            .Union(_) | .Case(_, _) -> sema_pattern_flat_union_owner_name(normalized, variant, environment, program, span) ?? ""
             .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Quantity(_, _) | .Measure(_) -> ""
         }
         if resolved_name == "" {
@@ -1085,6 +1092,27 @@ sema_expression_hook_decision_literal: fn(variant: String, args: [EnumLitArg], v
     sema_expression_core_enum_positional_literal("HookDecision", "HookDecision", variant, payload_types, decision_ty, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
 }
 
+// The payload of the named case `variant` that the expected union lists.
+sema_expression_union_case_payload: fn(expected: Type?, variant: String) -> Type? {
+    wanted: expected ?? return None
+    if sema_expr_unwrap_tag(wanted) == .Union(members) {
+        loop member in members {
+            if member == .Case(name, payload) && name == variant -> return Val(payload.copy())
+        }
+    }
+    None
+}
+
+// `.Celsius(value)`: the named case `variant` of `union_ty`, whose one
+// positional value checks against the case payload `payload_ty`.
+sema_expression_union_case_literal: fn(union_ty: Type, variant: String, payload_ty: Type, args: [EnumLitArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    if args.len() != 1 || args[0] == .Named(_, _) {
+        diagnostics.push(sema_error("E0104", span, "case `{variant}` takes one value", "a named union case carries exactly one positional payload value", "write `.{variant}(value)`"))
+        return None
+    }
+    sema_expression_core_enum_positional_literal("", type_name(union_ty), variant, [Type]{payload_ty.copy()}, union_ty, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+}
+
 // The positional payload of a Core enum variant without a source
 // declaration, checked against `payload_types`; the literal has `result_ty`.
 sema_expression_core_enum_positional_literal: fn(enum_name: String, display_name: String, variant: String, payload_types: [Type], result_ty: Type, args: [EnumLitArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
@@ -1259,7 +1287,7 @@ sema_expression_typed_literal_printable_bound: fn(ty: Type, environment: SemaSco
 sema_expression_typed_literal_printable: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
     if ty == {
         .Int | .IntN(_, _) | .Float | .Float32 | .Bool | .String | .Char | .Quantity(_, _) -> return true
-        .Option(inner) | .List(inner) | .FixedList(inner, _) | .Tagged(_, inner) | .InlineRange(inner, _, _) -> return sema_expression_typed_literal_printable(inner, environment, program)
+        .Option(inner) | .List(inner) | .FixedList(inner, _) | .Tagged(_, inner) | .Case(_, inner) | .InlineRange(inner, _, _) -> return sema_expression_typed_literal_printable(inner, environment, program)
         .Result(ok, err) -> return sema_expression_typed_literal_printable(ok, environment, program) && sema_expression_typed_literal_printable(err, environment, program)
         .Map(key, _, value) -> return sema_expression_typed_literal_printable(key, environment, program) && sema_expression_typed_literal_printable(value, environment, program)
         .Tuple(fields) -> {
@@ -1319,7 +1347,7 @@ SemaExpressionCheckedTextLiteral: struct {
 sema_expression_checked_text_target: fn(head: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable) -> SemaExpressionCheckedTextTarget? {
     name: if head == {
         .Named(value) -> value
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> { return None }
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> { return None }
     }
     if program.registration_graph == .Val(graph) {
     owner := Symbol?{None}
@@ -1458,7 +1486,7 @@ sema_expression_checked_text_static_method_call: fn(receiver: Expr, method_name:
     // reads back as the named `String`) and the default failure route.
     hole_type: if checked.value.ty == {
         .Result(ok, _) -> ok
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> checked.value.ty
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> checked.value.ty
     }
     if method_name == "encode_hole" && target.build == None && hole_type != Type.String && hole_type != (Type.Named{name: "String"}) {
         diagnostics.push(sema_error("E0112", method_span, "a checked text hole encoder must return String", "every interpolation is passed through the type's pure `encode_hole` method before it reaches the checker", "make `encode_hole` return a String"))
@@ -1466,7 +1494,7 @@ sema_expression_checked_text_static_method_call: fn(receiver: Expr, method_name:
     }
     check_returns_unit_result: if checked.value.ty == {
         .Result(ok, _) -> ok == Type.Named{name: "Unit"}
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
     }
     if (method_name == "check" || method_name == "from") && !check_returns_unit_result {
         diagnostics.push(sema_error("E0907", method_span, "`{type_name}.check` must return `Result<Unit, Error>`", "the canonical CheckedText contract reports rejection through its error result", "match the pure CheckedText.check signature"))
@@ -1486,7 +1514,7 @@ sema_expression_checked_text_static_method_call: fn(receiver: Expr, method_name:
 sema_expression_checked_text_from: fn(target: SemaExpressionCheckedTextTarget, type_name: String, checked: TExpr, span: Span) -> TExpr? {
     error_type: if checked.ty == {
         .Result(_, error) -> error
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> { return None }
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> { return None }
     }
     source_local: checked_generated_local("__checked_text_source_{span.start}", span, Type.String)
     error_local: checked_generated_local("__checked_text_error_{span.start}", span, error_type)
@@ -1560,7 +1588,7 @@ sema_expression_checked_text_literal: fn(head: Type, source_head: Type?, body: T
     target: sema_expression_checked_text_target(head, environment, program, scopes) ?? return SemaExpressionCheckedTextLiteral{handled: false, value: None}
     type_name := if head == {
         .Named(name) -> name
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> panic("checked text target lost its named owner")
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> panic("checked text target lost its named owner")
     }
     // A type with `build` is also an ordinary record: only a quoted body is
     // its checked literal, and `Query{text: …}` stays a struct literal.
@@ -1801,7 +1829,7 @@ sema_expression_checked_text_constant: fn(value: Expr, scopes: SemaScopeTable) -
 sema_expression_checked_text_runtime: fn(head: Type, head_name: String, checked: TExpr, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> TExpr? {
     accepted_type: if checked.ty == {
         .Result(ok, _) -> ok
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> { return None }
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> { return None }
     }
     source_local: checked_generated_local("__checked_text_source_{span.start}", span, Type.String)
     source_value: sema_tree_node(Type.String, TExprKind.Local{local: source_local}, span)
@@ -1890,7 +1918,7 @@ sema_expression_typed_literal_regex: fn(value: Expr, span: Span, expected: Type?
             compiled: sema_call_core_check_source_owned(target, "core.regex.compile", [Type]{}, [CallArg]{argument}, span, None, environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
             result_type: if compiled.ty == {
                 .Result(ok, _) -> ok
-                .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> panic("source Regex compile producer is not fallible")
+                .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> panic("source Regex compile producer is not fallible")
             }
             message: sema_tree_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: "compiler-checked regex failed to compile"}}}, span)
             fallback: TOrFallback.Panic{message: message, location: sema_expression_panic_location(environment, program, scopes, span)}
@@ -1974,7 +2002,7 @@ sema_expression_variant_head: fn(head: Type, environment: SemaScopeEnvironment, 
     // Both named and applied heads retain the same dotted variant path.
     path: if sema_expr_unwrap_tag(head) == {
         .Named(name) | .Apply(name, _) -> name
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> ""
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> ""
     }
     // The variant is the last dotted part; the enum part is `Enum` or the
     // module-alias-qualified `alias.Enum`, cut in place with no part list.
@@ -2019,7 +2047,7 @@ sema_expression_typed_literal_distinct_mismatch: fn(head: Type, value: TExpr, en
         .String -> "from_string"
         .Bool -> "from_bool"
         .Char -> "from_char"
-        .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> "from_{offered}"
+        .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> "from_{offered}"
     }
     // The source spelling of the destination, never its resolved symbol identity.
     shown: sema_type_nominal_leaf(Type.Named{name: facts.name})
@@ -2048,7 +2076,7 @@ sema_expression_typed_literal: fn(head: Type?, body: TypedLitBody, span: Span, e
         if sema_expression_variant_head(written, environment, program, scopes) == .Val(variant_head) {
             owner_args: if sema_expr_unwrap_tag(written) == {
                 .Apply(_, rows) -> rows
-                .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> [Type]{}
+                .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> [Type]{}
             }
             if body == {
                 .Fields(fields) -> {
@@ -2163,7 +2191,7 @@ sema_expression_typed_literal: fn(head: Type?, body: TypedLitBody, span: Span, e
             }
             .Fields(_) | .Elements(_) | .Entries(_) | .ByteText(_) | .Empty -> return sema_expression_typed_literal_mismatch(result_head, span, diagnostics)
         }
-        .Int | .Float | .Bool | .String | .Char | .Shared(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> {}
+        .Int | .Float | .Bool | .String | .Char | .Shared(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
     }
 
     if body == {
@@ -2185,7 +2213,7 @@ sema_expression_typed_literal: fn(head: Type?, body: TypedLitBody, span: Span, e
             line := sema_source_line_at(environment.source_segments, value_span) ?? 0
             needs_conversion := (checked.ty == Type.Int && (if result_head == {
                 .IntN(_, _) -> true
-                .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
+                .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
             })) || (sema_expr_is_integer(checked.ty) && (result_head == Type.Float || result_head == Type.Float32)) || (checked.ty == Type.Float && result_head == Type.Float32) || sema_expression_typed_literal_fixed_conversion(checked.ty, result_head)
             if needs_conversion {
                 converted = sema_expr_numeric_literal_conversion(checked, result_head, value_span, line, diagnostics) ?? return None
@@ -2223,7 +2251,7 @@ sema_expression_typed_literal: fn(head: Type?, body: TypedLitBody, span: Span, e
             line := sema_source_line_at(environment.source_segments, value_span) ?? 0
             needs_conversion := (checked.ty == Type.Int && (if result_head == {
                 .IntN(_, _) -> true
-                .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
+                .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
             })) || (sema_expr_is_integer(checked.ty) && (result_head == Type.Float || result_head == Type.Float32)) || (checked.ty == Type.Float && result_head == Type.Float32) || sema_expression_typed_literal_fixed_conversion(checked.ty, result_head)
             if needs_conversion {
                 converted = sema_expr_numeric_literal_conversion(checked, result_head, value_span, line, diagnostics) ?? return None

@@ -78,7 +78,7 @@ jet_cli_solver_type_bounds: fn(ty: Type) -> JetCLISolverBounds Never! {
             if !jet_cli_solver_type_bounds(base).integer -> return JetCLISolverBounds{integer: false, lo: None, hi: None}
             JetCLISolverBounds{integer: true, lo: Val(lo), hi: Val(hi)}
         }
-        .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> JetCLISolverBounds{integer: false, lo: None, hi: None}
+        .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> JetCLISolverBounds{integer: false, lo: None, hi: None}
     }
 }
 
@@ -94,7 +94,7 @@ jet_cli_solver_fixed_width: fn(ty: Type) -> Bool Never! {
     if ty == {
         .IntN(_, _) -> true
         .InlineRange(base, _, _) -> jet_cli_solver_fixed_width(base)
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
     }
 }
 

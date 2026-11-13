@@ -98,7 +98,7 @@ sema_call_reflection_secret_bearing: fn(ty: Type) -> Bool Never! {
             return sema_call_reflection_secret_bearing(inner)
         }
         .Named(name) -> core_identity_in_module(name, "core.crypto") && sema_call_reflection_secret_leaf(name)
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
     }
 }
 
@@ -115,7 +115,7 @@ sema_call_reflection_one_pass: fn(ty: Type) -> Bool Never! {
             leaf: sema_call_reflection_leaf_name(name)
             core_identity_in_module(name, "core.http") && (leaf == "Body" || leaf == "HTTPBodyChunks")
         }
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> false
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
     }
 }
 
@@ -205,7 +205,7 @@ sema_call_reflection_is_displayable: fn(ty: Type, environment: SemaScopeEnvironm
         }
         .TraitObject(bounds) -> return sema_call_reflection_has_name(bounds, "Renderable")
         .Shared(_) | .Fn(_, _, _, _, _, _) | .Measure(_) -> return false
-        .FixedList(element, _) | .Tagged(_, element) | .InlineRange(element, _, _) -> return sema_call_reflection_is_displayable(element, environment, program)
+        .FixedList(element, _) | .Tagged(_, element) | .Case(_, element) | .InlineRange(element, _, _) -> return sema_call_reflection_is_displayable(element, environment, program)
         .Union(members) -> {
             loop member in members {
                 if !sema_call_reflection_is_displayable(member, environment, program) -> return false
@@ -262,7 +262,7 @@ sema_call_reflection_metadata_owner: fn(ty: Type) -> String? {
     if ty == {
         .Tagged(_, inner) -> return sema_call_reflection_metadata_owner(inner)
         .Named(name) | .Apply(name, _) -> return Val(sema_call_reflection_leaf_name(name))
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Union(_) | .Quantity(_, _) | .Measure(_) -> None
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> None
     }
 }
 
@@ -417,7 +417,7 @@ sema_call_try_reflection_handle_method: fn(
     if metadata.handled -> return metadata
     owner: if receiver_value.ty == {
         .Named(name) -> name
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> ""
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> ""
     }
     operation: sema_call_reflection_handle_operation(owner, method)
     if operation == None -> return SemaMethodSpecialCheck{handled: false, value: None}

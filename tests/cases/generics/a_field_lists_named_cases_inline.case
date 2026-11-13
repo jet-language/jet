@@ -1,0 +1,17 @@
+# A field lists named cases inline, as inside an enum: they parse, check,
+# build with `.Celsius(value)` and match on every tier, and a named case
+# mixes with a type member of the same union.
+fixture: a_field_lists_named_cases_inline.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step check: jet check cases.jet
+exit: 0
+step o0: jet run --optimize=none cases.jet
+exit: 0
+stdout: = "21.5 C\n70.5 F\n300 K\ntext n/a\n4 K\n"
+step o1: jet run --optimize=basic cases.jet
+exit: 0
+stdout: = "21.5 C\n70.5 F\n300 K\ntext n/a\n4 K\n"
+step o2: jet run --optimize=full cases.jet
+exit: 0
+stdout: = "21.5 C\n70.5 F\n300 K\ntext n/a\n4 K\n"

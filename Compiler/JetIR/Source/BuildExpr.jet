@@ -3291,7 +3291,7 @@ ir_empty_string_literal: fn(p: IRProgram, b: IRBuilder, value: Int) -> Bool Neve
 ir_empty_list_literal: fn(p: IRProgram, b: IRBuilder, value: Int) -> Bool Never! {
     if ir_untag(ir_ty(p, b, value)) == {
         .List(_) -> {}
-        .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> { return false }
+        .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> { return false }
     }
     node: ir_body_node(p, b, value)
     if node.kind == {
@@ -3312,7 +3312,7 @@ ir_clear_list: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, binding: IRBinding,
     if ir_kind_of(m, b, binding.slot) != .Aggregate -> return false
     if ir_untag(m.types[b.f.slot_type[binding.slot]].ty) == {
         .List(_) -> {}
-        .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> { return false }
+        .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> { return false }
     }
     element: ir_list_element(m, p, b, binding.slot) ?? return false
     if !binding.write && (!ir_owned_binding(b, binding.slot) || ir_live_flag(b, binding.slot) >= 0) -> return false
@@ -3349,7 +3349,7 @@ ir_clear_member: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, member
     if m.types[member.ty].kind != .Aggregate -> return false
     if ir_untag(m.types[member.ty].ty) == {
         .List(_) -> {}
-        .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> { return false }
+        .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> { return false }
     }
     element: ir_list_element_of(m, p, member.ty) ?? return false
     // The old value closes before it ends, as any field write closes it.
@@ -4059,7 +4059,7 @@ ir_err_abi_spelling: fn(p: IRProgram, ty: Type) -> String Never! {
     if plain == {
         .Option(inner) -> "{ir_err_abi_spelling(p, inner)}?"
         .List(element) -> "[{ir_err_abi_spelling(p, element)}]"
-        .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> ir_error_spelling(p, plain)
+        .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> ir_error_spelling(p, plain)
     }
 }
 
@@ -4071,7 +4071,7 @@ ir_err_abi_record_row: fn(p: IRProgram, ty: Type) -> Int? Never! {
         .Option(inner) -> ir_err_abi_record_row(p, inner)
         .List(element) -> ir_err_abi_record_row(p, element)
         .Named(name) -> ir_type_def(p, name)
-        .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> None
+        .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> None
     }
 }
 
@@ -4920,7 +4920,7 @@ ir_take_pattern: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receive
     ok_ty := Type.Named{name: "Unit"}
     if ir_untag(ty) == {
         .Result(ok, _) -> ok_ty = ok.copy()
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> return ir_fail_slot(b, span, "take_pattern as {ir_type_name(ty)}")
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> return ir_fail_slot(b, span, "take_pattern as {ir_type_name(ty)}")
     }
     handle: ir_expr(m, p, b, receiver)
     if ir_failed(b) || handle < 0 -> return -1
@@ -4965,7 +4965,7 @@ ir_take_pattern: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receive
         members := [IRMember]{}
         if ir_untag(ok_ty) == {
             .Tuple(fields) -> members = ir_tuple_members(m, p, fields) ?? return ir_type_fail(b, span, ok_ty)
-            .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> return ir_fail_slot(b, span, "take_pattern captures as {ir_type_name(ok_ty)}")
+            .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> return ir_fail_slot(b, span, "take_pattern captures as {ir_type_name(ok_ty)}")
         }
         loop field in canonical {
             member := IRMember?{None}
@@ -6269,7 +6269,7 @@ ir_list_literal: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, values:
     // A `[T#N]` literal is the List of its N elements.
     if ir_untag(ty) == {
         .List(element) | .FixedList(element, _) -> element_row = ir_value_type(m, p, element) ?? -1
-        .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> {}
+        .Int | .Float | .Bool | .String | .Char | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
     }
     if element_row < 0 -> return ir_fail_slot(b, span, "list literal of {ir_type_name(ty)}")
     elements := [Int]{}

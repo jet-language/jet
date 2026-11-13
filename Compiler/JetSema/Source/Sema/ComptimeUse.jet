@@ -591,7 +591,7 @@ sema_comptime_use_type: fn(ty: Type, span: Span, scan: &SemaComptimeUseScan) Nev
             loop arg in args -> sema_comptime_use_type(arg, span, scan)
         }
         .TraitObject(bounds) -> loop bound in bounds -> sema_comptime_use_reference(bound, span, scan)
-        .List(inner) | .Shared(inner) | .Option(inner) | .Tagged(_, inner) | .FixedList(inner, _) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> sema_comptime_use_type(inner, span, scan)
+        .List(inner) | .Shared(inner) | .Option(inner) | .Tagged(_, inner) | .Case(_, inner) | .FixedList(inner, _) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> sema_comptime_use_type(inner, span, scan)
         .Map(key, _, value) -> {
             sema_comptime_use_type(key, span, scan)
             sema_comptime_use_type(value, span, scan)
@@ -725,7 +725,7 @@ sema_comptime_use_value_prefix: fn(graph: SemaRegistrationGraph, ty: Type, modul
         if graph.comptime_use_targets.get("{module_identity}\n{graph.modules[row.module_index].module_identity}") == .Val(prefix) -> return Val(prefix)
     }
     if ty == {
-        .List(inner) | .Shared(inner) | .Option(inner) | .Tagged(_, inner) | .FixedList(inner, _) -> return sema_comptime_use_value_prefix(graph, inner, module_identity)
+        .List(inner) | .Shared(inner) | .Option(inner) | .Tagged(_, inner) | .Case(_, inner) | .FixedList(inner, _) -> return sema_comptime_use_value_prefix(graph, inner, module_identity)
         .Map(key, _, value) -> {
             if sema_comptime_use_value_prefix(graph, key, module_identity) == .Val(prefix) -> return Val(prefix)
             return sema_comptime_use_value_prefix(graph, value, module_identity)

@@ -76,7 +76,7 @@ checked_cost_integer_bounds: fn(expression: TExpr) -> TIntegerBounds? Never! {
             if value.ty == {
                 .Option(inner) -> success = checked_cost_type_bounds(inner)
                 .Result(ok, _) -> success = checked_cost_type_bounds(ok)
-                .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Quantity(_, _) | .Measure(_) -> {}
+                .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
             }
             if fallback == .Value(alternative) {
                 if success == .Val(normal) && checked_cost_integer_bounds(alternative) == .Val(other) -> bounds = Val(TIntegerBounds{lo: checked_cost_min(normal.lo, other.lo), hi: checked_cost_max(normal.hi, other.hi)})

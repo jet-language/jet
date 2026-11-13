@@ -121,7 +121,7 @@ sema_effect_type_add_held: fn(graph: SemaRegistrationGraph, module_identity: Str
         }
         .Shared(inner) -> sema_effect_type_add_held(graph, module_identity, label, span, inner, sources)
         .Option(inner) -> sema_effect_type_add_held(graph, module_identity, label, span, inner, sources)
-        .Tagged(_, inner) -> sema_effect_type_add_held(graph, module_identity, label, span, inner, sources)
+        .Tagged(_, inner) | .Case(_, inner) -> sema_effect_type_add_held(graph, module_identity, label, span, inner, sources)
         .Result(ok, err) -> {
             sema_effect_type_add_held(graph, module_identity, label, span, ok, sources)
             sema_effect_type_add_held(graph, module_identity, label, span, err, sources)
