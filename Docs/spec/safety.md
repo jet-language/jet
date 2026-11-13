@@ -211,7 +211,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 <!-- unsafe-ratchet:data
 {
   "schema": 1,
-  "total": 1427,
+  "total": 1428,
   "counts": {
     "Compiler": 751,
     "Core": 170,
@@ -219,7 +219,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     "Examples": 41,
     "Jetpack": 9,
     "Tools": 6,
-    "tests": 442
+    "tests": 443
   },
   "regions": [
     {
@@ -5440,21 +5440,21 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetTestKit/Assets/no_nix.jet",
-      "line": 56,
+      "line": 55,
       "column": 9,
       "reason": "the no-nix launcher passes its subject's status 101 through unchanged; process.exit would report it as 1 (S36)"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetTestKit/Source/Exec.jet",
-      "line": 478,
+      "line": 496,
       "column": 5,
       "reason": "the testkit stops its own step child at the resident-memory guard"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetTestKit/Source/Exec.jet",
-      "line": 664,
+      "line": 682,
       "column": 9,
       "reason": "the testkit stops a process its own case left running in the case scratch"
     },
@@ -6728,35 +6728,35 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Examples",
       "file": "Examples/Crypto/CryptoMigration.jet",
-      "line": 33,
+      "line": 34,
       "column": 5,
       "reason": "AES-256-GCM protocol interoperability"
     },
     {
       "package": "Examples",
       "file": "Examples/Crypto/CryptoSuite.jet",
-      "line": 38,
+      "line": 39,
       "column": 5,
       "reason": "known-answer check reads the RFC 7748 shared secret"
     },
     {
       "package": "Examples",
       "file": "Examples/Crypto/ExpertProjection.jet",
-      "line": 35,
+      "line": 36,
       "column": 5,
       "reason": "expert cryptography is an explicit opt-in"
     },
     {
       "package": "Examples",
       "file": "Examples/Crypto/RandomAPISplit.jet",
-      "line": 35,
+      "line": 36,
       "column": 5,
       "reason": "compare the typed and raw HKDF rungs"
     },
     {
       "package": "Examples",
       "file": "Examples/Crypto/VaultKeys.jet",
-      "line": 43,
+      "line": 44,
       "column": 5,
       "reason": "restore audited raw signing-key material"
     },
@@ -6777,35 +6777,35 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Examples",
       "file": "Examples/Interop/FFI/InlineC.jet",
-      "line": 6,
+      "line": 7,
       "column": 1,
       "reason": "the scalar ABI contract matches the C definition"
     },
     {
       "package": "Examples",
       "file": "Examples/Interop/FFI/InlineC.jet",
-      "line": 13,
+      "line": 14,
       "column": 1,
       "reason": "the scalar ABI contract deliberately returns a mismatched result"
     },
     {
       "package": "Examples",
       "file": "Examples/Interop/FFI/InlineC.jet",
-      "line": 19,
+      "line": 20,
       "column": 5,
       "reason": "call the audited inline C contract"
     },
     {
       "package": "Examples",
       "file": "Examples/Interop/FFI/InlineC.jet",
-      "line": 26,
+      "line": 25,
       "column": 9,
       "reason": "call the audited inline C contract with bounded Int values"
     },
     {
       "package": "Examples",
       "file": "Examples/Interop/FFI/InlineC.jet",
-      "line": 32,
+      "line": 31,
       "column": 9,
       "reason": "call the audited inline C contract with a deliberately wrong C result"
     },
@@ -6819,14 +6819,14 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Examples",
       "file": "Examples/LowLevel/InlineAsm.jet",
-      "line": 8,
+      "line": 9,
       "column": 1,
       "reason": "the operands are scalar registers and the early-written r10 clobber does not overlap live inputs"
     },
     {
       "package": "Examples",
       "file": "Examples/LowLevel/InlineAsm.jet",
-      "line": 19,
+      "line": 20,
       "column": 5,
       "reason": "call the audited register-only assembly contract"
     },
@@ -6875,7 +6875,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Examples",
       "file": "Examples/Memory/ExpiringSecret.jet",
-      "line": 22,
+      "line": 23,
       "column": 5,
       "reason": "vault key import: expiring secret lifetime"
     },
@@ -7015,14 +7015,14 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Jetpack",
       "file": "Jetpack/Foundation/Source/TreeHash.jet",
-      "line": 516,
+      "line": 514,
       "column": 9,
       "reason": "the authority retains the held directory until the process provider duplicates its descriptor; the child descriptor slot is supplied by the compiler"
     },
     {
       "package": "Jetpack",
       "file": "Jetpack/Foundation/Source/TreeHash.jet",
-      "line": 692,
+      "line": 690,
       "column": 5,
       "reason": "source-store linkat uses the live held reader and directory, a validated plain name, and no source pathname; raw syscall facts are classified here"
     },
@@ -7064,14 +7064,14 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Jetpack",
       "file": "Jetpack/Store/Tests/ClosureGraph.jet",
-      "line": 59,
+      "line": 58,
       "column": 13,
       "reason": "the test owns the journal file it just wrote"
     },
     {
       "package": "Jetpack",
       "file": "Jetpack/Store/Tests/Seal.jet",
-      "line": 31,
+      "line": 29,
       "column": 5,
       "reason": "the store test owns the fixture file whose mtime it pins"
     },
@@ -7092,14 +7092,14 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Tools",
       "file": "Tools/ci/CompiledWorkloadPeerLauncher.jet",
-      "line": 585,
+      "line": 584,
       "column": 9,
       "reason": "posix kill: every process in the sandbox's private PID namespace except its init and this supervisor belongs to the supervised command"
     },
     {
       "package": "Tools",
       "file": "Tools/ci/CompiledWorkloadPeerLauncher.jet",
-      "line": 597,
+      "line": 596,
       "column": 5,
       "reason": "posix signal reset + kill: restore SIG_DFL for one signal number, then re-raise it on this process so the caller observes the supervised command's signal"
     },
@@ -10178,6 +10178,13 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     },
     {
       "package": "tests",
+      "file": "tests/ui/unsafe_forbidden_by_organization_policy/run.jet",
+      "line": 5,
+      "column": 5,
+      "reason": "the organization policy forbids this escape"
+    },
+    {
+      "package": "tests",
       "file": "tests/ui/unsafe_obligation_missing.jet",
       "line": 5,
       "column": 5,
@@ -10225,8 +10232,8 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Examples | 41 |
 | Jetpack | 9 |
 | Tools | 6 |
-| tests | 442 |
-| **total** | **1427** |
+| tests | 443 |
+| **total** | **1428** |
 
 ### Regions
 
@@ -10977,9 +10984,9 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetSema/Tests/ScalarGlobalFixtures.jet | 21:5 | "single-threaded test: plain module writes of each scalar type" |
 | Compiler | Compiler/JetSema/Tests/XmlCheckerRootsFixtures.jet | 10:5 | "no raw operations in this regression" |
 | Compiler | Compiler/JetSema/Tests/XmlCheckerRootsFixtures.jet | 11:9 | "nested tail retains its value grammar" |
-| Compiler | Compiler/JetTestKit/Assets/no_nix.jet | 56:9 | "the no-nix launcher passes its subject's status 101 through unchanged; process.exit would report it as 1 (S36)" |
-| Compiler | Compiler/JetTestKit/Source/Exec.jet | 478:5 | "the testkit stops its own step child at the resident-memory guard" |
-| Compiler | Compiler/JetTestKit/Source/Exec.jet | 664:9 | "the testkit stops a process its own case left running in the case scratch" |
+| Compiler | Compiler/JetTestKit/Assets/no_nix.jet | 55:9 | "the no-nix launcher passes its subject's status 101 through unchanged; process.exit would report it as 1 (S36)" |
+| Compiler | Compiler/JetTestKit/Source/Exec.jet | 496:5 | "the testkit stops its own step child at the resident-memory guard" |
+| Compiler | Compiler/JetTestKit/Source/Exec.jet | 682:9 | "the testkit stops a process its own case left running in the case scratch" |
 | Compiler | Compiler/JetTestKit/Source/StepsControl.jet | 179:5 | "kill(pid, 0) observes the case-owned child without sending a signal" |
 | Compiler | Compiler/JetTestKit/Source/StepsSessions.jet | 363:5 | "the case explicitly authorizes signalling its own spawned child" |
 | Compiler | Compiler/JetTestKit/Tests/Fixtures/golden/compiler.jet | 30:9 | "the CLI double stands in for jet, whose internal compiler error alone ends with status 101 (I2); process.exit would report it as 1 (S36)" |
@@ -11161,28 +11168,28 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Docs | Docs/audits/g15-2026-11/probes/c4599_28_runtime_asm_reach.jet | 22:9 | "call the audited register-only assembly contract" |
 | Docs | Docs/proposals/jai-style-sample/Data.jet | 1274:9 | "native path bytes originate from the host environment and are split at ASCII boundaries" |
 | Docs | Docs/proposals/jai-style-sample/Data.jet | 1886:5 | "inspect existing private Decode carriers only inside checked Core data source" |
-| Examples | Examples/Crypto/CryptoMigration.jet | 33:5 | "AES-256-GCM protocol interoperability" |
-| Examples | Examples/Crypto/CryptoSuite.jet | 38:5 | "known-answer check reads the RFC 7748 shared secret" |
-| Examples | Examples/Crypto/ExpertProjection.jet | 35:5 | "expert cryptography is an explicit opt-in" |
-| Examples | Examples/Crypto/RandomAPISplit.jet | 35:5 | "compare the typed and raw HKDF rungs" |
-| Examples | Examples/Crypto/VaultKeys.jet | 43:5 | "restore audited raw signing-key material" |
+| Examples | Examples/Crypto/CryptoMigration.jet | 34:5 | "AES-256-GCM protocol interoperability" |
+| Examples | Examples/Crypto/CryptoSuite.jet | 39:5 | "known-answer check reads the RFC 7748 shared secret" |
+| Examples | Examples/Crypto/ExpertProjection.jet | 36:5 | "expert cryptography is an explicit opt-in" |
+| Examples | Examples/Crypto/RandomAPISplit.jet | 36:5 | "compare the typed and raw HKDF rungs" |
+| Examples | Examples/Crypto/VaultKeys.jet | 44:5 | "restore audited raw signing-key material" |
 | Examples | Examples/ErrorsAndEffects/Effects/AuditedGateLadder.jet | 6:5 | "the audited block has no low-level operation" |
 | Examples | Examples/ErrorsAndEffects/Effects/SingleUse.jet | 85:5 | "event cancelled; the ticket admits to nothing, so voiding it is correct" |
-| Examples | Examples/Interop/FFI/InlineC.jet | 6:1 | "the scalar ABI contract matches the C definition" |
-| Examples | Examples/Interop/FFI/InlineC.jet | 13:1 | "the scalar ABI contract deliberately returns a mismatched result" |
-| Examples | Examples/Interop/FFI/InlineC.jet | 19:5 | "call the audited inline C contract" |
-| Examples | Examples/Interop/FFI/InlineC.jet | 26:9 | "call the audited inline C contract with bounded Int values" |
-| Examples | Examples/Interop/FFI/InlineC.jet | 32:9 | "call the audited inline C contract with a deliberately wrong C result" |
+| Examples | Examples/Interop/FFI/InlineC.jet | 7:1 | "the scalar ABI contract matches the C definition" |
+| Examples | Examples/Interop/FFI/InlineC.jet | 14:1 | "the scalar ABI contract deliberately returns a mismatched result" |
+| Examples | Examples/Interop/FFI/InlineC.jet | 20:5 | "call the audited inline C contract" |
+| Examples | Examples/Interop/FFI/InlineC.jet | 25:9 | "call the audited inline C contract with bounded Int values" |
+| Examples | Examples/Interop/FFI/InlineC.jet | 31:9 | "call the audited inline C contract with a deliberately wrong C result" |
 | Examples | Examples/Interop/FFI/OpaqueHandles/run.jet | 36:5 | "fixed headers define handle close ownership, exclusive buffers, and bounded output lengths" |
-| Examples | Examples/LowLevel/InlineAsm.jet | 8:1 | "the operands are scalar registers and the early-written r10 clobber does not overlap live inputs" |
-| Examples | Examples/LowLevel/InlineAsm.jet | 19:5 | "call the audited register-only assembly contract" |
+| Examples | Examples/LowLevel/InlineAsm.jet | 9:1 | "the operands are scalar registers and the early-written r10 clobber does not overlap live inputs" |
+| Examples | Examples/LowLevel/InlineAsm.jet | 20:5 | "call the audited register-only assembly contract" |
 | Examples | Examples/LowLevel/LowLevel.jet | 8:5 | "`cell` is live on this stack frame and the pointer never escapes" |
 | Examples | Examples/LowLevel/LowLevel.jet | 22:5 | "`cell` is a live Int on this stack frame; the pointer never escapes" |
 | Examples | Examples/LowLevel/MMIOBoardWrite.jet | 9:5 | "stand-in MMIO cell stays on this stack frame" |
 | Examples | Examples/LowLevel/PointerCastDeref.jet | 11:5 | "flag is live on this stack frame and the pointer never escapes" |
 | Examples | Examples/LowLevel/UnsafeObligations.jet | 9:5 | "cell stays live and the pointer remains local" |
 | Examples | Examples/Memory/Allocation/Uninit.jet | 12:5 | "uninitialized plain-data storage is filled before every read" |
-| Examples | Examples/Memory/ExpiringSecret.jet | 22:5 | "vault key import: expiring secret lifetime" |
+| Examples | Examples/Memory/ExpiringSecret.jet | 23:5 | "vault key import: expiring secret lifetime" |
 | Examples | Examples/Memory/Pin.jet | 42:5 | "node storage is fixed for the returned pin; self_addr names this place" |
 | Examples | Examples/Memory/Unsafe/UnsafeSentries.jet | 7:5 | "pointer is used only after arena reset to prove quarantine" |
 | Examples | Examples/Memory/Unsafe/UnsafeSentriesPackageOff/run.jet | 7:5 | "the local cell is live for this package-policy proof" |
@@ -11202,19 +11209,19 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Examples | Examples/Text/CheckedText/CheckedTextRuntimeHole.jet | 24:5 | "checked text example output" |
 | Examples | Examples/Text/CheckedText/CheckedTextRuntimeHoleStop.jet | 23:5 | "checked text example output" |
 | Examples | Examples/Text/CheckedText/CheckedTextType.jet | 20:5 | "checked text example output" |
-| Jetpack | Jetpack/Foundation/Source/TreeHash.jet | 516:9 | "the authority retains the held directory until the process provider duplicates its descriptor; the child descriptor slot is supplied by the compiler" |
-| Jetpack | Jetpack/Foundation/Source/TreeHash.jet | 692:5 | "source-store linkat uses the live held reader and directory, a validated plain name, and no source pathname; raw syscall facts are classified here" |
+| Jetpack | Jetpack/Foundation/Source/TreeHash.jet | 514:9 | "the authority retains the held directory until the process provider duplicates its descriptor; the child descriptor slot is supplied by the compiler" |
+| Jetpack | Jetpack/Foundation/Source/TreeHash.jet | 690:5 | "source-store linkat uses the live held reader and directory, a validated plain name, and no source pathname; raw syscall facts are classified here" |
 | Jetpack | Jetpack/Provider/Batteries/embedded/embedded.jet | 183:5 | "host replay uses a stack cell for the CMSDK UART0 control register and never dereferences the target address" |
 | Jetpack | Jetpack/Publication/Source/Sign.jet | 67:5 | "export a fresh Core signing seed only to descriptor-relative owner-only key publication; the Core key owner is wiped on every outcome" |
 | Jetpack | Jetpack/Publication/Source/Sign.jet | 122:5 | "import the protected seed into Core signing without a second raw-secret copy; close the temporary Core Secret on success and failure" |
 | Jetpack | Jetpack/Publication/Source/Sign.jet | 146:5 | "package author signatures require Core's strict Ed25519 verification; no raw verifier or helper process" |
 | Jetpack | Jetpack/Publication/Tests/Index.jet | 299:5 | "the test owns the planted lock file it ages" |
-| Jetpack | Jetpack/Store/Tests/ClosureGraph.jet | 59:13 | "the test owns the journal file it just wrote" |
-| Jetpack | Jetpack/Store/Tests/Seal.jet | 31:5 | "the store test owns the fixture file whose mtime it pins" |
+| Jetpack | Jetpack/Store/Tests/ClosureGraph.jet | 58:13 | "the test owns the journal file it just wrote" |
+| Jetpack | Jetpack/Store/Tests/Seal.jet | 29:5 | "the store test owns the fixture file whose mtime it pins" |
 | Tools | Tools/agent/cache/Lanes.jet | 311:21 | "the guard signals only compiler, build and test jobs of this user, chosen by name from /proc" |
 | Tools | Tools/agent/orchestrator/LaneCommit.jet | 214:5 | "signal 0 delivers nothing: it only asks whether a queued job's caller still runs" |
-| Tools | Tools/ci/CompiledWorkloadPeerLauncher.jet | 585:9 | "posix kill: every process in the sandbox's private PID namespace except its init and this supervisor belongs to the supervised command" |
-| Tools | Tools/ci/CompiledWorkloadPeerLauncher.jet | 597:5 | "posix signal reset + kill: restore SIG_DFL for one signal number, then re-raise it on this process so the caller observes the supervised command's signal" |
+| Tools | Tools/ci/CompiledWorkloadPeerLauncher.jet | 584:9 | "posix kill: every process in the sandbox's private PID namespace except its init and this supervisor belongs to the supervised command" |
+| Tools | Tools/ci/CompiledWorkloadPeerLauncher.jet | 596:5 | "posix signal reset + kill: restore SIG_DFL for one signal number, then re-raise it on this process so the caller observes the supervised command's signal" |
 | Tools | Tools/ci/CompiledWorkloadPeerProbe.jet | 88:5 | "posix kill: the probe ends itself with SIGTERM so the check observes the launcher propagating a signal death" |
 | Tools | Tools/packaging/NativeCCompiler.jet | 68:9 | "re-raise the compiler's terminating signal on this process, as the parent shell expects" |
 | tests | tests/cases/backend_ice/fixtures/asm_rail/rail.jet | 10:1 | "the program claims the runtime's stack switch" |
@@ -11654,6 +11661,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | tests | tests/ui/unsafe_and_runtime/volatile_write_emit_is_byte_exact/run.jet | 2:1 | "UART TX register is mapped by the target machine" |
 | tests | tests/ui/unsafe_block_after_statement_parse_error.jet | 8:5 | "target outlives the read in this frame" |
 | tests | tests/ui/unsafe_forbidden/run.jet | 2:5 | "not allowed" |
+| tests | tests/ui/unsafe_forbidden_by_organization_policy/run.jet | 5:5 | "the organization policy forbids this escape" |
 | tests | tests/ui/unsafe_obligation_missing.jet | 5:5 | "local pointer" |
 | tests | tests/ui/unsafe_obligation_no_bleed.jet | 6:5 | "two independent pointer operations" |
 | tests | tests/ui/unsafe_per_site/run.jet | 2:5 | "selection required" |
