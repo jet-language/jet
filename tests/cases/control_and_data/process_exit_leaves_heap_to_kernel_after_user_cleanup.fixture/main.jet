@@ -1,0 +1,48 @@
+// An ending process leaves its heap to the kernel: process.exit runs every
+// user cleanup, including the Close that wipes a Secret, and frees nothing.
+// A 64 MiB buffer is its own mapping, so freeing it is one munmap.
+package: {
+    name: "exit_leaves_heap"
+    authority: { allow: [Env, Exec, IO] }
+}
+
+use {
+    crypto: core.crypto
+    os: core.sys
+    process: core.process
+    scope: core.mem.scope
+}
+
+Key: struct {
+    secret: crypto.Secret
+
+    impl Close {
+        close: fn(&&self) {
+            secret := self.secret.move()
+            close(secret)
+            print("key wiped")
+        }
+    }
+}
+
+fill: fn() -> [U8] {
+    bytes := [U8]{}
+    loop at in 0..<67108864 -> bytes.push(U8{at.bit_and(255)})
+    bytes
+}
+
+run: fn() {
+    #Unsafe("the exit callback has no captured state") {
+        os.atexit(() -> print("atexit"))
+    }
+    guard: scope.guard(() -> print("guard"))
+    key := Key{secret: crypto.Secret.from_text("hunter2")}
+    defer close(key)
+    // `drop`: a first buffer dies inside the run, so its free is seen.
+    if process.args().contains("drop") -> print("dropped {fill().len()}")
+    rows := [String]{}
+    loop at in 0..<400000 -> rows.push("row {at}")
+    bytes: fill()
+    print("body {rows.len()} {bytes.len()}")
+    process.exit(0)
+}
