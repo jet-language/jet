@@ -328,8 +328,9 @@ ir_static_member: fn(m: &IRModule, p: IRProgram, s: &IRStaticBuild, object: Int,
 }
 
 // Lays an aggregate value out in place: a struct or tuple member by member
-// (ir_comptime_struct), a List as its frozen header over a static element
-// buffer (ir_list_from), a byte List over its data row (ir_comptime_bytes).
+// (ir_comptime_struct), an inline `[T#N]` element by element at its stride,
+// a List as its frozen header over a static element buffer (ir_list_from), a
+// byte List over its data row (ir_comptime_bytes).
 ir_static_fill: fn(m: &IRModule, p: IRProgram, s: &IRStaticBuild, object: Int, offset: Int, ty: Type, row: Int, value: TComptimeValue) -> Bool Never! {
     if value == {
         .Struct(_, fields) -> {
@@ -338,6 +339,14 @@ ir_static_fill: fn(m: &IRModule, p: IRProgram, s: &IRStaticBuild, object: Int, o
             return ir_static_struct(m, p, s, object, offset, ty, members, plan, fields)
         }
         .List(values) -> {
+            if ir_fixed_shape(m, p, row) == .Val(fixed) {
+                if values.len() != fixed.count -> return false
+                element: ir_sequence_element(ty) ?? return false
+                loop (index, item) in values {
+                    if !ir_static_into(m, p, s, object, offset + index * fixed.stride, element, fixed.element, item) -> return false
+                }
+                return true
+            }
             if ir_untag(ty) == .List(element) {
                 element_row: ir_value_type(m, p, element) ?? return false
                 if values.len() == 0 -> return true
@@ -385,6 +394,11 @@ ir_static_fill: fn(m: &IRModule, p: IRProgram, s: &IRStaticBuild, object: Int, o
             return true
         }
         .Bytes(bytes) -> {
+            if ir_fixed_shape(m, p, row) == .Val(fixed) {
+                if bytes.len() != fixed.count || m.types[fixed.element].kind != .Word || m.types[fixed.element].size != 1 -> return false
+                loop (index, byte) in bytes -> ir_static_put(s, object, offset + index * fixed.stride, IRStaticWord{word: Int{byte}}, 1)
+                return true
+            }
             element_row := -1
             if ir_untag(ty) == .List(element) {
                 element_row = ir_value_type(m, p, element) ?? -1
