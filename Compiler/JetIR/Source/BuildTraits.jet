@@ -318,6 +318,13 @@ ir_trait_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, receiver: Int, meth
         result = ir_temp(m, b, result_row)
     }
     key: ir_load_word(m, b, boxed, 0)
+    // Each implementation's path builds the arguments again, from the
+    // ownership before the dispatch; the paths meet innermost first as their
+    // Ifs close (ir_close_arms), and the unknown-key path stops.
+    before: ir_own_states(b, b.bindings.len())
+    tests := [Int]{}
+    arm_states := [[IROwnState]]{}
+    arm_leaves := [Bool]{}
     loop target in targets {
         target_key: ir_trait_key(m, p, target.concrete)
         expected: ir_word_const(m, b, target_key)
@@ -349,14 +356,14 @@ ir_trait_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, receiver: Int, meth
             b.fresh[value] = false
             b.fresh[adapted] = false
         }
+        tests.push(selected)
+        arm_states.push(ir_own_states(b, before.len()))
+        arm_leaves.push(false)
         ir_else(b.f, b.line)
+        ir_set_own_states(b, before)
     }
     ir_trait_unreachable(m, b)
-    closing := targets.len()
-    loop closing > 0 {
-        ir_end(b.f, b.line)
-        closing -= 1
-    }
+    ir_close_arms(m, b, tests, arm_states, arm_leaves, true)
     // A consumed box went to the implementation; any other fresh one ends here.
     if consumes {
         b.fresh[boxed] = false

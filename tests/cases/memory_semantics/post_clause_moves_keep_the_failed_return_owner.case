@@ -1,0 +1,22 @@
+# The `#Post` clauses of a function whose declared type is its success run
+# where it succeeds only. A clause that moves a parameter moves it there
+# only: where the function fails, the parameter still owns its text, which
+# ends as the function returns, so 256 failing calls over a fresh MiB each
+# leave the resident set where it was. A contract is pure, so a clause can
+# only move plain memory, which only the resident set shows.
+fixture: post_clause_moves_keep_the_failed_return_owner.fixture
+env: NO_COLOR=1
+step: jet run --optimize=none main.jet
+exit: 0
+stdout: = post_clause_moves_keep_the_failed_return_owner.out
+step: jet run --optimize=basic main.jet
+exit: 0
+stdout: = post_clause_moves_keep_the_failed_return_owner.out
+step: jet run --optimize=full main.jet
+exit: 0
+stdout: = post_clause_moves_keep_the_failed_return_owner.out
+step: jet build main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = post_clause_moves_keep_the_failed_return_owner.out

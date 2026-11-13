@@ -1,0 +1,46 @@
+use files: core.files
+
+// Lock descriptors this process holds open (fds whose target ends `.lk`).
+held: fn() -[FS]> Int {
+    count := 0
+    names: files.list_dir("/proc/self/fd") ?? panic("list /proc/self/fd")
+    loop entry in names {
+        target: files.read_link(entry.path) ?? ""
+        if target.ends_with(".lk") -> count += 1
+    }
+    count
+}
+
+lock: fn(name: String) -[FS, Env]> FileLock {
+    files.lock(name) ?? panic("lock {name}")
+}
+
+add: fn(x: Int, y: Int) -> Int {
+    x + y
+}
+
+// Takes the lock, which closes as this returns, and hands back `add`.
+adder: fn(&&l: FileLock) -[FS]> fn(Int, Int) -> Int {
+    _: held()
+    add
+}
+
+// `Option.lift2(f, a, b)` builds `f` only once both operands are present,
+// so `adder(l.move())` moves the lock there only: where an operand is
+// absent, the parameter still owns the lock, which closes as this returns.
+lifted: fn(&&l: FileLock, a: Int?, b: Int?) -[FS]> Int {
+    sum: Option.lift2(adder(l.move()), a, b) ?? 0
+    sum + held()
+}
+
+run: fn() -[IO, FS, Env]> {
+    loop name in ["a", "b", "c"] {
+        files.write("{name}.lk", "") ?? panic("write {name}")
+    }
+    both: lifted(lock("a.lk"), Val(1), Val(2))
+    print("lift2, both present {both} {held()}")
+    first_absent: lifted(lock("b.lk"), None, Val(2))
+    print("lift2, first absent {first_absent} {held()}")
+    second_absent: lifted(lock("c.lk"), Val(1), None)
+    print("lift2, second absent {second_absent} {held()}")
+}

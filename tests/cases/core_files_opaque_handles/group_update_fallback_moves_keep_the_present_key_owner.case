@@ -1,0 +1,21 @@
+# A group update (`group := map.get(key) ?? fallback`, then
+# `map[key] = group`) builds as a write window into the key's entry. A
+# fallback that moves an owner seeds a missing key and moves it there only:
+# where the key is present, the owner still ends its lock at its scope end,
+# so every lock descriptor closes once and none leaks.
+fixture: group_update_fallback_moves_keep_the_present_key_owner.fixture
+env: NO_COLOR=1
+step: jet run --optimize=none main.jet
+exit: 0
+stdout: = group_update_fallback_moves_keep_the_present_key_owner.out
+step: jet run --optimize=basic main.jet
+exit: 0
+stdout: = group_update_fallback_moves_keep_the_present_key_owner.out
+step: jet run --optimize=full main.jet
+exit: 0
+stdout: = group_update_fallback_moves_keep_the_present_key_owner.out
+step: jet build main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = group_update_fallback_moves_keep_the_present_key_owner.out

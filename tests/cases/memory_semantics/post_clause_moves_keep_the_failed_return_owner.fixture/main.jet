@@ -1,0 +1,42 @@
+package: {
+    name: "post_clause_moves_keep_the_failed_return_owner"
+    authority: { allow: [IO, FS] }
+}
+
+use files: core.files
+
+// Takes `s`, which ends as this returns. A contract is pure, so what a
+// clause moves can only be a value whose end is pure too: plain memory.
+taken: fn(&&s: String) -[]> Int {
+    1
+}
+
+// A function whose declared Int is its success: `result` is the payload, so
+// its `#Post` clauses run where it succeeds only. The clause moves `s` there
+// only: where it fails, the parameter still owns its text, which ends as
+// this returns.
+#Post(result + taken(s.move()) > 0, "post")
+checked: fn(&&s: String, value: Int) -> Int {
+    if value < 0 -> return Err("negative")
+    value
+}
+
+// Resident pages of this process (the second field of /proc/self/statm).
+resident: fn() -[FS]> Int {
+    statm: files.read("/proc/self/statm") ?? panic("read /proc/self/statm")
+    fields: statm.trim().split(" ").to_list()
+    Int.parse(fields[1]) ?? panic("statm {statm}")
+}
+
+run: fn() -[IO, FS]> {
+    ok: checked("x".repeat(16), 5) ?? -1
+    print("post clause, success {ok}")
+    start: resident()
+    failures := 0
+    // 256 failing calls, each handed a fresh MiB of text.
+    loop _ in 0..<256 {
+        if (checked("x".repeat(1048576), -1) ?? -1) < 0 -> failures += 1
+    }
+    grown: (resident() - start) * 4096
+    print("post clause, {failures} failures, grew under 64 MiB: {grown < 67108864}")
+}

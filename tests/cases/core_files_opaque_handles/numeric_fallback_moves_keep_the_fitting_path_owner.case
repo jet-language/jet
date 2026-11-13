@@ -1,0 +1,20 @@
+# `U8.from_int(n) ?? fallback` builds as a range test with no Result. A
+# fallback that moves an owner, as a value or behind `return`, moves it only
+# where `n` does not fit: where it fits, the owner still ends its lock at its
+# scope end, so every lock descriptor closes once and none leaks.
+fixture: numeric_fallback_moves_keep_the_fitting_path_owner.fixture
+env: NO_COLOR=1
+step: jet run --optimize=none main.jet
+exit: 0
+stdout: = numeric_fallback_moves_keep_the_fitting_path_owner.out
+step: jet run --optimize=basic main.jet
+exit: 0
+stdout: = numeric_fallback_moves_keep_the_fitting_path_owner.out
+step: jet run --optimize=full main.jet
+exit: 0
+stdout: = numeric_fallback_moves_keep_the_fitting_path_owner.out
+step: jet build main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = numeric_fallback_moves_keep_the_fitting_path_owner.out

@@ -1,0 +1,20 @@
+# `Option.lift2(f, a, b)` builds `f` only once both operands are present.
+# An `f` whose building moves an owner moves it there only: where an operand
+# is absent, the owner still ends its lock at its scope end, so every lock
+# descriptor closes once and none leaks.
+fixture: lift2_callable_moves_keep_the_absent_operand_owner.fixture
+env: NO_COLOR=1
+step: jet run --optimize=none main.jet
+exit: 0
+stdout: = lift2_callable_moves_keep_the_absent_operand_owner.out
+step: jet run --optimize=basic main.jet
+exit: 0
+stdout: = lift2_callable_moves_keep_the_absent_operand_owner.out
+step: jet run --optimize=full main.jet
+exit: 0
+stdout: = lift2_callable_moves_keep_the_absent_operand_owner.out
+step: jet build main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = lift2_callable_moves_keep_the_absent_operand_owner.out

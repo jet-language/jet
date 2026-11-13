@@ -1,0 +1,76 @@
+use files: core.files
+
+// Lock descriptors this process holds open (fds whose target ends `.lk`).
+held: fn() -[FS]> Int {
+    count := 0
+    names: files.list_dir("/proc/self/fd") ?? panic("list /proc/self/fd")
+    loop entry in names {
+        target: files.read_link(entry.path) ?? ""
+        if target.ends_with(".lk") -> count += 1
+    }
+    count
+}
+
+lock: fn(name: String) -[FS, Env]> FileLock {
+    files.lock(name) ?? panic("lock {name}")
+}
+
+consume_lock: fn(&&l: FileLock) -[FS]> Int {
+    held()
+}
+
+Meter: trait {
+    read: fn(self, n: Int) -[]> Int
+}
+
+Small: struct {
+    k: Int
+
+    impl Meter {
+        read: fn(self, n: Int) -[]> Int {
+            self.k + n
+        }
+    }
+}
+
+Large: struct {
+    k: Int
+
+    impl Meter {
+        read: fn(self, n: Int) -[]> Int {
+            self.k * n
+        }
+    }
+}
+
+small: fn() -> Meter {
+    Small{k: 1}
+}
+
+large: fn() -> Meter {
+    Large{k: 10}
+}
+
+// A call through a trait value builds its arguments once per
+// implementation, each on that implementation's path. The `??` fallback
+// moves the lock only where `n` is absent: on every implementation's path
+// where it is present, the parameter still owns the lock, which closes as
+// this returns.
+measured: fn(&&l: FileLock, m: Meter, n: Int?) -[FS]> Int {
+    total: m.read(n ?? consume_lock(l.move()))
+    total + held()
+}
+
+run: fn() -[IO, FS, Env]> {
+    loop name in ["a", "b", "c", "d"] {
+        files.write("{name}.lk", "") ?? panic("write {name}")
+    }
+    small_present: measured(lock("a.lk"), small(), Val(2))
+    print("small, present {small_present} {held()}")
+    small_absent: measured(lock("b.lk"), small(), None)
+    print("small, absent {small_absent} {held()}")
+    large_present: measured(lock("c.lk"), large(), Val(2))
+    print("large, present {large_present} {held()}")
+    large_absent: measured(lock("d.lk"), large(), None)
+    print("large, absent {large_absent} {held()}")
+}

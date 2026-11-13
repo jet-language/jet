@@ -1,0 +1,63 @@
+use files: core.files
+
+// Lock descriptors this process holds open (fds whose target ends `.lk`).
+held: fn() -[FS]> Int {
+    count := 0
+    names: files.list_dir("/proc/self/fd") ?? panic("list /proc/self/fd")
+    loop entry in names {
+        target: files.read_link(entry.path) ?? ""
+        if target.ends_with(".lk") -> count += 1
+    }
+    count
+}
+
+lock: fn(name: String) -[FS, Env]> FileLock {
+    files.lock(name) ?? panic("lock {name}")
+}
+
+consume_lock: fn(&&l: FileLock) -[FS]> Int {
+    held()
+}
+
+Reading: enum {
+    Missing
+    Count(n: Int)
+}
+
+// A payload slot's value is compared only once the variant matches: on the
+// other variant the parameter still owns the lock, which closes as this
+// returns.
+variant_value: fn(&&l: FileLock, r: Reading) -[FS]> Int {
+    if r == .Count(consume_lock(l.move())) -> return 1
+    0 + held()
+}
+
+// A later alternative is tested only where the earlier one missed.
+alternative_value: fn(&&l: FileLock, r: Reading) -[FS]> Int {
+    if r == .Missing | .Count(consume_lock(l.move())) -> return 1 + held()
+    0 + held()
+}
+
+// A list item's value is compared only once the length fits.
+list_value: fn(&&l: FileLock, xs: [Int]) -[FS]> Int {
+    if xs == [consume_lock(l.move())] -> return 1
+    0 + held()
+}
+
+run: fn() -[IO, FS, Env]> {
+    loop name in ["a", "b", "c", "d", "e", "f"] {
+        files.write("{name}.lk", "") ?? panic("write {name}")
+    }
+    v1: variant_value(lock("a.lk"), Reading.Count{n: 1})
+    print("variant value, matched {v1} {held()}")
+    v2: variant_value(lock("b.lk"), Reading.Missing)
+    print("variant value, other variant {v2} {held()}")
+    a1: alternative_value(lock("c.lk"), Reading.Count{n: 1})
+    print("alternative value, second matched {a1} {held()}")
+    a2: alternative_value(lock("d.lk"), Reading.Missing)
+    print("alternative value, first matched {a2} {held()}")
+    l1: list_value(lock("e.lk"), [1])
+    print("list value, matched {l1} {held()}")
+    l2: list_value(lock("f.lk"), [1, 2])
+    print("list value, length differs {l2} {held()}")
+}

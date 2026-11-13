@@ -1,0 +1,21 @@
+# A call through a trait value builds its arguments once per implementation,
+# each on that implementation's path. An argument whose `??` fallback moves
+# an owner starts from the same ownership on every path, and the paths meet
+# after the dispatch: on each implementation the owner ends its lock once,
+# when the fallback takes it or at its scope end, and none leaks.
+fixture: trait_call_argument_moves_keep_one_owner_per_implementation.fixture
+env: NO_COLOR=1
+step: jet run --optimize=none main.jet
+exit: 0
+stdout: = trait_call_argument_moves_keep_one_owner_per_implementation.out
+step: jet run --optimize=basic main.jet
+exit: 0
+stdout: = trait_call_argument_moves_keep_one_owner_per_implementation.out
+step: jet run --optimize=full main.jet
+exit: 0
+stdout: = trait_call_argument_moves_keep_one_owner_per_implementation.out
+step: jet build main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = trait_call_argument_moves_keep_one_owner_per_implementation.out

@@ -104,6 +104,9 @@ ir_contract_return: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, spa
             } else {
                 result_mode: frame.result.mode == .ResultPayload
                 present: if result_mode -> ir_result_is_ok(m, b, slot) else -> ir_option_is_some(m, b, slot)
+                // The clauses run where the carrier holds a payload: a
+                // variable one moves still owns its value on the other path.
+                before: ir_own_states(b, b.bindings.len())
                 ir_open_if(b.f, present, b.line)
                 binding_ty: ir_fact(p, b, frame.result.binding_ty, span)
                 binding_row: ir_value_type(m, p, binding_ty) ?? -1
@@ -114,7 +117,10 @@ ir_contract_return: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, spa
                 ir_contract_bind(m, p, b, frame.result, slot, span)
                 ir_contract_bind_payload(b, frame.result, payload)
                 ir_contract_posts(m, p, b, frame.post)
+                then_states: ir_own_states(b, before.len())
+                ir_set_own_states(b, before)
                 ir_end(b.f, b.line)
+                ir_meet_paths(m, b, present, then_states, false, false)
             }
         }
     }

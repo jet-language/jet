@@ -1,0 +1,46 @@
+use files: core.files
+
+// Lock descriptors this process holds open (fds whose target ends `.lk`).
+held: fn() -[FS]> Int {
+    count := 0
+    names: files.list_dir("/proc/self/fd") ?? panic("list /proc/self/fd")
+    loop entry in names {
+        target: files.read_link(entry.path) ?? ""
+        if target.ends_with(".lk") -> count += 1
+    }
+    count
+}
+
+lock: fn(name: String) -[FS, Env]> FileLock {
+    files.lock(name) ?? panic("lock {name}")
+}
+
+consume_lock: fn(&&l: FileLock) -[FS]> Int {
+    held()
+}
+
+// A group update (`group := map.get(key) ?? fallback`, then
+// `map[key] = group`) builds as a write window into the key's entry. Its
+// fallback seeds a missing key and moves the lock there only: where the key
+// is present, the parameter still owns the lock, which closes as this
+// returns.
+group_update: fn(&&l: FileLock, seeded: Bool) -[FS]> Int {
+    counts := [String: Int]{}
+    if seeded -> counts["k"] = 10
+    key: "k"
+    total := counts.get(key) ?? consume_lock(l.move())
+    total += 1
+    seen: total + held()
+    counts[key] = total
+    seen
+}
+
+run: fn() -[IO, FS, Env]> {
+    loop name in ["a", "b"] {
+        files.write("{name}.lk", "") ?? panic("write {name}")
+    }
+    present: group_update(lock("a.lk"), true)
+    print("group update, present key {present} {held()}")
+    missing: group_update(lock("b.lk"), false)
+    print("group update, missing key {missing} {held()}")
+}

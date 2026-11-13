@@ -1,0 +1,21 @@
+# A pattern's payload value is compared only once its variant matches, a
+# list item's only once the length fits, and a later alternative only where
+# the earlier one missed. A value that moves an owner moves it on that path
+# only: elsewhere the owner still ends its lock at its scope end, so every
+# lock descriptor closes once and none leaks.
+fixture: pattern_value_moves_keep_the_unmatched_path_owner.fixture
+env: NO_COLOR=1
+step: jet run --optimize=none main.jet
+exit: 0
+stdout: = pattern_value_moves_keep_the_unmatched_path_owner.out
+step: jet run --optimize=basic main.jet
+exit: 0
+stdout: = pattern_value_moves_keep_the_unmatched_path_owner.out
+step: jet run --optimize=full main.jet
+exit: 0
+stdout: = pattern_value_moves_keep_the_unmatched_path_owner.out
+step: jet build main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = pattern_value_moves_keep_the_unmatched_path_owner.out
