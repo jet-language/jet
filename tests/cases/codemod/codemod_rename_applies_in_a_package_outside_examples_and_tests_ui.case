@@ -1,0 +1,22 @@
+# A codemod edits a package that has its own package.jet and lives outside
+# Examples/ and tests/ui/. The managed project falls back to the manifest root,
+# so the replay log lands under proj/.jet/codemods, and the edited package checks.
+fixture: codemod_rename_applies_in_a_package_outside_examples_and_tests_ui.fixture
+env: NO_COLOR=1
+write: rename.codemod.json object.template
+step: jet inspect codemod rename.codemod.json --dry-run
+exit: 0
+stdout: ~ "report -> summarize" # the preview names the rename
+file: proj/src/main.jet ~ "report: fn" # a dry run writes nothing
+step: jet inspect codemod apply rename.codemod.json --yes
+exit: 0
+file: proj/src/main.jet ~ "summarize: fn" # the definition is renamed
+file: proj/src/main.jet ~ "summarize()" # the call is renamed
+file: proj/src/main.jet !~ "report" # no old spelling is left
+file: proj/.jet/codemods/RenameReport.log.json exists
+file: .jet/codemods/RenameReport.log.json absent
+step: jet check proj/src/main.jet
+exit: 0
+step: jet run proj/src/main.jet
+exit: 0
+stdout: = "ok\n"
