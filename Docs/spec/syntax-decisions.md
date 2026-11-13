@@ -4457,6 +4457,19 @@ This is bounded exploration, not universal proof.
 **S49 — Doc comments**: `///` summary lines above items, plain text v1;
 doctest-runnable (D-TEST4); no `/** … */`.
 
+**D-COMMENT-SIGIL1 — Comments keep `//`** *(ratified A as amended,
+2026-11-04, card #6566)*: `##` is not a comment. A line comment starts with
+`//`, a doc comment with `///` (S49) and a block comment with nesting
+`/* … */` (S5). The owner's amendment drops the proposed warning on Python's
+`7 // 2`: `//` always starts a comment, and whole-number division is `/%`
+(D-FLOORDIV1). `//!` is not a comment form; the lexer reads it as a plain
+`//` comment, and its 48 lines in examples and tests were rewritten to `///`
+in one cutover with no teaching error and no change to any expected output.
+The registry spellings are `COMMENT_PREFIX`, `DOC_COMMENT_PREFIX`,
+`BLOCK_COMMENT_OPEN` and `BLOCK_COMMENT_CLOSE` in
+`Data/Syntax/CoreSurface.jet`, and the lexer and the tools that scan for
+comments read them.
+
 **S6 — No visible semicolons** *(S6-R, amended by D-LOOP-COMMA1=A)*: statements end at line end; the
 lexer inserts Go-style terminators after any line whose last token can end a
 statement. Layout rules: `-> Type` and `{` stay on the closing-`)` line; a
