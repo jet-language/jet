@@ -1,0 +1,28 @@
+# `mem.window(p, len)` gives a `mem.Window<T>` over the `len` Ts at `p`:
+# `w.len()`, `w[i]` and `w[i] = v` reach only elements inside `0..<len`,
+# `w.get(i)` is None past the end, and a negative length is an empty
+# window, on every tier. Reading one past the end stops with the index
+# miss before any byte is touched.
+fixture: a_raw_window_checks_each_index.fixture
+env: NO_COLOR=1
+step check: jet check main.jet
+exit: 0
+step o0: jet run --optimize=none main.jet
+exit: 0
+stdout: = "4 11 44\n20\npast refused\n0\n"
+step o1: jet run --optimize=basic main.jet
+exit: 0
+stdout: = "4 11 44\n20\npast refused\n0\n"
+step o2: jet run --optimize=full main.jet
+exit: 0
+stdout: = "4 11 44\n20\npast refused\n0\n"
+step pastnone: jet run --optimize=none past.jet
+exit: 70
+stdout: = "33\n"
+stderr: ~ "Stop [E3001]: `panic: index miss`" # the Index hook's miss stop, whose source line follows
+stderr: ~ "print(ints[4])" # the stop quotes the faulting index
+step pastfull: jet run --optimize=full past.jet
+exit: 70
+stdout: = "33\n"
+stderr: ~ "Stop [E3001]: `panic: index miss`" # the Index hook's miss stop, whose source line follows
+stderr: ~ "print(ints[4])" # the stop quotes the faulting index

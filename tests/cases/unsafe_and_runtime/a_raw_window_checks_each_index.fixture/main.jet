@@ -1,0 +1,15 @@
+use core.mem
+
+run: fn() {
+    readings := (a: 11, b: 22, c: 33, d: 44)
+    #Unsafe("the window covers exactly the tuple's four Ints, which outlive it") {
+        first: mem.Ptr<Int>.from_addr(mem.address_of(readings))
+        ints := mem.window(first, 4)
+        print("{ints.len()} {ints[0]} {ints[3]}")
+        ints[1] = 20
+        print(ints[1])
+        if ints.get(4) == .Val(_) -> print("past given") else -> print("past refused")
+        empty: mem.window(first, -2)
+        print(empty.len())
+    }
+}

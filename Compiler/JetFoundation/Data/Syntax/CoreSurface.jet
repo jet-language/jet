@@ -718,6 +718,14 @@ MEM_ALLOC_RAW: "alloc_raw"
 /// pointer. Needs `#Unsafe`.
 MEM_FREE_RAW: "free_raw"
 
+/// `mem.window(pointer, len)` — a checked `mem.Window<T>` over the `len`
+/// elements at a raw pointer. Needs `#Unsafe`.
+MEM_WINDOW: "window"
+
+/// `mem.Window<T>` — `window`'s checked window; `w[i]` and `w[i] = v` stop
+/// outside `0..<w.len()`.
+TYPE_WINDOW: "Window"
+
 /// S58 (ratified 2026-06-12): `mem.address_of(x)` — the address of a value as
 /// an Int (taking a pointer is inert; using it needs `#Unsafe`).
 MEM_ADDRESS_OF: "address_of"
@@ -786,6 +794,8 @@ CORE_MEM_GATE_TIERS: [(field_0: String, field_1: CoreMemGate)]{
     (field_0: MEM_FILL, field_1: CoreMemGate.Audit),
     (field_0: MEM_ALLOC_RAW, field_1: CoreMemGate.Audit),
     (field_0: MEM_FREE_RAW, field_1: CoreMemGate.Audit),
+    (field_0: MEM_WINDOW, field_1: CoreMemGate.Audit),
+    (field_0: TYPE_WINDOW, field_1: CoreMemGate.Import),
     (field_0: MEM_ADDRESS_OF, field_1: CoreMemGate.Import),
     (field_0: MEM_PIN, field_1: CoreMemGate.Import),
     (field_0: MEM_STREAM_STORE, field_1: CoreMemGate.Import),

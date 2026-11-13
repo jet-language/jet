@@ -72,6 +72,45 @@ Pin: struct<T> {}
     core.mem.free_raw(pointer)
 }
 
+// A checked window over `count` Ts at a raw pointer (`window`). `w[i]` is
+// element `i` and `w[i] = v` writes it; an index outside `0..<w.len()`
+// stops the run (a read with the Index hook's miss, a write with a panic)
+// before any byte is touched. Each access is a raw access under the
+// window's own gate, so the sentry still checks liveness and alignment.
+Window: struct<T> {
+    start: *T
+    count: Int
+
+    len: fn(self) -> Int { self.count }
+
+    impl Index {
+        Key: Int
+        Value: T
+
+        get: fn(self, k: Int) -> T? {
+            if k < 0 || k >= self.count -> return None
+            #Unsafe("`window`'s caller vouched for `count` live Ts at `start`, and `k` is inside them") {
+                return Val(__ptr_offset<T>(self.start, k).*)
+            }
+        }
+    }
+
+    impl IndexMut {
+        set: fn(&self, k: Int, v: T) {
+            if k < 0 || k >= self.count -> panic("window index {k} is outside 0..<{self.count}")
+            #Unsafe("`window`'s caller vouched for `count` live Ts at `start`, and `k` is inside them") {
+                volatile_write<T>(__ptr_offset<T>(self.start, k), v)
+            }
+        }
+    }
+}
+
+// The checked window over the `len` Ts at `pointer`; a `len` below zero is
+// an empty window.
+#Unsafe("`pointer` names `len` live, aligned Ts that outlive every use of the window") window: fn<T>(pointer: *T, len: Int) -> Window<T> Never! {
+    Window<T>{start: pointer, count: if len < 0 -> 0 else -> len}
+}
+
 // `dst = value`, written without filling the cache where the target has a
 // non-temporal store of the value's width (x86-64: `movnti` for four- and
 // eight-byte values), else an ordinary store. For a large output written

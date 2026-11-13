@@ -3055,6 +3055,18 @@ through a kept copy of the pointer is a located R0802 fault. See
 `tests/cases/unsafe_and_runtime/raw_heap_storage_is_taken_and_released.case`.
 (D-RAWPTR2=A)
 
+`mem.window(p, len)` gives a `mem.Window<T>`, a checked window over the `len`
+`T`s at `p`; a `len` below zero gives an empty window. `w.len()` is its
+length. `w[i]` reads element `i` and `w[i] = v` writes it, through the
+`Index` and `IndexMut` hooks, and `w.get(i)` is `None` past either end. An
+`i` outside `0..<w.len()` stops the run before any byte is touched: a read
+with the hook's index miss, a write with a panic naming the index. The
+window keeps `p` unchanged, so its accesses are raw accesses that the memory
+sentry still checks for liveness and alignment. `mem.window` is E3101
+outside `#Unsafe`, while using the window it gives is not. See
+`tests/cases/unsafe_and_runtime/a_raw_window_checks_each_index.case`.
+(D-RAWPTR2=A)
+
 ### Allocator families
 
 `core.mem` exposes `Arena`, `Bump`, `Pool`, and `Fixed`; constructing and using

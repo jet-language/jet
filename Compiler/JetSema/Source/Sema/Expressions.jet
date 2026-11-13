@@ -3719,10 +3719,10 @@ sema_expr_core_module_method_checked: fn(receiver: Expr, method: String, method_
         .SharedSite(lifetime) -> return SemaMethodSpecialCheck{handled: true, value: sema_call_core_global_shared(lifetime, method, type_args, args, method_span, expected, environment, program, scopes, state, tail_store, context, diagnostics)}
         .Source(target) -> {
             // ("core.mem", "volatile_read" | "volatile_write" | "copy" |
-            // "fill" | "alloc_raw" | "free_raw"): an audited `core.mem`
-            // operation outside `#Unsafe` is E3101 at the call, before its
-            // arguments are checked.
-            if module_name == "core.mem" && (method == "volatile_read" || method == "volatile_write" || method == "copy" || method == "fill" || method == "alloc_raw" || method == "free_raw") {
+            // "fill" | "alloc_raw" | "free_raw" | "window"): an audited
+            // `core.mem` operation outside `#Unsafe` is E3101 at the call,
+            // before its arguments are checked.
+            if module_name == "core.mem" && (method == "volatile_read" || method == "volatile_write" || method == "copy" || method == "fill" || method == "alloc_raw" || method == "free_raw" || method == "window") {
                 _: sema_expr_require_unsafe(method, method_span, context, diagnostics)
             }
             math_abs: sema_call_try_core_math_abs(module_name, method, type_args, args, method_span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
