@@ -3421,7 +3421,7 @@ sema_checked_coherence_orphan: fn(graph: SemaRegistrationGraph, module_row: Sema
 sema_checked_impl_refused: fn(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, state: SemaCheckedCoherence, implementation: SemaRegistrationImpl) -> Bool {
     trait_name: implementation.declaration.trait_name ?? return false
     if implementation.declaration.delegation_field != None && !owned_trait_literal(trait_name) -> return false
-    local_type: sema_checked_coherence_local_type(state, implementation.declaration.type_name) || implementation.target_module_identity != None
+    local_type: sema_checked_coherence_local_type(state, implementation.declaration.type_name) || !module_is_none(implementation.target_module_identity)
     if local_type -> return false
     sema_checked_coherence_orphan(graph, module_row, state, implementation.declaration.type_name, trait_name, implementation.declaration.operator_rhs, local_type)
 }
@@ -3484,7 +3484,7 @@ sema_checked_coherence_impl: fn(graph: SemaRegistrationGraph, module_row: SemaRe
         }
         return
     }
-    local_type: sema_checked_coherence_local_type(state, definition.type_name) || implementation.target_module_identity != None
+    local_type: sema_checked_coherence_local_type(state, definition.type_name) || !module_is_none(implementation.target_module_identity)
     sema_checked_coherence_register(graph, module_row, definition.type_name, trait_name, definition.operator_rhs, None, definition.methods, definition.assoc_type_impls, definition.is_generated_serde, local_type, definition.type_span, state, diagnostics)
 }
 

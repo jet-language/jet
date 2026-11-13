@@ -2612,7 +2612,7 @@ sema_registration_add_impl: fn(module_row: &SemaRegistrationModule, module_text:
                 diagnostics.push(sema_registration_impl_on_trait(definition))
             }
             module_row.impls.push(row.copy())
-            if row.target_module_identity != None {
+            if !module_is_none(row.target_module_identity) {
                 nominal_index: rows.nominals.get(definition.type_name) ?? -1
                 if nominal_index >= 0 {
                     loop method in row.methods -> module_row.nominals[nominal_index].methods.push(method)
@@ -2772,7 +2772,7 @@ sema_registration_attach_namespace_impls: fn(graph: &SemaRegistrationGraph) {
         if !sema_registration_package_is_namespace(package_identity) -> next
         loop impl_index in 0..<graph.modules[module_index].impls.len() {
             definition: graph.modules[module_index].impls[impl_index].declaration
-            if definition.type_name.contains(".") || graph.modules[module_index].impls[impl_index].target_module_identity != None -> next
+            if definition.type_name.contains(".") || !module_is_none(graph.modules[module_index].impls[impl_index].target_module_identity) -> next
             owner_index := -1
             loop candidate_index in 0..<graph.modules.len() {
                 if candidate_index == module_index || graph.modules[candidate_index].package_identity != package_identity -> next
