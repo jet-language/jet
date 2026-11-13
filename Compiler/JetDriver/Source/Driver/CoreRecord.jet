@@ -24,12 +24,15 @@
 //   7 declaration rows: the check's declaration table, one row per DeclID
 //     in row order, so a body's DeclID names the row it was checked against
 // A row names another module by its module key position (section 2), not by
-// the check's graph index; a graph that takes a row rebases both its module
-// indexes and its DeclIDs (CoreRecordRebase.jet).
+// the check's graph index, and a body names declarations by section 7's
+// rows; a graph that takes a row rebases its module indexes
+// (CoreRecordRebase.jet), and sema rebases a taken body's DeclIDs (JetSema
+// CoreRecordBodies.jet). Every row decodes under sema's
+// SEMA_CORE_RECORD_CBOR, the one set of limits a record row reads under.
 use {
     core_record_cbor: core.encoding.cbor
     jet_foundation.[DeclRow, DeclTable, FnBody, RecordField, RecordReader, RecordSection, RecordValue, decl_table_add_row, decl_table_index, record_element, record_encode, record_key_digest, record_open_schema, record_section_elements, record_section_index, record_value_as_str, record_value_field]
-    jet_sema.[SemaComptimeFunctionResult, SemaGraphModuleResult, SemaRegistrationModule, sema_core_body_packets]
+    jet_sema.[SEMA_CORE_RECORD_CBOR, SemaComptimeFunctionResult, SemaGraphModuleResult, SemaRegistrationModule, sema_core_body_packets, sema_core_record_field_errors]
 }
 
 JET_CORE_RECORD_SCHEMA: "jet.core/v2"
@@ -40,10 +43,6 @@ JET_CORE_RECORD_BODY_KEYS: 4
 JET_CORE_RECORD_BODY_ROWS: 5
 JET_CORE_RECORD_REGISTRATION_ROWS: 6
 JET_CORE_RECORD_DECL_ROWS: 7
-
-// The reader's limits are core.encoding.cbor's ceilings (parse refuses a
-// depth past 4096 or a byte bound past 1073741824): a row is read whole.
-JET_CORE_RECORD_CBOR: core_record_cbor.CBOROptions{max_depth: 4096, max_items: 1000000000, max_bytes: 1073741824, require_canonical: true}
 
 // An open record: its verified reader and the two key columns, in element
 // order, with each module key's position by module identity.
@@ -241,7 +240,7 @@ jet_driver_core_record_open: fn(bytes: [U8]) -> JetDriverCoreRecord Err! {
 // The checked row of the record's module `index` (in module key order).
 jet_driver_core_record_module: fn(record: JetDriverCoreRecord, index: Int) -> SemaGraphModuleResult Err! {
     bytes: jet_driver_core_record_row(record.reader, JET_CORE_RECORD_MODULE_ROWS, index) ?? return Err(err)
-    row: core_record_cbor.decode<SemaGraphModuleResult>(bytes, JET_CORE_RECORD_CBOR) ?? return Err("Core module `{record.module_names[index]}` doesn't decode: {jet_driver_core_record_field_errors(err)}")
+    row: core_record_cbor.decode<SemaGraphModuleResult>(bytes, SEMA_CORE_RECORD_CBOR) ?? return Err("Core module `{record.module_names[index]}` doesn't decode: {sema_core_record_field_errors(err)}")
     Ok(row)
 }
 
@@ -249,7 +248,7 @@ jet_driver_core_record_module: fn(record: JetDriverCoreRecord, index: Int) -> Se
 // checked body with the facts its check recorded.
 jet_driver_core_record_body: fn(record: JetDriverCoreRecord, index: Int) -> SemaComptimeFunctionResult Err! {
     bytes: jet_driver_core_record_row(record.reader, JET_CORE_RECORD_BODY_ROWS, index) ?? return Err(err)
-    packet: core_record_cbor.decode<SemaComptimeFunctionResult>(bytes, JET_CORE_RECORD_CBOR) ?? return Err("Core function `{record.body_keys[index]}` doesn't decode: {jet_driver_core_record_field_errors(err)}")
+    packet: core_record_cbor.decode<SemaComptimeFunctionResult>(bytes, SEMA_CORE_RECORD_CBOR) ?? return Err("Core function `{record.body_keys[index]}` doesn't decode: {sema_core_record_field_errors(err)}")
     Ok(packet)
 }
 
@@ -270,7 +269,7 @@ jet_driver_core_record_registration_bytes: fn(record: JetDriverCoreRecord, index
 
 // A registration row's bytes decoded; `name` is its module's name.
 jet_driver_core_record_registration_decode: fn(bytes: [U8], name: String) -> SemaRegistrationModule Err! {
-    registration: core_record_cbor.decode<SemaRegistrationModule>(bytes, JET_CORE_RECORD_CBOR) ?? return Err("Core module `{name}` has a registration row that doesn't decode: {jet_driver_core_record_field_errors(err)}")
+    registration: core_record_cbor.decode<SemaRegistrationModule>(bytes, SEMA_CORE_RECORD_CBOR) ?? return Err("Core module `{name}` has a registration row that doesn't decode: {sema_core_record_field_errors(err)}")
     Ok(registration)
 }
 
@@ -288,7 +287,7 @@ jet_driver_core_record_decls: fn(record: JetDriverCoreRecord) -> DeclTable Err! 
 
 jet_driver_core_record_decl: fn(record: JetDriverCoreRecord, index: Int) -> DeclRow Err! {
     bytes: jet_driver_core_record_row(record.reader, JET_CORE_RECORD_DECL_ROWS, index) ?? return Err(err)
-    row: core_record_cbor.decode<DeclRow>(bytes, JET_CORE_RECORD_CBOR) ?? return Err("the Core record's declaration row {index} doesn't decode: {jet_driver_core_record_field_errors(err)}")
+    row: core_record_cbor.decode<DeclRow>(bytes, SEMA_CORE_RECORD_CBOR) ?? return Err("the Core record's declaration row {index} doesn't decode: {sema_core_record_field_errors(err)}")
     Ok(row)
 }
 
@@ -352,10 +351,4 @@ jet_driver_core_record_text: fn(value: RecordValue, name: String) -> String Err!
     found: field.value ?? return Err(field.problem ?? "the Core record has no `{name}`")
     text: record_value_as_str(found)
     Ok(text.value ?? return Err(text.problem ?? "the Core record's `{name}` is not text"))
-}
-
-jet_driver_core_record_field_errors: fn(errors: [FieldError]) -> String Never! {
-    parts := [String]{}
-    loop error in errors -> parts.push(if error.path == "" -> error.reason.copy() else -> "{error.path}: {error.reason}")
-    parts.join("; ")
 }

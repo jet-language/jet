@@ -24,6 +24,12 @@
 // call edge, an unnamed Core caller's too.
 // A retaining compile that reads only the user modules (`jet fix`,
 // SemaRegistrationGraph.retained_core_demand) demands as a Check compile does.
+//
+// A module taken from the Core record (sema_finalize_seeded_taken) checks no
+// body: demand takes its bodies' packets instead (CoreRecordBodies.jet),
+// those the rules above check up front before the first wave, and the
+// others as soon as a checked or taken body names them. A taken body names
+// more as a checked one does.
 use jet_foundation.[
     BodyCallArg,
     BodyTree,
@@ -44,11 +50,14 @@ use jet_foundation.[
 
 // Indexes the deferred bodies of `graph` for one finalization: none unless
 // `enabled`. Called at the start of each finalization, so a later one over
-// the same graph demands afresh.
+// the same graph demands afresh. The taken seeded modules' bodies are
+// indexed apart: their packets wait for a keyed caller the same way
+// (sema_core_body_begin).
 sema_core_demand_index: fn(graph: &SemaRegistrationGraph, enabled: Bool) {
     graph.core_wave_rows = [String:Bool]{}
     graph.core_checked = [String:Bool]{}
     rows := [String:Int]{}
+    taken_rows := [String:Int]{}
     if enabled {
         roots: graph.core_lowering_roots ?? [String:Bool]{}
         // Every method an impl that stays checked supplies; a nominal lists
@@ -60,35 +69,46 @@ sema_core_demand_index: fn(graph: &SemaRegistrationGraph, enabled: Bool) {
                 loop method in implementation.methods -> eager[method.symbol.id.key] = true
             }
         }
-        // A taken seeded module's result already holds the bodies its
-        // finalization checked (sema_finalize_seeded_taken): none waits here.
-        loop module_index in sema_finalize_seeded_taken(graph)..<graph.modules.len() {
-            identity: graph.modules[module_index].module_identity
-            if !sema_module_is_core_source(identity) || identity == graph.entry_module_identity -> next
-            loop item in graph.modules[module_index].program.items {
-                if item == .Func(func) {
-                    key: symbol_id(SymbolKind.Function, identity, "", func.name).key
-                    if roots.get(key) == None -> rows[key] = module_index
-                }
-            }
-            loop nominal in graph.modules[module_index].nominals {
-                // A trait impl written in the type's body stays checked like a
-                // top-level one: its methods sit among the nominal's own.
-                nested: sema_core_demand_nested_trait_spans(nominal)
-                loop method in nominal.methods {
-                    if method.declaration.compiler_generated || method.declaration.name == "close" || eager.get(method.symbol.id.key) != None || roots.get(method.symbol.id.key) != None || nested.get("{method.declaration.span.start}:{method.declaration.span.end}") != None -> next
-                    rows[method.symbol.id.key] = module_index
-                }
-            }
-            loop implementation in graph.modules[module_index].impls {
-                if !sema_core_demand_impl_deferrable(implementation) -> next
-                loop method in implementation.methods {
-                    if method.declaration.name != "close" && roots.get(method.symbol.id.key) == None -> rows[method.symbol.id.key] = module_index
-                }
+        taken: sema_finalize_seeded_taken(graph)
+        loop module_index in 0..<graph.modules.len() {
+            if module_index < taken {
+                sema_core_demand_module_rows(graph, module_index, roots, eager, taken_rows)
+            } else {
+                sema_core_demand_module_rows(graph, module_index, roots, eager, rows)
             }
         }
     }
     graph.core_demand_rows = rows.move()
+    sema_core_body_begin(graph, enabled, taken_rows)
+}
+
+// The deferred bodies of module `module_index`, each key mapped to the
+// module in `rows`: none for a module that isn't Core source or is the
+// entry. `roots` and `eager` are the keys that stay checked up front.
+sema_core_demand_module_rows: fn(graph: SemaRegistrationGraph, module_index: Int, roots: [String:Bool], eager: [String:Bool], rows: &[String:Int]) Never! {
+    identity: graph.modules[module_index].module_identity
+    if !sema_module_is_core_source(identity) || identity == graph.entry_module_identity -> return
+    loop item in graph.modules[module_index].program.items {
+        if item == .Func(func) {
+            key: symbol_id(SymbolKind.Function, identity, "", func.name).key
+            if roots.get(key) == None -> rows[key] = module_index
+        }
+    }
+    loop nominal in graph.modules[module_index].nominals {
+        // A trait impl written in the type's body stays checked like a
+        // top-level one: its methods sit among the nominal's own.
+        nested: sema_core_demand_nested_trait_spans(nominal)
+        loop method in nominal.methods {
+            if method.declaration.compiler_generated || method.declaration.name == "close" || eager.get(method.symbol.id.key) != None || roots.get(method.symbol.id.key) != None || nested.get("{method.declaration.span.start}:{method.declaration.span.end}") != None -> next
+            rows[method.symbol.id.key] = module_index
+        }
+    }
+    loop implementation in graph.modules[module_index].impls {
+        if !sema_core_demand_impl_deferrable(implementation) -> next
+        loop method in implementation.methods {
+            if method.declaration.name != "close" && roots.get(method.symbol.id.key) == None -> rows[method.symbol.id.key] = module_index
+        }
+    }
 }
 
 // An inherent, authored impl: no trait, operator, delegation or generator.
@@ -158,7 +178,9 @@ SemaCoreDemandTally: struct {
 // those name too.
 sema_core_demand_waves: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrail, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], checked_types: [TTypeDef], host_hooks: SemaHostHookAccess?, threads: CompilerThreads, trace_sink: CompilerTraceSink?, carried: &[SemaPassFacts], modules: &[SemaGraphModuleResult]) -> SemaRegistrationGraph {
     graph := owned.move()
-    if graph.core_demand_rows.len() == 0 -> return graph.move()
+    // The taken modules' bodies that stay checked up front come first.
+    _: sema_core_body_take_eager(graph, modules)
+    if graph.core_demand_rows.len() == 0 && !sema_core_body_pending(graph) -> return graph.move()
     seeds := [String]{}
     if graph.core_lowering_roots != None {
         loop result in comptime_functions {
@@ -172,7 +194,7 @@ sema_core_demand_waves: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrai
     loop {
         wave := [String:Bool]{}
         affected := [Int]{}
-        loop key in seeds -> sema_core_demand_key(graph, key, wave, affected)
+        loop key in seeds -> sema_core_demand_key(graph, modules, key, wave, affected)
         seeds = [String]{}
         sema_core_demand_named(graph, modules, tally.read_functions, tally.read_facts, wave, affected)
         if wave.len() == 0 -> break
@@ -185,6 +207,7 @@ sema_core_demand_waves: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrai
         sink.progress("counters.sema.core_deferred", graph.core_demand_rows.len(), -1)
         sink.progress("counters.sema.core_checked", tally.checked, -1)
         sink.progress("counters.sema.core_waves", tally.waves, -1)
+        sink.progress("counters.sema.core_taken", sema_core_body_taken_count(graph), -1)
     }
     graph.move()
 }
@@ -293,31 +316,39 @@ sema_check_registered_locate_diagnostics: fn(environment: SemaScopeEnvironment, 
 
 // The deferred bodies the functions and call-site facts of `modules` read
 // since the last call name, into `wave` (each marked checked) with their
-// modules in `affected`.
-sema_core_demand_named: fn(graph: &SemaRegistrationGraph, modules: [SemaGraphModuleResult], read_functions: &[Int], read_facts: &[Int], wave: &[String:Bool], affected: &[Int]) {
+// modules in `affected`. A named body of a taken module is taken into
+// `modules` at once (sema_core_body_take), and what it names is read in
+// turn, until a read takes none.
+sema_core_demand_named: fn(graph: &SemaRegistrationGraph, modules: &[SemaGraphModuleResult], read_functions: &[Int], read_facts: &[Int], wave: &[String:Bool], affected: &[Int]) {
     loop read_functions.len() < modules.len() -> read_functions.push(0)
     loop read_facts.len() < modules.len() -> read_facts.push(0)
-    keys := [String]{}
-    loop module_index in 0..<modules.len() {
-        loop position in read_functions[module_index]..<modules[module_index].functions.len() -> sema_core_demand_body_keys(modules[module_index].functions[position], graph.decls, keys)
-        read_functions[module_index] = modules[module_index].functions.len()
-        loop position in read_facts[module_index]..<modules[module_index].call_facts.len() {
-            if modules[module_index].call_facts[position].callee == .Val(callee) -> keys.push(callee.key)
+    loop {
+        keys := [String]{}
+        loop module_index in 0..<modules.len() {
+            loop position in read_functions[module_index]..<modules[module_index].functions.len() -> sema_core_demand_body_keys(modules[module_index].functions[position], graph.decls, keys)
+            read_functions[module_index] = modules[module_index].functions.len()
+            loop position in read_facts[module_index]..<modules[module_index].call_facts.len() {
+                if modules[module_index].call_facts[position].callee == .Val(callee) -> keys.push(callee.key)
+            }
+            read_facts[module_index] = modules[module_index].call_facts.len()
         }
-        read_facts[module_index] = modules[module_index].call_facts.len()
+        if keys.len() == 0 -> return
+        loop key in keys -> sema_core_demand_key(graph, modules, key, wave, affected)
     }
-    loop key in keys -> sema_core_demand_key(graph, key, wave, affected)
 }
 
 // Demands the deferred body `key` names; a call at type arguments names its
 // generic declaration.
-sema_core_demand_key: fn(graph: &SemaRegistrationGraph, key: String, wave: &[String:Bool], affected: &[Int]) {
-    sema_core_demand_add(graph, key, wave, affected)
+sema_core_demand_key: fn(graph: &SemaRegistrationGraph, modules: &[SemaGraphModuleResult], key: String, wave: &[String:Bool], affected: &[Int]) {
+    sema_core_demand_add(graph, modules, key, wave, affected)
     template: sema_core_demand_template_key(key)
-    if template != key -> sema_core_demand_add(graph, template, wave, affected)
+    if template != key -> sema_core_demand_add(graph, modules, template, wave, affected)
 }
 
-sema_core_demand_add: fn(graph: &SemaRegistrationGraph, key: String, wave: &[String:Bool], affected: &[Int]) {
+// A taken module's body is taken from the record; any other deferred one
+// joins the wave.
+sema_core_demand_add: fn(graph: &SemaRegistrationGraph, modules: &[SemaGraphModuleResult], key: String, wave: &[String:Bool], affected: &[Int]) {
+    if sema_core_body_take(graph, modules, key) -> return
     if graph.core_checked.get(key) != None -> return
     module_index: graph.core_demand_rows.get(key) ?? return
     graph.core_checked[key] = true
