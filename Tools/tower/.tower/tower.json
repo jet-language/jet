@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6777,
-    "rev": 100143,
+    "rev": 100150,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -60443,8 +60443,8 @@
       "epoch": "e11",
       "milestoneId": null,
       "phase": "planning",
-      "priority": "P2",
-      "plan": null,
+      "priority": "P0",
+      "plan": "Owner-ordered speed program (owner 2026-11-12). This plan is the one ordered home for compile speed, run speed and the related size work. Work runs in this order. A step starts when its predecessor's criteria land, except where a track is marked parallel. Every step's proof is in its criteria.\n\nStep 0. Measure and guard (prerequisite, small).\n- #5479 c1: a throughput cell for a million-line corpus.\n- #5479 c5: the train speed gate (+10% fails).\n- #5479 c2: per-phase lines/s budgets that add up to 30M.\n\nStep 1. Cut the work. This is the top priority now; 1a and 1b run in parallel.\n- 1a, #6328 c22: checked Core and Prelude ship precompiled inside the jet binary. The owner ruled this part of the toolchain, not a compile cache (2026-11-08, restated 2026-11-12: option B of the exec-tiers comparison). Owner: G11Speed-4. It follows Docs/proposals/precompiled-libraries-2026-11-05.md section 8 and uses the RecordCodec format (auto-derived Encode/CBOR, no hand-written codec). Slices, each its own SUB:\n  S1. check Core and Prelude alone as one closed graph; `jet devtools core-record --check` reports counts; a Core read of a per-program fact is refused.\n  S2. a census in Docs/audits of every sema and IR read of Core AST or registration state while handling user code; it fixes what the record holds.\n  S3. the jet.core/v1 writer and reader (header with compiler identity, target and Core digest; modules; decl and registration rows; comptime values; checked bodies; the AST S2 names). A round-trip test; two builds give identical bytes.\n  S4. a core-record step in Compiler/build.jet, embedded in the jet binary, with no file I/O per compile.\n  S5. the cutover: the loader and sema seed every <corelib>/ module from the record, lazily per item. The Core parse and the demand-driven Core body check go in the same change, with no flag and no fallback path. The D-CORE-LAYERS1 impl-reach rule (1b S1) stays, and is applied to the record's impl rows.\n  S6. comptime and IR read Core constants and bodies from the record.\n  S7. Core machine code at O0, O1 and O2 is built with jet and linked by reach.\n  S8. proof: goldens, ui and cases byte-identical before and after; PortBars and #6759 c9 timings before and after; strace -c of hello.\n  Known risk, measured in S1: near-name suggestions and errors in Core code no program reaches can differ.\n- 1b, #6759 c10 (moved from #6281 c162): D-CORE-LAYERS1=A. Owner: G6Meta-4. Slices, each its own SUB:\n  S1. the reach rule: a Core trait impl is a lazy row, reached only when its type and its trait are both reached (compiler-implied traits such as Display, Equatable and Comparable count as reached). It is written as one function over impl rows (type module, trait module) that CoreReach calls today and the 1a S5 record loader calls after the cutover. Proof: the c03 probe (core.time zoned+now: 33 units, 113 MB, 0.55 s on seed-b13, pulled in through ZonedDateTime's impl Decode) before and after, plus decode and display cases.\n  S2. the layer table in Core/package.jet, and a registered sema error for an upward core.<area> name under `jet check Core`, with a ui snapshot.\n  S3-S5. Core moves that remove the 67 upward references in 12 pairs (census at 4bb64588): encoding to files 27, crypto to files 20, data to db 6, net to http 3, data to files/sys 2+2, encoding to archive 2, and one each of crypto to tasks, encoding to db, meta to compiler, rt to time and sync to text. Git and Target get layer rows. `jet check Core` is clean.\n  S6. the proof SUB with traces.\n- 1c, #6759 c1, c5, c2, c4 and c9: one comptime child per compile, and load, finalize and memory proportional to the code reached. Then #6759 c8 and c3, and #6527 c10: the PortBars speed bar for cold tool twins.\n\nStep 2. Use the machine.\n- #5479 c6: modules stream through the pipeline, comptime runs in parallel, at least 24 of 32 threads busy.\n- #6328 c23: small programs compile on the calling thread.\n\nStep 3. Data-oriented core.\n- #5479 c7: interned u32 ids, flat columns, per-phase arenas.\n- #5910: self-compile under 1 GB, with no per-node heap allocation or RC.\n\nStep 4. Fused per-function pipeline and a direct executable image writer (#5479 c8).\n\nStep 5. Front-end primitives and budgets.\n- #5910 c6: a SIMD lexer at 1 ns/byte or less.\n- Every phase within its #5479 c2 budget, each overrun with a named root.\n\nStep 6. The compiler compiled well (#5479 c9). This starts only once the language is mostly stable.\n\nExit: #5479 c3, `jet build` of the million-line corpus at 30M lines/s or faster, with identical output.\n\nRun-speed track, parallel with steps 1-6: generated code reaches the hand-written machine-code ceiling.\n- R1, #6461: a ceiling reference for every required cell; an uncovered cell fails the gate. #6461 is G13, which the owner has paused (ruling 6), so R1 starts when the owner moves G13.\n- R2, #6414 c15 and c35: a kernel catalog worked backwards from hand-written code, closing the gaps largest first. Measured gaps on the cards: 3.7x-244x cycles against the references (2026-10-31), binparse 12.5x cycles and 301x bytes, and the Doom kernels 2.5x-8.6x at --release (2026-11-05).\n- R3, #6414 c22 and c29: every cell at Jet/peer < 1.00 and Jet/ceiling <= 1.00 in cycles and bytes.\n- Size (#6328 c2-c6) rides the same root fixes.\n\nRuled out by owner rulings: an interpreter or JIT tier (D-EXEC2=A stands; jet run stays native O0); incremental compilation; and any cross-run cache. Precompiled Core is toolchain, not cache.\n",
       "checkSteps": null,
       "probe": null,
       "visualMedia": [],
@@ -60677,7 +60677,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-23T14:31:32.550Z",
-      "updated": "2026-11-11T12:23:24.355Z",
+      "updated": "2026-11-13T00:47:36.637Z",
       "updatedBy": "Main",
       "goals": [
         "G11"
@@ -74576,15 +74576,6 @@
           "at": "2026-11-10T14:49:31.787Z"
         },
         {
-          "n": 162,
-          "text": "D-CORE-LAYERS1=A is built. The loader keys impl rows by the type and trait modules. Core's package.jet holds the Core layer table. A name used from a higher layer is a registered error under `jet check Core`, and the file adapters and fault hooks move to their layer. `jet check Core` is clean.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-10T14:49:32.826Z"
-        },
-        {
           "n": 163,
           "text": "D-DATA-EVOLVE1=A is built. Once #Table and the generation handoff exist, #Table steps and the D-SERVICE-UPGRADE1 migrate function derive from the one migration block. An executable example proves a stored table upgrades across one schema change. Blocked until #Table is built.",
           "status": "open",
@@ -74818,7 +74809,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T00:04:45.539Z",
-      "updated": "2026-11-13T00:43:37.932Z",
+      "updated": "2026-11-13T00:47:33.434Z",
       "updatedBy": "Main",
       "criteriaLastN": 187
     },
@@ -76889,7 +76880,7 @@
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
-      "plan": null,
+      "plan": "Step 1a of the owner-ordered speed program; the full ordered plan is the plan of #5479. c22 (precompiled checked Core and Prelude in the jet binary, ruled toolchain not cache) is the top item, owned by G11Speed-4, in slices S1-S8 listed there. Size criteria c2-c6 ride the same root fixes.",
       "checkSteps": null,
       "probe": null,
       "visualMedia": [],
@@ -77368,7 +77359,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T16:05:34.496Z",
-      "updated": "2026-11-13T00:43:36.234Z",
+      "updated": "2026-11-13T00:47:40.078Z",
       "updatedBy": "Main",
       "criteriaLastN": 30
     },
@@ -78855,7 +78846,7 @@
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
-      "plan": null,
+      "plan": "Run-speed track R2-R3 of the owner-ordered speed program (plan of #5479), parallel with compile-speed steps 1-6: the kernel catalog worked backwards from hand-written code (c15), gaps closed largest first (c35), then every cell Jet/peer < 1.00 and Jet/ceiling <= 1.00 (c22, c29).",
       "checkSteps": null,
       "probe": null,
       "visualMedia": [],
@@ -79544,7 +79535,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T00:36:48.109Z",
-      "updated": "2026-11-11T21:19:38.398Z",
+      "updated": "2026-11-13T00:47:46.145Z",
       "updatedBy": "Main",
       "criteriaLastN": 53
     },
@@ -98045,7 +98036,7 @@
       "milestoneId": null,
       "phase": "planning",
       "priority": "P0",
-      "plan": null,
+      "plan": "Steps 1b and 1c of the owner-ordered speed program; the full ordered plan is the plan of #5479. 1b: c10 (D-CORE-LAYERS1 reach rule and Core layers), owned by G6Meta-4 in slices S1-S6. 1c, after 1a/1b land: c1, c5, c2, c4 and c9, then c8 and c3.",
       "checkSteps": null,
       "probe": null,
       "visualMedia": [],
@@ -98169,6 +98160,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-12T23:11:20.318Z"
+        },
+        {
+          "n": 10,
+          "text": "(moved from #6281 c162, owner direction 2026-11-12: check only the Core a program reaches, and untangle Core so one thing does not link everything) D-CORE-LAYERS1=A is built. The loader keys impl rows by the type and trait modules, and a Core trait impl is reached only when its type and its trait are both reached. Core package.jet holds the Core layer table. A name used from a higher layer is a registered error under `jet check Core` (code, what/why/fix, ui snapshot), and the Core moves remove every upward reference (67 in 12 pairs at 4bb64588). `jet check Core` is clean. Proof: the c03 probe (core.time zoned+now; 33 units, 113 MB, 0.55 s on seed-b13) loads only what it reaches, with trace counts before and after.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T00:47:31.472Z"
         }
       ],
       "refs": [],
@@ -98179,9 +98179,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-12T04:08:18.925Z",
-      "updated": "2026-11-12T23:11:20.318Z",
+      "updated": "2026-11-13T00:47:43.355Z",
       "updatedBy": "Main",
-      "criteriaLastN": 9
+      "criteriaLastN": 10
     },
     {
       "id": "c0on083p",
@@ -200891,6 +200891,55 @@
   ],
   "events": [
     {
+      "at": "2026-11-13T00:47:47.788Z",
+      "by": "Main",
+      "action": "goal.log",
+      "ref": "G11",
+      "note": "Owner 2026-11-12: the ordered speed program (compile speed t"
+    },
+    {
+      "at": "2026-11-13T00:47:46.146Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0i891tv",
+      "note": "plan"
+    },
+    {
+      "at": "2026-11-13T00:47:43.355Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0ssy5wy",
+      "note": "plan"
+    },
+    {
+      "at": "2026-11-13T00:47:40.078Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c08r6ogl",
+      "note": "plan"
+    },
+    {
+      "at": "2026-11-13T00:47:36.637Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c031o59x",
+      "note": "priority,plan"
+    },
+    {
+      "at": "2026-11-13T00:47:33.434Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0oev2ib",
+      "note": "#162: Moved to #6759 as step 1b of the owner-ordered speed program (#5479 plan).; was [open]: D-CORE-LAYERS1=A is built. The loader keys impl rows by the type and trait modules. Core's package.jet holds the Core layer table. A name used from a higher layer is a registered error under `jet chec"
+    },
+    {
+      "at": "2026-11-13T00:47:31.472Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0ssy5wy",
+      "note": "#10 (moved from #6281 c162, owner direction 2026-11-12: check on"
+    },
+    {
       "at": "2026-11-13T00:43:37.932Z",
       "by": "Main",
       "action": "card.update",
@@ -206834,6 +206883,11 @@
       "status": "active",
       "log": [
         {
+          "at": "2026-11-13",
+          "by": "Main",
+          "text": "Owner 2026-11-12: the ordered speed program (compile speed to 30M lines/s, precompiled Core, Core reach and layers, and run speed to the hand-written ceiling) lives in the plan of #5479; #6328, #6759 and #6414 carry pointer plans. Top now: step 1a #6328 c22 (G11Speed-4) and step 1b #6759 c10 (G6Meta-4)."
+        },
+        {
           "at": "2026-11-12",
           "by": "Main",
           "text": "Owner order 2026-11-11 late: the peer floor is enforced structurally on wall time and peak memory, and any loss is a general codegen, runtime or Core failure. The work is #6756; AGENTS.md records it (SUB Main-owner-rulings-1)."
@@ -206880,7 +206934,7 @@
         }
       ],
       "created": "2026-11-04T18:09:54.108Z",
-      "updated": "2026-11-12T02:32:34.378Z",
+      "updated": "2026-11-13T00:47:47.788Z",
       "updatedBy": "Main"
     },
     {
