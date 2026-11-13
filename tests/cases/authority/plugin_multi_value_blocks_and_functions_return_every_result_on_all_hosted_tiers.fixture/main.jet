@@ -1,0 +1,16 @@
+use plugin: core.plugin
+
+// Each export folds the several results of a guest function, block, loop or
+// `if` into one Int: 47 divmod 5 directly and 100 divmod 7 through the table,
+// the ordered pair (2, 9), a two-param block that swaps (30, 4), a loop
+// summing 10 down to 1, and an (i32, f64, i64) triple.
+run: fn() {
+    policy: Authority.from_rights(["FS.Read(\".\")"])
+    guest: plugin.load("multi_value.wat", policy)
+    print("direct {guest.direct() ?? -1}")
+    print("indirect {guest.indirect() ?? -1}")
+    print("pick {guest.pick() ?? -1}")
+    print("swapped {guest.swapped() ?? -1}")
+    print("sum {guest.sum() ?? -1}")
+    print("mixed {guest.mixed() ?? -1}")
+}

@@ -1,6 +1,8 @@
 // The translator: each validated guest function becomes one JetIR function
 // `(instance, params…) -> result` over the runtime instance record
-// (PluginHost.jet PG_INST_*). Operand-stack values are fresh slots, wasm
+// (PluginHost.jet PG_INST_*). A function with several results returns the
+// first and takes a hidden out area after the instance, one word per further
+// result, that it fills on return. Operand-stack values are fresh slots, wasm
 // blocks are IR Blocks, Loops and Ifs whose label values cross in slots.
 // Every memory access is bounds-checked against the instance's memory
 // record; a trap records itself in the instance and returns, and each
@@ -138,16 +140,18 @@ PlugFrame: struct {
     has_else: Bool
 }
 
-// One function's translation state. `flags` maps an i32 slot made from a
-// comparison to the Bool it came from, so a branch on it tests the Bool.
-// `dead` is set after an unconditional transfer until the enclosing
-// block's else or end (`skip` counts the blocks opened meanwhile).
+// One function's translation state. `out` is the hidden out area of a
+// function with several results (-1 for one or none). `flags` maps an i32
+// slot made from a comparison to the Bool it came from, so a branch on it
+// tests the Bool. `dead` is set after an unconditional transfer until the
+// enclosing block's else or end (`skip` counts the blocks opened meanwhile).
 PlugCx: struct {
     f: IRFunction
     rows: PlugRows
     names: [String:Int]
     fid: Int
     inst: Int
+    out: Int
     locals: [Int]
     stack: [Int]
     frames: [PlugFrame]
@@ -224,6 +228,26 @@ PlugCx: struct {
         start: ir_args(self.f, args)
         self.emit(IROp.Call, dst, callee, start, args.len())
         dst
+    }
+
+    // The out area a call to a function of type `ty` passes after the
+    // instance: one frame word per result past the first, or -1.
+    out_area: fn(&self, ty: WasmFuncType) -> Int Never! {
+        if ty.results.len() < 2 -> return -1
+        area: self.temp(self.rows.word)
+        self.emit(IROp.StackAddress, area, 8 * (ty.results.len() - 1), 8, -1)
+        area
+    }
+
+    // Pushes a finished call's results: `first` as returned, the rest read
+    // back from its out area.
+    push_results: fn(&self, ty: WasmFuncType, first: Int, area: Int) Never! {
+        if ty.results.len() == 0 -> return
+        self.push(first)
+        loop k in 1..<ty.results.len() {
+            value: self.load(plug_row(self.rows, ty.results[k]), area, (k - 1) * 8)
+            self.push(value)
+        }
     }
 
     push: fn(&self, slot: Int) Never! {
@@ -437,6 +461,7 @@ PlugCx: struct {
             one: self.word(1)
             less: self.op2(IROp.Sub, self.rows.word, left, one)
             self.store(self.inst, PLUG_INST_DEPTH, less)
+            loop k in 1..<frame.result_slots.len() -> self.store(self.out, (k - 1) * 8, frame.result_slots[k])
             self.emit(IROp.Return, -1, if frame.result_slots.len() > 0 -> frame.result_slots[0] else -> -1, -1, -1)
             self.dead = true
             return
@@ -481,11 +506,12 @@ plug_translate: fn(kit: PlugKit, scope: PlugScope, fid: Int, ty: WasmFuncType, c
     rows: kit.rows
     cx := PlugCx{
         f: ir_hashed_function("plugin.wasm", "#plugin.wasm<{kit.artifact}>#{fid}", "jet_ir_plugin_", "", 0),
-        rows: rows, names: kit.names, fid: fid, inst: 0, locals: [Int]{}, stack: [Int]{}, frames: [PlugFrame]{},
+        rows: rows, names: kit.names, fid: fid, inst: 0, out: -1, locals: [Int]{}, stack: [Int]{}, frames: [PlugFrame]{},
         flags: [Int:Int]{}, dead: false, skip: 0, dummy: -1, at: code.start,
     }
     cx.f.result = if ty.results.len() > 0 -> plug_row(rows, ty.results[0]) else -> -1
     cx.inst = ir_slot(cx.f, rows.word, IRSlotKind.Param, -1, 0)
+    if ty.results.len() > 1 -> cx.out = ir_slot(cx.f, rows.word, IRSlotKind.Param, -1, 0)
     loop param in ty.params {
         slot: ir_slot(cx.f, plug_row(rows, param), IRSlotKind.Param, -1, 0)
         cx.locals.push(slot)
@@ -589,11 +615,13 @@ plug_op: fn(cx: &PlugCx, kit: PlugKit, scope: PlugScope, code: WasmCode, k: Int)
             ty: scope.callee_types[a]
             args: cx.pops(ty.params.len())
             all := [Int]{cx.inst}
+            area: cx.out_area(ty)
+            if area >= 0 -> all.push(area)
             loop arg in args -> all.push(arg)
             row: if ty.results.len() > 0 -> plug_row(rows, ty.results[0]) else -> -1
             result: cx.call(kit.base + scope.funcs[a], all, row)
             cx.check(true)
-            if row >= 0 -> cx.push(result)
+            cx.push_results(ty, result, area)
         }
         op == WASM_OP_CALL_INDIRECT -> {
             ty: scope.types[a]
@@ -606,11 +634,13 @@ plug_op: fn(cx: &PlugCx, kit: PlugKit, scope: PlugScope, code: WasmCode, k: Int)
             target: cx.rt("jet_plugin_table_fid", [Int]{cx.inst, table, index, sig, fid, at}, rows.word)
             cx.check(false)
             all := [Int]{cx.inst, target}
+            area: cx.out_area(ty)
+            if area >= 0 -> all.push(area)
             loop arg in args -> all.push(arg)
             row: if ty.results.len() > 0 -> plug_row(rows, ty.results[0]) else -> -1
             result: cx.call(kit.dispatch_base + scope.type_sigs[a], all, row)
             cx.check(true)
-            if row >= 0 -> cx.push(result)
+            cx.push_results(ty, result, area)
         }
         op == WASM_OP_DROP -> {
             _: cx.pop()
@@ -1158,14 +1188,15 @@ plug_bulk: fn(cx: &PlugCx, scope: PlugScope, op: Int, a: Int, b: Int) Never! {
 
 plug_cx: fn(kit: PlugKit, f: &&IRFunction, fid: Int) -> PlugCx Never! {
     PlugCx{
-        f: f.move(), rows: kit.rows, names: kit.names, fid: fid, inst: 0, locals: [Int]{}, stack: [Int]{}, frames: [PlugFrame]{},
+        f: f.move(), rows: kit.rows, names: kit.names, fid: fid, inst: 0, out: -1, locals: [Int]{}, stack: [Int]{}, frames: [PlugFrame]{},
         flags: [Int:Int]{}, dead: false, skip: 0, dummy: -1, at: 0,
     }
 }
 
 // The entry thunk of function `fid`: `(instance, area) -> Word` reads the
 // flat arguments from the area's words (an f32 arrives widened to binary64),
-// calls the function and leaves its result in the area's first word.
+// calls the function and leaves its first result in the area's first word
+// (a lifted export, realloc or post-return has one result or none).
 plug_thunk: fn(kit: PlugKit, fid: Int, ty: WasmFuncType) -> IRFunction Never! {
     rows: kit.rows
     cx := plug_cx(kit, ir_hashed_function("plugin.thunk", "#plugin.thunk<{kit.artifact}>#{fid}", "jet_ir_plugin_thunk_", "", 0), fid)
@@ -1174,6 +1205,8 @@ plug_thunk: fn(kit: PlugKit, fid: Int, ty: WasmFuncType) -> IRFunction Never! {
     area: ir_slot(cx.f, rows.word, IRSlotKind.Param, -1, 0)
     cx.dummy = cx.word(0)
     all := [Int]{cx.inst}
+    extra: cx.out_area(ty)
+    if extra >= 0 -> all.push(extra)
     loop (k, param) in ty.params {
         wide: cx.load(if param == WASM_F32 -> rows.f64 else -> plug_row(rows, param), area, k * 8)
         value: if param == WASM_F32 -> cx.demote(wide) else -> wide
@@ -1204,6 +1237,10 @@ plug_dispatcher: fn(kit: PlugKit, sig: Int, ty: WasmFuncType, targets: [Int]) ->
     cx.inst = ir_slot(cx.f, rows.word, IRSlotKind.Param, -1, 0)
     target: ir_slot(cx.f, rows.word, IRSlotKind.Param, -1, 0)
     all := [Int]{cx.inst}
+    if ty.results.len() > 1 {
+        out: ir_slot(cx.f, rows.word, IRSlotKind.Param, -1, 0)
+        all.push(out)
+    }
     loop param in ty.params {
         slot: ir_slot(cx.f, plug_row(rows, param), IRSlotKind.Param, -1, 0)
         all.push(slot)

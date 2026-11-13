@@ -1,0 +1,15 @@
+# Claim: a component whose internal functions return several results (called
+# directly and through call_indirect, ending in a two-result `if` or an early
+# `return`, of mixed i32/f64/i64 types) and whose blocks and loops take and
+# give several values loads and returns the right results on jet run and
+# jet run --release.
+fixture: plugin_multi_value_blocks_and_functions_return_every_result_on_all_hosted_tiers.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet run main.jet
+exit: 0
+stdout: = "direct 902\nindirect 1402\npick 29\nswapped -26\nsum 55\nmixed 1257\n"
+step: jet run --release main.jet
+exit: 0
+stdout: = "direct 902\nindirect 1402\npick 29\nswapped -26\nsum 55\nmixed 1257\n"

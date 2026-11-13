@@ -170,7 +170,6 @@ plug_instantiate: fn(flat: &PlugFlat, index: Int) WasmError! {
         imported: inst.funcs.len()
         loop (k, type_index) in wm.funcs {
             ty: wm.types[type_index]
-            if ty.results.len() > 1 -> return Err(plug_fail("multi-value functions are not supported by the plugin engine"))
             function: imported + k
             name := wm.function_name(function)
             if name == "" {
@@ -283,6 +282,8 @@ plug_item: fn(c: WasmComponent, kind: Int, index: Int) -> WasmCoreItem? {
 plug_lower: fn(flat: &PlugFlat, index: Int, item: WasmCoreItem, expected: WasmFuncType?) -> Int WasmError! {
     if flat.lowered.get(index) == .Val(known) -> return Ok(known)
     ty: expected ?? return Err(plug_fail("a lowered function is used outside a function import"))
+    // The canonical ABI lowers a host function to one core result at most.
+    if ty.results.len() > 1 -> return Err(plug_fail("a lowered function import has more than one core result"))
     target: item.target
     func: flat.c.func_type(target) ?? return Err(plug_fail("lowered function {target} has no function type"))
     params := [Int]{}
