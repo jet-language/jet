@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6787,
-    "rev": 101448,
+    "nextNum": 6788,
+    "rev": 101450,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -95226,6 +95226,47 @@
       "needsAcceptance": false,
       "created": "2026-11-13T11:59:55.802Z",
       "updated": "2026-11-13T11:59:56.673Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1
+    },
+    {
+      "id": "c0ro7ubx",
+      "num": 6787,
+      "title": "An `impl X -> Err` conversion is not applied to a generic error type",
+      "body": "Found 2026-11-13 while reworking D-SEND-ERROR1 (probe s1_generic_error_to_err.jet by BallotAnswers-2, under $JET_SCRATCH_ROOT/lanes/Main/ballots/probes/D-SEND-ERROR1/). seed-b14 applies a declared conversion into Err for a plain error type, but not for a generic one such as `Unsent<Int>`, so `?` and a bare failing call refuse where the plain type passes. The reworked D-SEND-ERROR1 depends on this, but it is a defect on its own: a conversion that is declared once should apply to every instantiation.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A declared conversion `impl<T> X<T> -> Err` (or one for a concrete instantiation) is applied wherever an error converts into Err, just as for a non-generic error type, on O0, O1 and O2. Proof: a run case using a generic error through `?` and through a bare failing call, plus the plain-type case still passing; first re-run the probe with the batch jet, to see whether dev already fixes it.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T12:04:13.527Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G3"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-13T12:04:12.555Z",
+      "updated": "2026-11-13T12:04:13.527Z",
       "updatedBy": "Main",
       "criteriaLastN": 1
     }
@@ -199881,6 +199922,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-13T12:04:13.527Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0ro7ubx",
+      "note": "#1 A declared conversion `impl<T> X<T> -> Err` (or one for a co"
+    },
+    {
+      "at": "2026-11-13T12:04:12.555Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0ro7ubx",
+      "note": "An `impl X -> Err` conversion is not applied to a generic error type"
+    },
     {
       "at": "2026-11-13T12:03:36.008Z",
       "by": "Main",
