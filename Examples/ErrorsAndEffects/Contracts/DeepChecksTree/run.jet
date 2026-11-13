@@ -1,0 +1,94 @@
+// Deep checks on a search tree loaded from a stored snapshot.
+//
+// `load` trusts its snapshot, and this one stores 6 in the left subtree of 5,
+// so a lookup of 6 misses a key the snapshot holds. Two deep checks find the
+// fault, and both are off unless `--deep-checks` selects them:
+//
+// - `load` walks the loaded tree once and checks that every key lies between
+//   the bounds its ancestors set.
+// - `run` compares the lookup with a scan of the stored keys.
+//
+// `jet run` loads, answers wrongly and serves. `jet run --deep-checks`, or
+// `--deep-checks=tree` for this package, keeps both checks, so the load
+// stops the program before it serves. `--deep-checks=tree::run` keeps only the
+// lookup's check, which stops the program after the load. A scope that names
+// nothing in the program, such as `tree::nowhere`, is refused before the run.
+
+Node: struct {
+    key: Int
+    left: Int?{None}
+    right: Int?{None}
+}
+
+Tree: struct {
+    nodes: [Node]
+
+    root: fn(self) -> Int? { if self.nodes.len() == 0 -> None else -> Val(0) }
+
+    // One walk from the root: every key lies strictly between the bounds its
+    // ancestors set.
+    ordered: fn(self) -> Bool { self.within(self.root(), None, None) }
+
+    within: fn(self, at: Int?, low: Int?, high: Int?) -> Bool {
+        index: at ?? return true
+        node: self.nodes[index]
+        if low == .Val(bound) {
+            if node.key <= bound -> return false
+        }
+        if high == .Val(bound) {
+            if node.key >= bound -> return false
+        }
+        self.within(node.left, low, Val(node.key)) && self.within(node.right, Val(node.key), high)
+    }
+
+    contains: fn(self, key: Int) -> Bool { self.find(self.root(), key) }
+
+    find: fn(self, at: Int?, key: Int) -> Bool {
+        index: at ?? return false
+        node: self.nodes[index]
+        if {
+            key < node.key -> self.find(node.left, key)
+            key > node.key -> self.find(node.right, key)
+            else -> true
+        }
+    }
+
+    // Whether any stored node holds `key`, without the search order.
+    stored: fn(self, key: Int) -> Bool {
+        loop node in self.nodes {
+            if node.key == key -> return true
+        }
+        false
+    }
+}
+
+load: fn(nodes: [Node]) -> Tree {
+    tree: Tree{nodes: nodes}
+    #On(.Deep) {
+        assert(tree.ordered(), "the snapshot's tree is out of order")
+    }
+    tree
+}
+
+// Node 0 is the root; `left` and `right` index the children.
+snapshot: fn() -> [Node] {
+    [Node]{
+        Node{key: 5, left: Val(1), right: Val(2)},
+        Node{key: 3, left: Val(3), right: Val(4)},
+        Node{key: 8},
+        Node{key: 1},
+        Node{key: 6},
+    }
+}
+
+run: fn() {
+    tree: load(snapshot())
+    print("loaded {tree.nodes.len()} keys")
+    found: tree.contains(6)
+    #On(.Deep) {
+        assert(found == tree.stored(6), "a lookup of 6 disagrees with the stored keys")
+    }
+    answer: if found -> "found" else -> "missing"
+    print("lookup 6: {answer}")
+    print("serving")
+}

@@ -6,6 +6,7 @@ Run a lesson from the repository root, for example `jet run Examples/ErrorsAndEf
 
 ## Contracts
 
+- [DeepChecksTree](Contracts/DeepChecksTree/) — Deep checks on a loaded search tree: `#On(.Deep)` checks run only where `--deep-checks` selects them, by package or function, at every optimize level.
 - [InlineContracts](Contracts/InlineContracts.jet) — Checked `#Inline` contracts.
 - [PostBreach](Contracts/PostBreach.jet) — A broken `#Post` stops in its function, the same on every tier.
 - [PreBreach](Contracts/PreBreach.jet) — A broken `#Pre` stops at the call, the same on every tier.
