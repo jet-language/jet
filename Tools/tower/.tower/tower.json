@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6777,
-    "rev": 101275,
+    "rev": 101276,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -90891,7 +90891,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-08T21:18:50.483Z",
-      "updated": "2026-11-13T06:49:09.967Z",
+      "updated": "2026-11-13T07:09:44.859Z",
       "updatedBy": "Main",
       "criteriaLastN": 4
     },
@@ -194835,6 +194835,247 @@
       "draft": false,
       "status": "open",
       "created": "2026-11-13T06:19:16.805Z"
+    },
+    {
+      "id": "D-MMAP-STABLE1",
+      "cardId": "c0vwlomv",
+      "group": "library",
+      "title": "Mapped files: keep borrowed bytes stable by holding the file or copying it, copy always, copy on every read, or let the bytes change",
+      "situation": "A mapped file is a file the program reads as if it were already in memory. files.map(path) gives Jet code a borrowed view of the bytes with no copy. Today another program can change those bytes while the view is borrowed. One probe read 3, another process wrote the file, and the same borrowed byte then read 9. If the other program shrinks the file, the next read kills the process with SIGBUS. Safe Jet promises that a borrowed value does not change under you, so this breaks the promise. It matters to anyone who maps large files for speed. This vote decides what a safe mapped view sees when another program writes or shrinks the file. We recommend A: the runtime holds the file so writers wait, and copies the bytes when it can't.",
+      "gist": "When another program writes a file that Jet has mapped, should the borrowed bytes stay as they were, be copied up front, be copied on each read, or change?",
+      "lesson": "Mapping a file lets a program read a huge file without loading it first: the operating system brings in each page when the program touches it. The bytes still belong to the file, so another program can change them while Jet is reading. Jet's rule is that a borrowed view never changes under you. This vote picks how mapped files keep that rule.",
+      "explainer": "Words used here. A view is a borrowed window into bytes someone else owns; it is not a copy. A lease is a Linux promise to the program that holds it: before another process may write or shrink the file, the kernel tells the holder and makes the writer wait. Copying means reading the bytes into the program's own memory, which costs time and memory equal to the file's size.",
+      "story": "Mia's log tool maps a 2 GiB log and scans it for errors. One night a rotation script truncates the log mid-scan. Today her tool dies with SIGBUS. Under A the script waits a moment while Jet copies, and the scan finishes. Under B the tool never mapped: it spent a second and 2 GiB copying first. Under C each read copies, and a read past the new end stops with a message. Under D her scan sees whatever the file says at each moment.",
+      "inWild": "// Rust memmap2: mapping a file is unsafe, because another process\n// may change or truncate it while the slice is borrowed.\nlet map = unsafe { Mmap::map(&file)? };\nlet first = map[0];",
+      "detail": "What this ballot decides. What a safe borrowed view from files.map sees when another process writes or truncates the file, and where zero-copy mapping lives.\n\nToday's map. Compiler/JetRuntime/Source/CompilerMapped.jet jet_std_files_map opens the file read-only, takes a shared flock (advisory, so non-Jet writers ignore it), and calls mmap with PROT_READ and MAP_PRIVATE. A private mapping is not a snapshot on Linux: pages not yet copied show the file's current bytes. The in-process writer check (jet_std_files_writer_refusal) only refuses this program's own writes.\n\nWhat the card says. #6706 c1: a safe borrowed view must not observe a byte change made by another process after the borrow, or the safe API no longer hands out such a view. c2: a truncation during safe access gives a typed error or a registered fault, never a raw SIGBUS.\n\nUses today. Six Jet files call files.map: two examples, one perf tool, one case, one run test and one UI snapshot. The view API (window, window_len, lines) is pinned by Examples/Systems/Files/FilesMapViews.jet, which returns views through Option, Result, tuples, lists and Shared guards.\n\nProbes. The probes are in $JET_SCRATCH_ROOT/lanes/Main/ballots/probes/D-MMAP-STABLE1. today.jet, option_b.jet and option_c.jet are one program under three spellings, run on the b14 seed. lease_probe.py shows option A's Linux mechanism with real leases, and lease_probe.py stall shows the kernel's deadline. copy_cost.py measures what a copy costs.\n\nHow Linux leases work. fcntl(2) F_SETLEASE: a writer's open or truncate blocks, and the kernel signals the holder, SIGIO unless F_SETSIG names another signal. The holder has /proc/sys/fs/lease-break-time seconds, 45 by default, before the kernel removes the lease itself and lets the writer in. Only the file's owner or a CAP_LEASE process may take one, and not while anyone has it open for writing.\n\nOther hosts. Windows opens without FILE_SHARE_WRITE, and SetEndOfFile already fails on a file with a mapped view. macOS and FreeBSD have no lease call. Web has no mmap; files.map returns a typed IOError today.\n\nSources. memmap2: docs.rs/memmap2/latest/memmap2/struct.Mmap.html (Safety). Go: pkg.go.dev/syscall#Mmap, pkg.go.dev/runtime/debug#SetPanicOnFault and pkg.go.dev/golang.org/x/exp/mmap. Java: docs.oracle.com/en/java/javase/21/docs/api/java.base/java/nio/MappedByteBuffer.html. .NET: learn.microsoft.com/dotnet/standard/io/memory-mapped-files and learn.microsoft.com/windows/win32/api/fileapi/nf-fileapi-setendoffile. Linux: man7.org/linux/man-pages/man2/fcntl.2.html (Leases).",
+      "options": [
+        {
+          "key": "A",
+          "name": "Stable map: hold the file where the OS can, copy where it can't",
+          "detail": "files.map keeps zero-copy views and makes them stable. On a local Linux filesystem the runtime takes a read lease on the file. When another process opens it for writing or shrinks it, the kernel makes that process wait and tells Jet. Jet copies the mapped bytes into its own memory at the same address and releases the lease. The views keep their address and their old bytes.\n\nWhere no lease is possible, the map is a copy from the start, so the meaning is the same everywhere. If a copy can't finish before the kernel's deadline, the Jet program stops with a message; it never reads changed bytes.",
+          "technical": "Which files get a lease. At map time fstatfs picks the path. Local Linux filesystems (ext4, xfs, btrfs, tmpfs, f2fs, bcachefs) get a lease. NFS, SMB, FUSE, 9p, Ceph and overlayfs files are copied at map time: there a lease is refused or misses writes from other machines and FUSE daemons. A refused lease (a writer already open, a file not owned) also copies.\n\nThe signal. jet_std_files_map opens read-only, sets F_SETSIG to SIGRTMAX (64), takes F_SETLEASE F_RDLCK, then calls mmap. Its handler only records si_fd and wakes the runtime's signal thread. Native images link musl statically, and the build passes over a glibc libc.a, so FFI.C code never brings in glibc's threads. musl keeps 32 (timers), 33 (SIGCANCEL) and 34 (synccall) below the SIGRTMIN (35) it reports; 64 is none of them.\n\nKeeping 64 for the runtime. Safe code can't subscribe to it: process.signals takes only the named POSIX signals, with no real-time kinds. #Unsafe reset_signal refuses 64. C code linked through FFI.C can still install its own handler, so files.map reads the action back with rt_sigaction first. If 64 isn't the runtime's handler, that map is a copy.\n\nThe copy. The signal thread copies each live map of that file into anonymous memory, mremaps the copy over the mapped address (MREMAP_FIXED) and releases the lease. Program threads keep reading meanwhile, because the writer is still held back.\n\nThe deadline. The runtime reads lease-break-time at map time. If the copy isn't done one second before it, the program stops with a registered message while the writer still waits. At the probe's 0.36 s per cached GiB, 45 s covers about 120 GiB; from a 200 MB/s disk, about 8 GiB.\n\nMemory. A map-time copy larger than the host's available memory (MemAvailable on Linux) fails files.map with a typed IOError. A break-time copy that can't get its memory is the same registered stop.\n\nOther hosts. Windows opens without FILE_SHARE_WRITE; a file already open for writing is copied. macOS, FreeBSD and web copy at map time. Truncation can no longer fault a safe view, which also meets c2 for safe code.",
+          "code": "mapped: files.map(path)\nheader: mapped.window_len(0, 1) ?? panic(\"window\")\nfirst: header[0]\n// another process writes byte 0 = 9: it waits while Jet copies\nprint(\"header after: {Int.from_u8(header[0])} (first read {Int.from_u8(first)})\")\n// prints: header after: 3 (first read 3)"
+        },
+        {
+          "key": "B",
+          "name": "The safe map is a copy; zero-copy mapping moves behind #Unsafe",
+          "detail": "files.map(path) reads the whole file into the program's memory, as files.read_bytes does, and keeps the MappedFile API (window, lines, len). Views are stable because they borrow the copy. Zero-copy mapping becomes an expert call inside #Unsafe that hands out raw reads, never a safe view.",
+          "technical": "jet_std_files_map reads the file into an owned buffer instead of calling mmap; the drop frees the buffer. Add an #Unsafe raw map in core.files whose reads go through checked raw access and whose truncation fault is c2's registered stop. Update spec.md, core-library.md and the files.map examples. Web gets the same copy, so every tier has one meaning.",
+          "code": "mapped: files.map(path)\nheader: mapped.window_len(0, 1) ?? panic(\"window\")\nfirst: header[0]\n// another process writes byte 0 = 9\nprint(\"header after: {Int.from_u8(header[0])} (first read {Int.from_u8(first)})\")\n// prints: header after: 3 (first read 3)"
+        },
+        {
+          "key": "C",
+          "name": "VolatileBytes: no borrowed views; every read copies",
+          "detail": "files.map returns a map that never lends a view. mapped.read(start, count) copies the bytes it asks for at that moment, and lines() yields copied lines. Searching and counting run inside the runtime over the live pages, so scans stay zero-copy. Two reads can disagree if another program wrote in between. A read past a shrunk end stops with a registered message.",
+          "technical": "MappedFile loses window, window_len and the View<U8> lines iterator; it gains read(start, count) -> [U8] !IOError, a copying lines() and runtime scan kernels (find, count, checksum) that read the mapping. c2's registered SIGBUS stop is required. FilesMapViews and the view-provenance cases for maps are deleted.",
+          "code": "mapped: files.map(path)\nfirst: mapped.read(0, 1)[0]\n// another process writes byte 0 = 9\nprint(\"header after: {Int.from_u8(mapped.read(0, 1)[0])} (first read {Int.from_u8(first)})\")\n// prints: header after: 9 (first read 3)"
+        },
+        {
+          "key": "D",
+          "name": "Keep views and let them change: a mapped view is shared with other programs",
+          "detail": "files.map keeps today's zero-copy views. The spec states that another program may change a mapped file's bytes at any time, so a mapped view can read different values at different moments. The compiler never assumes a mapped byte stays the same between reads. A read after a shrink stops with a registered message.",
+          "technical": "No API change. Sema marks map views as externally mutable, so no optimization reuses a loaded mapped byte. c2's registered SIGBUS stop is required. Card #6706 c1 is rewritten to accept change.",
+          "code": "mapped: files.map(path)\nheader: mapped.window_len(0, 1) ?? panic(\"window\")\nfirst: header[0]\n// another process writes byte 0 = 9\nprint(\"header after: {Int.from_u8(header[0])} (first read {Int.from_u8(first)})\")\n// prints: header after: 9 (first read 3)"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "memmap2 marks every file-backed map constructor unsafe, because the map is undefined behavior if the file is modified in or out of process; the caller must prevent that.",
+          "code": "let map = unsafe { Mmap::map(&file)? }; // UB if the file changes"
+        },
+        {
+          "lang": "Go",
+          "note": "syscall.Mmap returns a plain byte slice that shows other processes' writes. A read after truncation crashes the program unless debug.SetPanicOnFault turns the fault into a panic. x/exp/mmap's ReaderAt copies on each ReadAt.",
+          "code": "m, _ := syscall.Mmap(fd, 0, size, syscall.PROT_READ, syscall.MAP_SHARED)\nfirst := m[0] // may change later"
+        },
+        {
+          "lang": "Java",
+          "note": "MappedByteBuffer documents that its content can change at any time when the file changes, and that touching a truncated region throws an unspecified exception, possibly later.",
+          "code": "MappedByteBuffer buf = ch.map(MapMode.READ_ONLY, 0, ch.size());\nbyte first = buf.get(0); // may change"
+        },
+        {
+          "lang": ".NET",
+          "note": "MemoryMappedFile views of a file show other processes' writes; sharing is the point of the type. On Windows, SetEndOfFile fails while a view is mapped, so a truncation can't happen there.",
+          "code": "using var mmf = MemoryMappedFile.CreateFromFile(path);\nusing var view = mmf.CreateViewAccessor();\nbyte first = view.ReadByte(0); // may change"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "A keeps both the promise and the speed where the OS can hold the file: local Linux filesystems and Windows. Everywhere else it copies, with the same meaning. Its costs fall on other programs' writers, which wait for one copy, and on a huge map under a writer, which stops with a message instead of reading changed bytes.",
+        "gains": [
+          "A borrowed mapped byte never changes, on every host.",
+          "Zero-copy maps on local Linux filesystems and Windows: a 1 GiB map opened in 0.05 ms in the probe.",
+          "A shrink by another program can no longer fault a safe view, so card c2 holds for safe code.",
+          "No change to any Jet program that maps files today."
+        ],
+        "losses": [
+          {
+            "loss": "Many maps are a copy: on macOS, FreeBSD and web, on Linux network and FUSE filesystems, and for a file the program doesn't own or another program has open for writing. In the probe, 1 GiB cost 0.36 s and 1056 MiB of memory. There a file larger than available memory can't be mapped.",
+            "mitigation": "The meaning is the same as a zero-copy map, so no program changes. A file too large to copy gives a typed IOError from files.map, not an out-of-memory kill. An #Unsafe raw map stays for experts who need zero copy anyway."
+          },
+          {
+            "loss": "Other programs pay. A program that opens the mapped file for writing waits while Jet copies: 18-32 ms for 64 MiB in the probe, about 0.36 s per cached GiB. A Jet program reading a log can stall the logger. A non-blocking open, like coreutils truncate, fails once with EAGAIN.",
+            "mitigation": "It happens once per map: after the copy the lease is gone. A program that must never stall a writer reads with files.read_bytes or files.open."
+          },
+          {
+            "loss": "On Windows, other programs can't open the file for writing at all while the map lives; they get a sharing violation.",
+            "mitigation": "Deny-write sharing is ordinary Windows behavior, and a file another program already has open for writing is copied instead."
+          },
+          {
+            "loss": "A copy that can't finish before the kernel's lease break time (45 s by default), or can't get its memory, stops the Jet program. That is about 120 GiB from the page cache, or 8 GiB from a 200 MB/s disk.",
+            "mitigation": "The stop is a registered, located message, and it comes while the writer still waits, so no view ever reads changed bytes. Smaller maps never reach it."
+          },
+          {
+            "loss": "The runtime reserves real-time signal 64 (SIGRTMAX) for lease breaks.",
+            "mitigation": "Images link musl, whose own signals are 32-34, so nothing collides. Safe code can't subscribe to 64, #Unsafe reset_signal refuses it, and a C handler on 64 turns that map into a copy."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B pays the full copy on every host for every map, and a file larger than available memory can't be mapped at all. It never stalls another program."
+          },
+          {
+            "key": "C",
+            "reason": "C removes borrowed views from maps, so every line a program keeps is a copy, and two reads can disagree."
+          },
+          {
+            "key": "D",
+            "reason": "D gives up Jet's promise that a borrowed value doesn't change under you."
+          }
+        ],
+        "tradeoff": "Copies where no hold exists, a wait for the first writer and a stop for a huge map under a writer, for stable zero-copy views on local Linux disks and Windows."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: Main. Main reviewed five attacks: lease-break timing, filesystems, cost to other writers, per-OS behavior and peers; each is probed or stated in A losses. The lease signal moved to SIGRTMAX after Main found the collision with libc reserved real-time signals."
+      },
+      "checkInstructions": "The probes sit in the Main lane's ballots/probes/D-MMAP-STABLE1 folder. Run each Jet probe with the b14 seed.\n\nThe command jet run today.jet prints header after: 9 (first read 3), the bug. jet run option_b.jet uses files.read_bytes, B's meaning, and prints header after: 3 (first read 3). jet run option_c.jet uses files.read_at per read, C's meaning, and prints header after: 9 (first read 3).\n\nRun python3 lease_probe.py on Linux. It maps a 64 MiB file and takes a read lease. A dd write and a truncate(2) each wait while the probe copies the map under the same address, which took 18-32 ms. The borrowed byte still reads 3 afterwards, and the truncated file is 0 bytes. coreutils truncate opens with O_NONBLOCK and fails once with EAGAIN. A lease is refused with EAGAIN while another process holds a write descriptor, and with EACCES on a root-owned file.\n\nRun python3 lease_probe.py stall. The probe holds the lease and never copies. The dd writer waited 45.2 s, the default lease-break-time, then wrote, and the borrowed byte read 9. This is the deadline A's runtime must beat or stop before.\n\nRun python3 copy_cost.py on a 1 GiB file in the page cache. Mapping it and reading a 16-byte header took 0.05 ms at 32 MiB RSS. Copying it took 0.36 s at 1056 MiB RSS.\n\nToday's map is in Compiler/JetRuntime/Source/CompilerMapped.jet jet_std_files_map (mmap PROT_READ, MAP_PRIVATE, shared flock). Count the callers with git grep -n -E 'files\\.map\\(' -- '*.jet'; it lists 8 lines in 6 files.\n\nValidate this payload with Tools/agent/ballots/Validate.jet.",
+      "surface": {
+        "gist": "When another program changes a file Jet mapped, do borrowed bytes stay put, get copied first or per read, or change?",
+        "lesson": "Mapping reads a big file without loading it first. The bytes still belong to the file, so another program can change them mid-read. Jet promises a borrowed view never changes under you.",
+        "trio": {
+          "current": {
+            "note": "Another program's write shows through a borrowed view; a shrink kills the program.",
+            "code": "header: mapped.window_len(0, 1) ?? panic(\"window\")\n// another process writes byte 0 = 9\nprint(header[0])   // 9, was 3"
+          },
+          "wild": {
+            "lang": "Rust",
+            "note": "Mapping a file is unsafe, because the file can change.",
+            "code": "let map = unsafe { Mmap::map(&file)? };"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Hold the file, else copy",
+            "gist": "Writers wait while Jet copies; hosts without a hold copy first.",
+            "gains": [
+              "Views never change.",
+              "Zero copy on Linux and Windows.",
+              "A shrink can't kill the program."
+            ],
+            "losses": [
+              "Other hosts and network disks copy first.",
+              "A writer waits for one copy.",
+              "A huge map under a writer stops."
+            ],
+            "proposed": {
+              "code": "header: mapped.window_len(0, 1) ?? panic(\"window\")\nprint(header[0])   // 3: the writer waited"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Always copy",
+            "gist": "files.map reads the whole file first; zero-copy needs #Unsafe.",
+            "gains": [
+              "Views never change.",
+              "Simple everywhere."
+            ],
+            "losses": [
+              "A 1 GiB file costs 0.36 s and 1 GiB.",
+              "Files bigger than memory can't map."
+            ],
+            "proposed": {
+              "code": "header: mapped.window_len(0, 1) ?? panic(\"window\")\nprint(header[0])   // 3: a copy"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Copy on every read",
+            "gist": "No borrowed views; each read copies the bytes it asks for.",
+            "gains": [
+              "Scans stay zero copy."
+            ],
+            "losses": [
+              "No borrowed views from maps.",
+              "Two reads can disagree."
+            ],
+            "proposed": {
+              "code": "print(mapped.read(0, 1)[0])   // 9: read now"
+            }
+          },
+          {
+            "key": "D",
+            "name": "Let bytes change",
+            "gist": "Keep today's views and document that they can change.",
+            "gains": [
+              "No code change."
+            ],
+            "losses": [
+              "A borrowed value can change under you."
+            ],
+            "proposed": {
+              "code": "print(header[0])   // 9, was 3"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Views stay stable and zero-copy where the OS can hold the file, and a copy gives the same meaning everywhere else.",
+          "gains": [
+            "Stable views on every host.",
+            "No program changes."
+          ],
+          "losses": [
+            {
+              "loss": "Other hosts and network disks copy first.",
+              "mitigation": "Same meaning; an #Unsafe raw map stays for experts."
+            },
+            {
+              "loss": "Another program's writer waits for one copy.",
+              "mitigation": "Once per map; read_bytes never stalls writers."
+            },
+            {
+              "loss": "A huge map under a writer stops the program.",
+              "mitigation": "With a message, before any byte changes."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Always pays the copy."
+            },
+            {
+              "key": "C",
+              "reason": "No borrowed views."
+            },
+            {
+              "key": "D",
+              "reason": "Breaks the borrow promise."
+            }
+          ],
+          "tradeoff": "Copies and writer waits where needed, for stable zero-copy views where the OS can hold the file."
+        }
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-13T07:09:44.859Z"
     }
   ],
   "questions": [
@@ -198102,6 +198343,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-13T07:09:44.859Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-MMAP-STABLE1",
+      "note": "Mapped files: keep borrowed bytes stable by holding the file or copying it, copy always, copy on every read, or let the bytes change"
+    },
     {
       "at": "2026-11-13T06:52:17.112Z",
       "by": "Main",
