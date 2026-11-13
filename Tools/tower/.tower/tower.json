@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6777,
-    "rev": 100275,
+    "rev": 100300,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -20308,12 +20308,12 @@
         },
         {
           "n": 9,
-          "text": "[retarget] `bash Jetpack/Bootstrap/check.sh --tests` prints JETPACK CHECK OK with the client tests included",
+          "text": "`jet test Compiler --profile packages --filter Mcp` passes with the MCP client claims included (client builders, request lifecycle, negotiation, bounded failures, redacted audit facts).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-09-29T01:36:47.449Z"
+          "at": "2026-11-13T01:52:26.373Z"
         },
         {
           "n": 10,
@@ -20388,7 +20388,7 @@
       ],
       "needsAcceptance": false,
       "created": "2026-07-26T01:05:56.812Z",
-      "updated": "2026-11-13T01:48:58.607Z",
+      "updated": "2026-11-13T01:52:26.374Z",
       "updatedBy": "Main",
       "tags": [
         "retargeted",
@@ -20936,12 +20936,12 @@
         },
         {
           "n": 6,
-          "text": "The scan procedure is committed at Tools/agent/security-scan.mjs, and its `finalize` run at the integration HEAD exits 0 with zero reportable findings, publishing Docs/audits/security-final-<date>/.",
+          "text": "The committed security-scan procedure (a Jet tool under Tools/, per AGENTS.md:93-129) runs its finalize step at the integration HEAD, exits 0 with zero reportable findings, and publishes Docs/audits/security-final-<date>/.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-09-29T02:11:22.033Z"
+          "at": "2026-11-13T01:52:31.224Z"
         },
         {
           "n": 7,
@@ -20981,12 +20981,12 @@
         },
         {
           "n": 14,
-          "text": "(was #4821) Core crypto file_seal/migrate_v1 (Jet) lacks the JETC v2 bounded-streaming + no-overwrite contract of the Rust prelude",
+          "text": "Core crypto file_seal/migrate (Core/Crypto) meets the JETC v2 contract: bounded streaming and no overwrite of an existing destination, proven by a Core #Test that seals a stream larger than the buffer limit and a second seal onto an existing path that fails without touching it (`jet test Compiler --profile core --filter file_seal`).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-28T20:12:17.601Z"
+          "at": "2026-11-13T01:52:27.967Z"
         },
         {
           "n": 15,
@@ -20999,12 +20999,12 @@
         },
         {
           "n": 16,
-          "text": "(was #4843) Jetpack Jet port skips policy gates before writes (TrustStore, workspace lock, invocation flags; Rust refuses with E3415)",
+          "text": "The Jetpack Jet port refuses writes that skip policy gates (TrustStore, workspace lock, invocation flags) with E3415, proven by Jetpack claims in `jet test Compiler --profile packages --filter Trust`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-28T20:13:21.459Z"
+          "at": "2026-11-13T01:52:29.690Z"
         },
         {
           "n": 17,
@@ -21059,7 +21059,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-08-03T15:42:30.347Z",
-      "updated": "2026-11-13T01:49:00.694Z",
+      "updated": "2026-11-13T01:52:31.224Z",
       "updatedBy": "Main",
       "probe": null,
       "visualMedia": [],
@@ -26339,6 +26339,33 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-10-04T17:58:20.664Z"
+        },
+        {
+          "n": 19,
+          "text": "(was #3032 c1) Missing direct-source authentication requires explicit interactive approval before the first artifact GET. -y and --trust cannot grant it [precut audit: no dev test, golden, case or snapshot proves this today] (moved from #2199 c14)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T01:52:32.722Z"
+        },
+        {
+          "n": 20,
+          "text": "(was #3032 c2) A binds source target, metadata authority, repository, resolver, selector, asset policy, target, platform, proof floor and ordered HTTPS origins exactly [precut audit: no dev test, golden, case or snapshot proves this today] (moved from #2199 c15)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T01:52:35.025Z"
+        },
+        {
+          "n": 21,
+          "text": "(was #3032 c3) A excludes mutable version, tag, observed digest and transient URL queries. A later candidate under unchanged scope needs no new source-grant prompt [precut audit: no dev test, golden, case or snapshot proves this today] (moved from #2199 c16)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T01:52:36.469Z"
         }
       ],
       "refs": [
@@ -26369,12 +26396,12 @@
       "parentId": "c0u5tm84",
       "needsAcceptance": false,
       "created": "2026-09-10T22:59:01.979Z",
-      "updated": "2026-11-13T01:49:08.659Z",
+      "updated": "2026-11-13T01:52:36.469Z",
       "updatedBy": "Main",
       "goals": [
         "G7"
       ],
-      "criteriaLastN": 18
+      "criteriaLastN": 21
     },
     {
       "id": "c01k5lts",
@@ -75803,6 +75830,69 @@
           "verifiedBy": null,
           "evidence": "Landed 095a9ffdd5 on dev (Recover-cachecontrol; receipt $JET_SCRATCH_ROOT/lanes/Main/land/Recover-cachecontrol.receipt.md), built on the recovered cache-control1-wip patch. Chain full FIXED_POINT (s2 == s3, dbd83aab9676f709). Examples/features/memory/stream_store.jet and cache_line_padding.jet and the core.mem.stream_store conformance test pass on o0, o1 and o2 (9/9); the O2 binary contains movnti and sfence. Golden census 1215 vs 1213 passed on base, 0 lost; two new E1105 UI snapshots (fatal and grouped paths); layout and memory cases unchanged; lane-check CHECK OK. Tools/tower/held/6312/ is retired with a Landed row in held/README.md.",
           "at": "2026-11-04T19:10:34.524Z"
+        },
+        {
+          "n": 6,
+          "text": "jet perf run with the memory method reports L1D, LLC, dTLB misses and page faults per source line on Linux x86-64 (merged from #4727 c1)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T01:52:04.992Z"
+        },
+        {
+          "n": 7,
+          "text": "A strided array walk reports more L1D misses per element than a sequential walk in a golden test (merged from #4727 c2)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T01:52:06.569Z"
+        },
+        {
+          "n": 8,
+          "text": "Hosts without counters report unavailable with a reason, never zero counts (merged from #4727 c3)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T01:52:07.966Z"
+        },
+        {
+          "n": 9,
+          "text": "`jet perf run` on bench w04 (wordfreq) writes a sampling profile with self and inclusive time per Jet source line plus allocation counts per line. (merged from #4727 c4)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T01:52:09.471Z"
+        },
+        {
+          "n": 10,
+          "text": "(was #6016) The ratified per-line cost view runs on the self-hosted toolchain: on the D-COSTLAW1 example (`out.push(log.lines().first())` in a loop) it reports the String copy repeating per loop turn on that line; golden output registered. (merged from #4727 c5)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T01:52:11.011Z"
+        },
+        {
+          "n": 11,
+          "text": "(was #6016) Each line shows allocations, copies, representation fallbacks and Int boxing; a fixture with a range-proven Int loop shows no boxing and one with an unbounded Int shows it. (merged from #4727 c6)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T01:52:12.467Z"
+        },
+        {
+          "n": 12,
+          "text": "(was #6016) The hidden-copy loop lint of D-COSTLAW1 fires on the self-hosted `jet check` with the repair named; UI snapshot. (merged from #4727 c7)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T01:52:13.963Z"
         }
       ],
       "refs": [],
@@ -75813,8 +75903,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T13:32:06.012Z",
-      "updated": "2026-11-11T12:45:10.780Z",
-      "updatedBy": "Main"
+      "updated": "2026-11-13T01:52:13.963Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 12
     },
     {
       "id": "c0vhdiiv",
@@ -85000,6 +85091,42 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-07T03:29:46.908Z"
+        },
+        {
+          "n": 3,
+          "text": "Syntax registry entry updated (Compiler/JetFoundation/Data/Syntax) (merged from #5027 c1)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T01:52:20.115Z"
+        },
+        {
+          "n": 4,
+          "text": "syntax-decisions.md log entry (merged from #5027 c2)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T01:52:21.803Z"
+        },
+        {
+          "n": 5,
+          "text": "jet devtools grammars regenerated (merged from #5027 c3)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T01:52:23.406Z"
+        },
+        {
+          "n": 6,
+          "text": "(was #2887 c1) Ratified layout/alignment facts and safe Atomic scalar operations are implemented with exact Int ownership, nonblocking reclamation, fallible growth, and tier carriers, proven by tests and goldens on every applicable tier. (merged from #5027 c5)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T01:52:24.881Z"
         }
       ],
       "refs": [],
@@ -85014,9 +85141,9 @@
       "parentId": "c085f598",
       "needsAcceptance": false,
       "created": "2026-11-01T01:14:55.459Z",
-      "updated": "2026-11-07T03:29:46.908Z",
+      "updated": "2026-11-13T01:52:24.881Z",
       "updatedBy": "Main",
-      "criteriaLastN": 2
+      "criteriaLastN": 6
     },
     {
       "id": "c08o25e8",
@@ -92250,6 +92377,42 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-13T01:51:57.350Z"
+        },
+        {
+          "n": 16,
+          "text": "(was #6221) JetDevserver and JetDebug parse, check and run their tests under a gate (or are deleted by owner decision) (merged from #4148 c9)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T01:51:59.180Z"
+        },
+        {
+          "n": 17,
+          "text": "(was #6221) The agent capsule and the reference doc teach only the current forms (merged from #4148 c10)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T01:52:00.574Z"
+        },
+        {
+          "n": 18,
+          "text": "(was #6221) `x: null?` is either a diagnostic or explained (merged from #4148 c11)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T01:52:02.013Z"
+        },
+        {
+          "n": 19,
+          "text": "(was #6341) JetLSP reads declaration visibility from Sema facts, never from source text: the import quick-fix fires for a public function in another module, and signature preview reports external callers for public functions and not for functions inside a priv module, proved by JetLSP tests whose fixtures contain no pub keyword. (merged from #4148 c13)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T01:52:03.507Z"
         }
       ],
       "refs": [],
@@ -92260,9 +92423,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-07T02:41:10.182Z",
-      "updated": "2026-11-13T01:51:57.350Z",
+      "updated": "2026-11-13T01:52:03.507Z",
       "updatedBy": "Main",
-      "criteriaLastN": 15
+      "criteriaLastN": 19
     },
     {
       "id": "c0g6fxb9",
@@ -95005,6 +95168,33 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-09T16:03:48.060Z"
+        },
+        {
+          "n": 6,
+          "text": "sin, cos, tan, exp, log, pow, sqrt are Jet code in core.math with a documented error bound (merged from #4732 c1)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T01:52:15.623Z"
+        },
+        {
+          "n": 7,
+          "text": "A sweep of inputs gives bit-identical results on every tier and target (merged from #4732 c2)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T01:52:17.193Z"
+        },
+        {
+          "n": 8,
+          "text": "(was #6417) One libm meaning on every tier: web Wasm must not use host Math for Core float functions (merged from #4732 c4)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T01:52:18.604Z"
         }
       ],
       "refs": [
@@ -95020,9 +95210,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-08T19:41:56.680Z",
-      "updated": "2026-11-10T14:33:12.248Z",
-      "updatedBy": "owner",
-      "criteriaLastN": 5
+      "updated": "2026-11-13T01:52:18.604Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 8
     },
     {
       "id": "c0l39twq",
@@ -200979,6 +201169,181 @@
   ],
   "events": [
     {
+      "at": "2026-11-13T01:52:36.469Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c03habw5",
+      "note": "#21 (was #3032 c3) A excludes mutable version, tag, observed dig"
+    },
+    {
+      "at": "2026-11-13T01:52:35.025Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c03habw5",
+      "note": "#20 (was #3032 c2) A binds source target, metadata authority, re"
+    },
+    {
+      "at": "2026-11-13T01:52:32.722Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c03habw5",
+      "note": "#19 (was #3032 c1) Missing direct-source authentication requires"
+    },
+    {
+      "at": "2026-11-13T01:52:31.224Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c02lvwje",
+      "note": "#6: Tools/agent/security-scan.mjs does not exist on dev (Tools/agent lists only .jet tools plus roots.mjs/runtime-c-census.mjs); the criterion must name the Jet tool.; was: The scan procedure is committed at Tools/agent/security-scan.mjs, and its `finalize` run at the integration HEAD exits 0 with zero reportable findings, publishing Docs/audits/security-final-<date>/."
+    },
+    {
+      "at": "2026-11-13T01:52:29.690Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c02lvwje",
+      "note": "#16: The Rust implementation is gone from dev (AGENTS.md:289-293: `rust` is a frozen dead-end branch); dev has no .rs compiler, Prelude or crates, so a Rust-side comparison or 'both compilers' clause has nothing to check.; was: (was #4843) Jetpack Jet port skips policy gates before writes (TrustStore, workspace lock, invocation flags; Rust refuses with E3415)"
+    },
+    {
+      "at": "2026-11-13T01:52:27.968Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c02lvwje",
+      "note": "#14: The Rust implementation is gone from dev (AGENTS.md:289-293: `rust` is a frozen dead-end branch); dev has no .rs compiler, Prelude or crates, so a Rust-side comparison or 'both compilers' clause has nothing to check. The contract survives; the Rust-prelude contrast does not.; was: (was #4821) Core crypto file_seal/migrate_v1 (Jet) lacks the JETC v2 bounded-streaming + no-overwrite contract of the Rust prelude"
+    },
+    {
+      "at": "2026-11-13T01:52:26.374Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c06tpil4",
+      "note": "#9: Jetpack/Bootstrap/check.sh, Tools/agent/jet-env and scripts/ do not exist on dev; the bootstrap proof is Jetpack/Bootstrap/Check.jet (header lines 6-25) and Jetpack claims run in `jet test Compiler --profile packages` (Check.jet:23-25).; was: [retarget] `bash Jetpack/Bootstrap/check.sh --tests` prints JETPACK CHECK OK with the client tests included"
+    },
+    {
+      "at": "2026-11-13T01:52:24.881Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0wv2wmp",
+      "note": "#6 (was #2887 c1) Ratified layout/alignment facts and safe Atom"
+    },
+    {
+      "at": "2026-11-13T01:52:23.406Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0wv2wmp",
+      "note": "#5 jet devtools grammars regenerated (merged from #5027 c3)"
+    },
+    {
+      "at": "2026-11-13T01:52:21.803Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0wv2wmp",
+      "note": "#4 syntax-decisions.md log entry (merged from #5027 c2)"
+    },
+    {
+      "at": "2026-11-13T01:52:20.115Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0wv2wmp",
+      "note": "#3 Syntax registry entry updated (Compiler/JetFoundation/Data/S"
+    },
+    {
+      "at": "2026-11-13T01:52:18.604Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c028lxdd",
+      "note": "#8 (was #6417) One libm meaning on every tier: web Wasm must no"
+    },
+    {
+      "at": "2026-11-13T01:52:17.193Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c028lxdd",
+      "note": "#7 A sweep of inputs gives bit-identical results on every tier "
+    },
+    {
+      "at": "2026-11-13T01:52:15.623Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c028lxdd",
+      "note": "#6 sin, cos, tan, exp, log, pow, sqrt are Jet code in core.math"
+    },
+    {
+      "at": "2026-11-13T01:52:13.963Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0x9nq8j",
+      "note": "#12 (was #6016) The hidden-copy loop lint of D-COSTLAW1 fires on"
+    },
+    {
+      "at": "2026-11-13T01:52:12.467Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0x9nq8j",
+      "note": "#11 (was #6016) Each line shows allocations, copies, representat"
+    },
+    {
+      "at": "2026-11-13T01:52:11.011Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0x9nq8j",
+      "note": "#10 (was #6016) The ratified per-line cost view runs on the self"
+    },
+    {
+      "at": "2026-11-13T01:52:09.471Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0x9nq8j",
+      "note": "#9 `jet perf run` on bench w04 (wordfreq) writes a sampling pro"
+    },
+    {
+      "at": "2026-11-13T01:52:07.966Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0x9nq8j",
+      "note": "#8 Hosts without counters report unavailable with a reason, nev"
+    },
+    {
+      "at": "2026-11-13T01:52:06.569Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0x9nq8j",
+      "note": "#7 A strided array walk reports more L1D misses per element tha"
+    },
+    {
+      "at": "2026-11-13T01:52:04.992Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0x9nq8j",
+      "note": "#6 jet perf run with the memory method reports L1D, LLC, dTLB m"
+    },
+    {
+      "at": "2026-11-13T01:52:03.507Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c073cvg9",
+      "note": "#19 (was #6341) JetLSP reads declaration visibility from Sema fa"
+    },
+    {
+      "at": "2026-11-13T01:52:02.013Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c073cvg9",
+      "note": "#18 (was #6221) `x: null?` is either a diagnostic or explained ("
+    },
+    {
+      "at": "2026-11-13T01:52:00.574Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c073cvg9",
+      "note": "#17 (was #6221) The agent capsule and the reference doc teach on"
+    },
+    {
+      "at": "2026-11-13T01:51:59.180Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c073cvg9",
+      "note": "#16 (was #6221) JetDevserver and JetDebug parse, check and run t"
+    },
+    {
       "at": "2026-11-13T01:51:57.350Z",
       "by": "Main",
       "action": "card.criteria-add",
@@ -204316,713 +204681,6 @@
       "action": "card.criteria-meet",
       "ref": "c07glrub",
       "note": "#3"
-    },
-    {
-      "at": "2026-11-12T04:43:36.048Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0xuffg1",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-12T04:43:35.184Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0gelll3",
-      "note": "#7"
-    },
-    {
-      "at": "2026-11-12T04:43:34.313Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0gelll3",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-12T04:43:33.444Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c03183d1",
-      "note": "#56"
-    },
-    {
-      "at": "2026-11-12T04:43:32.582Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c03183d1",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-12T04:43:31.292Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0xnvmrf",
-      "note": "#3"
-    },
-    {
-      "at": "2026-11-12T04:43:30.381Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0o8f1p4",
-      "note": "#25"
-    },
-    {
-      "at": "2026-11-12T04:43:29.520Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0o8f1p4",
-      "note": "#21"
-    },
-    {
-      "at": "2026-11-12T04:43:28.657Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0o8f1p4",
-      "note": "#16"
-    },
-    {
-      "at": "2026-11-12T04:43:27.796Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0o8f1p4",
-      "note": "#3"
-    },
-    {
-      "at": "2026-11-12T04:39:04.475Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0g1f1kd",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-12T04:39:01.840Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0s6y4cj",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-12T04:38:59.552Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0hn7w1n",
-      "note": "#28"
-    },
-    {
-      "at": "2026-11-12T04:38:58.478Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0g1f1kd",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-12T04:38:57.337Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0s6y4cj",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-12T04:38:56.353Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0s6y4cj",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-12T04:38:55.252Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c03183d1",
-      "note": "#36"
-    },
-    {
-      "at": "2026-11-12T04:38:54.135Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c03183d1",
-      "note": "#35"
-    },
-    {
-      "at": "2026-11-12T04:38:53.232Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c03183d1",
-      "note": "#34"
-    },
-    {
-      "at": "2026-11-12T04:38:52.042Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c03183d1",
-      "note": "#33"
-    },
-    {
-      "at": "2026-11-12T04:38:50.968Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c03183d1",
-      "note": "#32"
-    },
-    {
-      "at": "2026-11-12T04:35:15.117Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0pjwkhn",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-12T04:20:52.740Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0xnvmrf",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-12T04:20:51.905Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0bk3yid",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-12T04:20:32.393Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0zlsxzv",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-12T04:20:31.538Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0rkebo4",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-12T04:20:30.695Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c066t33h",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-12T04:20:29.853Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0ozzmvc",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-12T04:20:29.016Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0cwk90x",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-12T04:13:29.417Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0qe89cl",
-      "note": "#61"
-    },
-    {
-      "at": "2026-11-12T04:09:25.572Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0hn7w1n",
-      "note": "#12"
-    },
-    {
-      "at": "2026-11-12T04:09:15.268Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0hn7w1n",
-      "note": "#11"
-    },
-    {
-      "at": "2026-11-12T04:08:33.414Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0ssy5wy",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-12T04:08:32.570Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0ssy5wy",
-      "note": "#3 The jetc-trace and run-cold-context PortBars speed rows (wal"
-    },
-    {
-      "at": "2026-11-12T04:08:31.752Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0ssy5wy",
-      "note": "#2 Core load and sema.finalize for a script that imports a few "
-    },
-    {
-      "at": "2026-11-12T04:08:30.923Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0ssy5wy",
-      "note": "#1 comptime.bodies costs one compile-and-run for the whole comp"
-    },
-    {
-      "at": "2026-11-12T04:08:18.925Z",
-      "by": "Main",
-      "action": "card.add",
-      "ref": "c0ssy5wy",
-      "note": "Cold compile of a small script is about 1-4 s, and comptime.bodies is its largest phase"
-    },
-    {
-      "at": "2026-11-12T04:06:55.473Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0o2a99m",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-12T04:06:39.321Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0hn7w1n",
-      "note": "#30"
-    },
-    {
-      "at": "2026-11-12T04:06:38.471Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0hn7w1n",
-      "note": "#29"
-    },
-    {
-      "at": "2026-11-12T04:06:37.618Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0hn7w1n",
-      "note": "#23"
-    },
-    {
-      "at": "2026-11-12T04:06:36.773Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0hn7w1n",
-      "note": "#20"
-    },
-    {
-      "at": "2026-11-12T04:06:35.932Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0hn7w1n",
-      "note": "#13"
-    },
-    {
-      "at": "2026-11-12T04:04:38.792Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0o2a99m",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-12T04:04:37.895Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0o2a99m",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-12T04:04:37.021Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0xnvmrf",
-      "note": "#31"
-    },
-    {
-      "at": "2026-11-12T04:04:35.863Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0xnvmrf",
-      "note": "#30"
-    },
-    {
-      "at": "2026-11-12T04:04:35.002Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0xnvmrf",
-      "note": "#28"
-    },
-    {
-      "at": "2026-11-12T03:48:33.892Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0d72itt",
-      "note": "#1 Sema folds a local at compile time only when the solved effe"
-    },
-    {
-      "at": "2026-11-12T03:48:27.281Z",
-      "by": "Main",
-      "action": "card.add",
-      "ref": "c0d72itt",
-      "note": "Compile-time folding bakes vDSO reads: rt.clock_mono_ns() in a local became one build's constant"
-    },
-    {
-      "at": "2026-11-12T03:36:41.495Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0s6y4cj",
-      "note": "#2 min_by and max_by with a Float key follow the same total-ord"
-    },
-    {
-      "at": "2026-11-12T03:31:58.511Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0s6y4cj",
-      "note": "#1 sort_by with a Float key has one checked meaning on every ti"
-    },
-    {
-      "at": "2026-11-12T03:31:46.868Z",
-      "by": "Main",
-      "action": "card.add",
-      "ref": "c0s6y4cj",
-      "note": "sort_by with a Float key is an internal compiler error (ir.build unlowered)"
-    },
-    {
-      "at": "2026-11-12T02:42:20.941Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c07glrub",
-      "note": "#3: conflicts with the specified jet run program-argument contract (Front.jet); ruled by Main within the card scope; was: (Found by Builder 2026-11-04 at 37eae4f5d6) An extra positional argument to a verb is refused with a registered diagnostic, not silently ignored: jet build -A file.jet extra.bin exits 0 today. Applies"
-    },
-    {
-      "at": "2026-11-12T02:32:34.378Z",
-      "by": "Main",
-      "action": "goal.log",
-      "ref": "G11",
-      "note": "Owner order 2026-11-11 late: the peer floor is enforced stru"
-    },
-    {
-      "at": "2026-11-12T02:32:33.511Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0ef6eb1",
-      "note": "#5 The loss census is empty: on the canonical manifest and the "
-    },
-    {
-      "at": "2026-11-12T02:32:32.666Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0ef6eb1",
-      "note": "#4 Structural coverage beyond the cells: a generated or curated"
-    },
-    {
-      "at": "2026-11-12T02:32:31.792Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0ef6eb1",
-      "note": "#3 A loss census on the current compiler lists every cell, peer"
-    },
-    {
-      "at": "2026-11-12T02:32:30.921Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0ef6eb1",
-      "note": "#2 Every required cell measures peak memory for Jet and every m"
-    },
-    {
-      "at": "2026-11-12T02:32:30.068Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0ef6eb1",
-      "note": "#1 The perf gate encodes the peer floor: on the canonical manif"
-    },
-    {
-      "at": "2026-11-12T02:32:29.173Z",
-      "by": "Main",
-      "action": "card.add",
-      "ref": "c0ef6eb1",
-      "note": "Peer floor, enforced structurally: Jet is faster and uses less peak memory than every other language"
-    },
-    {
-      "at": "2026-11-12T02:27:08.275Z",
-      "by": "Main",
-      "action": "goal.log",
-      "ref": "G13",
-      "note": "Owner rulings 2026-11-11 late: (1) no review needs a reviewe"
-    },
-    {
-      "at": "2026-11-12T02:27:07.434Z",
-      "by": "Main",
-      "action": "goal.log",
-      "ref": "G11",
-      "note": "Owner rulings 2026-11-11 late: (1) no review needs a reviewe"
-    },
-    {
-      "at": "2026-11-12T02:27:06.603Z",
-      "by": "Main",
-      "action": "goal.log",
-      "ref": "G4",
-      "note": "Owner rulings 2026-11-11 late: (1) no review needs a reviewe"
-    },
-    {
-      "at": "2026-11-12T02:27:05.687Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0qe89cl",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-12T02:27:04.840Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0qe89cl",
-      "note": "#61 Tools/gauntlet/PortBars.jet encodes the owner's 2026-11-11 t"
-    },
-    {
-      "at": "2026-11-12T02:27:03.968Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0qe89cl",
-      "note": "#42: owner ruling: no cross-family reviewer required; was: Reasoning: every PortBars entry has its review.json record from a reviewer of a different model family than the twin's author. The reasoning bar passes on all nine."
-    },
-    {
-      "at": "2026-11-12T02:21:43.952Z",
-      "by": "Main",
-      "action": "goal.log",
-      "ref": "G12",
-      "note": "Owner order 2026-11-11 late: by 05:30, G12 and G4 are done, "
-    },
-    {
-      "at": "2026-11-12T02:21:43.079Z",
-      "by": "Main",
-      "action": "goal.log",
-      "ref": "G11",
-      "note": "Owner order 2026-11-11 late: by 05:30, G12 and G4 are done, "
-    },
-    {
-      "at": "2026-11-12T02:21:42.202Z",
-      "by": "Main",
-      "action": "goal.log",
-      "ref": "G6",
-      "note": "Owner order 2026-11-11 late: by 05:30, G12 and G4 are done, "
-    },
-    {
-      "at": "2026-11-12T02:21:41.367Z",
-      "by": "Main",
-      "action": "goal.log",
-      "ref": "G5",
-      "note": "Owner order 2026-11-11 late: by 05:30, G12 and G4 are done, "
-    },
-    {
-      "at": "2026-11-12T02:21:40.155Z",
-      "by": "Main",
-      "action": "goal.log",
-      "ref": "G4",
-      "note": "Owner order 2026-11-11 late: by 05:30, G12 and G4 are done, "
-    },
-    {
-      "at": "2026-11-12T02:21:39.254Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0qe89cl",
-      "note": "#22"
-    },
-    {
-      "at": "2026-11-12T02:21:38.396Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0dhc7rh",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-12T02:21:37.559Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0dhc7rh",
-      "note": "#15 First criterion for building D-CONTEXT-EFFECT1=F (ratified 2"
-    },
-    {
-      "at": "2026-11-12T02:21:36.703Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0dhc7rh",
-      "note": "#13: D-CONTEXT-EFFECT1 ratified F on 2026-11-12; was: From the adversarial review of D-CONTEXT-EFFECT1 (sol-reviewer, 2026-11-11). Once D-CONTEXT-EFFECT1 is ratified, the chosen option is built with its authority and generated-registry cutover in one cha"
-    },
-    {
-      "at": "2026-11-12T02:21:35.831Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0dhc7rh",
-      "note": "#2: D-CONTEXT-EFFECT1 ratified F on 2026-11-12; was: Code reads typed context fields (context.allocator, .logger, .deadline, .scratch, .on_stop, .print, .thread, .trace) and reads add the Context effect in sema, proven by goldens on O0/O1/O2 through the"
-    },
-    {
-      "at": "2026-11-12T02:16:45.477Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-CONTEXT-EFFECT1",
-      "note": "F"
-    },
-    {
-      "at": "2026-11-12T02:15:54.696Z",
-      "by": "Main",
-      "action": "goal.update",
-      "ref": "G1",
-      "note": "status"
-    },
-    {
-      "at": "2026-11-12T02:15:53.771Z",
-      "by": "Main",
-      "action": "goal.log",
-      "ref": "G1",
-      "note": "Owner order 2026-11-11: a goal whose criteria are all met is"
-    },
-    {
-      "at": "2026-11-12T02:15:44.209Z",
-      "by": "Main",
-      "action": "decision.update",
-      "ref": "D-CONTEXT-EFFECT1",
-      "note": ""
-    },
-    {
-      "at": "2026-11-12T02:10:58.008Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-11-12T02:10:58.008Z"
-    },
-    {
-      "at": "2026-11-12T02:02:27.341Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0ba2y7a",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-12T01:53:04.776Z",
-      "by": "Main",
-      "action": "question.answer",
-      "ref": "q0adwkpu",
-      "note": ""
-    },
-    {
-      "at": "2026-11-12T01:53:03.880Z",
-      "by": "Main",
-      "action": "decision.update",
-      "ref": "D-CONTEXT-EFFECT1",
-      "note": ""
-    },
-    {
-      "at": "2026-11-12T01:52:42.675Z",
-      "by": "Main",
-      "action": "goal.update",
-      "ref": "G8",
-      "note": "status"
-    },
-    {
-      "at": "2026-11-12T01:52:41.686Z",
-      "by": "Main",
-      "action": "goal.log",
-      "ref": "G8",
-      "note": "Owner order 2026-11-11: G8 closes. Its eight open criteria ("
-    },
-    {
-      "at": "2026-11-12T01:52:40.701Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0tbm7r0",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-12T01:52:39.000Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c09kjhit",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-12T01:52:36.484Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0tbm7r0",
-      "note": "#5"
-    },
-    {
-      "at": "2026-11-12T01:52:35.340Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0tbm7r0",
-      "note": "#4"
-    },
-    {
-      "at": "2026-11-12T01:52:34.126Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c09kjhit",
-      "note": "#71"
-    },
-    {
-      "at": "2026-11-12T01:52:33.010Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c09kjhit",
-      "note": "#70"
-    },
-    {
-      "at": "2026-11-12T01:52:31.902Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c09kjhit",
-      "note": "#69"
-    },
-    {
-      "at": "2026-11-12T01:52:30.808Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c09kjhit",
-      "note": "#68"
-    },
-    {
-      "at": "2026-11-12T01:52:29.740Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c09kjhit",
-      "note": "#66"
-    },
-    {
-      "at": "2026-11-12T01:52:28.259Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c09kjhit",
-      "note": "#64"
-    },
-    {
-      "at": "2026-11-12T01:52:27.214Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0mf9ybj",
-      "note": "#8 Moved from #6551 c5. jet explain effects reports every effec"
-    },
-    {
-      "at": "2026-11-12T01:52:26.280Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0mf9ybj",
-      "note": "#7 Moved from #6551 c4. jet explain effects shows an instantiat"
-    },
-    {
-      "at": "2026-11-12T01:52:25.349Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0mf9ybj",
-      "note": "#6 Moved from #6129 c71. From the adversarial review of D-NET-H"
-    },
-    {
-      "at": "2026-11-12T01:52:24.386Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0mf9ybj",
-      "note": "#5 Moved from #6129 c70. Compile-time input calls publish their"
     }
   ],
   "nextNum": 368,
