@@ -158,6 +158,17 @@ ir_runtime_intrinsic_specs: fn() -> [IRIntrinsicSpec] Never! {
     }
 }
 
+// Whether `name` is a recognizer row of ir_runtime_intrinsic_specs: a library
+// build lowers each call of that function as its own operation, so the
+// function's checked body is a stand-in whose value no caller sees (#6777).
+ir_runtime_intrinsic: fn(name: String) -> Bool Never! {
+    if !name.starts_with("rt_") -> return false
+    loop spec in ir_runtime_intrinsic_specs() {
+        if spec.name == name -> return true
+    }
+    false
+}
+
 // Builds the library of `rows` (the entry module's `#Export(c)` rows, in
 // declaration order) and every function they reach; the other inputs as
 // ir_build_program's. A row whose function does not satisfy the C export

@@ -1,0 +1,41 @@
+# A let-bound static constant lowers to its static header, the same as a direct argument (#6777).
+# Library part: a runtime-library unit (one tier: a library build always optimizes at basic,
+# Compiler/JetCli/Source/Cli/Request.jet) binds rt_static_text by let, directly, through a helper,
+# empty and before a loop. Compile-time evaluation refuses a runtime intrinsic's stand-in body,
+# so no let row folds to the stand-in's 0, which the host prints as "null header".
+# Program part: let-bound literals and pure calls a build computes ahead of time print the
+# direct argument's length at O0, O1 and O2.
+requires: os-name:linux
+requires: tool:cc
+fixture: let_bound_static_text_is_its_static_header_on_every_tier.fixture
+copy: {root}/Compiler/JetRuntime/package.jet native/package.jet
+write: native/lifecycle.list = ""
+step library: jet doc {work}/native/Source/Fixture.jet
+cwd: native/Source
+env: JET_FRONT_LIBRARY_OBJECT_OUTPUT={work}/native/fixture
+env: JET_FRONT_LIBRARY_LIFECYCLE={work}/native/lifecycle.list
+timeout: 600s
+exit: 0
+file: native/fixture.issues absent # the front lowered every function of the unit
+file: native/fixture.o exists
+step: cc -std=c11 -Wall -Wextra -Werror host.c native/fixture.o -o host
+exit: 0
+step host: {work}/host
+exit: 0
+stdout: = library.out
+stderr: empty
+step o0: jet run --optimize=none main.jet
+env: NO_COLOR=1
+exit: 0
+stdout: = program.out
+stderr: empty
+step o1: jet run --optimize=basic main.jet
+env: NO_COLOR=1
+exit: 0
+stdout: = program.out
+stderr: empty
+step o2: jet run --optimize=full main.jet
+env: NO_COLOR=1
+exit: 0
+stdout: = program.out
+stderr: empty

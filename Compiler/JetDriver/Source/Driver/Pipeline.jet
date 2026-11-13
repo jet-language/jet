@@ -212,7 +212,7 @@ use {
         pkg_lint_e1293,
         pkg_lint_policy_is_denied,
     ]
-    jet_ir.[IRProgram, ir_codec_decode_helpers, ir_comptime_codec_targets, ir_comptime_expression_types, ir_core_decoding_read, ir_core_lowered_by_name, ir_core_method_lowered_by_owner, ir_first_function_rows, ir_precise_helper_names, ir_named_function_keys, ir_reachable_core_rows]
+    jet_ir.[IRProgram, ir_codec_decode_helpers, ir_comptime_codec_targets, ir_comptime_expression_types, ir_core_decoding_read, ir_core_lowered_by_name, ir_core_method_lowered_by_owner, ir_first_function_rows, ir_precise_helper_names, ir_named_function_keys, ir_reachable_core_rows, ir_runtime_intrinsic]
     jet_eval.[
         JetEvalConfig,
         JetEvalCompilerQueryHost,
@@ -1026,8 +1026,8 @@ jet_driver_comptime_function_closure: fn(
     checked_functions: &[SemaComptimeFunctionResult],
     request: SemaComptimeItemRequest,
     // A module value's closure also records why it is impure, if it is: an
-    // impure call, or a body that takes a raw address or makes a pointer
-    // (sema_comptime_body_unfoldable).
+    // impure call, a runtime intrinsic (ir_runtime_intrinsic), or a body that
+    // takes a raw address or makes a pointer (sema_comptime_body_unfoldable).
     module_value: Bool,
     // A local value's closure also refuses `#Unsafe` code: it falls back to
     // run time quietly, where a refused module value fails the build.
@@ -1114,6 +1114,11 @@ jet_driver_comptime_function_closure: fn(
                     complete = false
                     next
                 }
+                // #6777: a runtime intrinsic's checked body is a stand-in (the
+                // library build lowers each call as its own operation), so a
+                // value computed from it is not the one the program sees:
+                // `key: rt_static_text("…")` folded to the stand-in's 0.
+                if module_value && impurity == None && ir_runtime_intrinsic(function.name) -> impurity = Val("it calls `{function.name}`, a runtime intrinsic the build lowers as its own operation")
                 if module_value && impurity == None -> impurity = sema_comptime_body_unfoldable(function, local_value)
                 defaults := [Int]{}
                 loop parameter in function.params {

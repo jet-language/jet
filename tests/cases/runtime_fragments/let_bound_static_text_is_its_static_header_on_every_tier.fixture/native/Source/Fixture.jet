@@ -1,0 +1,37 @@
+// The runtime's stand-in (Compiler/JetRuntime/Source/Text.jet): a library
+// build lowers each literal call to a process-static text header.
+rt_static_text: fn(_literal: String) -> I64 {
+    I64{0}
+}
+
+static_helper: fn() -> I64 { rt_static_text("through a helper") }
+
+#Export(c) static_direct: fn() -> I64 { rt_static_text("direct") }
+
+#Export(c) static_direct_empty: fn() -> I64 { rt_static_text("") }
+
+#Export(c) static_let: fn() -> I64 {
+    key: rt_static_text("let-bound")
+    key
+}
+
+#Export(c) static_let_helper: fn() -> I64 {
+    key: static_helper()
+    key
+}
+
+#Export(c) static_let_empty: fn() -> I64 {
+    key: rt_static_text("")
+    key
+}
+
+#Export(c) static_let_loop: fn(rounds: I64) -> I64 {
+    key: rt_static_text("bound before a loop")
+    seen := I64{0}
+    at := I64{0}
+    loop at < rounds {
+        seen = key
+        at = wrapping(at + I64{1})
+    }
+    seen
+}

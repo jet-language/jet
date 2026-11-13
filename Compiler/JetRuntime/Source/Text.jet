@@ -8,6 +8,9 @@
 // and lowers this declaration to an unreachable body. The checked body must
 // still return: a diverging body makes `if c -> rt_static_text(..)
 // else -> rt_static_text(..)` diverge and drops every later binding in scope.
+// Its 0 is never a value: compile-time evaluation refuses every runtime
+// intrinsic (Pipeline.jet jet_driver_comptime_function_closure), so a
+// let-bound call stays run-time code and gets the static view too (#6777).
 rt_static_text: fn(_literal: String) -> I64 {
     I64{0}
 }
