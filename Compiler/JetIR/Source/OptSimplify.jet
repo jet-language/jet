@@ -11,7 +11,11 @@
 //               (jet_int_checked_fixed) of an Int masked by a constant,
 //               `x & c` with c >= 0 inside the kind, is a Move (an inline
 //               Int is its i64 bits); `(x /% k) * k` with k = 2^j >= 2, of
-//               an Int or a signed word, is `x & -k`
+//               an Int or a signed word, is `x & -k`; the clone of an
+//               immortal String (a ConstText, through Moves and Copies) is
+//               that ConstText, and the scalar count (jet_char_len) of one
+//               is the constant count of its data row, so the program never
+//               walks the constant's bytes
 //   unreachable everything after a Br, Return or Unreachable up to the end
 //               of its region
 //   fuse        `t = a <cmp> b; n = not t` becomes `n = a <inverse> b` when t
@@ -33,7 +37,8 @@
 //   dead        an instruction without effects whose result nobody reads (a
 //               division or remainder by a positive constant among them);
 //               the drop of an exact Int that holds an inline constant or a
-//               value masked by a nonnegative constant
+//               value masked by a nonnegative constant, and the drop of an
+//               immortal String (a no-op)
 //   structure   a `br 0` that falls through anyway; empty Block, Loop and If;
 //               a Block no Br targets
 // The address sums below are no sweep of it: Opt.jet ir_opt_function moves
@@ -49,12 +54,13 @@ IR_OPT_SIMPLIFY_ROUNDS: 8
 ir_opt_simplify: fn(m: IRModule, f: &IRFunction, report: &IROptReport) Never! {
     round := 0
     fixed: name_rows_value(m.name_rows, "jet_int_checked_fixed") ?? -2
+    texts: OptTextRoutes{clone: name_rows_value(m.name_rows, "jet_rt_string_clone") ?? -2, scalars: name_rows_value(m.name_rows, "jet_char_len") ?? -2}
     loop round < IR_OPT_SIMPLIFY_ROUNDS {
         // The facts stay true until a sweep changes the function, so they
         // are computed again only after one does (most sweeps change
         // nothing, and the last round none).
         facts := ir_opt_facts(f)
-        changed := ir_opt_fold(m, f, facts, fixed, report)
+        changed := ir_opt_fold(m, f, facts, fixed, texts, report)
         changed += ir_opt_unreachable(f, report)
         if changed > 0 -> facts = ir_opt_facts(f)
         step := ir_opt_fuse_compares(m, f, facts, report)
@@ -199,7 +205,49 @@ ir_opt_set_copy: fn(f: &IRFunction, at: Int, source: Int) Never! {
     f.c[at] = -1
 }
 
-ir_opt_fold: fn(m: IRModule, f: &IRFunction, facts: OptFacts, fixed: Int, report: &IROptReport) -> Int Never! {
+// The ids of the String routes the fold reads (-2 when the module calls
+// none).
+OptTextRoutes: struct {
+    clone: Int
+    scalars: Int
+}
+
+// The Unicode scalars of UTF-8 text `bytes`: its bytes less its
+// continuation bytes, as JetRuntime Text.jet rt_text_scalars counts them.
+ir_opt_text_scalars: fn(bytes: [U8]) -> Int Never! {
+    continuations := 0
+    loop byte in bytes {
+        code: Int.from_u8(byte)
+        if code >= 128 && code < 192 -> continuations += 1
+    }
+    bytes.len() - continuations
+}
+
+// A clone of an immortal String is that String (the runtime's clone returns
+// it), and its scalar count is the count of its data row, noted in
+// `report.text_lengths`. Returns whether instruction `at` folded.
+ir_opt_fold_text: fn(m: IRModule, f: &IRFunction, facts: OptFacts, texts: OptTextRoutes, at: Int, report: &IROptReport) -> Bool Never! {
+    route: f.a[at]
+    if (route != texts.clone && route != texts.scalars) || f.c[at] != 1 || f.dst[at] < 0 -> return false
+    row: ir_opt_text_at(f, facts, f.args[f.b[at]], at, texts.clone) ?? return false
+    if row >= m.data.len() -> return false
+    if route == texts.clone {
+        f.op[at] = .ConstText
+        f.a[at] = row
+        f.b[at] = -1
+        f.c[at] = -1
+        return true
+    }
+    kind: ir_opt_type(m, f, f.dst[at]).kind
+    if kind != .Int && kind != .Word -> return false
+    count: ir_opt_text_scalars(m.data[row])
+    if kind == .Int && !ir_int_inline(count) -> return false
+    ir_opt_set_const(f, at, count)
+    report.text_lengths.push("text length {f.name}: the scalar count of a {m.data[row].len()}-byte text folds to {count}")
+    true
+}
+
+ir_opt_fold: fn(m: IRModule, f: &IRFunction, facts: OptFacts, fixed: Int, texts: OptTextRoutes, report: &IROptReport) -> Int Never! {
     nesting: ir_opt_nesting(f)
     changed := 0
     loop at in 0..<f.op.len() {
@@ -233,6 +281,11 @@ ir_opt_fold: fn(m: IRModule, f: &IRFunction, facts: OptFacts, fixed: Int, report
             next
         }
         if op == .CallRuntime {
+            if ir_opt_fold_text(m, f, facts, texts, at, report) {
+                report.folded += 1
+                changed += 1
+                next
+            }
             if f.a[at] != fixed || f.c[at] != 5 || f.dst[at] < 0 -> next
             value: f.args[f.b[at]]
             if ir_opt_type(m, f, value).kind != .Int -> next
@@ -1286,11 +1339,13 @@ ir_opt_dead: fn(m: IRModule, f: &IRFunction, facts: OptFacts, report: &IROptRepo
 
 ir_opt_dead_sweep: fn(m: IRModule, f: &IRFunction, facts: OptFacts) -> Int Never! {
     removed := 0
+    clone: name_rows_value(m.name_rows, "jet_rt_string_clone") ?? -2
     loop at in 0..<f.op.len() {
         op: f.op[at]
         if op == .Drop {
             slot: f.a[at]
-            if ir_opt_type(m, f, slot).kind == .Int && (ir_opt_const_at(f, facts, slot, at) != None || ir_opt_masked_at(f, facts, slot, at) != None) {
+            immortal: ir_opt_text_at(f, facts, slot, at, clone) != None
+            if immortal || (ir_opt_type(m, f, slot).kind == .Int && (ir_opt_const_at(f, facts, slot, at) != None || ir_opt_masked_at(f, facts, slot, at) != None)) {
                 ir_opt_kill(f, at)
                 removed += 1
             }

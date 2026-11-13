@@ -2,9 +2,10 @@
 # `quad` (four) return, once inlined, are scalar-replaced at O1 and O2: their
 # fields live in registers, and the only frame storage left in `run` is
 # `big`'s (one stack_address before the passes, one after). `big` is read
-# by `look` and moved into `consume` in place: no byte copy, and its one
-# String is cloned once, from the literal. `grow` is recursive, so it stays
-# a call, and the program prints the same values on every tier.
+# by `look` and moved into `consume` in place: no byte copy. Its one String
+# is the literal's clone before the passes and the literal itself after
+# them. `grow` is recursive, so it stays a call, and the program prints the
+# same values on every tier.
 fixture: small_results_live_in_registers_and_large_values_move_by_address.fixture
 env: NO_COLOR=1
 step: jet inspect decisions --optimize=basic main.jet
@@ -14,7 +15,7 @@ stdout: ~ "O1:" # optimize: basic runs the O1 passes
 stdout: ~ "scalar-replaced 2," # divmod's and quad's tuples
 stdout: count "stack_address" = 2 # big, before and after the passes
 stdout: count "copy_bytes" = 0 # big is read and moved in place, never copied
-stdout: count "jet_rt_string_clone" = 2 # the literal's clone, before and after
+stdout: count "jet_rt_string_clone" = 1 # the literal's clone before the passes; none after
 step: jet inspect decisions --release main.jet
 env: JET_OPT_DUMP=run
 exit: 0
@@ -22,7 +23,7 @@ stdout: ~ "O2:" # --release runs the O2 passes
 stdout: ~ "scalar-replaced 3," # both tuples, and big's fields around its loans
 stdout: count "stack_address" = 2 # big, before and after the passes
 stdout: count "copy_bytes" = 0 # big is read and moved in place, never copied
-stdout: count "jet_rt_string_clone" = 2 # the literal's clone, before and after
+stdout: count "jet_rt_string_clone" = 1 # the literal's clone before the passes; none after
 step: jet run --optimize=none main.jet
 exit: 0
 stdout: = small_results_live_in_registers_and_large_values_move_by_address.out

@@ -494,17 +494,19 @@ x64_object_functions_threads: fn(program: &&X64ObjectModule, functions: &&[X64Co
     if !x64_fits_i32(text_size) -> return X64ExecutableResult{bytes: [U8]{}, errors: [String]{".text is {text_size} bytes; calls between its functions are rel32, which reaches at most 2147483647 bytes"}}
     // `.data` and `.rodata` hold each object where the text first reaches it:
     // in function order, each function's objects in relocation order with
-    // the objects their relocations reach right after them, then every object
-    // nothing reaches, in data order. With the hot functions first
-    // (ir_x64_hot_order) a short run then reads its data from few pages.
+    // the objects their relocations reach right after them, then the data
+    // exports and what they reach. An object nothing reaches is not written:
+    // a folded String the program reads no byte of costs no file bytes. With
+    // the hot functions first (ir_x64_hot_order) a short run then reads its
+    // data from few pages.
     data := [U8]{}
     data_align := 1
     rodata := [U8]{}
     rodata_align := 1
     data_offsets := [Int]{}
     loop _ in program.data -> data_offsets.push(0)
+    placed := [Bool]{}
     if !own_sections {
-        placed := [Bool]{}
         loop _ in program.data -> placed.push(false)
         order := [Int]{}
         loop function in functions {
@@ -512,7 +514,7 @@ x64_object_functions_threads: fn(program: &&X64ObjectModule, functions: &&[X64Co
                 if reloc.target == .Data(id) -> x64_object_data_place(program.data, id.value, placed, order)
             }
         }
-        loop index in 0..<program.data.len() -> x64_object_data_place(program.data, index, placed, order)
+        loop index in data_rows -> x64_object_data_place(program.data, index, placed, order)
         loop index in order {
             object: program.data[index]
             if x64_object_read_only(object) {
@@ -544,6 +546,7 @@ x64_object_functions_threads: fn(program: &&X64ObjectModule, functions: &&[X64Co
     data_rela_ends := [Int]{}
     data_errors := [String]{}
     loop (index, object) in program.data {
+        if !own_sections && !placed[index] -> next
         loop reloc in object.relocs {
             if reloc.offset < 0 || reloc.offset % 8 != 0 || reloc.offset > object.bytes.len() - 8 {
                 data_errors.push("data {index}: relocation offset {reloc.offset} is not an aligned word in bounds")

@@ -146,19 +146,23 @@ IROptReport: struct {
     factors: Int
     factors_declined: Int
     steps: [String]
+    // Each scalar count of a constant text that simplify folded
+    // (OptSimplify.jet ir_opt_fold_text), one note each.
+    text_lengths: [String]
     // IROptOptions.dump: each dumped function's IR before and after its passes.
     dumps: [String]
     lint: [IRLintFinding]
 }
 
 ir_opt_report: fn(level: Int) -> IROptReport Never! {
-    IROptReport{level: level, inlined_calls: 0, inlines: [IROptInlined]{}, direct_calls: 0, folded: 0, branches_folded: 0, compares_fused: 0, short_circuits: 0, copies_coalesced: 0, dead_removed: 0, unreachable_removed: 0, aggregates_replaced: 0, unique_hoisted: 0, int_facts: 0, ssa_functions: 0, ssa_changed: 0, ssa_moves: 0, ssa_fresh: 0, instructions_before: 0, instructions_after: 0, reduced: 0, reductions_declined: 0, reductions: [String]{}, stepped: 0, steps_declined: 0, factors: 0, factors_declined: 0, steps: [String]{}, dumps: [String]{}, lint: [IRLintFinding]{}}
+    IROptReport{level: level, inlined_calls: 0, inlines: [IROptInlined]{}, direct_calls: 0, folded: 0, branches_folded: 0, compares_fused: 0, short_circuits: 0, copies_coalesced: 0, dead_removed: 0, unreachable_removed: 0, aggregates_replaced: 0, unique_hoisted: 0, int_facts: 0, ssa_functions: 0, ssa_changed: 0, ssa_moves: 0, ssa_fresh: 0, instructions_before: 0, instructions_after: 0, reduced: 0, reductions_declined: 0, reductions: [String]{}, stepped: 0, steps_declined: 0, factors: 0, factors_declined: 0, steps: [String]{}, text_lengths: [String]{}, dumps: [String]{}, lint: [IRLintFinding]{}}
 }
 
 ir_opt_report_text: fn(r: IROptReport) -> String Never! {
     text := "O{r.level}: instructions {r.instructions_before} -> {r.instructions_after}, inlined {r.inlined_calls}, direct calls {r.direct_calls}, folded {r.folded}, branches {r.branches_folded}, fused compares {r.compares_fused}, short circuits {r.short_circuits}, coalesced {r.copies_coalesced}, dead {r.dead_removed}, unreachable {r.unreachable_removed}, scalar-replaced {r.aggregates_replaced}, unique hoisted {r.unique_hoisted}, inline Int facts {r.int_facts}, ssa {r.ssa_functions} (rewritten {r.ssa_changed}, moves {r.ssa_moves}, fresh slots {r.ssa_fresh}), reductions {r.reduced} (declined {r.reductions_declined})"
     text = "{text}, stepped indices {r.stepped} (declined {r.steps_declined}), factors {r.factors} (declined {r.factors_declined})"
     loop note in r.reductions -> text = "{text}\n{note}"
+    loop note in r.text_lengths -> text = "{text}\n{note}"
     loop note in r.steps -> text = "{text}\n{note}"
     loop dump in r.dumps -> text = "{text}\n{dump}"
     text
@@ -190,6 +194,7 @@ ir_opt_report_add: fn(total: &IROptReport, part: IROptReport) Never! {
     total.factors += part.factors
     total.factors_declined += part.factors_declined
     loop note in part.steps -> total.steps.push(note.copy())
+    loop note in part.text_lengths -> total.text_lengths.push(note.copy())
     loop dump in part.dumps -> total.dumps.push(dump.copy())
     loop finding in part.lint -> total.lint.push(finding.copy())
 }
@@ -252,7 +257,7 @@ ir_optimize_module: fn(m: &IRModule, options: IROptOptions, threads: CompilerThr
         view := ir_opt_view(m, keys)
         bodies := ir_opt_rows(functions)
         ir_opt_serial(view, bodies, keys, order.recursive, sites, options, lint, order.order, report)
-        compiler_transfer_rows<IRType>(m.types, view.types)
+        ir_opt_unview(m, view)
         ir_opt_unrows(functions, bodies)
     }
     if level >= 2 && ir_opt_enabled(options, "version") && ir_opt_enabled(options, "range") && ir_opt_enabled(options, "ssa") -> ir_opt_version_entries(m, functions, options, entry_lint, report)
@@ -317,7 +322,7 @@ ir_opt_module_facts: fn(m: &IRModule, options: IROptOptions, report: &IROptRepor
     loop f in functions -> keys.push(f.key.copy())
     view := ir_opt_view(m, keys)
     loop id in 0..<functions.len() -> _ := ir_opt_ssa_facts(view, functions[id], options, report)
-    compiler_transfer_rows<IRType>(m.types, view.types)
+    ir_opt_unview(m, view)
     compiler_transfer_rows<IRFunction>(m.functions, functions)
 }
 
@@ -381,14 +386,16 @@ ir_opt_mark_cold: fn(functions: &[IRFunction], calls: OptCalls) Never! {
     }
 }
 
-// The passes read the module's type rows, moved out of `m` into a module of
-// their own, the ids of the runtime routes they know (ir_opt_routes), the
-// stop and trap polls' (OptRange.jet), by name, and the `#unique<..>`
-// helpers' (of `keys`, the functions' keys) by the type row of the header
-// each takes, as "#unique@<row>" (OptRange.jet ir_range_unique_call).
+// The passes read the module's type and data rows, moved out of `m` into a
+// module of their own (ir_opt_unview moves them back), the ids of the
+// runtime routes they know (ir_opt_routes), the stop and trap polls'
+// (OptRange.jet), by name, and the `#unique<..>` helpers' (of `keys`, the
+// functions' keys) by the type row of the header each takes, as
+// "#unique@<row>" (OptRange.jet ir_range_unique_call).
 ir_opt_view: fn(m: &IRModule, keys: [String]) -> IRModule Never! {
     view := ir_module_new()
     compiler_transfer_rows<IRType>(view.types, m.types)
+    compiler_transfer_rows<[U8]>(view.data, m.data)
     loop route in ir_opt_routes() {
         id: name_rows_value(m.name_rows, route) ?? -1
         if id >= 0 -> name_rows_set(view.name_rows, route, id)
@@ -406,6 +413,12 @@ ir_opt_view: fn(m: &IRModule, keys: [String]) -> IRModule Never! {
         if row >= 0 -> name_rows_set(view.name_rows, "#unique@{row}", id)
     }
     view
+}
+
+// The type and data rows ir_opt_view moved out of `m`, back into it.
+ir_opt_unview: fn(m: &IRModule, view: &IRModule) Never! {
+    compiler_transfer_rows<IRType>(m.types, view.types)
+    compiler_transfer_rows<[U8]>(m.data, view.data)
 }
 
 // Each body moves into a one-row list, so a pass takes its function out and
@@ -678,9 +691,9 @@ ir_opt_split_part: fn(slot: Shared<IROptSplitPart>, types: Shared<IROptTypes>) -
 }
 
 // The runtime routes a pass recognizes by name (OptUnique.jet, OptRange.jet,
-// OptLocalBox.jet).
+// OptLocalBox.jet, OptSimplify.jet).
 ir_opt_routes: fn() -> [String] Never! {
-    [String]{"jet_rt_alloc", "jet_rt_mem_move", "jet_rt_block_release", "jet_rt_block_unique", "jet_rt_block_inherit_zero", "jet_rt_free", "jet_string_from_bytes", "jet_string_from_bytes_lossy", "jet_int_owned_to_i64", "jet_rt_int_clone", "jet_int_checked_fixed", "jet_int_native_i64_at"}
+    [String]{"jet_rt_alloc", "jet_rt_mem_move", "jet_rt_block_release", "jet_rt_block_unique", "jet_rt_block_inherit_zero", "jet_rt_free", "jet_string_from_bytes", "jet_string_from_bytes_lossy", "jet_int_owned_to_i64", "jet_rt_int_clone", "jet_int_checked_fixed", "jet_int_native_i64_at", "jet_rt_string_clone", "jet_char_len"}
 }
 
 // Whether instruction `at` calls the runtime route `route`.
@@ -998,7 +1011,7 @@ ir_opt_scheduled: fn(m: &IRModule, functions: &[IRFunction], keys: &&[String], o
         if held.value.sizes[id].value.load() < 0 -> left.push(id)
     }
     if left.len() > 0 -> ir_opt_serial(held.value.views[0], bodies, held.value.keys, held.value.recursive, held.value.sites, held.value.options, held.value.lint, left, report)
-    compiler_transfer_rows<IRType>(m.types, held.value.views[0].types)
+    ir_opt_unview(m, held.value.views[0])
     ir_opt_unrows(functions, bodies)
 }
 
@@ -1201,6 +1214,31 @@ ir_opt_const_at: fn(f: IRFunction, facts: OptFacts, slot: Int, at: Int) -> Int? 
     def: ir_opt_reaching_def(f, facts, slot, at)
     if def < 0 || f.op[def] != .Const -> return None
     Val(f.a[def])
+}
+
+// The data row of the immortal String `slot` holds at instruction `at`: its
+// single reaching write is a ConstText of that row, or a Move, a Copy or a
+// jet_rt_string_clone (routine `clone`; the runtime's clone of an immortal
+// String is that String) of a slot that holds it there. Each step reads an
+// earlier write, so the walk ends.
+ir_opt_text_at: fn(f: IRFunction, facts: OptFacts, slot: Int, at: Int, clone: Int) -> Int? Never! {
+    value := slot
+    point := at
+    loop value >= 0 {
+        def: ir_opt_reaching_def(f, facts, value, point)
+        if def < 0 -> return None
+        op: f.op[def]
+        if op == .ConstText -> return Val(f.a[def])
+        if op == .Move || op == .Copy {
+            value = f.a[def]
+        } else if op == .CallRuntime && f.a[def] == clone && f.c[def] == 1 {
+            value = f.args[f.b[def]]
+        } else {
+            return None
+        }
+        point = def
+    }
+    None
 }
 
 // ---------------------------------------------------------------------------
