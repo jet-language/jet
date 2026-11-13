@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6777,
-    "rev": 101250,
+    "rev": 101254,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -62433,11 +62433,11 @@
         {
           "n": 11,
           "text": "(was #5906) A Close temporary passed to a borrowed parameter is never closed: sink(S { id: 5 }) skips close: the temporary closes exactly once after the call on run",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-28T21:01:39.986Z"
+          "evidence": "dev 8a0374c66b (G6Meta-5989c6c11): the resource_close case for sink(S{id: 5}) (a Close temporary passed to a borrowed parameter) gives PASS 1 on seed-b14. The temporary closes exactly once, after the call, at none, basic and full.",
+          "at": "2026-11-13T06:05:38.804Z"
         },
         {
           "n": 12,
@@ -62521,7 +62521,7 @@
       "parentId": "c0tgtjtu",
       "needsAcceptance": false,
       "created": "2026-10-28T11:41:38.387Z",
-      "updated": "2026-11-13T06:05:37.750Z",
+      "updated": "2026-11-13T06:05:38.804Z",
       "updatedBy": "Main",
       "goals": [
         "G10"
@@ -83396,11 +83396,11 @@
         {
           "n": 7,
           "text": "Single-source census F11 (Docs/audits/2026-11-05-single-source-census.md): Hot-text order list (compiler functions laid out first). One hand-written home: A measurement, so the source is the measured run. Fix: gen, plus a staleness check. Drift check: A check, run in s5, that every row names an existing function (no rebuild needed). Drifted on 2026-11-05: Yes. At least 9 rows name functions that no longer exist anywhere in the repo: sema_effect_builtin_leaves, sema_effect_grantable_roots, sema_name_first_seen, sema_prelude_conversion_demands_visit, sema_taint_check_graph, sema_finalize_core_usage, jet_driver_checked_function_owners, jet_cli_parse_root, jet_cli_right_root. 24 non-generated rows did not resolve; the other 15 (pkg_* and similar) were not checked Effort S. Met when every other home is generated from or derived from that one home, or deleted, and the drift check runs in a gate and fails on any copy that differs.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-05T15:30:16.505Z"
+          "evidence": "dev 725135617f (G5DevX2-hot-text-check): jet Tools/perf/hot-text/run.jet --check (no rebuild) resolves every hot-text.list row against the sources and runs in the Land.jet RATCHETS. The 11 dead rows are dropped. Red on the unpruned list (rc 1, exactly the 11 rows), green on the 3928 rows (rc 0). jet test Tools/perf/hot-text/run.jet passes 1, and Land.jet ratchets is rc 0.",
+          "at": "2026-11-13T06:05:39.663Z"
         },
         {
           "n": 8,
@@ -83492,7 +83492,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-05T14:08:03.130Z",
-      "updated": "2026-11-13T05:56:16.662Z",
+      "updated": "2026-11-13T06:05:39.663Z",
       "updatedBy": "Main",
       "criteriaLastN": 16
     },
@@ -88706,7 +88706,7 @@
       "track": "epoch",
       "epoch": "e4",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -88719,11 +88719,11 @@
         {
           "n": 1,
           "text": "jet codemod (and the repository_semantic_edit workload) accepts any editable root inside the target repository, not only Examples/ and tests/ui/: an unknown root falls back to the manifest root or the entry directory (Codemod.jet jet_cli_codemod_managed_project). Proof: a tests/cases row runs jet codemod on a package rooted outside Examples/ and tests/ui (for example a temp package with its own jet.toml), shows the edit applied and checked, and tests/known-failing.tsv names no #6667 row. The agent_workloads/equivalent_adapters_complete_declared_tasks case is tracked by #6386 (`jet self lsp` E2104).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-13T05:50:11.587Z"
+          "evidence": "dev 056cb675c4 (G5DevX-6667c1): jet test Compiler --profile cases --filter codemod/codemod_rename_applies_in_a_package_outside_examples_and_tests_ui PASS 1 on seed-b14. A temp package with its own package.jet, outside Examples/ and tests/ui: the dry run leaves it unchanged, apply --yes renames the definition and the call, the log lands in proj/.jet/codemods, and jet check plus jet run (prints ok) are rc 0. tests/known-failing.tsv names no #6667 row.",
+          "at": "2026-11-13T06:05:40.522Z"
         }
       ],
       "refs": [],
@@ -88734,9 +88734,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-07T09:39:22.111Z",
-      "updated": "2026-11-13T05:50:11.587Z",
+      "updated": "2026-11-13T06:05:42.066Z",
       "updatedBy": "Main",
-      "criteriaLastN": 1
+      "criteriaLastN": 1,
+      "completedAt": "2026-11-13T06:05:42.066Z"
     },
     {
       "id": "c0b4rnem",
@@ -197717,6 +197718,34 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-13T06:05:42.067Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c09qdr1z",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-13T06:05:40.522Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c09qdr1z",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-13T06:05:39.663Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0xuffg1",
+      "note": "#7"
+    },
+    {
+      "at": "2026-11-13T06:05:38.804Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c00e9u2p",
+      "note": "#11"
+    },
     {
       "at": "2026-11-13T06:05:37.750Z",
       "by": "Main",
