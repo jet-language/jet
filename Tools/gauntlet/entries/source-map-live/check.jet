@@ -1,0 +1,40 @@
+// The facts a source-map-live case's program reported (PortBars.jet and the
+// gauntlet harness run this in the case directory with the file holding the
+// program's output): from its breakpoint report, whether the page's script
+// named its map, the generated line the breakpoint was set on and the one the
+// page paused at, and the Jet line both map to; `no breakpoint report` when
+// the program printed none.
+use {
+    files: core.files
+    json: core.encoding.json
+    process: core.process
+    core.encoding.[Dyn]
+}
+
+run: fn() {
+    printed: files.read(process.args()[0]) ?? process.fail(1, "the program's output cannot be read: {err}")
+    loop line in printed.lines() {
+        if !line.contains("\"pausedGeneratedLine\"") -> next
+        report: json.parse(line) ?? process.fail(1, "the breakpoint report is not JSON: {err}")
+        print("script names its map: {shown(field(report, "scriptParsedMapUrl"))}")
+        print("breakpoint at generated line {shown(field(report, "generatedLine"))}, paused at generated line {shown(field(report, "pausedGeneratedLine"))}")
+        print("mapped Jet line: {shown(field(report, "jetFile"))}:{shown(field(report, "jetLine"))} {shown(field(report, "jetText"))}")
+        return
+    }
+    print("no breakpoint report")
+}
+
+field: fn(tree: Dyn, name: String) -> Dyn {
+    if tree == .Object(entries) {
+        loop entry in entries {
+            if entry.key == name -> return entry.value.copy()
+        }
+    }
+    Dyn.Null
+}
+
+// A report value as text: a string without its quotes, anything else as JSON.
+shown: fn(value: Dyn) -> String {
+    if value == .Text(text) -> return text.copy()
+    json.to_string(value) ?? "?"
+}

@@ -1,0 +1,70 @@
+// The gauntlet driver of Tools/web-test/SourceMapLive.jet, the twin of
+// Tools/gauntlet/harness/drivers/source-map-live.mjs: it pins Chromium
+// and its chromedriver in the working directory's .jet/lock (`jetpack browser
+// lock`), where SourceMapLive.jet's core.browser reads them, serves the
+// working directory's files on a free loopback port (a directory's
+// index.html for a path that ends in `/`), and runs SourceMapLive.jet against
+// SITE there.
+//
+//   jet driver/run.jet -- SITE
+//
+// Chromium is $CHROMIUM and chromedriver $CHROMEDRIVER, each when set, else
+// its build from the nixpkgs revision the repository's flake.lock ($FLAKE_LOCK
+// when set) pins, so the check runs the same on any machine with the
+// repository's nix inputs. A lock that pins nixpkgs other than from GitHub is
+// refused (exit 1). A browser that cannot be locked (jetpack says why) leaves
+// no lock, and SourceMapLive.jet refuses the missing lock.
+use {
+    files: core.files
+    json: core.encoding.json
+    process: core.process
+    sys: core.sys
+    web: core.web
+    core.encoding.[EncodingError]
+    core.process.[Sh]
+}
+
+USAGE: "usage: driver SITE"
+
+// This driver's path below the checkout that holds it.
+DRIVER: "/Tools/gauntlet/entries/source-map-live/driver/run.jet"
+
+// The part of flake.lock that names the pinned nixpkgs. Its source decodes
+// only from GitHub, so a lock of any other type is refused.
+FlakeLock: struct { nodes: FlakeNodes }
+FlakeNodes: struct { nixpkgs: FlakeNode }
+FlakeNode: struct { locked: FlakeRevision }
+FlakeRevision: struct { type: FlakeSource, owner: String, repo: String, rev: String }
+#Rename(.Lower)
+FlakeSource: enum { Github }
+
+// The nixpkgs revision that $FLAKE_LOCK, else `repo`'s flake.lock, pins, as a
+// flake reference.
+pinned_nixpkgs: fn(repo: String) -> String (IOError | EncodingError | [FieldError])! {
+    tree: json.parse(files.read(process.env_get("FLAKE_LOCK") ?? files.join(repo, "flake.lock")))
+    pinned: tree.decode<FlakeLock>().nodes.nixpkgs.locked
+    Ok("github:{pinned.owner}/{pinned.repo}/{pinned.rev}")
+}
+
+// The program `name` of the nixpkgs package `name` that `nixpkgs` builds;
+// nix says why when it cannot.
+built: fn(nixpkgs: String, name: String) -> String IOError! {
+    Ok("{Sh{argv: [String]{"nix", "build", "--no-link", "--print-out-paths", "{nixpkgs}#{name}"}}.text()}/bin/{name}")
+}
+
+run: fn() -> Never (IOError | EncodingError | [FieldError] | HTTPError)! {
+    args: process.args()
+    if args.len() != 1 -> process.fail(2, USAGE)
+    repo: sys.executable().remove_suffix(DRIVER)
+    chromium: process.env_get("CHROMIUM") ?? built(pinned_nixpkgs(repo), "chromium")
+    chromedriver: process.env_get("CHROMEDRIVER") ?? built(pinned_nixpkgs(repo), "chromedriver")
+    _: Sh{argv: [String]{"jetpack", "browser", "lock", "chromium", "--binary", chromium, "--protocol", "bidi-2025.5", "--driver", chromedriver}}.ok()
+
+    server: web.app().static_files("/", files.cwd()).bind("127.0.0.1:0")
+    port: server.local_addr().partition(":").tail
+    serving: task { server.serve() }
+    code: Sh{argv: [String]{"jet", "run", "--allow=Env,Exec,FS,IO,Net,Time", "{repo}/Tools/web-test/SourceMapLive.jet", "--", "--port", port, "--prefix", "/{args[0]}"}}.status()
+    server.shutdown().drop("the check is done, so the server's report is not needed")
+    serving.join().drop("the check is done, so the server's report is not needed")
+    process.exit(code)
+}

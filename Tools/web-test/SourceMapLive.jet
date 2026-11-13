@@ -1,0 +1,243 @@
+#!/usr/bin/env jet
+// The live half of the web source-map check, followed in the Chromium the
+// working directory's `.jet/lock` pins:
+//
+//   jet run --allow=Env,Exec,FS,IO,Net,Time Tools/web-test/SourceMapLive.jet -- --port <port> [--prefix /click]
+//
+// app.js must name `app.js.map` in a trailing sourceMappingURL comment, and
+// app.js.map must be a version 3 map whose sources are relative and each
+// carry their text. The page opens with a breakpoint, set over its CDP
+// session, at the generated position of the map's first mapping that lands
+// on a Jet statement (a `name: ` binding, a `backend: ` line or a `print(`
+// call). The page must pause there, and the paused frame's position, read
+// back through the same map, must be the same line of a `.jet` source that is
+// not empty. It prints `PASS web source-map CDP Jet breakpoint` and the paused
+// location with the Jet line it maps to. Any failed check is named, with
+// exit 1. Tools/web-test/SourceMap.jet does the static and wasm checks.
+use {
+    browser: core.browser
+    client: core.http.client
+    json: core.encoding.json
+    core.browser.[Browser, BrowserProtocol]
+}
+
+// How long the page may take to parse the script and pause.
+C_PAUSE_MS: 20000
+
+C_BODY_LIMIT: 268435456
+
+SOURCE_MAPPING_URL: Regex{"//# sourceMappingURL=app\.js\.map\s*$"}
+JET_STATEMENT: Regex{"^\s*[A-Za-z_]\w*: "}
+DRIVE_PATH: Regex{"^[A-Za-z]:[\\/]"}
+
+#Error
+Failure: struct {
+    message: String
+
+    impl Display {
+        display: fn(self) -> String { self.message }
+    }
+}
+
+#CLI
+LiveArgs: struct {
+    #Doc("the static server's port") port: Int
+    #Doc("the page whose script is paused") prefix: String{"/click"}
+}
+
+// The fields of a version 3 source map the checks read.
+#Rename(.Camel)
+SourceMapFile: struct {
+    version: Int
+    sources: [String]
+    sources_content: [String]
+    mappings: String
+}
+
+// One decoded segment with a source: generated and original positions, all 0-based.
+Mapping: struct {
+    generated_line: Int
+    generated_column: Int
+    source: Int
+    original_line: Int
+    original_column: Int
+}
+
+// The paused location as printed, lines 1-based.
+#[Encode, Rename(.Camel)]
+PauseReport: struct {
+    #Rename("sourceMappingURL") source_mapping_url: String
+    #Rename("scriptParsedMapUrl") script_parsed_map_url: Bool
+    generated_line: Int
+    paused_generated_line: Int
+    paused_generated_column: Int
+    jet_file: String
+    jet_line: Int
+    jet_text: String
+}
+
+#[Encode, Rename(.Camel)]
+BreakpointAt: struct { url: String, line_number: Int, column_number: Int }
+
+#Encode
+Navigation: struct { url: String }
+
+run: fn(args: LiveArgs) Failure! {
+    check(args.port > 0, "usage: SourceMapLive.jet --port <port> [--prefix /click]")
+    origin: "http://127.0.0.1:{args.port}"
+    script: served(origin, "{args.prefix}/app.js")
+    named := false
+    loop line in script.split("\n").to_list() {
+        if SOURCE_MAPPING_URL.is_match(line) -> named = true
+    }
+    check(named, "app.js missing relative sourceMappingURL=app.js.map")
+
+    tree: json.parse(served(origin, "{args.prefix}/app.js.map")) ?? return Err(Failure{message: "app.js.map is not JSON: {err}"})
+    map: tree.decode<SourceMapFile>() ?? return Err(Failure{message: "app.js.map is not a version 3 source map: {err[0].path}: {err[0].reason}"})
+    check(map.version == 3, "app.js.map version")
+    check(map.sources.len() > 0, "app.js.map sources")
+    check(map.sources_content.len() == map.sources.len(), "app.js.map sourcesContent")
+    loop path in map.sources {
+        check(!path.starts_with("/") && !DRIVE_PATH.is_match(path), "host path in js map: {path}")
+    }
+    // Each source's text as lines, so a mapping's original line is an index.
+    texts: map.sources_content.map(fn(text) { text.split("\n").to_list() })
+
+    mappings: decode_mappings(map.mappings)
+    check(mappings.len() > 0, "app.js.map has no mappings")
+    hit := mappings[0].copy()
+    loop mapping in mappings {
+        lines: texts.get(mapping.source) ?? next
+        line: lines.get(mapping.original_line) ?? next
+        if line.contains("backend: ") || JET_STATEMENT.is_match(line) || line.contains("print(") {
+            hit = mapping.copy()
+            break
+        }
+    }
+    jet_file: map.sources.get(hit.source) ?? return Err(Failure{message: "app.js.map mapping source {hit.source} is outside its {map.sources.len()} sources"})
+    check(jet_file.ends_with(".jet"), "app.js.map: mapped source is not a Jet file: {jet_file}")
+    jet_text: (texts[hit.source].get(hit.original_line) ?? "").trim()
+    check(jet_text != "", "app.js.map: {jet_file}:{hit.original_line + 1} is empty")
+
+    session: browser.launch("chromium") ?? return Err(Failure{message: "Chromium did not launch: {err}"})
+    paused: pause_in(session, origin, args.prefix, mappings, hit) ?? {
+        session.close().drop("the engine stops at its last owner's drop as well")
+        return Err(err)
+    }
+    session.close().drop("the engine stops at its last owner's drop as well")
+    print("PASS web source-map CDP Jet breakpoint")
+    print(json.stringify(PauseReport{
+        source_mapping_url: "app.js.map", script_parsed_map_url: paused.named, generated_line: hit.generated_line + 1,
+        paused_generated_line: paused.line + 1, paused_generated_column: paused.column,
+        jet_file: jet_file, jet_line: hit.original_line + 1, jet_text: jet_text
+    }))
+    Ok()
+}
+
+// The page opens with a breakpoint at `hit`'s generated position and must
+// pause where `mappings` maps the same Jet line as `hit`; the paused position,
+// 0-based, and whether the page's script named its map.
+pause_in: fn(session: Browser, origin: String, prefix: String, mappings: [Mapping], hit: Mapping) -> (line: Int, column: Int, named: Bool) Failure! {
+    timeout: browser.timeout(C_PAUSE_MS) ?? return Err(Failure{message: "the pause timeout is refused: {err}"})
+    context: session.context() ?? return Err(Failure{message: "Chromium opened no browsing context: {err}"})
+    page: context.page() ?? return Err(Failure{message: "Chromium opened no page: {err}"})
+    cdp: page.protocol("cdp") ?? return Err(Failure{message: "the page has no CDP session: {err}"})
+    cdp.subscribe("Debugger.scriptParsed") ?? return Err(Failure{message: "Debugger.scriptParsed cannot be subscribed: {err}"})
+    cdp.subscribe("Debugger.paused") ?? return Err(Failure{message: "Debugger.paused cannot be subscribed: {err}"})
+    send(cdp, "Debugger.enable", "{{}}")
+    send(cdp, "Debugger.setBreakpointByUrl", json.stringify(BreakpointAt{url: "{origin}{prefix}/app.js", line_number: hit.generated_line, column_number: hit.generated_column}))
+    send(cdp, "Page.navigate", json.stringify(Navigation{url: "{origin}{prefix}/"}))
+
+    map_hash: browser.fact_hash("app.js.map")
+    named := false
+    loop {
+        event: cdp.next_event(timeout) ?? return Err(Failure{message: "the page did not pause at app.js:{hit.generated_line + 1}:{hit.generated_column} within {C_PAUSE_MS} ms: {err}"})
+        if event.kind() == "Debugger.scriptParsed" && event.source_map_url_hash() == map_hash -> named = true
+        if event.kind() != "Debugger.paused" -> next
+        line: event.frame_line()
+        column: event.frame_column()
+        send(cdp, "Debugger.resume", "{{}}")
+        // The mapping that covers the paused position: the last one on its
+        // line that starts at or before its column.
+        at := Mapping?{None}
+        loop mapping in mappings {
+            if mapping.generated_line == line && mapping.generated_column <= column -> at = Val(mapping.copy())
+        }
+        found: at ?? return Err(Failure{message: "the page paused at app.js:{line + 1}:{column}, where app.js.map maps nothing"})
+        check(found.source == hit.source && found.original_line == hit.original_line, "the page paused at app.js:{line + 1}:{column}, which app.js.map maps to Jet line {found.original_line + 1}, not {hit.original_line + 1}")
+        return Ok((line: line, column: column, named: named))
+    }
+}
+
+// One CDP command on the page's session; its reply is not needed.
+send: fn(cdp: BrowserProtocol, method: String, params: String) Failure! {
+    cdp.send(method, params) ?? return Err(Failure{message: "{method} failed: {err}"})
+    Ok()
+}
+
+// The segments of a version 3 `mappings` string that name a source.
+decode_mappings: fn(mappings: String) -> [Mapping] Failure! {
+    out := [Mapping]{}
+    generated_line := 0
+    source := 0
+    original_line := 0
+    original_column := 0
+    loop line in mappings.split(";").to_list() {
+        generated_column := 0
+        loop segment in line.split(",").to_list() {
+            if segment == "" -> next
+            values: decode_vlq(segment)
+            if values.len() > 0 -> generated_column += values[0]
+            if values.len() >= 4 {
+                source += values[1]
+                original_line += values[2]
+                original_column += values[3]
+                out.push(Mapping{generated_line: generated_line, generated_column: generated_column, source: source, original_line: original_line, original_column: original_column})
+            }
+        }
+        generated_line += 1
+    }
+    Ok(out)
+}
+
+// The signed base64 VLQ values of one segment.
+decode_vlq: fn(segment: String) -> [Int] Failure! {
+    values := [Int]{}
+    result := 0
+    shift := 0
+    loop (index, byte) in segment.bytes() {
+        code: Int{byte}
+        digit: if {
+            code >= 65 && code <= 90 -> code - 65
+            code >= 97 && code <= 122 -> code - 71
+            code >= 48 && code <= 57 -> code + 4
+            code == 43 -> 62
+            code == 47 -> 63
+            else -> return Err(Failure{message: "bad VLQ at {index + 1} in `{segment}`"})
+        }
+        result += digit.bit_and(31) << shift
+        if digit >= 32 {
+            shift += 5
+            next
+        }
+        magnitude: result >> 1
+        values.push(if result.bit_and(1) == 1 -> 0 - magnitude else -> magnitude)
+        result = 0
+        shift = 0
+    }
+    if shift != 0 -> return Err(Failure{message: "truncated VLQ in `{segment}`"})
+    Ok(values)
+}
+
+// The text of a 2xx response to GET `path` on the static server.
+served: fn(origin: String, path: String) -> String Failure! {
+    response: client.get("{origin}{path}") ?? return Err(Failure{message: "{path} request failed: {err}"})
+    if response.status() < 200 || response.status() > 299 -> return Err(Failure{message: "{path} returned {response.status()}"})
+    body: response.text(C_BODY_LIMIT) ?? return Err(Failure{message: "{path} body is not text: {err}"})
+    Ok(body)
+}
+
+check: fn(condition: Bool, message: String) Failure! {
+    if !condition -> return Err(Failure{message: message})
+    Ok()
+}

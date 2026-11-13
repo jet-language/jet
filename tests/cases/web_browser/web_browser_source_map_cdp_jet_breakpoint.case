@@ -1,10 +1,15 @@
 # tests/web_browser.rs::web_browser_source_map_cdp_jet_breakpoint
 # Exact five-source preparation/build/publish sequence; the published source
 # maps are checked statically: app.js names app.js.map, the map's mappings
-# land on a Jet line, and app.wasm carries its map. The live CDP breakpoint
-# half of the original oracle needs a page-scoped CDP surface in
-# core.browser, which does not exist.
+# land on a Jet line, and app.wasm carries its map. Then the live half: the
+# Chromium pinned in .jet/lock opens the page with a breakpoint on the
+# generated line the map assigns to that Jet line, pauses there over the
+# page's CDP session, and the paused position maps back to the same Jet line.
 fixture: fixtures/acceptance
+requires: os-name:linux
+requires: tool:chromium
+requires: tool:chromedriver
+env: JET_PROJECT_ROOT={work}
 step: jet build --target=web app.jet
 cwd: {work}/click_src
 exit: 0
@@ -40,12 +45,17 @@ mkdir: {work}/lifecycle
 for file {work}/lifecycle_src/.jet/build as f
 copy: {f.path} {work}/lifecycle/{f.name}
 end for
+step: jetpack browser lock chromium --binary {tool:chromium} --version 152.0.7977.64 --protocol bidi-2025.5 --driver {tool:chromedriver}
+exit: 0
 spawn server: jet run --allow=Env,FS,IO,Net,Time {root}/Tools/web-test/Serve.jet -- --port {free-port:static} --root {work}
 stdout: null
 poll ready: jet run {root}/tests/cases/web_browser/fixtures/http-ready.jet 127.0.0.1:{free-port:static} /click/web.manifest.json - - until stdout: ~ "200 OK" timeout 10s every 50ms # the static server serves the manifest
 step: jet run --allow=Env,Exec,IO,Net,Time {root}/Tools/web-test/SourceMap.jet -- --port {free-port:static} --prefix /click --wasm-prefix /compute
 exit: 0
 stdout: ~ "PASS web source-map Jet mapping + wasm map" # the second line is the mapped location, which varies with the build
+step: jet run --allow=Env,Exec,FS,IO,Net,Time {root}/Tools/web-test/SourceMapLive.jet -- --port {free-port:static} --prefix /click
+exit: 0
+stdout: ~ "PASS web source-map CDP Jet breakpoint" # the second line is the paused location, which varies with the build
 signal server: KILL
 wait: server
 exit: any # original server cleanup ignores status

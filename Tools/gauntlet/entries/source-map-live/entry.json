@@ -1,0 +1,17 @@
+{
+  "name": "source-map-live",
+  "mode": "tool",
+  "description": "The live half of the web source-map check, the reference Tools/gauntlet/entries/source-map-live/original/sourcemap-live.mjs with its CDP driver Tools/canvas-test/driver.mjs, and its Jet twin, Tools/web-test/SourceMapLive.jet, #5072 c65: the published app.js.map's first mapping that lands on a Jet statement gives a generated line, Chromium opens the page with a breakpoint there over the page's CDP session and pauses, and the check reports whether the script named its map, the line it paused at and the Jet line that maps to; a map whose source is not Jet, or a Chromium that cannot start, fails with exit 1. Each side's driver serves the case directory on a free loopback port and supplies the pinned nixpkgs Chromium of the repository's flake.lock ($FLAKE_LOCK when set; a lock that pins nixpkgs other than from GitHub is refused with exit 1), with, for the twin, its chromedriver in a generated .jet/lock, or the browsers $CHROMIUM and $CHROMEDRIVER name.",
+  "tool": {
+    "original": "Tools/gauntlet/harness/drivers/source-map-live.mjs",
+    "jet": "Tools/gauntlet/entries/source-map-live/driver/run.jet",
+    "programs": {"original": ["Tools/gauntlet/entries/source-map-live/original/sourcemap-live.mjs"], "jet": ["Tools/web-test/SourceMapLive.jet"]},
+    "notes": "PortBars speed bar, 2026-11-13 (seed-b16, 5 interleaved rounds): the twin loses, wall Jet/original 37.80 (22741.1 ms against 601.6 ms over the 3 cases) and peak memory 3.55 (764.9 MB against 215.4 MB). The loss is the per-case cold compile, not the twin: each case compiles driver/run.jet and then Tools/web-test/SourceMapLive.jet (core.browser), and `jet check` of SourceMapLive.jet alone takes about 3.2 s, against 0.04 s for `jetpack browser lock` and under 1 s for Chromium. Compile speed is tracked by #5479.",
+    "fixtures": "fixtures",
+    "cases": [
+      {"args": ["site"], "check": "check.jet", "expected": "expected/pass.out"},
+      {"args": ["not-jet"], "check": "check.jet", "exit": 1, "expected": "expected/none.out"},
+      {"args": ["site"], "env": {"CHROMIUM": "/definitely/missing/chromium", "CHROMEDRIVER": "/definitely/missing/chromedriver"}, "check": "check.jet", "exit": 1, "expected": "expected/none.out"}
+    ]
+  }
+}
