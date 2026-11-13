@@ -7,7 +7,8 @@
 //
 // `--measure` runs no case: it prints each side's tokens and files (with each
 // file's tokens) under SOURCE RULES, and its branches and control nesting
-// depth under REACH RULES. It
+// depth under REACH RULES, and exits 1 when an entry cannot be measured
+// (one row saying why). It
 // also measures a gauntlet program entry (no "mode": "tool"): its
 // jet/run.jet against its python/main.py, the pair the c14 token bar
 // compares there.
@@ -24,7 +25,10 @@
 // run X.jet`, a JavaScript `import('…')` of the real tool), the entry names
 // those programs in `tool.programs` (`{"original": [...], "jet": [...]}`,
 // repository paths, each in its side's language), and the tokens and
-// reasoning bars measure them as part of that side (SOURCE RULES). Each
+// reasoning bars measure them as part of that side (SOURCE RULES). A program
+// with several modes that the driver runs in one names the definition that
+// mode runs after a `#` (`Tools/x/Run.jet#lifecycle`): the proxies then
+// start there, not at the program's entry (REACH RULES). Each
 // entry is judged against its own original only. Performance ranks first:
 // the job, wall time and peak memory decide a switch, with the reasoning bar
 // beside them; source tokens are minimized, measured and reported, but never
@@ -116,7 +120,16 @@
 // file of that package: its package mates count as a counted package file's
 // do. Core, Node built-ins and installed packages are never counted. The
 // tokens bar counts every token of these files; the proxies count only what
-// the REACH RULES keep of them.
+// the REACH RULES keep of them. A driver (a side's program under
+// Tools/gauntlet/harness/drivers/ or in its entry's own directory) runs or
+// loads no repository program unseen: every string literal of its code
+// (never a comment, nor a Jet #Test) splits into words at each byte that
+// cannot be in a path, and a word naming a Jet program or a script
+// (`language_of`'s extensions) that exists, as written from the repository
+// root or relative to the driver, must be a counted file of that side or lie
+// in the entry's own directory. Any other keeps the entry from being judged
+// or measured, so a program a driver spawns or imports cannot be missing
+// from `tool.programs`.
 //
 // REACH RULES. The proxies count the definitions a program reaches, not the
 // whole of its files, by one rule for both sides: dead code is charged to
@@ -132,7 +145,9 @@
 // nothing (Jet `use`, JavaScript `import` and `export {…}`, Python `import`
 // and `from`), or is code that runs where it stands. The program reaches its
 // code that runs where it stands and, in Jet, each root's `run` and `main`
-// (every definition of a root that has neither); then, transitively,
+// (every definition of a root that has neither); a root named with a
+// `#definition` reaches that definition instead of its own code that runs
+// where it stands and its entry, and it must declare it; then, transitively,
 // every definition a reached one names, in its code or in the code its
 // string literals interpolate (Jet `{…}`, a JavaScript template's `${…}`, a
 // Python f-string's `{…}`): by `references` in Jet, by any word not written
@@ -236,13 +251,15 @@ TokenKind: enum { Word Text Symbol }
 // `first` marks the first token of its line and `column` the indentation
 // before it then. A string literal's `inner` is the code it interpolates
 // (Jet `{…}`, a JavaScript template's `${…}`, a Python f-string's `{…}`),
-// each part on a line of its own; "" for none.
+// each part on a line of its own; "" for none. Its `literal` is its source,
+// quotes included; "" for any other token.
 Token: struct {
     text: String
     kind: TokenKind
     first: Bool
     column: Int
     inner: String
+    literal: String
 }
 
 // What the proxies measure of one program.
@@ -276,7 +293,8 @@ Entry: struct {
     cases: [Case]
     // What closes the token gap: Core API criteria and syntax ballots.
     token_gaps: [String]
-    // Each side's `tool.programs`: the repository programs its driver runs.
+    // Each side's `tool.programs`: the repository programs its driver runs,
+    // each `path` or `path#definition`.
     programs: [[String]]
     problems: [String]
 }
@@ -361,6 +379,12 @@ keys_of: fn(tree: Dyn) -> [String] Never! {
     out
 }
 
+// Whether `text` is one word, as a definition's name is.
+one_word: fn(text: String) -> Bool Never! {
+    list: tokens(text, .Jet)
+    list.len() == 1 && list[0].kind == .Word && list[0].text == text
+}
+
 // The tool entry `name` under `repo`, with every problem that keeps it from
 // being judged.
 read_entry: fn(repo: String, name: String) -[FS]> Entry Never! {
@@ -395,13 +419,17 @@ read_entry: fn(repo: String, name: String) -[FS]> Entry Never! {
     loop side in 0..<SIDES.len() {
         named: if field(programs, SIDES[side]) == .Array(items) -> items.copy() else -> [Dyn]{}
         loop item in named {
-            path: if item == .Text(written) -> written.copy() else -> ""
+            written: if item == .Text(spelled) -> spelled.copy() else -> ""
+            // `path#definition` names the definition the driver's mode runs.
+            root: written.partition("#")
+            path: root.head
             language: language_at(repo, path)
             if {
                 path == "" || !files.is_file(files.join(repo, path)) -> entry.problems.push("its `tool.programs.{SIDES[side]}` names {json.dumps(item) ?? "a value"}, not a repository file")
+                root.sep != "" && !one_word(root.tail) -> entry.problems.push("its `tool.programs.{SIDES[side]}` names `{written}`, whose definition after `#` is not a name")
                 side == 0 && language != language_at(repo, entry.original) -> entry.problems.push("its `tool.programs.original` names `{path}`, not in the original's language")
                 side == 1 && language != Val(Language.Jet) -> entry.problems.push("its `tool.programs.jet` names `{path}`, not a Jet program")
-                else -> entry.programs[side].push(path)
+                else -> entry.programs[side].push(written)
             }
         }
     }
@@ -949,9 +977,11 @@ tokens: fn(source: String, language: Language) -> [Token] Never! {
         } else {
             at += symbol_len(bytes, at)
         }
-        text: if kind == .Text -> "" else -> String.from_bytes_lossy(bytes[start..<at])
+        written: String.from_bytes_lossy(bytes[start..<at])
+        text: if kind == .Text -> "" else -> written.copy()
         inner: if kind == .Text -> interpolated(bytes, start, at, language) else -> ""
-        out.push(Token{text: text, kind: kind, first: first, column: column, inner: inner})
+        literal: if kind == .Text -> written.copy() else -> ""
+        out.push(Token{text: text, kind: kind, first: first, column: column, inner: inner, literal: literal})
         first = false
     }
 }
@@ -988,6 +1018,9 @@ Program: struct {
     paths: [String]
     // How many of `paths`, from the first, are roots.
     roots: Int
+    // The definition each root's reach starts at: what follows the `#` of
+    // its `tool.programs` name, "" for its own code and entry.
+    entries: [String]
     counts: [Int]
     tokens: [Token]
     aliases: [String]
@@ -1258,14 +1291,18 @@ references: fn(list: [Token], start: Int, end: Int, inner: [Token]) -> [String] 
     out
 }
 
-// The program whose roots are `roots` in `repo`, written in `language`.
+// The program whose roots are `roots` in `repo`, written in `language`; a
+// root may name the definition its reach starts at as `path#definition`.
 program: fn(repo: String, roots: [String], language: Language) -[FS]> Program Never! {
-    found := Program{paths: roots.copy(), roots: roots.len(), counts: [Int]{}, tokens: [Token]{}, aliases: [String]{}}
+    found := Program{paths: [String]{}, roots: roots.len(), entries: [String]{}, counts: [Int]{}, tokens: [Token]{}, aliases: [String]{}}
     // The package directory each path belongs to, "" for none: a Jet root's
     // own directory when it holds a package.jet.
     owners := [String]{}
-    loop root in roots {
-        dir: files.dirname(root)
+    loop written in roots {
+        root: written.partition("#")
+        found.paths.push(root.head.copy())
+        found.entries.push(root.tail.copy())
+        dir: files.dirname(root.head)
         owners.push(if language == .Jet && files.is_file(files.join(repo, "{dir}/package.jet")) -> dir else -> "")
     }
     index := 0
@@ -1319,11 +1356,93 @@ program: fn(repo: String, roots: [String], language: Language) -[FS]> Program Ne
     found
 }
 
-// Each file of `found` with its token count.
+// Each file of `found` with its token count, a root with the definition its
+// reach starts at.
 program_files: fn(found: Program) -> String Never! {
     parts := [String]{}
-    loop index in 0..<found.paths.len() -> parts.push("{found.paths[index]} {found.counts[index]}")
+    loop index in 0..<found.paths.len() {
+        chosen: if index < found.roots -> found.entries[index].copy() else -> ""
+        shown: if chosen == "" -> found.paths[index].copy() else -> "{found.paths[index]}#{chosen}"
+        parts.push("{shown} {found.counts[index]}")
+    }
     parts.join(", ")
+}
+
+// The words of string literal `literal` that may be paths: its runs of word
+// bytes, `.`, `/`, `-`, `+` and `@`.
+path_words: fn(literal: String) -> [String] Never! {
+    bytes: literal.bytes()
+    out := [String]{}
+    word := [U8]{}
+    // One step past the end, so the last word ends too.
+    loop at in 0..<bytes.len() + 1 {
+        code: byte_at(bytes, at)
+        if is_word_byte(code) || code == 46 || code == 47 || code == 45 || code == 43 || code == 64 {
+            word.push(bytes[at])
+            next
+        }
+        if word.len() > 0 -> out.push(String.from_bytes_lossy(word))
+        word = [U8]{}
+    }
+    out
+}
+
+// Where the gauntlet keeps an original's driver; a twin's driver is in its
+// entry's own directory.
+DRIVERS: "Tools/gauntlet/harness/drivers/"
+
+// Each repository program (a Jet program or a script, by `language_of`'s
+// extensions) that a string literal of the root of `found` names, as written
+// from the repository root or relative to that root, which `found` does not
+// count and which lies outside directory `own`, once each (SOURCE RULES).
+unnamed_programs: fn(repo: String, found: Program, own: String) -[FS]> [String] Never! {
+    out := [String]{}
+    root: found.paths[0]
+    loop at in 0..<found.counts[0] {
+        if found.tokens[at].kind != .Text -> next
+        loop word in path_words(found.tokens[at].literal) {
+            targets: [String]{normalized(word), normalized("{files.dirname(root)}/{word}")}
+            loop target in targets {
+                if target == "" || out.contains(target) || found.paths.contains(target) || target.starts_with("{own}/") -> next
+                if language_of(target, "") == None || !files.is_file(files.join(repo, target)) -> next
+                out.push(target.copy())
+            }
+        }
+    }
+    out
+}
+
+// Why `entry`, whose sides count `sides`, cannot be judged: a side's driver
+// (its program under DRIVERS or in the entry's own directory) names a
+// repository program it neither counts nor finds in `tool.programs`
+// (`unnamed_programs`).
+unnamed_problems: fn(repo: String, entry: Entry, sides: [Program]) -[FS]> [String] Never! {
+    out := [String]{}
+    loop side in 0..<SIDES.len() {
+        driver: sides[side].paths[0]
+        if !driver.starts_with(DRIVERS) && !driver.starts_with("{entry.dir}/") -> next
+        loop named in unnamed_programs(repo, sides[side], entry.dir) -> out.push("its {SIDES[side]} driver `{driver}` names the repository program `{named}`, which `tool.programs.{SIDES[side]}` does not name")
+    }
+    out
+}
+
+// Why `sides`, written in `languages`, cannot be measured: a root named with
+// its `#definition` declares no top-level definition of that name.
+undeclared_entries: fn(sides: [Program], languages: [Language]) -> [String] Never! {
+    out := [String]{}
+    loop side in 0..<SIDES.len() {
+        found: sides[side]
+        offset := 0
+        loop file in 0..<found.roots {
+            end: offset + found.counts[file]
+            chosen: found.entries[file].copy()
+            wanted: chosen.copy()
+            declared: definitions(found.tokens, offset, end, file, languages[side]).any(item -> item.owner == "" && item.name == wanted)
+            if chosen != "" && !declared -> out.push("its `tool.programs.{SIDES[side]}` names `{found.paths[file]}#{chosen}`, but `{found.paths[file]}` declares no `{chosen}`")
+            offset = end
+        }
+    }
+    out
 }
 
 // The names a module `text` binds to a repository module it imports whole
@@ -1528,8 +1647,14 @@ reached_tokens: fn(found: Program, language: Language) -> [Token] Never! {
         grown = false
         loop item in all {
             if kept[item.start] || item.inert -> next
-            runs: item.name == "" && item.owner == ""
-            entry: language == .Jet && item.file < found.roots && item.owner == "" && (!entered[item.file] || JET_ENTRIES.contains(item.name))
+            // A root named with its `#definition` starts there alone.
+            chosen: if item.file < found.roots -> found.entries[item.file].copy() else -> ""
+            runs: item.name == "" && item.owner == "" && chosen == ""
+            entry: if {
+                item.file >= found.roots || item.owner != "" -> false
+                chosen != "" -> item.name == chosen
+                else -> language == .Jet && (!entered[item.file] || JET_ENTRIES.contains(item.name))
+            }
             called: item.owner == "" && (named.has_key("{item.file}\t{item.name}") || anywhere.has_key(item.name))
             method: item.owner != "" && written.has_key(item.owner) && (item.name == "" || members.has_key(item.name))
             if !(runs || entry || called || method) -> next
@@ -2070,6 +2195,10 @@ case_dir: fn(work: String, name: String, index: Int, side: Int) -> String Never!
 judge: fn(repo: String, name: String, jet: String, runs: Int, work: String) -[Env, Exec, FS, Time, Time.Wait]> Report Never! {
     entry := read_entry(repo, name)
     report := Report{entry: name.copy(), bars: [Bar]{}}
+    language: language_at(repo, entry.original)
+    sides: [Program]{program(repo, roots_of(entry, 0), language ?? .Shell), program(repo, roots_of(entry, 1), .Jet)}
+    unnamed: if entry.problems.len() == 0 -> unnamed_problems(repo, entry, sides).concat(undeclared_entries(sides, [Language]{language ?? .Shell, .Jet})) else -> [String]{}
+    entry.problems.extend(unnamed)
     launcher: build_launcher(work)
     if launcher.problem != "" -> entry.problems.push(launcher.problem)
     if entry.problems.len() > 0 {
@@ -2131,14 +2260,11 @@ judge: fn(repo: String, name: String, jet: String, runs: Int, work: String) -[En
     }
     report.bars.push(speed_bar(wall_original, wall_jet, peak_original, peak_jet, problems))
 
-    language: language_at(repo, entry.original)
     unmeasured: if language == None -> "no token or proxy rule for the original `{entry.original}`'s language" else -> ""
-    original: program(repo, roots_of(entry, 0), language ?? .Shell)
-    twin: program(repo, roots_of(entry, 1), .Jet)
     record: "{entry.dir}/{REVIEW_FILE}"
-    original_proxies: proxies(reached_tokens(original, language ?? .Shell), language ?? .Shell)
-    report.bars.push(reasoning_bar(record, review_at(repo, record), original_proxies, proxies(reached_tokens(twin, .Jet), .Jet), unmeasured))
-    report.bars.push(tokens_bar(original.tokens.len(), twin.tokens.len(), entry.token_gaps, unmeasured))
+    original_proxies: proxies(reached_tokens(sides[0], language ?? .Shell), language ?? .Shell)
+    report.bars.push(reasoning_bar(record, review_at(repo, record), original_proxies, proxies(reached_tokens(sides[1], .Jet), .Jet), unmeasured))
+    report.bars.push(tokens_bar(sides[0].tokens.len(), sides[1].tokens.len(), entry.token_gaps, unmeasured))
     report
 }
 
@@ -2149,7 +2275,8 @@ measure_lines: fn(repo: String, name: String) -[FS]> [String] Never! {
     entry := read_entry(repo, name)
     jet_program: "{entry.dir}/jet/run.jet"
     python_program: "{entry.dir}/python/main.py"
-    if entry.problems.any(problem -> problem.starts_with("it is not a tool entry")) && files.is_file(files.join(repo, jet_program)) && files.is_file(files.join(repo, python_program)) {
+    tool: !entry.problems.any(problem -> problem.starts_with("it is not a tool entry"))
+    if !tool && files.is_file(files.join(repo, jet_program)) && files.is_file(files.join(repo, python_program)) {
         entry.original = python_program.copy()
         entry.twin = jet_program.copy()
         entry.problems = [String]{}
@@ -2158,6 +2285,8 @@ measure_lines: fn(repo: String, name: String) -[FS]> [String] Never! {
     language: language_at(repo, entry.original) ?? return [String]{"{name}\t-\t-\t-\t-\tno token or proxy rule for the original `{entry.original}`'s language"}
     sides: [Program]{program(repo, roots_of(entry, 0), language), program(repo, roots_of(entry, 1), .Jet)}
     languages: [Language]{language, .Jet}
+    unnamed: if tool -> unnamed_problems(repo, entry, sides).concat(undeclared_entries(sides, languages)) else -> [String]{}
+    if unnamed.len() > 0 -> return [String]{"{name}\t-\t-\t-\t-\tcannot be measured: {unnamed.join("; ")}"}
     out := [String]{}
     loop side in 0..<2 {
         measured: proxies(reached_tokens(sides[side], languages[side]), languages[side])
@@ -2272,9 +2401,13 @@ run: fn() {
     }
     if measure {
         print("entry\tside\ttokens\tbranches\tdepth\tfiles")
+        refused := 0
         loop name in names {
-            loop line in measure_lines(repo, name) -> print(line)
+            rows: measure_lines(repo, name)
+            if rows.len() == 1 -> refused += 1
+            loop line in rows -> print(line)
         }
+        if refused > 0 -> process.exit(1)
         return
     }
     work: work_dir("judge") ?? return cannot_run("port-bars: a scratch directory cannot be made: {err}")
@@ -2562,6 +2695,13 @@ review_json: fn(original: Int, twin: Int, extra: String) -> String Never! {
     assert(!lower.pass && lower.detail.contains("checklist Jet 6/12, original 12/12 (-6"))
 }
 
+// The jet a planted judge runs, as `run` takes it: $JET, else the `jet` on
+// PATH.
+planted_jet: fn() -[Env, FS]> String Never! {
+    jet: process.env_get("JET") ?? "jet"
+    if jet.contains("/") -> absolute(jet) else -> jet.copy()
+}
+
 plant: fn(dir: String, path: String, text: String) -[FS]> () {
     files.create_dir_all(files.dirname(files.join(dir, path))) ?? panic("{path}: {err}")
     files.write(files.join(dir, path), text) ?? panic("{path}: {err}")
@@ -2609,45 +2749,126 @@ plant_entry: fn(dir: String, name: String, original: String, twin: String, revie
     files.remove_all(dir) ?? ()
 }
 
-#Test("a planted entry that wins every bar passes, as do an over-count twin with or without a named token gap and a job its check proves, and each planted loss fails its bar alone") {
+#Test("a program named `path#definition` is reached from that definition alone, and a name it doesn't declare or that is no name is a problem") {
+    dir: work_dir("chosen") ?? panic("a scratch directory cannot be made: {err}")
+    plant(dir, "Tools/fx/drive.mjs", "await import('./real.mjs');\n")
+    plant(dir, "Tools/fx/real.mjs", "if (process.argv.length > 2) console.log(3);\n")
+    plant(dir, "Tools/fx/driver.jet", "run: fn() {{ print(3) }}\n")
+    plant(dir, "Tools/fz/Run.jet", "run: fn() {{\n    if ready() -> quick() else -> slow()\n}}\n\nquick: fn() {{\n    if ready() -> print(3)\n}}\n\nslow: fn() {{\n    loop i in 0..<3 {{\n        if i > 1 && i < 3 -> print(i)\n    }}\n}}\n\nready: fn() -> Bool {{ true }}\n")
+    names: [String]{"whole", "mode", "missing", "word"}
+    programs: [String]{"Tools/fz/Run.jet", "Tools/fz/Run.jet#quick", "Tools/fz/Run.jet#nowhere", "Tools/fz/Run.jet#two words"}
+    loop index in 0..<names.len() {
+        plant(dir, "{ENTRIES_ROOT}/{names[index]}/entry.json", "{{\"name\": \"{names[index]}\", \"mode\": \"tool\", \"tool\": {{\"original\": \"Tools/fx/drive.mjs\", \"jet\": \"Tools/fx/driver.jet\", \"programs\": {{\"original\": [\"Tools/fx/real.mjs\"], \"jet\": [\"{programs[index]}\"]}}, \"cases\": [{{\"args\": [], \"expected\": \"expected/three.out\"}}]}}}}\n")
+        plant(dir, "{ENTRIES_ROOT}/{names[index]}/expected/three.out", "3\n")
+    }
+    // The whole program reaches every mode: `run`'s if, quick's if, and
+    // slow's loop, if and &&.
+    whole: measure_lines(dir, "whole")
+    assert_eq(whole[1].split("\t").to_list()[3], "5")
+    mode: measure_lines(dir, "mode")
+    assert_eq(mode[1].split("\t").to_list()[3], "1")
+    assert(mode[1].contains("Tools/fz/Run.jet#quick "), mode[1])
+    assert_eq(mode[1].split("\t").to_list()[2], whole[1].split("\t").to_list()[2])
+    assert_eq(measure_lines(dir, "missing"), ["missing\t-\t-\t-\t-\tcannot be measured: its `tool.programs.jet` names `Tools/fz/Run.jet#nowhere`, but `Tools/fz/Run.jet` declares no `nowhere`"])
+    assert_eq(read_entry(dir, "word").problems, ["its `tool.programs.jet` names `Tools/fz/Run.jet#two words`, whose definition after `#` is not a name"])
+    files.remove_all(dir) ?? ()
+}
+
+#Test("a driver that names a repository program its `tool.programs` leaves out cannot be judged or measured, unlike one that names it, a file of its own entry or a program that is no driver") {
+    dir: work_dir("unnamed") ?? panic("a scratch directory cannot be made: {err}")
+    plant(dir, "Tools/fx/real.mjs", "console.log(3);\n")
+    plant(dir, "Tools/fx/drive.mjs", "const tool = 'Tools/fx/real.mjs';\nconsole.log(3);\n")
+    plant(dir, "Tools/fz/Run.jet", "run: fn() {{ print(3) }}\n")
+    // The original's driver imports the tool by a relative path, and the
+    // twin's runs it from the checkout and names its entry's check.
+    plant(dir, "{DRIVERS}fx.mjs", "// Runs Tools/fz/Run.jet? Only a comment says so.\nconst repo = '.';\nawait import('../../../fx/real.mjs');\n")
+    plant(dir, "{ENTRIES_ROOT}/fx/driver/run.jet", "run: fn() {{\n    repo: \".\"\n    print(\"{{repo}}/Tools/fz/Run.jet {ENTRIES_ROOT}/fx/check.jet\")\n}}\n")
+    plant(dir, "{ENTRIES_ROOT}/fx/check.jet", "run: fn() {{ print(3) }}\n")
+    review: review_json(1, 2, "")
+    plant_entry(dir, "fx", "{DRIVERS}fx.mjs", "{ENTRIES_ROOT}/fx/driver/run.jet", review)
+    unnamed: measure_lines(dir, "fx")
+    assert_eq(unnamed.len(), 1)
+    assert_eq(unnamed[0], "fx\t-\t-\t-\t-\tcannot be measured: its original driver `{DRIVERS}fx.mjs` names the repository program `Tools/fx/real.mjs`, which `tool.programs.original` does not name; its jet driver `{ENTRIES_ROOT}/fx/driver/run.jet` names the repository program `Tools/fz/Run.jet`, which `tool.programs.jet` does not name")
+    work: work_dir("unnamed_work") ?? panic("a scratch directory cannot be made: {err}")
+    report: judge(dir, "fx", planted_jet(), 1, work)
+    assert_eq(lost_bars(report), BARS)
+    assert(!report.bars.any(bar -> !bar.detail.starts_with("the entry cannot be judged: its original driver")))
+    plant(dir, "{ENTRIES_ROOT}/fx/entry.json", "{{\"name\": \"fx\", \"mode\": \"tool\", \"tool\": {{\"original\": \"{DRIVERS}fx.mjs\", \"jet\": \"{ENTRIES_ROOT}/fx/driver/run.jet\", \"programs\": {{\"original\": [\"Tools/fx/real.mjs\"], \"jet\": [\"Tools/fz/Run.jet\"]}}, \"cases\": [{{\"args\": [], \"expected\": \"expected/three.out\"}}]}}}}\n")
+    named: measure_lines(dir, "fx")
+    assert_eq(named.len(), 2)
+    assert(named[0].contains("Tools/fx/real.mjs ") && named[1].contains("Tools/fz/Run.jet "))
+    plant_entry(dir, "plain", "Tools/fx/drive.mjs", "Tools/fz/Run.jet", review)
+    assert_eq(measure_lines(dir, "plain").len(), 2)
+    files.remove_all(dir) ?? ()
+    files.remove_all(work) ?? ()
+}
+
+#Test("a planted entry that wins every bar but speed passes them, as do an over-count twin with or without a named token gap and a job its check proves, and each planted loss fails its bar alone") {
     dir: work_dir("planted") ?? panic("a scratch directory cannot be made: {err}")
-    // Slow and large: half a gigabyte held for a second, a margin a warmed
-    // Jet run on a loaded machine stays inside.
-    plant(dir, "Tools/fx/heavy.py", "import time\nd = b\"x\" * 536870912\ntime.sleep(1)\nprint(3)\n")
-    plant(dir, "Tools/fx/wrong.py", "import time\nd = b\"x\" * 536870912\ntime.sleep(1)\nprint(4)\n")
-    plant(dir, "Tools/fx/fast.sh", "a=1\nb=2\nc=3\nd=4\ne=5\necho 3\n")
+    // Each judged on the job, the record and the tokens; the speed bar, a
+    // live timing, is judged from planted rounds in its own test.
+    plant(dir, "Tools/fx/three.py", "print(3)\n")
+    plant(dir, "Tools/fx/wrong.py", "print(4)\n")
     plant(dir, "Tools/fx/Small.jet", "run: fn() {{ print(3) }}\n")
     plant(dir, "Tools/fx/Big.jet", "run: fn() {{\n    first: 1\n    second: 2\n    third: first + second\n    print(third)\n}}\n")
     // The same job, a file holding 3, reported in other words; and a wrong job.
-    plant(dir, "Tools/fx/job.py", "import time\nd = b\"x\" * 536870912\ntime.sleep(1)\nopen(\"job\", \"w\").write(\"3\\n\")\nprint(\"python wrote the job\")\n")
+    plant(dir, "Tools/fx/job.py", "open(\"job\", \"w\").write(\"3\\n\")\nprint(\"python wrote the job\")\n")
     plant(dir, "Tools/fx/Job.jet", "use {{\n    files: core.files\n}}\n\nrun: fn() {{\n    files.write(\"job\", \"3\\n\")\n    print(\"done\")\n}}\n")
     plant(dir, "Tools/fx/WrongJob.jet", "use {{\n    files: core.files\n}}\n\nrun: fn() {{\n    files.write(\"job\", \"4\\n\")\n    print(\"python wrote the job\")\n}}\n")
     check: "use {{\n    files: core.files\n}}\n\nrun: fn() {{ print(files.read(\"job\").trim()) }}\n"
     review: review_json(1, 2, "")
-    plant_entry(dir, "pass", "Tools/fx/heavy.py", "Tools/fx/Small.jet", review)
+    plant_entry(dir, "pass", "Tools/fx/three.py", "Tools/fx/Small.jet", review)
     plant_entry(dir, "parity", "Tools/fx/wrong.py", "Tools/fx/Small.jet", review)
-    plant_entry(dir, "speed", "Tools/fx/fast.sh", "Tools/fx/Small.jet", review)
-    plant_entry(dir, "tokens", "Tools/fx/heavy.py", "Tools/fx/Big.jet", review)
-    plant_entry(dir, "reasoning", "Tools/fx/heavy.py", "Tools/fx/Small.jet", "")
-    plant_entry(dir, "gapped", "Tools/fx/heavy.py", "Tools/fx/Big.jet", review, gaps: "[\"#5072 c36\"]")
+    plant_entry(dir, "tokens", "Tools/fx/three.py", "Tools/fx/Big.jet", review)
+    plant_entry(dir, "reasoning", "Tools/fx/three.py", "Tools/fx/Small.jet", "")
+    plant_entry(dir, "gapped", "Tools/fx/three.py", "Tools/fx/Big.jet", review, gaps: "[\"#5072 c36\"]")
     plant_entry(dir, "job", "Tools/fx/job.py", "Tools/fx/Job.jet", review, check: check, gaps: "[\"D-SH-RUN1\"]")
     plant_entry(dir, "wrongjob", "Tools/fx/job.py", "Tools/fx/WrongJob.jet", review, check: check, gaps: "[\"D-SH-RUN1\"]")
-    jet: absolute(process.env_get("JET") ?? "jet")
+    jet: planted_jet()
     work: work_dir("work") ?? panic("a scratch directory cannot be made: {err}")
-    expected: [[], ["parity"], ["speed"], [], ["reasoning"], [], [], ["parity"]]
-    names: ["pass", "parity", "speed", "tokens", "reasoning", "gapped", "job", "wrongjob"]
+    expected: [[], ["parity"], [], ["reasoning"], [], [], ["parity"]]
+    names: ["pass", "parity", "tokens", "reasoning", "gapped", "job", "wrongjob"]
     loop index in 0..<names.len() {
-        report: judge(dir, names[index], jet, 3, work)
-        if lost_bars(report) != expected[index] {
+        report: judge(dir, names[index], jet, 1, work)
+        lost := [String]{}
+        loop bar in lost_bars(report) {
+            if bar != "speed" -> lost.push(bar.copy())
+        }
+        if lost != expected[index] {
             loop line in report_lines(report) -> print(line)
         }
-        assert_eq(lost_bars(report), expected[index])
+        assert_eq(lost, expected[index])
+        assert(report.bars.any(bar -> bar.name == "speed"))
     }
-    assert_eq(tool_entries(dir) ?? panic(err.message), ["gapped", "job", "parity", "pass", "reasoning", "speed", "tokens", "wrongjob"])
-    plant_entry(dir, "badgap", "Tools/fx/heavy.py", "Tools/fx/Big.jet", review, gaps: "[\"soon\"]")
+    assert_eq(tool_entries(dir) ?? panic(err.message), ["gapped", "job", "parity", "pass", "reasoning", "tokens", "wrongjob"])
+    plant_entry(dir, "badgap", "Tools/fx/three.py", "Tools/fx/Big.jet", review, gaps: "[\"soon\"]")
     assert(read_entry(dir, "badgap").problems.any(problem -> problem.contains("not a criterion")))
     files.remove_all(dir) ?? ()
     files.remove_all(work) ?? ()
+}
+
+#Test("the speed bar, judged from planted rounds, passes only when every Jet round is below every original round in both wall time and peak memory") {
+    ms: 1000000
+    mb: 1048576
+    fast: [Int]{10 * ms, 11 * ms, 12 * ms}
+    slow: [Int]{30 * ms, 31 * ms, 32 * ms}
+    mixed: [Int]{9 * ms, 20 * ms, 40 * ms}
+    light: [Int]{40 * mb, 41 * mb, 42 * mb}
+    heavy: [Int]{90 * mb, 91 * mb, 92 * mb}
+    win: speed_bar(slow, fast, heavy, light, [String]{})
+    assert(win.pass)
+    assert_eq(win.detail, "wall Jet/original 0.35 (11.0 ms against 31.0 ms; every Jet round below every original round); peak memory Jet/original 0.45 (41.0 MB against 91.0 MB; every Jet round below every original round); medians of 3 interleaved rounds")
+    slower: speed_bar(fast, slow, heavy, light, [String]{})
+    assert(!slower.pass && slower.detail.starts_with("wall Jet/original 2.82 (31.0 ms against 11.0 ms; lost: every original round below every Jet round)"))
+    overlapping: speed_bar(fast, mixed, heavy, light, [String]{})
+    assert(!overlapping.pass && overlapping.detail.contains("inconclusive: the rounds overlap"))
+    heavier: speed_bar(slow, fast, light, heavy, [String]{})
+    assert(!heavier.pass && heavier.detail.contains("peak memory Jet/original 2.22 (91.0 MB against 41.0 MB; lost"))
+    broken: speed_bar(slow, fast, heavy, light, [String]{"case 1 jet: it timed out"})
+    assert(!broken.pass)
+    assert_eq(broken.detail, "not measured: case 1 jet: it timed out")
+    unrecorded: speed_bar(slow, fast, [Int]{0, 91 * mb, 92 * mb}, light, [String]{})
+    assert(!unrecorded.pass && unrecorded.detail.contains("peak memory was not recorded"))
 }
 
 #Test("a measured token count never fails the tokens bar; an unmeasured one does") {
