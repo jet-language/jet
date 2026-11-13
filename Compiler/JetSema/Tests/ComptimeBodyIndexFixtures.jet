@@ -182,7 +182,7 @@ body_index_identity_and_lifecycle: fn() {
     _ := sema_comptime_body_capture(context, environment, program, scopes, "temporary", Expr.Int{value: 8, span: source, width: None, raw: None, id: AST_NODE_GENERATED}, Type.Int, source, Span{start: 30, end: 31})
     sema_comptime_body_values_replace(context, [SemaComptimeBodyValue]{repeated, wrong_module, repeated})
     body_index_require(sema_comptime_body_value_find(context, "mod::one", "function::one", source, site) == None, "a probe may append a second matching value")
-    sema_check_context_rollback(context, mark)
+    sema_check_context_rollback(context, mark.move())
     body_index_require(context.comptime_body_sources.len() == 1, "rollback restores the canonical source prefix")
     body_index_require(sema_comptime_body_value_find(context, "mod::one", "function::one", source, site) == Val((repeated)), "rollback rebuilds value uniqueness from the retained rows")
     retained: sema_comptime_body_capture(context, environment, program, scopes, "after rollback", Expr.Bool{value: false, span: source, id: AST_NODE_GENERATED}, Type.Bool, source, site)
@@ -421,7 +421,7 @@ body_index_append_prefixes: fn() {
     sema_comptime_body_values_append_items(replacement, replacement_items, 1)
     body_index_require(replacement.length == 2 && publication.length == 4 && restored.comptime_body_values.length == 1, "append to a replacement generation cannot retarget an older owner or its selected prefix")
     body_index_require(sema_comptime_body_values_debug(restored.comptime_body_values) == "{[SemaComptimeBodyValue]{late}:Debug}" && sema_comptime_body_values_debug(two) == "{[SemaComptimeBodyValue]{first, different}:Debug}", "replacement append preserves both generations' old canonical memo bytes")
-    sema_check_context_rollback(restored, mark)
+    sema_check_context_rollback(restored, mark.move())
     body_index_require(restored.comptime_body_values.length == 4 && sema_comptime_body_value_find(restored, "append::module", "append::function", source, site) == None, "rollback restores the old generation and duplicate ambiguity")
 }
 

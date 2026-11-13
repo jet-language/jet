@@ -3346,7 +3346,7 @@ sema_probe_expression: fn(value: Expr, expected: Type?, environment: SemaScopeEn
     // copy: the rollback below restores `state.share_found`; the sites the probe found are kept from this copy.
     found_sites: state.share_found.copy()
     sema_ownership_fork_drop(state, fork, found_sites, [SemaOwnershipShareSite]{})
-    sema_check_context_rollback(context, context_mark)
+    sema_check_context_rollback(context, context_mark.move())
     sema_scope_rollback(scopes, scope_mark)
     checked
 }
@@ -3386,7 +3386,7 @@ sema_expr_try_explicit_unit_method: fn(receiver: Expr, method: String, method_sp
     probe_source := sema_expr_check_unit_conversion_source(args[0].expr, method, rounded, environment, program, scopes, state, tail_store, context, probe_diagnostics, probe_rounded_allowed)
     sema_ownership_fork_rollback(state, probe_fork)
     sema_ownership_fork_close(state, probe_fork)
-    sema_check_context_rollback(context, probe_context_mark)
+    sema_check_context_rollback(context, probe_context_mark.move())
     sema_scope_rollback(scopes, probe_scope_mark)
     source_probe: probe_source ?? return SemaMethodSpecialCheck{handled: false, value: None}
     source_fact: sema_expr_unit_fact(source_probe.ty, environment, program) ?? return SemaMethodSpecialCheck{handled: false, value: None}
@@ -4296,7 +4296,7 @@ sema_expr_check_expiring_secret_with: fn(receiver: Expr, receiver_value: TExpr, 
     callback: sema_expression_lambda_collection_callback(args[0].expr, Val(loan_expected), environment, program, scopes, state, tail_store, context, loan_reports)
     sema_ownership_fork_rollback(state, fork)
     sema_ownership_fork_close(state, fork)
-    sema_check_context_rollback(context, context_mark)
+    sema_check_context_rollback(context, context_mark.move())
     sema_scope_rollback(scopes, scope_mark)
     result := Type.Named{name: "Unit"}
     if callback == .Val(checked_callback) -> result = sema_call_signature_return(checked_callback.ty) ?? Type.Named{name: "Unit"}
@@ -6522,7 +6522,7 @@ sema_expr_shared_place_call_writes: fn(receiver: Expr, method: String, method_sp
     }
     sema_ownership_fork_rollback(state, fork)
     sema_ownership_fork_close(state, fork)
-    sema_check_context_rollback(context, context_mark)
+    sema_check_context_rollback(context, context_mark.move())
     sema_scope_rollback(scopes, scope_mark)
     writes
 }
@@ -6895,7 +6895,7 @@ sema_expr_probe_type: fn(expr: Expr, carrier: Bool, environment: SemaScopeEnviro
     context.suppress_partial_move_root_read = true
     probed: if carrier -> sema_check_expression_carrier(expr, None, environment, program, scopes, state, tail_store, context, diagnostics) else -> sema_check_expression(expr, None, environment, program, scopes, state, tail_store, context, diagnostics)
     context.suppress_partial_move_root_read = previous_root_read
-    sema_check_context_rollback(context, context_mark)
+    sema_check_context_rollback(context, context_mark.move())
     sema_scope_rollback(scopes, scope_mark)
     sema_ownership_state_restore(state, saved_state.move())
     loop diagnostics.len() > diagnostic_count -> _ := diagnostics.pop()

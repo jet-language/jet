@@ -1429,8 +1429,9 @@ sema_scope_commit: fn(table: &SemaScopeTable, mark: SemaScopeMark) Never! {
 // Restores `context` to `mark`: appended rows are dropped (a check only appends
 // to these lists; the one in-place row edit, a discarded call fact, stays
 // inside the rows its statement appended) and every other field is restored,
-// except the number-name refusals, which stay (number_retypes_found).
-sema_check_context_rollback: fn(context: &SemaCheckContext, mark: SemaCheckContextMark) Never! {
+// except the number-name refusals, which stay (number_retypes_found). The mark
+// is spent, so its saved fields move back.
+sema_check_context_rollback: fn(context: &SemaCheckContext, mark: &&SemaCheckContextMark) Never! {
     loop context.call_facts.len() > mark.call_facts -> _ := context.call_facts.pop()
     loop context.module_writes.len() > mark.module_writes -> _ := context.module_writes.pop()
     loop context.call_return_views.len() > mark.call_return_views -> _ := context.call_return_views.pop()
@@ -1438,7 +1439,6 @@ sema_check_context_rollback: fn(context: &SemaCheckContext, mark: SemaCheckConte
     loop context.name_references.len() > mark.name_references -> _ := context.name_references.pop()
     loop context.comptime_requests.len() > mark.comptime_requests -> _ := context.comptime_requests.pop()
     sema_comptime_body_sources_truncate(context, mark.comptime_body_sources)
-    context.comptime_body_values = mark.saved.comptime_body_values.copy()
     loop context.compute_calls.len() > mark.compute_calls -> _ := context.compute_calls.pop()
     loop context.autodiff_obligations.len() > mark.autodiff_obligations -> _ := context.autodiff_obligations.pop()
     loop context.copy_events.len() > mark.copy_events -> _ := context.copy_events.pop()
@@ -1456,60 +1456,61 @@ sema_check_context_rollback: fn(context: &SemaCheckContext, mark: SemaCheckConte
     loop context.failure_union_cases.len() > mark.failure_union_cases -> _ := context.failure_union_cases.pop()
     loop context.failure_union_edges.len() > mark.failure_union_edges -> _ := context.failure_union_edges.pop()
     loop context.incomplete_reasons.len() > mark.incomplete_reasons -> _ := context.incomplete_reasons.pop()
-    saved: mark.saved
+    saved := mark.saved.move()
+    context.comptime_body_values = saved.comptime_body_values.move()
     context.exact_int_reachable = saved.exact_int_reachable
     context.unsafe_depth = saved.unsafe_depth
     context.borrow_ctx = saved.borrow_ctx
     context.allow_string_view_read = saved.allow_string_view_read
     context.suppress_partial_move_root_read = saved.suppress_partial_move_root_read
     context.allow_fixed_constructor = saved.allow_fixed_constructor
-    context.generic_params = saved.generic_params.copy()
+    context.generic_params = saved.generic_params.move()
     context.lambda_escapes = saved.lambda_escapes
     context.lambda_lending_views = saved.lambda_lending_views
-    context.lending_view_parameter_keys = saved.lending_view_parameter_keys.copy()
-    context.lambda_statement_tails = saved.lambda_statement_tails.copy()
-    context.hardware_use = sema_hardware_use_snapshot(saved.hardware_use)
-    context.http_routes = saved.http_routes.copy()
-    context.return_view_receiver_key = saved.return_view_receiver_key
-    context.return_view_parameter_keys = saved.return_view_parameter_keys.copy()
-    context.return_view_provenance = saved.return_view_provenance
+    context.lending_view_parameter_keys = saved.lending_view_parameter_keys.move()
+    context.lambda_statement_tails = saved.lambda_statement_tails.move()
+    context.hardware_use = saved.hardware_use.move()
+    context.http_routes = saved.http_routes.move()
+    context.return_view_receiver_key = saved.return_view_receiver_key.move()
+    context.return_view_parameter_keys = saved.return_view_parameter_keys.move()
+    context.return_view_provenance = saved.return_view_provenance.move()
     context.autodiff_safe_panic = saved.autodiff_safe_panic
     context.autodiff_unsafe_panic = saved.autodiff_unsafe_panic
     context.autodiff_safe_panic_context = saved.autodiff_safe_panic_context
-    context.loop_value_frames = saved.loop_value_frames.copy()
-    context.loop_break_flows = sema_loop_break_flows_snapshot(saved.loop_break_flows)
-    context.pending_loop_value = saved.pending_loop_value
-    context.collect_item_types = saved.collect_item_types.copy()
+    context.loop_value_frames = saved.loop_value_frames.move()
+    context.loop_break_flows = saved.loop_break_flows.move()
+    context.pending_loop_value = saved.pending_loop_value.move()
+    context.collect_item_types = saved.collect_item_types.move()
     context.collect_item_if = saved.collect_item_if
-    context.last_loop_result_type = saved.last_loop_result_type
+    context.last_loop_result_type = saved.last_loop_result_type.move()
     context.arrow_loop_body = saved.arrow_loop_body
-    context.reactive_upgrades = saved.reactive_upgrades.copy()
-    context.reactive_upgrade_names = saved.reactive_upgrade_names.copy()
-    context.reactive_local_keys = saved.reactive_local_keys.copy()
-    context.reactive_shared_keys = saved.reactive_shared_keys.copy()
-    context.taskgroups = sema_taskgroup_state_snapshot(saved.taskgroups)
+    context.reactive_upgrades = saved.reactive_upgrades.move()
+    context.reactive_upgrade_names = saved.reactive_upgrade_names.move()
+    context.reactive_local_keys = saved.reactive_local_keys.move()
+    context.reactive_shared_keys = saved.reactive_shared_keys.move()
+    context.taskgroups = saved.taskgroups.move()
     context.failure_carrier_root = saved.failure_carrier_root
     context.failure_success_view = saved.failure_success_view
     context.failure_inference = saved.failure_inference
-    context.inferred_failure_carrier = saved.inferred_failure_carrier
+    context.inferred_failure_carrier = saved.inferred_failure_carrier.move()
     context.callback_return_open = saved.callback_return_open
     context.callback_return_closed = saved.callback_return_closed
-    context.callback_return_row = saved.callback_return_row
-    context.failure_contract_source = saved.failure_contract_source
-    context.failure_repair = saved.failure_repair
-    context.function_name = saved.function_name
-    context.fallback_err_denial = saved.fallback_err_denial
+    context.callback_return_row = saved.callback_return_row.move()
+    context.failure_contract_source = saved.failure_contract_source.move()
+    context.failure_repair = saved.failure_repair.move()
+    context.function_name = saved.function_name.move()
+    context.fallback_err_denial = saved.fallback_err_denial.move()
     context.lost_tail_span = saved.lost_tail_span
     context.value_tail_span = saved.value_tail_span
     context.failure_direct_source = saved.failure_direct_source
     context.failure_union_general = saved.failure_union_general
     context.task_body_propagates = saved.task_body_propagates
-    context.iter_borrowed = saved.iter_borrowed.copy()
+    context.iter_borrowed = saved.iter_borrowed.move()
     context.binding_initializer = saved.binding_initializer
     context.source_nesting = saved.source_nesting
     context.implicit_loop_subject_depth = saved.implicit_loop_subject_depth
     context.subject_shorthand_depth = saved.subject_shorthand_depth
-    context.arithmetic_policy = saved.arithmetic_policy
+    context.arithmetic_policy = saved.arithmetic_policy.move()
     context.compiler_generated = saved.compiler_generated
     context.return_view_declared = saved.return_view_declared
 }
@@ -1561,11 +1562,11 @@ sema_check_context_return_expr_ids: fn(copied: SemaCheckContext, target: &SemaCh
 // Rolls `context` back to `mark` but keeps the source ids filed since it,
 // with the id count: the facts of an erased `#Off(.Release)` body stay inside it,
 // while its checked statements stay in the tree and keep their ids.
-sema_check_context_rollback_keep_expr_ids: fn(context: &SemaCheckContext, mark: SemaCheckContextMark) Never! {
+sema_check_context_rollback_keep_expr_ids: fn(context: &SemaCheckContext, mark: &&SemaCheckContextMark) Never! {
     kept := [Int]{}
     loop index in mark.filed_expr_ids..<context.filed_expr_ids.len() -> kept.push(context.filed_expr_ids[index])
     next_expr_id: context.next_expr_id
-    sema_check_context_rollback(context, mark)
+    sema_check_context_rollback(context, mark.move())
     loop id in kept {
         context.filed_expr_id_set[id] = true
         context.filed_expr_ids.push(id)
@@ -1772,21 +1773,21 @@ sema_scope_enter: fn(table: &SemaScopeTable, state: &SemaOwnershipState, owner: 
 sema_scope_leave: fn(table: &SemaScopeTable, state: &SemaOwnershipState) Never! {
     if table.current <= 0 -> return
     leaving := table.current
-    remaining_transfers := [SemaHardwareDMATransferFact]{}
-    loop fact in table.hardware_transfers {
-        if fact.buffer_frame != leaving -> remaining_transfers.push(fact.copy())
+    index := table.hardware_transfers.len()
+    loop index > 0 {
+        index -= 1
+        if table.hardware_transfers[index].buffer_frame == leaving -> _ := table.hardware_transfers.remove(index, .Slot)
     }
-    remaining_definite := [SemaHardwareDMATransferFact]{}
-    loop fact in table.hardware_definite_transfers {
-        if fact.scope_frame != leaving && fact.buffer_frame != leaving -> remaining_definite.push(fact.copy())
+    index = table.hardware_definite_transfers.len()
+    loop index > 0 {
+        index -= 1
+        if table.hardware_definite_transfers[index].scope_frame == leaving || table.hardware_definite_transfers[index].buffer_frame == leaving -> _ := table.hardware_definite_transfers.remove(index, .Slot)
     }
-    remaining_pending := [SemaHardwareDMATransferFact]{}
-    loop fact in table.hardware_pending_transfers {
-        if fact.buffer_frame != leaving -> remaining_pending.push(fact.copy())
+    index = table.hardware_pending_transfers.len()
+    loop index > 0 {
+        index -= 1
+        if table.hardware_pending_transfers[index].buffer_frame == leaving -> _ := table.hardware_pending_transfers.remove(index, .Slot)
     }
-    table.hardware_transfers = remaining_transfers
-    table.hardware_definite_transfers = remaining_definite
-    table.hardware_pending_transfers = remaining_pending
     sema_ownership_leave_scope(state)
     table.current = table.frames[leaving].parent
 }
@@ -2053,7 +2054,7 @@ sema_scope_pop_loop_label: fn(table: &SemaScopeTable) Never! {
 }
 
 // Appends one binding and records its position under its name.
-sema_scope_push_binding: fn(table: &SemaScopeTable, binding: SemaScopeBinding) Never! {
+sema_scope_push_binding: fn(table: &SemaScopeTable, binding: &&SemaScopeBinding) Never! {
     position: table.bindings.len()
     if sema_scope_name_slot(table, binding.symbol.name) == .Val(slot) {
         table.name_positions[slot].push(position)
@@ -2061,7 +2062,7 @@ sema_scope_push_binding: fn(table: &SemaScopeTable, binding: SemaScopeBinding) N
         name_rows_set(table.name_slots, binding.symbol.name, table.name_positions.len())
         table.name_positions.push([Int]{position})
     }
-    table.bindings.push(binding.copy())
+    table.bindings.push(binding.move())
 }
 
 // The `name_positions` row of `name`, if any binding ever had that name.

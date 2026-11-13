@@ -9106,7 +9106,7 @@ sema_stmt_check_unreachable_statement: fn(statement: Stmt, index: Int, statement
     dead_union_edges := [String]{}
     loop union_edge_index in dead_mark.failure_union_edges..<context.failure_union_edges.len() -> dead_union_edges.push(context.failure_union_edges[union_edge_index])
     dead_general: context.failure_union_general
-    sema_check_context_rollback(context, dead_mark)
+    sema_check_context_rollback(context, dead_mark.move())
     sema_scope_rollback(scopes, dead_scope_mark)
     // #3708: dead source still counts toward the body's failure rows.
     loop edge in dead_edges -> context.failure_edges.push(edge)
@@ -9420,7 +9420,7 @@ sema_stmt_check_dropped_prep_arm: fn(body: [Stmt], return_type: Type?, environme
     _ := sema_stmt_check_block(body, return_type, environment, program, scopes, state, tail_store, context, arm_diagnostics, "{owner}.dropped", loop_depth)
     sema_ownership_fork_rollback(state, fork)
     sema_ownership_fork_close(state, fork)
-    sema_check_context_rollback(context, context_mark)
+    sema_check_context_rollback(context, context_mark.move())
     sema_scope_rollback(scopes, scope_mark)
     loop diagnostic in arm_diagnostics {
         if diagnostic.code == "E0107" || diagnostic.code == "E0102" -> diagnostics.push(diagnostic)
@@ -9725,7 +9725,7 @@ sema_stmt_check_scoped_statement: fn(statement: Stmt, return_type: Type?, enviro
                     checked: sema_check_statements(body, return_type, environment, program, scopes, erased_state, tail_store, context, diagnostics, loop_depth)
                     erased_reasons := [String]{}
                     loop reason_index in erased_mark.incomplete_reasons..<context.incomplete_reasons.len() -> erased_reasons.push(context.incomplete_reasons[reason_index])
-                    if release_only -> sema_check_context_rollback_keep_expr_ids(context, erased_mark) else -> sema_check_context_rollback(context, erased_mark)
+                    if release_only -> sema_check_context_rollback_keep_expr_ids(context, erased_mark.move()) else -> sema_check_context_rollback(context, erased_mark.move())
                     sema_scope_rollback(scopes, erased_scope_mark)
                     if {
                         !checked.complete -> {
