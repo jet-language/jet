@@ -1,0 +1,19 @@
+# `jet eval CODE` reads a Core module by its full name with no `use` line
+# (D-CLI-EVAL1, #6281 c160): CODE that names `core.` and binds no `core` of
+# its own gets `use core`, which binds the Core root as a namespace. The write
+# runs under jet run's default authority, and its effects note names it. A
+# `core` that CODE binds itself stays its own.
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: XDG_CACHE_HOME={work}/xdg
+step exists: jet eval 'core.files.exists("nope.txt")'
+exit: 0
+stdout: = "false\n"
+step write: jet eval 'core.files.write("out.txt", "hi")'
+exit: 0
+stdout: = ""
+stderr: ~ "writes files" # the effects note names the write
+file: out.txt = "hi" # the write ran
+step own_binding: jet eval 'core := 2; core + 1'
+exit: 0
+stdout: = "3\n"

@@ -48,7 +48,7 @@ use {
         schema_cache_dir,
     ]
     jet_foundation.[BuildOptions, build_options_key, build_options_value]
-    jet_lexer.[TOKEN_EOF, TOKEN_KW_IF, TOKEN_LBRACE, TOKEN_LBRACKET, TOKEN_LPAREN, TOKEN_RBRACE, TOKEN_RBRACKET, TOKEN_RPAREN, TOKEN_SEMI, Token, lex]
+    jet_lexer.[TOKEN_COLON, TOKEN_COLON_EQ, TOKEN_DOT, TOKEN_EOF, TOKEN_IDENT, TOKEN_KW_IF, TOKEN_KW_USE, TOKEN_LBRACE, TOKEN_LBRACKET, TOKEN_LPAREN, TOKEN_RBRACE, TOKEN_RBRACKET, TOKEN_RPAREN, TOKEN_SEMI, Token, lex]
     jet_parser.[parse_source]
 }
 
@@ -264,20 +264,41 @@ jet_cli_script_cache_dir: fn() -> String? {
 // statements on lines of their own (jet_cli_eval_lines), its declarations
 // above `run: fn` (jet_cli_eval_items), kept as the `eval` entry file of its
 // source (jet_cli_entry_file). The file holds CODE as written, but for a
-// final value `if` (jet_cli_eval_final_value): the compile
-// request of an `eval` entry file (Request.jet jet_cli_driver_request) shows
-// the value of its last statement (JetSema Calls/Direct.jet
+// final value `if` (jet_cli_eval_final_if), and opens with `use core` when
+// CODE reads a Core module by its full name (jet_cli_eval_names_core): the
+// compile request of an `eval` entry file (Request.jet jet_cli_driver_request)
+// shows the value of its last statement (JetSema Calls/Direct.jet
 // sema_eval_entry_show).
 jet_cli_eval_file: fn(code: String) -> String? {
-    split: jet_cli_eval_items(jet_cli_eval_lines(code))
-    at: jet_cli_eval_final_if(split.body) ?? return jet_cli_entry_file("eval", "{split.items}{JET_CLI_EVAL_HEAD}{split.body}\n}}\n")
+    lines: jet_cli_eval_lines(code)
+    split: jet_cli_eval_items(lines)
+    items: if jet_cli_eval_names_core(lines) -> "use core\n{split.items}" else -> split.items
+    at: jet_cli_eval_final_if(split.body) ?? return jet_cli_entry_file("eval", "{items}{JET_CLI_EVAL_HEAD}{split.body}\n}}\n")
     head: jet_cli_repl_bytes(split.body, 0, at)
     tail: jet_cli_repl_bytes(split.body, at, split.body.count_bytes())
-    jet_cli_entry_file("eval", "{split.items}{JET_CLI_EVAL_HEAD}{head}({tail})\n}}\n")
+    jet_cli_entry_file("eval", "{items}{JET_CLI_EVAL_HEAD}{head}({tail})\n}}\n")
 }
 
 // The opening of the `run: fn` an `-e` body goes in.
 JET_CLI_EVAL_HEAD: "run: fn() {{\n"
+
+// Whether `lines` reads a Core module by its full name
+// (`core.files.exists("out.txt")`) and binds no `core` of its own (`use core`,
+// `use core: …`, `core: …`, `core := …`). A one-liner has no room for a `use`
+// line, so its entry file gets `use core`, which binds the Core root as a
+// namespace, as it does in a file.
+jet_cli_eval_names_core: fn(lines: String) -> Bool Never! {
+    tokens: lex(lines.bytes()).tokens
+    reads := false
+    loop (index, token) in tokens {
+        if token.kind != TOKEN_IDENT || jet_cli_repl_bytes(lines, token.span.start, token.span.end) != "core" -> next
+        before: if index > 0 -> tokens[index - 1].kind else -> TOKEN_EOF
+        after: if index + 1 < tokens.len() -> tokens[index + 1].kind else -> TOKEN_EOF
+        if (before == TOKEN_KW_USE && after != TOKEN_DOT) || after == TOKEN_COLON || after == TOKEN_COLON_EQ -> return false
+        if after == TOKEN_DOT && before != TOKEN_DOT -> reads = true
+    }
+    reads
+}
 
 // Where the final `if` of `body` starts when that `if` is a value: `->`
 // branches with an `else`, or a dispatch (`if x == { … }`). The body of

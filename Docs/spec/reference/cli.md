@@ -797,7 +797,11 @@ refused with E2104, and `jet dev -e` with E2102. As a REPL cell does, CODE
 may declare: a line of it (between `;`s) that is a declaration alone, such as
 a type, a function, an `impl` or a `use`, goes above `run: fn`, so
 `jet -e 'S: struct { amount: Float }; input.csv<S>().map(fn(s) { s.amount }).sum()' sales.csv`
-prints the column's sum. A binding such as `x: 1` stays in the body.
+prints the column's sum. A binding such as `x: 1` stays in the body. A Core
+module is read by its full name with no `use` line
+(`jet -e 'core.files.exists("out.txt")'`): when CODE names `core.` and binds
+no `core` of its own, its file opens with `use core`, which binds the Core
+root as a namespace, as it does in a file.
 
 CODE reads the program's input through plain Core names, which work the same
 in a script: `input` is the lines of the files named after CODE, else of
