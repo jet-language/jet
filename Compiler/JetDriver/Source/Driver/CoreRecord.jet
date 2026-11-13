@@ -43,7 +43,7 @@ JET_CORE_RECORD_DECL_ROWS: 7
 JET_CORE_RECORD_CBOR: core_record_cbor.CBOROptions{max_depth: 4096, max_items: 1000000000, max_bytes: 1073741824, require_canonical: true}
 
 // An open record: its verified reader and the two key columns, in element
-// order.
+// order, with each module key's position by module identity.
 JetDriverCoreRecord: struct {
     reader: RecordReader
     compiler: String
@@ -51,6 +51,7 @@ JetDriverCoreRecord: struct {
     core_digest: String
     module_names: [String]
     module_identities: [String]
+    module_rows: [String:Int]
     body_modules: [String]
     body_keys: [String]
 }
@@ -193,13 +194,17 @@ jet_driver_core_record_open: fn(bytes: [U8]) -> JetDriverCoreRecord Err! {
         core_digest: jet_driver_core_record_text(header, "core_digest") ?? return Err(err),
         module_names: [String]{},
         module_identities: [String]{},
+        module_rows: [String:Int]{},
         body_modules: [String]{},
         body_keys: [String]{},
     }
     loop index in 0..<jet_driver_core_record_count(record.reader, JET_CORE_RECORD_MODULE_KEYS) {
         key: jet_driver_core_record_value(record.reader, JET_CORE_RECORD_MODULE_KEYS, index) ?? return Err(err)
+        identity: jet_driver_core_record_text(key, "identity") ?? return Err(err)
+        if record.module_rows.get(identity) != None -> return Err("the Core record keys module {identity} twice")
+        record.module_rows[identity.copy()] = index
         record.module_names.push(jet_driver_core_record_text(key, "name") ?? return Err(err))
-        record.module_identities.push(jet_driver_core_record_text(key, "identity") ?? return Err(err))
+        record.module_identities.push(identity.copy())
     }
     loop index in 0..<jet_driver_core_record_count(record.reader, JET_CORE_RECORD_BODY_KEYS) {
         key: jet_driver_core_record_value(record.reader, JET_CORE_RECORD_BODY_KEYS, index) ?? return Err(err)
@@ -229,8 +234,21 @@ jet_driver_core_record_body: fn(record: JetDriverCoreRecord, index: Int) -> FnBo
 // The finalized registration module of the record's module `index` (in
 // module key order).
 jet_driver_core_record_registration: fn(record: JetDriverCoreRecord, index: Int) -> SemaRegistrationModule Err! {
+    bytes: jet_driver_core_record_registration_bytes(record, index) ?? return Err(err)
+    registration: jet_driver_core_record_registration_decode(bytes, record.module_names[index]) ?? return Err(err)
+    Ok(registration)
+}
+
+// The encoded registration row of the record's module `index`, read on the
+// load thread so a parse thread decodes it without the record.
+jet_driver_core_record_registration_bytes: fn(record: JetDriverCoreRecord, index: Int) -> [U8] Err! {
     bytes: jet_driver_core_record_row(record.reader, JET_CORE_RECORD_REGISTRATION_ROWS, index) ?? return Err(err)
-    registration: core_record_cbor.decode<SemaRegistrationModule>(bytes, JET_CORE_RECORD_CBOR) ?? return Err("Core module `{record.module_names[index]}` has a registration row that doesn't decode: {jet_driver_core_record_field_errors(err)}")
+    Ok(bytes)
+}
+
+// A registration row's bytes decoded; `name` is its module's name.
+jet_driver_core_record_registration_decode: fn(bytes: [U8], name: String) -> SemaRegistrationModule Err! {
+    registration: core_record_cbor.decode<SemaRegistrationModule>(bytes, JET_CORE_RECORD_CBOR) ?? return Err("Core module `{name}` has a registration row that doesn't decode: {jet_driver_core_record_field_errors(err)}")
     Ok(registration)
 }
 

@@ -19,7 +19,7 @@ use {
     record_runtime: jet.runtime.sys
     record_time: core.time
     jet_backend.[x64_executable_add_part]
-    jet_driver.[JetDriverCompileMode, JetDriverCoreRecordCounts, JetDriverLoweringInputs, JetDriverVerbOutput, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USAGE, JET_DRIVER_EXIT_USER_ERROR, jet_driver_check_outcome, jet_driver_core_record_round_trip, jet_driver_core_record_write, jet_driver_lowering_inputs, jet_driver_present_diagnostics]
+    jet_driver.[JetDriverCompileMode, JetDriverCoreRecord, JetDriverCoreRecordCounts, JetDriverLoweringInputs, JetDriverVerbOutput, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USAGE, JET_DRIVER_EXIT_USER_ERROR, jet_driver_check_outcome, jet_driver_core_record_open, jet_driver_core_record_round_trip, jet_driver_core_record_write, jet_driver_lowering_inputs, jet_driver_present_diagnostics]
     jet_foundation.[sha256_bytes, sha256_hex_bytes]
 }
 
@@ -89,6 +89,19 @@ jet_cli_core_record_embedded: fn() -> JetDriverVerbOutput {
     bytes: record_runtime.image_part(JET_CLI_CORE_RECORD_PART, 0, size) ?? return jet_cli_ice("the Core record part `{JET_CLI_CORE_RECORD_PART}` has a size but no bytes")
     counts: jet_driver_core_record_round_trip(bytes) ?? return jet_cli_ice("the embedded Core record doesn't read back: {err}")
     JetDriverVerbOutput{stdout: "core-record embedded: {jet_cli_core_record_counts(counts)}, sha256 {jet_cli_core_record_digest(bytes)}, every row read back and encoded to the same bytes, {watch.elapsed_millis()} ms\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+}
+
+// The Core record a compile of `core_input` loads its Core modules from
+// (JetDriverCompileRequest.core_record): this jet's record part, opened, when
+// the compile reads the Core sources built into this jet. A toolchain tree's
+// Core (jet_cli_core_sources) may differ from them, so a compile that reads
+// it parses its sources, as does every compile of a jet without the part.
+jet_cli_core_record: fn(core_input: String) -> JetDriverCoreRecord? Never! {
+    if jet_cli_toolchain_root(core_input) == .Found(_) -> return None
+    size: record_runtime.image_part_size(JET_CLI_CORE_RECORD_PART) ?? return None
+    bytes: record_runtime.image_part(JET_CLI_CORE_RECORD_PART, 0, size) ?? panic("the Core record part `{JET_CLI_CORE_RECORD_PART}` has a size but no bytes")
+    record: jet_driver_core_record_open(bytes) ?? panic("this jet's Core record doesn't open: {err}")
+    Val(record)
 }
 
 // A file operand: present and not a flag.

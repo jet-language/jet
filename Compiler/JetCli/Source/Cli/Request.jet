@@ -1754,7 +1754,9 @@ jet_cli_prepare_overlays: fn(anchor: String, entry: String, overlays: [JetCLIOve
 }
 
 // The request that compiles `snapshot` against the Core sources of the
-// toolchain of `core_input` (the snapshot's entry when `None`); `core_tests`
+// toolchain of `core_input` (the snapshot's entry when `None`), or against
+// this jet's Core record when those are the sources built in
+// (jet_cli_core_record); `core_tests`
 // as JetDriverCompileRequest.core_tests, its row compiled from
 // `core_tested_source` when given (the file with its doctest claims,
 // Doctests.jet). The organization's gate policy (`JET_ORG_UNSAFE_POLICY`) is
@@ -1776,6 +1778,7 @@ jet_cli_prepare_request: fn(snapshot: JetDriverAuthorizedSourceSnapshot, color: 
         .Err(error) -> return JetCLIPrepared.Refused{output: JetDriverVerbOutput{stdout: "", stderr: jet_driver_report_problems("", "", error.diagnostics, color, true), exit_code: JET_DRIVER_EXIT_USER_ERROR}}
     }
     request := jet_cli_driver_request(snapshot, core_sources, threads, mode)
+    request.core_record = jet_cli_core_record(core_input ?? snapshot.entry_path)
     request.organization_policy = organization.declarations.move()
     request.organization_deny = organization.deny.move()
     request.organization_source = organization.source.move()

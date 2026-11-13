@@ -53,6 +53,7 @@ use {
         SemaLayoutProjectionRow,
         SemaComptimeItemValue,
         SemaRegistrationImportEdge,
+        SemaRegistrationModule,
         SemaSourceOrigin,
         SemaSourceSegment,
         SchemaSnapshot,
@@ -261,6 +262,12 @@ JetDriverCompileRequest: struct {
     authorized_sources: JetDriverAuthorizedSourceSnapshot
     canonical_effect_source: String
     core_sources: [JetDriverCoreSource]
+    // The precompiled Core record the running jet carries (CoreRecord.jet):
+    // a Core module it holds loads that module's finalized registration row,
+    // never its source (Loader.jet JetDriverParseJob.Record). None, and in a
+    // compile of every Core body (`every_core_body`, `core_tests`), each
+    // Core module parses its source.
+    core_record: JetDriverCoreRecord?{None}
     host_facts: JetDriverHostFacts
     eval_config: JetEvalConfig
     record_store: JetDriverRecordStore?
@@ -706,6 +713,13 @@ JetDriverLoadedModule: struct {
     namespace_names: [String]{[String]{}}
     namespace_private: [String]{[String]{}}
     namespace_refs: [String]{[String]{}}
+    // A Core module the Core record holds: its module key position there
+    // (-1 for a parsed module) and its finalized registration row, whose
+    // tree is `program`, held without it until the graph seeds the row. The
+    // row sits in a list of one, so the seed pops it out of the loaded
+    // module (Collections.jet compiler_transfer_rows) and never copies it.
+    core_record_index: Int{-1}
+    core_registration: [SemaRegistrationModule]{[SemaRegistrationModule]{}}
 }
 
 JetDriverCompileTrace: struct {

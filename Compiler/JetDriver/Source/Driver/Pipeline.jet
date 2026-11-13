@@ -3647,6 +3647,8 @@ jet_driver_registration_module_inputs: fn(
     inputs := [SemaRegistrationModuleInput]{}
     source_positions: jet_driver_source_file_positions(source_files)
     loop loaded_index in 0..<modules.len() {
+        // A module the Core record holds seeds the graph (jet_driver_core_record_seeds).
+        if modules[loaded_index].core_record_index >= 0 -> next
         // Fields are read through the index: a local binding of the loaded
         // module would copy its whole parsed program.
         unit_index: modules[loaded_index].source_unit_index
@@ -4032,9 +4034,13 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
     // every other compile hands them to registration.
     release_programs: !(checked_projection || request.mode == JetDriverCompileMode.Doc)
     registration_inputs := jet_driver_registration_module_inputs(load.modules, load.source_units, load.source_files, load.packages, foreign_provider_inputs, load.diagnostics, request.core_sources, release_programs) ?? return jet_driver_compile_result(load, load.diagnostics, Val(JetDriverStage.Load), false, trace)
+    core_seeds := [SemaRegistrationModule]{}
+    if request.core_record == .Val(record) {
+        core_seeds = jet_driver_core_record_seeds(load.modules, record.module_names.len(), release_programs) ?? return jet_driver_compile_internal_result(load, trace, "the Core record can't seed the graph: {err}")
+    }
     canonical_effect_module_identity := canonical_effect_module.module_identity
     registration_inputs.push(canonical_effect_module)
-    registration_module_count := registration_inputs.len()
+    registration_module_count := core_seeds.len() + registration_inputs.len()
     package_policies: jet_driver_registration_package_policies(request, load)
     // #4319: the graph counts its lookups only while a trace is open.
     counting := false
@@ -4044,7 +4050,7 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
     }
     registration_graph := sema_registration_prepare_graph(
         registration_inputs,
-        [SemaRegistrationModule]{},
+        core_seeds,
         load.imports,
         load.package_identity,
         load.entry_module_identity,

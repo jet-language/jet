@@ -397,6 +397,10 @@ jet_driver_compiler_check: fn(input: JetDriverCompilerCheckInput) -> JetDriverCo
     jet_driver_script_helpers(input.request, load, providers, target)
     registration_inputs_option := jet_driver_registration_module_inputs(load.modules, load.source_units, load.source_files, load.packages, providers, load.diagnostics, input.request.core_sources, false)
     registration_inputs := registration_inputs_option ?? return jet_driver_compiler_check_failure(load, JetDriverStage.Load, None)
+    core_seeds := [SemaRegistrationModule]{}
+    if input.request.core_record == .Val(record) {
+        core_seeds = jet_driver_core_record_seeds(load.modules, record.module_names.len(), false) ?? return jet_driver_compiler_check_failure(load, JetDriverStage.Check, Val("the Core record can't seed the graph: {err}"))
+    }
     canonical_identity := canonical.module_identity
     registration_inputs.push(canonical)
     loop index in 0..<registration_inputs.len() {
@@ -405,10 +409,10 @@ jet_driver_compiler_check: fn(input: JetDriverCompilerCheckInput) -> JetDriverCo
             jet_driver_script_carry_parameters(load, registration_inputs[index].program)
         }
     }
-    registration_count: registration_inputs.len()
+    registration_count: core_seeds.len() + registration_inputs.len()
     registration := sema_registration_prepare_graph(
         registration_inputs,
-        [SemaRegistrationModule]{},
+        core_seeds,
         load.imports,
         load.package_identity,
         load.entry_module_identity,

@@ -109,6 +109,7 @@ use {
     ]
     jet_sema.[
         SemaRegistrationImportEdge,
+        SemaRegistrationModule,
         SemaSourceOrigin,
         SemaSourceSegment,
         sema_cli_entry_expand,
@@ -3522,6 +3523,12 @@ JetDriverParsedUnit: struct {
     tokens: Int{0}
     line_starts: [Int]{[Int]{}}
     words: JetDriverUnitWords?{None}
+    // A Core module the Core record holds (JetDriverParseJob.Record): its
+    // module key position there, and its finalized registration row (a list
+    // of one, as JetDriverLoadedModule holds it), whose tree is `parsed`'s
+    // program.
+    core_record_index: Int{-1}
+    core_registration: [SemaRegistrationModule]{[SemaRegistrationModule]{}}
 }
 
 jet_driver_empty_core_identifier_demand: fn() -> JetDriverCoreIdentifierDemand Never! {
@@ -3926,6 +3933,10 @@ JetDriverParseJob: enum {
     // `tested` unit is the Core source a `jet test` of that file runs
     // (JetDriverCompileRequest.core_tests): it keeps its #Test controls.
     Core(text: String, module_name: String, owned_members: [String], runtime: Bool, tested: Bool)
+    // A Core module the Core record holds: its encoded registration row, the
+    // module's name, and its module key position. Decoding it replaces the
+    // lex and the parse: the row's tree is the program the record checked.
+    Record(row: [U8], module_name: String, index: Int)
     // A Core unit whose row is out of range: an empty program.
     Missing
 }
@@ -3988,7 +3999,20 @@ jet_driver_parse_job: fn(request: JetDriverCompileRequest, unit: JetDriverSource
     }
     if unit.file_index < 0 || unit.file_index >= request.core_sources.len() -> return JetDriverParseJob.Missing
     row: request.core_sources[unit.file_index]
+    if request.core_record == .Val(record) {
+        if jet_driver_core_record_loads(request, record) && record.module_rows.get(jet_driver_unit_module_identity(unit)) == .Val(index) {
+            bytes: jet_driver_core_record_registration_bytes(record, index) ?? panic("the Core record: {err}")
+            return JetDriverParseJob.Record{row: bytes, module_name: row.module_name, index: index}
+        }
+    }
     JetDriverParseJob.Core{text: row.source(), module_name: row.module_name, owned_members: row.owned_members, runtime: row.runtime, tested: request.core_tests != "" && row.path == request.core_tests}
+}
+
+// Whether the Core record loads this compile's Core modules: it was checked
+// for the compile's target, and the compile doesn't check Core from its
+// source (`every_core_body`, `core_tests`).
+jet_driver_core_record_loads: fn(request: JetDriverCompileRequest, record: JetDriverCoreRecord) -> Bool Never! {
+    !request.every_core_body && request.core_tests == "" && request.build_os == "" && (request.host_facts.target_triple ?? "") == record.target
 }
 
 jet_driver_parse_job_bytes: fn(job: JetDriverParseJob) -> Int Never! {
@@ -3997,6 +4021,7 @@ jet_driver_parse_job_bytes: fn(job: JetDriverParseJob) -> Int Never! {
         .RuntimeEntry(text) -> text.len()
         .Prelude(text) -> text.len()
         .Core(text, _, _, _, _) -> text.len()
+        .Record(row, _, _) -> row.len()
         .Missing -> 0
     }
 }
@@ -4010,7 +4035,25 @@ jet_driver_parse_one: fn(job: JetDriverParseJob, threads: CompilerThreads) -> Je
         .RuntimeEntry(text) -> jet_driver_parse_core_source(text, "", [String]{}, true, true, threads)
         .Prelude(text) -> jet_driver_parse_prelude_source(text, threads)
         .Core(text, module_name, owned_members, runtime, tested) -> jet_driver_parse_core_source(text, module_name, owned_members, runtime, tested, threads)
+        .Record(row, module_name, index) -> jet_driver_core_record_parsed_unit(row, module_name, index)
         .Missing -> JetDriverParsedUnit{parsed: ParseResult{program: ast_program(), diagnostics: [Diagnostic]{}}, demand: jet_driver_empty_core_identifier_demand()}
+    }
+}
+
+// A Core module the Core record holds: its registration row decoded, the
+// row's tree the unit's program, the row kept without it. It spells no word
+// and demands nothing: the record's check loaded every module it names, and
+// the row's imports are already final. A record this jet wrote whose row
+// doesn't decode is a compiler fault.
+jet_driver_core_record_parsed_unit: fn(row: [U8], module_name: String, index: Int) -> JetDriverParsedUnit {
+    registration := jet_driver_core_record_registration_decode(row, module_name) ?? panic("the Core record: {err}")
+    program := registration.program.move()
+    registration.program = ast_program()
+    JetDriverParsedUnit{
+        parsed: ParseResult{program: program.move(), diagnostics: [Diagnostic]{}},
+        demand: jet_driver_empty_core_identifier_demand(),
+        core_record_index: index,
+        core_registration: [SemaRegistrationModule]{registration.move()},
     }
 }
 
@@ -4513,6 +4556,8 @@ jet_driver_parse_wave: fn(request: JetDriverCompileRequest, source_units: [JetDr
                     core_input_bytes += text.count_bytes()
                     core_source_units += 1
                 }
+                // A record row is no source.
+                .Record(_, _, _) -> {}
                 .Missing -> {}
             }
             user_jobs.push(user_job)
@@ -5084,9 +5129,6 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
         is_core: jet_driver_unit_is_core(unit)
         is_runtime_entry: entry_module != "" && source_unit_index == (entry_index ?? 0)
         importer_core: is_core || is_runtime_entry
-        // A Core module (public module, private part or runtime unit) defers
-        // its private imports until reached code spells their aliases.
-        defers: reach.enabled && is_core && !is_runtime_entry
         deferred := [JetDriverScopedImport]{}
         // A package is one namespace. Loading any file of a
         // package loads every other file of it (and, through their imports,
@@ -5104,6 +5146,14 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
         jet_driver_take_line_starts(source_units[source_unit_index].source_segments, parsed_unit.line_starts.move())
         demand: parsed_unit.demand.move()
         words := parsed_unit.words.move()
+        // A module the Core record holds loads its finalized row: its imports
+        // are final, so none waits on reach and none is added.
+        core_record_index: parsed_unit.core_record_index
+        core_registration := parsed_unit.core_registration.move()
+        recorded: core_registration.len() > 0
+        // A Core module (public module, private part or runtime unit) defers
+        // its private imports until reached code spells their aliases.
+        defers: reach.enabled && is_core && !is_runtime_entry && !recorded
         if !is_core && !spells_program {
             spells_program = if words == {
                 .Val(found) -> found.words.contains("program") || found.words.contains("compiler")
@@ -5112,7 +5162,9 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
         }
         parse_result := parsed_unit.parsed.move()
         // Runtime member imports consult shared rows only on the load thread.
-        if importer_core -> jet_driver_core_runtime_member_imports(parse_result.program, request.core_sources) else -> jet_driver_member_imports(parse_result.program, request, source_units, unit, catalog.packages, source_index_result.index)
+        if !recorded {
+            if importer_core -> jet_driver_core_runtime_member_imports(parse_result.program, request.core_sources) else -> jet_driver_member_imports(parse_result.program, request, source_units, unit, catalog.packages, source_index_result.index)
+        }
         parse_diagnostic_start: diagnostics.len()
         loop diagnostic in parse_result.diagnostics -> diagnostics.push(diagnostic)
         loop parse_diagnostic_index in parse_diagnostic_start..<diagnostics.len() {
@@ -5612,7 +5664,7 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
         // copy: reach admits the same rows from unit_words below.
         if unit_words.held.len() > 0 -> held_modules.push(JetDriverReachHeldModule{loaded: modules.len(), declarations: unit_words.held.copy()})
         if reach.enabled {
-            reach_unit: jet_driver_reach_admit(reach, modules.len(), unit.module_name, unit_words, program.imports, !is_core || is_runtime_entry)
+            reach_unit: jet_driver_reach_admit(reach, modules.len(), unit.module_name, unit_words, program.imports, !is_core || is_runtime_entry || recorded)
             loop scoped in deferred -> jet_driver_reach_defer(reach, reach_unit, scoped)
             if defers {
                 jet_driver_reach_core_demands(reach, reach_unit, demand, path_words, path_modules)
@@ -5622,6 +5674,10 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
         // Pushed last, so the loop reads its own program instead of a copy of
         // the module row's.
         modules.push(jet_driver_loaded_module(source_unit_index, unit, module_identity, program, declared_modules.get(source_unit_index) ?? ""))
+        if recorded {
+            modules[modules.len() - 1].core_record_index = core_record_index
+            modules[modules.len() - 1].core_registration = core_registration.move()
+        }
         loop import_diagnostic_index in import_diagnostic_start..<diagnostics.len() {
             diagnostics[import_diagnostic_index] = diagnostic_with_source_path(diagnostics[import_diagnostic_index], unit.path, 0)
         }

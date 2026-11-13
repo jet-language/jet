@@ -1,0 +1,91 @@
+// Loading a Core module from the precompiled Core record (Loader.jet
+// JetDriverParseJob.Record): its registration row decodes into the unit's
+// program with no source lexed, and the loaded rows seed the graph
+// (CoreRecordRebase.jet jet_driver_core_record_seeds).
+use {
+    load_cbor: core.encoding.cbor
+    jet_parser.[parse_source]
+    jet_sema.[
+        SemaBuildFacts, SemaForeignProviderInput, SemaRegistrationForeignHandleFacts,
+        SemaRegistrationImportEdge, SemaRegistrationModule,
+        SemaRegistrationModuleInput, SemaSourceOrigin, SemaSourceSegment,
+        sema_registration_prepare_graph,
+    ]
+    jet_driver.[JetDriverLoadedModule, JetDriverParseJob, jet_driver_canonical_effect_module, jet_driver_core_record_seeds, jet_driver_parse_one]
+    jet_foundation.[Span, ast_program, compiler_threads_single, jet_target_machine_hosted]
+}
+
+LOAD_EFFECTS: "IO: struct {{\n    impl Effect {{}}\n}}\nPanic: struct {{\n    impl Effect {{}}\n}}\n"
+LOAD_MAIN: "Point: struct {{\n    x: Int\n}}\n\nmain: fn() {{\n}}\n"
+
+// The registered row of `LOAD_MAIN`, as a record holds it.
+core_record_load_row: fn() -> SemaRegistrationModule {
+    effects := jet_driver_canonical_effect_module(LOAD_EFFECTS) ?? panic("the canonical effect source does not parse")
+    effect_identity: effects.module_identity.copy()
+    parsed := parse_source(LOAD_MAIN.bytes())
+    assert_eq(parsed.diagnostics.len(), 0)
+    segment: SemaSourceSegment{generated: Span{start: 0, end: LOAD_MAIN.len()}, source_file: "main.jet", source_start: 0, line_starts: [Int]{0}, origin: SemaSourceOrigin.Snapshot}
+    main: SemaRegistrationModuleInput{package_identity: "load", module_identity: "load::main", module_name: "main", core_source_alias: "", module_path: "main.jet", source_file: "main.jet", source_segments: [SemaSourceSegment]{segment}, source_origin: SemaSourceOrigin.Snapshot, program: parsed.program.move(), foreign_handles: [SemaRegistrationForeignHandleFacts]{}, source: LOAD_MAIN}
+    facts: SemaBuildFacts{package_name: "load", package_version: "0.1.0", os: "linux", profile: "dev", stamp_git: None, stamp_dirty: false, stamp_toolchain: "fixture", stamp_at: ""}
+    graph := sema_registration_prepare_graph([SemaRegistrationModuleInput]{main, effects}, [SemaRegistrationModule]{}, [SemaRegistrationImportEdge]{}, "load", "load::main", effect_identity, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), facts, false, compiler_threads_single())
+    rows := graph.modules.move()
+    loop rows.len() > 0 {
+        row := rows.pop() ?? break
+        if row.module_identity == "load::main" -> return row
+    }
+    panic("the fixture registered no main module")
+}
+
+// A loaded module the record holds at key position `index`: its tree is the
+// program, its row held without it.
+core_record_load_module: fn(row: SemaRegistrationModule, index: Int) -> JetDriverLoadedModule {
+    held := row.copy()
+    program := held.program.move()
+    held.program = ast_program()
+    JetDriverLoadedModule{source_unit_index: 0, source_identity: "load:main.jet", package_identity: row.package_identity, module_identity: row.module_identity, module_name: row.module_name, program: program.move(), core_record_index: index, core_registration: [SemaRegistrationModule]{held.move()}}
+}
+
+#Test("a record row loads as the program it holds, with no source lexed") {
+    row := core_record_load_row()
+    items: row.program.items.len()
+    assert(items > 0)
+    bytes: load_cbor.to_bytes_canonical(row) ?? panic("the registration row has no record encoding: {err}")
+    unit := jet_driver_parse_one(JetDriverParseJob.Record{row: bytes, module_name: "main", index: 3}, compiler_threads_single())
+    assert_eq(unit.parsed.diagnostics.len(), 0)
+    assert_eq(unit.parsed.program.items.len(), items)
+    assert_eq(unit.tokens, 0)
+    assert_eq(unit.lines, 0)
+    assert(unit.words == None)
+    assert_eq(unit.core_record_index, 3)
+    assert_eq(unit.core_registration.len(), 1)
+    registration := unit.core_registration.pop() ?? panic("the record unit kept no registration row")
+    assert_eq(registration.module_identity, "load::main")
+    assert_eq(registration.program.items.len(), 0)
+    assert_eq(registration.nominals.len(), row.nominals.len())
+}
+
+#Test("loaded record rows seed the graph in load order and take their trees back") {
+    row := core_record_load_row()
+    items: row.program.items.len()
+    modules := [JetDriverLoadedModule]{core_record_load_module(row, 1)}
+    seeds := jet_driver_core_record_seeds(modules, 2, true) ?? panic("the record rows don't seed: {err}")
+    assert_eq(seeds.len(), 1)
+    assert_eq(seeds[0].module_identity, "load::main")
+    assert_eq(seeds[0].program.items.len(), items)
+    assert_eq(modules[0].core_registration.len(), 0)
+    // Copied, not moved, when a later stage reads the loaded programs again.
+    kept := [JetDriverLoadedModule]{core_record_load_module(row, 0)}
+    copied := jet_driver_core_record_seeds(kept, 1, false) ?? panic("the record rows don't seed: {err}")
+    assert_eq(copied[0].program.items.len(), items)
+    assert_eq(kept[0].program.items.len(), items)
+}
+
+#Test("a record row loaded twice or out of the record's range doesn't seed") {
+    row := core_record_load_row()
+    twice := [JetDriverLoadedModule]{core_record_load_module(row, 0), core_record_load_module(row, 0)}
+    twice_seeds := jet_driver_core_record_seeds(twice, 1, true) ?? [SemaRegistrationModule]{}
+    assert_eq(twice_seeds.len(), 0)
+    beyond := [JetDriverLoadedModule]{core_record_load_module(row, 2)}
+    beyond_seeds := jet_driver_core_record_seeds(beyond, 2, true) ?? [SemaRegistrationModule]{}
+    assert_eq(beyond_seeds.len(), 0)
+}
