@@ -9,6 +9,7 @@ StrayCharacter: struct {
     impl Diagnostic {
         code: "E0001"
         stage: [.Jet]
+        meaning: "A character or escape that belongs to no token"
         no_fix: .Behavior
         what: fn(self) -> String { "Character/escape/lone brace means nothing here" }
         why: fn(self) -> String { "Outside quoted text, every character must belong to a name, number, operator or punctuation mark, and inside it a backslash must start a known escape" }
@@ -20,6 +21,7 @@ UnterminatedText: struct {
     impl Diagnostic {
         code: "E0002"
         stage: [.Jet]
+        meaning: "Text, an interpolation or a block comment left open at the end of the file"
         no_fix: .Behavior
         what: fn(self) -> String { "Unterminated text literal, interpolation, or block comment" }
         why: fn(self) -> String { "Quoted text, an interpolated value and a block comment each need their closing mark before the file ends" }
@@ -321,6 +323,7 @@ DuplicateAccessMarker: struct {
     impl Diagnostic {
         code: "E0029"
         stage: [.Parse]
+        meaning: "A parameter that carries two access markers"
         what: fn(self) -> String { "Two access markers on one parameter" }
         why: fn(self) -> String { "A parameter has one access mode, so a second access marker can only repeat or contradict the first" }
         fix: fn(self) -> String { "Keep exactly one access marker on the parameter." }
@@ -518,6 +521,7 @@ RetiredOptionalChainFieldsOnly: struct {
 OptionalChainOnNonOptional: struct {
     impl Diagnostic {
         code: "E0047"
+        meaning: "Optional chaining (`?.`) on a value that can't be missing"
         what: fn(self) -> String { "`?.` is used on a value that isn't optional" }
         why: fn(self) -> String { "Optional chaining stops at a missing link, so its left side must be a `T?` that can be missing" }
         fix: fn(self) -> String { "Make the left operand optional (`T?`) before using `?.`." }
@@ -684,6 +688,7 @@ CompileTimePrefixOnRule: struct {
     impl Diagnostic {
         code: "E0063"
         stage: [.Parse]
+        meaning: "An applied rule written with the compile-time prefix `@` instead of `#`"
         what: fn(self) -> String { "Teaching: applied rules use `#`, not the compile-time/fact-read prefix `@`" }
         why: fn(self) -> String { "`#` marks attributes, instructions and properties; prefix `@` marks compile-time names and fact reads" }
         fix: fn(self) -> String { "Use `#` for an applied rule and reserve `@` for compile-time or fact reads." }
@@ -694,6 +699,7 @@ InvalidForeignBody: struct {
     impl Diagnostic {
         code: "E0064"
         stage: [.Parse]
+        meaning: "An inline foreign function whose body isn't one raw foreign-source string"
         what: fn(self) -> String { "`#FFI(<lang>) fn` body is not one triple-quoted raw foreign-source string" }
         why: fn(self) -> String { "An inline foreign function carries its foreign source as one string; the Jet signature above it is the checked contract" }
         fix: fn(self) -> String { "Give the foreign function one triple-quoted raw foreign-source string body." }
@@ -732,6 +738,7 @@ ReservedDunderName: struct {
     impl Diagnostic {
         code: "E0067"
         stage: [.Lex, .Sema]
+        meaning: "A source-written name that starts with a double underscore"
         no_fix: .Ambiguous
         what: fn(self) -> String { "Source-written `__name` is reserved for Jet and generated tooling; visible machine names use `__jet_`" }
         why: fn(self) -> String { "Double-underscore names belong to the compiler, generated binders, the debugger, the serializer, and tools." }
@@ -1183,6 +1190,7 @@ DuplicateDefinition: struct {
 BuiltinRedefined: struct {
     impl Diagnostic {
         code: "E0106"
+        meaning: "A declaration that takes over a built-in name"
         what: fn(self) -> String { "Redefining a built-in" }
         why: fn(self) -> String { "Built-in names mean the same thing in every file, so a declaration can't take one over" }
         fix: fn(self) -> String { "Rename the declaration so it does not shadow a built-in." }
@@ -1294,6 +1302,7 @@ MissingBlockValue: struct {
 LoopControlOutsideLoop: struct {
     impl Diagnostic {
         code: "E0115"
+        meaning: "`break` or `next` with no enclosing loop"
         what: fn(self) -> String { "`break`/`next` outside a loop" }
         why: fn(self) -> String { "`break` and `next` steer the nearest enclosing loop, and here there is none" }
         fix: fn(self) -> String { "Use `break` or `next` only inside a loop." }
@@ -1351,6 +1360,7 @@ RetiredMarkerAtPrefix: struct {
 ValuelessCallUsedAsValue: struct {
     impl Diagnostic {
         code: "E0116"
+        meaning: "A call that returns nothing, used where a value is needed"
         what: fn(self) -> String { "Valueless call used as a value" }
         why: fn(self) -> String { "This call returns nothing, so there is no value to use here" }
         fix: fn(self) -> String { "Use a value-producing call here, or discard the valueless call as a statement." }
@@ -1439,6 +1449,7 @@ InvalidLoopStride: struct {
     impl Diagnostic {
         code: "E0123"
         stage: [.Sema, .Runtime]
+        meaning: "A loop stride of zero or less"
         no_fix: .Behavior
         what: fn(self) -> String { "Loop stride must be a positive Int" }
         why: fn(self) -> String { "A stride of zero or less would never reach the end of the range" }
@@ -1449,6 +1460,7 @@ InvalidLoopStride: struct {
 BranchTypeMismatch: struct {
     impl Diagnostic {
         code: "E0124"
+        meaning: "An `if` value whose branches give different types"
         no_fix: .Ambiguous
         what: fn(self) -> String { "The branches of an `if` used as a value produce different types" }
         why: fn(self) -> String { "An `if` used as a value must give the same type on every path" }
@@ -1459,6 +1471,7 @@ BranchTypeMismatch: struct {
 DefaultReadsLaterParameter: struct {
     impl Diagnostic {
         code: "E0126"
+        meaning: "A parameter default that reads a later parameter"
         what: fn(self) -> String { "Default expression references a later parameter" }
         why: fn(self) -> String { "Defaults are filled from left to right, so a parameter isn't known yet to the defaults before it" }
         fix: fn(self) -> String { "Move the referenced parameter before the parameter that uses it as a default." }
@@ -1468,6 +1481,7 @@ DefaultReadsLaterParameter: struct {
 DistinctArithmeticNotAllowed: struct {
     impl Diagnostic {
         code: "E0127"
+        meaning: "Arithmetic that a distinct type or a unit mix doesn't allow"
         what: fn(self) -> String { "Arithmetic on a distinct type without `#Numeric`, between noncommensurable distinct types, or an inexact/explicit-only cross-unit mix" }
         why: fn(self) -> String { "A distinct type gets arithmetic only when it is `#Numeric`, and mixing units needs an exact conversion between them" }
         fix: fn(self) -> String { "Use `#Numeric`, an explicit unit conversion, or one commensurable numeric type." }
@@ -1503,6 +1517,7 @@ DistinctTypeMismatch: struct {
 DistinctOverDistinct: struct {
     impl Diagnostic {
         code: "E0129"
+        meaning: "A distinct type declared over another distinct type"
         what: fn(self) -> String { "Distinct-over-distinct: base type is itself a distinct type" }
         why: fn(self) -> String { "A distinct type wraps a plain type; stacking one distinct type on another is not supported" }
         fix: fn(self) -> String { "Base the distinct type on a primitive or other non-distinct type." }
@@ -1512,6 +1527,7 @@ DistinctOverDistinct: struct {
 FloatDecimalMix: struct {
     impl Diagnostic {
         code: "E0131"
+        meaning: "Arithmetic that mixes `Float` and `Decimal`"
         what: fn(self) -> String { "`Float` and `Decimal` mixed" }
         why: fn(self) -> String { "`Decimal` is exact and `Float` is not, so mixing them silently would lose the exactness" }
         fix: fn(self) -> String { "`Float` and `Decimal` cannot be mixed; convert the operands to one numeric type." }
@@ -1521,6 +1537,7 @@ FloatDecimalMix: struct {
 UnsupportedDecimalOperator: struct {
     impl Diagnostic {
         code: "E0133"
+        meaning: "An operator that `Decimal` doesn't support"
         what: fn(self) -> String { "Unsupported operator on `Decimal`" }
         why: fn(self) -> String { "`Decimal` supports only the operators that keep its results exact" }
         fix: fn(self) -> String { "Use a supported `Decimal` operator or convert before operating." }
@@ -1530,6 +1547,7 @@ UnsupportedDecimalOperator: struct {
 UnknownUnitSuffix: struct {
     impl Diagnostic {
         code: "E0134"
+        meaning: "A number's unit suffix that names no unit in scope"
         what: fn(self) -> String { "A numeric literal's unit suffix isn't an `#UnitFamily` member in scope" }
         why: fn(self) -> String { "A unit suffix must name a member of a `#UnitFamily` in scope, so the number's unit is known" }
         fix: fn(self) -> String { "Declare the suffix in an in-scope `#UnitFamily` or remove it." }
@@ -1539,6 +1557,7 @@ UnknownUnitSuffix: struct {
 LiteralOutsideRange: struct {
     impl Diagnostic {
         code: "E0135"
+        meaning: "A literal outside its range type's bounds"
         what: fn(self) -> String { "A compile-time literal outside a range type's declared bounds" }
         why: fn(self) -> String { "A range type only holds values inside its declared bounds, and this literal is outside them" }
         fix: fn(self) -> String { "Use a comptime integer within the range type's declared bounds." }
@@ -1548,6 +1567,7 @@ LiteralOutsideRange: struct {
 RangeValueWithoutCheck: struct {
     impl Diagnostic {
         code: "E0136"
+        meaning: "A runtime value put into a range type without the checked `?` form"
         what: fn(self) -> String { "A runtime value constructed into a range type without the fallible `?` form" }
         why: fn(self) -> String { "Only a literal can be checked against the bounds while compiling; a runtime value needs the fallible form so a bad value is handled" }
         fix: fn(self) -> String { "Use the fallible `?` form when constructing the range from a runtime value." }
@@ -1558,6 +1578,7 @@ EmptyRangeType: struct {
     impl Diagnostic {
         code: "E0137"
         stage: [.Parse]
+        meaning: "A range type whose low bound is above its high bound"
         what: fn(self) -> String { "A range type's declared bounds are empty/reversed (`lo > hi`)" }
         why: fn(self) -> String { "A range whose low bound is above its high bound holds no values" }
         fix: fn(self) -> String { "Declare range bounds with `lo <= hi`." }
@@ -1567,6 +1588,7 @@ EmptyRangeType: struct {
 DistinctOperationNotGranted: struct {
     impl Diagnostic {
         code: "E0138"
+        meaning: "An operation that a distinct type's operation bundles don't grant"
         what: fn(self) -> String { "An operation used on a nominal `distinct` type whose operation bundles don't grant it" }
         why: fn(self) -> String { "A distinct type has only the operations its declared operation bundles grant" }
         fix: fn(self) -> String { "Grant the required operation bundle on the distinct type." }
@@ -1576,6 +1598,7 @@ DistinctOperationNotGranted: struct {
 ContractUsesEffect: struct {
     impl Diagnostic {
         code: "E0139"
+        meaning: "A contract condition that uses an effect"
         what: fn(self) -> String { "A `#Pre`/`#Post` contract condition uses an effect" }
         why: fn(self) -> String { "A contract is checked at every call, so it must be a pure claim about values" }
         fix: fn(self) -> String { "Keep `#Pre` and `#Post` conditions free of effects." }
@@ -1585,6 +1608,7 @@ ContractUsesEffect: struct {
 SingleUseDropped: struct {
     impl Diagnostic {
         code: "E0140"
+        meaning: "A `#SingleUse` value that reaches the end of its scope unused"
         what: fn(self) -> String { "`#SingleUse` value dropped without being consumed at scope end" }
         why: fn(self) -> String { "A `#SingleUse` value carries a job that must be done, so dropping it leaves that job undone" }
         fix: fn(self) -> String { "Consume the `#SingleUse` value before scope end." }
@@ -1594,6 +1618,7 @@ SingleUseDropped: struct {
 SingleUseConsumedOnOneBranch: struct {
     impl Diagnostic {
         code: "E0141"
+        meaning: "A `#SingleUse` value used on only one branch of an `if`"
         what: fn(self) -> String { "`#SingleUse` value consumed on only one `if` branch" }
         why: fn(self) -> String { "A `#SingleUse` value must be used on every path, or one path ends its scope without doing its job" }
         fix: fn(self) -> String { "Consume the `#SingleUse` value on every control-flow branch." }
@@ -1603,6 +1628,7 @@ SingleUseConsumedOnOneBranch: struct {
 SingleUseLent: struct {
     impl Diagnostic {
         code: "E0142"
+        meaning: "A `#SingleUse` value lent or shared instead of moved"
         what: fn(self) -> String { "`#SingleUse` value lent/shared instead of moved" }
         why: fn(self) -> String { "A `#SingleUse` value can only be moved; lending or sharing it would give it a second use" }
         fix: fn(self) -> String { "Move the `#SingleUse` value instead of lending or sharing it." }
@@ -1612,6 +1638,7 @@ SingleUseLent: struct {
 SingleUseConsumeOutsideUnsafe: struct {
     impl Diagnostic {
         code: "E0143"
+        meaning: "A `#SingleUse` value discarded with `consume` outside `#Unsafe`"
         what: fn(self) -> String { "`consume` of a `#SingleUse` value outside an `#Unsafe(\"reason\")` region/fn — the audited deliberate-discard hatch" }
         why: fn(self) -> String { "Throwing away a `#SingleUse` value skips its job, so that choice must be written down in an audited `#Unsafe` place" }
         fix: fn(self) -> String { "Put the deliberate `consume` inside a `#Unsafe(\"reason\")` region or function." }
@@ -1621,6 +1648,7 @@ SingleUseConsumeOutsideUnsafe: struct {
 ResultInPrecondition: struct {
     impl Diagnostic {
         code: "E0144"
+        meaning: "`result` read in a `#Pre` condition"
         what: fn(self) -> String { "`result` used inside a `#Pre` condition — it only exists once the function has returned" }
         why: fn(self) -> String { "`result` names the return value, which doesn't exist yet when a `#Pre` condition runs at entry" }
         fix: fn(self) -> String { "Use `result` in a `#Post` condition, not in `#Pre`." }
@@ -1647,6 +1675,7 @@ PersistNotModuleLevel: struct {
     impl Diagnostic {
         code: "E0145"
         stage: [.Parse]
+        meaning: "`#Persist` on a binding inside a function"
         what: fn(self) -> String { "`#Persist` on a binding that isn't module-level" }
         why: fn(self) -> String { "A persisted value is kept under its module and name, and a local has no stable identity across a reload" }
         fix: fn(self) -> String { "Apply `#Persist` only to a module-level binding." }
@@ -1667,6 +1696,7 @@ RetiredConstKeyword: struct {
 AdjacentPatternHoles: struct {
     impl Diagnostic {
         code: "E0147"
+        meaning: "Two text-pattern holes with no fixed text between them"
         what: fn(self) -> String { "Two `{{}}` holes in a str-match pattern with no literal text between them" }
         why: fn(self) -> String { "A text pattern splits the text at the fixed characters between holes, and two holes in a row give it nothing to split on" }
         fix: fn(self) -> String { "Put literal text between adjacent `{{}}` holes in the string pattern." }
@@ -1676,6 +1706,7 @@ AdjacentPatternHoles: struct {
 PatternTableMissingElse: struct {
     impl Diagnostic {
         code: "E0148"
+        meaning: "A text-pattern table without an `else` arm"
         what: fn(self) -> String { "A str-match pattern used in an `if == {{}}` table with no `else` arm" }
         why: fn(self) -> String { "A text pattern can always fail to match, so the table needs an arm for text that matches none of them" }
         fix: fn(self) -> String { "Add an `else` arm to cover values that do not match the str pattern." }
@@ -1685,6 +1716,7 @@ PatternTableMissingElse: struct {
 RuntimeStringAsCheckedText: struct {
     impl Diagnostic {
         code: "E0149"
+        meaning: "Runtime text used where checked text is required"
         fix_next: "Validate or construct the checked text type before using the value."
         what: fn(self) -> String { "A runtime `String` used where a checked text type is expected" }
         why: fn(self) -> String { "A checked text type is built only from checked literals, so untrusted text can't change its meaning" }
@@ -1730,6 +1762,7 @@ TypestateUnknownState: struct {
 InvalidRegexLiteral: struct {
     impl Diagnostic {
         code: "E0152"
+        meaning: "A `Regex` literal whose pattern isn't complete, valid source text"
         what: fn(self) -> String { "A bare `String`, interpolated pattern, or invalid pattern is used as a typed `Regex` literal" }
         why: fn(self) -> String { "A `Regex` literal is checked while compiling, so its complete pattern must be written in the source" }
         fix: fn(self) -> String { "Use a valid typed `Regex` literal without interpolation." }
@@ -2177,6 +2210,7 @@ UnreachableState: struct {
 MissingMoveMarker: struct {
     impl Diagnostic {
         code: "E0201"
+        meaning: "A value that can't be copied, given away without a marked move"
         what: fn(self) -> String { "This use needs to own a value that can't be copied" }
         why: fn(self) -> String { "A value that can't be copied has one owner, so giving it away must be marked where it happens" }
         fix: fn(self) -> String { "Declare the parameter or receiver with the take mark `&&`, or call `.move()` where the value is given away." }
@@ -2186,6 +2220,7 @@ MissingMoveMarker: struct {
 UseWhileWriteActive: struct {
     impl Diagnostic {
         code: "E0204"
+        meaning: "An argument that reads a value another argument of the same call is changing"
         what: fn(self) -> String { "Same value used while a write parameter holds it in one call" }
         why: fn(self) -> String { "While something is being changed through a write parameter, nobody else may be looking at it" }
         fix: fn(self) -> String { "Pass the value only once, or copy it first with `.copy()`." }
@@ -2195,6 +2230,7 @@ UseWhileWriteActive: struct {
 FieldWriteWithoutMarker: struct {
     impl Diagnostic {
         code: "E0205"
+        meaning: "A field write through a read-only receiver"
         what: fn(self) -> String { "`self.field = v` in a method whose receiver is read-only" }
         why: fn(self) -> String { "Changing a field needs write access to the value that owns it, and this receiver gives read access only" }
         fix: fn(self) -> String { "Write the receiver as `&self` before assigning to `self.field`." }
@@ -2226,6 +2262,7 @@ RetiredRefFieldOwner: struct {
 RawPointerOutsideUnsafe: struct {
     impl Diagnostic {
         code: "E0208"
+        meaning: "A raw pointer operation outside `#Unsafe`"
         what: fn(self) -> String { "Raw pointer op outside `#Unsafe`: postfix `p.*` deref or prefix `*x` raw-of" }
         why: fn(self) -> String { "Raw pointer operations can break memory safety, so they are allowed only inside an audited `#Unsafe` region" }
         fix: fn(self) -> String { "Place the raw pointer operation inside an audited `#Unsafe` region." }
@@ -2235,6 +2272,7 @@ RawPointerOutsideUnsafe: struct {
 MoveWithoutMarker: struct {
     impl Diagnostic {
         code: "E0209"
+        meaning: "A value handed over before its last use, or a move left unwritten"
         structured_fix: .SourceEdit
         no_fix: None
         fix_safety: .BehaviorPreserving
@@ -2258,6 +2296,7 @@ RetiredPointerAlias: struct {
 CopyNotSupported: struct {
     impl Diagnostic {
         code: "E0211"
+        meaning: "`.copy()` on a value Jet can't duplicate"
         no_fix: .Ambiguous
         what: fn(self) -> String { "`x.copy()` on a value that can't be copied — a function, a trait value, or a type Jet doesn't know how to duplicate" }
         why: fn(self) -> String { "A copy needs a value made only of parts Jet can duplicate, and this value holds a part it can't" }
