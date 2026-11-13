@@ -1,0 +1,25 @@
+use plugin: core.plugin
+
+// Each line prints the input and the bits the guest computed: f32 bits for
+// `s` and `u`, f64 bits for `d`. The unsigned inputs above the Int range are
+// written as their two's complement, so 0x8000_0080_0000_0001 is
+// -9223371487098961919 and u64 max is -1.
+run: fn() {
+    policy: Authority.from_rights(["FS.Read(\".\")"])
+    guest: plugin.load("convert.wat", policy)
+    signed: [16777217, 9007199254740993, 4611686293305294849, -4611686293305294849, -9223371487098961919, -9223372036854775807 - 1, -1]
+    loop v in signed {
+        bits: guest.s(v) ?? -1
+        print("s {v} {bits}")
+    }
+    unsigned: [16777217, 9007199254740993, -9223371487098961919, -1, 0]
+    loop v in unsigned {
+        bits: guest.u(v) ?? -1
+        print("u {v} {bits}")
+    }
+    wide: [9007199254740993, 9007199254740995, -9223371487098961919, -9223372036854772736, -1, 0]
+    loop v in wide {
+        bits: guest.d(v) ?? -1
+        print("d {v} {bits}")
+    }
+}

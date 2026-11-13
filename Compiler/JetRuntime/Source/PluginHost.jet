@@ -453,10 +453,31 @@ pg_in_bounds: fn(start: I64, count: I64, size: I64) -> Bool {
     magnitude
 }
 
-#Export(c) jet_plugin_f64_from_u64: fn(value: I64) -> Float {
-    if (value >= I64{0}) -> return Float{value}
-    half: (value >> I64{1}).bit_and(I64{9223372036854775807}).bit_or(value.bit_and(I64{1}))
-    Float{half} * Float{2.0}
+// The Float nearest the unsigned 64-bit `magnitude` with `digits` significant
+// bits (53 for an f64, 24 for an f32), ties to even. Every step is exact, so
+// the value rounds once, and the f32 demote of a 24-bit result is exact.
+pg_round_magnitude: fn(magnitude: I64, digits: I64) -> Float {
+    if (magnitude >= I64{0} && magnitude < (I64{1} << digits)) -> return Float{magnitude}
+    // `shift` drops the bits below the kept `digits`: a set top bit is bit 63.
+    shift := if (magnitude < I64{0}) -> I64{64} - digits else -> I64{1}
+    loop magnitude >= (I64{0}) && (magnitude >> (digits + shift)) != (I64{0}) {
+        shift = shift + I64{1}
+    }
+    kept := (magnitude >> shift).bit_and(I64{9223372036854775807} >> (shift - I64{1}))
+    rest: magnitude.bit_and((I64{1} << shift) - I64{1})
+    half: I64{1} << (shift - I64{1})
+    if (rest > half || (rest == half && kept.bit_and(I64{1}) != I64{0})) -> kept = kept + I64{1}
+    Float{kept} * Float{I64{1} << shift}
+}
+
+#Export(c) jet_plugin_f64_from_u64: fn(value: I64) -> Float { pg_round_magnitude(value, I64{53}) }
+
+// f32.convert_i64_s (`unsigned` 0) and f32.convert_i64_u (`unsigned` 1): the
+// nearest f32, as the Float that holds it exactly.
+#Export(c) jet_plugin_f32_from_i64: fn(value: I64, unsigned: I64) -> Float {
+    if (unsigned != I64{0} || value >= I64{0}) -> return pg_round_magnitude(value, I64{24})
+    // i64 min negates to itself, which reads as the unsigned 2^63.
+    jet_plugin_f64_neg(pg_round_magnitude(wrapping(I64{0} - value), I64{24}))
 }
 
 #Export(c) jet_plugin_f64_min: fn(left: Float, right: Float) -> Float {

@@ -55,8 +55,8 @@ PLUG_RUNTIME_NAMES: [
     "jet_plugin_memory_init", "jet_plugin_data_drop", "jet_plugin_table_size", "jet_plugin_table_grow",
     "jet_plugin_table_get", "jet_plugin_table_set", "jet_plugin_table_fill", "jet_plugin_table_copy",
     "jet_plugin_table_init", "jet_plugin_elem_drop", "jet_plugin_table_fid", "jet_plugin_clz", "jet_plugin_ctz",
-    "jet_plugin_popcnt", "jet_plugin_trunc", "jet_plugin_f64_from_u64", "jet_plugin_f64_min", "jet_plugin_f64_max",
-    "jet_plugin_f64_copysign", "jet_plugin_f64_abs", "jet_plugin_f64_neg", "jet_plugin_f64_nearest",
+    "jet_plugin_popcnt", "jet_plugin_trunc", "jet_plugin_f64_from_u64", "jet_plugin_f32_from_i64", "jet_plugin_f64_min",
+    "jet_plugin_f64_max", "jet_plugin_f64_copysign", "jet_plugin_f64_abs", "jet_plugin_f64_neg", "jet_plugin_f64_nearest",
     "jet_plugin_host_import", "jet_std_math_ceil", "jet_std_math_floor", "jet_std_math_trunc", "jet_std_math_sqrt",
 ]
 
@@ -1079,12 +1079,18 @@ plug_convert: fn(cx: &PlugCx, op: Int) Never! {
         op == 0xad -> {
             result = cx.zext(value)
         }
-        (op >= 0xb2 && op <= 0xb5) || (op >= 0xb7 && op <= 0xba) -> {
-            n: if op <= 0xb5 -> op - 0xb2 else -> op - 0xb7
+        op == 0xb4 || op == 0xb5 -> {
+            // i64 to f32 rounds once in the runtime; through an f64 it would round twice.
+            unsigned: cx.word(op - 0xb4)
+            rounded: cx.rt("jet_plugin_f32_from_i64", [Int]{value, unsigned}, rows.f64)
+            result = cx.demote(rounded)
+        }
+        (op >= 0xb2 && op <= 0xb3) || (op >= 0xb7 && op <= 0xba) -> {
+            n: if op <= 0xb3 -> op - 0xb2 else -> op - 0xb7
             wide := value
             if n == 1 -> wide = cx.zext(value)
             widened: if n == 3 -> cx.rt("jet_plugin_f64_from_u64", [Int]{value}, rows.f64) else -> cx.convert(rows.f64, wide)
-            result = if op <= 0xb5 -> cx.demote(widened) else -> widened
+            result = if op <= 0xb3 -> cx.demote(widened) else -> widened
         }
         op == 0xb6 -> {
             result = cx.demote(value)
