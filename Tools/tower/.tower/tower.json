@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6777,
-    "rev": 101263,
+    "rev": 101264,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -62510,11 +62510,11 @@
         {
           "n": 19,
           "text": "A Close value read out of self or out of a struct field is a move: after `lease := self` in a method, or after a field is consumed while its struct stays in scope, the original no longer holds the resource, and it closes exactly once when the moved value drops. A case proves that a FileLock taken this way is released before the next statement that probes it, on O0, O1 and O2.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-10T01:07:49.180Z"
+          "evidence": "dev fca00acc6d: Main ran jet test Compiler --profile cases --filter core_files_opaque_handles/moved_lock_owners_close_at_their_consumer on seed-b14, which gives PASS 1, FAIL 0 (steps O0, O1, O2 and the built binary), with no KF row. lease := self in Lease.release prints \"rebound release 2 0\". A field consumed while its struct stays in scope prints \"guard close 2 0\" for close(p.guard.move()) and \"member argument 2 1\" for consume_holder(o.owner.move()). Each FileLock is released before the next probe and closes once (found by G6Meta-4).",
+          "at": "2026-11-13T06:23:34.287Z"
         },
         {
           "n": 20,
@@ -62535,7 +62535,7 @@
       "parentId": "c0tgtjtu",
       "needsAcceptance": false,
       "created": "2026-10-28T11:41:38.387Z",
-      "updated": "2026-11-13T06:05:38.804Z",
+      "updated": "2026-11-13T06:23:34.287Z",
       "updatedBy": "Main",
       "goals": [
         "G10"
@@ -198074,6 +198074,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-13T06:23:34.287Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c00e9u2p",
+      "note": "#19"
+    },
     {
       "at": "2026-11-13T06:23:15.641Z",
       "by": "Main",
