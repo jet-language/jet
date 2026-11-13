@@ -4487,6 +4487,9 @@ sema_expr_check_identifier: fn(name: String, span: Span, expected: Type?, enviro
         }
     }
     value: sema_expr_check_ident(name, span, expected, environment, program, scopes, context, diagnostics) ?? {
+        // A read the check refuses (the value doesn't fit here) still names
+        // its binding: the error belongs to that read of that name.
+        if unresolved_index == .Val(refused) -> sema_expr_note_name_reference(span, refused, environment, scopes, context)
         if !sema_has_error_since(diagnostics, diagnostics_before) {
             if {
                 sema_expr_core_module_alias_visible(name, scopes) -> diagnostics.push(sema_module_used_as_value(name, span))
@@ -4508,6 +4511,12 @@ sema_expr_check_identifier: fn(name: String, span: Span, expected: Type?, enviro
     if !sema_hardware_note_cpu_use(expr, scopes, state, context, diagnostics) -> return None
     sema_string_view_check_read(name, span, scopes, state, context, diagnostics)
     binding_index: unresolved_index ?? return Val(value)
+    sema_expr_note_name_reference(span, binding_index, environment, scopes, context)
+    Val(value)
+}
+
+// The reference fact of a read of the binding at `binding_index`.
+sema_expr_note_name_reference: fn(span: Span, binding_index: Int, environment: SemaScopeEnvironment, scopes: SemaScopeTable, context: &SemaCheckContext) {
     symbol: sema_scope_binding_symbol(environment, scopes, binding_index)
     reference_kind := "semantic"
     if symbol.kind == {
@@ -4521,7 +4530,6 @@ sema_expr_check_identifier: fn(name: String, span: Span, expected: Type?, enviro
         .Impl | .Field | .Variant | .Import | .Foreign | .Label -> {}
     }
     context.name_references.push(SemaNameReferenceFact{span: span, symbol: symbol, kind: reference_kind})
-    Val(value)
 }
 
 sema_expr_check_string: fn(parts: [StrPart], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {

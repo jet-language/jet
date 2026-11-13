@@ -24,6 +24,7 @@ use jet_foundation.[
     DIAGNOSTIC_ERROR,
     DIAGNOSTIC_LINT,
     Diagnostic,
+    DiagnosticLabel,
     ast_binding,
     ast_func,
     ConstDef,
@@ -5608,6 +5609,7 @@ sema_check_registration_module_tail: fn(owned_run: &&SemaModuleCheckRun, environ
     }
     sema_check_registration_module_foreign(environment, program, module_index, module_result)
     sema_check_soft_public_uses(program, module_index, generated_references, generated_calls, module_result)
+    sema_check_module_value_consumers(program, module_index, generated_references, module_result)
     if trace_sink == .Val(sink) {
         sink.progress("counters.{counter_phase}.items_scanned", run.items_scanned, -1)
         sink.progress("counters.{counter_phase}.functions_checked", run.functions_checked, -1)
@@ -5655,6 +5657,133 @@ sema_check_soft_public_uses: fn(program: SemaProgramTables, module_index: Int, g
         }
         sema_check_soft_public_signatures(graph.modules[module_index], codes, raw, seen, module_result.diagnostics)
     }
+}
+
+// One consumer's read of a module value, from a body of this module.
+SemaModuleValueRead: struct {
+    key: String
+    name: String
+    consumer: String
+    span: Span
+}
+
+// A module value has one type and one value for every consumer. When one
+// consumer reads it as the value it is and another needs something else (a
+// String where the value is an Int, or a field the value lacks), the
+// disagreement belongs to the value: the consumer's error moves to the
+// value's name, and its labels name both consumers. A value whose consumers
+// all fail, or that one consumer alone reads, keeps the error at the read.
+sema_check_module_value_consumers: fn(program: SemaProgramTables, module_index: Int, generated_references: [Span], module_result: &SemaGraphModuleResult) {
+    graph: program.registration_graph ?? return
+    has_error: loop diagnostic in module_result.diagnostics {
+        if diagnostic.severity == DIAGNOSTIC_ERROR -> break true
+    } ?? false
+    if !has_error -> return
+    module_identity: graph.modules[module_index].module_identity
+    raw: graph.modules[module_index].source.bytes()
+    segments: graph.modules[module_index].source_segments
+    reads := [SemaModuleValueRead]{}
+    skipped := 0
+    loop (index, reference) in module_result.name_references {
+        loop skipped < generated_references.len() && generated_references[skipped].end <= index -> skipped += 1
+        if skipped < generated_references.len() && index >= generated_references[skipped].start -> next
+        if reference.kind != "const" -> next
+        owner: reference.symbol.module_name
+        if owner != "" && owner != module_identity -> next
+        consumer: sema_module_value_consumer(graph.modules[module_index].declarations, reference.span) ?? next
+        reads.push(SemaModuleValueRead{key: reference.symbol.id.key.copy(), name: reference.symbol.name.copy(), consumer: consumer, span: reference.span})
+    }
+    if reads.len() < 2 -> return
+    moved := [(position: Int, diagnostic: Diagnostic)]{}
+    loop (position, diagnostic) in module_result.diagnostics {
+        failed: sema_module_value_failed_read(reads, raw, segments, diagnostic) ?? next
+        read: reads[failed]
+        agreeing: reads[sema_module_value_agreeing_read(reads, module_result.diagnostics, raw, segments, read) ?? next]
+        constant: sema_module_value_constant(graph.modules[module_index].constants, read.key) ?? next
+        shown: if constant.ty == .Val(ty) -> " as {sema_module_value_type_show(ty)}" else -> ""
+        updated := diagnostic.copy()
+        // The value's name is located afresh: it may sit in another file of
+        // this module than the read.
+        updated.span = Val(constant.declaration.name_span)
+        updated.source_path = None
+        updated.source_offset = None
+        updated.source_start = None
+        updated.what = "`{read.consumer}` and `{agreeing.consumer}` disagree about `{read.name}`: {diagnostic.what}"
+        updated.labels.push(DiagnosticLabel{span: read.span, message: "`{read.consumer}` reads `{read.name}` here"})
+        updated.labels.push(DiagnosticLabel{span: agreeing.span, message: "`{agreeing.consumer}` reads it here{shown}"})
+        moved.push((position: position, diagnostic: sema_diagnostic_with_source_location(updated, segments)))
+    }
+    loop row in moved -> module_result.diagnostics[row.position] = row.diagnostic.copy()
+}
+
+// Another consumer's read of `read`'s value that no error fails.
+sema_module_value_agreeing_read: fn(reads: [SemaModuleValueRead], diagnostics: [Diagnostic], raw: [U8], segments: [SemaSourceSegment], read: SemaModuleValueRead) -> Int? {
+    loop (index, other) in reads {
+        if other.key == read.key && other.consumer != read.consumer && sema_module_value_read_agrees(diagnostics, reads, raw, segments, other) -> return Val(index)
+    }
+    None
+}
+
+// A module value's type as its reader wrote it: a registered nominal type
+// carries its module's key, and the reader wrote only its name.
+sema_module_value_type_show: fn(ty: Type) -> String Never! {
+    leaf: sema_type_nominal_leaf(ty)
+    if leaf != "" -> return "`{leaf}`"
+    sema_type_show(ty)
+}
+
+sema_module_value_constant: fn(constants: [SemaRegistrationConstant], key: String) -> SemaRegistrationConstant? {
+    loop row in constants {
+        if row.symbol.id.key == key -> return Val(row.copy())
+    }
+    None
+}
+
+// The function or method of `declarations` whose text holds `span`.
+sema_module_value_consumer: fn(declarations: [Item], span: Span) -> String? {
+    loop item in declarations {
+        found: if item == {
+            .Func(function) -> sema_module_value_function_consumer([function], span)
+            .Impl(implementation) -> sema_module_value_function_consumer(implementation.methods, span)
+            .Struct(definition) -> sema_module_value_function_consumer(definition.methods, span)
+            .Enum(definition) -> sema_module_value_function_consumer(definition.methods, span)
+            .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> None
+        }
+        if found != None -> return found
+    }
+    None
+}
+
+sema_module_value_function_consumer: fn(functions: [Func], span: Span) -> String? {
+    loop function in functions {
+        if function.span.start <= span.start && span.end <= function.span.end -> return Val(function.name.copy())
+    }
+    None
+}
+
+// The row in `reads` that an error of this module's text fails: an error at
+// the read itself (the value is the wrong type there), or at the member
+// written right after the read's `.` (the value lacks that field).
+sema_module_value_failed_read: fn(reads: [SemaModuleValueRead], raw: [U8], segments: [SemaSourceSegment], diagnostic: Diagnostic) -> Int? {
+    if diagnostic.severity != DIAGNOSTIC_ERROR -> return None
+    at: diagnostic.span ?? return None
+    // Only this module's own written text: a diagnostic located where its
+    // segment maps, not one on generated text or another file.
+    location: sema_source_location_at(segments, at) ?? return None
+    if location.origin == SemaSourceOrigin.CompilerGenerated || diagnostic.source_path != Val(location.source_path) || diagnostic.source_offset != Val(location.aggregate_start) -> return None
+    loop (index, read) in reads {
+        if at.start == read.span.start && at.end == read.span.end -> return Val(index)
+        if at.start == read.span.end + 1 && read.span.end < raw.len() && Int.from_u8(raw[read.span.end]) == 46 -> return Val(index)
+    }
+    None
+}
+
+sema_module_value_read_agrees: fn(diagnostics: [Diagnostic], reads: [SemaModuleValueRead], raw: [U8], segments: [SemaSourceSegment], read: SemaModuleValueRead) -> Bool {
+    loop diagnostic in diagnostics {
+        failed: sema_module_value_failed_read(reads, raw, segments, diagnostic) ?? next
+        if reads[failed].span.start == read.span.start -> return false
+    }
+    true
 }
 
 sema_soft_public_warn: fn(leaf: (start: Int, name: String), seen: &[Int:Bool], diagnostics: &[Diagnostic]) {

@@ -1,0 +1,33 @@
+Error [jet.ReturnTypeMismatch]: `label` and `numeric` disagree about `PORT`: This value is Int (a whole number), but `label` returns String
+  --> tests/ui/module_value_consumers_disagree.jet:10:1
+    |
+ 10 | PORT: port_for("https")
+    | ^^^^
+  --> tests/ui/module_value_consumers_disagree.jet:21:25
+    |
+ 21 | label: fn() -> String { PORT }
+    |                         ^^^^ `label` reads `PORT` here
+  --> tests/ui/module_value_consumers_disagree.jet:19:24
+    |
+ 19 | numeric: fn() -> Int { PORT + 1 }
+    |                        ^^^^ `numeric` reads it here as Int (a whole number)
+ Why: `label` declares String as its result, so the value it hands back must be String
+ Fix: Put the value in text with interpolation: "{value}"
+More: jet-lang.dev/e/E0113
+
+Error [jet.UnknownField]: `scheme_of` and `host_of` disagree about `ENDPOINT`: `Endpoint` has no field `scheme`
+  --> tests/ui/module_value_consumers_disagree.jet:17:1
+    |
+ 17 | ENDPOINT: Endpoint{host: "example.com", port: 8080}
+    | ^^^^^^^^
+  --> tests/ui/module_value_consumers_disagree.jet:25:29
+    |
+ 25 | scheme_of: fn() -> String { ENDPOINT.scheme }
+    |                             ^^^^^^^^ `scheme_of` reads `ENDPOINT` here
+  --> tests/ui/module_value_consumers_disagree.jet:23:27
+    |
+ 23 | host_of: fn() -> String { ENDPOINT.host }
+    |                           ^^^^^^^^ `host_of` reads it here as `Endpoint`
+ Why: Field access only works on names declared in the struct
+ Fix: Check the field names on `Endpoint`
+More: jet-lang.dev/e/E0302

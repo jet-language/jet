@@ -1,0 +1,29 @@
+// A module value has one type for every consumer. `numeric` reads `PORT` as
+// the Int it is and `label` needs a String, so the error lands on `PORT` and
+// names both consumers; `ENDPOINT` has no `scheme` field for `scheme_of`
+// while `host_of` reads the field it has.
+port_for: fn(scheme: String) -> Int {
+    if scheme == "https" -> return 443
+    80
+}
+
+PORT: port_for("https")
+
+Endpoint: struct {
+    host: String
+    port: Int
+}
+
+ENDPOINT: Endpoint{host: "example.com", port: 8080}
+
+numeric: fn() -> Int { PORT + 1 }
+
+label: fn() -> String { PORT }
+
+host_of: fn() -> String { ENDPOINT.host }
+
+scheme_of: fn() -> String { ENDPOINT.scheme }
+
+run: fn() {
+    print("{numeric()} {label()} {host_of()} {scheme_of()}")
+}
