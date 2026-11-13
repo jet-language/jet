@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6824,
-    "rev": 101650,
+    "rev": 101672,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -96666,7 +96666,35 @@
       "blockedBy": [],
       "assignee": null,
       "log": [],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "start, foreground, background, suspend and terminate reach the app on every target: through scenePhase-equivalent events on phones, window events on desktops and the Page Lifecycle API on the web. native.lifecycle(on_resume:) runs on resume. Proof: `jet test Compiler --profile cases --filter native_app/lifecycle_events_reach_the_app_on_every_target`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T16:43:40.667Z"
+        },
+        {
+          "n": 2,
+          "text": "ui.saved state, such as the half-typed comment in comment_box, survives the phone ending the process in the background, and a reload on the web. Proof: `jet test Compiler --profile cases --filter native_app/saved_state_survives_process_death`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T16:43:41.858Z"
+        },
+        {
+          "n": 3,
+          "text": "On resume, live queries resubscribe and the offline queue sends with no app code. Proof: `jet test Compiler --profile cases --filter native_app/resume_resubscribes_and_drains_the_queue`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T16:43:42.914Z"
+        }
+      ],
       "refs": [],
       "tags": [],
       "goals": [
@@ -96675,8 +96703,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-13T15:13:53.581Z",
-      "updated": "2026-11-13T15:13:53.581Z",
-      "updatedBy": "Main"
+      "updated": "2026-11-13T16:43:42.914Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 3
     },
     {
       "id": "c0s5hn28",
@@ -96696,7 +96725,35 @@
       "blockedBy": [],
       "assignee": null,
       "log": [],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "The desktop output writes an MSIX on Windows, a signed and notarized DMG on macOS, and an AppImage and a Flatpak on Linux, signed with the identities named in outputs:. Proof: `jet test Compiler --profile cases --filter build_entry/desktop_output_writes_signed_installers` (it checks the structure and the signature of each package the host can verify).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T16:43:43.882Z"
+        },
+        {
+          "n": 2,
+          "text": "The updates: feed is signed. A client refuses an update whose signature fails or whose version is lower than its own, and applies a delta update when one is offered. Proof: `jet test Compiler --profile cases --filter native_app/update_feed_refuses_bad_signatures_and_downgrades`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T16:43:44.841Z"
+        },
+        {
+          "n": 3,
+          "text": "A client below the server's min_client gets the typed UpdateRequired (section 4.12) and is offered the update. Proof: `jet test Compiler --profile cases --filter native_app/client_below_min_client_gets_update_required`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T16:43:45.812Z"
+        }
+      ],
       "refs": [],
       "tags": [],
       "goals": [
@@ -96705,8 +96762,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-13T15:13:54.979Z",
-      "updated": "2026-11-13T15:13:54.979Z",
-      "updatedBy": "Main"
+      "updated": "2026-11-13T16:43:45.812Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 3
     },
     {
       "id": "c0gvf2dr",
@@ -96726,7 +96784,26 @@
       "blockedBy": [],
       "assignee": null,
       "log": [],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": ".head(fn) renders title, description, canonical, Open Graph and Twitter card tags into the server HTML of the screen. Signed-in screens are noindex by default. Proof: `jet test Compiler --profile cases --filter web_app/head_renders_metadata_and_signed_in_screens_are_noindex`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T16:43:46.764Z"
+        },
+        {
+          "n": 2,
+          "text": ".sitemap(fn) writes /sitemap.xml with only the public states it returns, and the server output serves /robots.txt that points to it. Proof: `jet test Compiler --profile cases --filter web_app/sitemap_lists_only_public_states`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T16:43:47.695Z"
+        }
+      ],
       "refs": [],
       "tags": [],
       "goals": [
@@ -96735,8 +96812,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-13T15:13:56.474Z",
-      "updated": "2026-11-13T15:13:56.474Z",
-      "updatedBy": "Main"
+      "updated": "2026-11-13T16:43:47.695Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 2
     },
     {
       "id": "c02vkuef",
@@ -96756,7 +96834,26 @@
       "blockedBy": [],
       "assignee": null,
       "log": [],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "With .stream(after: 50ms), the server sends the shell with each still-running read's Loading branch after 50 ms, then each region's HTML as its read finishes. A page whose reads finish within 50 ms is sent whole. Proof: `jet test Compiler --profile cases --filter web_app/stream_sends_the_shell_then_each_region`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T16:43:48.712Z"
+        },
+        {
+          "n": 2,
+          "text": "Streamed regions resume (D-RESUME1) with no hydration replay. A read that fails after the 200 status is sent renders its region's error branch. Proof: `jet test Compiler --profile cases --filter web_app/streamed_region_errors_render_their_error_branch`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T16:43:49.670Z"
+        }
+      ],
       "refs": [],
       "tags": [],
       "goals": [
@@ -96765,8 +96862,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-13T15:13:57.804Z",
-      "updated": "2026-11-13T15:13:57.804Z",
-      "updatedBy": "Main"
+      "updated": "2026-11-13T16:43:49.670Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 2
     },
     {
       "id": "c0pg5tj9",
@@ -96786,7 +96884,35 @@
       "blockedBy": [],
       "assignee": null,
       "log": [],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "An app.Upload streams to storage. A body over the api's max_upload gets 413 before it is read, and kit.file_button reports progress. Proof: `jet test Compiler --profile cases --filter web_app/upload_over_the_limit_is_413_before_it_is_read`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T16:43:50.581Z"
+        },
+        {
+          "n": 2,
+          "text": "Storage names each stored file itself and returns a blob ID. The client's file name is kept only as metadata and never becomes part of a path, so a name such as ../../etc/passwd stores safely. The server checks the media type from the bytes against the declared list, and a body declared image/png that holds HTML gets 415. Proof: `jet test Compiler --profile cases --filter web_app/upload_storage_names_files_and_checks_content`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T16:43:51.518Z"
+        },
+        {
+          "n": 3,
+          "text": "attach applies the project's row policy (D-DBPOLICY1, #3709) before it reads the body, so a signed-in caller who is not a member gets 403. Proof: `jet test Compiler --profile cases --filter web_app/upload_by_a_non_member_is_403_before_it_is_read`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T16:43:52.455Z"
+        }
+      ],
       "refs": [],
       "tags": [],
       "goals": [
@@ -96795,8 +96921,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-13T15:13:59.169Z",
-      "updated": "2026-11-13T15:13:59.169Z",
-      "updatedBy": "Main"
+      "updated": "2026-11-13T16:43:52.455Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 3
     },
     {
       "id": "c0b8qwec",
@@ -96816,7 +96943,26 @@
       "blockedBy": [],
       "assignee": null,
       "log": [],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Signed-in responses carry Cache-Control: private, no-store. .cache<V>(.Public(max_age:)) sends public, max-age with an ETag, and a matching If-None-Match gets 304. Proof: `jet test Compiler --profile cases --filter web_app/cache_policy_headers_and_etag_revalidation`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T16:43:53.388Z"
+        },
+        {
+          "n": 2,
+          "text": "Built assets have content-hashed names and are served with public, max-age=31536000, immutable. Changing an asset changes its name. Proof: `jet test Compiler --profile cases --filter web_build/hashed_assets_are_immutable`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T16:43:54.391Z"
+        }
+      ],
       "refs": [],
       "tags": [],
       "goals": [
@@ -96825,8 +96971,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-13T15:14:00.487Z",
-      "updated": "2026-11-13T15:14:00.487Z",
-      "updatedBy": "Main"
+      "updated": "2026-11-13T16:43:54.391Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 2
     },
     {
       "id": "c016keg2",
@@ -96846,7 +96993,26 @@
       "blockedBy": [],
       "assignee": null,
       "log": [],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": ".installable(name:, icon:, color:) writes a web app manifest, linked from every page, with 192 px, 512 px and maskable icons generated from the one icon. Proof: `jet test Compiler --profile cases --filter web_build/installable_writes_the_manifest_and_icons`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T16:43:55.342Z"
+        },
+        {
+          "n": 2,
+          "text": "The service worker (#6048) caches the app shell and the hashed assets, so an offline reload shows the shell. Under .offline(.Queue) it holds the queue. Proof: `jet test Compiler --profile cases --filter web_browser/installed_app_reloads_offline`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T16:43:56.282Z"
+        }
+      ],
       "refs": [],
       "tags": [],
       "goals": [
@@ -96855,8 +97021,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-13T15:14:02.055Z",
-      "updated": "2026-11-13T15:14:02.055Z",
-      "updatedBy": "Main"
+      "updated": "2026-11-13T16:43:56.282Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 2
     },
     {
       "id": "c0tgi103",
@@ -96876,7 +97043,26 @@
       "blockedBy": [],
       "assignee": null,
       "log": [],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A ui.asset path with no file is a compile error that names the path. Fonts, icons and static files get content-hashed names. Proof: `jet test Compiler --profile cases --filter web_build/missing_asset_is_a_compile_error`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T16:43:57.223Z"
+        },
+        {
+          "n": 2,
+          "text": "The first screen's fonts get preload hints on the web. The same assets are packaged per target: a desktop bundle, an iOS asset catalog and Android resources. Proof: `jet test Compiler --profile cases --filter build_entry/assets_are_packaged_per_target`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T16:43:58.155Z"
+        }
+      ],
       "refs": [],
       "tags": [],
       "goals": [
@@ -96885,8 +97071,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-13T15:14:03.765Z",
-      "updated": "2026-11-13T15:14:03.765Z",
-      "updatedBy": "Main"
+      "updated": "2026-11-13T16:43:58.155Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 2
     },
     {
       "id": "c0ha077m",
@@ -96906,7 +97093,35 @@
       "blockedBy": [],
       "assignee": null,
       "log": [],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "These style errors are caught at compile time: an S1 C class the sheet does not define (section 6.5 row b7), a style asking for a theme type the graph or the enclosing ui.with_theme does not provide, and an unused style or token (no dead rules, as a lint). Proof: `jet test Compiler --profile cases --filter ui_style/sheet_class_theme_type_and_dead_rules_are_caught`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T16:43:59.091Z"
+        },
+        {
+          "n": 2,
+          "text": "Accessibility checks: a lint checks each text paint against its background in both themes, and under increased contrast, against WCAG 1.4.3 (section 6.5 row b8). Forced colors (Windows high contrast, CSS forced-colors) keep focus rings and borders. Focus rings are on by default, and reduced motion is honored. Proof: `jet test Compiler --profile cases --filter ui_style/contrast_forced_colors_focus_and_motion`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T16:44:00.046Z"
+        },
+        {
+          "n": 3,
+          "text": "Overlays (dialogs, popovers, sheets and toasts) stack in one order. Scroll containers and sticky headers work on both layout engines. kit.list rows and ui.local state are keyed by identity, so filtering or moving Crewboard cards never moves local state to another row. The preview tests of 6.4 (three widths, two text sizes, both themes) report the four measures of 6.5. Proof: `jet test Compiler --profile cases --filter ui_style/overlays_scrolling_and_row_identity` and `jet test Compiler --profile golden --filter ui_style/crewboard_previews`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-13T16:44:00.980Z"
+        }
+      ],
       "refs": [],
       "tags": [],
       "goals": [
@@ -96915,8 +97130,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-13T15:14:05.205Z",
-      "updated": "2026-11-13T15:14:05.205Z",
-      "updatedBy": "Main"
+      "updated": "2026-11-13T16:44:00.981Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 3
     },
     {
       "id": "c0akrada",
@@ -203480,6 +203696,160 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-13T16:44:00.981Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0ha077m",
+      "note": "#3 Overlays (dialogs, popovers, sheets and toasts) stack in one"
+    },
+    {
+      "at": "2026-11-13T16:44:00.046Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0ha077m",
+      "note": "#2 Accessibility checks: a lint checks each text paint against "
+    },
+    {
+      "at": "2026-11-13T16:43:59.091Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0ha077m",
+      "note": "#1 These style errors are caught at compile time: an S1 C class"
+    },
+    {
+      "at": "2026-11-13T16:43:58.155Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0tgi103",
+      "note": "#2 The first screen's fonts get preload hints on the web. The s"
+    },
+    {
+      "at": "2026-11-13T16:43:57.223Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0tgi103",
+      "note": "#1 A ui.asset path with no file is a compile error that names t"
+    },
+    {
+      "at": "2026-11-13T16:43:56.282Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c016keg2",
+      "note": "#2 The service worker (#6048) caches the app shell and the hash"
+    },
+    {
+      "at": "2026-11-13T16:43:55.342Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c016keg2",
+      "note": "#1 .installable(name:, icon:, color:) writes a web app manifest"
+    },
+    {
+      "at": "2026-11-13T16:43:54.391Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0b8qwec",
+      "note": "#2 Built assets have content-hashed names and are served with p"
+    },
+    {
+      "at": "2026-11-13T16:43:53.388Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0b8qwec",
+      "note": "#1 Signed-in responses carry Cache-Control: private, no-store. "
+    },
+    {
+      "at": "2026-11-13T16:43:52.455Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0pg5tj9",
+      "note": "#3 attach applies the project's row policy (D-DBPOLICY1, #3709)"
+    },
+    {
+      "at": "2026-11-13T16:43:51.518Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0pg5tj9",
+      "note": "#2 Storage names each stored file itself and returns a blob ID."
+    },
+    {
+      "at": "2026-11-13T16:43:50.581Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0pg5tj9",
+      "note": "#1 An app.Upload streams to storage. A body over the api's max_"
+    },
+    {
+      "at": "2026-11-13T16:43:49.670Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c02vkuef",
+      "note": "#2 Streamed regions resume (D-RESUME1) with no hydration replay"
+    },
+    {
+      "at": "2026-11-13T16:43:48.712Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c02vkuef",
+      "note": "#1 With .stream(after: 50ms), the server sends the shell with e"
+    },
+    {
+      "at": "2026-11-13T16:43:47.695Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0gvf2dr",
+      "note": "#2 .sitemap(fn) writes /sitemap.xml with only the public states"
+    },
+    {
+      "at": "2026-11-13T16:43:46.764Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0gvf2dr",
+      "note": "#1 .head(fn) renders title, description, canonical, Open Graph "
+    },
+    {
+      "at": "2026-11-13T16:43:45.812Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0s5hn28",
+      "note": "#3 A client below the server's min_client gets the typed Update"
+    },
+    {
+      "at": "2026-11-13T16:43:44.841Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0s5hn28",
+      "note": "#2 The updates: feed is signed. A client refuses an update whos"
+    },
+    {
+      "at": "2026-11-13T16:43:43.882Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0s5hn28",
+      "note": "#1 The desktop output writes an MSIX on Windows, a signed and n"
+    },
+    {
+      "at": "2026-11-13T16:43:42.914Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c051j6ab",
+      "note": "#3 On resume, live queries resubscribe and the offline queue se"
+    },
+    {
+      "at": "2026-11-13T16:43:41.858Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c051j6ab",
+      "note": "#2 ui.saved state, such as the half-typed comment in comment_bo"
+    },
+    {
+      "at": "2026-11-13T16:43:40.667Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c051j6ab",
+      "note": "#1 start, foreground, background, suspend and terminate reach t"
+    },
     {
       "at": "2026-11-13T16:43:39.337Z",
       "by": "Main",
