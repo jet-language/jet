@@ -495,8 +495,18 @@ LOCK_DIFF_VERB: "diff"
 
 LOCK_DIFF_FLAG_AGAINST: "--against"
 
+/// `jet split env|package <name>|hosts <name>` and its reverse `jet fold
+/// <file>`: reversible package source transitions; `--check` previews.
+TRANSITION_SPLIT_VERB: "split"
+
+TRANSITION_FOLD_VERB: "fold"
+
+TRANSITION_FLAG_CHECK: "--check"
+
+/// Every Jetpack verb, in dispatch order. JetOS's `os` verb (OS_SUBCOMMAND)
+/// routes through its own dispatcher and is not listed.
 JETPACK_VERBS: [String]{
-    // Card #479: reuses 's existing `doctor` spelling for Jetpack health.
+    // `doctor` reports Jetpack's health.
     "doctor",
     "env",
     "use",
@@ -516,7 +526,6 @@ JETPACK_VERBS: [String]{
     "override",
     "push",
     TRUST_SUBCOMMAND,
-    OS_SUBCOMMAND,
     CONFIG_SUBCOMMAND,
     BRIDGE_SUBCOMMAND,
     SERVICES_SUBCOMMAND,
@@ -526,6 +535,8 @@ JETPACK_VERBS: [String]{
     TOOL_SUBCOMMAND,
     PROFILE_SUBCOMMAND,
     BROWSER_SUBCOMMAND,
+    TRANSITION_SPLIT_VERB,
+    TRANSITION_FOLD_VERB,
 }
 
 /// U16 (card c9jetpackgates): `jetpack env -p <pkg>...` — ad-hoc nixpkgs packages

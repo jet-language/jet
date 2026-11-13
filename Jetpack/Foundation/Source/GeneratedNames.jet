@@ -2,21 +2,12 @@
 // (`sanitize_generated_name`, `canonical_name_case`, and
 // `is_reserved_generated_name`). Binders name every generated type through
 // this one policy so their output never collides with Jet's own names.
-// The built-in and reserved type names are the compiler's own lists
-// (`JET_TYPE_NAMES`, `SEMA_RESERVED_TYPES`), never a copy.
+// The keywords are the syntax registry's `JET_KEYWORD_LIST`, and the built-in
+// and reserved type names are the compiler's own lists (`JET_TYPE_NAMES`,
+// `SEMA_RESERVED_TYPES`), never a copy.
 use {
     jet_foundation.[JET_TYPE_NAMES, SEMA_RESERVED_TYPES]
 }
-
-// Real Jet keywords (`JET_KEYWORD_LIST`).
-GENERATED_NAME_KEYWORDS: #run { [String]{
-    "fn", "pub", "priv", "use", "as", "extern", "module", "if", "else", "loop", "in", "break",
-    "return", "defer", "struct", "enum", "impl", "policy", "wrap", "trait", "tag",
-    "effect", "derive", "distinct", "migration", "rename", "add", "remove", "change", "via",
-    "self", "Unsafe", "Impure", "Context", "task", "freeze", "Transact", "Job", "Test",
-    "Todo", "State", "Transition", "state", "protocol", "client", "server", "validate",
-    "check", "true", "false", "None", "it"
-} }
 
 // Lexer keywords and teaching words outside the keyword list, and the
 // contextual `state` that stays legal (`KW_MUTATE`, `KW_MOVE`, `KW_COPY`,
@@ -39,7 +30,7 @@ GENERATED_NAME_COMPTIME_MARK: "@"
 // built-in, reserved, and Prelude type tables; Core module type exports
 // (`CoreModuleExports::is_core_type_name`) are not part of this check.
 foundation_is_reserved_generated_name: fn(name: String) -> Bool Never! {
-    (GENERATED_NAME_KEYWORDS.contains(name) && name != GENERATED_NAME_CONTEXTUAL_STATE)
+    (JET_KEYWORD_LIST.contains(name) && name != GENERATED_NAME_CONTEXTUAL_STATE)
         || GENERATED_NAME_RETIRED_WORDS.contains(name)
         || JET_TYPE_NAMES.contains(name)
         || SEMA_RESERVED_TYPES.contains(name)
