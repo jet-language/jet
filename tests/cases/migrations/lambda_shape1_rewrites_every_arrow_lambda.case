@@ -1,0 +1,17 @@
+# The registered lambda-shape1 plan (toolchain a0.0.45, D-LAMBDA-SHAPE1=C)
+# rewrites every arrow lambda in an old-spelling source and in a Markdown
+# file's Jet fence: bare and parenthesized heads, typed parameters, an effect
+# row, a block body, a body on the next line, nested lambdas, a lambda in a
+# record field, in an interpolation hole and in a quoted Jet program. Arms,
+# arrow `if`s, arrow loops and function types keep their arrows, and so does
+# prose. A second run finds nothing left to rewrite.
+fixture: lambda_shape1_rewrites_every_arrow_lambda/input
+step: jet run {root}/Compiler/Migrations/Migrate.jet -- lambda-shape1 --write before.jet guide.md
+exit: 0
+stdout: = "EDIT before.jet 12\nEDIT guide.md 1\nTOTAL 13 sites in 2 files\n"
+file: before.jet = lambda_shape1_rewrites_every_arrow_lambda/before.out
+file: guide.md = lambda_shape1_rewrites_every_arrow_lambda/guide.out
+step: jet run {root}/Compiler/Migrations/Migrate.jet -- lambda-shape1 --write before.jet guide.md
+exit: 0
+stdout: = "TOTAL 0 sites in 0 files\n"
+file: before.jet = lambda_shape1_rewrites_every_arrow_lambda/before.out

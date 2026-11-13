@@ -1,0 +1,49 @@
+// Written before toolchain a0.0.45, when a lambda was spelled with an arrow.
+Point: struct {
+    x: Int
+    y: Int
+}
+
+Handlers: struct {
+    on_point: fn(Point) -> Int
+}
+
+total: fn(points: [Point], pick: fn(Point) -> Int) -> Int {
+    sum := 0
+    loop point in points -> sum += pick(point)
+    sum
+}
+
+run: fn() {
+    points: [Point]{{x: 1, y: 2}, {x: 3, y: 4}}
+    print(total(points, p -> p.x))
+    print(total(points, (p) -> p.x + p.y))
+    print(total(points, (point: Point) -> {
+        doubled: point.y * 2
+        doubled + 1
+    }))
+    scaled: points.map(p ->
+        p.x * 10)
+    print(scaled)
+    sorted := [3, 1, 2]
+    sorted.sort_by((left, right) -> left <=> right)
+    print(sorted)
+    nested: points.map(p -> [1, 2].map(n -> n * p.x))
+    print(nested)
+    handlers: Handlers{on_point: p -> p.y}
+    print(handlers.on_point(points[0]))
+    print("{points.map(p -> p.x)}")
+    square := (n: Int) -> n * n
+    print(square(3))
+    notify: (p: Point) -[IO]> print(p.x)
+    notify(points[1])
+    label: if points.len() == {
+        0 -> "none"
+        count -> "{count} points"
+    }
+    print(label)
+    done := false
+    if done -> print("never")
+    source: "run: fn() {{\n    print([1].map(n -> n + 1))\n}}\n"
+    print(source)
+}

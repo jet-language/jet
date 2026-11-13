@@ -1,0 +1,360 @@
+// Toolchain a0.0.45, D-LAMBDA-SHAPE1=C: every arrow lambda (`x -> e`,
+// `(a, b) -> e`, `(p) -[E]> e`, `(p) -> { … }`) becomes the `fn(…) { … }`
+// lambda. The arrow forms are not Jet from this toolchain on, so the plan finds
+// them in the lexer's tokens, never in a parse: a `(…)` group or a name right
+// before `->` or `-[E]>` is a lambda head when it stands where a value starts
+// (after `(`, `[`, `:`, `=`, `:=`, `->`, `return`, `??` or `|>`, or after a
+// comma inside `(…)` or `[…]`). A braced arm or condition list (`{ a -> … }`)
+// never qualifies. The body runs to the comma or closer that ends it, or, in a
+// braced context, to the end of its line.
+use {
+    jet_lexer.[Token, TokenTables, lex_generated, STRING_PART_INTERPOLATION, TOKEN_COLON, TOKEN_COLON_EQ, TOKEN_COMMA, TOKEN_DOT, TOKEN_EQ, TOKEN_GT, TOKEN_IDENT, TOKEN_KW_ELSE, TOKEN_LBRACE, TOKEN_LBRACKET, TOKEN_LPAREN, TOKEN_MINUS, TOKEN_PIPE_GT, TOKEN_QUESTION_DOT, TOKEN_QUESTION_QUESTION, TOKEN_RAW_STRING, TOKEN_RBRACE, TOKEN_RBRACKET, TOKEN_RETURN, TOKEN_RPAREN, TOKEN_STRING, TOKEN_UNIFIED_ARROW, TOKEN_AND_AND, TOKEN_OR_OR, lexer_without_comments]
+    jet_parser.[parse_generated_source]
+}
+
+LambdaShapeEdit: struct {
+    start: Int
+    end: Int
+    text: String
+    // Among closers inserted at one offset, the later-starting lambda's first.
+    order: Int{0}
+}
+
+// The rewritten text, the count of lambdas rewritten and the sites left alone.
+MigrationOutcome: struct {
+    text: String
+    rewritten: Int
+    skipped: [String]
+}
+
+// Rewrites the arrow lambdas of one file: a Markdown file's ```jet fences, or
+// a Jet source with the Jet programs quoted in its strings.
+lambda_shape1_file: fn(path: String, text: String) -> MigrationOutcome {
+    if path.ends_with(".md") -> return lambda_shape1_markdown(path, text)
+    lambda_shape1_source(path, text)
+}
+
+// Rewrites the arrow lambdas of one Jet source, unless the result parses with
+// more errors than the source did.
+lambda_shape1_source: fn(path: String, text: String) -> MigrationOutcome {
+    bytes: text.bytes()
+    lexed: lex_generated(bytes)
+    edits := [LambdaShapeEdit]{}
+    skipped := [String]{}
+    rewritten := lambda_shape1_scan(path, bytes, lexed.tables, lexed.tokens, TOKEN_LBRACE, edits, skipped)
+    loop token in lexed.tokens {
+        if token.kind != TOKEN_RAW_STRING && token.kind != TOKEN_STRING -> next
+        quoted_edit: lambda_shape1_quoted(path, bytes, token, skipped) ?? next
+        rewritten += quoted_edit.rewritten
+        edits.push(LambdaShapeEdit{start: quoted_edit.start, end: quoted_edit.end, text: quoted_edit.text})
+    }
+    if edits.len() == 0 -> return MigrationOutcome{text: text, rewritten: 0, skipped: skipped}
+    result: lambda_shape1_apply(bytes, edits) ?? {
+        skipped.push("{path}: overlapping edits, file left alone")
+        return MigrationOutcome{text: text, rewritten: 0, skipped: skipped}
+    }
+    after_errors: lambda_shape1_errors(result)
+    before_errors: lambda_shape1_errors(text)
+    if after_errors > before_errors {
+        skipped.push("{path}: the rewrite parses worse ({after_errors} errors, {before_errors} before), file left alone")
+        return MigrationOutcome{text: text, rewritten: 0, skipped: skipped}
+    }
+    MigrationOutcome{text: result, rewritten: rewritten, skipped: skipped}
+}
+
+lambda_shape1_errors: fn(text: String) -> Int {
+    parse_generated_source(text.bytes()).diagnostics.filter(fn(d) { d.code.starts_with("E") }).len()
+}
+
+LambdaShapeQuoted: struct {
+    start: Int
+    end: Int
+    text: String
+    rewritten: Int
+}
+
+// A Jet program quoted in a string literal without interpolation holes or
+// unread escapes, rewritten in place when the result parses cleanly and
+// declares an item, so prose that happens to hold an arrow stays as written.
+lambda_shape1_quoted: fn(path: String, bytes: [U8], token: Token, skipped: &[String]) -> LambdaShapeQuoted? {
+    raw: lambda_shape1_text(bytes, token.span.start, token.span.end)
+    if !raw.contains("->") && !raw.contains("-[") -> return None
+    quote: if token.kind == TOKEN_RAW_STRING -> lambda_shape1_fence(raw, 96) else -> lambda_shape1_fence(raw, 34)
+    if quote == 0 || raw.len() < quote * 2 -> return None
+    inner_raw: lambda_shape1_text(bytes, token.span.start + quote, token.span.end - quote)
+    inner: if token.kind == TOKEN_RAW_STRING -> inner_raw.copy() else -> lambda_shape1_unquote(inner_raw) ?? return None
+    if token.kind == TOKEN_STRING && lambda_shape1_quote(inner) != inner_raw -> return None
+    outcome: lambda_shape1_source("{path}:{lambda_shape1_line(bytes, token.span.start)}", inner)
+    if outcome.rewritten == 0 -> return None
+    parsed: parse_generated_source(outcome.text.bytes())
+    if parsed.program.items.len() == 0 || parsed.diagnostics.any(fn(d) { d.code.starts_with("E") }) -> return None
+    loop reason in outcome.skipped -> skipped.push(reason.copy())
+    replaced: if token.kind == TOKEN_RAW_STRING -> outcome.text.copy() else -> lambda_shape1_quote(outcome.text)
+    if token.kind == TOKEN_RAW_STRING && replaced.contains(lambda_shape1_text(bytes, token.span.start, token.span.start + quote)) -> return None
+    Val(LambdaShapeQuoted{start: token.span.start + quote, end: token.span.end - quote, text: replaced, rewritten: outcome.rewritten})
+}
+
+// Finds and rewrites the lambdas among one token run: a file's code tokens or
+// one interpolation hole's, whose enclosing bracket is `outer`.
+lambda_shape1_scan: fn(path: String, bytes: [U8], tables: TokenTables, raw: [Token], outer: Int, edits: &[LambdaShapeEdit], skipped: &[String]) -> Int {
+    tokens: lexer_without_comments(raw)
+    rewritten := 0
+    stack := [Int]{}
+    loop index in 0..<tokens.len() {
+        token: tokens[index]
+        if token.literal >= 0 {
+            loop part in tables.literals[token.literal].string_parts {
+                if part.kind == STRING_PART_INTERPOLATION -> rewritten += lambda_shape1_scan(path, bytes, tables, part.tokens, TOKEN_LPAREN, edits, skipped)
+            }
+        }
+        enclosing: if stack.len() > 0 -> stack[stack.len() - 1] else -> outer
+        params_end := -1
+        if lambda_shape1_leads(tokens, index, enclosing) {
+            if token.kind == TOKEN_LPAREN -> params_end = lambda_shape1_match(tokens, index)
+            if token.kind == TOKEN_IDENT -> params_end = index
+        }
+        if params_end >= 0 {
+            body: lambda_shape1_after_arrow(tokens, params_end + 1)
+            if body > 0 && body < tokens.len() {
+                end: lambda_shape1_body_end(bytes, tokens, body, enclosing)
+                reason: lambda_shape1_site_edits(bytes, tokens, index, params_end, body, end, edits)
+                if {
+                    reason == "" -> rewritten += 1
+                    else -> skipped.push("{path}:{lambda_shape1_line(bytes, token.span.start)}: {reason}")
+                }
+            }
+        }
+        if token.kind == TOKEN_LPAREN || token.kind == TOKEN_LBRACKET || token.kind == TOKEN_LBRACE -> stack.push(token.kind)
+        if (token.kind == TOKEN_RPAREN || token.kind == TOKEN_RBRACKET || token.kind == TOKEN_RBRACE) && stack.len() > 0 -> _: stack.pop()
+    }
+    rewritten
+}
+
+// Whether the token at `index` stands where a value starts, so a `(…)` group or
+// a name there followed by an arrow is a lambda head.
+lambda_shape1_leads: fn(tokens: [Token], index: Int, enclosing: Int) -> Bool {
+    kind: tokens[index].kind
+    if kind != TOKEN_LPAREN && kind != TOKEN_IDENT -> return false
+    if index == 0 -> return enclosing == TOKEN_LPAREN
+    before: tokens[index - 1].kind
+    if before == TOKEN_COMMA -> return enclosing == TOKEN_LPAREN || enclosing == TOKEN_LBRACKET
+    before == TOKEN_LPAREN || before == TOKEN_LBRACKET || before == TOKEN_COLON || before == TOKEN_EQ || before == TOKEN_COLON_EQ || before == TOKEN_UNIFIED_ARROW || before == TOKEN_RETURN || before == TOKEN_QUESTION_QUESTION || before == TOKEN_PIPE_GT
+}
+
+// The index of the first token after the arrow at `at` (`->` or `-[E]>`), or
+// -1 when no arrow starts there.
+lambda_shape1_after_arrow: fn(tokens: [Token], at: Int) -> Int {
+    if at >= tokens.len() -> return -1
+    if tokens[at].kind == TOKEN_UNIFIED_ARROW -> return at + 1
+    if tokens[at].kind != TOKEN_MINUS || at + 1 >= tokens.len() || tokens[at + 1].kind != TOKEN_LBRACKET || tokens[at].span.end != tokens[at + 1].span.start -> return -1
+    close: lambda_shape1_match(tokens, at + 1)
+    if close < 0 || close + 1 >= tokens.len() || tokens[close + 1].kind != TOKEN_GT || tokens[close].span.end != tokens[close + 1].span.start -> return -1
+    close + 2
+}
+
+// The byte offset where the body starting at token `body` ends: before the
+// comma or closer at its own depth, or, in a braced context, at the end of the
+// line unless the next line continues the expression.
+lambda_shape1_body_end: fn(bytes: [U8], tokens: [Token], body: Int, enclosing: Int) -> Int {
+    depth := 0
+    last := body
+    index := body
+    loop index < tokens.len() {
+        kind: tokens[index].kind
+        closer: kind == TOKEN_RPAREN || kind == TOKEN_RBRACKET || kind == TOKEN_RBRACE
+        if depth == 0 && index > body {
+            if kind == TOKEN_COMMA || closer -> break
+            if enclosing == TOKEN_LBRACE && lambda_shape1_newline(bytes, tokens[index - 1].span.end, tokens[index].span.start) && !lambda_shape1_continues(tokens, index) -> break
+        }
+        if kind == TOKEN_LPAREN || kind == TOKEN_LBRACKET || kind == TOKEN_LBRACE -> depth += 1
+        if closer {
+            if depth == 0 -> break
+            depth -= 1
+        }
+        last = index
+        index += 1
+    }
+    tokens[last].span.end
+}
+
+// Whether the line starting at token `index` goes on with the expression
+// before it.
+lambda_shape1_continues: fn(tokens: [Token], index: Int) -> Bool {
+    next_kind: tokens[index].kind
+    before: tokens[index - 1].kind
+    next_kind == TOKEN_DOT || next_kind == TOKEN_QUESTION_DOT || next_kind == TOKEN_QUESTION_QUESTION || next_kind == TOKEN_AND_AND || next_kind == TOKEN_OR_OR || next_kind == TOKEN_PIPE_GT || next_kind == TOKEN_KW_ELSE || before == TOKEN_UNIFIED_ARROW || before == TOKEN_QUESTION_QUESTION || before == TOKEN_AND_AND || before == TOKEN_OR_OR || before == TOKEN_PIPE_GT || before == TOKEN_EQ
+}
+
+// The edits for the lambda whose head starts at token `first`, whose
+// parameters end at token `params_end` and whose body runs from token `body`
+// to byte `end`; or the reason it was left alone.
+lambda_shape1_site_edits: fn(bytes: [U8], tokens: [Token], first: Int, params_end: Int, body: Int, end: Int, edits: &[LambdaShapeEdit]) -> String {
+    start: tokens[first].span.start
+    bare: tokens[first].kind == TOKEN_IDENT
+    head_end: tokens[params_end].span.end
+    arrow: tokens[params_end + 1]
+    body_from: tokens[body - 1].span.end
+    row: if arrow.kind == TOKEN_MINUS -> " {lambda_shape1_text(bytes, arrow.span.start, body_from)}" else -> ""
+    body_start: tokens[body].span.start
+    braced: tokens[body].kind == TOKEN_LBRACE && lambda_shape1_match(tokens, body) >= 0 && tokens[lambda_shape1_match(tokens, body)].span.end == end
+    // A value body that starts on a later line keeps its lines; its closing
+    // brace then sits on its own line at the lambda line's indent.
+    split: !braced && lambda_shape1_newline(bytes, body_from, body_start)
+    open_body: if {
+        braced -> " "
+        split -> " {{{lambda_shape1_text(bytes, body_from, body_start)}"
+        else -> " {{ "
+    }
+    close_params: if bare -> ")" else -> ""
+    if end <= body_start -> return "empty body"
+    edits.push(LambdaShapeEdit{start: start, end: start, text: if bare -> "fn(" else -> "fn"})
+    edits.push(LambdaShapeEdit{start: head_end, end: body_start, text: "{close_params}{row}{open_body}"})
+    if !braced -> edits.push(LambdaShapeEdit{start: end, end: end, text: if split -> "\n{lambda_shape1_indent(bytes, start)}}}" else -> " }}", order: start})
+    ""
+}
+
+// Applies `edits`; None when two overlap. At one offset, insertions precede
+// replacements, and the closers of nested lambdas that end together close the
+// innermost (latest-starting) first.
+lambda_shape1_apply: fn(bytes: [U8], edits: &[LambdaShapeEdit]) -> String? {
+    edits.sort_by(fn(left, right) {
+        if {
+            left.start != right.start -> left.start <=> right.start
+            left.end - left.start != right.end - right.start -> (left.end - left.start) <=> (right.end - right.start)
+            else -> right.order <=> left.order
+        }
+    })
+    out := [String]{}
+    cursor := 0
+    loop edit in edits {
+        if edit.start < cursor -> return None
+        out.push(lambda_shape1_text(bytes, cursor, edit.start))
+        out.push(edit.text.copy())
+        cursor = edit.end
+    }
+    out.push(lambda_shape1_text(bytes, cursor, bytes.len()))
+    Val(out.join(""))
+}
+
+// The index of the closer matching the opener at `open`, or -1.
+lambda_shape1_match: fn(tokens: [Token], open: Int) -> Int {
+    opener: tokens[open].kind
+    closer: if {
+        opener == TOKEN_LPAREN -> TOKEN_RPAREN
+        opener == TOKEN_LBRACKET -> TOKEN_RBRACKET
+        else -> TOKEN_RBRACE
+    }
+    depth := 0
+    index := open
+    loop index < tokens.len() {
+        kind: tokens[index].kind
+        if kind == opener -> depth += 1
+        if kind == closer {
+            depth -= 1
+            if depth == 0 -> return index
+        }
+        index += 1
+    }
+    -1
+}
+
+lambda_shape1_text: fn(bytes: [U8], start: Int, end: Int) -> String {
+    String.from_bytes(bytes[start..<end]) ?? ""
+}
+
+lambda_shape1_line: fn(bytes: [U8], offset: Int) -> Int {
+    line := 1
+    loop index in 0..<offset {
+        if bytes[index] == 10 -> line += 1
+    }
+    line
+}
+
+lambda_shape1_newline: fn(bytes: [U8], start: Int, end: Int) -> Bool {
+    loop index in start..<end {
+        if bytes[index] == 10 -> return true
+    }
+    false
+}
+
+// The leading blanks of the line holding `offset`.
+lambda_shape1_indent: fn(bytes: [U8], offset: Int) -> String {
+    start := offset
+    loop start > 0 && bytes[start - 1] != 10 -> start -= 1
+    end := start
+    loop end < bytes.len() && (bytes[end] == 32 || bytes[end] == 9) -> end += 1
+    lambda_shape1_text(bytes, start, end)
+}
+
+// How many `mark` bytes open `raw`.
+lambda_shape1_fence: fn(raw: String, mark: Int) -> Int {
+    bytes: raw.bytes()
+    count := 0
+    loop count < bytes.len() && Int.from_u8(bytes[count]) == mark -> count += 1
+    count
+}
+
+// A quoted string's source text: `{{`/`}}` undoubled and the escapes `\\`,
+// `\"`, `\n`, `\t` read; None when it holds an interpolation hole or any
+// other escape.
+lambda_shape1_unquote: fn(raw: String) -> String? {
+    bytes: raw.bytes()
+    out := [U8]{}
+    index := 0
+    loop index < bytes.len() {
+        byte: Int.from_u8(bytes[index])
+        if byte == 92 {
+            if index + 1 >= bytes.len() -> return None
+            escaped: Int.from_u8(bytes[index + 1])
+            if {
+                escaped == 92 || escaped == 34 -> out.push(bytes[index + 1])
+                escaped == 110 -> out.push(U8{10})
+                escaped == 116 -> out.push(U8{9})
+                else -> return None
+            }
+            index += 2
+            next
+        }
+        if byte == 123 || byte == 125 {
+            if index + 1 >= bytes.len() || Int.from_u8(bytes[index + 1]) != byte -> return None
+            out.push(bytes[index])
+            index += 2
+            next
+        }
+        out.push(bytes[index])
+        index += 1
+    }
+    Val(String.from_bytes(out) ?? "")
+}
+
+// The quoted-string spelling of `text`, the inverse of `lambda_shape1_unquote`.
+lambda_shape1_quote: fn(text: String) -> String {
+    text.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\t", "\\t").replace("{{", "{{{{").replace("}}", "}}}}")
+}
+
+// A Markdown file: each ```jet fence is rewritten in place.
+lambda_shape1_markdown: fn(path: String, text: String) -> MigrationOutcome {
+    lines: text.split("\n").to_list()
+    out := [String]{}
+    skipped := [String]{}
+    rewritten := 0
+    index := 0
+    loop index < lines.len() {
+        line: lines[index].copy()
+        fence: line.trim() == "```jet"
+        out.push(line)
+        index += 1
+        if !fence -> next
+        block := [String]{}
+        loop index < lines.len() && lines[index].trim() != "```" {
+            block.push(lines[index].copy())
+            index += 1
+        }
+        if block.len() == 0 -> next
+        outcome: lambda_shape1_source("{path}:{index - block.len()}", block.join("\n"))
+        loop reason in outcome.skipped -> skipped.push(reason.copy())
+        rewritten += outcome.rewritten
+        loop rewritten_line in outcome.text.split("\n") -> out.push(rewritten_line.copy())
+    }
+    MigrationOutcome{text: out.join("\n"), rewritten: rewritten, skipped: skipped}
+}

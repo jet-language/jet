@@ -1,0 +1,71 @@
+// Runs one registered migration plan over source files.
+// Usage: jet run Compiler/Migrations/Migrate.jet -- <plan> [--write] [--list FILE] PATH...
+// Each PATH, and each line of a `--list` file, names a `.jet`, `.md` or
+// `.template` file. Without `--write` the files are only read. The run prints
+// `EDIT <path> <count>` for each file the plan changes, `SKIP <site>: <reason>`
+// for each site it leaves alone, and a closing `TOTAL` line.
+use {
+    files: core.files
+    process: core.process
+}
+
+// A registered plan: its name on the command line, the toolchain it moves
+// code to, and the decision it carries out.
+MigrationPlan: struct {
+    name: String
+    toolchain: String
+    decision: String
+}
+
+migration_plans: fn() -> [MigrationPlan] {
+    [MigrationPlan]{
+        MigrationPlan{name: "lambda-shape1", toolchain: "a0.0.45", decision: "D-LAMBDA-SHAPE1=C"},
+    }
+}
+
+migration_rewrite: fn(plan: String, path: String, text: String) -> MigrationOutcome {
+    if plan == "lambda-shape1" -> return lambda_shape1_file(path, text)
+    panic("no migration plan named {plan}")
+}
+
+run: fn() {
+    args: process.args()
+    names := [String]{}
+    loop known in migration_plans() -> names.push(known.name.copy())
+    if args.len() == 0 || !names.contains(args[0]) -> panic("usage: Migrate.jet -- <plan> [--write] [--list FILE] PATH...; plans: {names.join(", ")}")
+    plan: args[0]
+    write := false
+    paths := [String]{}
+    index := 1
+    loop index < args.len() {
+        arg: args[index]
+        if {
+            arg == "--write" -> write = true
+            arg == "--list" && index + 1 < args.len() -> {
+                listing: files.read(args[index + 1]) ?? panic("cannot read {args[index + 1]}: {err}")
+                loop line in listing.split("\n") {
+                    if line != "" -> paths.push(line.copy())
+                }
+                index += 1
+            }
+            else -> paths.push(arg.copy())
+        }
+        index += 1
+    }
+    total := 0
+    changed := 0
+    loop path in paths {
+        text: files.read(path) ?? {
+            print("UNREADABLE {path}")
+            next
+        }
+        outcome: migration_rewrite(plan, path, text)
+        loop line in outcome.skipped -> print("SKIP {line}")
+        if outcome.rewritten == 0 -> next
+        total += outcome.rewritten
+        changed += 1
+        print("EDIT {path} {outcome.rewritten}")
+        if write -> files.write(path, outcome.text) ?? panic("cannot write {path}: {err}")
+    }
+    print("TOTAL {total} sites in {changed} files")
+}
