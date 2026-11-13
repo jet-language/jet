@@ -14,6 +14,7 @@ use {
     rt: jet.runtime.term
     ui: core.ui
     core.ui.[Rect, UINode]
+    core.color.[Color]
     math: core.math
 }
 
@@ -39,10 +40,13 @@ TUIColorProfile: enum {
     ASCII
 }
 
+// A terminal color. `RGB` holds a core.color `Color`; the terminal has no
+// alpha, so its alpha is ignored, and a profile without true color shows the
+// nearest ANSI 256 or ANSI 16 color.
 TUIColor: enum {
     ANSI16(Int)
     ANSI256(Int)
-    RGB(red: Int, green: Int, blue: Int)
+    RGB(Color)
 }
 
 TUIDirection: enum {
@@ -207,9 +211,7 @@ ascii: fn(value: String) -> String Never! {
 }
 color_ansi16: fn(index: Int) -> TUIColor Never! { TUIColor.ANSI16(clamp_int(index, 15)) }
 color_ansi256: fn(index: Int) -> TUIColor Never! { TUIColor.ANSI256(clamp_int(index, 255)) }
-color_rgb: fn(red: Int, green: Int, blue: Int) -> TUIColor Never! {
-    TUIColor.RGB{red: clamp_int(red, 255), green: clamp_int(green, 255), blue: clamp_int(blue, 255)}
-}
+color_rgb: fn(color: Color) -> TUIColor Never! { TUIColor.RGB(color) }
 
 style: fn() -> TUIStyle Never! {
     TUIStyle{foreground: None, background: None, bold: false, dim: false, underline: false}
@@ -403,9 +405,9 @@ color_words: fn(color: TUIColor?) -> ColorWords Never! {
         if value == {
             .ANSI16(index) -> return ColorWords{kind: 1, word: clamp_int(index, 15)}
             .ANSI256(index) -> return ColorWords{kind: 2, word: clamp_int(index, 255)}
-            .RGB(red, green, blue) -> return ColorWords{
+            .RGB(rgb) -> return ColorWords{
                 kind: 3,
-                word: (clamp_int(red, 255) << 16).bit_or((clamp_int(green, 255) << 8)).bit_or(clamp_int(blue, 255)),
+                word: (Int.from_u8(rgb.r) << 16).bit_or((Int.from_u8(rgb.g) << 8)).bit_or(Int.from_u8(rgb.b)),
             }
         }
     }
@@ -507,7 +509,10 @@ color_code: fn(color: TUIColor, profile: TUIColorProfile, background: Bool) -> S
     if background -> base = 48
     if profile == .ASCII -> return ""
     if color == {
-        .RGB(red, green, blue) -> {
+        .RGB(rgb) -> {
+            red: Int.from_u8(rgb.r)
+            green: Int.from_u8(rgb.g)
+            blue: Int.from_u8(rgb.b)
             if profile == .TrueColor -> return "{base};2;{red};{green};{blue}"
             if profile == .ANSI256 {
                 index: 16 + 36 * rgb_cube(red) + 6 * rgb_cube(green) + rgb_cube(blue)
@@ -627,8 +632,8 @@ __write_cells: fn(&cells: [Int], cols: Int, row: Int, col: Int, label: String, u
     if color_ansi16(-1) == .ANSI16(index) -> assert(index == 0)
     if color_ansi16(99) == .ANSI16(index) -> assert(index == 15)
     if color_ansi256(999) == .ANSI256(index) -> assert(index == 255)
-    if color_rgb(-1, 128, 999) == .RGB(red, green, blue) {
-        assert(red == 0 && green == 128 && blue == 255)
+    if color_rgb(Color{r: 0, g: 128, b: 255, a: 7}) == .RGB(rgb) {
+        assert(rgb.r == 0 && rgb.g == 128 && rgb.b == 255 && rgb.a == 7)
     }
     selected: list_state_select(list_state(), -3)
     assert(list_state_selected(selected) == 0)
@@ -667,11 +672,12 @@ __write_cells: fn(&cells: [Int], cols: Int, row: Int, col: Int, label: String, u
 }
 
 #Test("TUI style code ordering and color-profile projection") {
-    s: style_background(style_foreground(style_underline(style_dim(style_bold(style(), true), true), true), color_rgb(255, 0, 0)), color_ansi16(9))
+    red: color_rgb(Color{r: 255, g: 0, b: 0, a: 255})
+    s: style_background(style_foreground(style_underline(style_dim(style_bold(style(), true), true), true), red), color_ansi16(9))
     escape: String.from_bytes([U8]{27}) ?? ""
-    assert(color_code(color_rgb(255, 0, 0), TUIColorProfile.TrueColor, false) == "38;2;255;0;0")
-    assert(color_code(color_rgb(255, 0, 0), TUIColorProfile.ANSI256, false) == "38;5;196")
-    assert(color_code(color_rgb(255, 0, 0), TUIColorProfile.ANSI16, false) == "91")
+    assert(color_code(red, TUIColorProfile.TrueColor, false) == "38;2;255;0;0")
+    assert(color_code(red, TUIColorProfile.ANSI256, false) == "38;5;196")
+    assert(color_code(red, TUIColorProfile.ANSI16, false) == "91")
     assert(s.bold && s.dim && s.underline)
     caps: capabilities()
     if !caps.color -> assert(style_text("jet", s, caps) == "jet")
@@ -679,7 +685,7 @@ __write_cells: fn(&cells: [Int], cols: Int, row: Int, col: Int, label: String, u
 }
 
 #Test("TUI style words normalize and the TUI backend shows styled text plain") {
-    styled: style_background(style_foreground(style_bold(style(), true), color_rgb(12, 34, 56)), color_ansi16(2))
+    styled: style_background(style_foreground(style_bold(style(), true), color_rgb(Color{r: 12, g: 34, b: 56, a: 255})), color_ansi16(2))
     words: style_words(styled)
     assert(words.foreground.kind == 3 && words.foreground.word == 795192)
     assert(words.background.kind == 1 && words.background.word == 2 && words.flags == 1)

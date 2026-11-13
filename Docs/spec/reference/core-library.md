@@ -3255,6 +3255,11 @@ run: fn() {
 | `Color.from_linear(light)` | `Color` | The color of a `LinearColor{r, g, b, a}` in linear light through the IEC 61966-2-1 sRGB transfer function. |
 | `color.to_linear()` | `LinearColor` | Each channel in linear light from 0 to 1; alpha is only scaled. |
 
+Core's libraries take this one value (D-VERDICT-3288-1=A). In `core.tui`,
+`color_rgb(color)` is `TUIColor.RGB(color)`: a terminal shows no alpha, so the
+alpha is ignored, and a profile without true color shows the nearest ANSI 256
+or ANSI 16 color.
+
 ### `core.math.random` — deterministic pseudorandom values
 
 `core.math.random` is a deterministic pseudorandom generator, not a

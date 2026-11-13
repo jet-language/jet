@@ -7,15 +7,16 @@ package: {
 use {
     tui: core.tui
     ui: core.ui
+    core.color.[Color]
 }
 
 run: fn() {
     if tui.color_ansi16(-20) == {
         .ANSI16(index) -> print(index)
-        .ANSI256(_) | .RGB(_, _, _) -> panic("ANSI16 constructor changed variant")
+        .ANSI256(_) | .RGB(_) -> panic("ANSI16 constructor changed variant")
     }
-    if tui.color_rgb(-1, 128, 999) == {
-        .RGB(red, green, blue) -> print("{red},{green},{blue}")
+    if tui.color_rgb(Color{r: 0, g: 128, b: 255, a: 255}) == {
+        .RGB(rgb) -> print("{rgb.r},{rgb.g},{rgb.b}")
         .ANSI16(_) | .ANSI256(_) -> panic("RGB constructor changed variant")
     }
     s: tui.style_underline(tui.style_dim(tui.style_bold(tui.style(), true), true), true)
