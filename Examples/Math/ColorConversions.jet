@@ -1,0 +1,67 @@
+// core.color is Core's one color value: sRGB red, green and blue and a
+// straight (not premultiplied) alpha, each a U8 from 0 to 255. It reads and
+// writes hex text and converts to and from HSL and linear light. A value out
+// of range clamps, NaN reads as 0, a hue wraps around 360 degrees, and every
+// conversion into a Color rounds half to even.
+use {
+    color: core.color
+    math: core.math
+}
+
+show: fn(c: color.Color) -> String {
+    "rgba({Int.from_u8(c.r)}, {Int.from_u8(c.g)}, {Int.from_u8(c.b)}, {Int.from_u8(c.a)})"
+}
+
+// `x` to three decimals, so every tier prints the same digits.
+milli: fn(x: Float) -> Float { math.round_even(x * 1000.0) / 1000.0 }
+
+hex: fn(text: String) {
+    if color.Color.from_hex(text) == {
+        .Ok(c) -> { print("hex {text}: {show(c)}, back {c.to_hex()}") }
+        .Err(_) -> { print("hex {text}: invalid") }
+    }
+}
+
+hsl: fn(c: color.Color) {
+    h: c.to_hsl()
+    back: color.Color.from_hsl(h)
+    print("hsl {c.to_hex()}: h {milli(h.h)}, s {milli(h.s)}, l {milli(h.l)}, a {milli(h.a)}, back {back.to_hex()}")
+}
+
+linear: fn(c: color.Color) {
+    light: c.to_linear()
+    back: color.Color.from_linear(light)
+    print("linear {c.to_hex()}: r {milli(light.r)}, g {milli(light.g)}, b {milli(light.b)}, a {milli(light.a)}, back {back.to_hex()}")
+}
+
+run: fn() {
+    // Three, six or eight digits after `#`, in either case; `to_hex` writes
+    // lowercase and adds alpha only below 255.
+    hex("#f80")
+    hex("#FF8800")
+    hex("#ff880080")
+    hex("#12345")
+    hex("ff8800")
+    hex("#ggg")
+
+    // HSL: hue in degrees, the rest from 0 to 1. A gray has hue and
+    // saturation 0, and each color comes back unchanged.
+    hsl(color.Color{r: U8{255}, g: U8{136}, b: U8{0}, a: U8{255}})
+    hsl(color.Color{r: U8{128}, g: U8{128}, b: U8{128}, a: U8{255}})
+    hsl(color.Color{r: U8{51}, g: U8{102}, b: U8{153}, a: U8{64}})
+
+    // Into a Color: 480 degrees wraps to 120 and -120 to 240, saturation 2 and
+    // alpha 1.5 clamp to 1, and NaN reads as 0. A channel of 127.5 rounds to
+    // 128, and alpha 1.5 and 2.5 both round to the even 2.
+    print("from hsl: {show(color.Color.from_hsl(color.Hsl{h: 480.0, s: 1.0, l: 0.5, a: 1.0}))}")
+    print("from hsl: {show(color.Color.from_hsl(color.Hsl{h: -120.0, s: 2.0, l: 0.25, a: 1.5}))}")
+    print("from hsl: {show(color.Color.from_hsl(color.Hsl{h: math.NAN, s: math.NAN, l: 0.5, a: 1.0}))}")
+    print("from hsl: {show(color.Color.from_hsl(color.Hsl{h: 0.0, s: 0.0, l: 0.0, a: Float{1.5} / 255.0}))}")
+    print("from hsl: {show(color.Color.from_hsl(color.Hsl{h: 0.0, s: 0.0, l: 0.0, a: Float{2.5} / 255.0}))}")
+
+    // Linear light through the sRGB transfer function; alpha is only scaled.
+    linear(color.Color{r: U8{128}, g: U8{128}, b: U8{128}, a: U8{255}})
+    linear(color.Color{r: U8{255}, g: U8{136}, b: U8{0}, a: U8{128}})
+    print("from linear: {show(color.Color.from_linear(color.LinearColor{r: 0.5, g: 0.0, b: 2.0, a: -1.0}))}")
+    print("from linear: {show(color.Color.from_linear(color.LinearColor{r: 0.0031308, g: 0.04, b: 1.0, a: 0.5}))}")
+}

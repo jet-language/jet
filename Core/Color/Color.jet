@@ -1,0 +1,187 @@
+use math: core.math
+
+// core.color: the one Core color value. A `Color` holds sRGB red, green and
+// blue and a straight (not premultiplied) alpha, each a `U8` from 0 to 255.
+// It converts to and from three other spellings:
+// - hex text, `#rgb`, `#rrggbb` or `#rrggbbaa` with digits in either case;
+//   `to_hex` writes lowercase `#rrggbb`, or `#rrggbbaa` when alpha is below 255;
+// - `Hsl`, hue in degrees and saturation, lightness and alpha from 0 to 1;
+// - `LinearColor`, each channel in linear light from 0 to 1 through the
+//   IEC 61966-2-1 sRGB transfer function; alpha is linear already and is
+//   only scaled.
+// A conversion into `Color` reads NaN as 0, clamps each value to its range,
+// and rounds the value scaled to 0..255 half to even. A hue wraps around 360
+// degrees.
+
+#Error
+ColorError: enum {
+    // The text is not `#rgb`, `#rrggbb` or `#rrggbbaa` hex.
+    InvalidHex(String)
+}
+
+// A color as hue, saturation and lightness: `h` in degrees from 0 up to 360,
+// and `s`, `l` and `a` from 0 to 1.
+Hsl: struct {
+    h: Float
+    s: Float
+    l: Float
+    a: Float
+}
+
+// A color in linear light: `r`, `g`, `b` and `a` from 0 to 1.
+LinearColor: struct {
+    r: Float
+    g: Float
+    b: Float
+    a: Float
+}
+
+Color: struct {
+    r: U8
+    g: U8
+    b: U8
+    a: U8
+
+    // The color `text` spells. `#rgb` doubles each digit, and alpha is 255
+    // unless `#rrggbbaa` gives it.
+    from_hex: fn(text: String) -> Color ColorError! {
+        raw: text.bytes()
+        count: raw.len()
+        if (count != 4 && count != 7 && count != 9) || Int.from_u8(raw[0]) != 35 -> return Err(ColorError.InvalidHex(text.copy()))
+        digits := [Int]{}
+        loop index in 1..<count {
+            digits.push(__color_hex_digit(raw[index]) ?? return Err(ColorError.InvalidHex(text.copy())))
+        }
+        if count == 4 -> return Ok(Color{r: U8{digits[0] * 17}, g: U8{digits[1] * 17}, b: U8{digits[2] * 17}, a: U8{255}})
+        alpha: if count == 9 -> digits[6] * 16 + digits[7] else -> 255
+        Ok(Color{r: U8{digits[0] * 16 + digits[1]}, g: U8{digits[2] * 16 + digits[3]}, b: U8{digits[4] * 16 + digits[5]}, a: U8{alpha}})
+    }
+
+    // Lowercase `#rrggbb`, or `#rrggbbaa` when alpha is below 255.
+    to_hex: fn(self) -> String Never! {
+        text: "#{__color_hex_byte(self.r)}{__color_hex_byte(self.g)}{__color_hex_byte(self.b)}"
+        if Int.from_u8(self.a) == 255 -> return text
+        "{text}{__color_hex_byte(self.a)}"
+    }
+
+    // The color `hsl` names.
+    from_hsl: fn(hsl: Hsl) -> Color Never! {
+        hue: __color_hue(hsl.h)
+        saturation: __color_unit(hsl.s)
+        lightness: __color_unit(hsl.l)
+        Color{
+            r: __color_channel(__color_hsl_part(0.0, hue, saturation, lightness))
+            g: __color_channel(__color_hsl_part(8.0, hue, saturation, lightness))
+            b: __color_channel(__color_hsl_part(4.0, hue, saturation, lightness))
+            a: __color_channel(hsl.a)
+        }
+    }
+
+    // The color as hue, saturation and lightness. A gray has hue 0 and
+    // saturation 0.
+    to_hsl: fn(self) -> Hsl Never! {
+        red: Int.from_u8(self.r)
+        green: Int.from_u8(self.g)
+        blue: Int.from_u8(self.b)
+        alpha: __color_fraction(self.a)
+        high := red
+        if green > high -> high = green
+        if blue > high -> high = blue
+        low := red
+        if green < low -> low = green
+        if blue < low -> low = blue
+        lightness: Float{high + low} / 510.0
+        if high == low -> return Hsl{h: 0.0, s: 0.0, l: lightness, a: alpha}
+        spread: Float{high - low}
+        saturation: spread / 255.0 / (Float{1.0} - math.abs_float(Float{2.0} * lightness - 1.0))
+        hue: if {
+            high == red -> Float{60.0} * (Float{green - blue} / spread)
+            high == green -> Float{60.0} * (Float{blue - red} / spread + 2.0)
+            else -> Float{60.0} * (Float{red - green} / spread + 4.0)
+        }
+        Hsl{h: __color_hue(hue), s: saturation, l: lightness, a: alpha}
+    }
+
+    // The color whose linear-light channels `linear` gives.
+    from_linear: fn(linear: LinearColor) -> Color Never! {
+        Color{
+            r: __color_channel(__color_encode(__color_unit(linear.r)))
+            g: __color_channel(__color_encode(__color_unit(linear.g)))
+            b: __color_channel(__color_encode(__color_unit(linear.b)))
+            a: __color_channel(linear.a)
+        }
+    }
+
+    // The color in linear light.
+    to_linear: fn(self) -> LinearColor Never! {
+        LinearColor{r: __color_decode(__color_fraction(self.r)), g: __color_decode(__color_fraction(self.g)), b: __color_decode(__color_fraction(self.b)), a: __color_fraction(self.a)}
+    }
+}
+
+// The value of one hex digit, or None for any other byte.
+__color_hex_digit: fn(byte: U8) -> Int? Never! {
+    n: Int.from_u8(byte)
+    if {
+        n >= 48 && n <= 57 -> Val(n - 48)
+        n >= 97 && n <= 102 -> Val(n - 87)
+        n >= 65 && n <= 70 -> Val(n - 55)
+        else -> None
+    }
+}
+
+// The two lowercase hex digits of `byte`.
+__color_hex_byte: fn(byte: U8) -> String Never! {
+    n: Int.from_u8(byte)
+    String.from_bytes([U8]{__color_hex_nibble(n >> 4), __color_hex_nibble(n.bit_and(15))}) ?? ""
+}
+
+// The lowercase hex digit of `n`, 0 to 15.
+__color_hex_nibble: fn(n: Int) -> U8 Never! {
+    if n < 10 -> return U8{48 + n}
+    U8{87 + n}
+}
+
+// `channel` from 0 to 1.
+__color_fraction: fn(channel: U8) -> Float Never! { Float{Int.from_u8(channel)} / 255.0 }
+
+// `value` clamped to 0..1, with NaN read as 0.
+__color_unit: fn(value: Float) -> Float Never! {
+    if math.is_nan(value) -> return 0.0
+    math.clamp_float(value, 0.0, 1.0)
+}
+
+// `degrees` wrapped into 0 up to 360, with NaN and infinities read as 0.
+__color_hue: fn(degrees: Float) -> Float Never! {
+    if !math.is_finite(degrees) -> return 0.0
+    wrapped: degrees - Float{360.0} * math.floor(degrees / 360.0)
+    if wrapped >= 360.0 -> return 0.0
+    wrapped
+}
+
+// The channel of `value` from 0 to 1: clamped, scaled to 0..255 and rounded
+// half to even.
+__color_channel: fn(value: Float) -> U8 Never! {
+    scaled: math.round_even(__color_unit(value) * 255.0)
+    U8{Int.from_float(scaled) ?? 0}
+}
+
+// One channel of the HSL to RGB formula: `offset` is 0 for red, 8 for green
+// and 4 for blue.
+__color_hsl_part: fn(offset: Float, hue: Float, saturation: Float, lightness: Float) -> Float Never! {
+    turn: offset + hue / 30.0
+    k: turn - Float{12.0} * math.floor(turn / 12.0)
+    reach: saturation * math.min_float(lightness, Float{1.0} - lightness)
+    lightness - reach * math.max_float(-1.0, math.min_float(math.min_float(k - 3.0, Float{9.0} - k), 1.0))
+}
+
+// The sRGB encoding of a linear-light value from 0 to 1.
+__color_encode: fn(linear: Float) -> Float Never! {
+    if linear <= 0.0031308 -> return Float{12.92} * linear
+    Float{1.055} * math.pow_r(linear, Float{1.0} / 2.4) - 0.055
+}
+
+// The linear-light value of an sRGB-encoded value from 0 to 1.
+__color_decode: fn(encoded: Float) -> Float Never! {
+    if encoded <= 0.04045 -> return encoded / 12.92
+    math.pow_r((encoded + 0.055) / 1.055, 2.4)
+}

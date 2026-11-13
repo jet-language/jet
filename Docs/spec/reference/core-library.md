@@ -3226,6 +3226,35 @@ run: fn() {
 | `units.equals(a, b)` / `units.ratio(a, b)` | `Bool` / `Float` | Compare values or compute a ratio; a zero denominator gives ratio `0`. |
 | `units.is_zero(value)` | `Bool` | Test whether the measured value is zero. |
 
+### `core.color` — the one color value
+
+`core.color` holds Core's one color value. A `Color` is sRGB red, green and
+blue plus a straight (not premultiplied) alpha, each a `U8` from 0 to 255. It
+converts to and from hex text, HSL and linear light. A conversion into a
+`Color` reads NaN as 0, clamps each value to its range, wraps a hue around
+360 degrees, and rounds the value scaled to 0..255 half to even.
+
+```jet
+use color: core.color
+
+run: fn() {
+    if color.Color.from_hex("#f80") == {
+        .Ok(orange) -> { print("{orange.to_hex()} at hue {orange.to_hsl().h}") }
+        .Err(_) -> { print("not a hex color") }
+    }
+}
+```
+
+| Operation | Returns | Description |
+| --- | --- | --- |
+| `Color{r:, g:, b:, a:}` | `Color` | sRGB channels and straight alpha, each a `U8`. |
+| `Color.from_hex(text)` | `Color ColorError!` | Read `#rgb`, `#rrggbb` or `#rrggbbaa`, digits in either case; `#rgb` doubles each digit and alpha is 255 unless given. Other text is `ColorError.InvalidHex(text)`. |
+| `color.to_hex()` | `String` | Lowercase `#rrggbb`, or `#rrggbbaa` when alpha is below 255. |
+| `Color.from_hsl(hsl)` | `Color` | The color of an `Hsl{h, s, l, a}`: hue in degrees, the rest from 0 to 1. |
+| `color.to_hsl()` | `Hsl` | Hue from 0 up to 360, saturation, lightness and alpha from 0 to 1; a gray has hue and saturation 0. |
+| `Color.from_linear(light)` | `Color` | The color of a `LinearColor{r, g, b, a}` in linear light through the IEC 61966-2-1 sRGB transfer function. |
+| `color.to_linear()` | `LinearColor` | Each channel in linear light from 0 to 1; alpha is only scaled. |
+
 ### `core.math.random` — deterministic pseudorandom values
 
 `core.math.random` is a deterministic pseudorandom generator, not a
@@ -6129,6 +6158,7 @@ The built-module inventory is a source-facing registry, not a missing-domain led
 - `core.compiler.lang`
 - `core.collections`
 - `core.collections.set`
+- `core.color`
 - `core.compute`
 - `core.compute.solve`
 - `core.crypto`
