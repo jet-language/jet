@@ -29,7 +29,7 @@ You produce a design doc, Tower cards, and ballots. **You implement nothing.** A
 - **False-green probes.** Bind-and-discard programs pass while the value-consuming form fails (the uuid.v4 lesson). Every generated conformance program must consume its result observably.
 - **Invisible surface.** Anything with no example is invisible to example-driven gates. The denominator law: every Core module item appears in the corpus or is named on an explicit, owner-visible exclusion list with a reason.
 - **Tier seams.** Interpreter-vs-AOT-vs-JIT divergence is where the worst bugs lived (semantic equality, indexed-place lowering, packed-Int tags, release emission totality). Tier-vs-tier byte-diff is an oracle that needs no external reference — exploit it hard.
-- **Resource blowups.** /tmp is RAM-backed tmpfs; `target/` once hit 619G; a continuous runner that leaks disk or RAM will OOM the machine. The design must state its resource budget, its scratch location (`~/.cache/…`, bounded), its pruning rule, and how it respects `scripts/agent/tmp-guard.sh` and `JET_TARGET_CAP_GB`.
+- **Resource blowups.** /tmp is RAM-backed tmpfs; `target/` once hit 619G; a continuous runner that leaks disk or RAM will OOM the machine. The design must state its resource budget, its scratch location (`~/.cache/…`, bounded), its pruning rule, and how it respects `scripts/agent/tmp-guard.sh` and the build-output cap.
 
 ## Design questions the doc must answer (with a decided recommendation each)
 

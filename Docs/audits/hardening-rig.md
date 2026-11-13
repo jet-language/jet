@@ -267,7 +267,6 @@ Every state transition is journaled atomically. A stale lease recovery kills no 
 | rig | suite concurrency | `2` |
 | rig | `CARGO_BUILD_JOBS` | `4` |
 | rig | `JET_MIN_FREE_GB` | `16` |
-| rig | `JET_TARGET_CAP_GB` | `80` |
 | rig | `CARGO_INCREMENTAL` | `0` |
 | rig | scratch | disk-backed `TMPDIR` and `JET_TEST_SCRATCH` |
 | rig | total cache cap | `4GiB` |

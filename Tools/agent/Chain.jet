@@ -1128,7 +1128,6 @@ chain_main: fn(args: [String], seedpub: String) -[Env, Exec, FS, IO, Time, Time.
     files.create_dir_all("{work}/tmp") ?? fail("cannot create `{work}/tmp`: {err}")
     // Every stage inherits these.
     sys.set("CARGO_INCREMENTAL", "0")
-    sys.set("JET_TARGET_CAP_GB", "120")
     cargo_vars: [String]{"CARGO_TARGET_DIR", "CARGO_HOME", "RUSTUP_HOME", "RUSTC"}
     loop name in cargo_vars -> sys.unset(name) ?? false
     sys.set_core_file_limit(Val(0), Val(0)) ?? ()
