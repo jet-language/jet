@@ -13,6 +13,7 @@
 use jet_foundation.[
     AST_NODE_GENERATED,
     CodeModule,
+    DOC_COMMENT_PREFIX,
     Diagnostic,
     Expr,
     ExprField,
@@ -113,8 +114,8 @@ sema_module_meta_field: fn(name: String, value: Expr, span: Span) -> ExprField N
 // One `///` line's text, or None for any other line.
 sema_module_meta_doc_line: fn(line: String) -> String? Never! {
     trimmed: line.trim()
-    if !trimmed.starts_with("///") -> return None
-    rest: String.from_bytes(trimmed.bytes()[3..<trimmed.bytes().len()]) ?? ""
+    if !trimmed.starts_with(DOC_COMMENT_PREFIX) -> return None
+    rest: String.from_bytes(trimmed.bytes()[DOC_COMMENT_PREFIX.bytes().len()..<trimmed.bytes().len()]) ?? ""
     if rest.starts_with(" ") -> return Val(String.from_bytes(rest.bytes()[1..<rest.bytes().len()]) ?? "")
     Val(rest)
 }

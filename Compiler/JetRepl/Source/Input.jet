@@ -3,7 +3,7 @@
 // the parser accepts is checked by the compiler on the shared path (`jet repl`,
 // JetCli Repl.jet); nothing here refuses a feature by name.
 use {
-    jet_foundation.[Diagnostic, DiagnosticLabel, Item, ParseResult, Span, Stmt, TextEdit]
+    jet_foundation.[BLOCK_COMMENT_OPEN, COMMENT_PREFIX, Diagnostic, DiagnosticLabel, Item, ParseResult, Span, Stmt, TextEdit]
     jet_lexer.[lex]
     jet_parser.[parse_generated_source, parse_source]
 }
@@ -57,9 +57,9 @@ repl_skip_leading_comments: fn(source: String) -> String Never! {
     text := source
     loop {
         text = text.trim_start()
-        if !text.starts_with("//") && !text.starts_with("/*") -> return text
+        if !text.starts_with(COMMENT_PREFIX) && !text.starts_with(BLOCK_COMMENT_OPEN) -> return text
         bytes: text.bytes()
-        if text.starts_with("//") {
+        if text.starts_with(COMMENT_PREFIX) {
             newline := Int?{None}
             loop index in 0..<text.len() {
                 if bytes[index] == (U8{10}) {

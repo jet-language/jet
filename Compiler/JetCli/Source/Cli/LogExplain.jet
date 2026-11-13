@@ -8,7 +8,7 @@ use {
     cli_files: core.files
     cli_sys: core.sys
     jet_driver.[JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR]
-    jet_foundation.[ENV_JET_LOG, LOG_FILTER_FIX, log_filter_bad_pair]
+    jet_foundation.[COMMENT_PREFIX, ENV_JET_LOG, LOG_FILTER_FIX, log_filter_bad_pair]
 }
 
 // One source of the filter: its rung, the text it sets, and where.
@@ -42,7 +42,7 @@ jet_cli_explain_log: fn(args: [String], color: Bool, json: Bool) -[FS, Env]> Jet
             source: cli_files.read(entry.path) ?? next
             loop (index, line) in source.split("\n").to_list() {
                 code: line.trim()
-                if code.starts_with("//") || !code.contains("set_level(") -> next
+                if code.starts_with(COMMENT_PREFIX) || !code.contains("set_level(") -> next
                 ladder.push(JetCLILogSource{rung: "code", filter: code, site: "{entry.path}:{index + 1}"})
             }
         }

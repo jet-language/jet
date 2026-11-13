@@ -2,6 +2,7 @@
 // renderer over the producer, receipt, lock, and closure records:
 // `PackageExplain` remains the detailed diagnostic surface, and this selects
 // the facts that answer the common provenance question in one screen.
+use jetpack_foundation.[COMMENT_PREFIX]
 
 WhyLocation: struct {
     path: String
@@ -252,7 +253,7 @@ store_why_matching_lock_block: fn(block: [WhyLine], names: [String], qualified: 
 // A source line names a package when a whole package token matches outside
 // a `//` comment.
 store_why_source_line_matches: fn(line: String, names: [String], qualified: [String]) -> Bool Never! {
-    code: if line.split_once("//") == {
+    code: if line.split_once(COMMENT_PREFIX) == {
         .Val(parts) -> parts.before
         .None -> line
     }

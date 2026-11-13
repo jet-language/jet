@@ -8,6 +8,7 @@ use {
         BindName,
         BindPattern,
         Binding,
+        COMMENT_PREFIX,
         CallArg,
         Expr,
         FencedNames,
@@ -1602,7 +1603,7 @@ jfmt_emit_classic_if_condition_trivia: fn(f: &JetFmt, condition_start: Int) {
         text: f.comments[f.comment_i].text.copy()
         jfmt_write(f, text)
         f.comment_i += 1
-        if text.starts_with("//") {
+        if text.starts_with(COMMENT_PREFIX) {
             jfmt_newline(f)
         } else {
             jfmt_write(f, " ")

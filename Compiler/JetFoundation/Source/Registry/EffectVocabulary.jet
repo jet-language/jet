@@ -133,7 +133,7 @@ effect_vocabulary_source_rows: fn(source: String, path: String, machine: [Effect
     impl_head: "irreversible: fn(self) -> Bool {{ "
     loop index in 0..<lines.len() {
         raw: lines[index]
-        comment: raw.find("//")
+        comment: raw.find(COMMENT_PREFIX)
         line: (if comment < 0 -> raw.copy() else -> effect_vocabulary_slice(raw, 0, comment)).trim()
         if line == "" -> next
         fields: effect_vocabulary_words(line)

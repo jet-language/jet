@@ -8,7 +8,7 @@ use {
         read_source_without_symlinks, snippet, source_revision, write_new_file_without_symlinks, write_source_if_unchanged,
     ]
     jet_driver.[jet_driver_apply_edits]
-    jet_foundation.[Item, NameLedger, Span, TextEdit, TraitMethodSig, core_module_for_alias, sha256_hex, type_name]
+    jet_foundation.[COMMENT_PREFIX, Item, NameLedger, Span, TextEdit, TraitMethodSig, core_module_for_alias, sha256_hex, type_name]
     jet_lsp.[LSPChecker]
     jet_parser.[jet_format_source]
     jet_semindex.[SemIndex]
@@ -642,7 +642,7 @@ core_imports: fn(src: String) -> [CoreImport] {
     imports := [CoreImport]{}
     in_block := false
     loop line in src.lines() {
-        code: if line.index_of("//") == .Val(at) -> line.slice(0, at).trim() else -> line.trim()
+        code: if line.index_of(COMMENT_PREFIX) == .Val(at) -> line.slice(0, at).trim() else -> line.trim()
         if in_block && code.starts_with("}}") {
             in_block = false
             next
@@ -702,7 +702,7 @@ core_import_insert_point: fn(src: String) -> CoreImportPoint {
             insert_at = line_end
         } else if saw_use {
             break
-        } else if trimmed == "" || trimmed.starts_with("//") {
+        } else if trimmed == "" || trimmed.starts_with(COMMENT_PREFIX) {
             insert_at = line_end
         } else {
             break

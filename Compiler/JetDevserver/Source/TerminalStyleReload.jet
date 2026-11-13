@@ -1,6 +1,6 @@
 // Style facts only; widget trees, focus, cursor and application model remain with the host.
 use {
-    jet_foundation.[foundation_json_escape, foundation_parse_protocol_json_with_limit, sha256_bytes, sha256_hex, sha256_hex_bytes]
+    jet_foundation.[COMMENT_PREFIX, foundation_json_escape, foundation_parse_protocol_json_with_limit, sha256_bytes, sha256_hex, sha256_hex_bytes]
     jetpack_foundation.[ColorChoice]
     core.tui.[TUIColorProfile]
 }
@@ -313,7 +313,7 @@ TerminalStyleDocument: struct {
         loop raw_line in source.split("\n").to_list() {
             line_number += 1
             line: raw_line.trim()
-            if line == "" || line.starts_with("#") || line.starts_with("//") -> next
+            if line == "" || line.starts_with("#") || line.starts_with(COMMENT_PREFIX) -> next
             parts: line.split("=").to_list()
             if parts.len() < 2 -> return Err(terminal_style_parse_error(line_number, .InvalidStyle, "expected role=value"))
             role: TerminalStyleRole.parse(parts[0].trim()) ?? return Err(terminal_style_parse_error(line_number, .InvalidStyle, "unknown semantic style role"))

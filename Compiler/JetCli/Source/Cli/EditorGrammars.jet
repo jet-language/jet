@@ -11,7 +11,7 @@ use {
     cli_files: core.files
     cli_grammar_json: core.encoding.json
     jet_driver.[JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR]
-    jet_foundation.[foundation_json_quote]
+    jet_foundation.[COMMENT_PREFIX, foundation_json_quote]
 }
 
 JET_CLI_GRAMMAR_SYNTAX_DIR: "Compiler/JetFoundation/Data/Syntax"
@@ -251,7 +251,7 @@ jet_cli_grammar_constant_line: fn(line: String) -> (name: String, literal: Strin
     close: jet_cli_grammar_literal_end(raw, at)
     if close < 0 -> return None
     tail: jet_cli_grammar_slice(line, close, raw.len()).trim().copy()
-    if tail != "" && !tail.starts_with("//") -> return None
+    if tail != "" && !tail.starts_with(COMMENT_PREFIX) -> return None
     Val((name: jet_cli_grammar_slice(line, 0, name_end), literal: jet_cli_grammar_slice(line, at, close)))
 }
 

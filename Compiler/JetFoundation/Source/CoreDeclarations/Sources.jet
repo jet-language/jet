@@ -320,7 +320,7 @@ core_decl_enum_variants: fn(text: String, open: Int) -> [String] Never! {
         }
         end += 1
     }
-    kept: loop line in core_decl_slice(text, open, end - 1).split("\n") -> if line.find("//") < 0 -> line.copy() else -> core_decl_slice(line, 0, line.find("//"))
+    kept: loop line in core_decl_slice(text, open, end - 1).split("\n") -> if line.find(COMMENT_PREFIX) < 0 -> line.copy() else -> core_decl_slice(line, 0, line.find(COMMENT_PREFIX))
     body: kept.join("\n")
     code_bytes: body.bytes()
     variants := [String]{}
@@ -511,7 +511,7 @@ core_declarations_checked_sources: fn(declared: CoreDeclarations, sources: [Core
 core_decl_embedded_names: fn(text: String) -> [String] Never! {
     names := [String]{}
     loop line in text.split("\n") {
-        if line.trim_start().starts_with("//") -> next
+        if line.trim_start().starts_with(COMMENT_PREFIX) -> next
         loop call in ([String]{"embed_bytes(\"", "embed_file(\""}) {
             rest := line.copy()
             loop rest.contains(call) {

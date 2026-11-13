@@ -5,7 +5,7 @@
 // has one home, jet_parser's parser_impl_placement_lints.
 use {
     jet_driver.[JetDriverAuthorizedSourceSnapshot, jet_driver_apply_edits]
-    jet_foundation.[Diagnostic, ImplDef, Span, TextEdit, diagnostic_with_source_path]
+    jet_foundation.[COMMENT_PREFIX, Diagnostic, ImplDef, Span, TextEdit, diagnostic_with_source_path]
     jet_parser.[parse_source, parser_impl_placement_exception, parser_impl_placement_lints]
 }
 
@@ -116,7 +116,7 @@ jet_cli_style_lift: fn(bytes: [U8], value: ImplDef, floor: Int) -> JetCLIStyleLi
     loop start > floor {
         above: jet_cli_style_line_start(bytes, start - 1)
         text: jet_cli_style_text(bytes, above, start).trim().copy()
-        if !text.starts_with("//") && !text.starts_with("#") -> break
+        if !text.starts_with(COMMENT_PREFIX) && !text.starts_with("#") -> break
         start = above
     }
     leading: jet_cli_style_text(bytes, start, head)
@@ -197,7 +197,7 @@ jet_cli_style_blank: fn(bytes: [U8], start: Int, end: Int) -> Bool Never! {
 // Whether `bytes[start..<end]` is blank or a `//` comment.
 jet_cli_style_blank_or_comment: fn(bytes: [U8], start: Int, end: Int) -> Bool Never! {
     rest: jet_cli_style_text(bytes, start, end).trim().copy()
-    rest == "" || rest.starts_with("//")
+    rest == "" || rest.starts_with(COMMENT_PREFIX)
 }
 
 jet_cli_style_text: fn(bytes: [U8], start: Int, end: Int) -> String Never! {

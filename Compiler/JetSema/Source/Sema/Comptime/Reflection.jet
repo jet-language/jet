@@ -9,6 +9,7 @@ use jet_foundation.[
     CallContractRow,
     CallablePolicy,
     CallablePolicyChain,
+    DOC_COMMENT_PREFIX,
     Dimension,
     DistinctDef,
     EnumDef,
@@ -242,7 +243,7 @@ sema_comptime_reflection_source: fn(source: String, file: String) -> SemaComptim
 // `source`, the text of `file`, read for its declarations' documentation: a
 // text with no `///` documents nothing, so it isn't lexed.
 sema_comptime_reflection_doc_source: fn(source: String, file: String) -> SemaComptimeReflectionSource {
-    if !source.contains("///") -> return SemaComptimeReflectionSource{bytes: [U8]{}, tokens: [Token]{}, file: file}
+    if !source.contains(DOC_COMMENT_PREFIX) -> return SemaComptimeReflectionSource{bytes: [U8]{}, tokens: [Token]{}, file: file}
     sema_comptime_reflection_source(source, file)
 }
 

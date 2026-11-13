@@ -2,8 +2,10 @@
 // Every Rust `Fmt` method `name` is the free function `jfmt_name(f, …)`;
 // shared state lives in Formatter.jet.
 use jet_foundation.[
+    BLOCK_COMMENT_OPEN,
     BudgetField,
     CLICommandBinding,
+    COMMENT_PREFIX,
     CModule,
     CModuleKind,
     CodeModule,
@@ -1720,7 +1722,7 @@ jfmt_empty_body_inline: fn(f: JetFmt, span: Span) -> Bool Never! {
     loop byte in body {
         if (Int{byte}) == 10 -> return false
     }
-    jfmt_items_find(body, "//".bytes(), 0) == None && jfmt_items_find(body, "/*".bytes(), 0) == None
+    jfmt_items_find(body, COMMENT_PREFIX.bytes(), 0) == None && jfmt_items_find(body, BLOCK_COMMENT_OPEN.bytes(), 0) == None
 }
 
 // The markers written above a function or a trait method signature: one

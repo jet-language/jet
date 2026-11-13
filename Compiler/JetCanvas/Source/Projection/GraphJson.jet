@@ -2,7 +2,7 @@
 // overlay wired over them, and their JSON.
 use {
     jet_foundation.[
-        Expr, Func, LValue, MetaAttr, NameLedger, Span, Stmt, access_sigil, expr_span, name_ledger_declaration, type_name,
+        DOC_COMMENT_PREFIX, Expr, Func, LValue, MetaAttr, NameLedger, Span, Stmt, access_sigil, expr_span, name_ledger_declaration, type_name,
     ]
     jet_parser.[jfmt_stmt_span]
 }
@@ -518,8 +518,8 @@ doc_comment_before: fn(src: String, name_start: Int) -> String Never! {
         prev_end: cursor - 1
         prev_start: line_start(src, prev_end)
         line: src.slice(prev_start, prev_end).trim()
-        if line.starts_with("///") {
-            docs.push(line.remove_prefix("///").trim())
+        if line.starts_with(DOC_COMMENT_PREFIX) {
+            docs.push(line.remove_prefix(DOC_COMMENT_PREFIX).trim())
             cursor = prev_start
             next
         }

@@ -2,7 +2,7 @@
 // so a brace inside a string or comment never folds, and runs of line
 // comments and `use` lines.
 use {
-    jet_foundation.[Span, foundation_json_quote]
+    jet_foundation.[COMMENT_PREFIX, Span, foundation_json_quote]
     jet_lexer.[Lexed, TOKEN_BLOCK_COMMENT, TOKEN_LBRACE, TOKEN_RBRACE]
 }
 
@@ -30,7 +30,7 @@ lsp_compute_folding_ranges: fn(src: String, lexed: Lexed) -> [LSPFoldingRange] N
         }
         if token.kind == TOKEN_BLOCK_COMMENT -> lsp_push_fold(bytes, table, token.span.start, token.span.end, "comment", folds)
     }
-    lsp_line_group_folds(src, table.lines, "//", "comment", folds)
+    lsp_line_group_folds(src, table.lines, COMMENT_PREFIX, "comment", folds)
     lsp_line_group_folds(src, table.lines, "use ", "imports", folds)
     folds.sort_by(fn(left: LSPFoldingRange, right: LSPFoldingRange) { (left.start_line <=> right.start_line).then(left.start_character <=> right.start_character).then(left.end_line <=> right.end_line) })
     folds

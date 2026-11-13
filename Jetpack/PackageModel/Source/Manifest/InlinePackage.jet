@@ -4,7 +4,7 @@
 // endings stay, so later compiler diagnostics still point at the user's file.
 use {
     jetpack_foundation.[
-        BUILD_ENTRY_FN, INLINE_PACKAGE_DECL, MANIFEST_BLOCK_AUTHORITY, MANIFEST_BLOCK_BOUNDARIES,
+        BLOCK_COMMENT_OPEN, BUILD_ENTRY_FN, COMMENT_PREFIX, INLINE_PACKAGE_DECL, MANIFEST_BLOCK_AUTHORITY, MANIFEST_BLOCK_BOUNDARIES,
         MANIFEST_BLOCK_BUILD, MANIFEST_BLOCK_EFFECTS, MANIFEST_BLOCK_GRANTS, MANIFEST_BLOCK_POLICY,
         MANIFEST_FIELD_NAME, MANIFEST_FIELD_VERSION,
     ]
@@ -502,11 +502,11 @@ pkg_skip_inline_trivia: fn(bytes: [U8], from: Int) -> Int Never! {
             next
         }
         at = pkg_skip_ascii_space(bytes, at)
-        if pkg_bytes_starts_with(bytes, at, "//".bytes()) {
+        if pkg_bytes_starts_with(bytes, at, COMMENT_PREFIX.bytes()) {
             at = pkg_skip_inline_line_comment(bytes, at)
             next
         }
-        if pkg_bytes_starts_with(bytes, at, "/*".bytes()) {
+        if pkg_bytes_starts_with(bytes, at, BLOCK_COMMENT_OPEN.bytes()) {
             following: pkg_skip_block_comment(bytes, at)
             if following == at -> return at
             at = following

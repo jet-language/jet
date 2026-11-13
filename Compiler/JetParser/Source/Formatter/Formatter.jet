@@ -9,6 +9,7 @@ use {
         AST_NODE_GENERATED,
         AppliedRuleApplication,
         BinOp,
+        COMMENT_PREFIX,
         Diagnostic,
         DIAGNOSTIC_ERROR,
         DIAGNOSTIC_LINT,
@@ -887,7 +888,7 @@ jfmt_loop_separator_tail: fn(f: &JetFmt, next_start: Int, wrap: Bool) Never! {
         jfmt_write(f, "  ")
         jfmt_write(f, text)
         f.comment_i += 1
-        if text.starts_with("//") {
+        if text.starts_with(COMMENT_PREFIX) {
             jfmt_newline(f)
             jfmt_write_loop_continuation_indent(f)
             broke = true

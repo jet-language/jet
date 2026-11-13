@@ -7,6 +7,7 @@
 // without one.
 use {
     jet_foundation.[
+        COMMENT_PREFIX,
         Diagnostic,
         Func,
         Item,
@@ -141,7 +142,7 @@ parser_state_marker_edit: fn(owner: String, info: StateMarkerOwner?, group: [Sta
     if state.groups.len() > 0 || !parser_state_marker_text_is(source, state.span.start, "state") -> return None
     open: parser_state_marker_skip_space(source, state.span.start + 5)
     if !parser_state_marker_text_is(source, open, "{{") -> return None
-    if parser_state_marker_text(source, state.span.start, state.span.end).contains("//") -> return None
+    if parser_state_marker_text(source, state.span.start, state.span.end).contains(COMMENT_PREFIX) -> return None
     names: loop member in state.states -> member.name
     moves := [String:[String]]{}
     loop arrow in state.arrows {

@@ -14,6 +14,7 @@
 use {
     jet_driver.[JetDriverAuthorizedSourceSnapshot]
     jet_foundation.[
+        DOC_COMMENT_PREFIX,
         Diagnostic,
         Span,
         diagnostic_from_registry,
@@ -59,7 +60,7 @@ jet_cli_doctest_file: fn(path: String, shown: String, source: String) -> JetCLID
 // `Outer: ...` it sits in; empty when the run documents no named item.
 jet_cli_doctest_item: fn(lines: [String], fence_line: Int) -> String Never! {
     at := fence_line
-    loop at < lines.len() && lines[at].trim().starts_with("///") -> at += 1
+    loop at < lines.len() && lines[at].trim().starts_with(DOC_COMMENT_PREFIX) -> at += 1
     loop at < lines.len() && lines[at].trim().starts_with("#") && !lines[at].trim().contains(" ") -> at += 1
     if at >= lines.len() -> return ""
     inner: jet_cli_doctest_declared(lines[at])

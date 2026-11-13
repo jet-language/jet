@@ -11,6 +11,7 @@ use {
     jet_driver.[JetDriverDocModule]
     jet_foundation.[
         BUILTIN_NUMERIC_SOURCES,
+        DOC_COMMENT_PREFIX,
         ImportDecl,
         JET_KEYWORD_NAMES,
         JET_TYPE_NAMES,
@@ -677,7 +678,7 @@ semindex_symbol_source_docs: fn(source: String, def_start: Int) -> SemDocComment
     collected := [String]{}
     position := lines.len() - 1
     loop position >= 0 {
-        doc: semindex_doc_strip_prefix(lines[position].trim(), "///") ?? break
+        doc: semindex_doc_strip_prefix(lines[position].trim(), DOC_COMMENT_PREFIX) ?? break
         collected.push(doc.trim())
         position -= 1
     }

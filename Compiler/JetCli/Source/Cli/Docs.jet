@@ -12,6 +12,7 @@ use {
         jet_driver_doc_kind_rank,
     ]
     jet_foundation.[
+        DOC_COMMENT_PREFIX,
         Func,
         Item,
         Marker,
@@ -189,7 +190,7 @@ jet_cli_doc_source_docs: fn(source: String, def_start: Int) -> SemDocComment Nev
     collected := [String]{}
     position := lines.len() - 1
     loop position >= 0 {
-        doc: semindex_doc_strip_prefix(lines[position].trim(), "///") ?? break
+        doc: semindex_doc_strip_prefix(lines[position].trim(), DOC_COMMENT_PREFIX) ?? break
         collected.push(doc.trim())
         position -= 1
     }
@@ -212,7 +213,7 @@ jet_cli_doc_leading_summary: fn(source: String) -> String Never! {
     summary := ""
     loop raw in semindex_doc_lines(source) {
         line: raw.trim()
-        doc: semindex_doc_strip_prefix(line, "///") ?? {
+        doc: semindex_doc_strip_prefix(line, DOC_COMMENT_PREFIX) ?? {
             if line != "" -> break
             next
         }
@@ -531,7 +532,7 @@ jet_cli_doc_discover_doctests: fn(unit: JetCLIDocUnit) -> [JetCLIDocTest] Never!
     }
     loop (index, raw_line) in semindex_doc_lines(unit.source) {
         line_number: index + 1
-        doc_text: semindex_doc_strip_prefix(raw_line.trim(), "///") ?? {
+        doc_text: semindex_doc_strip_prefix(raw_line.trim(), DOC_COMMENT_PREFIX) ?? {
             if in_fence {
                 in_fence = false
                 setup = [String]{}

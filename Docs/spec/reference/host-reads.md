@@ -1,5 +1,7 @@
 # Host reads under another effect
 
+Vocabulary: [Jet vocabulary](../vocabulary.md).
+
 This page lists every host read that the runtime or Core performs under an
 effect other than the read's own: a file, clock, entropy, environment or
 process-state read that a public operation makes while its row names a
