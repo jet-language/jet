@@ -1,0 +1,19 @@
+# Dropping a struct that holds a Lock runs the Lock's release: at the
+# wrapper's scope end, at the end of each loop turn, and for a wrapper nested
+# in another struct, on O0, O1, O2 and a built binary.
+fixture: a_wrapper_drop_runs_its_lock_field_release_on_every_tier.fixture
+env: NO_COLOR=1
+step: jet run --optimize=none main.jet
+exit: 0
+stdout: = a_wrapper_drop_runs_its_lock_field_release_on_every_tier.out
+step: jet run --optimize=basic main.jet
+exit: 0
+stdout: = a_wrapper_drop_runs_its_lock_field_release_on_every_tier.out
+step: jet run --optimize=full main.jet
+exit: 0
+stdout: = a_wrapper_drop_runs_its_lock_field_release_on_every_tier.out
+step: jet build --optimize=full main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = a_wrapper_drop_runs_its_lock_field_release_on_every_tier.out

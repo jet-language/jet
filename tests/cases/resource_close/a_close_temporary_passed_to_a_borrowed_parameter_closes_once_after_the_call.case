@@ -1,0 +1,19 @@
+# A Close temporary passed to a borrowed parameter closes exactly once,
+# right after the call: one argument, two arguments (last built first) and a
+# temporary built on each loop turn, on O0, O1, O2 and a built binary.
+fixture: a_close_temporary_passed_to_a_borrowed_parameter_closes_once_after_the_call.fixture
+env: NO_COLOR=1
+step: jet run --optimize=none main.jet
+exit: 0
+stdout: = a_close_temporary_passed_to_a_borrowed_parameter_closes_once_after_the_call.out
+step: jet run --optimize=basic main.jet
+exit: 0
+stdout: = a_close_temporary_passed_to_a_borrowed_parameter_closes_once_after_the_call.out
+step: jet run --optimize=full main.jet
+exit: 0
+stdout: = a_close_temporary_passed_to_a_borrowed_parameter_closes_once_after_the_call.out
+step: jet build --optimize=full main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = a_close_temporary_passed_to_a_borrowed_parameter_closes_once_after_the_call.out
