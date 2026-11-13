@@ -230,7 +230,7 @@ jet_driver_compiler_call: fn(session: &BuildSession, member: String, args: [TCom
         name: if args[1] == .String(text) -> text.copy() else -> { return jet_driver_build_host_failure(session, span, "`{member}` lost its type's name") }
         if sema_casing_ascii_has_case(name, SemaNameCase.Pascal) != .Val(true) || name == "_" -> return jet_driver_meta_name_refusal(span, "meta.add_struct", "type", name, "PascalCase, as in `Shape`")
         // A field's name and type may be computed (a reflected field's
-        // `type`), so each is checked before it is written.
+        // `type.name`), so each is checked before it is written.
         source := "{name}: struct {{\n"
         listed: if args[2] == .List(values) -> values.copy() else -> { return jet_driver_build_host_failure(session, span, "`{member}` lost its fields") }
         loop field in listed {

@@ -15,7 +15,7 @@ build: fn(b: Build) -[!Meta.Raw]> {
     loop field in source.fields {
         if field.name == "secret" -> next
         name: if field.name == "count" -> "total" else -> field.name.copy()
-        fields.push(CompilerField{name: name, type: field.type.copy()})
+        fields.push(CompilerField{name: name, type: field.type.name.copy()})
     }
     meta.add_struct("Shape", fields, scope: "shape")
     b.default(app)
