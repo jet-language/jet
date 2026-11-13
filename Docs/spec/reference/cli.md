@@ -1054,7 +1054,8 @@ gets `JET`, the path of the `jet` running the profile, and
 only for an id containing the filter, and `pass` and `skip` drop every other
 id. A failing row is always kept. A suite asks `selects` before doing a row's
 work: `jet test Compiler --profile packages --filter X` builds and runs only
-the packages, scripts and engine-unit claims holding a row that matches X. The rows
+the packages, scripts and engine-unit claims holding a row that matches X, and
+`--profile core --filter X` only the Core files holding one. The rows
 are compared with `.jet/test/<profile>/<suite>.rows` as a run's are, and each
 failing row's detail is printed. A repeated id fails as `duplicate row id`, and
 a suite that panics or exits non-zero adds the failing row `stopped` with its
@@ -1077,6 +1078,8 @@ every corpus. The `jobs`, `memory`, `filter`, `cases`, `shard`, `opt_in`,
 (`ID<TAB>card<TAB>reason` rows) holds the accepted failures. `-u` blesses
 every selected row's snapshots. A sharded or filtered run never writes a
 baseline and compares only the baseline rows it reported; code suites run in shard 1.
+A filtered run whose suites together report no row fails with ``the filter
+`X` matches no test: 0 selected``.
 `jet test Compiler --profile ui` (also `golden`, `cases`, `corpora`, `full`) runs
 the repository's corpora; a bare `jet test Compiler` runs `quick`. A bare
 `--shuffle` and the settings not ported yet (`where`, `coverage`, `grade`,

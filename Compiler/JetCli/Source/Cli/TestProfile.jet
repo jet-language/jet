@@ -19,6 +19,7 @@
 use {
     cli_files: core.files
     cli_sys: core.sys
+    jet_testkit.[kit_exec_nothing_selected]
     jet_driver.[JetDriverVerbOutput, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USAGE, JET_DRIVER_EXIT_USER_ERROR]
     jet_foundation.[
         EVIDENCE_REPORT_ENV,
@@ -193,6 +194,12 @@ jet_cli_test_profile: fn(profile: String, root: String, settings: [TestSetting],
     corpus: jet_cli_test_profile_corpus(profile, root, settings, update, results)
     if corpus.exit_code > output.exit_code -> output.exit_code = corpus.exit_code
     output.stderr = "{output.stderr}{corpus.stderr}"
+    // A filter that selects no test in any suite fails the run: a pass would
+    // prove nothing.
+    if !test_settings_on(settings, "list") && test_settings_get(settings, "filter") == .Val(filter) && results.len() == 0 {
+        output.stderr = "{output.stderr}jet test: profile `{profile}`: {kit_exec_nothing_selected(filter)}\n"
+        if JET_DRIVER_EXIT_USER_ERROR > output.exit_code -> output.exit_code = JET_DRIVER_EXIT_USER_ERROR
+    }
     if !test_settings_on(settings, "list") && test_settings_get(settings, "results") == .Val(path) {
         suites := [String]{}
         loop result in results {

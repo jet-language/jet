@@ -46,6 +46,24 @@ kit_exec_select_ids: fn(all_ids: [String], options: KitOptions) -> KitSelection 
     KitSelection{ids: selected, error: ""}
 }
 
+// The ids of a code suite's runs `filter` selects, as a corpus filter selects
+// entries: a run whose id holds it, or one holding a #Test whose row id
+// `<run>: <test>` holds it; every run without a filter. `tests[i]` names the
+// #Tests of the run `ids[i]`.
+kit_exec_select_runs: fn(ids: [String], tests: [[String]], filter: String) -> [String] {
+    selected := [String]{}
+    loop (index, id) in ids {
+        if filter == "" || id.contains(filter) || tests[index].any(test -> "{id}: {test}".contains(filter)) -> selected.push(id.copy())
+    }
+    selected
+}
+
+// Why a filtered run fails when `filter` selected no test in any of its
+// suites.
+kit_exec_nothing_selected: fn(filter: String) -> String {
+    "the filter `{filter}` matches no test: 0 selected"
+}
+
 kit_exec_failed: fn(message: String) -> KitRun {
     KitRun{stdout: "", stderr: "", code: -1, signal: None, timed_out: false, error: message}
 }

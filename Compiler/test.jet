@@ -7,6 +7,7 @@
 // `.jet/test/<profile>/<suite>.rows`.
 use {
     crypto: core.crypto
+    jet_testkit.[kit_exec_select_runs]
     files: core.files
     json: core.encoding.json
     process: core.process
@@ -707,9 +708,11 @@ test_names: fn(text: String) -> [String] {
 // <test>`, from `jet test <file> --optimize=<level>` for every Core source that
 // declares #Tests. A Core source tests as the Core unit the compiler loads,
 // with Core's privileges; a file whose tests didn't run is the failing row
-// `<file> [<level>]`. CORE_LEVELS copies the `optimize` row's values in
-// JetFoundation/Source/Registry/BuildOptions.jet, which a script can't
-// import; tests/guards/closed_lists.jet fails when the two differ.
+// `<file> [<level>]`. Under a filter only the runs holding a row it selects
+// run (kit_exec_select_runs), each with the filter as its `--filter` when the
+// child can apply it (run_filter). CORE_LEVELS copies the `optimize` row's
+// values in JetFoundation/Source/Registry/BuildOptions.jet, which a script
+// can't import; tests/guards/closed_lists.jet fails when the two differ.
 CORE_LEVELS: [String]{"none", "basic", "full"}
 
 core_rows: fn(rows: TestRows) {
@@ -721,30 +724,50 @@ core_rows: fn(rows: TestRows) {
     }
     paths.sort()
     tested := [String]{}
+    names := [[String]]{}
     loop path in paths {
         text: files.read(files.join(setup.checkout, path)) ?? {
             rows.fail(path, "couldn't read `{path}`: {err}")
             next
         }
-        if test_names(text).len() > 0 -> tested.push(path.copy())
+        declared: test_names(text)
+        if declared.len() == 0 -> next
+        tested.push(path.copy())
+        names.push(declared)
     }
-    runs := [(path: String, level: String)]{}
-    specs := [ProcessSpec]{}
+    candidates := [(id: String, path: String, level: String)]{}
+    ids := [String]{}
+    held := [[String]]{}
     loop level in CORE_LEVELS {
-        loop path in tested {
-            runs.push((path: path.copy(), level: level.copy()))
-            specs.push(jet_command(setup, setup.jet, [String]{"test", path, "--optimize={level}"}))
+        loop (index, path) in tested {
+            id: "{path} [{level}]"
+            candidates.push((id: id.copy(), path: path.copy(), level: level.copy()))
+            ids.push(id)
+            held.push(names[index].copy()) // copy: each level's run holds the file's tests.
         }
     }
+    selected: kit_exec_select_runs(ids, held, rows.filter)
+    runs := [(id: String, path: String, level: String)]{}
+    specs := [ProcessSpec]{}
+    loop (index, run) in candidates {
+        if !selected.contains(run.id) -> next
+        args := [String]{"test", run.path, "--optimize={run.level}"}
+        if run_filter(rows, run.id, held[index]) == .Val(filter) {
+            args.push("--filter")
+            args.push(filter)
+        }
+        runs.push((id: run.id.copy(), path: run.path.copy(), level: run.level.copy()))
+        specs.push(jet_command(setup, setup.jet, args))
+    }
+    if specs.len() == 0 -> return
     results: process.run_all(specs, package_jobs(specs.len())) ?? {
         rows.fail("core", "couldn't start the Core runs: {err}")
         return
     }
     loop (index, run) in runs {
-        id: "{run.path} [{run.level}]"
         if results[index] == {
-            .Ok(receipt) -> { _ := package_rows(rows, id, receipt) }
-            .Err(error) -> rows.fail(id, "couldn't run `jet test {run.path} --optimize={run.level}`: {error}")
+            .Ok(receipt) -> { _ := package_rows(rows, run.id, receipt) }
+            .Err(error) -> rows.fail(run.id, "couldn't run `jet test {run.path} --optimize={run.level}`: {error}")
         }
     }
 }
