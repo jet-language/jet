@@ -845,10 +845,17 @@ JetDriverComptimeRunIndex: struct {
     // `module\nkey` -> the first row of that function in the run's checked
     // functions.
     checked_rows: [String:Int]
+    // `module\nkey` -> the row in `waiting_functions` of that function's
+    // last check, which waits on constants with no value yet. Until one of
+    // those waits has a value, checking the function again gives the same
+    // result (every other constant it reads already has its value), so each
+    // closure that reaches it reuses that check instead of making its own.
+    waiting_rows: [String:Int]
+    waiting_functions: [SemaComptimeFunctionResult]
 }
 
 jet_driver_comptime_run_index: fn(checked_functions: [SemaComptimeFunctionResult]) -> JetDriverComptimeRunIndex Never! {
-    index := JetDriverComptimeRunIndex{owners: [String:String]{}, ambiguous_owners: [String:Bool]{}, owners_built: false, checked_rows: [String:Int]{}}
+    index := JetDriverComptimeRunIndex{owners: [String:String]{}, ambiguous_owners: [String:Bool]{}, owners_built: false, checked_rows: [String:Int]{}, waiting_rows: [String:Int]{}, waiting_functions: [SemaComptimeFunctionResult]{}}
     // Sorted once, so every insert appends (JetDriverModuleKeyRow).
     rows := [JetDriverCheckedKeyRow]{}
     loop (row, checked) in checked_functions -> rows.push(JetDriverCheckedKeyRow{key: "{checked.module_identity}\n{checked.function_key}", row: row})
@@ -1000,8 +1007,10 @@ jet_driver_comptime_owner_refs: fn(graph: SemaRegistrationGraph, module_identity
 // (sema_comptime_program) and `available` its constant keys: every function
 // check re-targets the environment instead of copying the graph per function.
 // A function the run already checked completely is reused from
-// `checked_functions`. Function sources and module rows are read from
-// `program`'s graph, whose staged values never change them. `memory_plan`
+// `checked_functions`, and one whose last check waits on constants that still
+// have no value from `index` (JetDriverComptimeRunIndex.waiting_rows).
+// Function sources and module rows are read from `program`'s graph, whose
+// staged values never change them. `memory_plan`
 // holds the run's memory plan once a function is checked (zero or one row):
 // it reads only function declarations, which staged values never change, so
 // every on-demand function check of the run shares the one built at the first.
@@ -1064,8 +1073,25 @@ jet_driver_comptime_function_closure: fn(
         if index.checked_rows.get(checked_key) == .Val(row) {
             if checked_functions[row].complete || checked_functions[row].obligations_pending -> reused_row = row
         }
-        if reused_row < 0 && memory_plan.len() == 0 -> memory_plan.push(sema_function_memory_plan_from_graph(graph))
-        checked := if reused_row >= 0 -> checked_functions[reused_row] else -> sema_check_comptime_function(graph, environment, program, probe, available, memory_plan[0], values, current.module_identity, current.function_key)
+        waiting_row := -1
+        if reused_row < 0 && index.waiting_rows.get(checked_key) == .Val(row) {
+            if !jet_driver_comptime_any_available(available, index.waiting_functions[row].waiting_dependencies) -> waiting_row = row
+        }
+        fresh: reused_row < 0 && waiting_row < 0
+        if fresh && memory_plan.len() == 0 -> memory_plan.push(sema_function_memory_plan_from_graph(graph))
+        checked := if {
+            reused_row >= 0 -> checked_functions[reused_row]
+            waiting_row >= 0 -> index.waiting_functions[waiting_row]
+            else -> sema_check_comptime_function(graph, environment, program, probe, available, memory_plan[0], values, current.module_identity, current.function_key)
+        }
+        if fresh && checked.waiting_dependencies.len() > 0 {
+            if index.waiting_rows.get(checked_key) == .Val(row) {
+                index.waiting_functions[row] = checked.copy()
+            } else {
+                index.waiting_rows[checked_key] = index.waiting_functions.len()
+                index.waiting_functions.push(checked.copy())
+            }
+        }
         if checked.foreign == .Val(row) {
             foreign.push(row.copy())
             // An `#Import(c)`'s failure row (sema_check_comptime_function):
