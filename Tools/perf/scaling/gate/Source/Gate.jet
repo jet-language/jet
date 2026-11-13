@@ -10,8 +10,10 @@
 // fitted against k * N log N on its baseline-subtracted (marginal) values;
 // the gate fails naming the shape, compiler, phase and the counter that grows
 // fastest inside that phase. It also fails when a phase or the whole compile
-// is slower than its lines/s floor (Tools/perf/scaling/phase-budgets.json and
-// the end-to-end floor), and projects every phase to 1M lines.
+// is slower than its lines/s floor (Tools/perf/budget/budget.json: each
+// phase's budget in its 30M lines/s `target` column, and the target end to
+// end), naming the cards that own the phase's root, and projects every phase
+// to 1M lines.
 //
 // A compile runs as Tools/perf/compile-throughput/Throughput.jet runs one: a
 // Core process in a memory scope of its own (no swap) with a timeout, whose
@@ -30,7 +32,7 @@ use {
     time: core.time
 }
 
-BUDGETS: "Tools/perf/scaling/phase-budgets.json"
+BUDGETS: "Tools/perf/budget/budget.json"
 DOMAIN_LADDER: [Int]{125000, 250000, 500000, 1000000}
 JET_COMMANDS: [String]{"build", "check"}
 MODES: [String]{"timing", "counters"}
@@ -93,34 +95,38 @@ Families: struct {
 
 FAMILIES: Families{time: Family{min: Float{0.25}, bound: Float{1.5}}, rss: Family{min: Float{65536.0}, bound: Float{1.5}}, counter: Family{min: Float{64.0}, bound: Float{1.25}}}
 
-// A lines/s floor from one phase budget.
+// A lines/s floor from one phase budget: its spans less its `exclude` spans.
 FloorRule: struct {
     phase: String
     kinds: [String]
+    exclude: [String]
     lines_per_second: Float
     owners: [String]
 }
 
 Limits: struct {
     rows: [FloorRule]
-    startup_s: Float?
     total_lines_per_second: Float
 }
 
+// A budget.json row: ns per source line by column.
 BudgetRow: struct {
     phase: String
-    measure: String
-    kinds: [String]?
-    wall_budget_s: Float
+    spans: [String]?
+    exclude: [String]?
+    budget: [String: Float]
     owners: [String]
 }
 
-// phase-budgets.json.
+BudgetTarget: struct {
+    column: String
+    lines_per_second: Int
+}
+
+// budget.json.
 Budgets: struct {
-    schema: String
-    about: String
-    phase_budgets_basis: String
-    phase_budgets: [BudgetRow]
+    target: BudgetTarget
+    rows: [BudgetRow]
 }
 
 // One measured compile. `x` is the size the fit uses: N, or the code lines of
@@ -276,7 +282,7 @@ Receipt: struct {
     finished_at: String?
 }
 
-// `stop_after_s` None is no limit; `repo` holds phase-budgets.json and the
+// `stop_after_s` None is no limit; `repo` holds budget.json and the
 // sources a profile resolves symbols to. Encoded with harness.mjs's names
 // (enqueue's queue-plan.json).
 #Rename(.Camel)
@@ -572,18 +578,18 @@ judge: fn(series: Series) -> Judged Never! {
 
 // ---------------------------------------------------------- lines/s floors
 
-// Phase floors from the per-phase wall budgets of phase-budgets.json (seconds
-// per 300k lines -> lines/s), plus the end-to-end floor of TARGET_LINES in
-// TARGET_SECONDS. `startup` is an absolute budget, not a rate.
+// Phase floors from budget.json's rows with spans, each the target column's
+// ns per line as lines/s, plus the target end to end.
 floors: fn(repo: String) -> Limits Err! {
-    budgets: json.decode<Budgets>(files.read(files.join(repo, BUDGETS))) ?? return Err("{BUDGETS} has no phase_budgets rows")
+    budgets: json.decode<Budgets>(files.read(files.join(repo, BUDGETS))) ?? return Err("{BUDGETS} has no target and rows")
     rows := [FloorRule]{}
-    startup := Float?{None}
-    loop row in budgets.phase_budgets {
-        if row.measure == "kinds" -> rows.push(FloorRule{phase: row.phase.copy(), kinds: row.kinds ?? [String]{}, lines_per_second: Float{300000.0} / row.wall_budget_s, owners: row.owners.copy()})
-        if row.measure == "startup" && startup == None -> startup = Val(row.wall_budget_s)
+    loop row in budgets.rows {
+        if row.spans == .Val(spans) {
+            ns: row.budget.get(budgets.target.column) ?? ZERO
+            if ns > ZERO -> rows.push(FloorRule{phase: row.phase.copy(), kinds: spans.copy(), exclude: row.exclude ?? [String]{}, lines_per_second: Float{1000000000.0} / ns, owners: row.owners.copy()})
+        }
     }
-    Ok(Limits{rows: rows, startup_s: startup, total_lines_per_second: Float{TARGET_LINES} / Float{TARGET_SECONDS}})
+    Ok(Limits{rows: rows, total_lines_per_second: Float{budgets.target.lines_per_second}})
 }
 
 floor_failure: fn(phase: String, text: String) -> Failure Never! {
@@ -600,13 +606,10 @@ check_floors: fn(point: Point, limits: Limits) -> (rows: [FloorRow], failures: [
         if rule.kinds.filter(kind -> point.metrics.has_key("phase.{kind}")).len() == 0 -> next
         seconds := Float{0.0}
         loop kind in rule.kinds -> seconds += point.metrics.get("phase.{kind}") ?? Float{0.0}
+        loop kind in rule.exclude -> seconds -= point.metrics.get("phase.{kind}") ?? Float{0.0}
         rate: if seconds > ZERO -> lines / seconds else -> math.INFINITY
         rows.push(FloorRow{phase: rule.phase.copy(), lines_per_second: finite(rate), floor: rule.lines_per_second, owners: Val(rule.owners.copy())})
-        if rate < rule.lines_per_second -> failures.push(floor_failure(rule.phase, "{rule.phase} ({rule.kinds.join("+")}) {whole(rate)} lines/s < floor {whole(rule.lines_per_second)} (owners {rule.owners.join(", ")})"))
-    }
-    if limits.startup_s == .Val(budget) {
-        startup: point.metrics.get("startup_seconds") ?? Float{0.0}
-        if startup > budget -> failures.push(floor_failure("startup", "startup {fmt.decimal(startup, 3)} s > {js(budget)} s"))
+        if rate < rule.lines_per_second -> failures.push(floor_failure(rule.phase, "{rule.phase} ({rule.kinds.join("+")}) {whole(rate)} lines/s < floor {whole(rule.lines_per_second)} (root: {rule.owners.join(", ")})"))
     }
     (rows: rows, failures: failures)
 }

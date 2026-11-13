@@ -851,7 +851,7 @@ test("measurement manifest covers every corpus entry and source pair", async () 
 
   // The compile-throughput cell (#4529): its contract, its harness, the
   // bench300k pin shared with Tools/perf/throughput/bench.json, and the
-  // phase budgets (Tools/perf/scaling/phase-budgets.json).
+  // phase budgets (Tools/perf/budget/budget.json).
   const throughput = manifest.axes.compile_throughput;
   assert.deepEqual(compileThroughputContractIssues(throughput), []);
   assert.equal(await exists(repoSourcePath(throughput.harness)), true);
@@ -862,8 +862,17 @@ test("measurement manifest covers every corpus entry and source pair", async () 
   assert.equal(bench300k.generator, `jet run Tools/perf/scaling/generate/run.jet -- mixed --code-lines ${pins.programs.bench300k.code_lines} --seed ${pins.programs.bench300k.seed} {dir}`);
   assert.ok(pins.programs.bench300k.shape.code_lines >= bench300k.loc_contract.nonblank_noncomment_lines_min);
   assert.deepEqual(Object.keys(throughput.gates.memory).sort(), ["bench300k_peak_rss_bytes_max", "selfhost_peak_rss_bytes_max"]);
-  const budgets = JSON.parse(await fs.readFile(repoSourcePath("Tools/perf/scaling/phase-budgets.json"), "utf8"));
-  assert.ok(budgets.phase_budgets.every((row) => row.owners.length > 0));
+  const budgets = JSON.parse(await fs.readFile(repoSourcePath("Tools/perf/budget/budget.json"), "utf8"));
+  const column = budgets.target.column;
+  const phases = [...budgets.rows, budgets.outside_trace];
+  assert.ok(phases.every((row) => row.owners.length > 0 && row.budget[column] > 0));
+  // Each phase's budget is a lines/s rate (1e9 / its ns per line), and the
+  // rates compose to the 30M lines/s target end to end: the ns per line of
+  // every phase, the build steps outside the trace included, sum to at most
+  // the target's.
+  assert.equal(budgets.target.lines_per_second, 30000000);
+  const nsPerLine = phases.reduce((sum, row) => sum + row.budget[column], 0);
+  assert.ok(nsPerLine <= 1e9 / budgets.target.lines_per_second, `phase budgets compose to ${Math.floor(1e9 / nsPerLine)} lines/s`);
 
   // The Nix peer: five paired cells, the stricter target on the three
   // everyday loops, and a generated project whose edit files exist.

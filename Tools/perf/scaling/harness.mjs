@@ -10,8 +10,10 @@
 // against k * N log N on its baseline-subtracted (marginal) values; the gate
 // fails naming the shape, compiler, phase and the counter that grows fastest
 // inside that phase. It also fails when a phase or the whole compile is
-// slower than its lines/s floor (phase-budgets.json and the end-to-end
-// floor), and projects every phase to 1M lines.
+// slower than its lines/s floor (Tools/perf/budget/budget.json: each phase's
+// budget in its 30M lines/s `target` column, and the target end to end),
+// naming the cards that own the phase's root, and projects every phase to 1M
+// lines.
 //
 // Usage: node harness.mjs --compiler LABEL=KIND:PATH [--shape NAME]... [options]
 // (see USAGE below). Exit 0: every series passed; 1: a growth, floor, compile
@@ -30,7 +32,7 @@ import { scratchRoot } from '../../agent/roots.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(here, '../../..');
-export const BUDGETS = path.join(here, 'phase-budgets.json');
+export const BUDGETS = path.join(REPO, 'Tools/perf/budget/budget.json');
 export const DOMAIN_LADDER = Object.freeze([125000, 250000, 500000, 1000000]);
 export const TARGET_LINES = 1000000;
 export const TARGET_SECONDS = 10;
@@ -154,15 +156,14 @@ const fmt = value => (typeof value === 'number' ? (Number.isFinite(value) ? valu
 
 // ---------------------------------------------------------- lines/s floors
 
-// Phase floors from the throughput cell's per-phase wall budgets (seconds per
-// 300k lines -> lines/s), plus the end-to-end floor of TARGET_LINES in
-// TARGET_SECONDS. `startup` is an absolute budget, not a rate.
+// Phase floors from budget.json's rows with spans, each the target column's ns
+// per line as lines/s (less its `exclude` spans), plus the target end to end.
 export function floors(bench = JSON.parse(fs.readFileSync(BUDGETS, 'utf8'))) {
-  const rows = bench.phase_budgets.filter(row => row.measure === 'kinds').map(row => ({
-    phase: row.phase, kinds: row.kinds, lines_per_second: 300000 / row.wall_budget_s, owners: row.owners,
+  const column = bench.target.column;
+  const rows = bench.rows.filter(row => row.spans && row.budget[column] > 0).map(row => ({
+    phase: row.phase, kinds: row.spans, exclude: row.exclude ?? [], lines_per_second: 1e9 / row.budget[column], owners: row.owners,
   }));
-  const startup = bench.phase_budgets.find(row => row.measure === 'startup');
-  return { rows, startup_s: startup?.wall_budget_s ?? null, total_lines_per_second: TARGET_LINES / TARGET_SECONDS };
+  return { rows, total_lines_per_second: bench.target.lines_per_second };
 }
 
 export function checkFloors(point, limits) {
@@ -172,14 +173,11 @@ export function checkFloors(point, limits) {
   rows.push({ phase: 'end to end', lines_per_second: total, floor: limits.total_lines_per_second });
   if (total < limits.total_lines_per_second) failures.push({ kind: 'floor', phase: 'end to end', text: `end to end ${Math.round(total)} lines/s < floor ${limits.total_lines_per_second}` });
   for (const row of limits.rows) {
-    const seconds = row.kinds.reduce((sum, kind) => sum + (point.metrics[`phase.${kind}`] ?? 0), 0);
+    const seconds = row.kinds.reduce((sum, kind) => sum + (point.metrics[`phase.${kind}`] ?? 0), 0) - row.exclude.reduce((sum, kind) => sum + (point.metrics[`phase.${kind}`] ?? 0), 0);
     if (!row.kinds.some(kind => `phase.${kind}` in point.metrics)) continue;
     const rate = seconds > 0 ? point.code_lines / seconds : Infinity;
     rows.push({ phase: row.phase, lines_per_second: rate, floor: row.lines_per_second, owners: row.owners });
-    if (rate < row.lines_per_second) failures.push({ kind: 'floor', phase: row.phase, text: `${row.phase} (${row.kinds.join('+')}) ${Math.round(rate)} lines/s < floor ${Math.round(row.lines_per_second)} (owners ${row.owners.join(', ')})` });
-  }
-  if (limits.startup_s !== null && point.metrics.startup_seconds !== undefined && point.metrics.startup_seconds > limits.startup_s) {
-    failures.push({ kind: 'floor', phase: 'startup', text: `startup ${point.metrics.startup_seconds.toFixed(3)} s > ${limits.startup_s} s` });
+    if (rate < row.lines_per_second) failures.push({ kind: 'floor', phase: row.phase, text: `${row.phase} (${row.kinds.join('+')}) ${Math.round(rate)} lines/s < floor ${Math.round(row.lines_per_second)} (root: ${row.owners.join(', ')})` });
   }
   return { rows, failures };
 }

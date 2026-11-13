@@ -2,12 +2,16 @@
 // Compile-throughput cell (#5479 c1; the gauntlet's axes.compile_throughput):
 // live, cold, uncached compiles by the compiler JET names, with their lines
 // per second, wall, CPU, peak memory and per-phase seconds from the
-// compiler's own trace. Two forms:
+// compiler's own trace. Three forms:
 //
 //   JET=PATH jet Tools/perf/compile-throughput/Throughput.jet [--tree DIR]
 //       [--modes check,O0,release] [--cpus LIST] [--threads N] [--memory SIZE]
 //       [--timeout SECONDS] [--work DIR] [--out FILE] [--tool PATH]
 //       [--budget COLUMN] [--runs N]
+//   JET=PATH jet Tools/perf/compile-throughput/Throughput.jet --against SEED
+//       [--perf PATH] [--modes LIST] [--runs N] [--tree DIR] [--cpus LIST]
+//       [--threads N] [--memory SIZE] [--timeout SECONDS] [--work DIR]
+//       [--out FILE] [--tool PATH]
 //   JET=PATH jet Tools/perf/compile-throughput/Throughput.jet --lane quick|full
 //       [--programs LIST] [--arms default,single] [--samples N] [--warmups N]
 //       [--receipt FILE] [--baseline FILE] [--write-baseline FILE]
@@ -52,13 +56,32 @@
 // compile, one `phase` row per phase).
 //
 // --budget COLUMN checks each mode against that column of
-// Tools/perf/budget/budget.json (#5479 c2): Tools/perf/budget/Check.jet over
-// the trace, per corpus line (`--lines`), on the wall clock for a `-wall`
-// column and the process CPU clock otherwise (its report goes to
+// Tools/perf/budget/budget.json (#5479 c2): Tools/perf/budget/check over the
+// trace, per corpus line (`--lines`), on the wall clock for a `-wall` column
+// and the process CPU clock otherwise (its report goes to
 // <work>/<mode>.<n>/budget.txt), and `outside` against the column's
 // `outside_trace` budget when it has one. The run row's `budget` cell is ok,
 // OVER (the phases), OUTSIDE (the build steps around the compile) or
 // `error N` (the checker's exit code).
+//
+// The --against form is the train speed gate (#5479 c5): the
+// compiler JET against the jet SEED it was built with, each compiling the
+// same corpus in each mode, --runs rounds (default 3). A round compiles
+// with SEED then JET, the next with JET then SEED, so both see the same
+// machine; every compile runs under `perf stat -e instructions:u` (--perf,
+// default `perf` on PATH), in <work>/{seed,new}-<mode>.<n>. The gate judges
+// only what load cannot move much: per mode, CPU (user + system), user-mode
+// instructions, and each top-level phase's process CPU at or above 0.5 s in
+// either compiler. Wall time and lines/s are reported, never judged. Each
+// quantity's per-round ratio JET / SEED gives its median and spread (largest
+// less smallest ratio): FAIL when the median is over +10% and the spread is
+// within 10 points, or when every round is over +10%; INCONCLUSIVE when the
+// spread is wider than 10 points, when there is only one round, or when a
+// count is missing; else pass. The verdict line reads `speed gate: PASS`,
+// `FAIL` or `INCONCLUSIVE`; a failed compile is FAIL. --out FILE records
+// every compile as the first form does, its mode cell `seed:O0` or `new:O0`
+// (the throughput ledger of every train). Exit: 0 PASS, 1 FAIL, 3
+// INCONCLUSIVE, 64 usage.
 //
 // The second form is the gauntlet cell, axes.compile_throughput of
 // Tools/gauntlet/measurement-manifest.json. Its programs: `bench300k` and
@@ -80,9 +103,9 @@
 // a wrong golden, artifacts or diagnostics that differ across samples and
 // arms, and a missing sample fail the run. The full lane also applies the
 // manifest's gates: peak memory, the wall or lines/s threshold, and each
-// Tools/perf/scaling/phase-budgets.json phase budget (scaled by code lines over
-// 300,000, naming its owning cards). The quick lane compares wall, peak
-// memory and each phase's median with a baseline (default
+// Tools/perf/budget/budget.json row at its `target` column (the 30M lines/s
+// budgets, ns per code line), naming the cards that own its root. The quick
+// lane compares wall, peak memory and each phase's median with a baseline (default
 // Tools/perf/throughput/quick-baseline.json)
 // within Tools/perf/baseline.json's regression budgets, skipping baseline
 // values under 100 ms or 64 MiB; --write-baseline FILE records a passing
@@ -108,12 +131,13 @@ MODES: [String]{"check", "O0", "O1", "O2", "release", "default"}
 PROGRAMS: [String]{"bench300k", "bench30k", "selfhost"}
 ARMS: [String]{"default", "single"}
 GIB: 1073741824
-RECEIPT_SCHEMA: "jet.compile-throughput.receipt/v2"
+RECEIPT_SCHEMA: "jet.compile-throughput.receipt/v3"
 BASELINE_SCHEMA: "jet.compile-throughput.quick-baseline/v2"
 // The cell's pins (bench.json) and quick baseline (quick-baseline.json), and
-// the phase budgets the full lane checks.
+// the per-phase budgets (ns per source line by column) of --budget and the
+// full lane.
 PIN_DIR: "Tools/perf/throughput"
-PHASE_BUDGETS_FILE: "Tools/perf/scaling/phase-budgets.json"
+BUDGET_FILE: "Tools/perf/budget/budget.json"
 // Baseline values below these floors are under the scheduler's and the
 // allocator's resolution; the quick lane's budgets apply at or above them.
 QUICK_TIME_FLOOR_NS: 100000000
@@ -140,10 +164,19 @@ Options: struct {
     baseline: String
     write_baseline: String
     profile: String
+    // The speed gate's seed jet ("" outside the gate) and perf.
+    against: String
+    perf: String
 }
 
-OutsideTrace: struct { budget: [String: Float] }
-BudgetFile: struct { outside_trace: OutsideTrace? }
+// budget.json: per-phase ns per source line by column, each row naming the
+// cards that own its root; `target` is the column the full lane gates on.
+// A row sums its `spans` less its `exclude` spans; the `residual` row is the
+// wall outside every other row.
+BudgetPin: struct { id: String, phase: String, spans: [String]?, exclude: [String]?, residual: Bool?, budget: [String: Float], owners: [String] }
+OutsideTrace: struct { budget: [String: Float], owners: [String] }
+BudgetTarget: struct { column: String, lines_per_second: Int }
+BudgetFile: struct { target: BudgetTarget, rows: [BudgetPin], outside_trace: OutsideTrace? }
 
 TraceArgs: struct { proc_cpu_ns: Int?, value: Int?, items: Int?, unix_ms: Int? }
 TraceEvent: struct { name: String, ph: String, cat: String?, ts: Int?, tid: Int, args: TraceArgs? }
@@ -162,9 +195,14 @@ Run: struct {
     mode: String
     // 1-based: the compile's place among the mode's --runs.
     repeat: Int
+    // The speed gate's "seed" or "new"; "" outside the gate.
+    compiler: String
     rc: Int
     wall_ns: Int
     cpu_ns: Int
+    // User-mode instructions of the compile and its children; -1 when not
+    // counted.
+    instructions: Int
     peak_bytes: Int
     lines: Int
     trace: Trace?
@@ -176,6 +214,7 @@ usage: fn(message: String) -> Never {
     term.eprint("Throughput.jet: {message}")
     term.eprint("usage: JET=PATH jet Tools/perf/compile-throughput/Throughput.jet [--tree DIR] [--modes check,O0,release] [--cpus LIST] [--threads N] [--memory SIZE] [--timeout SECONDS] [--work DIR] [--out FILE] [--tool PATH] [--budget COLUMN] [--runs N]")
     term.eprint("       JET=PATH jet Tools/perf/compile-throughput/Throughput.jet --lane quick|full [--programs LIST] [--arms default,single] [--samples N] [--warmups N] [--receipt FILE] [--baseline FILE] [--write-baseline FILE] [--profile TEXT] [--tree DIR] [--cpus LIST] [--memory SIZE] [--timeout SECONDS] [--work DIR] [--tool PATH]")
+    term.eprint("       JET=PATH jet Tools/perf/compile-throughput/Throughput.jet --against SEED [--perf PATH] [--modes LIST] [--runs N] [--tree DIR] [--cpus LIST] [--threads N] [--memory SIZE] [--timeout SECONDS] [--work DIR] [--out FILE] [--tool PATH]")
     process.exit(64)
 }
 
@@ -209,7 +248,7 @@ parse_cpus: fn(text: String) -> [Int] {
 parse_list: fn(text: String) -> [String] { text.split(",").map(m -> m.trim()).to_list() }
 
 parse_options: fn(args: [String]) -> Options {
-    options := Options{tree: ".", modes: [String]{"check", "O0", "release"}, cpus: [Int]{}, threads: 12, memory: 16 * GIB, timeout: 1200, work: "", out: "", tool: "", budget: "", runs: 3, lane: "", programs: [String]{}, arms: ARMS.copy(), samples: 0, warmups: 1, receipt: "", baseline: "", write_baseline: "", profile: ""}
+    options := Options{tree: ".", modes: [String]{"check", "O0", "release"}, cpus: [Int]{}, threads: 12, memory: 16 * GIB, timeout: 1200, work: "", out: "", tool: "", budget: "", runs: 3, lane: "", programs: [String]{}, arms: ARMS.copy(), samples: 0, warmups: 1, receipt: "", baseline: "", write_baseline: "", profile: "", against: "", perf: "perf"}
     index := 0
     loop index < args.len() {
         flag: args[index]
@@ -237,6 +276,8 @@ parse_options: fn(args: [String]) -> Options {
             flag == "--baseline" -> options.baseline = value
             flag == "--write-baseline" -> options.write_baseline = value
             flag == "--profile" -> options.profile = value
+            flag == "--against" -> options.against = value
+            flag == "--perf" -> options.perf = value
             else -> usage("unknown option {flag}")
         }
     }
@@ -244,6 +285,7 @@ parse_options: fn(args: [String]) -> Options {
     loop mode in options.modes {
         if !MODES.contains(mode) -> usage("unknown mode {mode}; the modes are {MODES.join(", ")}")
     }
+    if options.against != "" && (options.lane != "" || options.budget != "") -> usage("--against takes neither --lane nor --budget")
     if options.lane == "" -> return options
     if options.lane != "quick" && options.lane != "full" -> usage("--lane is quick or full")
     if options.programs.len() == 0 -> options.programs = if options.lane == "quick" -> [String]{"bench30k"} else -> [String]{"bench300k", "selfhost"}
@@ -458,17 +500,24 @@ copy_input: fn(tree: String, project: String, input: String) -> String? {
     None
 }
 
-// The work directory of a mode's compile: <work>/<mode>.<repeat>.
-slot_dir: fn(options: Options, mode: String, repeat: Int) -> String { files.join(options.work, "{mode}.{repeat}") }
+// The work directory of a compile: <work>/<mode>.<repeat>, and in the speed
+// gate <work>/<compiler>-<mode>.<repeat>.
+slot_dir: fn(options: Options, compiler: String, mode: String, repeat: Int) -> String {
+    if compiler == "" -> return files.join(options.work, "{mode}.{repeat}")
+    files.join(options.work, "{compiler}-{mode}.{repeat}")
+}
 
-measure: fn(options: Options, inputs: [String], lines: Int, jet: String, identity: String, mode: String, repeat: Int) -> Run {
-    base: slot_dir(options, mode, repeat)
+// One compile of the corpus by `jet`. In the speed gate (`compiler` set) it
+// runs under `perf stat`, which counts its user-mode instructions.
+measure: fn(options: Options, inputs: [String], lines: Int, jet: String, identity: String, compiler: String, mode: String, repeat: Int) -> Run {
+    base: slot_dir(options, compiler, mode, repeat)
     files.remove_all(base) ?? ()
     project: files.join(base, "project")
     store: files.join(base, "store")
     cache: files.join(base, "cache")
     trace_file: files.join(base, "trace.jsonl")
-    failed := Run{mode, repeat, rc: 1, wall_ns: 0, cpu_ns: 0, peak_bytes: 0, lines, trace: None, note: "", budget: ""}
+    counts_file: files.join(base, "perf.csv")
+    failed := Run{mode, repeat, compiler, rc: 1, wall_ns: 0, cpu_ns: 0, instructions: -1, peak_bytes: 0, lines, trace: None, note: "", budget: ""}
     loop dir in ([String]{project, store, cache}) {
         files.create_dir_all(dir) ?? {
             failed.note = "cannot create {dir}: {err}"
@@ -479,7 +528,7 @@ measure: fn(options: Options, inputs: [String], lines: Int, jet: String, identit
         failed.note = problem
         return failed
     }
-    argv := [String]{jet}
+    argv := if compiler == "" -> [String]{jet} else -> [String]{options.perf, "stat", "-x", ",", "-e", "instructions:u", "-o", counts_file, "--", jet}
     argv.extend(mode_args(mode, options.threads))
     spec := process.cmd(argv).cwd(project).env("JET_TRACE_FILE", trace_file).env("JET_TOOLCHAIN_ROOT", project).env("JET_STORE_DIR", store).env("XDG_CACHE_HOME", cache)
     if identity != "" -> spec = spec.env("JET_COMPILER_IDENTITY", identity)
@@ -501,22 +550,34 @@ measure: fn(options: Options, inputs: [String], lines: Int, jet: String, identit
     note := ""
     if rc != 0 -> note = receipt.errors.trim().partition("\n").head
     if trace == None -> note = "{note} (no trace)".trim()
-    run := Run{mode, repeat, rc, wall_ns: wall, cpu_ns: (receipt.user_cpu_ns ?? 0) + (receipt.system_cpu_ns ?? 0), peak_bytes: receipt.peak_memory_bytes ?? 0, lines, trace, note, budget: ""}
+    instructions: if compiler == "" -> -1 else -> perf_instructions(files.read(counts_file) ?? "")
+    run := Run{mode, repeat, compiler, rc, wall_ns: wall, cpu_ns: (receipt.user_cpu_ns ?? 0) + (receipt.system_cpu_ns ?? 0), instructions, peak_bytes: receipt.peak_memory_bytes ?? 0, lines, trace, note, budget: ""}
     if options.budget != "" && run.trace == .Val(measured) -> run.budget = check_budget(options, base, lines, wall - traced_ns(measured))
     run
 }
 
-// The --budget verdict of one mode: Check.jet over its trace per corpus line,
-// then the build steps outside the trace against the column's outside_trace.
+// The instructions:u count of `perf stat -x ,` output (`count,unit,event,…`
+// rows); -1 when it has none, as for `<not counted>`.
+perf_instructions: fn(text: String) -> Int {
+    loop line in text.split("\n") {
+        fields: line.split(",").to_list()
+        if fields.len() > 2 && fields[2].starts_with("instructions") -> return Int.parse(fields[0].trim()) ?? -1
+    }
+    -1
+}
+
+// The --budget verdict of one mode: Tools/perf/budget/check over its trace per
+// corpus line, then the build steps outside the trace against the column's
+// outside_trace.
 check_budget: fn(options: Options, base: String, lines: Int, outside_ns: Int) -> String {
-    budget_file: files.join(options.tree, "Tools/perf/budget/budget.json")
+    budget_file: files.join(options.tree, BUDGET_FILE)
     clock: if options.budget.ends_with("-wall") -> "wall" else -> "proc_cpu"
-    argv: [String]{options.tool, files.join(options.tree, "Tools/perf/budget/Check.jet"), files.join(base, "trace.jsonl"), "--budget", budget_file, "--column", options.budget, "--clock", clock, "--lines", "{lines}"}
+    argv: [String]{options.tool, files.join(options.tree, "Tools/perf/budget/check"), files.join(base, "trace.jsonl"), "--budget", budget_file, "--column", options.budget, "--clock", clock, "--lines", "{lines}"}
     receipt: process.cmd(argv).cwd(options.tree).output_limit(GIB).run() ?? return "error {err}"
     files.write(files.join(base, "budget.txt"), "{receipt.output}{receipt.errors}") ?? ()
     if receipt.code > 1 -> return "error {receipt.code}"
     verdict := if receipt.code == 1 -> "OVER" else -> "ok"
-    parsed: json.decode<BudgetFile>(files.read(budget_file) ?? "{{}}") ?? BudgetFile{outside_trace: None}
+    parsed: json.decode<BudgetFile>(files.read(budget_file) ?? "") ?? return "error {BUDGET_FILE}"
     limit: outside_limit(parsed, options.budget)
     if limit == .Val(ns_per_line) && lines > 0 && Float.from_int(outside_ns) / Float.from_int(lines) > ns_per_line {
         verdict = if verdict == "ok" -> "OUTSIDE" else -> "OVER+OUTSIDE"
@@ -544,17 +605,25 @@ parallelism: fn(run: Run) -> String {
     "{Float.from_int(run.cpu_ns) / Float.from_int(run.wall_ns):Fixed(1)}"
 }
 
-// The run row: mode, repeat, rc, lines, lines/s, wall, CPU, CPU ns per line,
-// parallelism, peak MiB, parsed lines, traced and outside seconds, budget.
+// The mode cell: the mode, `seed:O0` or `new:O0` in the speed gate.
+mode_cell: fn(run: Run) -> String {
+    if run.compiler == "" -> return run.mode.copy()
+    "{run.compiler}:{run.mode}"
+}
+
+// The run row: mode, repeat, rc, lines, lines/s, wall, CPU, instructions, CPU
+// ns per line, parallelism, peak MiB, parsed lines, traced and outside
+// seconds, budget.
 run_cells: fn(run: Run) -> [String] {
     parsed: run.trace.map(t -> "{t.user_lines + t.core_lines}") ?? "-"
     traced: run.trace.map(t -> traced_ns(t)) ?? 0
     cpu_per_line: if run.lines > 0 -> "{run.cpu_ns /% run.lines}" else -> "-"
+    instructions: if run.instructions < 0 -> "-" else -> "{run.instructions}"
     budget: if run.budget == "" -> "-" else -> run.budget
-    [String]{run.mode, "{run.repeat}", "{run.rc}", "{run.lines}", per_second(run.lines, run.wall_ns), seconds(run.wall_ns), seconds(run.cpu_ns), cpu_per_line, parallelism(run), "{run.peak_bytes /% 1048576}", parsed, seconds(traced), seconds(run.wall_ns - traced), budget}
+    [String]{mode_cell(run), "{run.repeat}", "{run.rc}", "{run.lines}", per_second(run.lines, run.wall_ns), seconds(run.wall_ns), seconds(run.cpu_ns), instructions, cpu_per_line, parallelism(run), "{run.peak_bytes /% 1048576}", parsed, seconds(traced), seconds(run.wall_ns - traced), budget}
 }
 
-RUN_HEADER: [String]{"mode", "run", "rc", "lines", "lines/s", "wall s", "cpu s", "cpu ns/line", "parallel", "peak MiB", "parsed", "traced s", "outside s", "budget"}
+RUN_HEADER: [String]{"mode", "run", "rc", "lines", "lines/s", "wall s", "cpu s", "instructions", "cpu ns/line", "parallel", "peak MiB", "parsed", "traced s", "outside s", "budget"}
 
 // The mode's median compile by wall among those that compiled (the lower
 // middle of an even count); None when none compiled.
@@ -565,12 +634,18 @@ median_run: fn(runs: [Run], mode: String) -> Run? {
     Val(compiled[(compiled.len() - 1) /% 2].copy())
 }
 
-report: fn(runs: [Run], modes: [String]) -> [String] {
+// The run rows, with each failed compile's note.
+run_table: fn(runs: [Run]) -> [String] {
     out := [String]{RUN_HEADER.map(h -> h.pad_start(11, " ")).join(" ")}
     loop run in runs {
         out.push(run_cells(run).map(c -> c.pad_start(11, " ")).join(" "))
-        if run.note != "" -> out.push("  {run.mode}.{run.repeat}: {run.note}")
+        if run.note != "" -> out.push("  {mode_cell(run)}.{run.repeat}: {run.note}")
     }
+    out
+}
+
+report: fn(runs: [Run], modes: [String]) -> [String] {
+    out := run_table(runs)
     out.push("")
     out.push("median by wall:")
     medians := [Run]{}
@@ -601,7 +676,7 @@ tsv_rows: fn(run: Run, stamp: String, commit: String, jet: String, load: String)
     rows := [String]{cells.join("\t")}
     trace: run.trace ?? return rows
     loop phase in trace.phases {
-        rows.push([String]{"phase", stamp, commit, jet, load, run.mode, "{run.repeat}", phase.kind, seconds(phase.wall_ns), seconds(phase.cpu_ns), "{phase.count}"}.join("\t"))
+        rows.push([String]{"phase", stamp, commit, jet, load, mode_cell(run), "{run.repeat}", phase.kind, seconds(phase.wall_ns), seconds(phase.cpu_ns), "{phase.count}"}.join("\t"))
     }
     rows
 }
@@ -610,6 +685,17 @@ first_line: fn(argv: [String], cwd: String) -> String {
     receipt: process.cmd(argv).cwd(cwd).run() ?? return "-"
     if receipt.code != 0 -> return "-"
     receipt.output.trim()
+}
+
+// A compile's trace, out and err stay; its copy, store and cache go. Its
+// rows go to --out.
+keep: fn(options: Options, run: Run, commit: String, jet: String, load: String) {
+    loop dir in ([String]{"project", "store", "cache"}) -> files.remove_all(files.join(slot_dir(options, run.compiler, run.mode, run.repeat), dir)) ?? ()
+    if options.out == "" -> return
+    stamp: "{time.now().to_unix_ms() /% 1000}"
+    text := if files.is_file(options.out) -> "" else -> "kind\tunix_s\tcommit\tjet\tload\t{RUN_HEADER.join("\t")}\n"
+    loop row in tsv_rows(run, stamp, commit, jet, load) -> text = "{text}{row}\n"
+    files.append_all(options.out, text) ?? term.eprint("Throughput.jet: cannot append to {options.out}: {err}")
 }
 
 // The first form: the corpus in each mode. Returns the exit code.
@@ -621,15 +707,8 @@ run_modes: fn(options: Options, jet: String, identity: String) -> Int {
     loop mode in options.modes {
         loop repeat in 1..<(options.runs + 1) {
             load: (files.read("/proc/loadavg") ?? "-").partition(" ").head
-            run: measure(options, inputs, lines, jet, identity, mode, repeat)
-            // The copy, store and cache go; the trace, out and err stay.
-            loop dir in ([String]{"project", "store", "cache"}) -> files.remove_all(files.join(slot_dir(options, mode, repeat), dir)) ?? ()
-            if options.out != "" {
-                stamp: "{time.now().to_unix_ms() /% 1000}"
-                text := if files.is_file(options.out) -> "" else -> "kind\tunix_s\tcommit\tjet\tload\t{RUN_HEADER.join("\t")}\n"
-                loop row in tsv_rows(run, stamp, commit, jet, load) -> text = "{text}{row}\n"
-                files.append_all(options.out, text) ?? term.eprint("Throughput.jet: cannot append to {options.out}: {err}")
-            }
+            run: measure(options, inputs, lines, jet, identity, "", mode, repeat)
+            keep(options, run, commit, jet, load)
             runs.push(run)
         }
     }
@@ -639,14 +718,188 @@ run_modes: fn(options: Options, jet: String, identity: String) -> Int {
     if failed.len() > 0 -> 1 else -> 0
 }
 
+// ---- The train speed gate (--against) ----
+
+// A judged quantity fails over GATE_LIMIT (new / seed); the gate judges only
+// when the spread of its per-round ratios is within GATE_SPREAD. A phase is
+// judged at or above GATE_PHASE_FLOOR_NS of process CPU in either compiler.
+GATE_LIMIT: 1.10
+GATE_SPREAD: 0.10
+GATE_PHASE_FLOOR_NS: 500000000
+
+// One round's value of a quantity for each compiler; negative when it was
+// not measured.
+Paired: struct { seed: Int, new: Int }
+
+// One judged quantity of a mode: each compiler's median, the median and the
+// spread of the per-round ratios new / seed (0 when not taken), the verdict.
+GateRow: struct { mode: String, metric: String, seed: Int, new: Int, ratio: Float, spread: Float, status: String }
+
+// The middle value (the lower middle of an even count); 0 when empty.
+middle_int: fn(values: [Int]) -> Int {
+    if values.len() == 0 -> return 0
+    sorted := values.copy()
+    sorted.sort()
+    sorted[(sorted.len() - 1) /% 2]
+}
+
+// The verdict on one quantity over the rounds. A count that was not taken,
+// a single round, or ratios spread wider than GATE_SPREAD is INCONCLUSIVE,
+// so noise never passes; every round over GATE_LIMIT fails whatever the
+// spread. Work the seed never did (0 in every seed round) at or above the
+// floor in every new round fails.
+gate_row: fn(mode: String, metric: String, rounds: [Paired], floor: Int) -> GateRow {
+    row := GateRow{mode: mode.copy(), metric: metric.copy(), seed: middle_int(rounds.map(r -> r.seed)), new: middle_int(rounds.map(r -> r.new)), ratio: 0.0, spread: 0.0, status: "pass"}
+    if rounds.len() == 0 || rounds.any(r -> r.seed < 0 || r.new < 0) {
+        row.status = "INCONCLUSIVE (not measured)"
+        return row
+    }
+    if row.seed < floor && row.new < floor {
+        row.status = "below floor"
+        return row
+    }
+    if rounds.len() < 2 {
+        row.status = "INCONCLUSIVE (one round)"
+        return row
+    }
+    if rounds.any(r -> r.seed == 0) {
+        row.status = if rounds.any(r -> r.seed != 0 || r.new < floor) -> "INCONCLUSIVE (absent in a seed round)" else -> "FAIL (new work)"
+        return row
+    }
+    ratios := rounds.map(r -> Float.from_int(r.new) / Float.from_int(r.seed))
+    ratios.sort()
+    row.ratio = ratios[(ratios.len() - 1) /% 2]
+    row.spread = ratios[ratios.len() - 1] - ratios[0]
+    if {
+        ratios[0] > GATE_LIMIT -> row.status = "FAIL (every round)"
+        row.spread > GATE_SPREAD -> row.status = "INCONCLUSIVE (spread)"
+        row.ratio > GATE_LIMIT -> row.status = "FAIL"
+        else -> {}
+    }
+    row
+}
+
+// A top-level phase's process CPU in a compile; 0 when it has none.
+phase_cpu: fn(run: Run, kind: String) -> Int {
+    trace: run.trace ?? return 0
+    (trace.phases.find(p -> p.kind == kind) ?? return 0).cpu_ns
+}
+
+// The phase kinds of `runs`' traces not yet in `kinds`, in order.
+add_kinds: fn(kinds: &[String], runs: [Run]) {
+    loop run in runs {
+        trace: run.trace ?? next
+        loop phase in trace.phases {
+            if !kinds.contains(phase.kind) -> kinds.push(phase.kind.copy())
+        }
+    }
+}
+
+// Per mode, over the rounds whose two compiles both succeeded with a trace:
+// CPU, instructions, then each top-level phase either compiler ran.
+gate_rows: fn(runs: [Run], modes: [String]) -> [GateRow] {
+    rows := [GateRow]{}
+    loop mode in modes {
+        seeds := [Run]{}
+        news := [Run]{}
+        loop run in runs {
+            if run.mode != mode || run.compiler != "seed" || run.rc != 0 || run.trace == None -> next
+            wanted: mode.copy()
+            repeat: run.repeat
+            other: runs.find(r -> r.mode == wanted && r.compiler == "new" && r.repeat == repeat && r.rc == 0 && r.trace != None) ?? next
+            seeds.push(run.copy())
+            news.push(other.copy())
+        }
+        cpu := [Paired]{}
+        instructions := [Paired]{}
+        loop at in 0..<seeds.len() {
+            cpu.push(Paired{seed: seeds[at].cpu_ns, new: news[at].cpu_ns})
+            instructions.push(Paired{seed: seeds[at].instructions, new: news[at].instructions})
+        }
+        rows.push(gate_row(mode, "cpu", cpu, 0))
+        rows.push(gate_row(mode, "instructions", instructions, 0))
+        kinds := [String]{}
+        add_kinds(kinds, seeds)
+        add_kinds(kinds, news)
+        loop kind in kinds {
+            phase := [Paired]{}
+            loop at in 0..<seeds.len() -> phase.push(Paired{seed: phase_cpu(seeds[at], kind), new: phase_cpu(news[at], kind)})
+            rows.push(gate_row(mode, "phase {kind}", phase, GATE_PHASE_FLOOR_NS))
+        }
+    }
+    rows
+}
+
+// FAIL when a compile failed or a quantity fails; else INCONCLUSIVE when one
+// is; else PASS.
+gate_verdict: fn(rows: [GateRow], runs: [Run]) -> String {
+    if runs.any(r -> r.rc != 0 || r.trace == None) || rows.any(r -> r.status.starts_with("FAIL")) -> return "FAIL"
+    if rows.len() == 0 || rows.any(r -> r.status.starts_with("INCONCLUSIVE")) -> return "INCONCLUSIVE"
+    "PASS"
+}
+
+GATE_HEADER: [String]{"mode", "quantity", "seed", "new", "change", "spread", "verdict"}
+
+// A row of the gate table: seconds (instructions as counts), the median
+// change in percent and the spread in points.
+gate_cells: fn(row: GateRow) -> [String] {
+    shown: if row.metric == "instructions" -> [String]{"{row.seed}", "{row.new}"} else -> [String]{seconds(row.seed), seconds(row.new)}
+    taken: row.ratio > 0.0
+    change: if taken -> "{(row.ratio - 1.0) * 100.0:Fixed(1)}%" else -> "-"
+    spread: if taken -> "{row.spread * 100.0:Fixed(1)}" else -> "-"
+    [String]{row.mode.copy(), row.metric.copy(), shown[0].copy(), shown[1].copy(), change, spread, row.status.copy()}
+}
+
+// The IDENTITY file beside a jet, else "".
+identity_of: fn(jet: String) -> String {
+    identity_file: files.join(files.dirname(jet), "IDENTITY")
+    if files.is_file(identity_file) -> (files.read(identity_file) ?? "").trim() else -> ""
+}
+
+// The --against form. Returns the exit code: 0 PASS, 1 FAIL, 3 INCONCLUSIVE.
+run_gate: fn(options: Options, jet: String, identity: String) -> Int {
+    seed: files.absolute(options.against) ?? usage("cannot resolve --against {options.against}")
+    if !files.is_file(seed) -> usage("--against {seed} is not a file")
+    probe: process.cmd([String]{options.perf, "--version"}).output_limit(GIB).run() ?? usage("cannot run --perf {options.perf}: {err}")
+    if probe.code != 0 -> usage("`{options.perf} --version` exited {probe.code}")
+    seed_identity: identity_of(seed)
+    inputs: packages(options, "inputs")
+    lines: corpus_source(options, inputs).physical_lines
+    commit: first_line([String]{"git", "rev-parse", "HEAD"}, options.tree)
+    runs := [Run]{}
+    seed_first := true
+    loop mode in options.modes {
+        loop repeat in 1..<(options.runs + 1) {
+            order: if seed_first -> [String]{"seed", "new"} else -> [String]{"new", "seed"}
+            seed_first = !seed_first
+            loop compiler in order {
+                compiler_jet: if compiler == "seed" -> seed else -> jet
+                compiler_identity: if compiler == "seed" -> seed_identity else -> identity
+                load: (files.read("/proc/loadavg") ?? "-").partition(" ").head
+                run: measure(options, inputs, lines, compiler_jet, compiler_identity, compiler, mode, repeat)
+                keep(options, run, commit, compiler_jet, load)
+                runs.push(run)
+            }
+        }
+    }
+    loop line in run_table(runs) -> print(line)
+    rows: gate_rows(runs, options.modes)
+    print("")
+    print(GATE_HEADER.map(h -> h.pad_start(12, " ")).join(" "))
+    loop row in rows -> print(gate_cells(row).map(c -> c.pad_start(12, " ")).join(" "))
+    verdict: gate_verdict(rows, runs)
+    print("traces: {options.work}/<seed|new>-<mode>.<run>/trace.jsonl")
+    print("speed gate: {verdict}")
+    if verdict == "PASS" -> return 0
+    if verdict == "FAIL" -> return 1
+    3
+}
+
 // ---- The gauntlet cell (--lane) ----
 
-// bench.json: each generated program's pin. phase-budgets.json: the phase
-// budgets.
+// bench.json: each generated program's pin.
 BenchPin: struct { code_lines: Int, seed: Int, source_sha256: String, expected_output: String }
-BudgetPin: struct { row: Int, phase: String, measure: String, kinds: [String]?, wall_budget_s: Float, owners: [String] }
 BenchFile: struct { programs: [String: BenchPin] }
-PhaseBudgetFile: struct { phase_budgets: [BudgetPin] }
 
 // The manifest's cell: what the full lane gates on.
 CellThreshold: struct { arm: String, wall_ns_lt: Int?, lines_per_second_min: Int? }
@@ -717,13 +970,13 @@ Arm: struct { id: String, threads: String, samples: [Sample], summary: Summary? 
 #Codable
 Program: struct { id: String, entry: String, expected: String, golden: Bool, source: Source, arms: [Arm] }
 
-// One bench.json phase budget row against a summary (`actual_ns` -1:
-// unmeasured).
+// One budget.json row against a summary (`actual_ns` -1: unmeasured;
+// `budget_ns` -1: the row has no budget in the column).
 #Codable
-BudgetRow: struct { row: Int, phase: String, budget_ns: Int, actual_ns: Int, status: String, owners: [String] }
+BudgetRow: struct { id: String, phase: String, budget_ns: Int, actual_ns: Int, status: String, owners: [String] }
 
 #Codable
-BudgetCheck: struct { scale: Float, rows: [BudgetRow], over: [String] }
+BudgetCheck: struct { column: String, code_lines: Int, rows: [BudgetRow], over: [String] }
 
 // A program's full-lane gates: pass, fail or "-" (not gated).
 #Codable
@@ -935,38 +1188,49 @@ summary_phase_wall: fn(summary: Summary, kind: String) -> Int {
     0
 }
 
-// The phase budgets against the default arm's summary, scaled by
-// `code_lines` / 300,000. The glue row is the wall outside every other row.
-phase_budget_check: fn(pins: [BudgetPin], summary: Summary, code_lines: Int) -> BudgetCheck {
-    scale: Float.from_int(code_lines) / 300000.0
+// The budget file's target column against the default arm's summary: each
+// row's ns per line times `code_lines`. A row's actual wall is its spans'
+// less its `exclude` spans'; the residual row's is the wall outside every
+// other row, against its budget plus the build steps' outside the trace.
+phase_budget_check: fn(file: BudgetFile, summary: Summary, code_lines: Int) -> BudgetCheck {
+    column: file.target.column
+    lines: Float.from_int(code_lines)
+    outside: outside_limit(file, column) ?? 0.0
     rows := [BudgetRow]{}
     named := 0
-    loop pin in pins {
+    loop pin in file.rows {
         actual := -1
-        if pin.measure == "startup" -> actual = summary.startup_ns
-        if pin.kinds == .Val(kinds) {
+        if pin.spans == .Val(spans) {
             actual = 0
-            loop kind in kinds -> actual += summary_phase_wall(summary, kind)
+            loop kind in spans -> actual += summary_phase_wall(summary, kind)
+            if pin.exclude == .Val(excluded) -> loop kind in excluded -> actual -= summary_phase_wall(summary, kind)
+            if actual < 0 -> actual = 0
             named += actual
         }
-        budget: nearest(pin.wall_budget_s * 1e9 * scale)
-        rows.push(BudgetRow{row: pin.row, phase: pin.phase.copy(), budget_ns: budget, actual_ns: actual, status: "", owners: pin.owners.copy()})
+        per_line: pin.budget.get(column) ?? -1.0
+        residual: pin.residual ?? false
+        budget: if {
+            per_line < 0.0 -> -1
+            residual -> nearest((per_line + outside) * lines)
+            else -> nearest(per_line * lines)
+        }
+        rows.push(BudgetRow{id: pin.id.copy(), phase: pin.phase.copy(), budget_ns: budget, actual_ns: actual, status: "", owners: pin.owners.copy()})
     }
-    startup: if summary.startup_ns > 0 -> summary.startup_ns else -> 0
     over := [String]{}
     loop at in 0..<rows.len() {
-        if pins[at].measure == "glue" {
-            glue: summary.wall_ns.median - named - startup
-            rows[at].actual_ns = if glue > 0 -> glue else -> 0
+        if file.rows[at].residual ?? false {
+            rest: summary.wall_ns.median - named
+            rows[at].actual_ns = if rest > 0 -> rest else -> 0
         }
         rows[at].status = if {
+            rows[at].budget_ns < 0 -> "unbudgeted"
             rows[at].actual_ns < 0 -> "unmeasured"
             rows[at].actual_ns < rows[at].budget_ns -> "within"
             else -> "over"
         }
-        if rows[at].status != "within" -> over.push("{rows[at].phase}: {rows[at].actual_ns} ns vs {rows[at].budget_ns} ns budget (owners {rows[at].owners.join(", ")})")
+        if rows[at].status != "within" -> over.push("{rows[at].id} {rows[at].phase}: {rows[at].actual_ns} ns vs {rows[at].budget_ns} ns budget (root: {rows[at].owners.join(", ")})")
     }
-    BudgetCheck{scale, rows, over}
+    BudgetCheck{column: column.copy(), code_lines, rows, over}
 }
 
 // The distinct artifact and diagnostics digests over every sample of every
@@ -983,7 +1247,7 @@ digest_count: fn(program: Program) -> Int {
 }
 
 // The full lane's gates of one complete program; failures go to `failures`.
-cell_gate: fn(cell: AxisCell, pins: [BudgetPin], program: Program, failures: &[String]) -> Gate {
+cell_gate: fn(cell: AxisCell, budgets: BudgetFile, program: Program, failures: &[String]) -> Gate {
     gate := Gate{program: program.id.copy(), determinism: "pass", memory: "-", threshold: "-", lines_per_second_median: 0, lines_per_second_min: 0, phase_budgets: None}
     distinct: digest_count(program)
     if distinct != 1 {
@@ -1011,9 +1275,9 @@ cell_gate: fn(cell: AxisCell, pins: [BudgetPin], program: Program, failures: &[S
         gate.threshold = if passed -> "pass" else -> "fail"
         if !passed -> failures.push("{program.id}: {gate.lines_per_second_median} lines/s median, {gate.lines_per_second_min} min, threshold >= {floor}")
     }
-    budgets: phase_budget_check(pins, summary, program.source.code_lines)
-    loop over in budgets.over -> failures.push("{program.id}: phase over budget: {over}")
-    gate.phase_budgets = Val(budgets)
+    checked: phase_budget_check(budgets, summary, program.source.code_lines)
+    loop over in checked.over -> failures.push("{program.id}: phase over budget: {over}")
+    gate.phase_budgets = Val(checked)
     gate
 }
 
@@ -1323,7 +1587,7 @@ quick_checks: fn(options: Options, pin_dir: String, complete: [Program], receipt
 run_lane: fn(options: Options, jet: String, identity: String) -> Int {
     pin_dir: files.join(options.tree, PIN_DIR)
     pins: json.decode<BenchFile>(files.read(files.join(pin_dir, "bench.json")) ?? "") ?? usage("cannot read {pin_dir}/bench.json")
-    budgets: json.decode<PhaseBudgetFile>(files.read(files.join(options.tree, PHASE_BUDGETS_FILE)) ?? "") ?? usage("cannot read {PHASE_BUDGETS_FILE}")
+    budgets: json.decode<BudgetFile>(files.read(files.join(options.tree, BUDGET_FILE)) ?? "") ?? usage("cannot read {BUDGET_FILE}")
     manifest: json.decode<Manifest>(files.read(files.join(options.tree, "Tools/gauntlet/measurement-manifest.json")) ?? "") ?? usage("cannot read Tools/gauntlet/measurement-manifest.json")
     cell: manifest.axes.compile_throughput
     compiler_bytes: files.read_bytes(jet) ?? usage("cannot read JET={jet}: {err}")
@@ -1378,7 +1642,7 @@ run_lane: fn(options: Options, jet: String, identity: String) -> Int {
         receipt.programs.push(prepared.program.copy())
     }
     complete: receipt.programs.filter(p -> p.arms.len() > 0 && p.arms.all(a -> a.summary != None))
-    if options.lane == "full" -> loop program in complete -> receipt.gates.push(cell_gate(cell, budgets.phase_budgets, program, receipt.failures))
+    if options.lane == "full" -> loop program in complete -> receipt.gates.push(cell_gate(cell, budgets, program, receipt.failures))
     if options.lane == "quick" -> quick_checks(options, pin_dir, complete, receipt)
     receipt.contention_end = contention()
     receipt.finished_unix_ms = time.now().to_unix_ms()
@@ -1424,9 +1688,12 @@ run: fn() {
     if options.tool == "" -> options.tool = jet
     if options.work == "" -> options.work = files.join(sys.temp_dir(), "jet-throughput-{time.now().to_unix_ms()}")
     files.create_dir_all(options.work) ?? usage("cannot create the work directory {options.work}: {err}")
-    identity_file: files.join(files.dirname(jet), "IDENTITY")
-    identity: if files.is_file(identity_file) -> (files.read(identity_file) ?? "").trim() else -> ""
-    process.exit(if options.lane != "" -> run_lane(options, jet, identity) else -> run_modes(options, jet, identity))
+    identity: identity_of(jet)
+    if {
+        options.lane != "" -> process.exit(run_lane(options, jet, identity))
+        options.against != "" -> process.exit(run_gate(options, jet, identity))
+        else -> process.exit(run_modes(options, jet, identity))
+    }
 }
 
 test_trace: fn() -> String {
@@ -1473,7 +1740,7 @@ test_trace: fn() -> String {
 }
 
 test_run: fn(repeat: Int, rc: Int, wall_s: Int) -> Run {
-    Run{mode: "O0", repeat, rc, wall_ns: wall_s * 1000000000, cpu_ns: wall_s * 4000000000, peak_bytes: 0, lines: 1000, trace: None, note: "", budget: ""}
+    Run{mode: "O0", repeat, compiler: "", rc, wall_ns: wall_s * 1000000000, cpu_ns: wall_s * 4000000000, instructions: -1, peak_bytes: 0, lines: 1000, trace: None, note: "", budget: ""}
 }
 
 #Test("the median compile of a mode is the middle wall of those that compiled") {
@@ -1486,10 +1753,10 @@ test_run: fn(repeat: Int, rc: Int, wall_s: Int) -> Run {
 }
 
 #Test("the budget file's outside_trace budget reads by column") {
-    parsed: json.decode<BudgetFile>("{{\"columns\":[\"30M-wall\"],\"outside_trace\":{{\"phase\":\"steps\",\"budget\":{{\"30M-wall\":3.3}}}}}}") ?? panic("budget file")
+    parsed: json.decode<BudgetFile>("{{\"columns\":[\"30M-wall\"],\"target\":{{\"column\":\"30M-wall\",\"lines_per_second\":30000000}},\"rows\":[],\"outside_trace\":{{\"phase\":\"steps\",\"budget\":{{\"30M-wall\":3.3}},\"owners\":[\"A\"]}}}}") ?? panic("budget file")
     assert_eq(outside_limit(parsed, "30M-wall") ?? 0.0, 3.3)
     assert(outside_limit(parsed, "1M") == None)
-    bare: json.decode<BudgetFile>("{{\"columns\":[]}}") ?? panic("bare budget file")
+    bare: json.decode<BudgetFile>("{{\"columns\":[],\"target\":{{\"column\":\"1M\",\"lines_per_second\":1000000}},\"rows\":[]}}") ?? panic("bare budget file")
     assert(bare.outside_trace == None)
 }
 
@@ -1557,21 +1824,26 @@ test_program: fn(id: String, default_wall: Int, single_digest: String) -> Progra
     Program{id: id.copy(), entry: "main.jet", expected: "", golden: true, source, arms}
 }
 
-#Test("the full lane's gates and phase budgets fail closed") {
-    pins: json.decode<PhaseBudgetFile>("{{\"phase_budgets\":[{{\"row\":1,\"phase\":\"startup\",\"measure\":\"startup\",\"kinds\":null,\"wall_budget_s\":0.03,\"owners\":[\"A\"]}},{{\"row\":2,\"phase\":\"read, lex, parse\",\"measure\":\"kinds\",\"kinds\":[\"load\"],\"wall_budget_s\":0.08,\"owners\":[\"B\"]}},{{\"row\":3,\"phase\":\"glue\",\"measure\":\"glue\",\"kinds\":null,\"wall_budget_s\":0.02,\"owners\":[\"C\"]}}]}}") ?? panic("pins")
+#Test("the full lane's gates and phase budgets fail closed, naming each over-budget phase's root") {
+    budget_file: json.decode<BudgetFile>("{{\"target\":{{\"column\":\"30M-wall\",\"lines_per_second\":30000000}},\"rows\":[{{\"id\":\"P1+P2\",\"phase\":\"read, lex, parse\",\"spans\":[\"sources\",\"load\"],\"budget\":{{\"1M\":400,\"30M-wall\":2.8}},\"owners\":[\"B\"]}},{{\"id\":\"P6\",\"phase\":\"other finalize\",\"spans\":[\"sema.finalize\"],\"exclude\":[\"sema.bodies\"],\"budget\":{{\"30M-wall\":1.7}},\"owners\":[\"C\"]}},{{\"id\":\"P15\",\"phase\":\"residual\",\"residual\":true,\"budget\":{{\"30M-wall\":2.2}},\"owners\":[\"D\"]}},{{\"id\":\"PX\",\"phase\":\"unbudgeted\",\"spans\":[\"emit\"],\"budget\":{{\"1M\":1}},\"owners\":[\"E\"]}}],\"outside_trace\":{{\"budget\":{{\"30M-wall\":3.3}},\"owners\":[\"F\"]}}}}") ?? panic("budget file")
     cell: json.decode<AxisCell>("{{\"cache_lane\":\"clean\",\"programs\":[{{\"id\":\"bench300k\",\"threshold\":{{\"arm\":\"default\",\"wall_ns_lt\":2000000000}}}}],\"gates\":{{\"memory\":{{\"bench300k_peak_rss_bytes_max\":1073741824}}}}}}") ?? panic("cell")
     failures := [String]{}
-    gate: cell_gate(cell, pins.phase_budgets, test_program("bench300k", 1000000000, "b"), failures)
+    gate: cell_gate(cell, budget_file, test_program("bench300k", 1000000000, "b"), failures)
     assert_eq(gate.determinism, "fail")
     assert_eq(gate.memory, "pass")
     assert_eq(gate.threshold, "pass")
-    assert(failures.any(f -> f.contains("phase over budget: read, lex, parse")))
+    assert(failures.any(f -> f.contains("phase over budget: P1+P2 read, lex, parse") && f.contains("(root: B)")))
     assert(failures.any(f -> f.contains("differ across samples and arms (2 distinct)")))
-    budgets: phase_budget_check(pins.phase_budgets, (test_program("bench30k", 1000000000, "a").arms[0].summary ?? panic("summary")), 30000)
-    assert_eq(budgets.scale, 0.1)
-    assert_eq(budgets.rows[1].budget_ns, 8000000)
-    assert_eq(budgets.rows[2].actual_ns, 1000000000 - 500000000 - 1)
-    slow: cell_gate(cell, pins.phase_budgets, test_program("bench300k", 3000000000, "a"), failures)
+    checked: phase_budget_check(budget_file, (test_program("bench30k", 1000000000, "a").arms[0].summary ?? panic("summary")), 30000)
+    assert_eq(checked.column, "30M-wall")
+    assert_eq(checked.rows[0].budget_ns, 84000)
+    assert_eq(checked.rows[0].actual_ns, 500000000)
+    assert_eq(checked.rows[1].status, "within")
+    assert_eq(checked.rows[2].budget_ns, 165000)
+    assert_eq(checked.rows[2].actual_ns, 1000000000 - 500000000)
+    assert_eq(checked.rows[3].status, "unbudgeted")
+    assert_eq(checked.over.len(), 3)
+    slow: cell_gate(cell, budget_file, test_program("bench300k", 3000000000, "a"), failures)
     assert_eq(slow.determinism, "pass")
     assert_eq(slow.threshold, "fail")
 }
@@ -1591,4 +1863,65 @@ test_program: fn(id: String, default_wall: Int, single_digest: String) -> Progra
     other := baseline.copy()
     other.programs[0].source_sha256 = "other"
     assert(quick_compare(Val(other), machine, [Program]{program.copy()}, budgets).failures[0].contains("baseline source"))
+}
+
+// One planted compile of the speed gate: `cpu_s` CPU seconds, `bodies_ms`
+// of sema.bodies process CPU, and `instructions`.
+gate_run: fn(compiler: String, repeat: Int, cpu_s: Float, instructions: Int, bodies_ms: Int) -> Run {
+    trace: Trace{phases: [Phase]{Phase{kind: "sema.bodies", cpu_ns: bodies_ms * 1000000, count: 1}, Phase{kind: "load", cpu_ns: 100000000, count: 1}}, user_lines: 0, core_lines: 0, first_us: 0, last_us: 0}
+    Run{mode: "O0", repeat, compiler: compiler.copy(), rc: 0, wall_ns: 1000000000, cpu_ns: Int.from_float(cpu_s * 1e9), instructions, peak_bytes: 0, lines: 1000, trace: Val(trace), note: "", budget: ""}
+}
+
+// Three planted rounds: the seed at 100 s, 1e12 instructions and 10 s of
+// sema.bodies; the new compiler at the given CPU seconds per round.
+gate_rounds: fn(new_cpu: [Float], new_instructions: Int, new_bodies_ms: Int) -> [Run] {
+    runs := [Run]{}
+    loop at in 0..<new_cpu.len() {
+        runs.push(gate_run("seed", at + 1, 100.0, 1000000000000, 10000))
+        runs.push(gate_run("new", at + 1, new_cpu[at], new_instructions, new_bodies_ms))
+    }
+    runs
+}
+
+#Test("the speed gate passes a steady pair, fails a rise past 10% and refuses to judge a wide spread") {
+    modes: [String]{"O0"}
+    steady: gate_rounds([Float]{101.0, 102.0, 103.0}, 1010000000000, 10100)
+    steady_rows: gate_rows(steady, modes)
+    assert_eq(steady_rows.map(r -> "{r.metric}={r.status}").join(","), "cpu=pass,instructions=pass,phase sema.bodies=pass,phase load=below floor")
+    assert_eq(gate_verdict(steady_rows, steady), "PASS")
+    risen: gate_rounds([Float]{108.0, 112.0, 114.0}, 1020000000000, 10200)
+    risen_rows: gate_rows(risen, modes)
+    assert_eq(risen_rows[0].status, "FAIL")
+    assert_eq(gate_cells(risen_rows[0]).join(" "), "O0 cpu 100.00 112.00 12.0% 6.0 FAIL")
+    assert_eq(gate_verdict(risen_rows, risen), "FAIL")
+    noisy: gate_rounds([Float]{95.0, 102.0, 112.0}, 1010000000000, 10100)
+    noisy_rows: gate_rows(noisy, modes)
+    assert_eq(noisy_rows[0].status, "INCONCLUSIVE (spread)")
+    assert_eq(noisy_rows[1].status, "pass")
+    assert_eq(gate_verdict(noisy_rows, noisy), "INCONCLUSIVE")
+    slow: gate_rounds([Float]{115.0, 125.0, 140.0}, 1010000000000, 10100)
+    assert_eq(gate_rows(slow, modes)[0].status, "FAIL (every round)")
+    worse_bodies: gate_rows(gate_rounds([Float]{101.0, 102.0, 103.0}, 1010000000000, 52000), modes)
+    assert_eq(worse_bodies[2].status, "FAIL (every round)")
+}
+
+#Test("the speed gate never passes what it did not measure") {
+    modes: [String]{"O0"}
+    uncounted: gate_rounds([Float]{101.0, 102.0, 103.0}, -1, 10100)
+    uncounted_rows: gate_rows(uncounted, modes)
+    assert_eq(uncounted_rows[1].status, "INCONCLUSIVE (not measured)")
+    assert_eq(gate_verdict(uncounted_rows, uncounted), "INCONCLUSIVE")
+    single: gate_rounds([Float]{101.0}, 1010000000000, 10100)
+    assert_eq(gate_rows(single, modes)[0].status, "INCONCLUSIVE (one round)")
+    failed := gate_rounds([Float]{101.0, 102.0, 103.0}, 1010000000000, 10100)
+    failed[3].rc = 1
+    failed_rows: gate_rows(failed, modes)
+    assert_eq(failed_rows[0].new, 101000000000)
+    assert_eq(gate_verdict(failed_rows, failed), "FAIL")
+    assert_eq(gate_verdict([GateRow]{}, [Run]{}), "INCONCLUSIVE")
+    fresh: gate_row("O0", "phase comptime.precheck", [Paired]{Paired{seed: 0, new: 19000000000}, Paired{seed: 0, new: 18000000000}}, GATE_PHASE_FLOOR_NS)
+    assert_eq(fresh.status, "FAIL (new work)")
+    assert_eq(perf_instructions("# started on Thu\n\n1234567,,instructions:u,9000,100.00,,\n"), 1234567)
+    assert_eq(perf_instructions("<not counted>,,instructions:u,0,0.00,,\n"), -1)
+    assert_eq(perf_instructions(""), -1)
 }

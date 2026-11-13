@@ -22,6 +22,14 @@ Columns:
   included:
   `JET=PATH jet Tools/perf/compile-throughput/Throughput.jet --budget 30M-wall`.
 
+`budget.json` is the compiler's one per-phase budget table. Its `target`
+(`30M-wall`, 30,000,000 lines/s) is the column the scaling gate
+(`Tools/perf/scaling`) and the compile-throughput cell's full lane gate on:
+each row's ns per line there is its phase's lines/s rate (1e9 over it), and
+the rows with `outside_trace` compose to the target end to end. Every row and
+`outside_trace` carries `owners`, the cards whose work brings the phase inside
+budget; a phase over budget names them as its root.
+
 ```
 jet Tools/perf/budget/check build.trace.jsonl --column 2.5s-wall --clock wall
 jet Tools/perf/budget/check build.trace.jsonl --column 1M

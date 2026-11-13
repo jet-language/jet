@@ -3,10 +3,12 @@
   "default_lines": 448165,
   "lines_counter": "parse.user_lines",
   "columns": ["225K", "500K", "1M", "2.5s-wall", "20ms-wall", "30M", "30M-wall"],
+  "target": { "column": "30M-wall", "lines_per_second": 30000000 },
   "rows": [
     {
       "id": "P1+P2",
       "phase": "read + lex + intern + parse",
+      "owners": ["#6328 c22", "#5910 c6", "#5479 c7"],
       "spans": ["sources", "load"],
       "budget": { "225K": 1600, "500K": 720, "1M": 400, "2.5s-wall": 683, "20ms-wall": 5, "30M": 13.3, "30M-wall": 2.8 },
       "units": [{ "counter": "parse.tokens", "unit": "token", "budget": { "1M": 44, "30M": 1.5 } }]
@@ -14,12 +16,14 @@
     {
       "id": "P3",
       "phase": "collect / register / resolve",
+      "owners": ["#6328 c22", "#5479 c7"],
       "spans": ["register"],
       "budget": { "225K": 1800, "500K": 810, "1M": 450, "2.5s-wall": 273, "20ms-wall": 2, "30M": 15, "30M-wall": 1.1 }
     },
     {
       "id": "P4",
       "phase": "comptime: one check + evaluation",
+      "owners": ["#6328 c22", "#5479 c6"],
       "spans": ["sema.check", "comptime", "comptime.bodies", "comptime.validate"],
       "budget": { "225K": 1000, "500K": 450, "1M": 250, "2.5s-wall": 683, "20ms-wall": 5, "30M": 8.3, "30M-wall": 2.8 },
       "units": [{ "counter": "comptime.items_checked", "unit": "comptime item", "budget": { "1M": 45000, "30M": 1500 } }]
@@ -27,6 +31,7 @@
     {
       "id": "P5a+P5b",
       "phase": "sema bodies + ownership (one pass; P5b is not traced apart)",
+      "owners": ["#5479 c6", "#5479 c7"],
       "spans": ["sema.bodies", "sema.recheck"],
       "budget": { "225K": 13200, "500K": 5960, "1M": 3300, "2.5s-wall": 1640, "20ms-wall": 13, "30M": 110, "30M-wall": 7 },
       "always_on": { "check": "ownership (P5b)", "spans": ["sema.bodies"] },
@@ -35,6 +40,7 @@
     {
       "id": "P5c",
       "phase": "effect tracking",
+      "owners": ["#5479 c7"],
       "spans": ["sema.effects"],
       "budget": { "225K": 1200, "500K": 540, "1M": 300, "2.5s-wall": 137, "20ms-wall": 1, "30M": 10, "30M-wall": 0.6 },
       "always_on": { "check": "effect tracking", "spans": ["sema.effects"] }
@@ -42,6 +48,7 @@
     {
       "id": "P5d",
       "phase": "failure inference",
+      "owners": ["#5479 c7"],
       "spans": ["sema.failure"],
       "budget": { "225K": 800, "500K": 360, "1M": 200, "2.5s-wall": 82, "20ms-wall": 1, "30M": 6.7, "30M-wall": 0.6 },
       "always_on": { "check": "failure inference", "spans": ["sema.failure"] }
@@ -49,6 +56,7 @@
     {
       "id": "P6",
       "phase": "other whole-program finalize",
+      "owners": ["#5479 c7"],
       "spans": ["sema.finalize"],
       "exclude": ["sema.bodies", "sema.recheck", "sema.effects", "sema.failure"],
       "budget": { "225K": 400, "500K": 180, "1M": 100, "2.5s-wall": 410, "20ms-wall": 3, "30M": 3.3, "30M-wall": 1.7 }
@@ -56,6 +64,7 @@
     {
       "id": "P7",
       "phase": "typed tree -> IR lowering (driver lower)",
+      "owners": ["#5479 c8"],
       "spans": ["lower"],
       "budget": { "225K": 2600, "500K": 1170, "1M": 650, "2.5s-wall": 137, "20ms-wall": 1, "30M": 21.7, "30M-wall": 0.6 },
       "units": [{ "counter": "lower.functions", "unit": "function", "budget": { "1M": 33000, "30M": 1100 } }]
@@ -63,12 +72,14 @@
     {
       "id": "P8",
       "phase": "IR build",
+      "owners": ["#5479 c8", "#5479 c7"],
       "spans": ["ir.build"],
       "budget": { "225K": 9000, "500K": 4050, "1M": 2250, "2.5s-wall": 820, "20ms-wall": 7, "30M": 75, "30M-wall": 3.9 }
     },
     {
       "id": "P9",
       "phase": "IR O1 passes + IR consistency check (ir.lint, once, over the module x64 selection reads)",
+      "owners": ["#5479 c8", "#5479 c6"],
       "spans": ["ir.opt", "ir.lint"],
       "budget": { "225K": 7000, "500K": 3150, "1M": 1750, "2.5s-wall": 683, "20ms-wall": 5, "30M": 58.3, "30M-wall": 2.8 },
       "always_on": { "check": "IR consistency check (SPEED-500K P9; the native back end has no separate LIR, so ir.lint is also its P11)", "spans": ["ir.lint"] }
@@ -76,12 +87,14 @@
     {
       "id": "P10",
       "phase": "x64 selection, register allocation, encode",
+      "owners": ["#5479 c8"],
       "spans": ["ir.x64"],
       "budget": { "225K": 7000, "500K": 3150, "1M": 1750, "2.5s-wall": 328, "20ms-wall": 3, "30M": 58.3, "30M-wall": 1.7 }
     },
     {
       "id": "P11",
       "phase": "object write + DWARF debug info (SPEED-500K P13; debug_info is on in stock builds and runs)",
+      "owners": ["#5479 c8"],
       "spans": ["ir.object"],
       "budget": { "225K": 7000, "500K": 3150, "1M": 1750, "2.5s-wall": 273, "20ms-wall": 2, "30M": 58.3, "30M-wall": 1.1 },
       "always_on": { "check": "debug info (P13b, written with the object)", "spans": ["ir.object"] }
@@ -89,18 +102,21 @@
     {
       "id": "P14",
       "phase": "link + foreign objects",
+      "owners": ["#5479 c8"],
       "spans": ["native.link", "native.foreign", "native.rust_foreign"],
       "budget": { "225K": 1000, "500K": 450, "1M": 250, "2.5s-wall": 219, "20ms-wall": 2, "30M": 8.3, "30M-wall": 1.1 }
     },
     {
       "id": "P15",
       "phase": "driver, phase boundaries (residual)",
+      "owners": ["#5479 c6"],
       "residual": true,
       "budget": { "225K": 800, "500K": 360, "1M": 200, "2.5s-wall": 465, "20ms-wall": 4, "30M": 6.7, "30M-wall": 2.2 }
     }
   ],
   "outside_trace": {
     "phase": "the build steps around the traced compile (the package's source generators and the runtime pack step), wall ns per corpus line; Tools/perf/compile-throughput/Throughput.jet checks it",
+    "owners": ["#5479 c6"],
     "budget": { "30M-wall": 3.3 }
   },
   "work_sum_stated": { "225K": 54400, "500K": 24480, "1M": 13600, "2.5s-wall": 6833, "20ms-wall": 54, "30M": 453.3, "30M-wall": 30 },

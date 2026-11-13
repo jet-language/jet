@@ -140,6 +140,25 @@ cover: the package's build steps around the compile. `--budget COLUMN` holds
 every phase, and `outside`, to that column of
 `Tools/perf/budget/budget.json` (#5479).
 
+`budget.json` is the compiler's one per-phase budget table. Its `target`
+column, `30M-wall`, gives each phase a wall budget in ns per source line, that
+is a lines-per-second rate (1e9 over it); the phases, with the build steps
+outside the trace, sum to 33.3 ns per line, 30M lines per second end to end.
+Every row and `outside_trace` names its `owners`, the cards whose work brings
+it inside budget. A phase over its budget names them as its root.
+
+`--against SEED` is the train speed gate: the compiler `JET` against the seed
+it was built with, each compiling the corpus in each mode, `--runs` rounds that
+alternate which compiler goes first. Every compile runs under
+`perf stat -e instructions:u`. The gate judges per mode the CPU time,
+user-mode instructions and the process CPU of each top-level phase of at least
+0.5 s, never wall time or lines per second, which load moves. A quantity fails
+when its median per-round ratio is over +10% within a 10-point spread, or when
+every round is over +10%. A wider spread, a single round, or a missing count
+is `INCONCLUSIVE`, never a pass. It prints `speed gate: PASS`, `FAIL` or
+`INCONCLUSIVE` and exits 0, 1 or 3; `--out` records every compile in the
+throughput ledger.
+
 `--lane quick|full` runs the gauntlet's `compile_throughput` cell
 (`Tools/gauntlet/measurement-manifest.json`) with the same tool. The full lane
 builds the generated `bench300k` program and the compiler corpus (`selfhost`);
@@ -149,8 +168,8 @@ come from `Tools/perf/scaling/generate/run.jet`, are pinned in
 `Tools/perf/throughput/bench.json`, and each artifact's stdout must
 match the pinned golden byte for byte. Artifacts and diagnostics must be
 identical across every sample and arm. The full lane adds the manifest's
-memory, wall or lines-per-second, and phase-budget
-(`Tools/perf/scaling/phase-budgets.json`) gates. The quick lane
+memory, wall or lines-per-second, and phase-budget (`budget.json` at its
+`target` column) gates. The quick lane
 compares wall, peak memory and each phase with
 `Tools/perf/throughput/quick-baseline.json`, within the regression
 budgets of `Tools/perf/baseline.json`. Every run writes a JSON receipt.

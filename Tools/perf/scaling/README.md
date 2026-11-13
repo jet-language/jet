@@ -154,9 +154,11 @@ Line packing and single-file assembly append iteratively, so large rungs do not
 depend on the JavaScript engine's call-argument limit.
 Series are baseline-subtracted (an N=1 rung), judged between the first and
 last measurable rung against N log N (bounds: counters 1.25, time/RSS 1.5),
-and projected to 1M lines. Floors come from the phase budgets in
-`phase-budgets.json` plus 1M lines in 10 s end
-to end. `--profile` re-runs the top rung of a failing series under perf and
+and projected to 1M lines. Floors are the per-phase budgets of
+`Tools/perf/budget/budget.json` at its 30M lines/s `target` column (each row's
+ns per line as a lines/s rate) and the target end to end; a phase under its
+floor names the cards that own its root. `--profile` re-runs the top rung of a
+failing series under perf and
 attributes samples per phase to source functions (`profile.mjs`). Exit 0
 pass, 1 failure, 2 invalid invocation; the receipt is JSON in `--work-dir`.
 
