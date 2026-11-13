@@ -3400,7 +3400,7 @@ ir_x64_stop_point: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64All
                 skips.push(x64_jcc_rel32(e.code, X64Cond.E))
             } else if ir_x64_in_loop(e, f) {
                 tests := ir_x64_stop_quiet(e.code)
-                ir_x64_patch(e, tests.enter, e.code.bytes.len())
+                loop enter in tests.enter -> ir_x64_patch(e, enter, e.code.bytes.len())
                 skips = tests.quiet.move()
             }
             ir_x64_call(e, m, f, al, X64RelocTarget.Function{id: X64FunctionID{value: f.a[at]}}, -1, f.args, f.b[at], f.c[at], -1, 0)
@@ -3455,18 +3455,20 @@ ir_x64_in_loop: fn(e: IRX64Emitter, f: IRFunction) -> Bool Never! {
 }
 
 // The stop poll's tests that no stop is asked for (ir_x64_stop_poll), into
-// rax: `mov rax, gs:[0]; test rax, rax; jz quiet; mov rax, [rax + 16];
-// test rax, rax; jz quiet; cmp qword [rax + 24], 0; jnz enter;
-// mov rax, [rax + 32]; test rax, rax; jz quiet`. A task with attention
-// raised (control word 24: a strong pause, a cancel or a deadline) enters
-// the poll's routine with no stop asked for (JetRuntime Scheduler.jet
+// rax: `mov rax, gs:[0]; test rax, rax; jz quiet; cmp qword gs:[448], 0;
+// jnz enter; mov rax, [rax + 16]; test rax, rax; jz quiet;
+// cmp qword [rax + 24], 0; jnz enter; mov rax, [rax + 32]; test rax, rax;
+// jz quiet`. A task whose turn the scheduler asked for (TCB word 448,
+// JetRuntime Scheduler.jet SCHEDULER_TCB_TURN) or with attention raised
+// (control word 24: a strong pause, a cancel or a deadline) enters the
+// poll's routine with no stop asked for (Scheduler.jet scheduler_turn_give,
 // scheduler_check_loops).
 IRX64StopQuiet: struct {
     // The three rel32 fields to patch to `quiet`.
     quiet: [Int]
-    // The rel32 field to patch to the end of the tests, where the routine
-    // is entered.
-    enter: Int
+    // The two rel32 fields to patch to the end of the tests, where the
+    // routine is entered.
+    enter: [Int]
 }
 
 ir_x64_stop_quiet: fn(code: &X64Code) -> IRX64StopQuiet Never! {
@@ -3474,13 +3476,19 @@ ir_x64_stop_quiet: fn(code: &X64Code) -> IRX64StopQuiet Never! {
     x64_log(code, X64EmitKind.Memory, -1, -1, -1)
     loop byte in gs -> code.bytes.push(byte)
     sites := [Int]{}
+    enter := [Int]{}
     x64_test_rr(code, X64_RAX, X64_RAX)
     sites.push(x64_jcc_rel32(code, X64Cond.E))
+    // cmp qword gs:[448], 0
+    turn: [U8]{0x65, 0x48, 0x83, 0x3c, 0x25, 0xc0, 0x01, 0, 0, 0}
+    x64_log(code, X64EmitKind.Memory, -1, -1, -1)
+    loop byte in turn -> code.bytes.push(byte)
+    enter.push(x64_jcc_rel32(code, X64Cond.NE))
     x64_load(code, X64_RAX, X64_RAX, 16)
     x64_test_rr(code, X64_RAX, X64_RAX)
     sites.push(x64_jcc_rel32(code, X64Cond.E))
     x64_alu_mi(code, X64Alu.Cmp, X64_RAX, 24, 0)
-    enter: x64_jcc_rel32(code, X64Cond.NE)
+    enter.push(x64_jcc_rel32(code, X64Cond.NE))
     x64_load(code, X64_RAX, X64_RAX, 32)
     x64_test_rr(code, X64_RAX, X64_RAX)
     sites.push(x64_jcc_rel32(code, X64Cond.E))
@@ -3972,9 +3980,10 @@ IR_X64_POLL_KEEPS: [Int]{1, 2, 6, 7, 8, 9, 10, 11}
 // the Float slots in place (ir_x64_call_out) and is silent to the slot
 // allocator (X64Alloc.jet ir_x64_silent): a loop's check leaves r8 and r9
 // to its slots and a leaf a leaf:
-//   mov rax, gs:[0]; test rax, rax; jz done; mov rax, [rax + 16];
-//   test rax, rax; jz done; cmp qword [rax + 24], 0; jnz enter;
-//   mov rax, [rax + 32]; test rax, rax; jz done; enter:
+//   mov rax, gs:[0]; test rax, rax; jz done; cmp qword gs:[448], 0;
+//   jnz enter; mov rax, [rax + 16]; test rax, rax; jz done;
+//   cmp qword [rax + 24], 0; jnz enter; mov rax, [rax + 32];
+//   test rax, rax; jz done; enter:
 //   sub rsp, 296; movups [rsp + 16k], xmm(2 + k) for k in 0..<14;
 //   mov [rsp + 224 + 8k], r for the k-th of rcx, rdx, rsi, rdi, r8-r11;
 //   call jet_rt_session_propagate; the loads back; add rsp, 296;
@@ -3982,7 +3991,7 @@ IR_X64_POLL_KEEPS: [Int]{1, 2, 6, 7, 8, 9, 10, 11}
 ir_x64_stop_poll: fn(f: IRFunction, row: Int) -> IRX64FunctionResult Never! {
     code := x64_code()
     tests := ir_x64_stop_quiet(code)
-    x64_patch_rel32(code.bytes, tests.enter, code.bytes.len())
+    loop site in tests.enter -> x64_patch_rel32(code.bytes, site, code.bytes.len())
     // The fourteen xmm registers and the eight general ones below an 8-byte
     // pad keep rsp 16-byte aligned at the call.
     kept: IR_X64_POLL_KEEPS

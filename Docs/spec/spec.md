@@ -3750,9 +3750,9 @@ check. Every loop iteration starts with a check, and so does every call of a
 function that can call itself, directly, through other functions or through
 a function value. The return from a call that can stop is also a check. Every
 engine and optimization level lowers the check from the same rule. Until
-some task is stopped from outside, interrupted, cancelled, given a deadline
-or strongly paused, the native check that starts an iteration or a call
-costs one load and one branch.
+some task is stopped from outside, interrupted, cancelled, given a deadline,
+strongly paused or asked for its turn, the native check that starts an
+iteration or a call costs one load and one branch.
 
 Cancellation is preemptive at wait points and at checks (D-CANCELMODEL1=C,
 amended by D-TASK-SLICE1=A). The wait points are channel send and receive,
@@ -4005,7 +4005,11 @@ The scheduler is M:N: tasks park at channel, timer, and I/O waits instead of
 blocking OS threads. Native pollers are `epoll` on Linux, `kqueue` on macOS and
 BSD, and IOCP on Windows. Task-local failures unwind into the scheduler so a
 sibling combinator can report a task panic without exiting the process early
-(D-ASYNCRT1=A).
+(D-ASYNCRT1=A). A task that has run a whole time slice on its thread while
+other tasks wait for one gives its thread to them at its next check, a loop
+iteration or a call of a function that can call itself, and continues later,
+so busy tasks cannot hold a runnable task back beyond a bounded number of
+slices (D-TASK-SLICE1=A).
 
 ### Deadlock stance
 

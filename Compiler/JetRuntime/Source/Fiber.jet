@@ -223,7 +223,12 @@ fiber_gs_write: fn(root: I64, base: I64) {
 // A carrier's half of running a fiber until it switches out, then the
 // action the fiber left: FIBER_PARK (parked), FIBER_YIELD (on the ready
 // FIFO), FIBER_DONE (pooled) or FIBER_DEAD (unmapped). The carrier record's
-// save word (record+16) holds the carrier's stack while the fiber runs.
+// save word (record+16) holds the carrier's stack while the fiber runs, and
+// its fiber word (record+64) names the fiber for the monitor's turn requests
+// (Scheduler.jet scheduler_monitor_scan). The word is cleared before the
+// root lock is taken to pool or unmap the fiber, so a request made under the
+// lock never lands in a mapping already gone, and a pooled fiber starts its
+// next job with no turn owed.
 fiber_run: fn(root: I64, record: I64, fiber: I64) -> I64 {
     tcb: sync_load(wrapping(record + I64{24}))
     fiber_tcb: sync_load(wrapping(fiber + I64{24}))
@@ -234,10 +239,12 @@ fiber_run: fn(root: I64, record: I64, fiber: I64) -> I64 {
         fiber_cache_move(tcb, fiber_tcb)
         // The fiber runs on this carrier: `context.thread` reads its index.
         sync_store(wrapping(fiber_tcb + THREAD_TCB_INDEX), sync_load(wrapping(tcb + THREAD_TCB_INDEX)))
+        sync_store(wrapping(record + I64{64}), fiber)
         fiber_gs_write(root, fiber_tcb)
         #Unsafe("the fiber's saved stack is owned by no running thread: it is fresh, pooled or committed PARKED/RUNNABLE, and this carrier alone took it") {
             os_fiber_switch_i64(wrapping(record + I64{16}), sync_load(wrapping(fiber + I64{8})))
         }
+        sync_store(wrapping(record + I64{64}), I64{0})
         fiber_gs_write(root, tcb)
         fiber_cache_move(fiber_tcb, tcb)
         if (fiber_clock_on != I64{0}) -> fiber_clock_settle(fiber)
@@ -267,6 +274,7 @@ fiber_run: fn(root: I64, record: I64, fiber: I64) -> I64 {
         }
         sync_store(wrapping(root + I64{40}), sync_load(wrapping(root + I64{40})) - I64{1})
         if (action == FIBER_DONE) {
+            sync_store(wrapping(fiber_tcb + SCHEDULER_TCB_TURN), I64{0})
             head: fiber_pool_head(root, sync_load(wrapping(fiber + I64{200})))
             sync_store(wrapping(fiber + I64{48}), sync_load(head))
             sync_store(head, fiber)

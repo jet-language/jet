@@ -19,13 +19,13 @@ SCHEDULER_SCOPE_MASK_KIND: I64{1792}
 
 // Nonzero once any task's stop poll may have something to deliver that no
 // call of its own published: a stop published to another task's control, an
-// interrupt, a cancel, or a strong pause. A program's loops read it (as the
-// runtime object's data symbol jet_rt_checks_armed, JetIR X64Select.jet
-// ir_x64_stop_point; on the web, at the address the runtime partition's
-// receipt names, JetWeb Select.jet web_stop_point) before a stop poll that
-// checks no call, and enter the poll's routine only once it is set. It is
-// never cleared, so from then on those polls test the task control as every
-// other poll does.
+// interrupt, a cancel, a strong pause or a turn request. A program's loops
+// read it (as the runtime object's data symbol jet_rt_checks_armed, JetIR
+// X64Select.jet ir_x64_stop_point; on the web, at the address the runtime
+// partition's receipt names, JetWeb Select.jet web_stop_point) before a stop
+// poll that checks no call, and enter the poll's routine only once it is
+// set. It is never cleared, so from then on those polls test the task
+// control and the turn word as every other poll does.
 scheduler_checks_armed := I64{0}
 
 scheduler_checks_arm: fn() {
@@ -41,6 +41,26 @@ scheduler_checks_arm: fn() {
 SCHEDULER_ATTEND_PAUSE: I64{1}
 SCHEDULER_ATTEND_CANCEL: I64{2}
 SCHEDULER_ATTEND_DEADLINE: I64{4}
+
+// A fiber's turn word, in its TCB: the monitor sets it once the fiber has run
+// a whole tick on its carrier while other work waits (scheduler_monitor_scan).
+// Every stop poll tests it with the task control (JetIR X64Select.jet
+// ir_x64_stop_quiet), and the poll's routine then gives the carrier to that
+// work (scheduler_turn_give), so busy tasks take turns at their checks.
+SCHEDULER_TCB_TURN: I64{448}
+
+// Gives up the carrier once the monitor asked for this fiber's turn: the
+// fiber joins the back of the ready queue and continues when a carrier takes
+// it again. The word is cleared first, so one request yields once.
+scheduler_turn_give: fn() {
+    base: thread_base()
+    if (base == I64{0}) -> return
+    turn: wrapping(base + SCHEDULER_TCB_TURN)
+    if (sync_load(turn) == I64{0}) -> return
+    sync_store(turn, I64{0})
+    fiber: sync_load(wrapping(base + I64{56}))
+    if (fiber != I64{0}) -> fiber_yield(fiber)
+}
 
 // Raises (on) or clears the attention bits of a control. Raising arms the
 // loops' polls first, so a poll that sees the bits also enters its routine;
@@ -546,7 +566,13 @@ scheduler_delivered_status: fn() -> I64 {
 }
 #Export(c) jet_rt_session_status: fn() -> I64 { jet_scheduler_native_status() }
 #Export(c) jet_rt_session_poll: fn() -> I64 { jet_scheduler_native_poll() }
-#Export(c) jet_rt_session_propagate: fn() -> I64 { jet_scheduler_native_propagate() }
+// The stop poll's routine (JetIR X64Select.jet ir_x64_stop_poll), which
+// runtime code calls at its own stop points too: a turn the monitor asked
+// for is given there before the stop is propagated.
+#Export(c) jet_rt_session_propagate: fn() -> I64 {
+    scheduler_turn_give()
+    jet_scheduler_native_propagate()
+}
 
 #Export(c) jet_scheduler_shield_enter: fn() {
     if (scheduler_control_current() != I64{0}) -> sync_store(wrapping(thread_base() + I64{24}), sync_load(wrapping(thread_base() + I64{24})) + I64{1})
@@ -867,10 +893,11 @@ scheduler_yield_policy: fn(wait_kind: I64, slot: I64, timeout_ns: I64, deadline:
 // pooled (pool, linked through Fiber next@48, and the sizedPools lists of
 // larger stacks, Fiber.jet fiber_sized_pool) the idle ones and fiberSpace
 // the bytes the fiber stacks may still map (Fiber.jet fiber_space_take).
-// carriers is a word list (scheduler_words) of Carrier64 records {argument0
-// handle8 save16 tcb24 tid32 runs40 seenRuns48 seenCpu56}, changed only under
-// the lock; every carrier on it stays joinable so jet_rt_scheduler_shutdown
-// can join it. The poolSize carriers start one
+// carriers is a word list (scheduler_words) of Carrier72 records {argument0
+// handle8 save16 tcb24 tid32 runs40 seenRuns48 seenCpu56 fiber64}, changed
+// only under the lock; fiber64 is the fiber the carrier runs, 0 between
+// fibers (Fiber.jet fiber_run). Every carrier on it stays joinable so
+// jet_rt_scheduler_shutdown can join it. The poolSize carriers start one
 // at a time, on demand: a submit starts one only when no idle carrier is left
 // to wake (idle - woken), so a process that submits a few tasks starts a few
 // threads, not the whole pool. idle counts carriers waiting on workSeq;
@@ -890,13 +917,16 @@ scheduler_yield_policy: fn(wait_kind: I64, slot: I64, timeout_ns: I64, deadline:
 // and up to poolSize + blocked carriers may run. A carrier that finds no work
 // while more than poolSize + blocked run retires, unless it would leave the
 // fiber timers unwatched. The call path is
-// unchanged, so a short foreign call costs what it did. monitorArmed is 1
+// unchanged, so a short foreign call costs what it did. The fiber a carrier
+// is still running a tick later has its turn asked for (SCHEDULER_TCB_TURN),
+// and gives the carrier to the waiting work at its next stop check, so a
+// runnable task waits at most about two ticks for a busy one. monitorArmed is 1
 // while the monitor watches and 0 while it sleeps until a submit or a wake
 // finds no idle carrier; monitor is its thread handle (0: not started, -1:
 // starting, -2: its start was refused, and the pool goes on without it).
 scheduler_root := I64{0}
 SCHEDULER_ROOT_BYTES: I64{256}
-SCHEDULER_CARRIER_BYTES: I64{64}
+SCHEDULER_CARRIER_BYTES: I64{72}
 SCHEDULER_MONITOR_TICK_NS: I64{10000000}
 SCHEDULER_STAT_BYTES: I64{512}
 
@@ -1140,6 +1170,12 @@ scheduler_monitor_needed: fn(root: I64) -> Bool {
     pool: sync_load(wrapping(root + I64{112}))
     if (pool <= I64{0}) -> return false
     if (sync_load(wrapping(root + I64{152})) > pool) -> return true
+    scheduler_work_waits(root)
+}
+
+// Whether a queued job or a ready fiber waits with no idle carrier
+// unclaimed to take it. The root lock is held.
+scheduler_work_waits: fn(root: I64) -> Bool {
     queued: sync_load(wrapping(root + I64{8})) != I64{0} || sync_load(wrapping(root + I64{168})) != I64{0}
     queued && sync_load(wrapping(root + I64{120})) <= sync_load(wrapping(root + I64{160}))
 }
@@ -1230,9 +1266,15 @@ scheduler_thread_blocked: fn(tid: I64, buffer: I64) -> Bool {
 
 // Counts the blocked carriers: on the job they ran at the last look (runs
 // odd and unchanged), their threads under half a tick of CPU since and
-// blocked in the kernel now (scheduler_thread_blocked). Each record keeps this
-// look's runs and CPU time for the next. The root lock is held.
-scheduler_monitor_scan: fn(root: I64, buffer: I64) -> I64 {
+// blocked in the kernel now (scheduler_thread_blocked). With `turns` (work
+// waits for a carrier: scheduler_work_waits) every carrier still running
+// the fiber it ran at the last look gets that fiber's turn asked for
+// (SCHEDULER_TCB_TURN): a busy fiber gives its carrier up at its next check,
+// and one blocked or waiting gives it up harmlessly when it next checks.
+// Each record keeps this look's runs and CPU time for the next. The root
+// lock is held, so a fiber the record names stays mapped: its carrier
+// clears fiber64 before it takes the lock to unmap it (Fiber.jet fiber_run).
+scheduler_monitor_scan: fn(root: I64, buffer: I64, turns: Bool) -> I64 {
     list: sync_load(wrapping(root + I64{128}))
     if (list == I64{0}) -> return I64{0}
     length: sync_load(list)
@@ -1247,7 +1289,13 @@ scheduler_monitor_scan: fn(root: I64, buffer: I64) -> I64 {
         if (runs.bit_and(I64{1}) == I64{1} && tid > I64{0}) {
             cpu = scheduler_thread_cpu_ns(tid)
             seen: sync_load(wrapping(record + I64{56}))
-            if (cpu >= I64{0} && seen >= I64{0} && runs == sync_load(wrapping(record + I64{48})) && wrapping(cpu - seen) < SCHEDULER_MONITOR_TICK_NS / I64{2} && scheduler_thread_blocked(tid, buffer)) -> blocked += I64{1}
+            same: runs == sync_load(wrapping(record + I64{48}))
+            if (same && cpu >= I64{0} && seen >= I64{0} && wrapping(cpu - seen) < SCHEDULER_MONITOR_TICK_NS / I64{2} && scheduler_thread_blocked(tid, buffer)) -> blocked += I64{1}
+            fiber: sync_load(wrapping(record + I64{64}))
+            if (turns && same && fiber != I64{0}) {
+                scheduler_checks_arm()
+                sync_store(wrapping(sync_load(wrapping(fiber + I64{24})) + SCHEDULER_TCB_TURN), I64{1})
+            }
         }
         sync_store(wrapping(record + I64{48}), runs)
         sync_store(wrapping(record + I64{56}), cpu)
@@ -1284,9 +1332,10 @@ scheduler_monitor_starts: fn(root: I64) -> I64 {
 }
 
 // The monitor thread (Scheduler232). Asleep until armed; then each tick,
-// while it has carriers to watch, it recounts the blocked ones, starts
-// carriers into the room they leave and wakes idle carriers past it, which
-// retire. It leaves on shutdown's stop.
+// while it has carriers to watch, it recounts the blocked ones, asks busy
+// fibers for their turns while work waits, starts carriers into the room
+// the blocked ones leave and wakes idle carriers past it, which retire. It
+// leaves on shutdown's stop.
 #Export(c) jet_rt_scheduler_monitor: fn(root: I64) -> I64 {
     armed: wrapping(root + I64{216})
     buffer: jet_rt_alloc(SCHEDULER_STAT_BYTES, I64{8})
@@ -1305,7 +1354,7 @@ scheduler_monitor_starts: fn(root: I64) -> I64 {
             next
         }
         sync_store(armed, I64{1})
-        sync_store(wrapping(root + I64{208}), scheduler_monitor_scan(root, buffer))
+        sync_store(wrapping(root + I64{208}), scheduler_monitor_scan(root, buffer, scheduler_work_waits(root)))
         starts: scheduler_monitor_starts(root)
         wakes := I64{0}
         if scheduler_carrier_excess(root) {
@@ -1389,14 +1438,17 @@ scheduler_carrier_idle: fn(root: I64) {
 }
 
 // A carrier: the pool thread that runs task fibers (Fiber.jet fiber_run)
-// and, idle, fires their timers. The record is its Carrier64; runs turns odd
-// while it runs a job and even again after, for the monitor.
+// and, idle, fires their timers. The record is its Carrier72; runs turns odd
+// while it runs a job and even again after, for the monitor. A fiber that
+// just yielded here waits behind a queued job, so a turn it gave reaches a
+// job that has no fiber yet.
 #Export(c) jet_rt_scheduler_worker: fn(record: I64) -> I64 {
     root: sync_load(record)
     sync_store(wrapping(record + I64{24}), thread_base())
     #Unsafe("gettid takes no arguments and retains nothing") {
         sync_store(wrapping(record + I64{32}), os_syscall_i64(I64{186}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}))
     }
+    yielded := I64{0}
     loop {
         fiber_timers_fire(root)
         sync_thread_lock(root)
@@ -1407,7 +1459,11 @@ scheduler_carrier_idle: fn(root: I64) {
         }
         fiber := fiber_ready_pop(root)
         task := I64{0}
-        if (fiber == I64{0}) -> task = scheduler_pop(root)
+        if (fiber == I64{0} || fiber == yielded) -> task = scheduler_pop(root)
+        if (task != I64{0} && fiber != I64{0}) {
+            fiber_ready_push(root, fiber)
+            fiber = I64{0}
+        }
         if (fiber == I64{0} && task == I64{0}) {
             if scheduler_carrier_excess(root) {
                 scheduler_carrier_retire(root, record)
@@ -1439,7 +1495,7 @@ scheduler_carrier_idle: fn(root: I64) {
             }
             sync_store(wrapping(fiber + I64{56}), task)
         }
-        _ := fiber_run(root, record, fiber)
+        yielded = if fiber_run(root, record, fiber) == FIBER_YIELD -> fiber else -> I64{0}
         sync_store(runs, wrapping(sync_load(runs) + I64{1}))
     }
 }

@@ -4520,8 +4520,10 @@ suppresses later emission until process end.
 
 `core.tasks` supplies the scheduler's timers and task identity. A task yields
 at explicit suspension points, and a cancel or a passed deadline also reaches
-it at a loop's next iteration or a recursion's next call; the scheduler does not turn a blocking
-computation into preemptive parallelism. Mutable task-owned values stay with
+it at a loop's next iteration or a recursion's next call. A task that has run
+a whole time slice while other tasks wait for a thread gives its thread to
+them at that same check and continues later; the scheduler does not turn a
+blocking computation into preemptive parallelism. Mutable task-owned values stay with
 their task; values crossing a task or channel boundary must satisfy Jet's
 sendability rules. The implementation is in
 [`Core/Tasks/Tasks.jet`](../../../Core/Tasks/Tasks.jet).
