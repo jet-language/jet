@@ -1757,3 +1757,179 @@ once a run fails, or name the background run as CL7's exception.
 | #6792 c6 | met |
 | #6792 c7 | met |
 | #6792 c8 | met |
+
+# Round 5: revision 5 of the proposal
+
+Date: 2026-11-13. Reviewer: Claude Opus, lane G6. The reviewer did not
+write any revision and built no part of the shape.
+
+Subject: revision 5 of `Docs/proposals/2026-11-13-web-app-framework-shape.md`
+as submitted in G12Docs-webshape-r5 (6,853 lines, base dev `2fcd2d5247`,
+patch SHA-256 `72ecafa8…5b865`). Line numbers in this round refer to
+revision 5. As round 4 asked, this round checks only the eight R4-5 items
+and re-runs the kit. It attacks the four C3 fixes first: the order of the
+upload check, invitation expiry, the creator rule and what a policy's reads
+see.
+
+**Overall verdict for round 5: passes.** Revision 5 closes all eight R4-5
+items. Every file reproduces on seed-b15 and matches the document byte for
+byte. C3 safety holds: no attack in R5-3 gets a row, a role or a file past
+a policy. R5-4 lists five gaps. None is a safety hole. Each is a text fix
+in the proposal, with its cost and mitigation named here. One of them
+(item 1) also corrects the transport names in #6825 c1.
+
+## R5-1. Method
+
+- **Reproduction.** The reviewer copied G12Docs-5's revision 5 kit to the
+  G6 scratch. It extracted the 55 labeled blocks from revision 5 and
+  compared them with the kit's `tree/` and `stubs/`. All 55 are byte for
+  byte the same. The kit adds seven `package.jet` manifests, which A.7
+  describes. The reviewer ran `node build.mjs` (48 files), then `check.sh`
+  with seed-b15 (`jet@a0.0.45#1b363853…`), one file at a time under a
+  memory cap, with a dev checkout as the toolchain root. `report.mjs`
+  printed all 48 rows, and every cell matches A.3:
+  - b1–b6 each report their seeded error at line 10;
+  - `drag.jet` reports `jet.UninferableTypeArgument` at line 20;
+  - `cl1_server_only.jet` reports `jet.UnknownFunction` at lines 9 and 10;
+  - the other 40 files are clean.
+
+  The line counts match too. `model.jet` is 244 lines as written and 228
+  in the checked copy, 16 fewer, as A.3 now says. The distinct warnings are
+  48, as 3.8 and A.3 count: 41 `InferredNeverReturn`, 4
+  `RedundantFinalReturn` and 3 `UnusedParameter`.
+- **Cards.** The reviewer read the criteria that 0.2 says Main filed:
+  - #3709 c22 and c26;
+  - #6445 c7;
+  - #6813 c3 and c5;
+  - #6825 c1;
+  - #6826 c5.
+
+  Each one has the text 0.2 gives.
+
+## R5-2. The eight round-four items
+
+| R4-5 item | Round 5 | Evidence |
+|---|---|---|
+| 1. What a policy's reads see | closed | 846–850 and the `policy.jet` header (880–881): the policy's reads see the transaction's earlier writes but not the write being judged. #3709 c22 says the same |
+| 2. The creator rule tied to the project | closed | `Project.created_by` (559). `project_policy` admits an insert only for `created_by == account` (909), and an update only when `created_by` is kept (911–913). `first_owner` requires the row to exist, to name the caller and to have no members (971–976). The test is "an outsider can't claim a project with no members" (1816) |
+| 3. Invitation expiry in the policy | closed | `invited` checks `found.expires >= time.today()` (984), and `member_policy` carries `Time` (926). #6826 c5 now requires it. No test exercises it (R5-4 item 5) |
+| 4. One key per push | closed in the text; the FCM transport is wrong (R5-4 item 1) | Key = the run's key, the recipient and `open:` or `link:` (1111–1114, 3497–3507, 5864–5873). The schedule's key is its job name and due time |
+| 5. Upload check before the body | closed | `#App.UploadCheck(method: "may_attach")` (1288). It runs after the session check and the size cap, as the caller, in a read-only transaction, before the body is read (1067–1071, 4108–4114, 5605–5614). The spool comes after it and before the transaction (1072–1074, 4115–4122). The role is checked again in the transaction (1291, 4123–4126). A staged file's lifetime and crash cleanup are stated (1078–1079, 5723–5726). `may_attach` is not an endpoint (1853) |
+| 6. Which policies join | closed | The join list is task, attachment, project and the members read. The invites policy and the members insert run per row, memoized (885–889, 1054–1056, 2904–2907). R5-4 item 3 covers the scope of the memo |
+| 7. A replayed rebased edit | closed | It keeps the version it was made with, so it gets `Conflict` and its own notice. It is never re-derived from the server's copy (2684–2692). #3709 c26 says the same |
+| 8. Batch path, nested calls, background run, A.3 | closed | Element validation is named by index (538, 1061–1062). `in_row` (1603–1610) is tested by "an import names the refused row" (1799). Nested calls join the caller's transaction (2912–2915). A failed `native.background` run joins the notice list (3359–3362, 5484, #6445 c7). A.3 lines are verified (R5-1) |
+
+## R5-3. C3 safety, attacked again
+
+- **Upload order.**
+  - An outsider's upload stops at `may_attach` with 403, before the body.
+  - A member demoted while the body arrives is caught by the second check
+    in the transaction, and the staged file goes with the request.
+  - `may_attach` runs in a read-only transaction, so a check method cannot
+    write.
+  - The task ID travels in the URL (5610–5611), so the check never needs
+    the body.
+  - A crafted call to `may_attach` gets nothing, because it is not an
+    endpoint.
+
+  Holds.
+- **Invitation expiry.** A lapsed invitation fails `invited`, so
+  `accept_invite` and a hand-written insert of the member row are both
+  refused by the policy. An invitation grants only its own role
+  (`found.role == row.role`). Holds.
+- **The creator rule.** An outsider's Owner insert into a project that has
+  no members fails `first_owner`, because `created_by` is not the outsider.
+  No update can rewrite `created_by` (913). Only the creator can take back
+  a project left with no members, which can happen only if every owner's
+  account is deleted. Holds.
+- **Policy read visibility.**
+  - `create_project`'s member insert sees the project row it inserted.
+  - A Member rewriting its own row as Owner is judged on the stored row
+    and refused ("a member can't make itself an owner", 1709).
+  - A write cannot vouch for itself.
+
+  Holds, subject to the memo scope in R5-4 item 3.
+- **Earlier claims.** Round 4 found that self-promotion, removal, ID
+  probing, the webhook key and presence hold. Nothing in revision 5 weakens
+  them.
+
+## R5-4. Gaps for G12Docs-5, in one pass
+
+None of these blocks C3. Each needs a sentence or two, plus one test.
+
+1. **FCM collapse keys and Web Push.**
+   - **Problem.** FCM keeps at most four different collapse keys per device
+     at a time. Past four, it keeps four and does not say which
+     [FCM-COLLAPSE, the page the proposal already cites]. With one
+     collapse key per push, `remind_due_today` for a person with five due
+     tasks and an offline Android phone can lose pushes. The keys stay
+     distinct, so the loss comes from the four-key limit.
+   - **Mitigation.**
+     - Send FCM pushes as non-collapsible messages, which FCM stores up
+       to 100 per device. Put the key in `android.notification.tag`,
+       which replaces a shown notification with the same tag. Then a
+       re-run still replaces each push, and no push is dropped.
+     - For a browser, the proposal names no key at all. Pass it as the
+       Web Push `Topic` header (RFC 8030 §5.4) and as the notification's
+       `tag`.
+     - APNs `apns-collapse-id` allows at most 64 bytes, and a Web Push
+       topic at most 32 URL-safe base64 characters. So the key is sent as
+       a fixed-length hash of the run's key, the recipient and the target.
+   - **Changes.** Fix 3499–3501, the `notify` stub (5864–5867) and #6825
+     c1's transport list (Main to file).
+   - **Cost.** One transport rule per platform. **What it fixes.** A lost
+     push on Android, and a doubled push in the browser.
+2. **Mail repeats.**
+   - **Problem.** 1112–1113 says the push and mail transports "drop a
+     repeat" by the key. Mail does not. Only a receiver that drops a
+     repeated Message-ID shows a re-run's mail once, as 3502 and 5872 say.
+   - **Mitigation.** Make 1112–1113 say what 3502 says. Name the cost in
+     4.14: after a crash, a run can mail twice, and most mail clients show
+     both copies. Optionally, record each mail key in the outbox before the
+     send, which narrows the repeat to a crash between the send and the
+     record.
+3. **The memo against earlier writes.**
+   - **Problem.** "Memoized per key in the transaction" (889, 2904,
+     6487) together with "sees the transaction's earlier writes" (846)
+     reads as a memo that outlives a write. Such a memo could judge a
+     later write in the same transaction on a stale answer.
+   - **Mitigation.** Say that a memoized result is dropped when the
+     transaction writes a table the policy read. Equivalently, the memo
+     is keyed by the row and the transaction's write count.
+   - **Cost.** None in the common case. Each policy reads one or two
+     tables.
+4. **The upload test proves less than its name.**
+   - **Problem.** "an outsider's upload is refused before it is read"
+     (1831) calls `crew.may_attach` directly. It shows the check refuses
+     an outsider, not that the framework runs the check before it reads
+     the body.
+   - **Mitigation.** Either rename the test ("may_attach refuses an
+     outsider"), or add a host-level test with `host.raw_call` (as 2439
+     does) that sends an upload whose body would fail if it were read and
+     expects 403. That test is #6813 c3's proof case.
+   - **Size cap.** The size cap needs the same care. A body sent without
+     `Content-Length` cannot be refused before it is read. Say that the
+     spool counts bytes and stops at `max_upload` with 413 (4108).
+5. **No test for a lapsed invitation.**
+   - **Problem.** Item 3's fix has no test in `logic_test.jet`.
+   - **Mitigation.** Add "a lapsed invitation adds no member". It inserts
+     an invitation with `expires` in the past, then expects `accept_invite`
+     to answer `NotFound` and a direct `members.add` to answer `Denied`.
+
+## R5-5. Verdicts
+
+| Claim or criterion | Round 5 verdict |
+|---|---|
+| C1 logic once | **holds** |
+| C2 seamless | **holds** |
+| C3 safety | **holds.** The upload check comes before the body, expiry is in the policy, the creator rule is tied to `created_by`, and policy reads are stated. Round 4's attacks still hold |
+| C4 performance | **holds within limits.** The join list is right. State the memo's scope (R5-4 item 3) |
+| C5 completeness (c6) | **met.** Push delivery needs the transport fix (R5-4 item 1) |
+| C6 styling (c7) | **met** |
+| c8 probe and matrix | **met.** CL7 now holds for `native.background` |
+| #6792 c1 | met |
+| #6792 c2 | met |
+| #6792 c3 | **met by this review**, on two conditions: the five text fixes in R5-4 land in the proposal, and Main files the #6825 c1 transport edit. No sixth round is needed. A grep of the proposal for R5-4's terms verifies the fixes |
+| #6792 c6 | met |
+| #6792 c7 | met |
+| #6792 c8 | met |
