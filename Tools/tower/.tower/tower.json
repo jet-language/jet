@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6777,
-    "rev": 101203,
+    "rev": 101204,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -83209,7 +83209,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-05T13:14:14.496Z",
-      "updated": "2026-11-09T20:48:25.019Z",
+      "updated": "2026-11-13T03:51:29.536Z",
       "updatedBy": "Main",
       "criteriaLastN": 7
     },
@@ -193896,6 +193896,185 @@
       "draft": false,
       "status": "open",
       "created": "2026-11-13T03:42:39.334Z"
+    },
+    {
+      "id": "D-RETAIN-BOUND1",
+      "cardId": "c0q4s6en",
+      "group": "design",
+      "title": "Memory a program still holds and keeps growing: count it as the program's data, make it carry a visible mark, or forbid it in safe code",
+      "situation": "Safe Jet promises that a program does not leak memory. A leak here means memory nothing can reach any more but that is still taken. Jet frees such memory by rule. A program can still keep data it can reach and let it grow without end. Two examples are a cache told to keep every answer and a global list it appends to forever. The memory audit for the no-leak promise must say whether that growth breaks the promise. You are asked whether growing data the program can still read counts as a leak. We recommend treating it as the program's own data and keeping the existing marks that show where it can grow.",
+      "gist": "Does memory a program can still reach, but lets grow without a bound, break safe Jet's no-leak promise?",
+      "lesson": "A leak is memory a program lost track of but never gave back. Retention is memory the program still holds on purpose, such as a cache or a log. Jet already frees lost memory by rule. This vote decides whether unbounded retention also counts against the promise.",
+      "explainer": "Words used here. Reachable means some live name, global, task or cache can still get to the memory. A bound is a cap on how many entries a store keeps. #Memo marks a function whose answers are kept and reused. Shared{...} is a value many places can read and change.",
+      "story": "Ana writes a log service. It keeps every line in a global list so a status page can show them all. After a week the process uses 2 GB. Under A this is Ana's data: the leak checker at exit reports nothing, and she caps the list herself. Under B the global needs a #Grows mark before it builds, so a reviewer sees it. Under C the global list does not build at all, and the log must live inside run.",
+      "inWild": "// Rust: a static Mutex<Vec<String>> may grow without end; it is not a leak.\nstatic LOG: Mutex<Vec<String>> = Mutex::new(Vec::new());\nLOG.lock().unwrap().push(line);",
+      "detail": "What this ballot decides. The memory audit (Docs/audits/2026-11-12-safe-jet-memory-retention.md) lists each construct that can keep memory alive and the rule that frees it. Three constructs can grow without a bound while still reachable, so no rule can free them. They are #Memo(bound: none), a module Shared{...} global holding a growable collection, and a collection owned by a task that never ends.\n\nToday. spec.md: a #Memo function keeps 128 results by default and #Memo(bound: none) makes it unbounded; Examples/Memory/Memoize.jet uses bound: none. A module global `NAME: Shared{value}` holds one process-wide cell of literal data, and the program may push to a list inside it. A seed run of the example program below builds, prints `kept 100000 lines` and exits 0. No diagnostic marks the global.\n\nThe leak witness. #6567 c7 adds a runtime check that counts live allocations at exit on O0, O1 and O2. Under A and B it drops globals, memo stores and task results first, then counts; under C nothing unbounded can exist to drop.\n\nWhat stays the same under every option. Lost memory is still freed by rule: E0221 rejects strong Shared cycles, Weak back-edges break the ones a program needs, channels are bounded, and #Memo is bounded by default.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Reachable data is the program's own; marks show where it grows",
+          "detail": "The no-leak promise covers memory nothing can reach. Data a live global, cache or task still reaches is the program's own, as in Rust, Go and Swift. The places that can grow without a bound stay visible in the source. A #Memo cache is capped at 128 unless it says bound: none. A growing global is a named Shared{...} at module level. The leak witness drops every global and cache at exit, then counts what is left, so retention never hides a real leak.",
+          "technical": "No language change. Docs/spec/spec.md gains one sentence under memory safety: the no-leak guarantee covers unreachable allocations; reachable retention, including #Memo(bound: none) and module Shared globals, is program data. #6567 c7's witness frees module globals, memo stores and joined task results before it counts live blocks. The audit's B1 row cites this decision.",
+          "code": "Log: struct { lines: [String] }\nLOG: Shared{Log{lines: [String]{}}}\n#Memo(bound: none) label: fn(n: Int) -[]> String { \"line {n}\" }\n\nrun: fn() {\n    loop i in 0..<100000 -> LOG.lines.push(label(i))\n    print(\"kept {LOG.lines.len()} lines\")   // kept 100000 lines\n}\n// At exit the witness frees LOG and label's store, then counts 0 live blocks."
+        },
+        {
+          "key": "B",
+          "name": "Unbounded growth needs a visible mark",
+          "detail": "A module global whose Shared value holds a list, map or set must carry a new #Grows mark. #Memo(bound: none) is already such a mark and stays. Without #Grows the global is a compile error that names the mark. A reviewer can search for #Grows and bound: none to find every store that can grow without end.",
+          "technical": "New marker #Grows on module globals. A new registered diagnostic, with a ui snapshot, rejects an unmarked module Shared global that holds a collection. spec.md and syntax-decisions.md gain rows, and every existing module Shared global that holds a collection migrates. The witness behaves as in A.",
+          "code": "Log: struct { lines: [String] }\n#Grows LOG: Shared{Log{lines: [String]{}}}\n#Memo(bound: none) label: fn(n: Int) -[]> String { \"line {n}\" }\n\nrun: fn() {\n    loop i in 0..<100000 -> LOG.lines.push(label(i))\n    print(\"kept {LOG.lines.len()} lines\")   // kept 100000 lines\n}\n// Without #Grows, LOG is a compile error that names the mark."
+        },
+        {
+          "key": "C",
+          "name": "No unbounded store in safe code",
+          "detail": "#Memo(bound: none) is removed; a cache gives a number. A module Shared{...} global may hold only fixed-size data, so a list that keeps growing must live inside run or a task. Every store that can grow is then owned by a function and freed when it returns.",
+          "technical": "Remove bound: none from #Memo (spec.md, syntax-decisions.md, Compiler/Prelude/Markers.jet, sema FunctionHeaders.jet) and migrate Examples/Memory/Memoize.jet. A new registered diagnostic rejects a module Shared global whose type holds a list, map, set or String, with a ui snapshot. Migrate existing globals that hold collections.",
+          "code": "Log: struct { lines: [String] }\n#Memo(bound: 100000) label: fn(n: Int) -[]> String { \"line {n}\" }\n\nrun: fn() {\n    log := Log{lines: [String]{}}   // a global list does not build\n    loop i in 0..<100000 -> log.lines.push(label(i))\n    print(\"kept {log.lines.len()} lines\")   // kept 100000 lines\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "A static collection may grow without end; Rust's safety promise is about freed and dangling memory, not growth.",
+          "code": "static LOG: Mutex<Vec<String>> = Mutex::new(Vec::new());"
+        },
+        {
+          "lang": "Go",
+          "note": "A package-level slice grows freely; the garbage collector frees only what nothing reaches.",
+          "code": "var log []string\nlog = append(log, line)"
+        },
+        {
+          "lang": "Swift",
+          "note": "ARC frees unreachable objects; a global array that keeps growing is the program's data.",
+          "code": "var log: [String] = []\nlog.append(line)"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "A keeps the promise exact: Jet frees by rule every byte the program can no longer reach. Each store that can grow without a bound is already visible in the source. It matches Rust, Go and Swift, needs no new mark, and leaves every program that builds today unchanged.",
+        "gains": [
+          "The promise has one exact meaning: nothing unreachable stays allocated.",
+          "No new mark, diagnostic or migration.",
+          "Each unbounded store is visible: bound: none or a module Shared global.",
+          "The exit leak witness still catches real leaks, because it frees globals and caches first."
+        ],
+        "losses": [
+          {
+            "loss": "A program can still grow a global list until the system runs out of memory.",
+            "mitigation": "No language can stop growth of data the program still reads. Under A the place it grows is a named module global or a bound: none cache, so a search finds it."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B adds a second mark beside bound: none for the same meaning and a migration, and a global still grows once marked."
+          },
+          {
+            "key": "C",
+            "reason": "C removes bound: none, which programs use for exact caches, and forces shared logs and tables into run, where they grow just the same."
+          }
+        ],
+        "tradeoff": "No new rule, in exchange for leaving growth of reachable data to the program, as every mainstream language does."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: Main. I tried to break the claim that every unbounded store is already visible; module Shared globals and bound: none are the only unbounded roots in safe code, so the claim holds."
+      },
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Does memory a program still reaches, but lets grow forever, break the no-leak promise?",
+        "lesson": "A leak is memory a program lost but never gave back; Jet frees that by rule. Retention is memory still held on purpose, like a cache or a log. This vote decides whether retention that grows without end counts as a leak.",
+        "trio": {
+          "current": {
+            "note": "Today a global list may grow forever, and bound: none makes a cache unbounded.",
+            "code": "LOG: Shared{Log{lines: [String]{}}}\n#Memo(bound: none) label: fn(n: Int) -[]> String { \"line {n}\" }\nrun: fn() {\n    loop i in 0..<100000 -> LOG.lines.push(label(i))\n}"
+          },
+          "wild": {
+            "lang": "Rust",
+            "note": "A static list may grow forever; it is not a leak.",
+            "code": "static LOG: Mutex<Vec<String>> = Mutex::new(Vec::new());\nLOG.lock().unwrap().push(line);"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "It is the program's data",
+            "gist": "The promise covers lost memory; visible marks show growth.",
+            "gains": [
+              "One exact meaning of leak.",
+              "No new mark or migration."
+            ],
+            "losses": [
+              "A global list can still grow until memory runs out."
+            ],
+            "proposed": {
+              "code": "LOG: Shared{Log{lines: [String]{}}}\n#Memo(bound: none) label: fn(n: Int) -[]> String { \"line {n}\" }"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Growth needs a mark",
+            "gist": "A growing global needs #Grows before it builds.",
+            "gains": [
+              "Every growing global is marked."
+            ],
+            "losses": [
+              "A second mark beside bound: none.",
+              "Existing globals migrate."
+            ],
+            "proposed": {
+              "code": "#Grows LOG: Shared{Log{lines: [String]{}}}\n#Memo(bound: none) label: fn(n: Int) -[]> String { \"line {n}\" }"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Forbid it",
+            "gist": "No bound: none; globals hold fixed-size data only.",
+            "gains": [
+              "No global can grow."
+            ],
+            "losses": [
+              "Exact caches lose bound: none.",
+              "Logs move into run and grow there."
+            ],
+            "proposed": {
+              "code": "#Memo(bound: 100000) label: fn(n: Int) -[]> String { \"line {n}\" }\nrun: fn() {\n    log := Log{lines: [String]{}}\n}"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Jet frees every unreachable byte by rule, and each unbounded store is already visible, as in Rust, Go and Swift.",
+          "gains": [
+            "One exact meaning of leak.",
+            "No program changes."
+          ],
+          "losses": [
+            {
+              "loss": "Reachable data can still grow without end.",
+              "mitigation": "It grows only in a named global or a bound: none cache, which a search finds."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "A second mark for what bound: none already says."
+            },
+            {
+              "key": "C",
+              "reason": "Removes exact caches; logs grow in run anyway."
+            }
+          ],
+          "tradeoff": "No new rule, and growth of held data stays the program's choice."
+        }
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-13T03:51:29.536Z"
     }
   ],
   "questions": [
@@ -197163,6 +197342,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-13T03:51:29.536Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-RETAIN-BOUND1",
+      "note": "Memory a program still holds and keeps growing: count it as the program's data, make it carry a visible mark, or forbid it in safe code"
+    },
     {
       "at": "2026-11-13T03:50:40.627Z",
       "by": "Main",
