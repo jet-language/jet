@@ -3682,18 +3682,22 @@ that only computes, keeps running under the default pause. Task failure uses
 argument is the compiler-owned enum `TaskPauseMode`: `.WaitPoints`, the
 default, or `.CheckLoops`. A strong pause also holds the task at its next
 check. Every loop iteration starts with a check, and the return from a call
-that can stop is also a check. Once a task has been paused strongly, a later
-`cancel()` is delivered at its next check as well as at its next wait point,
-so a computing loop stops. Every engine and optimization level lowers the
+that can stop is also a check. Every engine and optimization level lowers the
 check from the same rule. Until some task is stopped from outside,
-interrupted or strongly paused, the native check that starts an iteration
-costs one load and one branch.
+interrupted, cancelled, given a deadline or strongly paused, the native check
+that starts an iteration costs one load and one branch.
 
-Cancellation is preemptive at wait points: channel send and receive,
-`time.sleep`, task join, a select arm, and I/O. A cancelled task unwinds at the
-next such point and runs Drop-backed cleanup. A cancelled receive unwinds
-instead of returning `Closed`; a race loser stops at its next wait point; and
-a cancelled `task.all` member reports `Cancelled`.
+Cancellation is preemptive at wait points and at checks (D-CANCELMODEL1=C,
+amended by D-TASK-SLICE1=A). The wait points are channel send and receive,
+`time.sleep`, task join, a select arm, and I/O. A cancelled task unwinds at
+the next wait point or check, whichever comes first, and runs Drop-backed
+cleanup, so a loop that only computes stops at its next iteration. A cancelled
+receive unwinds instead of returning `Closed`. A busy race loser stops at its
+next iteration, so `task.race` returns once its winner does. A cancelled
+`task.all` member reports `Cancelled`. A deadline (`#Context(deadline:)`,
+`task.timeout`) that passes is delivered the same way: at the next wait point
+or check, as E3003, so a handler busy in a loop stops at its deadline. A
+task or root that has set a deadline reads the clock at each check.
 
 `#Shield { ... }` defers cancellation or a blown deadline until the lexical
 critical section exits. It takes no arguments, nests, and always restores its

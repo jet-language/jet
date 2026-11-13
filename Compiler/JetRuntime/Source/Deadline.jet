@@ -16,6 +16,7 @@ deadline_ms_to_ns: fn(ms: I64) -> I64 {
     sync_store(wrapping(save + I64{8}), sync_load(wrapping(record + CONTEXT_DEADLINE_MS)))
     sync_store(wrapping(record + CONTEXT_DEADLINE_PRESENT), I64{1})
     sync_store(wrapping(record + CONTEXT_DEADLINE_MS), deadline_ms)
+    scheduler_deadline_attend()
 }
 #Export(c) jet_ctx_pop_deadline: fn(save: I64) {
     record: context_current()
@@ -26,6 +27,7 @@ deadline_ms_to_ns: fn(ms: I64) -> I64 {
     if !jet_ctx_deadline_present() || deadline_ms < jet_ctx_deadline_ms() {
         sync_store(wrapping(context_current() + CONTEXT_DEADLINE_PRESENT), I64{1})
         sync_store(wrapping(context_current() + CONTEXT_DEADLINE_MS), deadline_ms)
+        scheduler_deadline_attend()
     }
 }
 // `task.timeout(duration)`: the task deadline becomes the

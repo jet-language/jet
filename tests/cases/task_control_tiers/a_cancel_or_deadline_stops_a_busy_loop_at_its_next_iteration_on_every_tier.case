@@ -1,0 +1,26 @@
+# D-TASK-SLICE1=A: a cancel or a passed deadline reaches a task busy in a
+# loop that never waits, at the check its next iteration starts with, with
+# no pause first. A race returns its winner although the loser only
+# computes, a cancelled spinner unwinds through its deferred close, and a
+# spinner whose `task.timeout` passes stops with the deadline failure.
+# Without the delivery the race and the joins never return and the run
+# steps time out.
+# Hand-derived expectations, not worker-run.
+fixture: a_cancel_or_deadline_stops_a_busy_loop_at_its_next_iteration_on_every_tier.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet run --optimize=none main.jet
+exit: 0
+stdout: = "7\nclose the spinner's marker\nthe spinner: cancelled\nthe timed spinner: deadline\n"
+step: jet run --optimize=basic main.jet
+exit: 0
+stdout: = "7\nclose the spinner's marker\nthe spinner: cancelled\nthe timed spinner: deadline\n"
+step: jet run --optimize=full main.jet
+exit: 0
+stdout: = "7\nclose the spinner's marker\nthe spinner: cancelled\nthe timed spinner: deadline\n"
+step: jet build --optimize=full main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = "7\nclose the spinner's marker\nthe spinner: cancelled\nthe timed spinner: deadline\n"

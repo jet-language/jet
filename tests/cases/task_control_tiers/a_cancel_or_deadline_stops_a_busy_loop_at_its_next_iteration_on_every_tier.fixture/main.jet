@@ -1,0 +1,68 @@
+use time: core.time
+
+// A close that shows the cancelled task's cleanup ran.
+Marker: struct {
+    name: String
+
+    impl Close {
+        close: fn(&&self) { print("close {self.name}") }
+    }
+}
+
+// Counts with no call and no wait point: only the check each iteration
+// starts with can stop it.
+spin: fn(counter: Atomic<Int>) -> Int {
+    n := 0
+    loop n >= 0 {
+        n += 1
+        if n % 4096 == 0 -> counter.store(n)
+    }
+    n
+}
+
+seven: fn() -> Int { 7 }
+
+failure_label: fn(error: TaskFailure) -> String {
+    if error == {
+        .Cancelled -> { return "cancelled" }
+        .DeadlineBlown -> { return "deadline" }
+        .Panicked(_) -> { return "panicked" }
+    }
+}
+
+run: fn() {
+    // The race returns its winner although the loser never waits: the loser
+    // stops at its next iteration.
+    raced: Atomic<Int>.try_new(0) ?? return
+    print(task.race {spin(raced), seven()} ?? panic("race failed"))
+
+    counter: Atomic<Int>.try_new(0) ?? return
+    spinner: task {
+        marker := Marker{name: "the spinner's marker"}
+        defer close(marker)
+        spin(counter)
+    }
+    tries := 0
+    loop counter.load() == 0 && tries < 2000 {
+        time.sleep(1ms)
+        tries += 1
+    }
+    // No pause: a plain cancel stops the busy loop, and its cleanup runs.
+    spinner.cancel()
+    if spinner.join() == {
+        .Ok(_) -> print("the spinner finished")
+        .Err(error) -> print("the spinner: {failure_label(error)}")
+    }
+
+    // A deadline passes while the task only computes: its next iteration
+    // stops it with the deadline failure.
+    timed_counter: Atomic<Int>.try_new(0) ?? return
+    timed: task {
+        task.timeout(20ms)
+        spin(timed_counter)
+    }
+    if timed.join() == {
+        .Ok(_) -> print("the timed spinner finished")
+        .Err(error) -> print("the timed spinner: {failure_label(error)}")
+    }
+}

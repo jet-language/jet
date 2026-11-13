@@ -179,6 +179,8 @@ task_state_new: fn(site: I64, label: I64, env: I64, invoke: I64, release: I64, m
     sync_store(wrapping(child + I64{72}), invoke)
     sync_store(wrapping(child + I64{80}), release)
     context_inherit(wrapping(child + TASK_CONTEXT))
+    // A deadline inherited at spawn is the task's own from its first poll.
+    if (sync_load(wrapping(child + TASK_CONTEXT + CONTEXT_DEADLINE_PRESENT)) != I64{0}) -> scheduler_attention_set(control, SCHEDULER_ATTEND_DEADLINE, true)
     sync_store(wrapping(child + I64{104}), sync_park_new())
     sync_store(wrapping(child + I64{96}), if (group != I64{0}) -> sync_load(wrapping(group + I64{72})) else -> fiber_stack_current())
     sync_store(wrapping(child + I64{136}), group)

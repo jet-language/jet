@@ -4395,7 +4395,8 @@ suppresses later emission until process end.
 ### `core.tasks` — timers and scheduler identity
 
 `core.tasks` supplies the scheduler's timers and task identity. A task yields
-at explicit suspension points; the scheduler does not turn a blocking
+at explicit suspension points, and a cancel or a passed deadline also reaches
+it at a loop's next iteration; the scheduler does not turn a blocking
 computation into preemptive parallelism. Mutable task-owned values stay with
 their task; values crossing a task or channel boundary must satisfy Jet's
 sendability rules. The implementation is in
@@ -4432,7 +4433,7 @@ when it is closed or at capacity, so callers that require backpressure must use
 the scheduler receiver surface. Cancellation closes the receiver and leaves
 its handle available for identity and ownership.
 Generic channels return `(Sender<T>, Receiver<T>)`; tasks send owned values and do not use `async`/`await` (`D-CONC-CHAN1`; `D-SHAPE-COPY1`). Cancellation and pause/resume are control-plane requests on owned task handles (`D-COROUTINE1`), while shared memory uses `Shared<T>` guards and `Condition` rather than a raw lock (`D-SHAREDGUARD1`).
-`handle.pause()` holds the task at its next wait point, so a loop that never waits keeps running. `handle.pause(mode: .CheckLoops)` also holds it at the check every loop iteration starts with, and once a task has been paused that way, `cancel()` stops it at that check too (`D-TASK-PAUSE-TIER1`). `TaskPauseMode` is the compiler-owned enum `{ WaitPoints, CheckLoops }`; `.WaitPoints` is the default.
+`handle.pause()` holds the task at its next wait point, so a loop that never waits keeps running. `handle.pause(mode: .CheckLoops)` also holds it at the check every loop iteration starts with (`D-TASK-PAUSE-TIER1`). `cancel()` stops a task at its next wait point or at that check, whichever comes first, so a cancelled loop that never waits stops at its next iteration and runs its Drop cleanup; a passed `#Context(deadline:)` or `task.timeout` deadline stops it there the same way, with E3003 (`D-TASK-SLICE1`). `TaskPauseMode` is the compiler-owned enum `{ WaitPoints, CheckLoops }`; `.WaitPoints` is the default.
 `Condition` and `RealtimeStream` remain native carriers. Their registered Core
 source owners supply their declared methods without manufacturing a struct or
 enum declaration. This ownership does not export `tasks.Condition`: use the

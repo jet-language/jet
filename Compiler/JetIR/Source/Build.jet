@@ -2529,13 +2529,13 @@ ir_stop_check: fn(m: &IRModule, b: &IRBuilder) Never! {
 
 // The check every user loop's iteration starts with: a stop poll
 // (IR_STOP_POLL_KEY) whether or not the body calls anything, so a task
-// paused with `pause(mode: .CheckLoops)` (JetRuntime Scheduler.jet
-// scheduler_check_loops) stops at its next iteration and a cancel of it is
-// delivered there. At the start of the body rather than at its back
-// branch, so an iteration a `next` ends early is checked too. Every loop
-// form that lowers to a Loop (BuildExpr.jet, BuildLazy.jet) emits it right
-// after pushing its IRLoopFrame. The passes treat it as any other poll: a
-// poll later in the same iteration folds it (OptStops.jet
+// paused with `pause(mode: .CheckLoops)` stops at its next iteration, and a
+// cancel of it or its passed deadline is delivered there (JetRuntime
+// Scheduler.jet scheduler_check_loops). At the start of the body rather
+// than at its back branch, so an iteration a `next` ends early is checked
+// too. Every loop form that lowers to a Loop (BuildExpr.jet, BuildLazy.jet)
+// emits it right after pushing its IRLoopFrame. The passes treat it as any
+// other poll: a poll later in the same iteration folds it (OptStops.jet
 // ir_opt_fold_polls); the branch back to the head keeps one per iteration.
 // On x86-64 and the web target, a check that follows no call reads only the
 // runtime's armed word before it calls the poll, and on x86-64 the poll

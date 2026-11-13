@@ -396,8 +396,9 @@ web_leaf_body: fn(st: &WebState, m: IRModule, f: IRFunction) -> WebBody Never! {
 
 // A stop poll (JetIR Build.jet ir_stop_poll): the attached thread's TCB
 // (the word WEB_GLOBAL_TLS names), its task control (word 16), the
-// control's status (word 32); with a status, or under a strong pause
-// (pauseMode, word 24: JetRuntime Scheduler.jet scheduler_check_loops),
+// control's status (word 32); with a status, or with attention raised
+// (word 24, a strong pause, a cancel or a deadline: JetRuntime Scheduler.jet
+// scheduler_check_loops),
 // jet_rt_session_propagate's delivered stop as a Bool, else 0.
 web_poll_body: fn(st: &WebState, m: IRModule, f: IRFunction) -> WebBody Never! {
     e := web_emitter(m, f)

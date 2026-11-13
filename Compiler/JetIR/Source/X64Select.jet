@@ -3398,9 +3398,10 @@ ir_x64_in_loop: fn(e: IRX64Emitter, f: IRFunction) -> Bool Never! {
 // The stop poll's tests that no stop is asked for (ir_x64_stop_poll), into
 // rax: `mov rax, gs:[0]; test rax, rax; jz quiet; mov rax, [rax + 16];
 // test rax, rax; jz quiet; cmp qword [rax + 24], 0; jnz enter;
-// mov rax, [rax + 32]; test rax, rax; jz quiet`. A task under a strong
-// pause (pauseMode, control word 24) enters the poll's routine with no
-// stop asked for (JetRuntime Scheduler.jet scheduler_check_loops).
+// mov rax, [rax + 32]; test rax, rax; jz quiet`. A task with attention
+// raised (control word 24: a strong pause, a cancel or a deadline) enters
+// the poll's routine with no stop asked for (JetRuntime Scheduler.jet
+// scheduler_check_loops).
 IRX64StopQuiet: struct {
     // The three rel32 fields to patch to `quiet`.
     quiet: [Int]

@@ -1,6 +1,6 @@
 // L8a scheduler: an OS worker runs each task to completion. A wait returns a
 // delivered stop word; no Jet frame unwinds. Linux synchronization is Sync.jet.
-// Control128: refs0 paused8 cancelled16 pauseMode24 status32 stop40 pending48
+// Control128: refs0 paused8 cancelled16 attention24 status32 stop40 pending48
 // observe56 park64 mutex72 waiters80 callbacks88 inline96 scopeFlags104
 // requestedRootCode112 capture120. StopCleanup's opaque token owns old flags.
 // Stop56: kind0 jct8 owner16 start24 end32 owned E4 message40 form48 (0 raw,
@@ -16,8 +16,8 @@ SCHEDULER_SCOPE_MASK_KIND: I64{1792}
 
 // Nonzero once any task's stop poll may have something to deliver that no
 // call of its own published: a stop published to another task's control, an
-// interrupt, or a strong pause. A program's loops read it (as the runtime
-// object's data symbol jet_rt_checks_armed, JetIR X64Select.jet
+// interrupt, a cancel, or a strong pause. A program's loops read it (as the
+// runtime object's data symbol jet_rt_checks_armed, JetIR X64Select.jet
 // ir_x64_stop_point; on the web, at the address the runtime partition's
 // receipt names, JetWeb Select.jet web_stop_point) before a stop poll that
 // checks no call, and enter the poll's routine only once it is set. It is
@@ -29,6 +29,37 @@ scheduler_checks_arm: fn() {
     #Unsafe("an idempotent flag: every writer stores the same 1") {
         scheduler_checks_armed = I64{1}
     }
+}
+
+// A control's attention word (+24): what its stop polls take beyond a
+// published stop (scheduler_check_loops). A strong pause holds the task
+// there; a cancel and a passed deadline are delivered there, so a busy loop
+// stops at its next turn.
+SCHEDULER_ATTEND_PAUSE: I64{1}
+SCHEDULER_ATTEND_CANCEL: I64{2}
+SCHEDULER_ATTEND_DEADLINE: I64{4}
+
+// Raises (on) or clears the attention bits of a control. Raising arms the
+// loops' polls first, so a poll that sees the bits also enters its routine;
+// bits already raised were armed by their first raise.
+scheduler_attention_set: fn(control: I64, bits: I64, on: Bool) {
+    address: wrapping(control + I64{24})
+    if on {
+        if (sync_load(address).bit_and(bits) == bits) -> return
+        scheduler_checks_arm()
+    }
+    loop {
+        old: sync_load(address)
+        new: if on -> old.bit_or(bits) else -> old.bit_and(bits.bit_xor(I64{-1}))
+        if (old == new) || (sync_cas(address, old, new) == old) -> return
+    }
+}
+
+// The current task or root has a deadline (Deadline.jet): its stop polls
+// read the clock from now on, so a busy loop stops once the deadline passes.
+scheduler_deadline_attend: fn() {
+    control: scheduler_control_current()
+    if (control != I64{0}) -> scheduler_attention_set(control, SCHEDULER_ATTEND_DEADLINE, true)
 }
 
 // Exact E4 carrier; rounded byte capacity allows generated literal word stores.
@@ -533,10 +564,9 @@ scheduler_delivered_status: fn() -> I64 {
     }
 }
 // Leaves the runtime's own shield around a finished task body's cleanup.
-// The body has no wait point left, so a cancel or blown deadline that
-// arrived meanwhile has nothing to unwind and does not turn the completed
-// value into a failure (cancellation lands only at wait
-// points).
+// The body has no wait point or check left, so a cancel or blown deadline
+// that arrived meanwhile has nothing to unwind and does not turn the
+// completed value into a failure.
 scheduler_shield_leave_finished: fn() {
     if (scheduler_control_current() == I64{0}) -> return
     address: wrapping(thread_base() + I64{24})
@@ -615,6 +645,7 @@ scheduler_cancel_waiter_remove: fn(control: I64, node: I64) {
 
 scheduler_control_cancel: fn(control: I64) {
     sync_store(wrapping(control + I64{16}), I64{1})
+    scheduler_attention_set(control, SCHEDULER_ATTEND_CANCEL, true)
     jet_rt_observe_task_control(sync_load(wrapping(control + I64{56})), I64{-1}, I64{1})
     sync_park_wake(sync_load(wrapping(control + I64{64})))
     sync_mutex_lock(wrapping(control + I64{72}))
@@ -679,13 +710,11 @@ scheduler_control_cancel_consume: fn(control: I64) {
 #Export(c) jet_rt_scheduler_control_drop: fn(control: I64) { scheduler_control_drop(control) }
 
 scheduler_control_interrupt: fn(control: I64) {
-    scheduler_checks_arm()
     sync_store(wrapping(control + I64{48}), I64{1})
     scheduler_control_cancel(control)
 }
 scheduler_control_pause: fn(control: I64, mode: I64) {
-    if (mode == I64{1}) -> scheduler_checks_arm()
-    sync_store(wrapping(control + I64{24}), if (mode == I64{1}) -> I64{1} else -> I64{0})
+    scheduler_attention_set(control, SCHEDULER_ATTEND_PAUSE, mode == I64{1})
     sync_store(wrapping(control + I64{8}), I64{1})
     jet_rt_observe_task_control(sync_load(wrapping(control + I64{56})), I64{3}, I64{-1})
 }
@@ -722,15 +751,27 @@ scheduler_wait_while_paused: fn() -> I64 {
     jet_scheduler_native_propagate()
 }
 
-// A strong pause (`pause(mode: .CheckLoops)`, pauseMode 1) is taken at
-// every stop poll: the check each loop iteration starts with and the poll
-// after a call (JetIR Build.jet ir_loop_check, ir_stop_check). The task
-// parks while it stays paused, and once its mode is strong a cancel of it
-// is delivered there too, so a busy loop stops. Outside a shield only.
+// A control's attention (scheduler_attention_set) is taken at every stop
+// poll: the check each loop iteration starts with and the poll after a call
+// (JetIR Build.jet ir_loop_check, ir_stop_check), outside a shield only. A
+// strong pause (`pause(mode: .CheckLoops)`) parks the task while it stays
+// paused. A cancel is delivered there, so a busy loop stops at its next turn
+// and unwinds with its Drop cleanup; the bit is taken once (the cancel flag
+// itself stays for the wait points), and a root, which unwinds no cancel,
+// only drops it. The cancel flag is stored before the bit is raised, so a
+// poll that clears a raised bit sees the flag. Once a deadline has been set
+// (the bit stays), each poll reads the clock while the context holds a
+// deadline and no stop is published, and delivers E3003 once it has passed.
 scheduler_check_loops: fn(control: I64) {
-    if (sync_load(wrapping(control + I64{24})) != I64{1}) || scheduler_shielded() -> return
-    if !scheduler_park_while_paused(control) -> return
-    if (sync_load(wrapping(control + I64{16})) != I64{0}) -> scheduler_deliver_cancel()
+    attention: sync_load(wrapping(control + I64{24}))
+    if (attention == I64{0}) || scheduler_shielded() -> return
+    if (attention.bit_and(SCHEDULER_ATTEND_PAUSE) != I64{0}) && !scheduler_park_while_paused(control) -> return
+    if (sync_load(wrapping(control + I64{24})).bit_and(SCHEDULER_ATTEND_CANCEL) != I64{0}) {
+        scheduler_attention_set(control, SCHEDULER_ATTEND_CANCEL, false)
+        if (sync_load(wrapping(control + I64{16})) != I64{0}) -> scheduler_deliver_cancel()
+    }
+    if (attention.bit_and(SCHEDULER_ATTEND_DEADLINE) == I64{0}) || (scheduler_control_status(control) != I64{0}) -> return
+    if jet_ctx_deadline_present() && jet_deadline_remaining_ms() <= (I64{0}) -> scheduler_deliver_deadline(rt_static_text("a loop"))
 }
 
 scheduler_wait_point_cancel_check: fn() -> I64 {

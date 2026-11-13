@@ -455,7 +455,8 @@ fixed_size_list: fn() {
 // type, but it must not create a second workflow row. One `yield` hands one
 // value to one ordinary consumer pull. The producer resumes after that value
 // is accepted. A consumer `break` drops the iterator; task cancellation and
-// deferred cleanup follow D-CANCELMODEL1=C at the next wait point.
+// deferred cleanup follow D-CANCELMODEL1=C at the next wait point or loop
+// iteration.
 numbers: fn(n: Int) -> Stream<Int> {
     i := 0
     loop i < n {
