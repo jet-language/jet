@@ -1,0 +1,14 @@
+# Claim: cbor.reader and cbor.writer over files read definite and indefinite containers, chunked text, every float width and integers out to 2^64-1 and -2^64; an item limit fails once and stays failed; the writer sorts encoded keys, a flush does not complete a container, an incomplete finish is sticky, the total limit is checked at the root, and a wider Int is refused; on o0, o1 and o2.
+# Hand-derived: the byte fixtures and expected values are the ones Core/Encoding/Cbor.jet checked as in-file tests before the codec stopped naming core.files (#6759 c10, D-CORE-LAYERS1=A); each line is printed only after every check in its block held.
+fixture: cbor_file_stream_reads_writes_and_keeps_its_limits.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet run --allow=FS.Read,FS.Write --optimize=none run.jet
+exit: 0 # o0
+stdout: = cbor_file_stream_reads_writes_and_keeps_its_limits.out # o0
+step: jet run --allow=FS.Read,FS.Write --optimize=basic run.jet
+exit: 0 # o1
+stdout: = cbor_file_stream_reads_writes_and_keeps_its_limits.out # o1
+step: jet run --allow=FS.Read,FS.Write --optimize=full run.jet
+exit: 0 # o2
+stdout: = cbor_file_stream_reads_writes_and_keeps_its_limits.out # o2

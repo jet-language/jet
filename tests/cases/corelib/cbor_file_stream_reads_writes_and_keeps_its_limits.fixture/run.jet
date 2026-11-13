@@ -1,0 +1,117 @@
+use {
+    cbor: core.encoding.cbor
+    core.encoding.[DataEvent, EncodingError, EncodingLimits]
+    files: core.files
+}
+
+// The CBOR stream reader and writer over files: the checks that sat as
+// in-file tests in Core/Encoding/Cbor.jet, which as a codec may not name
+// core.files (D-CORE-LAYERS1=A). Each block panics on the first wrong value
+// and prints its name once every check in it has held.
+
+definite_and_indefinite_containers: fn() {
+    dir: files.temp_dir("jet-cbor-events") ?? panic("temp")
+    path: "{dir.path}/events.cbor"
+    files.write_bytes(path, [U8]{159, 130, 1, 2, 191, 97, 107, 127, 97, 97, 97, 98, 255, 255, 255}) ?? panic("fixture")
+    input: files.open(path) ?? panic("open")
+    source := cbor.reader(input) ?? panic("reader")
+    expected: [DataEvent]{.ArrayStart, .ArrayStart, .Int(1), .Int(2), .ArrayEnd, .ObjectStart, .Key("k"), .Text("ab"), .ObjectEnd, .ArrayEnd}
+    loop event in expected {
+        if source.next() == .Ok(read) -> assert_eq(read, Val(event)) else -> panic("event reads")
+    }
+    if source.next() == .Ok(end) -> assert_eq(end, None) else -> panic("end reads")
+    if source.next() == .Ok(after) -> assert_eq(after, None) else -> panic("end stays")
+    print("definite and indefinite containers and text chunks")
+}
+
+float_widths_and_sticky_item_limit: fn() {
+    dir: files.temp_dir("jet-cbor-floats") ?? panic("temp")
+    path: "{dir.path}/floats.cbor"
+    files.write_bytes(path, [U8]{131, 249, 62, 0, 250, 71, 195, 80, 0, 251, 63, 241, 153, 153, 153, 153, 153, 154}) ?? panic("fixture")
+    input: files.open(path) ?? panic("open")
+    source := cbor.reader(input) ?? panic("reader")
+    expected: [DataEvent]{.ArrayStart, .Float(Float{1.5}), .Float(Float{100000.0}), .Float(Float{1.1}), .ArrayEnd}
+    loop event in expected {
+        if source.next() == .Ok(read) -> assert_eq(read, Val(event)) else -> panic("float event reads")
+    }
+    if source.next() == .Ok(end) -> assert_eq(end, None) else -> panic("end reads")
+    files.write_bytes(path, [U8]{98, 97, 98}) ?? panic("fixture")
+    limited_input: files.open(path) ?? panic("open")
+    limits := EncodingLimits.safe()
+    limits.max_item_bytes = 1
+    limited := cbor.reader(limited_input, limits) ?? panic("reader")
+    first := EncodingError?{None}
+    if limited.next() == {
+        .Err(failure) -> {
+            assert_eq(failure.reason, "max_item_bytes 1 exceeded")
+            assert_eq(failure.byte_offset, 0)
+            first = Val(failure)
+        }
+        .Val(_) | .None -> panic("item limit must fail")
+    }
+    if limited.next() == .Err(failure) -> assert_eq(Val(failure), first) else -> panic("failure must be sticky")
+    print("every float width and a sticky item limit")
+}
+
+sorted_keys_and_flush_before_the_root_ends: fn() {
+    dir: files.temp_dir("jet-cbor-write") ?? panic("temp")
+    path: "{dir.path}/sorted.cbor"
+    output: files.create(path) ?? panic("create")
+    sink := cbor.writer(output) ?? panic("writer")
+    sink.write(DataEvent.ObjectStart) ?? panic("object")
+    sink.write(DataEvent.Key("aa")) ?? panic("key")
+    sink.write(DataEvent.Int(1)) ?? panic("value")
+    sink.flush() ?? panic("flush")
+    assert_eq(files.read_bytes(path) ?? panic("read"), [U8]{})
+    sink.write(DataEvent.Key("b")) ?? panic("key")
+    sink.write(DataEvent.Float(Float{1.5})) ?? panic("value")
+    sink.write(DataEvent.ObjectEnd) ?? panic("end")
+    sink.finish() ?? panic("finish")
+    sink.finish() ?? panic("repeat finish")
+    assert_eq(files.read_bytes(path) ?? panic("read"), [U8]{162, 97, 98, 249, 62, 0, 98, 97, 97, 1})
+    if sink.write(DataEvent.Null) == .Err(failure) -> assert_eq(failure.reason, "write called after finish") else -> panic("write after finish must fail")
+    print("sorted keys, and a flush does not complete a container")
+}
+
+incomplete_finish_and_root_total_limit: fn() {
+    dir: files.temp_dir("jet-cbor-finish") ?? panic("temp")
+    path: "{dir.path}/partial.cbor"
+    output: files.create(path) ?? panic("create")
+    sink := cbor.writer(output) ?? panic("writer")
+    sink.write(DataEvent.ArrayStart) ?? panic("start")
+    sink.flush() ?? panic("flush incomplete")
+    if sink.finish() == .Err(failure) -> assert_eq(failure.reason, "finish requires one complete CBOR root") else -> panic("incomplete finish must fail")
+    if sink.flush() == .Err(failure) -> assert_eq(failure.reason, "finish requires one complete CBOR root") else -> panic("flush must retain first failure")
+    limited_output: files.create("{dir.path}/limit.cbor") ?? panic("create")
+    limits := EncodingLimits.safe()
+    limits.max_total_bytes = Val(1)
+    limited := cbor.writer(limited_output, limits) ?? panic("writer")
+    limited.write(DataEvent.ArrayStart) ?? panic("start")
+    limited.write(DataEvent.Int(1)) ?? panic("item")
+    if limited.write(DataEvent.ArrayEnd) == .Err(failure) -> assert_eq(failure.reason, "max_total_bytes 1 exceeded") else -> panic("root wire limit must fail")
+    print("a sticky incomplete finish, and the total limit checked at the root")
+}
+
+full_width_integers: fn() {
+    dir: files.temp_dir("jet-cbor-wide") ?? panic("temp")
+    path: "{dir.path}/wide.cbor"
+    files.write_bytes(path, [U8]{130, 27, 255, 255, 255, 255, 255, 255, 255, 255, 59, 255, 255, 255, 255, 255, 255, 255, 255}) ?? panic("fixture")
+    input: files.open(path) ?? panic("open")
+    source := cbor.reader(input) ?? panic("reader")
+    expected: [DataEvent]{.ArrayStart, .Int(18446744073709551615), .Int(-18446744073709551616), .ArrayEnd}
+    loop event in expected {
+        if source.next() == .Ok(read) -> assert_eq(read, Val(event)) else -> panic("event reads")
+    }
+    output: files.create("{dir.path}/out.cbor") ?? panic("create")
+    sink := cbor.writer(output) ?? panic("writer")
+    if sink.write(DataEvent.Int(18446744073709551616)) == .Err(failure) -> assert_eq(failure.kind, .Unsupported) else -> panic("2^64 written")
+    print("integers out to 2^64-1 and -2^64, and a wider Int refused")
+}
+
+run: fn() {
+    definite_and_indefinite_containers()
+    float_widths_and_sticky_item_limit()
+    sorted_keys_and_flush_before_the_root_ends()
+    incomplete_finish_and_root_total_limit()
+    full_width_integers()
+}
