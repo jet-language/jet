@@ -39,6 +39,7 @@ Run a lesson from the repository root, for example `jet run Examples/Systems/<Le
 - [FilesDepth](Files/FilesDepth.jet) — Std-backed filesystem depth beyond read/write/list_dir.
 - [FilesProjection](Files/FilesProjection.jet) — Temporary paths make directory, mode, append, and rename operations explicit.
 - [FilesMapAdvise](Files/FilesMapAdvise.jet) — `mapped.advise(advice)` tells the system how a mapped file's bytes will be read (posix_madvise); the bytes stay the same.
+- [FilesMapViews](Files/FilesMapViews.jet) — a mapped file's windows come back from functions inside an Option, a Result, a named pair or a list, each a read view rooted in the caller's map with no copy.
 - [FilesReaderSeek](Files/FilesReaderSeek.jet)
 - [FilesRootedLifecycle](Files/FilesRootedLifecycle.jet) — Rooted file and temporary-resource lifecycle (CORE-F010, SCRIPT-F13).
 - [FilesReserve](Files/FilesReserve.jet) — `writer.allocate(size)` reserves disk space for a file (posix_fallocate) and `reader.advise(advice)` tells the system how the file will be read (posix_fadvise).

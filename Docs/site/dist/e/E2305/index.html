@@ -36,23 +36,23 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Keep every possible owner alive (take a returned view&#39;s source as a read or `&amp;` parameter, not `&amp;&amp;`), preserve the declared view boundary, or remove `copies: .Explicit` / write `view.copy()` when an owning destination is intended.</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E2305</code>: <code>tests/ui/nested_payload_view_escape.stderr</code>.</p>
-<pre class="diag">Error [jet.ViewOutlivesOwner]: Returned view escapes its declared `from` clause
-  --&gt; tests/ui/nested_payload_view_escape.jet:7:43
+<p>First UI snapshot mentioning <code>E2305</code>: <code>tests/ui/mapped_window_outlives_its_map.stderr</code>.</p>
+<pre class="diag">Error [jet.ViewOutlivesOwner]: This view points into `mapped`, which this function owns
+  --&gt; tests/ui/mapped_window_outlives_its_map.jet:6:12
     |
-  7 | head: fn(packet: Packet, spare: [Int]) -&gt; View&lt;Int&gt; from spare {
-    |                                           ^^^^^^^^^
- Why: Every return path&#39;s owners must stay inside the sources named after `from`
- Fix: Widen the `from` clause, or stop returning a view from that owner
+  6 |     mapped.window_len(0, 1)
+    |            ^^^^^^^^^^
+ Why: `mapped` is made here and freed when the function returns, so a read window into it would outlive what owns it — there&#39;d be nothing left to look at
+ Fix: Return an owned copy with `place.copy()` (for example `value[a..b].copy()`), or accept the source as a parameter so the caller keeps owning it
 More: jet-lang.dev/e/E2305
 
-Error [jet.ViewOutlivesOwner]: A returned view cannot borrow from a temporary argument
-  --&gt; tests/ui/nested_payload_view_escape.jet:13:34
+Error [jet.ViewOutlivesOwner]: Returned views need a stable owner relationship
+  --&gt; tests/ui/mapped_window_outlives_its_map.jet:10:13
     |
- 13 |     print(head(.Data([1, 2, 3]), [9]).len())
-    |                                  ^^^
- Why: The temporary owner is dropped at the end of this statement, while the returned view remains live
- Fix: Store the owner in a named binding first, then pass that binding to the view-returning call
+ 10 |     window: leak(&quot;table.txt&quot;) ?? return
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ Why: Each public `View`/`ViewMut` slot must name a bounded set of receiver, parameter, or static sources that stay live; this return did not prove those sources
+ Fix: Return a view derived from parameters or the receiver on every path, keep the view local, or return an owned copy with `.copy()`
 More: jet-lang.dev/e/E2305
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

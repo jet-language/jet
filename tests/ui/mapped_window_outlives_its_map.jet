@@ -1,0 +1,12 @@
+use files: core.files
+
+// The map is local, so a window of it can't leave the function.
+leak: fn(path: String) -> View<U8> IOError! {
+    mapped: files.map(path)
+    mapped.window_len(0, 1)
+}
+
+run: fn() {
+    window: leak("table.txt") ?? return
+    print(window.len())
+}

@@ -1,0 +1,97 @@
+package: {
+    name: "files_map_views"
+    authority: { allow: [Exec, FS, FS.Read, FS.Write, IO, Mem.Alloc, Mem.Rc] }
+}
+
+// A mapped file's windows are read views rooted in the MappedFile that made
+// them. A function that takes the map can hand a window back inside an
+// Option, a Result, a tuple or a list, and the checker keeps each one tied to
+// the caller's map: the map outlives every window, and none is copied. A map
+// shared between tasks sits in a `Shared` cell; a read guard holds the cell's
+// lock, and a window of the guarded map is rooted in the guard.
+
+use files: core.files
+
+#Error
+Missing: enum {
+    Short
+}
+
+// The first `size` bytes, or None when the file is shorter.
+header: fn(mapped: MappedFile, size: Int) -> View<U8>? {
+    if mapped.len() < size -> return None
+    mapped.window_len(0, size) ?? return None
+}
+
+// The same window as a Result with this program's own error.
+header_or: fn(mapped: MappedFile, size: Int) -> View<U8> Missing! {
+    window: header(mapped, size) ?? return Err(Missing.Short)
+    Ok(window)
+}
+
+// The first two lines, each a view of the map, as a named pair.
+first_two: fn(mapped: MappedFile) -> (first: View<U8>, second: View<U8>)? {
+    lines := [View<U8>]{}
+    loop line in mapped.lines() {
+        lines.push(line)
+        if lines.len() == 2 -> return Val((first: lines[0], second: lines[1]))
+    }
+    None
+}
+
+// Every line that starts with `prefix`, as views of the map.
+starting_with: fn(mapped: MappedFile, prefix: U8) -> [View<U8>] {
+    found := [View<U8>]{}
+    loop line in mapped.lines() {
+        if line.len() > 0 && line[0] == prefix -> found.push(line)
+    }
+    found
+}
+
+text: fn(bytes: View<U8>) -> String {
+    String.from_bytes(bytes.copy()) ?? "?"
+}
+
+guarded_header: fn(guard: SharedGuard<MappedFile>, size: Int) -> View<U8>? {
+    guard.value.window_len(0, size) ?? return None
+}
+
+shared_header: fn(shared: Shared<MappedFile>, size: Int) -> String {
+    guard: shared.guard_read()
+    window: guarded_header(guard, size) ?? return "short"
+    text(window)
+}
+
+run: fn() {
+    scratch: files.temp_dir("map-views")
+    path: files.join(scratch.path, "table.txt")
+    files.write(path, "alpha\nbeta\ngamma\nbravo\n")
+    mapped: files.map(path)
+
+    if header(mapped, 5) == {
+        .Val(window) -> print("option: {text(window)}")
+        .None -> print("option: none")
+    }
+    print("option past the end is None: {header(mapped, 99) == None}")
+    if header_or(mapped, 3) == {
+        .Ok(window) -> print("result: {text(window)}")
+        .Err(_) -> print("result: short")
+    }
+    if header_or(mapped, 99) == {
+        .Ok(_) -> print("result past the end: ok")
+        .Err(_) -> print("result past the end: short")
+    }
+    if first_two(mapped) == {
+        .Val(pair) -> print("pair: {text(pair.first)} {text(pair.second)}")
+        .None -> print("pair: none")
+    }
+    b_lines: starting_with(mapped, 98)
+    loop line in b_lines -> print("starts with b: {text(line)}")
+
+    shared: Shared{files.map(path)}
+    print("shared: {shared_header(shared, 4)}")
+    reader: task shared_header(shared, 2)
+    from_task: reader.join() ?? "task failed"
+    print("shared in a task: {from_task}")
+    print("shared past the end: {shared_header(shared, 99)}")
+}
