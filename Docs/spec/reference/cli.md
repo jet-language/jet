@@ -1403,6 +1403,11 @@ source project. Frontend errors prevent publication. Files are published
 sequentially, so an I/O failure can leave a partial bundle. These maintainer
 commands own their raw arguments: `reduce` accepts the two-word `--code` form.
 
+`jet self devtools core-record --check` checks Core and the Prelude alone,
+the closed program the precompiled Core record is written from, with every
+Core body checked, and prints its module, function, constant, type and impl
+counts, or the diagnostics that keep Core from checking clean.
+
 `jet inspect gates [<entry.jet>] [--kind <kind>] [--scope <scope>]`
 uses the canonical load-only gate query, not semantic body checking or emission.
 Without an explicit file, normal project entry selection still applies. Kind

@@ -84,3 +84,30 @@ core_failure_record_check: fn(source: String, module_identity: String, expected_
     core_failure_record_check(optional_dispatch, "user/fixture", "")
     print("Core failure record literals: passed")
 }
+
+// Core reads only the target's facts. A fact of one program (its package,
+// profile, stamp or settings) is refused in Core and read in a user module.
+core_target_fact_codes: fn(source: String, module_identity: String) -> [String] {
+    codes := [String]{}
+    loop diagnostic in core_failure_record_diagnostics(source, module_identity) {
+        if diagnostic.code.starts_with("E") -> codes.push(diagnostic.code.copy())
+    }
+    codes
+}
+
+#Test("core_reads_only_target_facts") {
+    target_source: "os: fn() -> String {{ #build.target.os }}\nrun: fn() {{}}"
+    if core_target_fact_codes(target_source, "<corelib>/fixture").len() != 0 -> panic("Core refused a target fact read")
+    program_sources: [String]{
+        "name: fn() -> String {{ #package.name }}\nrun: fn() {{}}",
+        "profile: fn() -> String {{ #build.profile }}\nrun: fn() {{}}",
+        "dirty: fn() -> Bool {{ #build.stamp.dirty }}\nrun: fn() {{}}",
+    }
+    loop source in program_sources {
+        core_codes: core_target_fact_codes(source, "<corelib>/fixture")
+        if core_codes.len() != 1 || core_codes[0] != "E0302" -> panic("Core read a program fact ({core_codes}): {source}")
+        user_codes: core_target_fact_codes(source, "user/fixture")
+        if user_codes.len() != 0 -> panic("a user module could not read a program fact ({user_codes}): {source}")
+    }
+    print("Core target fact reads: passed")
+}

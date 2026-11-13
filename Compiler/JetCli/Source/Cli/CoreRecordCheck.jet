@@ -1,0 +1,66 @@
+// `jet self devtools core-record --check`: the compiler build's check of Core
+// and the Prelude alone, the closed program the precompiled Core record is
+// written from. It is the `jet check Core` compile (one import of each public
+// Core module, jet_cli_core_check_source) over the Core sources built into
+// this jet, with every Core body checked whether a program calls it or not,
+// stopped right before lowering (jet_driver_lowering_inputs). It prints what
+// the record would hold, or the diagnostics that keep Core from checking
+// clean.
+use {
+    record_files: core.files
+    record_time: core.time
+    jet_driver.[JetDriverCompileMode, JetDriverLoweringInputs, JetDriverVerbOutput, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USAGE, jet_driver_check_outcome, jet_driver_lowering_inputs, jet_driver_present_diagnostics]
+}
+
+JET_CLI_CORE_RECORD_USAGE: "usage: jet self devtools core-record --check\n"
+
+jet_cli_devtools_core_record: fn(args: [String], color: Bool, json: Bool) -> JetDriverVerbOutput {
+    if args.len() != 1 || args[0] != "--check" -> return JetDriverVerbOutput{stdout: "", stderr: JET_CLI_CORE_RECORD_USAGE, exit_code: JET_DRIVER_EXIT_USAGE}
+    watch: record_time.start()
+    scratch: record_files.temp_dir("jet-core-record") ?? return jet_cli_maintenance_error("E2105", "couldn't create a scratch directory for the Core entry: {jet_cli_io_error_text(err)}", None, color, json)
+    entry: "{scratch.path}/core.jet"
+    source: jet_cli_core_check_source()
+    record_files.write(entry, source) ?? return jet_cli_maintenance_error("E2105", "couldn't write the Core entry `{entry}`: {jet_cli_io_error_text(err)}", None, color, json)
+    prepared := if jet_cli_prepare_snapshot(entry, entry, [JetCLIOverlay]{}, color, true) == {
+        .Refused(refusal) -> JetCLIPrepared.Refused{output: refusal}
+        .Held(snapshot) -> jet_cli_prepare_request(snapshot, color, None, JetDriverCompileMode.Check)
+    }
+    if prepared.move() == {
+        .Refused(output) -> output
+        .Prepared(request, snapshot) -> {
+            selected := request
+            selected.every_core_body = true
+            front := jet_driver_lowering_inputs(selected, None)
+            diagnostics: jet_driver_present_diagnostics(front.compile.diagnostics, snapshot, front.compile.generated_source_files)
+            if jet_cli_errors(diagnostics).len() > 0 -> return jet_driver_check_outcome("Core", source, diagnostics, color, false)
+            if front.compile.internal_problem == .Val(problem) -> return jet_cli_ice(problem)
+            inputs: front.inputs.move() ?? return jet_cli_ice("the Core check stopped before lowering without a diagnostic")
+            JetDriverVerbOutput{stdout: jet_cli_core_record_summary(inputs, watch.elapsed_millis()), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+        }
+    }
+}
+
+// One line: the checked modules other than the scratch entry, their
+// functions (generic ones apart), constants, nominal types and impls, and
+// the check's wall time.
+jet_cli_core_record_summary: fn(inputs: JetDriverLoweringInputs, millis: Int) -> String Never! {
+    modules := 0
+    functions := 0
+    generic := 0
+    constants := 0
+    nominals := 0
+    impls := 0
+    loop module_row in inputs.modules {
+        if module_row.module_identity == inputs.entry_module_identity -> next
+        modules += 1
+        constants += module_row.constants.len()
+        nominals += module_row.nominals.len()
+        impls += module_row.impls.len()
+    }
+    loop function in inputs.functions {
+        if function.module_identity == inputs.entry_module_identity -> next
+        functions += 1
+        if function.generic_params.len() > 0 -> generic += 1
+    }
+    "core-record check: {modules} modules, {functions} functions ({generic} generic), {constants} constants, {nominals} nominal types, {impls} impls, 0 errors, {millis} ms\n"
+}

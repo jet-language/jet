@@ -971,12 +971,24 @@ sema_fact_build_setting: fn(key: String, span: Span, environment: SemaScopeEnvir
     None
 }
 
+// Whether `path` is a fact of the program being built rather than of the
+// machine it targets: its package, profile, stamp or settings.
+sema_fact_build_per_program: fn(path: String) -> Bool Never! {
+    path.starts_with("#package.") || path == "#build.profile" || path.starts_with("#build.stamp.") || path.starts_with("#build.settings.")
+}
+
 // A complete `#package.*` / `#build.*` path folds to its
 // typed snapshot value (Rust `fold_fact_read`, which reads build paths before
 // the compile-time-only gate); `#build.settings.<key>` reads a declared setting.
+// Core reads only the target's facts, so Core means the same in every
+// program built for that target and one precompiled Core serves them all.
 sema_fact_build_read: fn(base: Expr, member: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaFactReadCheck {
     if !sema_fact_build_rooted(base) -> return sema_fact_read_unhandled()
     path: sema_fact_path_text(base, member) ?? return sema_fact_read_unhandled()
+    if sema_module_is_core_source(environment.module_identity) && sema_fact_build_per_program(path) {
+        diagnostics.push(sema_error("E0302", span, "Core reads `{path}`, a fact of the program being built", "Core means the same in every program built for a target, so it reads only the target's facts (`#build.target.*`)", "take the value as a parameter from the program that reads it"))
+        return sema_fact_read_failed()
+    }
     if sema_fact_build_setting_key(path) == .Val(key) {
         resolved: sema_fact_build_setting(key, span, environment, program, diagnostics) ?? return sema_fact_read_failed()
         prepared: sema_fact_prepared_expr(resolved.value, resolved.ty, span, environment, program, context) ?? return sema_fact_read_failed()
