@@ -167,7 +167,7 @@ jet_cli_inspect_pad: fn(value: String, width: Int) -> String Never! {
     out := value
     count := 0
     loop byte in value.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if code < 128 || code >= 192 -> count += 1
     }
     loop count < width {
@@ -261,7 +261,7 @@ jet_cli_digest_one_line: fn(value: String) -> String Never! {
     bytes: value.bytes()
     start := -1
     loop (index, byte) in bytes {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         space: code == 32 || (code >= 9 && code <= 13)
         if {
             space && start >= 0 -> {
@@ -426,7 +426,7 @@ jet_cli_inspect_trim_end: fn(text: String) -> String Never! {
     bytes: text.bytes()
     end := bytes.len()
     loop end > 0 {
-        code: Int.from_u8(bytes[end - 1])
+        code: Int{bytes[end - 1]}
         if code != 32 && (code < 9 || code > 13) -> break
         end -= 1
     }
@@ -439,7 +439,7 @@ jet_cli_inspect_less: fn(left: String, right: String) -> Bool Never! {
     b: right.bytes()
     loop index in 0..<a.len() {
         if index >= b.len() -> return false
-        if a[index] != b[index] -> return Int.from_u8(a[index]) < Int.from_u8(b[index])
+        if a[index] != b[index] -> return (Int{a[index]}) < (Int{b[index]})
     }
     a.len() < b.len()
 }
@@ -696,7 +696,7 @@ jet_cli_engine_dispatch: fn(engine: String, verb: String, argv: [String]) -[Env,
 jet_cli_find_external: fn(name: String) -[FS, Env]> String? Never! {
     if name == "" || name == "." || name == ".." -> return None
     loop byte in name.bytes() {
-        value: Int.from_u8(byte)
+        value: Int{byte}
         if value < 32 || value == 127 || value == 47 || value == 58 || value == 92 -> return None
     }
     path: cli_sys.get("PATH") ?? return None

@@ -254,7 +254,7 @@ split_byte: fn(text: String, code: Int) -> [String] Never! {
     i := 0
     loop i <= raw.len() {
         n := 0
-        if i < raw.len() -> n = Int.from_u8(raw[i])
+        if i < raw.len() -> n = (Int{raw[i]})
         if i == raw.len() || n == code {
             out.push(String.from_bytes(slice_u(raw, start, i)) ?? "")
             start = i + 1
@@ -270,7 +270,7 @@ parse_oct: fn(text: String) -> Int? {
     if raw.len() > 1 && raw[0] == (U8{48}) -> return None
     n := 0
     loop b in raw {
-        d: Int.from_u8(b)
+        d: Int{b}
         if d < 48 || d > 57 -> return None
         n = n * 10 + (d - 48)
         if n > 255 -> return None
@@ -283,7 +283,7 @@ parse_int: fn(text: String) -> Int? {
     if raw.len() == 0 -> return None
     n := 0
     loop b in raw {
-        d: Int.from_u8(b)
+        d: Int{b}
         if d < 48 || d > 57 -> return None
         digit: d - 48
         if n > (9223372036854775807 - digit) /% 10 -> return None
@@ -305,7 +305,7 @@ parse_hex4: fn(text: String) -> Int? {
 }
 
 hex_val: fn(b: U8) -> Int Never! {
-    n: Int.from_u8(b)
+    n: Int{b}
     if n >= 48 && n <= 57 -> return n - 48
     if n >= 65 && n <= 70 -> return n - 55
     if n >= 97 && n <= 102 -> return n - 87
@@ -368,7 +368,7 @@ packed_ipv4: fn(addr: IPv4) -> [U8] Never! {
 
 from_packed_ipv4: fn(bytes: [U8]) -> IPv4 IOError! {
     if bytes.len() != 4 -> return Err(net_err("IPv4 packed needs 4 bytes"))
-    ipv4(Int.from_u8(bytes[0]), Int.from_u8(bytes[1]), Int.from_u8(bytes[2]), Int.from_u8(bytes[3]))
+    ipv4(Int{bytes[0]}, Int{bytes[1]}, Int{bytes[2]}, Int{bytes[3]})
 }
 
 reverse_pointer: fn(addr: IPv4) -> String Never! { "{addr.d}.{addr.c}.{addr.b}.{addr.a}.in-addr.arpa" }
@@ -600,7 +600,7 @@ hex_trim: fn(n: Int) -> String {
 ends_colon_str: fn(text: String) -> Bool {
     found := false
     loop b in text.bytes() {
-        found = Int.from_u8(b) == 58
+        found = Int{b} == 58
     }
     return found
 }

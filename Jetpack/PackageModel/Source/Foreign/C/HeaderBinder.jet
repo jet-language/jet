@@ -64,10 +64,10 @@ pkg_cbind_compute_bind_hash: fn(header_src: String, cflags: String) -> String Ne
 pkg_cbind_hash_sidecar_path: fn(cache_path: String) -> String Never! {
     bytes: cache_path.bytes()
     name_start := bytes.len()
-    loop name_start > 0 && Int.from_u8(bytes[name_start - 1]) != 47 -> name_start -= 1
+    loop name_start > 0 && (Int{bytes[name_start - 1]}) != 47 -> name_start -= 1
     dot := bytes.len() - 1
-    loop dot > name_start && Int.from_u8(bytes[dot]) != 46 -> dot -= 1
-    if dot > name_start && Int.from_u8(bytes[dot]) == 46 -> return "{pkg_bytes_text(bytes, 0, dot)}.hash"
+    loop dot > name_start && (Int{bytes[dot]}) != 46 -> dot -= 1
+    if dot > name_start && (Int{bytes[dot]}) == 46 -> return "{pkg_bytes_text(bytes, 0, dot)}.hash"
     "{cache_path}.hash"
 }
 
@@ -246,7 +246,7 @@ pkg_cffi_metadata_escape: fn(value: String) -> String Never! {
     digits: "0123456789ABCDEF".bytes()
     out := [U8]{}
     loop byte in value.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         plain: (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 46 || code == 95 || code == 45 || code == 47
         if plain {
             out.push(byte)
@@ -466,7 +466,7 @@ pkg_cbind_debug_quote: fn(value: String) -> String Never! {
     raw: value.bytes()
     index := 0
     loop index < raw.len() {
-        code: Int.from_u8(raw[index])
+        code: Int{raw[index]}
         // C1 controls U+0080..U+009F encode as 0xC2 0x80..0x9F.
         second: pkg_bytes_code(raw, index + 1)
         if code == 0xC2 && second >= 0x80 && second <= 0x9F {

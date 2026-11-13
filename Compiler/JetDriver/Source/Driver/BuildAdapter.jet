@@ -752,9 +752,9 @@ jet_driver_build_fetch_error: fn(url: String, detail: String, span: Span) -> Bui
 // every answer (including IPv4-mapped IPv6), not only the chosen socket.
 jet_driver_build_public_address: fn(address: [U8]) -> Bool Never! {
     if address.len() == 4 {
-        a: Int.from_u8(address[0])
-        b: Int.from_u8(address[1])
-        c: Int.from_u8(address[2])
+        a: Int{address[0]}
+        b: Int{address[1]}
+        c: Int{address[2]}
         return !(a == 0 || a == 10 || (a == 100 && (b.bit_and(192)) == 64) || a == 127
             || (a == 169 && b == 254) || (a == 172 && b >= 16 && b <= 31)
             || (a == 192 && b == 0 && (c == 0 || c == 2)) || (a == 192 && b == 168)
@@ -767,8 +767,8 @@ jet_driver_build_public_address: fn(address: [U8]) -> Bool Never! {
         if address[index] != (U8{0}) -> mapped = false
     }
     if mapped && address[10] == (U8{255}) && address[11] == (U8{255}) -> return jet_driver_build_public_address(address[12..<16])
-    first: Int.from_u8(address[0]) * 256 + Int.from_u8(address[1])
-    second: Int.from_u8(address[2]) * 256 + Int.from_u8(address[3])
+    first: Int{address[0]} * 256 + Int{address[1]}
+    second: Int{address[2]} * 256 + Int{address[3]}
     (first.bit_and(57344)) == 8192 && !(first == 8193 && second == 3512)
 }
 

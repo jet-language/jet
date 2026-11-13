@@ -162,14 +162,14 @@ store_artifact_footprint_tally_text: fn(tally: ArtifactFootprintTally) -> String
 // newline; None when the window holds no whole line ending there. `whole`
 // when the window starts at the journal's first byte.
 store_artifact_journal_checksum_before: fn(window: [U8], end: Int, whole: Bool) -> String? Never! {
-    if end <= 0 || end > window.len() || Int.from_u8(window[end - 1]) != 10 -> return None
+    if end <= 0 || end > window.len() || (Int{window[end - 1]}) != 10 -> return None
     start := end - 1
-    loop start > 0 && Int.from_u8(window[start - 1]) != 10 {
+    loop start > 0 && (Int{window[start - 1]}) != 10 {
         start -= 1
     }
     if start == 0 && !whole -> return None
     field := end - 1
-    loop field > start && Int.from_u8(window[field - 1]) != 124 {
+    loop field > start && (Int{window[field - 1]}) != 124 {
         field -= 1
     }
     if field == start -> return None
@@ -210,7 +210,7 @@ store_artifact_footprint_replay: fn(tally_path: String, journal_path: String, jo
     if found != fields[4] -> return None
     start := before
     loop index in before..<window.len() {
-        if Int.from_u8(window[index]) != 10 -> next
+        if (Int{window[index]}) != 10 -> next
         record: store_artifact_parse_journal_line(store_artifact_slice(window, start, index)) ?? return None
         if record.operation == "put" -> total = store_artifact_saturating_add(total, record.length)
         if record.operation == "remove" -> total = store_artifact_saturating_sub(total, record.length)

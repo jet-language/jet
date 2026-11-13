@@ -78,7 +78,7 @@ trust_json_parse_lenient: fn(input: String) -> TrustJSONDocument Never! {
         newline: trust_text_find_byte(raw, TRUST_NEWLINE, start)
         end: if newline < 0 -> raw.len() else -> newline + 1
         content_end := if newline < 0 -> raw.len() else -> newline
-        if content_end > start && Int.from_u8(raw[content_end - 1]) == TRUST_CARRIAGE_RETURN -> content_end -= 1
+        if content_end > start && (Int{raw[content_end - 1]}) == TRUST_CARRIAGE_RETURN -> content_end -= 1
         content: pkg_bytes_text(raw, start, content_end)
         if {
             trust_json_is_provider_noise(content) -> noise.push(content)

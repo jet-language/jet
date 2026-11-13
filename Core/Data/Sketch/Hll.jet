@@ -19,10 +19,10 @@ HyperLogLog: struct {
 
     add: fn(&self, key: String) Never! {
         hash: sketch.__fnv1a64(key, U64{14695981039346656037})
-        index: Int.from_u64(hash.bit_and(U64{255}))
+        index: Int{hash.bit_and(U64{255})}
         rest: hash >> 8
         zeros: if rest == (U64{0}) -> 57 else -> rest.leading_zeros() + 1
-        if zeros > Int.from_u8(self.registers[index]) -> self.registers[index] = U8{zeros}
+        if zeros > (Int{self.registers[index]}) -> self.registers[index] = (U8{zeros})
     }
 
     count: fn(self) -> Int Never! {
@@ -34,7 +34,7 @@ HyperLogLog: struct {
         if empty > 0 -> return rounded_count(width * math.ln(width / Float{empty}))
         sum := Float{0.0}
         loop register in self.registers {
-            sum = sum + math.from_bits((1023 - Int.from_u8(register)) << 52)
+            sum = sum + math.from_bits((1023 - Int{register}) << 52)
         }
         alpha: Float{0.7213} / (Float{1.0} + Float{1.079} / width)
         rounded_count(alpha * width * width / sum)

@@ -30,6 +30,7 @@ use jet_foundation.[
     SemaNameCase,
     sema_casing_canonical,
     builtin_static_is_type_param,
+    builtin_static_numeric_row,
     builtin_static_rows,
     core_call,
     core_module_has_member,
@@ -417,7 +418,7 @@ sema_call_static_call_value: fn(value: TExpr, method_id: DeclID) -> TExpr? {
     }
 }
 
-// Built-in owners (`Int.parse`, `U8.from_int`, `Atomic<Int>.new`,
+// Built-in owners (`Int.parse`, `Int.from_float`, `Atomic<Int>.new`,
 // `crypto.Hasher.new`) have no declaration to resolve. Their checked contract
 // is the Foundation BuiltinStaticRow table: this layer admits the row for how
 // the owner was named, binds its type parameters, checks arity and argument
@@ -1275,13 +1276,14 @@ sema_call_is_clock_type: fn(ty: Type) -> Bool Never! {
 
 // The numeric destination conversion a distinct type
 // inherits from its numeric base (`UserID.from_int`, `Meters.from_float`):
-// the base's own built-in conversion row.
+// the base's own conversion row. Between two whole-number types the built-in
+// owner has no row of its own (`T{x}` converts), but the distinct type keeps it.
 sema_call_distinct_numeric_row: fn(base: Type, method: String) -> BuiltinStaticRow? {
     if !sema_expr_is_numeric(base) -> return None
     loop row in builtin_static_rows(type_name(base), method) {
         if row.lowering == .Numeric(_) -> return Val(row)
     }
-    None
+    builtin_static_numeric_row(type_name(base), method)
 }
 
 sema_call_distinct_numeric_operation: fn(row: BuiltinStaticRow, line: Int) -> TNumericOp? {

@@ -5597,8 +5597,8 @@ panic or silent truncation.
 | `String.bytes() -> [U8]` | bytes | Encode a string as UTF-8 bytes. |
 | `String.from_bytes(bytes: [U8]) -> String !UTF8Error` | text | Decode bytes strictly as UTF-8. |
 | `String.from_bytes_lossy(bytes: [U8]) -> String` | text | Decode bytes with replacement characters. |
-| `U8.from_int(n: Int) -> U8 !String` | byte | Perform a checked integer-to-byte conversion. |
-| `Int.from_u8(b: U8) -> Int` | integer | Widen a byte to `Int`. |
+| `checked(U8{n}) -> U8?` | byte | Perform a checked integer-to-byte conversion. |
+| `Int{b} -> Int` | integer | Widen a byte to `Int`. |
 | `Char.from_u32(word: U32) -> Char?` | character | The `Char` of a Unicode scalar value: `None` for a surrogate (`0xD800` through `0xDFFF`) or a word above `0x10FFFF`; noncharacters and `0` convert. |
 | `U32.from_char(c: Char) -> U32` | scalar | The Unicode scalar value of `c`; never fails and allocates nothing. |
 | `Reader.over(bytes: [U8]) -> Reader` | reader | Wrap an in-memory byte buffer. |
@@ -5663,9 +5663,6 @@ explicit policies when wrapping or clamping is part of the contract:
 | `wrapping(T{x})` | `T` | Keep the low bits of `x` in `T`'s width. |
 | `saturating(T{x})` | `T` | Clamp `x` to `T`'s bounds. |
 | `checked(T{x})` | `Option<T>` | Return no value when `x` is outside `T`. |
-| `value.wrapping_add(other)` | `T` | Receiver form of wrapping addition. |
-| `value.saturating_add(other)` | `T` | Receiver form of saturating addition. |
-| `value.checked_add(other)` | `Option<T>` | Receiver form of checked addition. |
 
 The wrappers accept exactly one integer arithmetic operation or one narrowing
 conversion; another expression, including a conversion that can't fail,
@@ -5696,12 +5693,13 @@ run: fn() {
 }
 ```
 
-Explicit narrowing is destination-owned and fallible. `U8.from_int`,
-`I16.from_int`, `F32.from_float`, `Int.from_float`, and the corresponding
-fixed-width conversions reject values outside the target's finite range;
-integer-to-float conversion truncates only where the destination contract says
-so. Handle each conversion's named error rather than relying on implicit
-narrowing.
+Between two whole-number types, `T{x}` widens and `checked(T{x})` narrows: it
+is `None` when the value is outside the target's range. Conversions that cross
+into or out of floating point stay destination-owned and fallible:
+`F32.from_float`, `Int.from_float`, and the corresponding fixed-width
+conversions reject values outside the target's finite range; integer-to-float
+conversion truncates only where the destination contract says so. Handle each
+conversion's failure rather than relying on implicit narrowing.
 
 
 ### `core.net` — sockets and DNS

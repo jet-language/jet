@@ -185,13 +185,13 @@ store_artifact_lines: fn(text: String) -> [String] Never! {
     raw: text.bytes()
     start := 0
     loop index in 0..<raw.len() {
-        if Int.from_u8(raw[index]) != 10 -> next
-        end: if index > start && Int.from_u8(raw[index - 1]) == 13 -> index - 1 else -> index
+        if (Int{raw[index]}) != 10 -> next
+        end: if index > start && (Int{raw[index - 1]}) == 13 -> index - 1 else -> index
         lines.push(pkg_bytes_text(raw, start, end))
         start = index + 1
     }
     if start < raw.len() {
-        end: if Int.from_u8(raw[raw.len() - 1]) == 13 -> raw.len() - 1 else -> raw.len()
+        end: if (Int{raw[raw.len() - 1]}) == 13 -> raw.len() - 1 else -> raw.len()
         lines.push(pkg_bytes_text(raw, start, end))
     }
     lines
@@ -229,7 +229,7 @@ store_artifact_read_journal: fn(path: String) -[FS]> ArtifactJournalState Artifa
     state := ArtifactJournalState{last_use: [String: Int]{}, last_sequence: 0, bytes: bytes.len(), valid: true}
     start := 0
     loop index in 0..<(bytes.len() + 1) {
-        if index < bytes.len() && Int.from_u8(bytes[index]) != 10 -> next
+        if index < bytes.len() && (Int{bytes[index]}) != 10 -> next
         line_start: start
         start = index + 1
         if index == line_start -> next
@@ -264,7 +264,7 @@ ArtifactJournalRecord: struct {
 // foreign or corrupt line, including an unknown operation. One trailing CR is
 // dropped here, as in Rust; nothing is recorded from a refused line.
 store_artifact_parse_journal_line: fn(line: [U8]) -> ArtifactJournalRecord? Never! {
-    end: if line.len() > 0 && Int.from_u8(line[line.len() - 1]) == 13 -> line.len() - 1 else -> line.len()
+    end: if line.len() > 0 && (Int{line[line.len() - 1]}) == 13 -> line.len() - 1 else -> line.len()
     text: String.from_bytes(store_artifact_slice(line, 0, end)) ?? return None
     fields: text.split("|").to_list()
     if fields.len() != 7 || fields[0] != STORE_ARTIFACT_VERSION -> return None
@@ -296,12 +296,12 @@ store_artifact_journal_tail_sequence: fn(path: String) -[FS]> Int? ArtifactStore
     if length == 0 -> return Ok(Val(0))
     window: if length < STORE_ARTIFACT_JOURNAL_TAIL_WINDOW -> length else -> STORE_ARTIFACT_JOURNAL_TAIL_WINDOW
     tail: files.read_at(path, length - window, window)
-    if tail.len() == 0 || Int.from_u8(tail[tail.len() - 1]) != 10 -> return Ok(None)
+    if tail.len() == 0 || (Int{tail[tail.len() - 1]}) != 10 -> return Ok(None)
     body_end: tail.len() - 1
     start := -1
     at := body_end - 1
     loop at >= 0 {
-        if Int.from_u8(tail[at]) == 10 {
+        if (Int{tail[at]}) == 10 {
             start = at + 1
             break
         }

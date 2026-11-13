@@ -111,7 +111,7 @@ fake_text: fn(text: String) -> [U8] {
 
 fake_u32: fn(bytes: [U8], at: Int) -> Int {
     if at + 4 > bytes.len() -> return 0
-    Int.from_u8(bytes[at]) + (Int.from_u8(bytes[at + 1]) << 8) + (Int.from_u8(bytes[at + 2]) << 16) + (Int.from_u8(bytes[at + 3]) << 24)
+    Int{bytes[at]} + (Int{bytes[at + 1]} << 8) + (Int{bytes[at + 2]} << 16) + (Int{bytes[at + 3]} << 24)
 }
 
 fake_i32: fn(bytes: [U8], at: Int) -> Int {
@@ -253,7 +253,7 @@ fake_report: fn(&f: Fake) {
         cx: 400 - 17 - k * 28
         pixel: fake_pixel(f, chrome, cx + 11 + m, 17 + m)
         // Bytes B, G, R, A: the header's red is 0x0B, the ring's 0xEC.
-        if pixel.len() == 4 && Int.from_u8(pixel[2]) >= 128 -> ringed.push(names[k])
+        if pixel.len() == 4 && (Int{pixel[2]}) >= 128 -> ringed.push(names[k])
     }
     f.report.push("chrome at {f.shown_x},{f.shown_y}, ringed {ringed}")
 }

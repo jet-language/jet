@@ -21,8 +21,8 @@ v4: fn() -[Rand]> String UUIDError! {
     raw: random.bytes(16) ?? return Err(UUIDError{reason: "secure random unavailable"})
     if raw.len() != 16 -> return Err(UUIDError{reason: "secure random returned invalid length"})
     bytes := copy_bytes(raw)
-    bytes[6] = U8{(((Int.from_u8(bytes[6])).bit_and(15))).bit_or(64)}
-    bytes[8] = U8{(((Int.from_u8(bytes[8])).bit_and(63))).bit_or(128)}
+    bytes[6] = U8{(((Int{bytes[6]}).bit_and(15))).bit_or(64)}
+    bytes[8] = U8{(((Int{bytes[8]}).bit_and(63))).bit_or(128)}
     value: format_uuid(bytes) ?? return Err(UUIDError{reason: "invalid UUID encoding"})
     Ok(value)
 }
@@ -42,8 +42,8 @@ v7: fn(clock: &Clock) -[Rand, Time]> String UUIDError! {
         wrapping(U8{timestamp}),
     }
     loop b in tail -> bytes.push(b)
-    bytes[6] = U8{(((Int.from_u8(bytes[6])).bit_and(15))).bit_or(112)}
-    bytes[8] = U8{(((Int.from_u8(bytes[8])).bit_and(63))).bit_or(128)}
+    bytes[6] = U8{(((Int{bytes[6]}).bit_and(15))).bit_or(112)}
+    bytes[8] = U8{(((Int{bytes[8]}).bit_and(63))).bit_or(128)}
     value: format_uuid(bytes) ?? return Err(UUIDError{reason: "invalid UUID encoding"})
     Ok(value)
 }
@@ -57,8 +57,8 @@ v5: fn(namespace: String, name: String) -> String UUIDError! {
     if digest.len() != 20 -> return Err(UUIDError{reason: "invalid UUID digest length"})
     bytes := [U8]{}
     loop i in 0..<16 -> bytes.push(digest[i])
-    bytes[6] = U8{(((Int.from_u8(bytes[6])).bit_and(15))).bit_or(80)}
-    bytes[8] = U8{(((Int.from_u8(bytes[8])).bit_and(63))).bit_or(128)}
+    bytes[6] = U8{(((Int{bytes[6]}).bit_and(15))).bit_or(80)}
+    bytes[8] = U8{(((Int{bytes[8]}).bit_and(63))).bit_or(128)}
     value: format_uuid(bytes) ?? return Err(UUIDError{reason: "invalid UUID encoding"})
     Ok(value)
 }
@@ -100,7 +100,7 @@ parse_uuid: fn(text: String) -> [U8]? {
 }
 
 hex_value: fn(b: U8) -> Int? {
-    n: Int.from_u8(b)
+    n: Int{b}
     if n >= 48 && n <= 57 -> return Val(n - 48)
     if n >= 65 && n <= 70 -> return Val(n - 55)
     if n >= 97 && n <= 102 -> return Val(n - 87)
@@ -112,7 +112,7 @@ format_uuid: fn(bytes: [U8]) -> String? {
     out := [U8]{}
     loop i in 0..<16 {
         if i == 4 || i == 6 || i == 8 || i == 10 -> out.push(U8{45})
-        value: Int.from_u8(bytes[i])
+        value: Int{bytes[i]}
         out.push(hex_digit(value >> 4))
         out.push(hex_digit((value).bit_and(15)))
     }
@@ -141,6 +141,6 @@ hex_decode: fn(text: String) -> [U8]? {
     value: v7(clock) ?? panic("UUID v7")
     assert(value.starts_with("01234567-89ab-7"))
     bytes: parse_uuid(value) ?? panic("UUID encoding")
-    assert_eq(Int.from_u8(bytes[6]) >> 4, 7)
-    assert_eq(Int.from_u8(bytes[8]).bit_and(192), 128)
+    assert_eq(Int{bytes[6]} >> 4, 7)
+    assert_eq(Int{bytes[8]}.bit_and(192), 128)
 }

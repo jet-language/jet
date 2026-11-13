@@ -163,16 +163,16 @@ debug_split_expression: fn(value: String) -> DebugExpressionSplit? Never! {
     if bytes.len() == 0 || bytes.len() > DEBUG_EXPRESSION_MAX_BYTES -> return None
     root_end: debug_ident_end(bytes, 0)
     // Root must start with an ASCII letter: rejects empty, `_` and digit starts.
-    if root_end == 0 || !debug_is_ascii_alpha(Int.from_u8(bytes[0])) -> return None
+    if root_end == 0 || !debug_is_ascii_alpha(Int{bytes[0]}) -> return None
     index := root_end
     loop index < bytes.len() {
-        lead: Int.from_u8(bytes[index])
+        lead: Int{bytes[index]}
         if {
             lead == 46 -> {
                 start: index + 1
                 end: debug_ident_end(bytes, start)
                 if end == start -> return None
-                first: Int.from_u8(bytes[start])
+                first: Int{bytes[start]}
                 if !debug_is_ascii_alpha(first) && first != 95 -> return None
                 index = end
             }
@@ -181,7 +181,7 @@ debug_split_expression: fn(value: String) -> DebugExpressionSplit? Never! {
                 close: debug_index_close(bytes, start) ?? return None
                 if close == start -> return None
                 loop digit in start..<close {
-                    if !debug_is_ascii_digit(Int.from_u8(bytes[digit])) -> return None
+                    if !debug_is_ascii_digit(Int{bytes[digit]}) -> return None
                 }
                 index = close + 1
             }
@@ -201,7 +201,7 @@ debug_path_segments: fn(value: String) -> [String]? Never! {
     bytes: split.suffix.bytes()
     index := 0
     loop index < bytes.len() {
-        lead: Int.from_u8(bytes[index])
+        lead: Int{bytes[index]}
         if {
             lead == 46 -> {
                 end: debug_ident_end(bytes, index + 1)
@@ -213,7 +213,7 @@ debug_path_segments: fn(value: String) -> [String]? Never! {
                 close: debug_index_close(bytes, index + 1) ?? return None
                 if close == index + 1 -> return None
                 loop digit in (index + 1)..<close {
-                    if !debug_is_ascii_digit(Int.from_u8(bytes[digit])) -> return None
+                    if !debug_is_ascii_digit(Int{bytes[digit]}) -> return None
                 }
                 segments.push(String.from_bytes(bytes[index..<(close + 1)]) ?? return None)
                 index = close + 1
@@ -322,7 +322,7 @@ debug_scalar_class: fn(type_name: String) -> DebugScalarClass Never! {
 
 // Rust `starts_with(open) && ends_with(close)` for distinct ASCII delimiters.
 debug_delimited: fn(bytes: [U8], open: Int, close: Int) -> Bool Never! {
-    bytes.len() > 0 && Int.from_u8(bytes[0]) == open && Int.from_u8(bytes[bytes.len() - 1]) == close
+    bytes.len() > 0 && Int{bytes[0]} == open && Int{bytes[bytes.len() - 1]} == close
 }
 
 // Rust aggregate_length: strip one matching `[]`, `{}` or `()` pair (the whole
@@ -332,14 +332,14 @@ debug_aggregate_length: fn(raw: String) -> Int Never! {
     start := 0
     end := bytes.len()
     if bytes.len() > 0 {
-        first: Int.from_u8(bytes[0])
+        first: Int{bytes[0]}
         closer: if {
             first == 91 -> 93
             first == 123 -> 125
             first == 40 -> 41
             else -> -1
         }
-        if closer >= 0 && bytes.len() >= 2 && Int.from_u8(bytes[bytes.len() - 1]) == closer {
+        if closer >= 0 && bytes.len() >= 2 && (Int{bytes[bytes.len() - 1]}) == closer {
             start = 1
             end = bytes.len() - 1
         }
@@ -350,7 +350,7 @@ debug_aggregate_length: fn(raw: String) -> Int Never! {
     depth := 0
     count := 1
     loop byte in inner.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if {
             code == 91 || code == 123 || code == 40 -> {
                 // Rust u32 saturating_add.
@@ -371,11 +371,11 @@ debug_aggregate_length: fn(raw: String) -> Int Never! {
 // final backslash is preserved. Unquoted text is returned unchanged.
 debug_unquote_text: fn(raw: String) -> String Never! {
     bytes: raw.bytes()
-    if bytes.len() < 2 || Int.from_u8(bytes[0]) != 34 || Int.from_u8(bytes[bytes.len() - 1]) != 34 -> return raw.copy()
+    if bytes.len() < 2 || (Int{bytes[0]}) != 34 || (Int{bytes[bytes.len() - 1]}) != 34 -> return raw.copy()
     out := [U8]{}
     escaped := false
     loop index in 1..<(bytes.len() - 1) {
-        code: Int.from_u8(bytes[index])
+        code: Int{bytes[index]}
         if {
             escaped -> {
                 if {
@@ -402,7 +402,7 @@ debug_is_ascii_digit: fn(code: Int) -> Bool Never! { code >= 48 && code <= 57 }
 debug_ident_end: fn(bytes: [U8], start: Int) -> Int Never! {
     index := start
     loop index < bytes.len() {
-        code: Int.from_u8(bytes[index])
+        code: Int{bytes[index]}
         if !debug_is_ascii_alpha(code) && !debug_is_ascii_digit(code) && code != 95 -> return index
         index += 1
     }
@@ -414,7 +414,7 @@ debug_ident_end: fn(bytes: [U8], start: Int) -> Int Never! {
 debug_index_close: fn(bytes: [U8], start: Int) -> Int? Never! {
     index := start
     loop index < bytes.len() {
-        if Int.from_u8(bytes[index]) == 93 -> return Val(index)
+        if (Int{bytes[index]}) == 93 -> return Val(index)
         index += 1
     }
     None

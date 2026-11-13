@@ -681,7 +681,7 @@ validate_identity: fn(value: String, field: String) WebErrorPageError! {
     if value.bytes().len() > MAX_WEB_ERROR_ID_BYTES -> return Err(WebErrorPageError.TextTooLarge(field: field))
     if jettrace_has_control(value) -> return Err(WebErrorPageError.ControlCharacter(field: field))
     loop byte in value.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         // Whitespace, `<`, `>`, `"`, `'`, `` ` `` and `\` never name an identity.
         if code == 32 || code == 60 || code == 62 || code == 34 || code == 39 || code == 96 || code == 92 -> return Err(WebErrorPageError.InvalidIdentity(field: field))
     }
@@ -714,9 +714,9 @@ normalize_text: fn(value: String, field: String, limit: Int) -> String WebErrorP
     out := [U8]{}
     index := 0
     loop index < bytes.len() {
-        code: Int.from_u8(bytes[index])
+        code: Int{bytes[index]}
         if code == 194 && index + 1 < bytes.len() {
-            continuation: Int.from_u8(bytes[index + 1])
+            continuation: Int{bytes[index + 1]}
             if continuation >= 128 && continuation <= 159 {
                 out.extend(WEB_ERROR_REPLACEMENT_BYTES)
                 index += 2
@@ -736,10 +736,10 @@ normalize_text: fn(value: String, field: String, limit: Int) -> String WebErrorP
 web_error_has_disallowed_control: fn(value: String) -> Bool {
     bytes: value.bytes()
     loop index in 0..<bytes.len() {
-        code: Int.from_u8(bytes[index])
+        code: Int{bytes[index]}
         if (code <= 31 && code != 9 && code != 10 && code != 13) || code == 127 -> return true
         if code == 194 && index + 1 < bytes.len() {
-            continuation: Int.from_u8(bytes[index + 1])
+            continuation: Int{bytes[index + 1]}
             if continuation >= 128 && continuation <= 159 -> return true
         }
     }
@@ -900,7 +900,7 @@ parse_quality: fn(value: String) -> Int? {
     loop position in 0..<3 {
         digit := 0
         if position < digits.len() {
-            code: Int.from_u8(digits[position])
+            code: Int{digits[position]}
             if code < 48 || code > 57 -> return None
             digit = code - 48
         }

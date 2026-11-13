@@ -219,7 +219,7 @@ __float_text: fn(value: Float) -> String Never! {
     negative: raw[at] == (U8{45})
     if negative || raw[at] == (U8{43}) -> at += 1
     loop at < raw.len() {
-        exponent = exponent * 10 + Int.from_u8(raw[at]) - 48
+        exponent = exponent * 10 + Int{raw[at]} - 48
         at += 1
     }
     if negative -> exponent = 0 - exponent
@@ -335,9 +335,9 @@ policy_audit: fn(scope: DBScope) -[DB]> String Never! {
 
 __sql_identifier: fn(raw: [U8]) -> Bool Never! {
     if raw.len() == 0 -> return false
-    first: Int.from_u8(raw[0])
+    first: Int{raw[0]}
     if !((first >= 65 && first <= 90) || (first >= 97 && first <= 122) || first == 95) -> return false
-    loop byte in raw { if !__sql_word_byte(Int.from_u8(byte)) -> return false }
+    loop byte in raw { if !__sql_word_byte(Int{byte}) -> return false }
     true
 }
 
@@ -354,7 +354,7 @@ __SQLToken: struct {
 __sql_word_byte: fn(byte: Int) -> Bool Never! { (byte >= 48 && byte <= 57) || (byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122) || byte == 95 }
 __sql_space: fn(byte: Int) -> Bool Never! { byte == 32 || (byte >= 9 && byte <= 13) }
 __sql_lower: fn(byte: U8) -> U8 Never! {
-    value: Int.from_u8(byte)
+    value: Int{byte}
     if value >= 65 && value <= 90 -> return U8{value + 32}
     byte
 }
@@ -371,28 +371,28 @@ __bytes_text: fn(raw: [U8], start: Int, end: Int) -> String Never! {
 __sql_trimmed: fn(raw: [U8], start: Int, end: Int) -> String Never! {
     first := start
     last := end
-    loop first < last && __sql_space(Int.from_u8(raw[first])) { first += 1 }
-    loop last > first && __sql_space(Int.from_u8(raw[last - 1])) { last -= 1 }
+    loop first < last && __sql_space(Int{raw[first]}) { first += 1 }
+    loop last > first && __sql_space(Int{raw[last - 1]}) { last -= 1 }
     __bytes_text(raw, first, last)
 }
 __sql_blank: fn(raw: [U8], start: Int, end: Int) -> Bool Never! {
-    loop at in start..<end { if !__sql_space(Int.from_u8(raw[at])) -> return false }
+    loop at in start..<end { if !__sql_space(Int{raw[at]}) -> return false }
     true
 }
 __sql_find: fn(raw: [U8], from: Int, byte: Int) -> Int Never! {
-    loop at in from..<raw.len() { if Int.from_u8(raw[at]) == byte -> return at }
+    loop at in from..<raw.len() { if (Int{raw[at]}) == byte -> return at }
     -1
 }
 // Control characters by Rust `char::is_control` on UTF-8 bytes: C0, DEL and
 // C1 (C2 80-9F). `allow_whitespace` admits the whitespace controls.
 __sql_has_control: fn(raw: [U8], allow_whitespace: Bool) -> Bool Never! {
     loop at in 0..<raw.len() {
-        byte: Int.from_u8(raw[at])
+        byte: Int{raw[at]}
         whitespace: byte >= 9 && byte <= 13
         if byte < 32 && !(allow_whitespace && whitespace) -> return true
         if byte == 127 -> return true
         if byte == 194 && at + 1 < raw.len() {
-            next: Int.from_u8(raw[at + 1])
+            next: Int{raw[at + 1]}
             if next >= 128 && next <= 159 && !(allow_whitespace && next == 133) -> return true
         }
     }
@@ -402,9 +402,9 @@ __sql_skip_quoted: fn(raw: [U8], open: Int, quote: Int, limit: Int) -> Int Never
     at := open + 1
     loop at < limit {
         if {
-            Int.from_u8(raw[at]) == quote -> {
+            (Int{raw[at]}) == quote -> {
                 if {
-                    at + 1 < limit && Int.from_u8(raw[at + 1]) == quote -> {
+                    at + 1 < limit && (Int{raw[at + 1]}) == quote -> {
                         at += 2
                     }
                     else -> {
@@ -423,7 +423,7 @@ __sql_tokens: fn(raw: [U8]) -> [__SQLToken] Never! {
     tokens := [__SQLToken]{}
     at := 0
     loop at < raw.len() {
-        byte: Int.from_u8(raw[at])
+        byte: Int{raw[at]}
         if {
             byte == 39 -> {
                 at = __sql_skip_quoted(raw, at, 39, raw.len())
@@ -431,7 +431,7 @@ __sql_tokens: fn(raw: [U8]) -> [__SQLToken] Never! {
             __sql_word_byte(byte) -> {
                 start: at
                 word := [U8]{}
-                loop at < raw.len() && __sql_word_byte(Int.from_u8(raw[at])) {
+                loop at < raw.len() && __sql_word_byte(Int{raw[at]}) {
                     word.push(__sql_lower(raw[at]))
                     at += 1
                 }
@@ -447,14 +447,14 @@ __sql_tokens: fn(raw: [U8]) -> [__SQLToken] Never! {
 __sql_has_comment: fn(raw: [U8]) -> Bool Never! {
     at := 0
     loop at < raw.len() {
-        byte: Int.from_u8(raw[at])
+        byte: Int{raw[at]}
         if {
             byte == 39 -> {
                 at = __sql_skip_quoted(raw, at, 39, raw.len())
             }
             else -> {
                 if at + 1 < raw.len() {
-                    next: Int.from_u8(raw[at + 1])
+                    next: Int{raw[at + 1]}
                     if (byte == 45 && next == 45) || (byte == 47 && next == 42) || (byte == 42 && next == 47) -> return true
                 }
                 at += 1
@@ -525,7 +525,7 @@ __sql_split_trimmed: fn(raw: [U8], start: Int, end: Int) -> [String] Never! {
     parts := [String]{}
     from := start
     loop at in start..<end {
-        if Int.from_u8(raw[at]) == 44 {
+        if (Int{raw[at]}) == 44 {
             parts.push(__sql_trimmed(raw, from, at))
             from = at + 1
         }
@@ -559,7 +559,7 @@ __sql_insert_shape: fn(raw: [U8], tokens: [__SQLToken]) -> __SQLInsertShape? Nev
     loop index in 0..<columns.len() {
         column: columns[index].bytes()
         if column.len() == 0 -> return None
-        loop byte in column { if !__sql_word_byte(Int.from_u8(byte)) -> return None }
+        loop byte in column { if !__sql_word_byte(Int{byte}) -> return None }
         if cells[index] != "?" -> return None
         if owner < 0 && __sql_lower_text(columns[index]) == "owner" -> owner = index
     }
@@ -581,14 +581,14 @@ __sql_placeholders: fn(raw: [U8], end: Int) -> Int Never! {
     count := 0
     at := 0
     loop at < end {
-        byte: Int.from_u8(raw[at])
+        byte: Int{raw[at]}
         if {
             byte == 39 || byte == 34 || byte == 96 -> {
                 at = __sql_skip_quoted(raw, at, byte, end)
             }
             byte == 91 -> {
                 at += 1
-                loop at < end && Int.from_u8(raw[at]) != 93 { at += 1 }
+                loop at < end && (Int{raw[at]}) != 93 { at += 1 }
                 if at < end -> at += 1
             }
             else -> {
@@ -604,7 +604,7 @@ __sql_is_migration_metadata: fn(raw: [U8]) -> Bool Never! {
     pending := false
     loop byte in raw {
         if {
-            __sql_space(Int.from_u8(byte)) -> {
+            __sql_space(Int{byte}) -> {
                 pending = out.len() > 0
             }
             else -> {
@@ -681,7 +681,7 @@ __policy_apply: fn(sql: SQL, policy: RowPolicy, user: String, allow_schema: Bool
     }
     if user_index == sql.values.len() -> values.push(DBValue.Text(user.copy()))
     tail_start := insertion
-    loop tail_start < raw.len() && __sql_space(Int.from_u8(raw[tail_start])) { tail_start += 1 }
+    loop tail_start < raw.len() && __sql_space(Int{raw[tail_start]}) { tail_start += 1 }
     suffix: if tail_start >= raw.len() -> "" else -> " {__bytes_text(raw, tail_start, raw.len())}"
     if where_index >= 0 {
         condition: __sql_trimmed(raw, tokens[where_index].end, insertion)
@@ -689,7 +689,7 @@ __policy_apply: fn(sql: SQL, policy: RowPolicy, user: String, allow_schema: Bool
         return Ok(SQL{text: "{__bytes_text(raw, 0, tokens[where_index].start)}WHERE ({condition}) AND owner = ?{suffix}", values: values})
     }
     head_end := insertion
-    loop head_end > 0 && __sql_space(Int.from_u8(raw[head_end - 1])) { head_end -= 1 }
+    loop head_end > 0 && __sql_space(Int{raw[head_end - 1]}) { head_end -= 1 }
     Ok(SQL{text: "{__bytes_text(raw, 0, head_end)} WHERE owner = ?{suffix}", values: values})
 }
 
@@ -1065,7 +1065,7 @@ migrate: fn(scope: DBScope, name: String, steps: [SQL]) -[DB, Time.Wait]> Int DB
 
 // FNV-1a 64 identities, byte-compatible with the existing migration ledgers.
 __fnv_offset: fn() -> U64 Never! { U64{14695981039346656037} }
-__fnv_byte: fn(hash: U64, byte: Int) -> U64 Never! { (hash.bit_xor(U64{byte})).wrapping_mul(U64{1099511628211}) }
+__fnv_byte: fn(hash: U64, byte: Int) -> U64 Never! { wrapping((hash.bit_xor(U64{byte})) * U64{1099511628211}) }
 __hash_field: fn(hash: U64, value: String) -> U64 Never! {
     bytes: value.bytes()
     out := hash
@@ -1074,13 +1074,13 @@ __hash_field: fn(hash: U64, value: String) -> U64 Never! {
         out = __fnv_byte(out, length.bit_and(255))
         length = length >> 8
     }
-    loop byte in bytes -> out = __fnv_byte(out, Int.from_u8(byte))
+    loop byte in bytes -> out = __fnv_byte(out, Int{byte})
     __fnv_byte(out, 255)
 }
 __float_bits_text: fn(value: Float) -> String Never! {
     bits: math.to_bits(value)
     if bits >= 0 -> return "{bits}"
-    unsigned: U64{bits + 9223372036854775807 + 1}.wrapping_add(U64{9223372036854775808})
+    unsigned: wrapping(U64{bits + 9223372036854775807 + 1} + U64{9223372036854775808})
     "{unsigned}"
 }
 __hash_value: fn(hash: U64, value: DBValue) -> U64 Never! {
@@ -1092,7 +1092,7 @@ __hash_value: fn(hash: U64, value: DBValue) -> U64 Never! {
         .Bool(flag) -> __hash_field(hash, if flag -> "B1" else -> "B0")
         .Blob(bytes) -> {
             out := __hash_field(hash, "X")
-            loop byte in bytes -> out = __fnv_byte(out, Int.from_u8(byte))
+            loop byte in bytes -> out = __fnv_byte(out, Int{byte})
             __fnv_byte(out, 255)
         }
     }
@@ -1107,7 +1107,7 @@ __hex16: fn(hash: U64) -> String Never! {
     digits: "0123456789abcdef".bytes()
     out := [U8]{}
     loop index in 0..<16 {
-        nibble: Int.from_u64((hash >> (60 - index * 4)).bit_and(U64{15}))
+        nibble: Int{(hash >> (60 - index * 4)).bit_and(U64{15})}
         out.push(digits[nibble])
     }
     String.from_bytes(out) ?? ""
@@ -1440,7 +1440,7 @@ __dyn_value: fn(value: DBValue) -> Dyn Never! {
         .Bool(flag) -> Dyn.Bool(flag)
         .Blob(bytes) -> {
             items := [Dyn]{}
-            loop byte in bytes -> items.push(Dyn.Int(Int.from_u8(byte)))
+            loop byte in bytes -> items.push(Dyn.Int(Int{byte}))
             Dyn.Array(items)
         }
     }

@@ -61,7 +61,7 @@ Question: struct {
     end: Int
 }
 
-byte: fn(value: Int) -> U8 { U8.from_int(value % 256) ?? U8{0} }
+byte: fn(value: Int) -> U8 { checked(U8{value % 256}) ?? U8{0} }
 
 v4: fn(a: Int, b: Int, c: Int, d: Int) -> Record {
     Record{kind: 1, data: [U8]{byte(a), byte(b), byte(c), byte(d)}}
@@ -172,13 +172,13 @@ with_byte: fn(bytes: [U8], at: Int, value: Int) -> [U8] {
     out
 }
 
-bumped: fn(bytes: [U8], at: Int) -> [U8] { with_byte(bytes, at, Int.from_u8(bytes[at]) + 1) }
+bumped: fn(bytes: [U8], at: Int) -> [U8] { with_byte(bytes, at, Int{bytes[at]} + 1) }
 
 // The question's name bytes (12 up to `end`) in lowercase.
 lowered: fn(bytes: [U8], end: Int) -> [U8] {
     out := bytes.copy()
     loop i in 12..<end {
-        c: Int.from_u8(out[i])
+        c: Int{out[i]}
         if c >= 65 && c <= 90 -> out[i] = byte(c + 32)
     }
     out
@@ -209,7 +209,7 @@ forgeries: fn(query: [U8], asked: Question) -> [[U8]] {
     name: asked.name
     all: name == "onlyforged.evil"
     if all || name == "wrongid.evil" -> out.push(bumped(encode(query, asked, answer([Record]{v4(6, 6, 6, 1)})), 1))
-    if all || name == "notreply.evil" -> out.push(with_byte(encode(query, asked, answer([Record]{v4(6, 6, 6, 2)})), 2, Int.from_u8(query[2]) % 2))
+    if all || name == "notreply.evil" -> out.push(with_byte(encode(query, asked, answer([Record]{v4(6, 6, 6, 2)})), 2, Int{query[2]} % 2))
     if all || name == "short.evil" -> out.push(slice(encode(query, asked, answer([Record]{v4(6, 6, 6, 3)})), 0, 11))
     if all || name == "wrongname.evil" -> out.push(renamed(query, asked, answer([Record]{v4(6, 6, 6, 4)})))
     if all || name == "wrongtype.evil" -> out.push(encode(with_byte(query, asked.end - 3, 28), asked, answer([Record]{v4(6, 6, 6, 5)})))
@@ -242,16 +242,16 @@ broken: fn(query: [U8], asked: Question, tcp: Bool) -> [U8]? {
 question: fn(query: [U8]) -> Question? {
     at := 12
     name := ""
-    loop at < query.len() && Int.from_u8(query[at]) != 0 {
+    loop at < query.len() && (Int{query[at]}) != 0 {
         from: at + 1
-        to: from + Int.from_u8(query[at])
+        to: from + Int{query[at]}
         if to > query.len() -> return None
         label: (String.from_bytes(slice(query, from, to)) ?? return None).to_lower()
         name = if name == "" -> label else -> "{name}.{label}"
         at = to
     }
     if at + 5 > query.len() -> return None
-    Val(Question{name: name, kind: Int.from_u8(query[at + 1]) * 256 + Int.from_u8(query[at + 2]), end: at + 5})
+    Val(Question{name: name, kind: Int{query[at + 1]} * 256 + Int{query[at + 2]}, end: at + 5})
 }
 
 slice: fn(bytes: [U8], from: Int, to: Int) -> [U8] {
@@ -267,7 +267,7 @@ encode: fn(query: [U8], asked: Question, reply: Reply) -> [U8] {
     loop record in reply.records {
         if record.kind == asked.kind || record.kind == 5 -> records.push(record.copy())
     }
-    flags: 128 + Int.from_u8(query[2]) % 2 + (if reply.truncated -> 2 else -> 0)
+    flags: 128 + Int{query[2]} % 2 + (if reply.truncated -> 2 else -> 0)
     out := [U8]{query[0], query[1], byte(flags), byte(128 + reply.rcode), 0, 1, byte(records.len() /% 256), byte(records.len() % 256), 0, 0, 0, 0}
     loop b in slice(query, 12, asked.end) -> out.push(b)
     loop record in records {
@@ -306,7 +306,7 @@ tcp_answer: fn(stream: &TCPStream) -> Bool {
         if chunk.len() == 0 -> return true
         loop b in chunk -> pending.push(b)
         loop pending.len() >= 2 {
-            size: Int.from_u8(pending[0]) * 256 + Int.from_u8(pending[1])
+            size: Int{pending[0]} * 256 + Int{pending[1]}
             if pending.len() < size + 2 -> break
             query: slice(pending, 2, size + 2)
             pending = slice(pending, size + 2, pending.len())

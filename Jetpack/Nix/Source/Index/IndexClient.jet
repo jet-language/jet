@@ -528,7 +528,7 @@ nix_index_parse_decimal: fn(text: String) -> Int? Never! {
     if digits.len() == 0 -> return None
     value := 0
     loop byte in digits {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if !nixeval_is_ascii_digit(code) -> return None
         value = value * 10 + code - 48
     }
@@ -542,7 +542,7 @@ nix_index_parse_generation: fn(line: String) -> Int? Never! {
 
 nix_index_is_hex: fn(text: String) -> Bool Never! {
     loop byte in text.bytes() {
-        if !nixeval_is_ascii_hexdigit(Int.from_u8(byte)) -> return false
+        if !nixeval_is_ascii_hexdigit(Int{byte}) -> return false
     }
     true
 }

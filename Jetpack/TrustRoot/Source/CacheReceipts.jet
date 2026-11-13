@@ -184,7 +184,7 @@ trust_blank_or_multiline: fn(value: String) -> Bool Never! {
 
 trust_has_carriage_return: fn(value: String) -> Bool Never! {
     loop byte in value.bytes() {
-        if Int.from_u8(byte) == 13 -> return true
+        if (Int{byte}) == 13 -> return true
     }
     false
 }
@@ -193,10 +193,10 @@ trust_has_carriage_return: fn(value: String) -> Bool Never! {
 trust_has_control: fn(value: String) -> Bool Never! {
     raw: value.bytes()
     loop index in 0..<raw.len() {
-        code: Int.from_u8(raw[index])
+        code: Int{raw[index]}
         if code < 32 || code == 127 -> return true
         if code == 194 && index + 1 < raw.len() {
-            next_code: Int.from_u8(raw[index + 1])
+            next_code: Int{raw[index + 1]}
             if next_code >= 128 && next_code <= 159 -> return true
         }
     }
@@ -232,7 +232,7 @@ trust_cache_role_component: fn(role: String) TrustRootError! {
     raw: role.bytes()
     valid := raw.len() > 0 && raw.len() <= 128
     loop byte in raw {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         word: (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 45 || code == 95 || code == 46
         if !word -> valid = false
     }
@@ -442,7 +442,7 @@ trust_root_lines: fn(text: String) -> [String] Never! {
         piece: pieces[index]
         if index == pieces.len() - 1 && piece == "" -> break
         raw: piece.bytes()
-        carriage_return: raw.len() > 0 && Int.from_u8(raw[raw.len() - 1]) == 13
+        carriage_return: raw.len() > 0 && Int{raw[raw.len() - 1]} == 13
         line: if carriage_return -> String.from_bytes(raw[0..<(raw.len() - 1)]) ?? piece else -> piece
         lines.push(line)
     }

@@ -75,7 +75,7 @@ link_debug_bytes: fn(c: &LinkContext, debug: LinkDebug, pieces: &LinkPieces, tex
 link_debug_le: fn(bytes: [U8], at: Int, width: Int) -> Int Never! {
     if at < 0 || at + width > bytes.len() -> return -1
     value := 0
-    loop k in 0..<width -> value = value.bit_or(Int.from_u8(bytes[at + k]) << (8 * k))
+    loop k in 0..<width -> value = value.bit_or(Int{bytes[at + k]} << (8 * k))
     value
 }
 
@@ -92,7 +92,7 @@ link_debug_uleb: fn(bytes: [U8], at: &Int) -> Int Never! {
     value := 0
     shift := 0
     loop at < bytes.len() {
-        byte: Int.from_u8(bytes[at])
+        byte: Int{bytes[at]}
         at += 1
         if shift < 56 -> value = value.bit_or(byte.bit_and(127) << shift)
         shift += 7
@@ -114,7 +114,7 @@ link_debug_leb_end: fn(bytes: [U8], at: Int) -> Int Never! {
 link_debug_cstr_end: fn(bytes: [U8], at: Int) -> Int Never! {
     end := at
     loop end < bytes.len() {
-        if Int.from_u8(bytes[end]) == 0 -> return end + 1
+        if (Int{bytes[end]}) == 0 -> return end + 1
         end += 1
     }
     bytes.len() + 1
@@ -178,7 +178,7 @@ link_debug_abbrevs: fn(bytes: [U8], from: Int) -> LinkAbbrevs? Never! {
         if table.entries.get(code) != .None -> return None
         table.entries.add(code, table.tags.len()).drop("checked absent above")
         table.tags.push(die)
-        table.children.push(Int.from_u8(bytes[at]) != 0)
+        table.children.push(Int{bytes[at]} != 0)
         at += 1
         table.starts.push(table.attributes.len())
         loop {
@@ -262,7 +262,7 @@ link_info_plan: fn(info: [U8], abbrev: [U8], text_start: Int, text_end: Int) -> 
         length: link_debug_le(info, unit, 4)
         if length < 8 || length >= 0xfffffff0 || unit + 4 + length > info.len() -> return None
         end: unit + 4 + length
-        if link_debug_le(info, unit + 4, 2) != 5 || Int.from_u8(info[unit + 6]) != 1 || Int.from_u8(info[unit + 7]) != 8 -> return None
+        if link_debug_le(info, unit + 4, 2) != 5 || (Int{info[unit + 6]}) != 1 || (Int{info[unit + 7]}) != 8 -> return None
         table: link_debug_abbrevs(abbrev, link_debug_le(info, unit + 8, 4)) ?? return None
         plan.units.push(unit)
         pos := unit + 12
@@ -363,10 +363,10 @@ link_line_prune: fn(line: &[U8], text_start: Int, text_end: Int, moved: &[Int:In
     loop at < line.len() {
         unit: at
         length: link_debug_le(line, unit, 4)
-        if length < 14 || length >= 0xfffffff0 || unit + 4 + length > line.len() || link_debug_le(line, unit + 4, 2) != 5 || Int.from_u8(line[unit + 6]) != 8 -> return
+        if length < 14 || length >= 0xfffffff0 || unit + 4 + length > line.len() || link_debug_le(line, unit + 4, 2) != 5 || (Int{line[unit + 6]}) != 8 -> return
         end: unit + 4 + length
         program: unit + 12 + link_debug_le(line, unit + 8, 4)
-        opcode_base: Int.from_u8(line[unit + 17])
+        opcode_base: Int{line[unit + 17]}
         if opcode_base < 1 || unit + 18 + opcode_base - 1 > program || program > end -> return
         olds.push(unit)
         news.push(kept.len())
@@ -379,12 +379,12 @@ link_line_prune: fn(line: &[U8], text_start: Int, text_end: Int, moved: &[Int:In
             ended := false
             loop !ended {
                 if pos >= end -> return
-                op: Int.from_u8(line[pos])
+                op: Int{line[pos]}
                 pos += 1
                 if op == 0 {
                     size: link_debug_uleb(line, pos)
                     if size < 1 || pos + size > end -> return
-                    sub: Int.from_u8(line[pos])
+                    sub: Int{line[pos]}
                     // DW_LNE_set_address: the sequence's first decides.
                     if sub == 2 && !addressed && size == 9 {
                         address = link_debug_addr(line, pos + 1)
@@ -396,7 +396,7 @@ link_line_prune: fn(line: &[U8], text_start: Int, text_end: Int, moved: &[Int:In
                     // DW_LNS_fixed_advance_pc: a uhalf operand.
                     pos += 2
                 } else if op < opcode_base {
-                    loop _ in 0..<Int.from_u8(line[unit + 17 + op]) -> pos = link_debug_leb_end(line, pos)
+                    loop _ in 0..<(Int{line[unit + 17 + op]}) -> pos = link_debug_leb_end(line, pos)
                 }
             }
             if pos > end -> return
@@ -415,7 +415,7 @@ link_line_prune: fn(line: &[U8], text_start: Int, text_end: Int, moved: &[Int:In
 link_list_end: fn(lists: [U8], from: Int, end: Int) -> Int Never! {
     at := from
     loop at < end {
-        kind: Int.from_u8(lists[at])
+        kind: Int{lists[at]}
         at += 1
         // DW_LLE_end_of_list.
         if kind == 0 -> return at

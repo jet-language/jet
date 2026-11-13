@@ -257,7 +257,7 @@ provider_registry_parse_u64: fn(text: String) -> Int? Never! {
     raw: digits.bytes()
     if raw.len() == 0 -> return None
     loop byte in raw {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if code < 48 || code > 57 -> return None
     }
     parsed: Int.parse(digits) ?? return None
@@ -277,7 +277,7 @@ provider_registry_valid_hex: fn(value: String, length: Int) -> Bool Never! {
     raw: value.bytes()
     if raw.len() != length -> return false
     loop byte in raw {
-        if !provider_registry_is_hex(Int.from_u8(byte)) -> return false
+        if !provider_registry_is_hex(Int{byte}) -> return false
     }
     true
 }
@@ -311,7 +311,7 @@ provider_registry_crlf_to_lf: fn(text: String) -> String Never! {
     raw: text.bytes()
     out := [U8]{}
     loop index in 0..<raw.len() {
-        if Int.from_u8(raw[index]) == 13 && pkg_bytes_code(raw, index + 1) == 10 -> next
+        if (Int{raw[index]}) == 13 && pkg_bytes_code(raw, index + 1) == 10 -> next
         out.push(raw[index])
     }
     pkg_bytes_text(out, 0, out.len())
@@ -541,7 +541,7 @@ provider_registry_authority_of: fn(url: String) -> String RegistryError! {
     raw: rest.bytes()
     end := 0
     loop end < raw.len() {
-        code: Int.from_u8(raw[end])
+        code: Int{raw[end]}
         if code == 47 || code == 63 || code == 35 -> break
         end += 1
     }
@@ -574,10 +574,10 @@ provider_registry_ipv4_octets: fn(text: String) -> [Int]? Never! {
     loop part in parts {
         raw: part.bytes()
         if raw.len() == 0 || raw.len() > 3 -> return None
-        if raw.len() > 1 && Int.from_u8(raw[0]) == 48 -> return None
+        if raw.len() > 1 && (Int{raw[0]}) == 48 -> return None
         value := 0
         loop byte in raw {
-            code: Int.from_u8(byte)
+            code: Int{byte}
             if code < 48 || code > 57 -> return None
             value = value * 10 + (code - 48)
         }
@@ -596,7 +596,7 @@ provider_registry_valid_host: fn(authority: String) -> Bool Never! {
         if raw.len() == 0 || raw.len() > 63 -> return false
         if label.starts_with("-") || label.ends_with("-") -> return false
         loop byte in raw {
-            code: Int.from_u8(byte)
+            code: Int{byte}
             if !provider_registry_is_ascii_alnum(code) && code != 45 -> return false
         }
     }
@@ -737,7 +737,7 @@ RegistryTarPreflight: struct {
     header: fn(&self, header: [U8]) RegistryError! {
         zero := true
         loop byte in header {
-            if Int.from_u8(byte) != 0 {
+            if (Int{byte}) != 0 {
                 zero = false
                 break
             }
@@ -749,7 +749,7 @@ RegistryTarPreflight: struct {
         self.entries += 1
         if self.entries > PROVIDER_MAX_ARCHIVE_ENTRIES -> return Err(RegistryError.Reason("source archive has too many entries"))
         stored: provider_registry_tar_number(header[124..<136])
-        kind: Int.from_u8(header[156])
+        kind: Int{header[156]}
         // `x`, `g`, `L`, `K`: PAX records and GNU long names/links.
         metadata: kind == 120 || kind == 103 || kind == 76 || kind == 75
         logical: if self.pax_logical_size == {
@@ -805,10 +805,10 @@ provider_registry_pax_logical_size: fn(text: String) -> Int? Never! {
 // A tar numeric field: base-256 when the high bit is set, else octal text
 // padded with NUL or space.
 provider_registry_tar_number: fn(field: View<U8>) -> Int RegistryError! {
-    if field.len() > 0 && Int.from_u8(field[0]) >= 128 {
-        value := Int.from_u8(field[0]) - 128
+    if field.len() > 0 && (Int{field[0]}) >= 128 {
+        value := Int{field[0]} - 128
         loop index in 1..<field.len() {
-            byte: Int.from_u8(field[index])
+            byte: Int{field[index]}
             if value > (9223372036854775807 - byte) /% 256 -> return Err(RegistryError.Reason("tar size overflows"))
             value = value * 256 + byte
         }
@@ -816,15 +816,15 @@ provider_registry_tar_number: fn(field: View<U8>) -> Int RegistryError! {
     }
     start := 0
     end := field.len()
-    loop start < end && (Int.from_u8(field[start]) == 0 || Int.from_u8(field[start]) == 32) -> start += 1
-    loop end > start && (Int.from_u8(field[end - 1]) == 0 || Int.from_u8(field[end - 1]) == 32) -> end -= 1
+    loop start < end && (Int{field[start]} == 0 || Int{field[start]} == 32) -> start += 1
+    loop end > start && (Int{field[end - 1]} == 0 || Int{field[end - 1]} == 32) -> end -= 1
     text: String.from_bytes(field[start..<end].copy()) ?? return Err(RegistryError.Reason("tar size is not ASCII"))
     digits: text.removeprefix("+")
     if text == "" -> return Ok(0)
     if digits == "" -> return Err(RegistryError.Reason("tar size is malformed"))
     value := 0
     loop byte in digits.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if code < 48 || code > 55 -> return Err(RegistryError.Reason("tar size is malformed"))
         if value > (9223372036854775807 - (code - 48)) /% 8 -> return Err(RegistryError.Reason("tar size is malformed"))
         value = value * 8 + (code - 48)
@@ -888,7 +888,7 @@ provider_registry_tar_members: fn(stream: [U8]) -> [RegistryTarMember] RegistryE
         start: at + PROVIDER_TAR_BLOCK
         if stored > PROVIDER_MAX_ARCHIVE_ENTRY_BYTES || stored > stream.len() - start -> return Err(unreadable)
         at = start + (stored + 511) /% 512 * 512
-        flag: Int.from_u8(header[156])
+        flag: Int{header[156]}
         payload: stream[start..<(start + stored)]
         if flag == {
             120 -> {
@@ -915,7 +915,7 @@ provider_registry_tar_members: fn(stream: [U8]) -> [RegistryTarMember] RegistryE
 
 provider_registry_tar_zero: fn(header: [U8]) -> Bool Never! {
     loop byte in header {
-        if Int.from_u8(byte) != 0 -> return false
+        if (Int{byte}) != 0 -> return false
     }
     true
 }
@@ -928,7 +928,7 @@ provider_registry_tar_checksum_valid: fn(header: [U8]) -> Bool Never! {
     }
     sum := 0
     loop index in 0..<PROVIDER_TAR_BLOCK {
-        sum += if index >= 148 && index < 156 -> 32 else -> Int.from_u8(header[index])
+        sum += if index >= 148 && index < 156 -> 32 else -> (Int{header[index]})
     }
     sum == recorded
 }
@@ -936,7 +936,7 @@ provider_registry_tar_checksum_valid: fn(header: [U8]) -> Bool Never! {
 // A NUL-terminated header or long-name field.
 provider_registry_tar_text: fn(field: [U8]) -> String RegistryError! {
     end := 0
-    loop end < field.len() && Int.from_u8(field[end]) != 0 -> end += 1
+    loop end < field.len() && (Int{field[end]}) != 0 -> end += 1
     text: String.from_bytes(field[0..<end]) ?? return Err(RegistryError.Reason("tar entry name is not UTF-8"))
     Ok(text)
 }
@@ -958,13 +958,13 @@ provider_registry_pax_path: fn(records: [U8]) -> String? RegistryError! {
     at := 0
     loop at < records.len() {
         space := at
-        loop space < records.len() && Int.from_u8(records[space]) != 32 -> space += 1
+        loop space < records.len() && (Int{records[space]}) != 32 -> space += 1
         if space == records.len() -> return Err(bad)
         digits: String.from_bytes(records[at..<space]) ?? return Err(bad)
         length: provider_registry_parse_u64(digits) ?? return Err(bad)
         if length <= space - at + 1 || length > records.len() - at -> return Err(bad)
         end: at + length - 1
-        if Int.from_u8(records[end]) != 10 -> return Err(bad)
+        if (Int{records[end]}) != 10 -> return Err(bad)
         text: String.from_bytes(records[(space + 1)..<end]) ?? return Err(RegistryError.Reason("tar PAX metadata is not UTF-8"))
         field: text.split_once("=") ?? return Err(bad)
         if field.before == "path" -> found = Val(field.after)

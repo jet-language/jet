@@ -109,7 +109,7 @@ Plan: struct {
 
 byte: fn(bytes: [U8], at: Int) -> Int Never! {
     if at < 0 || at >= bytes.len() -> return -1
-    Int.from_u8(bytes[at])
+    Int{bytes[at]}
 }
 
 is_name_byte: fn(code: Int) -> Bool Never! {
@@ -132,7 +132,7 @@ slice: fn(bytes: [U8], start: Int, end: Int) -> String {
 word_at: fn(bytes: [U8], at: Int, word: String) -> Bool Never! {
     want: word.bytes()
     loop (offset, code) in want {
-        if byte(bytes, at + offset) != Int.from_u8(code) -> return false
+        if byte(bytes, at + offset) != (Int{code}) -> return false
     }
     !is_name_byte(byte(bytes, at + want.len()))
 }
@@ -208,7 +208,7 @@ previous_visible: fn(bytes: [U8], at: Int) -> Int Never! {
 
 blank: fn(bytes: &[U8], start: Int, end: Int) Never! {
     loop index in start..<end {
-        if index < bytes.len() && Int.from_u8(bytes[index]) != 10 -> bytes[index] = U8{32}
+        if index < bytes.len() && (Int{bytes[index]}) != 10 -> bytes[index] = U8{32}
     }
 }
 

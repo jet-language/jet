@@ -325,7 +325,7 @@ primary_rank: fn(scalar: String) -> Int Never! {
     at: ROOT_PRIMARY_ORDER.find(folded)
     if at >= 0 && folded.count_bytes() == 1 -> return at
     rank := 0
-    loop byte in folded.bytes() -> rank = rank * 256 + Int.from_u8(byte)
+    loop byte in folded.bytes() -> rank = rank * 256 + (Int{byte})
     ROOT_PRIMARY_ORDER.count_bytes() + rank
 }
 
@@ -1058,9 +1058,9 @@ static_text_literal: fn(source: String, what: String) -> String Problem! {
         bytes := [U8]{}
         at := 0
         loop at < body.len() {
-            code: Int.from_u8(body[at])
+            code: Int{body[at]}
             if code == 92 && at + 1 < body.len() {
-                escaped: Int.from_u8(body[at + 1])
+                escaped: Int{body[at + 1]}
                 plain: if escaped == {
                     110 -> 10
                     92 -> 92
@@ -1071,7 +1071,7 @@ static_text_literal: fn(source: String, what: String) -> String Problem! {
                 at += 2
                 next
             }
-            if (code == 123 || code == 125) && at + 1 < body.len() && Int.from_u8(body[at + 1]) == code {
+            if (code == 123 || code == 125) && at + 1 < body.len() && (Int{body[at + 1]}) == code {
                 bytes.push(U8{code})
                 at += 2
                 next

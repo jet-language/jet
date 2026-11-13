@@ -348,7 +348,7 @@ recipe_safe_plan_component: fn(value: String) -> String Never! {
     output := ""
     loop scalar in value.chars() {
         text: "{scalar}"
-        code: if text.bytes().len() == 1 -> Int.from_u8(text.bytes()[0]) else -> 0
+        code: if text.bytes().len() == 1 -> (Int{text.bytes()[0]}) else -> 0
         keep: (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 45 || code == 95
         output = if keep -> "{output}{text}" else -> "{output}_"
     }

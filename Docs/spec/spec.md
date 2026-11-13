@@ -970,9 +970,8 @@ index, a slice bound, a division, a shift amount, an exponent, an allocation
 size, an indirect call target, a `?` or a `??` (E0737); must not be held in an
 `Int` or a `Float` (E0738); and must not reach a checked `+`, `-` or `*` outside
 `wrapping(...)`, `saturating(...)` or a wrapping or saturating arithmetic mode
-(E0739); `wrapping_add`, `wrapping_sub` and `wrapping_mul` never stop. A
-list's or a string's length is public whatever its contents carry
-(D-SECRET-CT1).
+(E0739). A list's or a string's length is public whatever its contents
+carry (D-SECRET-CT1).
 
 A branch on a `.Fixed` value whose arms are total is masked, not refused. A
 total arm only binds names, assigns to local names, and reads literals, names
@@ -1294,7 +1293,7 @@ bound, and any exit: `return`, `break`, `next`, a diverging call), only the
 part of its interval that the guard lets through, for the rest of the block:
 
 ```jet
-channel: Int.from_u8(byte)
+channel: Int{byte}
 if channel >= channels.len() -> return Err("bad channel")
 channels[channel] += U64{1}
 ```

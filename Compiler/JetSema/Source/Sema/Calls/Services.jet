@@ -78,11 +78,11 @@ sema_services_valid_name: fn(value: String) -> Bool Never! {
     if bytes.len() > 256 -> return false
     index := 0
     loop index < bytes.len() {
-        code := Int.from_u8(bytes[index])
+        code := Int{bytes[index]}
         if code < 32 || code == 127 -> return false
         // Rust char::is_control includes the C1 control range U+0080..U+009F.
         if code == 194 && index + 1 < bytes.len() {
-            next_code := Int.from_u8(bytes[index + 1])
+            next_code := Int{bytes[index + 1]}
             if next_code >= 128 && next_code <= 159 -> return false
         }
         index += 1

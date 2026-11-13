@@ -684,11 +684,11 @@ ir_precise_rendered_owners: fn(ty: Type, owners: &[String]) Never! {
 // target keeps its declaration, without stripping the owner's own arguments.
 ir_core_reach_template_key: fn(key: String) -> String Never! {
     bytes: key.bytes()
-    if bytes.len() == 0 || Int.from_u8(bytes[bytes.len() - 1]) != 62 -> return key.copy()
+    if bytes.len() == 0 || (Int{bytes[bytes.len() - 1]}) != 62 -> return key.copy()
     depth := 0
     position := bytes.len() - 1
     loop position >= 0 {
-        byte: Int.from_u8(bytes[position])
+        byte: Int{bytes[position]}
         if byte == 62 -> depth += 1
         if byte == 60 {
             depth -= 1

@@ -12,8 +12,8 @@ pkg_fetch_git_has_control: fn(text: String) -> Bool Never! {
     bytes: text.bytes()
     if bytes.len() < 3 -> return false
     loop index in 0..<(bytes.len() - 2) {
-        if Int.from_u8(bytes[index]) == 226 && Int.from_u8(bytes[index + 1]) == 128 {
-            last: Int.from_u8(bytes[index + 2])
+        if (Int{bytes[index]}) == 226 && (Int{bytes[index + 1]}) == 128 {
+            last: Int{bytes[index + 2]}
             if last == 168 || last == 169 -> return true
         }
     }
@@ -53,7 +53,7 @@ pkg_fetch_git_transport: fn(root: String, url: String) -[FS, Env, Net, Time.Wait
         user: parts.before
         if scheme != "ssh" || user == "" || user.starts_with("-") -> return Err(pkg_fetch_git_bad("SSH user-info must be a safe username"))
         loop byte in user.bytes() {
-            code: Int.from_u8(byte)
+            code: Int{byte}
             if !((code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 46 || code == 95 || code == 45) -> return Err(pkg_fetch_git_bad("SSH user-info must be a safe username"))
         }
         authority = parts.after

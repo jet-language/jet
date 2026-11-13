@@ -138,14 +138,14 @@ tree_files: fn(directory: String, keep: fn(String) -> Bool) -> [String] {
 le: fn(b: [U8], at: Int, width: Int) -> Int {
     if at < 0 || at + width > b.len() -> return -1
     value := 0
-    loop k in 0..<width -> value = value * 256 + Int.from_u8(b[at + width - 1 - k])
+    loop k in 0..<width -> value = value * 256 + (Int{b[at + width - 1 - k]})
     value
 }
 
 // The NUL-terminated name at `at`, ending at `end` at the latest.
 c_string: fn(b: [U8], at: Int, end: Int) -> String {
     stop := at
-    loop stop < end && Int.from_u8(b[stop]) != 0 -> stop += 1
+    loop stop < end && (Int{b[stop]}) != 0 -> stop += 1
     String.from_bytes_lossy(b.slice(at, stop))
 }
 
@@ -744,7 +744,7 @@ run: fn() {
 put: fn(b: &[U8], at: Int, width: Int, value: Int) {
     rest := value
     loop k in 0..<width {
-        b[at + k] = U8.from_int(rest % 256) ?? U8{0}
+        b[at + k] = checked(U8{rest % 256}) ?? U8{0}
         rest /%= 256
     }
 }

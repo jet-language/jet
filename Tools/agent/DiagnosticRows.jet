@@ -203,9 +203,9 @@ registry_text: fn(body: String, fields: [String], context: String) -> String Dia
     out := [U8]{}
     index := 0
     loop index < bytes.len() {
-        byte: Int.from_u8(bytes[index])
+        byte: Int{bytes[index]}
         // `\`, `{{` and `}}` copy two bytes as written.
-        if byte == 92 || ((byte == 123 || byte == 125) && index + 1 < bytes.len() && Int.from_u8(bytes[index + 1]) == byte) {
+        if byte == 92 || ((byte == 123 || byte == 125) && index + 1 < bytes.len() && Int{bytes[index + 1]} == byte) {
             out.push(bytes[index])
             if index + 1 < bytes.len() -> out.push(bytes[index + 1])
             index += 2
@@ -218,7 +218,7 @@ registry_text: fn(body: String, fields: [String], context: String) -> String Dia
             next
         }
         close := index + 1
-        loop close < bytes.len() && Int.from_u8(bytes[close]) != 125 -> close += 1
+        loop close < bytes.len() && (Int{bytes[close]}) != 125 -> close += 1
         if close >= bytes.len() -> return Err(rows_fail("{context}: an unclosed `{{` hole"))
         hole: String.from_bytes(bytes.slice(index + 1, close)) ?? return Err(rows_fail("{context}: a hole is not UTF-8"))
         if !hole.starts_with("self.") -> return Err(rows_fail("{context}: the hole `{{{hole}}}` reads something other than a `self` field"))
@@ -238,14 +238,14 @@ display_text: fn(text: String, context: String) -> String DiagnosticRowsError! {
     out := [U8]{}
     index := 0
     loop index < bytes.len() {
-        byte: Int.from_u8(bytes[index])
-        paired: index + 1 < bytes.len() && (byte == 92 || ((byte == 123 || byte == 125) && Int.from_u8(bytes[index + 1]) == byte))
+        byte: Int{bytes[index]}
+        paired: index + 1 < bytes.len() && (byte == 92 || ((byte == 123 || byte == 125) && Int{bytes[index + 1]} == byte))
         if !paired {
             out.push(bytes[index])
             index += 1
             next
         }
-        after: Int.from_u8(bytes[index + 1])
+        after: Int{bytes[index + 1]}
         if byte != 92 || after == 34 || after == 92 {
             out.push(bytes[index + 1])
         } else if after == 110 {
@@ -587,26 +587,26 @@ REPORT_OPENERS: [String]{"Error [", "Warning [", "Stop [", "Lint ["}
 
 code_byte: fn(byte: Int) -> Bool Never! { (byte >= 65 && byte <= 90) || (byte >= 48 && byte <= 57) || byte == 45 }
 
-digits: fn(text: String) -> Bool Never! { text.bytes().all(fn(byte) { Int.from_u8(byte) >= 48 && Int.from_u8(byte) <= 57 }) }
+digits: fn(text: String) -> Bool Never! { text.bytes().all(fn(byte) { Int{byte} >= 48 && Int{byte} <= 57 }) }
 
 // A code a report header may print: an uppercase letter, then uppercase
 // letters, digits and dashes.
 report_code: fn(code: String) -> Bool Never! {
     bytes: code.bytes()
-    if bytes.len() == 0 || Int.from_u8(bytes[0]) < 65 || Int.from_u8(bytes[0]) > 90 -> return false
-    bytes.all(fn(byte) { code_byte(Int.from_u8(byte)) })
+    if bytes.len() == 0 || (Int{bytes[0]}) < 65 || (Int{bytes[0]}) > 90 -> return false
+    bytes.all(fn(byte) { code_byte(Int{byte}) })
 }
 
 // A code a source names: `E`, `L` or `W` and four digits, `JT` and four
 // digits, or `E-`/`L-` and two or more dash-separated uppercase words.
 source_code: fn(code: String) -> Bool Never! {
     bytes: code.bytes()
-    first: if bytes.len() > 0 -> Int.from_u8(bytes[0]) else -> 0
+    first: if bytes.len() > 0 -> (Int{bytes[0]}) else -> 0
     if bytes.len() == 5 && (first == 69 || first == 76 || first == 87) && digits(String.from_bytes(bytes.slice(1, 5)) ?? "") -> return true
     if bytes.len() == 6 && code.starts_with("JT") && digits(text_after(code, "JT")) -> return true
     if !code.starts_with("E-") && !code.starts_with("L-") -> return false
     words: (String.from_bytes(bytes.slice(2, bytes.len())) ?? "").split("-").to_list()
-    words.len() >= 2 && words.all(fn(word) { word != "" && word.bytes().all(fn(byte) { code_byte(Int.from_u8(byte)) && Int.from_u8(byte) != 45 }) })
+    words.len() >= 2 && words.all(fn(word) { word != "" && word.bytes().all(fn(byte) { code_byte(Int{byte}) && Int{byte} != 45 }) })
 }
 
 add_code: fn(codes: &[String], code: String) {
@@ -617,14 +617,14 @@ add_code: fn(codes: &[String], code: String) {
 source_codes: fn(text: String, codes: &[String]) {
     bytes: text.bytes()
     loop (index, raw) in bytes {
-        byte: Int.from_u8(raw)
+        byte: Int{raw}
         if byte != 34 && byte != 91 -> next
         close: if byte == 34 -> 34 else -> 93
         end := index + 1
-        loop end < bytes.len() && code_byte(Int.from_u8(bytes[end])) {
+        loop end < bytes.len() && code_byte(Int{bytes[end]}) {
             end += 1
         }
-        if end == index + 1 || end >= bytes.len() || Int.from_u8(bytes[end]) != close -> next
+        if end == index + 1 || end >= bytes.len() || (Int{bytes[end]}) != close -> next
         code: String.from_bytes(bytes.slice(index + 1, end)) ?? next
         if source_code(code) -> add_code(codes, code)
     }
@@ -1008,15 +1008,15 @@ line_literals: fn(line: String, jet: Bool) -> [String] Never! {
     found := [String]{}
     index := 0
     loop index < bytes.len() {
-        if Int.from_u8(bytes[index]) != 34 {
+        if (Int{bytes[index]}) != 34 {
             index += 1
             next
         }
         out := [U8]{}
         index += 1
-        loop index < bytes.len() && Int.from_u8(bytes[index]) != 34 {
-            byte: Int.from_u8(bytes[index])
-            paired: index + 1 < bytes.len() && Int.from_u8(bytes[index + 1]) == byte
+        loop index < bytes.len() && (Int{bytes[index]}) != 34 {
+            byte: Int{bytes[index]}
+            paired: index + 1 < bytes.len() && Int{bytes[index + 1]} == byte
             if jet && (byte == 123 || byte == 125) && paired {
                 out.push(bytes[index])
                 index += 2
@@ -1027,7 +1027,7 @@ line_literals: fn(line: String, jet: Bool) -> [String] Never! {
                 index += 1
                 next
             }
-            after: Int.from_u8(bytes[index + 1])
+            after: Int{bytes[index + 1]}
             index += 2
             value := -1
             if after == 110 {
@@ -1038,20 +1038,20 @@ line_literals: fn(line: String, jet: Bool) -> [String] Never! {
                 value = 13
             } else if after == 34 || after == 92 {
                 value = after
-            } else if after == 120 && index + 1 < bytes.len() && hex_digit(Int.from_u8(bytes[index])) >= 0 && hex_digit(Int.from_u8(bytes[index + 1])) >= 0 {
-                value = hex_digit(Int.from_u8(bytes[index])) * 16 + hex_digit(Int.from_u8(bytes[index + 1]))
+            } else if after == 120 && index + 1 < bytes.len() && hex_digit(Int{bytes[index]}) >= 0 && hex_digit(Int{bytes[index + 1]}) >= 0 {
+                value = hex_digit(Int{bytes[index]}) * 16 + hex_digit(Int{bytes[index + 1]})
                 index += 2
             } else if after >= 48 && after <= 55 {
                 value = after - 48
                 digits := 1
-                loop digits < 3 && index < bytes.len() && Int.from_u8(bytes[index]) >= 48 && Int.from_u8(bytes[index]) <= 55 {
-                    value = value * 8 + Int.from_u8(bytes[index]) - 48
+                loop digits < 3 && index < bytes.len() && (Int{bytes[index]}) >= 48 && (Int{bytes[index]}) <= 55 {
+                    value = value * 8 + Int{bytes[index]} - 48
                     index += 1
                     digits += 1
                 }
             }
             if value >= 0 && value <= 255 {
-                out.push(U8.from_int(value) ?? bytes[index - 1])
+                out.push(checked(U8{value}) ?? bytes[index - 1])
             } else {
                 out.push(bytes[index - 2])
                 out.push(bytes[index - 1])
@@ -1371,13 +1371,13 @@ cited_codes: fn(line: String) -> [String] Never! {
     bytes: line.bytes()
     found := [String]{}
     loop (index, byte) in bytes {
-        head: Int.from_u8(byte)
+        head: Int{byte}
         if (head != 69 && head != 76) || index + 5 > bytes.len() -> next
-        if index > 0 && (word_byte(Int.from_u8(bytes[index - 1])) || Int.from_u8(bytes[index - 1]) == 35) -> next
-        if index + 5 < bytes.len() && word_byte(Int.from_u8(bytes[index + 5])) -> next
+        if index > 0 && (word_byte(Int{bytes[index - 1]}) || Int{bytes[index - 1]} == 35) -> next
+        if index + 5 < bytes.len() && word_byte(Int{bytes[index + 5]}) -> next
         digits := true
         loop at in (index + 1)..<(index + 5) {
-            digit: Int.from_u8(bytes[at])
+            digit: Int{bytes[at]}
             if digit < 48 || digit > 57 -> digits = false
         }
         if digits -> found.push(String.from_bytes(bytes.slice(index, index + 5)) ?? "")

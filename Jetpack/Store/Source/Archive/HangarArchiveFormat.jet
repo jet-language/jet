@@ -269,7 +269,7 @@ HangarArchive: struct {
             if node_count > STORE_ARCHIVE_MAX_NODES_PER_OBJECT -> return Err(StoreError.InvalidData("archive output has too many nodes"))
             nodes := [HangarArchiveNode]{}
             loop _ in 0..<node_count {
-                kind_code: Int.from_u8(reader.byte())
+                kind_code: Int{reader.byte()}
                 path: reader.string()
                 store_archive_validate_relative(path)
                 mode: reader.u32()
@@ -288,12 +288,12 @@ HangarArchive: struct {
             store_archive_validate_no_path_collisions(nodes)
             objects.push(HangarArchiveObject{id, digest, meta, root_mode, nodes})
         }
-        trailer: Int.from_u8(reader.byte())
+        trailer: Int{reader.byte()}
         nix_manifest := NixClosureManifest?{None}
         signature_tag := trailer
         if trailer == STORE_ARCHIVE_NIX_MANIFEST_TRAILER {
             nix_manifest = Val(NixClosureManifest.decode_from(reader))
-            signature_tag = Int.from_u8(reader.byte())
+            signature_tag = Int{reader.byte()}
         }
         if signature_tag != 0 && signature_tag != 1 -> return Err(StoreError.InvalidData("archive has an unknown signature trailer"))
         signature := HangarArchiveSignature?{None}
@@ -356,7 +356,7 @@ HangarArchiveReader: struct {
     u32: fn(&self) -> Int StoreError! {
         taken: self.take_bytes(4)
         value := 0
-        loop index in 0..<4 -> value = (value).bit_or((Int.from_u8(taken[index]) << (8 * index)))
+        loop index in 0..<4 -> value = (value).bit_or((Int{taken[index]} << (8 * index)))
         Ok(value)
     }
 
@@ -365,7 +365,7 @@ HangarArchiveReader: struct {
     u64: fn(&self) -> Int StoreError! {
         taken: self.take_bytes(8)
         value := 0
-        loop index in 0..<8 -> value = (value).bit_or((Int.from_u8(taken[index]) << (8 * index)))
+        loop index in 0..<8 -> value = (value).bit_or((Int{taken[index]} << (8 * index)))
         Ok(value)
     }
 
@@ -406,7 +406,7 @@ store_archive_put_string: fn(out: &[U8], value: String) StoreError! {
 // Whether `raw` holds an ASCII control byte (C0 or DEL).
 store_archive_has_ascii_control: fn(raw: [U8]) -> Bool Never! {
     loop byte in raw {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if code < 32 || code == 127 -> return true
     }
     false
@@ -430,7 +430,7 @@ store_archive_validate_digest: fn(value: String) StoreError! {
     valid := value.starts_with("sha256-") && raw.len() == 71
     if valid {
         loop index in 7..<71 {
-            if !store_archive_is_hex_digit(Int.from_u8(raw[index])) -> valid = false
+            if !store_archive_is_hex_digit(Int{raw[index]}) -> valid = false
         }
     }
     if !valid -> return Err(StoreError.InvalidData("invalid output digest `{value}`"))

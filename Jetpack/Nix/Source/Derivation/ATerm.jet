@@ -170,7 +170,7 @@ nix_aterm_escaped: fn(text: String) -> String Never! {
     out := [U8]{}
     nixeval_push_byte(out, 34)
     loop byte in text.bytes() {
-        if Int.from_u8(byte) == {
+        if (Int{byte}) == {
             34 -> nixeval_push_text(out, "\\\"")
             92 -> nixeval_push_text(out, "\\\\")
             10 -> nixeval_push_text(out, "\\n")
@@ -218,7 +218,7 @@ NixATermCursor: struct {
         self.consume("\"")
         start: self.position
         loop self.position < self.bytes.len() {
-            if Int.from_u8(self.bytes[self.position]) == 34 {
+            if (Int{self.bytes[self.position]}) == 34 {
                 text: nixeval_slice(self.bytes, start, self.position)
                 self.position += 1
                 return Ok(text)

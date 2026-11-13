@@ -1996,7 +1996,7 @@ point_read_binary: fn(grp: EcpGroup, buf: [U8]) -> Point EcpError! {
             }
             if buf[0] == (U8{2}) || buf[0] == (U8{3}) {
                 if ilen != 1 + plen -> return Err(.BadInput)
-                y: derive_y(grp, x, Int.from_u8(buf[0].bit_and(U8{1})))
+                y: derive_y(grp, x, Int{buf[0].bit_and(U8{1})})
                 return Ok(Point{x: x, y: y, z: bn.from_int(1)})
             }
             Err(.BadInput)
@@ -2009,7 +2009,7 @@ point_read_binary: fn(grp: EcpGroup, buf: [U8]) -> Point EcpError! {
 /// many bytes, and the count of bytes used (mbedtls_ecp_tls_read_point).
 tls_read_point: fn(grp: EcpGroup, buf: [U8]) -> (pt: Point, used: Int) EcpError! {
     if buf.len() < 2 -> return Err(.BadInput)
-    data_len: Int.from_u8(buf[0])
+    data_len: Int{buf[0]}
     if data_len < 1 || data_len > buf.len() - 1 -> return Err(.BadInput)
     pt: point_read_binary(grp, cipher.bytes_of(buf, 1, data_len))
     Ok((pt: pt, used: 1 + data_len))
@@ -2028,8 +2028,8 @@ tls_write_point: fn(grp: EcpGroup, pt: Point, format: PointFormat, blen: Int) ->
 /// (mbedtls_ecp_tls_read_group_id).
 tls_read_group_id: fn(buf: [U8]) -> (id: GroupID, used: Int) EcpError! {
     if buf.len() < 3 -> return Err(.BadInput)
-    if Int.from_u8(buf[0]) != TLS_NAMED_CURVE -> return Err(.BadInput)
-    tls_id: Int.from_u8(buf[1]) * 256 + Int.from_u8(buf[2])
+    if (Int{buf[0]}) != TLS_NAMED_CURVE -> return Err(.BadInput)
+    tls_id: Int{buf[1]} * 256 + Int{buf[2]}
     info: curve_info_from_tls_id(tls_id) ?? return Err(.FeatureUnavailable)
     Ok((id: info.grp_id, used: 3))
 }

@@ -702,7 +702,7 @@ __app_hex_digit: fn(value: Int) -> U8 Never! {
 __app_json_string: fn(value: String) -> String Never! {
     out := [U8]{34}
     loop byte in value.bytes() {
-        n: Int.from_u8(byte)
+        n: Int{byte}
         if n == 34 || n == 92 {
             out.push(U8{92})
             out.push(byte)
@@ -727,7 +727,7 @@ __app_json_string: fn(value: String) -> String Never! {
 __app_html_attr: fn(value: String) -> String Never! {
     out := [U8]{}
     loop byte in value.bytes() {
-        n: Int.from_u8(byte)
+        n: Int{byte}
         if n == 38 {
             __app_push(out, "&amp;")
         } else if n == 60 {
@@ -781,11 +781,11 @@ __app_route_identity: fn(path: String, handler: String) -> String Never! {
     bytes.push(U8{0})
     loop byte in handler.bytes() -> bytes.push(byte)
     loop byte in bytes {
-        hash = (hash.bit_xor(U64{Int.from_u8(byte)})).wrapping_mul(U64{1099511628211})
+        hash = wrapping((hash.bit_xor(U64{Int{byte}})) * U64{1099511628211})
     }
     out := [U8]{}
     loop index in 0..<16 {
-        out.push(__app_hex_digit(Int.from_u64((hash >> (60 - index * 4)).bit_and(U64{15}))))
+        out.push(__app_hex_digit(Int{(hash >> (60 - index * 4)).bit_and(U64{15})}))
     }
     "route-{String.from_bytes(out) ?? ""}"
 }
@@ -1308,11 +1308,11 @@ __openapi_operation_id: fn(name: String, path: String) -> String Never! {
     loop byte in path.bytes() -> bytes.push(byte)
     hash := U64{14695981039346656037}
     loop byte in bytes {
-        hash = (hash.bit_xor(U64{Int.from_u8(byte)})).wrapping_mul(U64{1099511628211})
+        hash = wrapping((hash.bit_xor(U64{Int{byte}})) * U64{1099511628211})
     }
     out := [U8]{}
     loop index in 0..<16 {
-        out.push(__app_hex_digit(Int.from_u64((hash >> (60 - index * 4)).bit_and(U64{15}))))
+        out.push(__app_hex_digit(Int{(hash >> (60 - index * 4)).bit_and(U64{15})}))
     }
     "jet_{name}_{String.from_bytes(out) ?? ""}"
 }

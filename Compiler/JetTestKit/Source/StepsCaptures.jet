@@ -292,7 +292,7 @@ kit_steps_capture_value: fn(words: [String], context: KitStepCtx, state: KitStep
             replacement: kit_steps_range_word(words[7], state.captures) ?? return kit_steps_capture_failure("ERROR", "replace-range text capture unavailable")
             bytes: text.bytes()
             if start < 0 || end < start || end > bytes.len() -> return kit_steps_capture_failure("FAIL", "replace-range invalid span")
-            if (start < bytes.len() && Int.from_u8(bytes[start]) >= 128 && Int.from_u8(bytes[start]) < 192) || (end < bytes.len() && Int.from_u8(bytes[end]) >= 128 && Int.from_u8(bytes[end]) < 192) -> return kit_steps_capture_failure("FAIL", "replace-range not on UTF-8 boundaries")
+            if (start < bytes.len() && Int{bytes[start]} >= 128 && Int{bytes[start]} < 192) || (end < bytes.len() && Int{bytes[end]} >= 128 && Int{bytes[end]} < 192) -> return kit_steps_capture_failure("FAIL", "replace-range not on UTF-8 boundaries")
             return kit_steps_capture_result("{kit_steps_byte_slice(text, 0, start)}{replacement}{kit_steps_byte_slice(text, end, text.count_bytes())}")
         }
         if kind == "tree-contents" {

@@ -16,7 +16,7 @@ STRIDE: 816
 // A running checksum of `bytes` on top of `h`.
 mix: fn(h: Int, bytes: [U8]) -> Int {
     out := h
-    loop byte in bytes -> out = (out * 31 + Int.from_u8(byte) + 1) % 2147483647
+    loop byte in bytes -> out = (out * 31 + Int{byte} + 1) % 2147483647
     out
 }
 
@@ -41,7 +41,7 @@ masks: fn(name: String, face: font.Face) {
             h = mix(h, [U8]{U8{mask.width.bit_and(255)}, U8{mask.height.bit_and(255)}, U8{(mask.left + 128).bit_and(255)}, U8{(mask.top + 128).bit_and(255)}})
             h = mix(h, mask.coverage)
             loop c in mask.coverage {
-                if Int.from_u8(c) != 0 -> inked += 1
+                if (Int{c}) != 0 -> inked += 1
             }
         }
     }
@@ -73,7 +73,7 @@ run: fn() {
     padding := 0
     loop row in 0..<HEIGHT {
         loop k in (WIDTH * 4)..<STRIDE {
-            if Int.from_u8(pixels[row * STRIDE + k]) != 7 -> padding += 1
+            if (Int{pixels[row * STRIDE + k]}) != 7 -> padding += 1
         }
     }
     print("canvas checksum {mix(0, pixels)}, {padding} padding bytes changed")

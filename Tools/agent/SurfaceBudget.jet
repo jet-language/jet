@@ -245,14 +245,14 @@ public_functions: fn(text: String) -> Int Never! {
     loop line in text.lines() {
         declaration: line.removeprefix("pub ")
         bytes: declaration.bytes()
-        first: if bytes.len() == 0 -> 0 else -> Int.from_u8(bytes[0])
+        first: if bytes.len() == 0 -> 0 else -> (Int{bytes[0]})
         if first < 97 || first > 122 -> next
         colon: declaration.find(": fn")
         if colon < 0 -> next
         name: String.from_bytes_lossy(bytes[0..<colon])
         plain := true
         loop byte in name.bytes() {
-            code: Int.from_u8(byte)
+            code: Int{byte}
             if !((code >= 97 && code <= 122) || (code >= 48 && code <= 57) || code == 95) -> plain = false
         }
         rest: String.from_bytes_lossy(bytes[colon + 4..<bytes.len()])

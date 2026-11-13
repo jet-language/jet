@@ -23,7 +23,7 @@ SHA256_H0: #run { [Int]{
 } }
 
 sha256_word: fn(bytes: View<U8>, offset: Int) -> U32 Never! {
-    (U32.from_u8(bytes[offset]) << 24).bit_or((U32.from_u8(bytes[offset + 1]) << 16)).bit_or((U32.from_u8(bytes[offset + 2]) << 8)).bit_or(U32.from_u8(bytes[offset + 3]))
+    (U32{bytes[offset]} << 24).bit_or((U32{bytes[offset + 1]} << 16)).bit_or((U32{bytes[offset + 2]} << 8)).bit_or(U32{bytes[offset + 3]})
 }
 
 sha256_compress: fn(state: &[U32], words: &[U32], k: [U32], block: View<U8>, offset: Int) Never! {
@@ -31,7 +31,7 @@ sha256_compress: fn(state: &[U32], words: &[U32], k: [U32], block: View<U8>, off
     loop index in 16..<64 {
         s0: ((words[index - 15].rotate_right(7)).bit_xor(words[index - 15].rotate_right(18))).bit_xor((words[index - 15] >> 3))
         s1: ((words[index - 2].rotate_right(17)).bit_xor(words[index - 2].rotate_right(19))).bit_xor((words[index - 2] >> 10))
-        words[index] = words[index - 16].wrapping_add(s0).wrapping_add(words[index - 7]).wrapping_add(s1)
+        words[index] = wrapping(wrapping(wrapping(words[index - 16] + s0) + words[index - 7]) + s1)
     }
 
     a := state[0]
@@ -45,27 +45,27 @@ sha256_compress: fn(state: &[U32], words: &[U32], k: [U32], block: View<U8>, off
     loop index in 0..<64 {
         s1: ((e.rotate_right(6)).bit_xor(e.rotate_right(11))).bit_xor(e.rotate_right(25))
         ch: (((e).bit_and(f))).bit_xor(((((e).bit_xor(U32{0xffffffff}))).bit_and(g)))
-        temp1: h.wrapping_add(s1).wrapping_add(ch).wrapping_add(k[index]).wrapping_add(words[index])
+        temp1: wrapping(wrapping(wrapping(wrapping(h + s1) + ch) + k[index]) + words[index])
         s0: ((a.rotate_right(2)).bit_xor(a.rotate_right(13))).bit_xor(a.rotate_right(22))
         maj: ((((a).bit_and(b))).bit_xor(((a).bit_and(c)))).bit_xor(((b).bit_and(c)))
-        temp2: s0.wrapping_add(maj)
+        temp2: wrapping(s0 + maj)
         h = g
         g = f
         f = e
-        e = d.wrapping_add(temp1)
+        e = wrapping(d + temp1)
         d = c
         c = b
         b = a
-        a = temp1.wrapping_add(temp2)
+        a = wrapping(temp1 + temp2)
     }
-    state[0] = state[0].wrapping_add(a)
-    state[1] = state[1].wrapping_add(b)
-    state[2] = state[2].wrapping_add(c)
-    state[3] = state[3].wrapping_add(d)
-    state[4] = state[4].wrapping_add(e)
-    state[5] = state[5].wrapping_add(f)
-    state[6] = state[6].wrapping_add(g)
-    state[7] = state[7].wrapping_add(h)
+    state[0] = wrapping(state[0] + a)
+    state[1] = wrapping(state[1] + b)
+    state[2] = wrapping(state[2] + c)
+    state[3] = wrapping(state[3] + d)
+    state[4] = wrapping(state[4] + e)
+    state[5] = wrapping(state[5] + f)
+    state[6] = wrapping(state[6] + g)
+    state[7] = wrapping(state[7] + h)
 }
 
 sha256_bytes: fn(data: View<U8>) -> [U8] Never! {
@@ -99,7 +99,7 @@ sha256_bytes: fn(data: View<U8>) -> [U8] Never! {
     }
     output := [U8]{}
     loop lane in state {
-        word: Int.from_u32(lane)
+        word: Int{lane}
         first: ((word >> 24)).bit_and(255)
         second: ((word >> 16)).bit_and(255)
         third: ((word >> 8)).bit_and(255)
@@ -123,7 +123,7 @@ sha256_hex_bytes: fn(bytes: [U8]) -> String Never! {
     digits := [U8]{}
     digits.try_reserve(bytes.len() * 2) ?? panic("hex digit allocation failed")
     loop byte in bytes {
-        value: Int.from_u8(byte)
+        value: Int{byte}
         digits.push(sha256_hex_digit(((value >> 4)).bit_and(15)))
         digits.push(sha256_hex_digit((value).bit_and(15)))
     }

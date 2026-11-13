@@ -97,7 +97,7 @@ CoreSigRowTypes: struct {
 
 core_sig_row_code: fn(bytes: [U8], index: Int) -> Int Never! {
     if index >= bytes.len() -> return -1
-    Int.from_u8(bytes[index])
+    Int{bytes[index]}
 }
 
 core_sig_row_is_name_code: fn(code: Int) -> Bool Never! {
@@ -111,7 +111,7 @@ core_sig_row_parameters: fn(field: String) -> [String] Never! {
     depth := 0
     start := 0
     loop (index, byte) in bytes {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if code == 91 || code == 60 || code == 40 -> depth += 1
         if code == 93 || code == 62 || code == 41 -> depth -= 1
         if code == 44 && depth == 0 {
@@ -223,7 +223,7 @@ core_sig_row_atom_at: fn(bytes: [U8], start: Int) -> CoreSigRowType Never! {
         bits := 0
         digits := true
         loop byte in bytes.slice(start + 1, end) {
-            code: Int.from_u8(byte)
+            code: Int{byte}
             if code < 48 || code > 57 -> digits = false
             bits = bits * 10 + code - 48
         }

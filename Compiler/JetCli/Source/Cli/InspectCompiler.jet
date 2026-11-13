@@ -51,7 +51,7 @@ jet_cli_compiler_checked_value: fn(value: TComptimeValue) -> JetCLIStatusValue N
         .Bool(flag) -> jet_cli_status_bool(flag)
         .Char(code) -> jet_cli_status_text(comptime_char_text(code))
         .String(text) | .BigInt(text) -> jet_cli_status_text(text)
-        .Bytes(bytes) -> jet_cli_status_array(loop byte in bytes -> jet_cli_status_int(Int.from_u8(byte)))
+        .Bytes(bytes) -> jet_cli_status_array(loop byte in bytes -> jet_cli_status_int(Int{byte}))
         .List(values) -> jet_cli_status_array(loop entry in values -> jet_cli_compiler_checked_value(entry))
         .Map(entries) -> jet_cli_status_object(loop entry in entries -> jet_cli_status_field(jet_cli_compiler_key_text(entry.key), jet_cli_compiler_checked_value(entry.value)))
         .Struct(_, fields) -> {

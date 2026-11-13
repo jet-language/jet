@@ -859,7 +859,7 @@ json_string: fn(value: String) -> String Never! {
     digits: "0123456789abcdef".bytes()
     out := [U8]{U8{34}}
     loop byte in value.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if code == {
             8 -> out.extend("\\b".bytes())
             9 -> out.extend("\\t".bytes())
@@ -1004,7 +1004,7 @@ validate_url: fn(value: String, label: String, suffix: String) StageError! {
     malformed: failed("{label} is malformed")
     if value.len() > MAX_URL_BYTES -> return Err(malformed)
     loop byte in value.bytes() {
-        if Int.from_u8(byte) <= 32 || Int.from_u8(byte) == 127 -> return Err(failed("{label} is malformed"))
+        if (Int{byte}) <= 32 || (Int{byte}) == 127 -> return Err(failed("{label} is malformed"))
     }
     scheme: value.partition(":")
     if scheme.sep == "" || !SCHEME.is_match(scheme.head) -> return Err(failed("{label} is malformed"))

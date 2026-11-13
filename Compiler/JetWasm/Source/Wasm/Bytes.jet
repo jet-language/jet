@@ -69,14 +69,14 @@ WasmReader: struct {
 
     byte: fn(&self) -> Int WasmError! {
         if self.at >= self.end -> return Err(WasmError.new("unexpected end of section or function", self.at))
-        value: Int.from_u8(self.bytes[self.at])
+        value: Int{self.bytes[self.at]}
         self.at += 1
         Ok(value)
     }
 
     peek: fn(self) -> Int? {
         if self.at >= self.end -> return None
-        Val(Int.from_u8(self.bytes[self.at]))
+        Val(Int{self.bytes[self.at]})
     }
 
     // An unsigned LEB128 value of at most `bits` bits.
@@ -124,7 +124,7 @@ WasmReader: struct {
     fixed: fn(&self, count: Int) -> Int WasmError! {
         if self.end - self.at < count -> return Err(WasmError.new("unexpected end of fixed-width value", self.at))
         value := 0
-        loop k in 0..<count -> value = value.bit_or(Int.from_u8(self.bytes[self.at + k]) << (8 * k))
+        loop k in 0..<count -> value = value.bit_or(Int{self.bytes[self.at + k]} << (8 * k))
         self.at += count
         Ok(value)
     }

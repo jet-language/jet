@@ -13,7 +13,7 @@ is_jet_ident: fn(name: String) -> Bool Never! {
     bytes: name.bytes()
     if bytes.len() == 0 -> return false
     loop i in 0..<bytes.len() {
-        if !ident_byte(Int.from_u8(bytes[i]), i == 0) -> return false
+        if !ident_byte(Int{bytes[i]}, i == 0) -> return false
     }
     true
 }
@@ -73,10 +73,10 @@ validate_single_line_fragment: fn(fragment: String, label: String) String! {
 
 validate_comment_color: fn(color: String) String! {
     bytes: color.bytes()
-    ok := bytes.len() == 7 && Int.from_u8(bytes[0]) == 35
+    ok := bytes.len() == 7 && Int{bytes[0]} == 35
     if ok {
         loop i in 1..<7 {
-            byte: Int.from_u8(bytes[i])
+            byte: Int{bytes[i]}
             if !((byte >= 48 && byte <= 57) || (byte >= 65 && byte <= 70) || (byte >= 97 && byte <= 102)) -> ok = false
         }
     }
@@ -163,14 +163,14 @@ identifiers: fn(expr: String) -> [String] Never! {
     bytes: expr.bytes()
     start := -1
     loop i in 0..bytes.len() {
-        byte: if i < bytes.len() -> Int.from_u8(bytes[i]) else -> 32
+        byte: if i < bytes.len() -> (Int{bytes[i]}) else -> 32
         if ident_byte(byte, false) {
             if start < 0 -> start = i
             next
         }
         if start >= 0 {
             word: expr.slice(start, i)
-            if ident_byte(Int.from_u8(bytes[start]), true) && word != "true" && word != "false" && word != "ok" && word != "err" -> out.push(word)
+            if ident_byte(Int{bytes[start]}, true) && word != "true" && word != "false" && word != "ok" && word != "err" -> out.push(word)
             start = -1
         }
     }
@@ -225,7 +225,7 @@ replace_ident: fn(expr: String, ident: String, replacement: String) -> String Ne
     bytes: expr.bytes()
     start := -1
     loop i in 0..bytes.len() {
-        byte: if i < bytes.len() -> Int.from_u8(bytes[i]) else -> 32
+        byte: if i < bytes.len() -> (Int{bytes[i]}) else -> 32
         if ident_byte(byte, false) {
             if start < 0 -> start = i
             next
@@ -239,6 +239,7 @@ replace_ident: fn(expr: String, ident: String, replacement: String) -> String Ne
     }
     out.join("").trim_end()
 }
+
 
 required_string: fn(text: String, key: String) -> String String! {
     json_string_field(text, key) ?? return Err(edit_error("bad_request", "missing `{key}`"))
@@ -277,7 +278,7 @@ json_bool_field: fn(text: String, key: String) -> Bool? Never! {
 leading_digits: fn(text: String) -> String Never! {
     bytes: text.bytes()
     end := 0
-    loop end < bytes.len() && Int.from_u8(bytes[end]) >= 48 && Int.from_u8(bytes[end]) <= 57 -> end += 1
+    loop end < bytes.len() && (Int{bytes[end]}) >= 48 && (Int{bytes[end]}) <= 57 -> end += 1
     text.slice(0, end)
 }
 
@@ -311,7 +312,7 @@ json_array_body: fn(text: String, key: String) -> String? Never! {
     in_string := false
     escaped := false
     loop i in 0..<bytes.len() {
-        byte: Int.from_u8(bytes[i])
+        byte: Int{bytes[i]}
         if in_string {
             if {
                 escaped -> escaped = false
@@ -339,7 +340,7 @@ json_object_bodies: fn(text: String) -> [String] Never! {
     in_string := false
     escaped := false
     loop i in 0..<bytes.len() {
-        byte: Int.from_u8(bytes[i])
+        byte: Int{bytes[i]}
         if in_string {
             if {
                 escaped -> escaped = false

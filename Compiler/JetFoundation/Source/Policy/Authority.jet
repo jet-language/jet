@@ -103,7 +103,7 @@ authority_root: fn(right: String) -> String Never! {
 authority_ascii_lower: fn(value: String) -> String Never! {
     out := [U8]{}
     loop byte in value.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         out.push(if code >= 65 && code <= 90 -> U8{code + 32} else -> byte)
     }
     String.from_bytes(out) ?? value
@@ -131,7 +131,7 @@ authority_parse_right: fn(right: String) -> String? Never! {
     canonical := root.copy()
     raw: split.base.bytes()
     loop index in 0..<raw.len() {
-        if Int.from_u8(raw[index]) == 46 {
+        if (Int{raw[index]}) == 46 {
             leaf: String.from_bytes(raw[index + 1..<raw.len()]) ?? ""
             canonical = "{root}.{leaf}"
             break

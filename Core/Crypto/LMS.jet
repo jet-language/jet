@@ -92,7 +92,7 @@ push_u32_be: fn(out: &[U8], v: Int) Never! {
 }
 
 get_u32_be: fn(data: [U8], at: Int) -> Int Never! {
-    (Int.from_u8(data[at]) << 24).bit_or(Int.from_u8(data[at + 1]) << 16).bit_or(Int.from_u8(data[at + 2]) << 8).bit_or(Int.from_u8(data[at + 3]))
+    (Int{data[at]} << 24).bit_or(Int{data[at + 1]} << 16).bit_or(Int{data[at + 2]} << 8).bit_or(Int{data[at + 3]})
 }
 
 u32_bytes: fn(v: Int) -> [U8] Never! {
@@ -153,7 +153,7 @@ digit_array: fn(params: LMOTSParams, msg: [U8], sig: [U8], c_at: Int) -> [U8] Ne
     hashes.hash_update(ctx, msg)
     out := hashes.hash_finish(ctx)
     sum := 0
-    loop i in 0..<N_HASH_LEN -> sum += DIGIT_MAX - Int.from_u8(out[i])
+    loop i in 0..<N_HASH_LEN -> sum += DIGIT_MAX - (Int{out[i]})
     out.push(U8{(sum >> 8).bit_and(0xFF)})
     out.push(U8{sum.bit_and(0xFF)})
     out
@@ -173,8 +173,8 @@ hash_chains: fn(params: LMOTSParams, x: [U8], x_at: Int, min: [U8]?, max: [U8]?)
         loop k in 0..<N_HASH_LEN -> block[prefix + 3 + k] = x[x_at + i * N_HASH_LEN + k]
         block[prefix] = U8{(i >> 8).bit_and(0xFF)}
         block[prefix + 1] = U8{i.bit_and(0xFF)}
-        lo: if min == .Val(m) -> Int.from_u8(m[i]) else -> 0
-        hi: if max == .Val(m) -> Int.from_u8(m[i]) else -> DIGIT_MAX
+        lo: if min == .Val(m) -> (Int{m[i]}) else -> 0
+        hi: if max == .Val(m) -> (Int{m[i]}) else -> DIGIT_MAX
         loop j in lo..<hi {
             block[prefix + 2] = U8{j}
             step: hashes.hash(.SHA256, block)

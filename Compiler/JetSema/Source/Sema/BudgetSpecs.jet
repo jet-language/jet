@@ -596,7 +596,7 @@ sema_budget_baseline_name: fn(value: String) -> Bool Never! {
     loop segment in value.split("/") {
         if segment == "" || segment == "." || segment == ".." || segment.starts_with("-") || segment.ends_with("-") || segment.contains("--") -> return false
         loop byte in segment.bytes() {
-            code: Int.from_u8(byte)
+            code: Int{byte}
             if !(sema_budget_is_lower(code) || sema_budget_is_digit(code) || code == 45) -> return false
         }
     }
@@ -654,7 +654,7 @@ sema_budget_safe_relative_path: fn(value: String) -> Bool Never! {
 sema_budget_snake_or_kebab: fn(value: String) -> Bool Never! {
     if value == "" -> return false
     loop byte in value.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if !(sema_budget_is_lower(code) || sema_budget_is_digit(code) || code == 95 || code == 45) -> return false
     }
     true
@@ -775,7 +775,7 @@ sema_budget_profile_selector: fn(name: String, expr: Expr) -> String BudgetSpecE
 sema_budget_ascii_lower: fn(value: String) -> String Never! {
     bytes := [U8]{}
     loop byte in value.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         bytes.push(if code >= 65 && code <= 90 -> U8{code + 32} else -> byte)
     }
     String.from_bytes_lossy(bytes)
@@ -788,7 +788,7 @@ sema_budget_canonical_triple: fn(value: String) -> Bool Never! {
         if part == "" -> return false
     }
     loop byte in value.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if !(sema_budget_is_lower(code) || sema_budget_is_digit(code) || code == 95 || code == 45) -> return false
     }
     true
@@ -836,7 +836,7 @@ sema_budget_u128_max: fn() -> Int Never! {
 sema_budget_parse_u128: fn(text: String) -> Int? Never! {
     if text == "" -> return None
     loop byte in text.bytes() {
-        if !sema_budget_is_digit(Int.from_u8(byte)) -> return None
+        if !sema_budget_is_digit(Int{byte}) -> return None
     }
     value: Int.parse(text) ?? return None
     if value > sema_budget_u128_max() -> return None
@@ -892,7 +892,7 @@ BudgetPercent: struct { basis_points: Int, raw: BudgetRawQuantity }
 
 sema_budget_digits: fn(text: String) -> Bool Never! {
     loop byte in text.bytes() {
-        if !sema_budget_is_digit(Int.from_u8(byte)) -> return false
+        if !sema_budget_is_digit(Int{byte}) -> return false
     }
     true
 }
@@ -975,7 +975,7 @@ sema_budget_string_value: fn(expr: Expr) -> String? Never! {
 sema_budget_snake_case: fn(value: String) -> Bool Never! {
     if value == "" || value.ends_with("_") || value.contains("__") -> return false
     loop (index, byte) in value.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if !(sema_budget_is_lower(code) || (sema_budget_is_digit(code) && index > 0) || (code == 95 && index > 0)) -> return false
     }
     true

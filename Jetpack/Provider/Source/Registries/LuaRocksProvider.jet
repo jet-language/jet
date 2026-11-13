@@ -201,7 +201,7 @@ provider_luarocks_parse_ref: fn(raw: String) -> (name: String, version: String) 
 provider_luarocks_valid_component: fn(value: String) -> Bool Never! {
     if value == "" || value == "." || value == ".." -> return false
     loop byte in value.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if !provider_registry_is_ascii_alnum(code) && code != 46 && code != 45 && code != 95 -> return false
     }
     true
@@ -567,12 +567,12 @@ provider_luarocks_table_table: fn(raw: String, key: String) -> String RegistryEr
 provider_luarocks_parse_quoted: fn(input: String) -> (value: String, used: Int) RegistryError! {
     raw: input.trim_start().bytes()
     if raw.len() == 0 -> return Err(RegistryError.Reason("missing quoted value"))
-    quote: Int.from_u8(raw[0])
+    quote: Int{raw[0]}
     if quote != 39 && quote != 34 -> return Err(RegistryError.Reason("provider metadata requires quoted string values"))
     out := [U8]{}
     escaped := false
     loop index in 1..<raw.len() {
-        code: Int.from_u8(raw[index])
+        code: Int{raw[index]}
         if escaped {
             out.push(raw[index])
             escaped = false
@@ -600,7 +600,7 @@ provider_luarocks_balanced_table: fn(input: String) -> (inner: String, used: Int
     escaped := false
     index := 0
     loop index < bytes.len() {
-        code: Int.from_u8(bytes[index])
+        code: Int{bytes[index]}
         if quote != 0 {
             if {
                 escaped -> escaped = false
@@ -612,7 +612,7 @@ provider_luarocks_balanced_table: fn(input: String) -> (inner: String, used: Int
             if {
                 code == 39 || code == 34 -> quote = code
                 code == 45 && pkg_bytes_code(bytes, index + 1) == 45 -> {
-                    loop index < bytes.len() && Int.from_u8(bytes[index]) != 10 -> index += 1
+                    loop index < bytes.len() && (Int{bytes[index]}) != 10 -> index += 1
                     next
                 }
                 code == 123 -> depth += 1
@@ -634,7 +634,7 @@ provider_luarocks_string_values: fn(raw: String) -> [String] RegistryError! {
     bytes: raw.bytes()
     index := 0
     loop index < bytes.len() {
-        code: Int.from_u8(bytes[index])
+        code: Int{bytes[index]}
         if code == 39 || code == 34 {
             quoted: provider_luarocks_parse_quoted(provider_registry_tail(raw, index))
             out.push(quoted.value)

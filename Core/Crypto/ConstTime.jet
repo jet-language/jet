@@ -121,12 +121,16 @@ byte_if: fn(c: CtCond, if1: #Secret U8, if0: #Secret U8) -> U8 Never! {
     if1.bit_and(m).bit_or(if0.bit_and(m.bit_not()))
 }
 
+/// A byte as a word, for a secret byte a word operation uses (a total helper:
+/// a typed widening takes an untagged byte).
+byte_word: fn(x: U8) -> U64 Never! { U64{x} }
+
 /// t when low <= c <= high, else zero (mbedtls_ct_uchar_in_range_if).
 uchar_in_range_if: fn(low: U8, high: U8, c: #Secret U8, t: #Secret U8) -> U8 Never! {
-    co: U64.from_u8(c)
+    co: byte_word(c)
     // All ones from bit 8 up when the subtraction borrows.
-    low_mask: co.wrapping_sub(U64.from_u8(low)) >> 8
-    high_mask: U64.from_u8(high).wrapping_sub(co) >> 8
+    low_mask: wrapping(co - U64{low}) >> 8
+    high_mask: wrapping(U64{high} - co) >> 8
     low_byte(low_mask.bit_or(high_mask).bit_not()).bit_and(t)
 }
 
@@ -193,7 +197,7 @@ memcpy_offset: fn(dest: &[#Secret U8], doff: Int, src: [#Secret U8], soff: Int, 
 /// read and the outcome stays secret (the mask form of mbedtls_ct_memcmp).
 mem_ne: fn(a: [#Secret U8], aoff: Int, b: [#Secret U8], boff: Int, n: Int) -> CtCond Never! {
     diff := U64{0}
-    loop i in 0..<n -> diff = diff.bit_or(U64.from_u8(a[aoff + i].bit_xor(b[boff + i])))
+    loop i in 0..<n -> diff = diff.bit_or(U64{a[aoff + i].bit_xor(b[boff + i])})
     cond_of(diff)
 }
 
@@ -201,7 +205,7 @@ mem_ne: fn(a: [#Secret U8], aoff: Int, b: [#Secret U8], boff: Int, n: Int) -> Ct
 /// is read and only the outcome is published (mbedtls_ct_memcmp).
 #Scrub(Secret)
 memcmp: fn(a: [#Secret U8], aoff: Int, b: [#Secret U8], boff: Int, n: Int) -> Int Never! {
-    Int.from_u8(cond_bit(mem_ne(a, aoff, b, boff, n).mask))
+    Int{cond_bit(mem_ne(a, aoff, b, boff, n).mask)}
 }
 
 /// mbedtls_ct_memcmp over a[0..<n] and b[0..<n], ignoring the first
@@ -212,11 +216,11 @@ memcmp_partial: fn(a: [#Secret U8], b: [#Secret U8], n: Int, skip_head: Int, ski
     valid_end: n - skip_tail
     diff := U64{0}
     loop i in 0..<n {
-        d: U64.from_u8(a[i].bit_xor(b[i]))
+        d: U64{a[i].bit_xor(b[i])}
         valid: bool_and(size_ge(i, skip_head), size_lt(i, valid_end))
         diff = diff.bit_or(if_else_0(valid, d))
     }
-    Int.from_u8(cond_bit(cond_of(diff).mask))
+    Int{cond_bit(cond_of(diff).mask)}
 }
 
 /// Entry x of a table packed 1 << per_log entries to a word (entry i in

@@ -49,7 +49,7 @@ JetLiveCursor: struct { bytes: [U8], at: Int }
 jet_live_word: fn(cursor: &JetLiveCursor) -> U64 JetLiveSnapshotError! {
     if cursor.bytes.len() - cursor.at < 8 -> return Err(jet_live_error("live runtime snapshot is truncated"))
     value := U64{0}
-    loop index in 0..<8 -> value = value.bit_or(U64.from_u8(cursor.bytes[cursor.at + index]) << (index * 8))
+    loop index in 0..<8 -> value = value.bit_or(U64{cursor.bytes[cursor.at + index]} << (index * 8))
     cursor.at += 8
     Ok(value)
 }
@@ -58,19 +58,19 @@ jet_live_word: fn(cursor: &JetLiveCursor) -> U64 JetLiveSnapshotError! {
 jet_live_unsigned: fn(cursor: &JetLiveCursor) -> Int JetLiveSnapshotError! {
     value: jet_live_word(cursor)
     if value > JET_LIVE_INT_MAX -> return Ok(9223372036854775807)
-    Ok(Int.from_u64(value))
+    Ok(Int{value})
 }
 jet_live_signed: fn(cursor: &JetLiveCursor) -> Int JetLiveSnapshotError! {
     value: jet_live_word(cursor)
-    if value <= JET_LIVE_INT_MAX -> return Ok(Int.from_u64(value))
-    Ok(Int.from_u64(value - JET_LIVE_INT_MAX - U64{1}) + (-9223372036854775807 - 1))
+    if value <= JET_LIVE_INT_MAX -> return Ok(Int{value})
+    Ok(Int{value - JET_LIVE_INT_MAX - U64{1}} + (-9223372036854775807 - 1))
 }
 jet_live_raw: fn(cursor: &JetLiveCursor) -> [U8]? JetLiveSnapshotError! {
     length: jet_live_word(cursor)
     if length == JET_LIVE_ABSENT -> return Ok(None)
     if length > (U64{cursor.bytes.len() - cursor.at}) -> return Err(jet_live_error("live runtime snapshot is truncated"))
     start: cursor.at
-    cursor.at += Int.from_u64(length)
+    cursor.at += Int{length}
     Ok(Val(cursor.bytes[start..<cursor.at].copy()))
 }
 // Observe's text contract: every Unicode Cc control (C0, DEL, C1) shows as
@@ -240,7 +240,7 @@ jet_live_stat_ticks: fn(text: String) -> U64? Never! {
     value := U64{0}
     loop byte in text.bytes() {
         if byte < (U8{48}) || byte > (U8{57}) -> return None
-        digit: U64.from_u8(byte) - U64{48}
+        digit: U64{byte} - U64{48}
         if value > (U64{18446744073709551615} - digit) /% (U64{10}) -> return None
         value = value * U64{10} + digit
     }
@@ -281,7 +281,7 @@ jet_live_bind: fn(snapshot: &JetLiveSnapshot, stat: String) JetLiveSnapshotError
         start_ns: jet_live_ticks_ns(snapshot.start_ticks, hz)
         if now_ns == .Val(now) && start_ns == .Val(start) {
             elapsed: if now < start -> U64{0} else -> now - start
-            snapshot.runtime.cpu_ns = Val(if elapsed > JET_LIVE_INT_MAX -> 9223372036854775807 else -> Int.from_u64(elapsed))
+            snapshot.runtime.cpu_ns = Val(if elapsed > JET_LIVE_INT_MAX -> 9223372036854775807 else -> (Int{elapsed}))
         }
     }
     return

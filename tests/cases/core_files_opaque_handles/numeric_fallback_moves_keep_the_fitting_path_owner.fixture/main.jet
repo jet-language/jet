@@ -20,21 +20,21 @@ consume_lock: fn(&&l: FileLock) -[FS]> Int {
 }
 
 lock_byte: fn(&&l: FileLock) -[FS]> U8 {
-    U8.from_int(held()) ?? 0
+    checked(U8{held()}) ?? 0
 }
 
-// `U8.from_int(n) ?? …` builds as a range test (no Result is made). A value
+// `checked(U8{n}) ?? …` builds as a range test (no Result is made). A value
 // fallback moves the lock only where `n` does not fit: where it fits, the
 // parameter still owns the lock, which closes as this returns.
 value_fallback: fn(&&l: FileLock, n: Int) -[FS]> Int {
-    small := U8.from_int(n) ?? lock_byte(l.move())
-    Int.from_u8(small) + held()
+    small := checked(U8{n}) ?? lock_byte(l.move())
+    Int{small} + held()
 }
 
 // A `?? return` fallback is the same: it moves the lock on the leaving path.
 return_fallback: fn(&&l: FileLock, n: Int) -[FS]> Int {
-    small := U8.from_int(n) ?? return consume_lock(l.move())
-    Int.from_u8(small) + held()
+    small := checked(U8{n}) ?? return consume_lock(l.move())
+    Int{small} + held()
 }
 
 run: fn() -[IO, FS, Env]> {

@@ -4,7 +4,7 @@
 // The byte at `at` as an Int, or -1 past either end.
 rust_source_byte: fn(raw: [U8], at: Int) -> Int Never! {
     if at < 0 || at >= raw.len() -> return -1
-    Int.from_u8(raw[at])
+    Int{raw[at]}
 }
 
 // Whether `raw[at..]` begins with `prefix`.
@@ -36,7 +36,7 @@ rust_code_mask: fn(source: String) -> String Never! {
     index := 0
     loop index < bytes.len() {
         byte: bytes[index]
-        code: Int.from_u8(byte)
+        code: Int{byte}
         blank: if code == 10 -> byte else -> U8{32}
         if state == {
             .Code -> {
@@ -144,7 +144,7 @@ rust_source_push_spaces: fn(out: &[U8], count: Int) Never! {
 rust_source_all_hashes: fn(bytes: [U8], start: Int, count: Int) -> Bool Never! {
     if start + count > bytes.len() -> return false
     loop offset in 0..<count {
-        if Int.from_u8(bytes[start + offset]) != 35 -> return false
+        if (Int{bytes[start + offset]}) != 35 -> return false
     }
     true
 }

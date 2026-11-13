@@ -318,7 +318,7 @@ env_transition_read_journal: fn(path: String) -[FS]> TransitionJournal Environme
 env_transition_validate_journal_operation: fn(operation: String, path: String) EnvironmentError! {
     unsafe_name := operation == "" || operation.bytes().len() > 128
     loop byte in operation.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if !pkg_bytes_is_word(code) && code != 45 -> unsafe_name = true
     }
     if unsafe_name -> return Err(env_transition_error("journal {path} has an unsafe operation"))
@@ -335,7 +335,7 @@ env_transition_validate_journal_fingerprint: fn(fingerprint: String, field: Stri
     hex: fingerprint.removeprefix("sha256:").bytes()
     valid := hex.len() == 64
     loop byte in hex {
-        if !env_transition_is_hex(Int.from_u8(byte)) -> valid = false
+        if !env_transition_is_hex(Int{byte}) -> valid = false
     }
     if !valid -> return Err(env_transition_error("journal {path} has an invalid {field} fingerprint"))
 }
@@ -356,13 +356,13 @@ env_transition_decode_state: fn(value: String?, path: String) -> [U8]? Environme
     hex: text.removeprefix("f").bytes()
     valid := hex.len() % 2 == 0
     loop byte in hex {
-        if !env_transition_is_hex(Int.from_u8(byte)) -> valid = false
+        if !env_transition_is_hex(Int{byte}) -> valid = false
     }
     if !valid -> return Err(env_transition_error("journal {path} has invalid file bytes"))
     bytes := [U8]{}
     loop index in 0..<(hex.len() /% 2) {
-        high: env_files_hex_value(Int.from_u8(hex[index * 2]))
-        low: env_files_hex_value(Int.from_u8(hex[index * 2 + 1]))
+        high: env_files_hex_value(Int{hex[index * 2]})
+        low: env_files_hex_value(Int{hex[index * 2 + 1]})
         bytes.push(U8{high * 16 + low})
     }
     Ok(Val(bytes))

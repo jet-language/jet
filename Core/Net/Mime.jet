@@ -173,12 +173,12 @@ trim_ascii: fn(text: String) -> String Never! {
     end := raw.len()
     loop {
         if start >= end -> return ""
-        n: Int.from_u8(raw[start])
+        n: Int{raw[start]}
         if n == 32 || n == 9 || n == 10 || n == 13 -> start = start + 1 else -> break
     }
     loop {
         if end <= start -> return ""
-        n: Int.from_u8(raw[end - 1])
+        n: Int{raw[end - 1]}
         if n == 32 || n == 9 || n == 10 || n == 13 -> end = end - 1 else -> break
     }
     slice(raw, start, end)
@@ -197,7 +197,7 @@ mime_token: fn(text: String) -> Bool Never! {
     raw: text.bytes()
     if raw.len() == 0 -> return false
     loop b in raw {
-        n: Int.from_u8(b)
+        n: Int{b}
         if (n >= 65 && n <= 90) || (n >= 97 && n <= 122) || (n >= 48 && n <= 57) {
             next
         }
@@ -211,7 +211,7 @@ mime_token: fn(text: String) -> Bool Never! {
 
 index_of: fn(raw: [U8], needle: Int) -> Int Never! {
     loop i in 0..<raw.len() {
-        if Int.from_u8(raw[i]) == needle -> return i
+        if (Int{raw[i]}) == needle -> return i
     }
     -1
 }

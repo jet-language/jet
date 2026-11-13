@@ -190,7 +190,7 @@ sema_hardware_consume_dma_transfer: fn(transfer_key: String, scopes: &SemaScopeT
 sema_hardware_ascii_lower: fn(value: String) -> String Never! {
     bytes := value.bytes()
     loop index in 0..<bytes.len() {
-        code := Int.from_u8(bytes[index])
+        code := Int{bytes[index]}
         if code >= 65 && code <= 90 -> bytes[index] = U8{code + 32}
     }
     String.from_bytes(bytes) ?? value
@@ -199,7 +199,7 @@ sema_hardware_ascii_lower: fn(value: String) -> String Never! {
 sema_hardware_ascii_upper: fn(value: String) -> String Never! {
     bytes := value.bytes()
     loop index in 0..<bytes.len() {
-        code := Int.from_u8(bytes[index])
+        code := Int{bytes[index]}
         if code >= 97 && code <= 122 -> bytes[index] = U8{code - 32}
     }
     String.from_bytes(bytes) ?? value

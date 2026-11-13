@@ -258,10 +258,10 @@ cli_dashboard_sanitize: fn(value: String) -> String Never! {
 // Rust `char::is_control` over one UTF-8 encoded scalar.
 cli_dashboard_is_control: fn(bytes: [U8]) -> Bool Never! {
     if bytes.len() == 1 {
-        code: Int.from_u8(bytes[0])
+        code: Int{bytes[0]}
         return code < 32 || code == 127
     }
-    bytes.len() == 2 && Int.from_u8(bytes[0]) == 194 && Int.from_u8(bytes[1]) < 160
+    bytes.len() == 2 && Int{bytes[0]} == 194 && Int{bytes[1]} < 160
 }
 
 // Sanitize and cut to `width` scalars, ending a cut line with `…`.

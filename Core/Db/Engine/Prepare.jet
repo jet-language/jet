@@ -580,7 +580,7 @@ init_callback: fn<H: aux.Host>(h: &H, db: &conn.Conn, a: &ast.AST, data: &InitDa
     sql: argv[4] ?? [U8]{}
     if argv[3] == None {
         corrupt_schema(db, data, argv[0], argv[1], None)
-    } else if argv[4] != None && sql.len() >= 2 && init_lower(Int.from_u8(sql[0])) == 99 && init_lower(Int.from_u8(sql[1])) == 114 {
+    } else if argv[4] != None && sql.len() >= 2 && init_lower(Int{sql[0]}) == 99 && init_lower(Int{sql[1]}) == 114 {
         // A CREATE TABLE, INDEX or VIEW: with db->init.busy set, the parser
         // builds the schema object and generates no code.
         saved_i_db: db.init.i_db
@@ -1004,7 +1004,7 @@ exec_in: fn<H: aux.Host>(h: &H, db: &conn.Conn, a: &ast.AST, sql0: [U8], cb: Boo
                 rc = finalize_stmt_in<H>(h, db, s)
                 s = -1
                 pos += r.tail
-                loop pos < sql.len() && util.is_space(Int.from_u8(sql[pos])) -> pos += 1
+                loop pos < sql.len() && util.is_space(Int{sql[pos]}) -> pos += 1
                 break
             }
         }

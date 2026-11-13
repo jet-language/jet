@@ -48,7 +48,7 @@ Row: struct<T> {
     __slot: U32
 
     /// The row's position in its table: 0 for the first `add`.
-    index: fn(self) -> Int Never! { Int.from_u32(self.__slot) }
+    index: fn(self) -> Int Never! { Int{self.__slot} }
 }
 
 /// An add-only table of `T` rows, reached through the `Row<T>` handles `add`
@@ -62,7 +62,7 @@ Rows: struct<T> {
     add: fn(&self, value: &&T) -> Row<T> Never! {
         count: self.__rows.len()
         if count >= 4294967295 -> panic("Rows.add: a table holds at most 4294967295 rows")
-        slot: U32.from_int(count) ?? panic("Rows.add: a table holds at most 4294967295 rows")
+        slot: checked(U32{count}) ?? panic("Rows.add: a table holds at most 4294967295 rows")
         self.__rows.push(value)
         Row<T>{__slot: slot}
     }

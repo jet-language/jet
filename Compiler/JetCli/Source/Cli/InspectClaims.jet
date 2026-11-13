@@ -92,7 +92,7 @@ jet_cli_claim_digest: fn(value: JetCLIStatusValue?) -> String? Never! {
     text: jet_cli_status_string(value) ?? return None
     if !text.starts_with("sha256:") || text.len() != 71 -> return None
     loop byte in text.slice(7..<text.len()).bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if !((code >= 48 && code <= 57) || (code >= 65 && code <= 70) || (code >= 97 && code <= 102)) {
             return None
         }

@@ -214,14 +214,14 @@ corpus: fn() -> Corpus {
 
 le: fn(bytes: [U8], at: Int, width: Int) -> Int {
     value := 0
-    loop k in 0..<width -> value = value * 256 + Int.from_u8(bytes[at + width - 1 - k])
+    loop k in 0..<width -> value = value * 256 + (Int{bytes[at + width - 1 - k]})
     value
 }
 
 c_string: fn(bytes: [U8], at: Int) -> String {
     end := at
     loop end < bytes.len() {
-        if Int.from_u8(bytes[end]) == 0 -> break
+        if (Int{bytes[end]}) == 0 -> break
         end += 1
     }
     String.from_bytes_lossy(bytes[at..<end])
@@ -230,7 +230,7 @@ c_string: fn(bytes: [U8], at: Int) -> String {
 // The symbols of an ELF64 little-endian object: its SHT_SYMTAB section and
 // the string table it links; section index 0 marks an undefined symbol.
 elf_symbols: fn(bytes: [U8]) -> Symbols? {
-    if bytes.len() < 64 || le(bytes, 0, 4) != 0x464c457f || Int.from_u8(bytes[4]) != 2 || Int.from_u8(bytes[5]) != 1 -> return None
+    if bytes.len() < 64 || le(bytes, 0, 4) != 0x464c457f || (Int{bytes[4]}) != 2 || (Int{bytes[5]}) != 1 -> return None
     sections: le(bytes, 0x28, 8)
     entry: le(bytes, 0x3a, 2)
     count: le(bytes, 0x3c, 2)

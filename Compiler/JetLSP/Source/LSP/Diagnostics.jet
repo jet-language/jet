@@ -132,8 +132,8 @@ lsp_clamped_span: fn(src: String, span: Span) -> Span Never! {
         span.end > bytes.len() -> bytes.len()
         else -> span.end
     }
-    loop start > 0 && start < bytes.len() && (Int.from_u8(bytes[start]).bit_and(192)) == 128 -> start -= 1
-    loop end < bytes.len() && (Int.from_u8(bytes[end]).bit_and(192)) == 128 -> end += 1
+    loop start > 0 && start < bytes.len() && (Int{bytes[start]}.bit_and(192)) == 128 -> start -= 1
+    loop end < bytes.len() && (Int{bytes[end]}.bit_and(192)) == 128 -> end += 1
     Span{start: start, end: end}
 }
 

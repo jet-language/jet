@@ -1490,7 +1490,7 @@ sema_compiler_index_normalize_definition: fn(source: String) -> String Never! {
     in_string := false
     index := 0
     loop index < bytes.len() {
-        code := Int.from_u8(bytes[index])
+        code := Int{bytes[index]}
         if in_string {
             output.push(bytes[index])
             if code == 34 -> in_string = false
@@ -1503,9 +1503,9 @@ sema_compiler_index_normalize_definition: fn(source: String) -> String Never! {
             index += 1
             next
         }
-        if code == 47 && index + 1 < bytes.len() && Int.from_u8(bytes[index + 1]) == 47 {
+        if code == 47 && index + 1 < bytes.len() && (Int{bytes[index + 1]}) == 47 {
             index += 2
-            loop index < bytes.len() && Int.from_u8(bytes[index]) != 10 -> index += 1
+            loop index < bytes.len() && (Int{bytes[index]}) != 10 -> index += 1
             next
         }
         if code != 9 && code != 10 && code != 11 && code != 12 && code != 13 && code != 32 -> output.push(bytes[index])

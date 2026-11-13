@@ -331,7 +331,7 @@ store_nar_ca_is_valid: fn(ca: String) -> Bool Never! {
 // Whether `text` holds NUL or an ASCII control byte.
 store_nar_has_control: fn(text: String) -> Bool Never! {
     loop byte in text.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if code < 32 || code == 127 -> return true
     }
     false
@@ -339,7 +339,7 @@ store_nar_has_control: fn(text: String) -> Bool Never! {
 
 store_nar_is_any_hex: fn(text: String) -> Bool Never! {
     loop byte in text.bytes() {
-        if store_any_hex_value(Int.from_u8(byte)) < 0 -> return false
+        if store_any_hex_value(Int{byte}) < 0 -> return false
     }
     true
 }
@@ -391,7 +391,7 @@ store_nar_parse_signature: fn(value: String) -> NarSignature StoreError! {
 store_nar_validate_relative_url: fn(value: String) StoreError! {
     unsafe_url := value == "" || value.contains("\\") || value.contains("//") || value.ends_with("/") || value.starts_with("/") || store_nar_has_control(value)
     loop byte in value.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if code == 63 || code == 35 || code == 37 -> unsafe_url = true
     }
     loop part in value.split("/") {
@@ -410,7 +410,7 @@ store_nar_validate_store_reference: fn(value: String) StoreError! {
 store_nar_validate_nix_field_name: fn(value: String) StoreError! {
     valid := value != "" && value.bytes().len() <= 128
     loop byte in value.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if !((code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 45 || code == 95) -> valid = false
     }
     if !valid -> return Err(store_nar_invalid("narinfo field name is invalid"))
@@ -443,9 +443,9 @@ store_nar_parse_nix_hash: fn(value: String, field: String) -> String StoreError!
 
 store_nar_parse_nix_size: fn(value: String, field: String) -> Int StoreError! {
     raw: value.bytes()
-    canonical := raw.len() > 0 && !(raw.len() > 1 && Int.from_u8(raw[0]) == 48)
+    canonical := raw.len() > 0 && !(raw.len() > 1 && Int{raw[0]} == 48)
     loop byte in raw {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if code < 48 || code > 57 -> canonical = false
     }
     if !canonical -> return Err(store_nar_invalid("Nix narinfo {field} is not canonical base-10"))
@@ -546,7 +546,7 @@ store_decode_sha256: fn(value: String) -> [U8]? Never! {
         raw: text.bytes()
         if raw.len() == 64 && store_nar_is_any_hex(text) {
             out := [U8]{}
-            loop index in 0..<32 -> out.push(U8{store_any_hex_value(Int.from_u8(raw[index * 2])) * 16 + store_any_hex_value(Int.from_u8(raw[index * 2 + 1]))})
+            loop index in 0..<32 -> out.push(U8{store_any_hex_value(Int{raw[index * 2]}) * 16 + store_any_hex_value(Int{raw[index * 2 + 1]})})
             return Val(out)
         }
         return store_decode_nix_base32(text)
@@ -596,7 +596,7 @@ store_encode_nix_base32: fn(value: [U8]) -> String Never! {
         digit := 0
         loop offset in 0..<5 {
             target: bit + offset
-            if target < 256 && ((Int.from_u8(value[target /% 8])).bit_and((1 << (target % 8)))) != 0 -> digit = (digit).bit_or((1 << offset))
+            if target < 256 && ((Int{value[target /% 8]}).bit_and((1 << (target % 8)))) != 0 -> digit = (digit).bit_or((1 << offset))
         }
         out.push(alphabet[digit])
     }

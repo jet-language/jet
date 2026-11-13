@@ -25,7 +25,7 @@ Base64Error: struct {
 rewrap: fn(reason: String) -> Base64Error Never! { Base64Error{reason: reason} }
 
 
-u8_int: fn(b: U8) -> Int Never! { Int.from_u8(b) }
+u8_int: fn(b: U8) -> Int Never! { Int{b} }
 
 encode: fn(data: [U8]) -> String Never! {
     encode_alphabet(data, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/", true)
@@ -168,7 +168,7 @@ C_L64A_ALPHABET: "./0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwx
 // The radix-64 digit of one a64l character: not part of the base64 surface.
 priv radix64: module {
     l64a_digit: fn(byte: U8) -> Int? Never! {
-        n: Int.from_u8(byte)
+        n: Int{byte}
         if n == 46 || n == 47 -> return Val(n - 46)
         if n >= 48 && n <= 57 -> return Val(n - 48 + 2)
         if n >= 65 && n <= 90 -> return Val(n - 65 + 12)
@@ -362,7 +362,7 @@ encode_alphabet: fn(data: [U8], alphabet: String, padded: Bool) -> String Never!
 }
 
 alphabet_value: fn(byte: U8, url: Bool) -> Int? Never! {
-    n: Int.from_u8(byte)
+    n: Int{byte}
     if n >= 65 && n <= 90 -> return Val(n - 65)
     if n >= 97 && n <= 122 -> return Val(n - 97 + 26)
     if n >= 48 && n <= 57 -> return Val(n - 48 + 52)
@@ -372,7 +372,7 @@ alphabet_value: fn(byte: U8, url: Bool) -> Int? Never! {
 }
 
 ascii_space: fn(byte: U8) -> Bool Never! {
-    n: Int.from_u8(byte)
+    n: Int{byte}
     n == 32 || (n >= 9 && n <= 13)
 }
 
@@ -384,7 +384,7 @@ decode_error: fn(url: Bool, offset: Int, reason: String) -> Base64Error Never! {
 invalid_byte: fn(url: Bool, offset: Int, byte: U8) -> Base64Error Never! {
     alphabet: if url -> "URL-safe base64" else -> "standard base64"
     digits: "0123456789ABCDEF".bytes()
-    n: Int.from_u8(byte)
+    n: Int{byte}
     pair: String.from_bytes([U8]{digits[n >> 4], digits[n.bit_and(15)]}) ?? ""
     decode_error(url, offset, "byte 0x{pair} is not in the {alphabet} alphabet")
 }

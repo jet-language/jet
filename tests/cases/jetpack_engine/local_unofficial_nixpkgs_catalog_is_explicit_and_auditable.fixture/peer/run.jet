@@ -104,7 +104,7 @@ peer_nix_base32: fn(bytes: [U8]) -> String {
         digit := 0
         loop offset in 0..<5 {
             target: bit + offset
-            if target < 256 && Int.from_u8(bytes[target /% 8]).bit_and(1 << (target % 8)) != 0 -> digit = digit.bit_or(1 << offset)
+            if target < 256 && (Int{bytes[target /% 8]}).bit_and(1 << (target % 8)) != 0 -> digit = digit.bit_or(1 << offset)
         }
         out.push(alphabet[digit])
     }

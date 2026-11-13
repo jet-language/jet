@@ -33,7 +33,7 @@
 //   then `drop total` (optional) and `move total <- s`;
 // - a count: `t <- e == v` (either order) with `v` of e's type and
 //   unchanged by the Loop, or `t <- w == v` with `w` an Int a Copy or
-//   Move widens an unsigned one-byte e to (`Int.from_u8(e) == v`; then the
+//   Move widens an unsigned one-byte e to (`Int{e} == v`; then the
 //   Loop may also drop `w`), then an If on `t` with no Else whose body is
 //   the exact Int add of 1 in either form above (and the Const 1);
 // - a fill: x is a Bool, Char, Int or word `v` the Loop does not change,
@@ -99,7 +99,7 @@ use {
 
 // The leaves, as an IRReduceLoop's `kind`: the int sum; the counts of
 // one-byte (Word or Bool), Int and 8-byte word elements, and of unsigned
-// bytes widened to Int (`Int.from_u8(b) == v`); the fills of 1-, 2-, 4- and
+// bytes widened to Int (`Int{b} == v`); the fills of 1-, 2-, 4- and
 // 8-byte words (IR_REDUCE_FILL + log2 of the width) and of Ints.
 IR_REDUCE_SUM: 0
 IR_REDUCE_COUNT_BYTES: 1
@@ -628,7 +628,7 @@ ir_reduce_fill_update: fn(m: IRModule, f: IRFunction, at: Int, end: Int, body: [
 
 // The loaded element a count's test reads through `slot`: `slot` itself
 // when the Loop loads it, or the unsigned byte the Loop loads and Copies
-// or Moves into the Int `slot` (`Int.from_u8(b)`: an Int in 0..=255);
+// or Moves into the Int `slot` (`Int{b}`: an Int in 0..=255);
 // -1 for neither.
 ir_reduce_element: fn(m: IRModule, f: IRFunction, at: Int, end: Int, slot: Int) -> Int Never! {
     def: ir_reduce_def(f, at, end, slot)

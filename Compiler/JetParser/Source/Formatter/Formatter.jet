@@ -550,7 +550,7 @@ jfmt_rfind_or: fn(f: JetFmt, end: Int, needle: String, fallback: Int) -> Int Nev
 jfmt_keyword_before: fn(f: JetFmt, at: Int, keyword: String) -> Int Never! {
     end := if at > f.src_bytes.len() -> f.src_bytes.len() else -> at
     loop end > 0 {
-        byte: Int.from_u8(f.src_bytes[end - 1])
+        byte: Int{f.src_bytes[end - 1]}
         if byte != 32 && byte != 9 && byte != 10 && byte != 13 -> break
         end -= 1
     }
@@ -649,7 +649,7 @@ jfmt_item_span_end: fn(item: Item) -> Int Never! {
 // ---- literal spellings ----
 
 jfmt_digit_value: fn(byte: U8) -> Int Never! {
-    value: Int.from_u8(byte)
+    value: Int{byte}
     if {
         value >= 48 && value <= 57 -> value - 48
         value >= 97 && value <= 122 -> value - 87

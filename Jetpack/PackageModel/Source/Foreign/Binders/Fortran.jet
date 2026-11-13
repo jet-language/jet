@@ -288,7 +288,7 @@ pkg_fortran_parse_extent: fn(text: String) -> Int? Never! {
     digits: text.removeprefix("+")
     if digits == "" -> return None
     loop byte in digits.bytes() {
-        if !pkg_binder_is_ascii_digit(Int.from_u8(byte)) -> return None
+        if !pkg_binder_is_ascii_digit(Int{byte}) -> return None
     }
     value: Int.parse(digits) ?? return None
     if value <= 0 -> return None
@@ -309,7 +309,7 @@ pkg_fortran_split_top_level: fn(value: String) -> [String] Never! {
     depth := 0
     start := 0
     loop index in 0..<raw.len() {
-        code: Int.from_u8(raw[index])
+        code: Int{raw[index]}
         if code == {
             40 -> depth += 1
             41 -> {

@@ -26,10 +26,10 @@ JetCLIMemoryRow: struct {
 jet_cli_text_has_control: fn(value: String) -> Bool Never! {
     raw: value.bytes()
     loop (index, byte) in raw {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if code < 32 || code == 127 -> return true
         if code == 194 && index + 1 < raw.len() {
-            low: Int.from_u8(raw[index + 1])
+            low: Int{raw[index + 1]}
             if low >= 128 && low <= 159 -> return true
         }
     }

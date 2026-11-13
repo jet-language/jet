@@ -301,7 +301,7 @@ pkg_inline_deps_numeric_version: fn(value: String) -> [U64]? Never! {
         number := U64{0}
         loop byte in digits.bytes() {
             if byte < (U8{48}) || byte > (U8{57}) -> return None
-            digit: U64.from_u8(byte - U8{48})
+            digit: U64{byte - U8{48}}
             if number > (U64{1844674407370955161}) || (number == (U64{1844674407370955161}) && digit > (U64{5})) -> return None
             number = number * U64{10} + digit
         }
@@ -314,7 +314,7 @@ pkg_inline_deps_numeric_version: fn(value: String) -> [U64]? Never! {
 pkg_inline_deps_valid_package_name: fn(name: String) -> Bool Never! {
     if name == "" || name == "." || name == ".." -> return false
     loop byte in name.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if code == 47 || code == 92 || code == 0 -> return false
     }
     true

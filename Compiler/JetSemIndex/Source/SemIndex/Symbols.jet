@@ -17,6 +17,7 @@ use {
         Item,
         Span,
         Type,
+        builtin_static_numeric_row,
         builtin_static_rows,
         failure_contract_shown_return,
         failure_contract_shown_type,
@@ -178,6 +179,13 @@ semindex_symbol_conversion_return: fn(owner: String, method: String) -> Type? Ne
     Val(rows[0].return_type)
 }
 
+// A distinct type's conversion keeps every row of its base, the
+// whole-number crossings the built-in owner leaves to `T{x}` included.
+semindex_symbol_distinct_conversion_return: fn(base: String, method: String) -> Type? Never! {
+    if builtin_static_numeric_row(base, method) == .Val(row) -> return Val(row.return_type)
+    semindex_symbol_conversion_return(base, method)
+}
+
 semindex_symbol_is_result: fn(ty: Type?) -> Bool Never! {
     value: ty ?? return false
     if value == .Result(_, _) -> return true
@@ -243,12 +251,12 @@ semindex_symbol_is_numeric: fn(ty: Type) -> Bool Never! {
 }
 
 semindex_symbol_is_upper: fn(byte: U8) -> Bool Never! {
-    code: Int.from_u8(byte)
+    code: Int{byte}
     code >= 65 && code <= 90
 }
 
 semindex_symbol_is_lower_or_digit: fn(byte: U8) -> Bool Never! {
-    code: Int.from_u8(byte)
+    code: Int{byte}
     (code >= 97 && code <= 122) || (code >= 48 && code <= 57)
 }
 
@@ -265,11 +273,11 @@ semindex_symbol_snake: fn(name: String) -> String Never! {
         }
         if index > 0 && bytes[index - 1] != (U8{95}) {
             previous: bytes[index - 1]
-            next_code: if index + 1 < bytes.len() -> Int.from_u8(bytes[index + 1]) else -> 0
+            next_code: if index + 1 < bytes.len() -> (Int{bytes[index + 1]}) else -> 0
             acronym_end: semindex_symbol_is_upper(previous) && next_code >= 97 && next_code <= 122
             if semindex_symbol_is_lower_or_digit(previous) || acronym_end -> out.push(U8{95})
         }
-        out.push(U8.from_int(Int.from_u8(byte) + 32) ?? byte)
+        out.push(checked(U8{Int{byte} + 32}) ?? byte)
     }
     String.from_bytes(out) ?? name
 }
@@ -326,7 +334,7 @@ semindex_symbol_distinct_conversions: fn(owner: String, base: Type, ranged: Bool
     }
     if !semindex_symbol_is_numeric(base) -> conversions.push(SemSymbolConversion{method: semindex_symbol_conversion_method(base_name), source: base_name})
     loop conversion in conversions {
-        fallible: checked_text_error != None || ranged || semindex_symbol_is_result(semindex_symbol_conversion_return(base_name, conversion.method))
+        fallible: checked_text_error != None || ranged || semindex_symbol_is_result(semindex_symbol_distinct_conversion_return(base_name, conversion.method))
         qualified_name: "{owner}.{conversion.method}"
         failure: if fallible -> " !String" else -> ""
         signature := "{owner}.{conversion.method}(value: {conversion.source}) -> {owner}{failure}"

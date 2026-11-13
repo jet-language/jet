@@ -246,7 +246,7 @@ number_lexeme: fn(text: String, name: String) -> String? {
         if pos >= raw.len() || raw[pos] != (U8{58}) -> return None
         pos = json_skip_ws(raw, pos + 1)
         if pos >= raw.len() -> return None
-        first: Int.from_u8(raw[pos])
+        first: Int{raw[pos]}
         if first == 45 || (first >= 48 && first <= 57) {
             end: json_scalar_end(raw, pos)
             if key.text == name -> return slice_bytes(raw, pos, end)
@@ -307,7 +307,7 @@ b64url_decode: fn(text: String) -> [U8] AuthError! {
 }
 
 b64url_value: fn(b: U8) -> Int Never! {
-    n: Int.from_u8(b)
+    n: Int{b}
     if {
         n >= 65 && n <= 90 -> n - 65
         n >= 97 && n <= 122 -> n - 71
@@ -594,12 +594,12 @@ decode_store: fn(raw: [U8]) -> [AuthRecord]? {
     out := [AuthRecord]{}
     pos := 0
     loop pos < raw.len() {
-        kind: Int.from_u8(raw[pos])
+        kind: Int{raw[pos]}
         pos = pos + 1
         fields := [String]{}
         loop _ in 0..<4 {
             if pos + 4 > raw.len() -> return None
-            n: Int.from_u8(raw[pos]).bit_or((Int.from_u8(raw[pos + 1]) << 8)).bit_or((Int.from_u8(raw[pos + 2]) << 16)).bit_or((Int.from_u8(raw[pos + 3]) << 24))
+            n: Int{raw[pos]}.bit_or((Int{raw[pos + 1]} << 8)).bit_or((Int{raw[pos + 2]} << 16)).bit_or((Int{raw[pos + 3]} << 24))
             pos = pos + 4
             if pos + n > raw.len() -> return None
             text: slice_bytes(raw, pos, pos + n) ?? return None
@@ -616,10 +616,10 @@ decode_store: fn(raw: [U8]) -> [AuthRecord]? {
 has_unicode_control: fn(text: String) -> Bool Never! {
     raw: text.bytes()
     loop i in 0..<raw.len() {
-        n: Int.from_u8(raw[i])
+        n: Int{raw[i]}
         if n < 32 || n == 127 -> return true
         if n == 194 && i + 1 < raw.len() {
-            next: Int.from_u8(raw[i + 1])
+            next: Int{raw[i + 1]}
             if next >= 128 && next <= 159 -> return true
         }
     }
@@ -636,7 +636,7 @@ valid_session_id: fn(text: String) -> Bool Never! {
     if raw.len() != 69 || !starts(text, "sess-") -> return false
     i := 5
     loop i < raw.len() {
-        n: Int.from_u8(raw[i])
+        n: Int{raw[i]}
         if !((n >= 48 && n <= 57) || (n >= 97 && n <= 102)) -> return false
         i = i + 1
     }
@@ -662,14 +662,14 @@ delivery_capability: fn(value: String) -> String? {
     domain: slice_bytes(raw, at + 1, raw.len()) ?? return None
     if local.len() == 0 || local.len() > 64 || starts(local, ".") || ends(local, ".") || index_of(local, "..") >= 0 -> return None
     loop b in local.bytes() {
-        n: Int.from_u8(b)
+        n: Int{b}
         if !(is_alnum(n) || contains_byte("!#$%&'*+-/=?^_`{{|}}~.".bytes(), b)) -> return None
     }
     if domain.len() == 0 || domain.len() > 253 -> return None
     loop label in split_dot(domain) {
         if label.len() == 0 || label.len() > 63 || starts(label, "-") || ends(label, "-") -> return None
         loop b in label.bytes() {
-            n: Int.from_u8(b)
+            n: Int{b}
             if !(is_alnum(n) || n == 45) -> return None
         }
     }
@@ -688,7 +688,7 @@ oauth_config: fn(provider: String) -[Env]> OAuthConfig {
     if raw.len() == 0 || raw.len() > 64 -> return Err("OAuth provider is invalid")
     upper := [U8]{}
     loop b in raw {
-        n: Int.from_u8(b)
+        n: Int{b}
         if !(is_alnum(n) || n == 45 || n == 95) -> return Err("OAuth provider is invalid")
         if n >= 97 && n <= 122 -> upper.push(wrapping(U8{n - 32})) else -> upper.push(b)
     }
@@ -852,7 +852,7 @@ oauth_claims: fn(text: String) -> OAuthClaims {
 }
 
 json_ws: fn(b: U8) -> Bool Never! {
-    n: Int.from_u8(b)
+    n: Int{b}
     n == 32 || n == 10 || n == 13 || n == 9
 }
 
@@ -866,7 +866,7 @@ json_skip_ws: fn(raw: [U8], start: Int) -> Int Never! {
 json_scalar_end: fn(raw: [U8], start: Int) -> Int Never! {
     pos := start
     loop pos < raw.len() {
-        n: Int.from_u8(raw[pos])
+        n: Int{raw[pos]}
         if json_ws(raw[pos]) || n == 44 || n == 125 || n == 93 -> return pos
         pos = pos + 1
     }
@@ -877,7 +877,7 @@ json_hex4: fn(raw: [U8], start: Int) -> Int? {
     if start + 4 > raw.len() -> return None
     value := 0
     loop i in start..<(start + 4) {
-        n: Int.from_u8(raw[i])
+        n: Int{raw[i]}
         digit: if {
             n >= 48 && n <= 57 -> n - 48
             n >= 97 && n <= 102 -> n - 87
@@ -915,7 +915,7 @@ json_string: fn(raw: [U8], start: Int) -> JSONText? {
     pos := start + 1
     out := [U8]{}
     loop pos < raw.len() {
-        n: Int.from_u8(raw[pos])
+        n: Int{raw[pos]}
         pos = pos + 1
         if n == 34 {
             text: String.from_bytes(out) ?? return None
@@ -926,7 +926,7 @@ json_string: fn(raw: [U8], start: Int) -> JSONText? {
             out.push(wrapping(U8{n}))
         } else {
             if pos >= raw.len() -> return None
-            e: Int.from_u8(raw[pos])
+            e: Int{raw[pos]}
             pos = pos + 1
             if {
                 e == 34 || e == 92 || e == 47 -> out.push(wrapping(U8{e}))
@@ -960,7 +960,7 @@ json_string: fn(raw: [U8], start: Int) -> JSONText? {
 /// inside are validated) or a non-empty bare scalar.
 json_skip_value: fn(raw: [U8], start: Int) -> Int? {
     if start >= raw.len() -> return None
-    first: Int.from_u8(raw[start])
+    first: Int{raw[start]}
     if first == 34 {
         value: json_string(raw, start) ?? return None
         return Val(value.next)
@@ -970,7 +970,7 @@ json_skip_value: fn(raw: [U8], start: Int) -> Int? {
         closers.push(if first == 123 -> 125 else -> 93)
         pos := start + 1
         loop pos < raw.len() {
-            n: Int.from_u8(raw[pos])
+            n: Int{raw[pos]}
             if n == 34 {
                 value: json_string(raw, pos) ?? return None
                 pos = value.next
@@ -1000,7 +1000,7 @@ json_i64: fn(text: String) -> Int? {
     start: if negative -> 1 else -> 0
     if start >= raw.len() -> return None
     loop i in start..<raw.len() {
-        n: Int.from_u8(raw[i])
+        n: Int{raw[i]}
         if n < 48 || n > 57 -> return None
     }
     if negative && raw.len() == 2 && raw[1] == (U8{48}) -> return None
@@ -1078,9 +1078,9 @@ b64url_for_test: fn(bytes: [U8]) -> String Never! {
     out := [U8]{}
     i := 0
     loop i < bytes.len() {
-        first: Int.from_u8(bytes[i])
-        second: if i + 1 < bytes.len() -> Int.from_u8(bytes[i + 1]) else -> 0
-        third: if i + 2 < bytes.len() -> Int.from_u8(bytes[i + 2]) else -> 0
+        first: Int{bytes[i]}
+        second: if i + 1 < bytes.len() -> (Int{bytes[i + 1]}) else -> 0
+        third: if i + 2 < bytes.len() -> (Int{bytes[i + 2]}) else -> 0
         out.push(alphabet[first >> 2])
         out.push(alphabet[((first.bit_and(3)) << 4).bit_or((second >> 4))])
         if i + 1 < bytes.len() -> out.push(alphabet[((second.bit_and(15)) << 2).bit_or((third >> 6))])

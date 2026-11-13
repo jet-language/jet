@@ -54,7 +54,7 @@ kit_steps_offset_ns: fn(text: String) -> Int? {
     if parts.len() == 2 {
         if parts[1] == "" || parts[1].len() > 9 -> return None
         loop byte in parts[1].bytes() {
-            digit: Int.from_u8(byte) - 48
+            digit: Int{byte} - 48
             if digit < 0 || digit > 9 -> return None
             fraction = fraction * 10 + digit
             denominator *= 10
@@ -72,7 +72,7 @@ kit_steps_octal: fn(text: String) -> Int? {
     if text == "" -> return None
     result := 0
     loop byte in text.bytes() {
-        digit: Int.from_u8(byte) - 48
+        digit: Int{byte} - 48
         if digit < 0 || digit > 7 -> return None
         result = result * 8 + digit
         if result > 4095 -> return None
@@ -138,8 +138,8 @@ kit_steps_setup_run: fn(step: KitStep, env: KitEnv, work: String, scratch: Strin
         loop (index, byte) in replacement {
             if step.argv[4] == "hex" -> bytes[offset + index] = byte
             else {
-                a: Int.from_u8(bytes[offset + index])
-                b: Int.from_u8(byte)
+                a: Int{bytes[offset + index]}
+                b: Int{byte}
                 bytes[offset + index] = U8{a + b - 2 * a.bit_and(b)}
             }
         }

@@ -742,7 +742,7 @@ ast_comptime_float_text: fn(number: CtFloat) -> String Never! {
 }
 
 ast_comptime_bytes_list: fn(bytes: [U8]) -> String Never! {
-    parts: loop byte in bytes -> "{Int.from_u8(byte)}"
+    parts: loop byte in bytes -> "{Int{byte}}"
     "[{parts.join(", ")}]"
 }
 
@@ -799,7 +799,7 @@ ast_comptime_generated_path: fn(name: String) -> String Never! {
             byte == (U8{92}) -> out.push(U8{98})
             byte == (U8{45}) -> out.push(U8{104})
             else -> {
-                code: Int.from_u8(byte)
+                code: Int{byte}
                 out.push(U8{120})
                 out.push(hex[code /% 16])
                 out.push(hex[code % 16])

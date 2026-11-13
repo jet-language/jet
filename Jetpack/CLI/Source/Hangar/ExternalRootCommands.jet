@@ -159,7 +159,7 @@ DurationParseError: struct {
 cli_parse_duration: fn(value: String) -> Int DurationParseError! {
     raw: value.bytes()
     split := 0
-    loop split < raw.len() && Int.from_u8(raw[split]) >= 48 && Int.from_u8(raw[split]) <= 57 -> split += 1
+    loop split < raw.len() && (Int{raw[split]}) >= 48 && (Int{raw[split]}) <= 57 -> split += 1
     number: String.from_bytes(raw[0..<split]) ?? ""
     suffix: String.from_bytes(raw[split..<raw.len()]) ?? ""
     amount: Int.parse(number) ?? return Err(DurationParseError{message: "`{value}` is not a valid duration"})

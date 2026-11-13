@@ -768,13 +768,13 @@ policy_test_unicode_manifest_fields: fn() {
 // Rust str::split_whitespace uses Unicode White_Space, not just ASCII space.
 // Scan byte spans directly; only the returned words allocate.
 policy_space_width: fn(bytes: [U8], index: Int) -> Int {
-    first: Int.from_u8(bytes[index])
+    first: Int{bytes[index]}
     if first == 32 || (first >= 9 && first <= 13) -> return 1
     if index + 1 >= bytes.len() -> return 0
-    second: Int.from_u8(bytes[index + 1])
+    second: Int{bytes[index + 1]}
     if first == 194 && (second == 133 || second == 160) -> return 2
     if index + 2 >= bytes.len() -> return 0
-    third: Int.from_u8(bytes[index + 2])
+    third: Int{bytes[index + 2]}
     if first == 225 && second == 154 && third == 128 -> return 3
     if first == 226 && second == 128 && ((third >= 128 && third <= 138) || third == 168 || third == 169 || third == 175) -> return 3
     if first == 226 && second == 129 && third == 159 -> return 3

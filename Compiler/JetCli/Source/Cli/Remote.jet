@@ -81,12 +81,12 @@ jet_cli_remote_record: fn(binding: JetCLIRemoteBinding) -> [U8] JetCLIReadError!
 jet_cli_remote_unsigned: fn(value: String) -> U64? Never! {
     bytes: value.bytes()
     if bytes.len() == 0 -> return None
-    start: if Int.from_u8(bytes[0]) == 43 -> 1 else -> 0
+    start: if (Int{bytes[0]}) == 43 -> 1 else -> 0
     if start == bytes.len() -> return None
     result := U64{0}
     loop index in start..<bytes.len() {
         byte: bytes[index]
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if code < 48 || code > 57 -> return None
         digit: U64{code - 48}
         if (result > (U64.MAX - digit) / U64{10}) -> return None

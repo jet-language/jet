@@ -947,7 +947,7 @@ parser_parse_prefix: fn(state: &JetParserState, depth: Int, allow_struct_lit: Bo
     // member shorthand; the postfix loop reads the rest of `.member.m(x)`.
     if kind == TOKEN_DOT && parser_kind_at(state, 1) == TOKEN_IDENT {
         first_byte: parser_value_at(state, 1).bytes()[0]
-        if Int.from_u8(first_byte) >= 97 && Int.from_u8(first_byte) <= 122 {
+        if (Int{first_byte}) >= 97 && (Int{first_byte}) <= 122 {
             parser_bump(state)
             member: parser_bump(state)
             // The field node is spanned at its member name, as in the
@@ -1892,7 +1892,7 @@ parser_parse_postfix: fn(state: &JetParserState, initial: &&ParsedExpr, depth: I
             if alias.len() == 0 -> break
             parsed: parser_parse_expression_fields(state, depth + 1)
             span := parser_cover(expression.span, parsed.span)
-            first_byte: Int.from_u8(alias.bytes()[0])
+            first_byte: Int{alias.bytes()[0]}
             upper: first_byte >= 65 && first_byte <= 90
             literal: if upper -> Expr.StructLit{type_name: "{alias}.{type_name}", type_args: owner_type_args, import_ns: None, as_trait: None, fields: parsed.fields, inferred: false, span: span, id: parser_node_id(state)} else -> Expr.StructLit{type_name: type_name, type_args: owner_type_args, import_ns: Val(alias), as_trait: None, fields: parsed.fields, inferred: false, span: span, id: parser_node_id(state)}
             expression = ParsedExpr{expr: literal, span: span}

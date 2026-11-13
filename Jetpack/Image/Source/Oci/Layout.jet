@@ -494,7 +494,7 @@ image_validate_layer_files: fn(layer_files: [LayerFile]) ImageError! {
 
 image_has_ascii_control: fn(raw: [U8]) -> Bool Never! {
     loop byte in raw {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if code < 32 || code == 127 -> return true
     }
     false
@@ -569,7 +569,7 @@ image_digest_hex: fn(digest: String) -> String ImageError! {
     raw: hex.bytes()
     if raw.len() != 64 -> return Err(image_invalid("OCI digest is not a SHA-256 value"))
     loop byte in raw {
-        if !trust_text_is_hex(Int.from_u8(byte)) -> return Err(image_invalid("OCI digest is not a SHA-256 value"))
+        if !trust_text_is_hex(Int{byte}) -> return Err(image_invalid("OCI digest is not a SHA-256 value"))
     }
     Ok(hex)
 }
@@ -671,7 +671,7 @@ image_with_extension: fn(path: String, extension: String) -> String Never! {
     name: files.basename(path)
     raw: name.bytes()
     dot := raw.len() - 1
-    loop dot > 0 && Int.from_u8(raw[dot]) != 46 -> dot -= 1
+    loop dot > 0 && (Int{raw[dot]}) != 46 -> dot -= 1
     stem: if dot > 0 -> pkg_bytes_text(raw, 0, dot) else -> name.copy()
     files.with_name(path, "{stem}.{extension}")
 }

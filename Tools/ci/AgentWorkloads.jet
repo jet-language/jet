@@ -52,7 +52,7 @@ records: fn(text: String) -> [String] Never! {
 all_bytes: fn(value: String, low: Int, high: Int) -> Bool Never! {
     if value == "" -> return false
     loop byte in value.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if code < low || code > high -> return false
     }
     true
@@ -63,7 +63,7 @@ nonnegative_integer: fn(value: String) -> Bool Never! { all_bytes(value, 48, 57)
 lower_hex64: fn(value: String) -> Bool Never! {
     if value.bytes().len() != 64 -> return false
     loop byte in value.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if !(code >= 48 && code <= 57) && !(code >= 97 && code <= 102) -> return false
     }
     true
@@ -71,7 +71,7 @@ lower_hex64: fn(value: String) -> Bool Never! {
 
 is_blank: fn(line: String) -> Bool Never! {
     loop byte in line.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if code != 32 && (code < 9 || code > 13) -> return false
     }
     true

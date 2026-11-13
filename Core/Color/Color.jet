@@ -47,7 +47,7 @@ Color: struct {
     from_hex: fn(text: String) -> Color ColorError! {
         raw: text.bytes()
         count: raw.len()
-        if (count != 4 && count != 7 && count != 9) || Int.from_u8(raw[0]) != 35 -> return Err(ColorError.InvalidHex(text.copy()))
+        if (count != 4 && count != 7 && count != 9) || (Int{raw[0]}) != 35 -> return Err(ColorError.InvalidHex(text.copy()))
         digits := [Int]{}
         loop index in 1..<count {
             digits.push(__color_hex_digit(raw[index]) ?? return Err(ColorError.InvalidHex(text.copy())))
@@ -60,7 +60,7 @@ Color: struct {
     // Lowercase `#rrggbb`, or `#rrggbbaa` when alpha is below 255.
     to_hex: fn(self) -> String Never! {
         text: "#{__color_hex_byte(self.r)}{__color_hex_byte(self.g)}{__color_hex_byte(self.b)}"
-        if Int.from_u8(self.a) == 255 -> return text
+        if (Int{self.a}) == 255 -> return text
         "{text}{__color_hex_byte(self.a)}"
     }
 
@@ -80,9 +80,9 @@ Color: struct {
     // The color as hue, saturation and lightness. A gray has hue 0 and
     // saturation 0.
     to_hsl: fn(self) -> Hsl Never! {
-        red: Int.from_u8(self.r)
-        green: Int.from_u8(self.g)
-        blue: Int.from_u8(self.b)
+        red: Int{self.r}
+        green: Int{self.g}
+        blue: Int{self.b}
         alpha: __color_fraction(self.a)
         high := red
         if green > high -> high = green
@@ -120,7 +120,7 @@ Color: struct {
 
 // The value of one hex digit, or None for any other byte.
 __color_hex_digit: fn(byte: U8) -> Int? Never! {
-    n: Int.from_u8(byte)
+    n: Int{byte}
     if {
         n >= 48 && n <= 57 -> Val(n - 48)
         n >= 97 && n <= 102 -> Val(n - 87)
@@ -131,7 +131,7 @@ __color_hex_digit: fn(byte: U8) -> Int? Never! {
 
 // The two lowercase hex digits of `byte`.
 __color_hex_byte: fn(byte: U8) -> String Never! {
-    n: Int.from_u8(byte)
+    n: Int{byte}
     String.from_bytes([U8]{__color_hex_nibble(n >> 4), __color_hex_nibble(n.bit_and(15))}) ?? ""
 }
 
@@ -142,7 +142,7 @@ __color_hex_nibble: fn(n: Int) -> U8 Never! {
 }
 
 // `channel` from 0 to 1.
-__color_fraction: fn(channel: U8) -> Float Never! { Float{Int.from_u8(channel)} / 255.0 }
+__color_fraction: fn(channel: U8) -> Float Never! { Float{Int{channel}} / 255.0 }
 
 // `value` clamped to 0..1, with NaN read as 0.
 __color_unit: fn(value: Float) -> Float Never! {

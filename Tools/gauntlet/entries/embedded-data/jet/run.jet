@@ -9,11 +9,11 @@ run: fn(args: Args) Err! {
     payload: files.read_bytes(args.input) ?? return
 
     checksum := U64{0}
-    loop byte in payload -> checksum += U64.from_u8(byte)
+    loop byte in payload -> checksum += (U64{byte})
 
     reader: Reader.over(payload)
     reader.take_pattern([U8]{"EDB1"}) ?? return Err("bad magic")
-    count: Int.from_u32(reader.read_u32_le() ?? return)
+    count: Int{reader.read_u32_le() ?? return}
 
     valid := U64{0}
     channels := [U64#4]{0, 0, 0, 0}
@@ -26,18 +26,18 @@ run: fn(args: Args) Err! {
 
     loop _ in 0..<count {
         frame: reader.take_pattern([U8]{"{channel:U8}{flags:U8}{sample:U16le}{tick:U32le}{energy:U16le}{load:U16le}"}) ?? return
-        channel: Int.from_u8(frame.channel)
+        channel: Int{frame.channel}
         if channel >= channels.len() -> return Err("bad channel")
         if frame.flags == 0 {
             valid += U64{1}
             channels[channel] = channels[channel] + U64{1}
-            sample: U64.from_u16(frame.sample)
+            sample: U64{frame.sample}
             if sample < sample_min -> sample_min = sample
             if sample > sample_max -> sample_max = sample
             sample_sum += sample
-            energy_sum += U64.from_u16(frame.energy)
-            load_sum += U64.from_u16(frame.load)
-            tick_sum += U64.from_u32(frame.tick)
+            energy_sum += U64{frame.energy}
+            load_sum += U64{frame.load}
+            tick_sum += U64{frame.tick}
         }
     }
 

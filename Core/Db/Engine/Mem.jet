@@ -53,8 +53,8 @@ change_encoding: fn(m: &Mem, enc: Int) Never! {
 // loses it and takes the encoding it names.
 handle_bom: fn(m: &Mem) Never! {
     if m.z.len() <= 1 -> return
-    b1: Int.from_u8(m.z[0])
-    b2: Int.from_u8(m.z[1])
+    b1: Int{m.z[0]}
+    b2: Int{m.z[1]}
     bom := 0
     if b1 == 254 && b2 == 255 -> bom = base.UTF16BE
     if b1 == 255 && b2 == 254 -> bom = base.UTF16LE

@@ -148,7 +148,7 @@ fake_text: fn(text: String) -> [U8] {
 
 fake_u32: fn(bytes: [U8], at: Int) -> Int {
     if at + 4 > bytes.len() -> return 0
-    Int.from_u8(bytes[at]) + (Int.from_u8(bytes[at + 1]) << 8) + (Int.from_u8(bytes[at + 2]) << 16) + (Int.from_u8(bytes[at + 3]) << 24)
+    Int{bytes[at]} + (Int{bytes[at + 1]} << 8) + (Int{bytes[at + 2]} << 16) + (Int{bytes[at + 3]} << 24)
 }
 
 fake_i32: fn(bytes: [U8], at: Int) -> Int {
@@ -322,7 +322,7 @@ fake_report: fn(&f: Fake) {
     f.report.push("  title bar {bar}")
     if m > 0 {
         shadow: fake_pixel(f, chrome, fake_pixels(m /% 2, s), fake_pixels(m + 100, s))
-        alpha: if shadow.len() == 4 -> Int.from_u8(shadow[3]) else -> -1
+        alpha: if shadow.len() == 4 -> (Int{shadow[3]}) else -> -1
         soft: alpha > 0 && alpha < 255
         f.report.push("  shadow soft {soft}")
     }

@@ -2479,7 +2479,7 @@ add_indexed_expr: fn(p: &cg.Parse, a: &ast.AST, ix: Int, i_idx_cur: Int, si: Int
             if def.flags.bit_and(conn.FUNC_RESULT_SUBTYPE) != 0 -> next
         }
         d: ast.expr_dup(a, e, 0)
-        aff: Int.from_u8(index_affinity_str(p.db, a, ix)[i])
+        aff: Int{index_affinity_str(p.db, a, ix)[i]}
         p.idx_exprs.push(cg.IndexedExpr{expr: d, i_data_cur: a.items[si].cursor, i_idx_cur: i_idx_cur, i_idx_col: i, b_maybe_null_row: null_row, aff: aff, next: p.f.idx_epr})
         p.f.idx_epr = p.idx_exprs.len() - 1
     }
@@ -3069,7 +3069,7 @@ disable_term: fn(a: ast.AST, wi: &we.WhereInfo, lv: Int, t0: Int) Never! {
 
 // Byte i of affinity string aff, 0 past its end (C's terminating NUL).
 aff_at: fn(aff: [U8], i: Int) -> Int Never! {
-    if i < aff.len() -> Int.from_u8(aff[i]) else -> 0
+    if i < aff.len() -> (Int{aff[i]}) else -> 0
 }
 
 // codeApplyAffinity: OP_Affinity of aff from byte off over the n registers
@@ -3098,7 +3098,7 @@ update_range_affinity_str: fn(db: conn.Conn, a: ast.AST, right: Int, n: Int, aff
         e: ast.vector_field_subexpr(a, right, i)
         k: off + i
         if k >= aff.len() -> next
-        x: Int.from_u8(aff[k])
+        x: Int{aff[k]}
         if ex.compare_affinity(db, a, e, x) == base.AFF_BLOB || ex.expr_needs_no_affinity_change(a, e, x) -> aff[k] = U8{base.AFF_BLOB}
     }
 }
@@ -3284,8 +3284,8 @@ code_all_equality_terms: fn(p: &cg.Parse, a: &ast.AST, wi: &we.WhereInfo, lv: In
             right: a.exprs[x].right
             if wi.terms[t].wt_flags.bit_and(we.TERM_IS) == 0 && rs.expr_can_be_null(p.db, a, right) -> _: cg.op2(p, opc.OP_IS_NULL, reg_base + j, wi.levels[lv].addr_brk)
             if cg.n_err(a) == 0 && j < aff.len() {
-                if ex.compare_affinity(p.db, a, right, Int.from_u8(aff[j])) == base.AFF_BLOB -> aff[j] = U8{base.AFF_BLOB}
-                if ex.expr_needs_no_affinity_change(a, right, Int.from_u8(aff[j])) -> aff[j] = U8{base.AFF_BLOB}
+                if ex.compare_affinity(p.db, a, right, Int{aff[j]}) == base.AFF_BLOB -> aff[j] = (U8{base.AFF_BLOB})
+                if ex.expr_needs_no_affinity_change(a, right, Int{aff[j]}) -> aff[j] = (U8{base.AFF_BLOB})
             }
         }
     }

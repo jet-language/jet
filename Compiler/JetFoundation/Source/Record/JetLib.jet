@@ -188,14 +188,14 @@ JetLibStamp: struct {
         out.push_text(self.target_triple)
         out.push_text(self.linker_identity)
         out.push_text(self.abi_identity)
-        out.push_u32(Int.from_u32(self.abi_version))
+        out.push_u32(Int{self.abi_version})
         assert(self.exports.len() <= 4294967295, "a .jetlib header cannot contain more than u32 exports")
         out.push_u32(self.exports.len())
         loop export in self.exports {
             out.push_text(export.name)
             out.push_text(export.symbol)
             out.bytes.push(U8{export.scalar.tag()})
-            out.push_u32(Int.from_u32(export.params))
+            out.push_u32(Int{export.params})
             loop convention in export.conventions -> out.bytes.push(U8{convention.tag()})
         }
         effects: jetlib_effects_canonical(self.declared_effects)
@@ -284,7 +284,7 @@ JetLibArtifact: struct {
         stamp := JetLibStamp.decode_prefix(reader) ?? return Err(err)
         if bytes.len() - reader.at < 8 -> return Err("truncated .jetlib artifact (payload length)")
         declared := 0
-        loop index in 0..<8 -> declared = (declared << 8).bit_or(Int.from_u8(bytes[reader.at + index]))
+        loop index in 0..<8 -> declared = (declared << 8).bit_or(Int{bytes[reader.at + index]})
         if declared > host_max -> return Err("the .jetlib payload is too large for this host")
         payload: bytes[reader.at + 8..<bytes.len()]
         if payload.len() != declared -> return Err("truncated .jetlib artifact (payload declares {declared} bytes, found {payload.len()})")
@@ -329,14 +329,14 @@ JetLibReader: struct {
 
     take_byte: fn(&self) -> Int? Never! {
         if self.at >= self.bytes.len() -> return None
-        value: Int.from_u8(self.bytes[self.at])
+        value: Int{self.bytes[self.at]}
         self.at += 1
         Val(value)
     }
     take_u32: fn(&self, what: String) -> Int Err! {
         if self.bytes.len() - self.at < 4 -> return Err("truncated .jetlib header ({what})")
         value := 0
-        loop index in 0..<4 -> value = (value << 8).bit_or(Int.from_u8(self.bytes[self.at + index]))
+        loop index in 0..<4 -> value = (value << 8).bit_or(Int{self.bytes[self.at + index]})
         self.at += 4
         Ok(value)
     }
@@ -407,11 +407,11 @@ pkg_jetlib_c_symbol: fn(name: String) -> String Never! {
     raw: name.bytes()
     if raw.len() == 0 -> out.push(U8{95})
     else {
-        first: Int.from_u8(raw[0])
+        first: Int{raw[0]}
         if first >= 48 && first <= 57 -> out.push(U8{95})
     }
     loop byte in raw {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         keep: (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 95
         if (code >= 0x80) && (code < 0xC0) {
             next
@@ -448,7 +448,7 @@ pkg_jetlib_valid_payload_digest: fn(digest: String) -> Bool Never! {
     hex: digest.removeprefix("sha256-").bytes()
     if hex.len() != 64 -> return false
     loop byte in hex {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if !((code >= 48 && code <= 57) || (code >= 97 && code <= 102)) -> return false
     }
     true
@@ -493,7 +493,7 @@ pkg_jetlib_validate_load_metadata: fn(stamp: JetLibStamp, target: String, loader
         names[export.name] = true
         if symbols.has_key(export.symbol) -> return jetlib_metadata_failure("E1341: .jetlib metadata repeats native symbol `{export.symbol}`", false)
         symbols[export.symbol] = true
-        if Int.from_u32(export.params) > JETLIB_MAX_EXPORT_PARAMS || export.conventions.len() != Int.from_u32(export.params) -> return jetlib_metadata_failure("E1341: .jetlib export `{export.name}` has invalid access-convention metadata", false)
+        if (Int{export.params}) > JETLIB_MAX_EXPORT_PARAMS || export.conventions.len() != (Int{export.params}) -> return jetlib_metadata_failure("E1341: .jetlib export `{export.name}` has invalid access-convention metadata", false)
     }
     None
 }

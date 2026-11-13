@@ -126,14 +126,14 @@ evidence_append_locked: fn(path: String, writer: &evidence_files.FileWriter, fra
     info: writer.stat() ?? return Err(evidence_codec_error("{err}"))
     if info.size == 0 {
         header := EVIDENCE_REPORT_MAGIC.bytes()
-        evidence_put_number(header, U64.from_u16(EVIDENCE_REPORT_VERSION), 2)
+        evidence_put_number(header, U64{EVIDENCE_REPORT_VERSION}, 2)
         writer.write_all(header) ?? return Err(evidence_codec_error("{err}"))
     } else if info.size < 10 {
         return Err(evidence_codec_error("truncated evidence report header"))
     } else {
         header: evidence_read_header(path) ?? return Err(evidence_codec_error("{err}"))
         expected := EVIDENCE_REPORT_MAGIC.bytes()
-        evidence_put_number(expected, U64.from_u16(EVIDENCE_REPORT_VERSION), 2)
+        evidence_put_number(expected, U64{EVIDENCE_REPORT_VERSION}, 2)
         if header != expected -> return Err(evidence_codec_error("evidence report schema conflict"))
     }
     writer.write_all(frame) ?? return Err(evidence_codec_error("{err}"))

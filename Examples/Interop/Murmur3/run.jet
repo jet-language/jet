@@ -22,9 +22,9 @@ hash: fn(data: [U8], seed: U32) -[]> U32 {
         tail: nblocks * 4
         tail_len: data.len() % 4
         k1 := U32{0}
-        if tail_len == 3 -> k1 = k1.bit_xor(U32.from_u8(data[tail + 2]) << 16)
-        if tail_len >= 2 -> k1 = k1.bit_xor(U32.from_u8(data[tail + 1]) << 8)
-        if tail_len >= 1 -> k1 = k1.bit_xor(U32.from_u8(data[tail]))
+        if tail_len == 3 -> k1 = k1.bit_xor(U32{data[tail + 2]} << 16)
+        if tail_len >= 2 -> k1 = k1.bit_xor(U32{data[tail + 1]} << 8)
+        if tail_len >= 1 -> k1 = k1.bit_xor(U32{data[tail]})
         if tail_len != 0 {
             k1 = k1 * c1
             k1 = k1.rotate_left(15)
@@ -32,7 +32,7 @@ hash: fn(data: [U8], seed: U32) -[]> U32 {
             h1 = h1.bit_xor(k1)
         }
 
-        length: U32.from_int(data.len()) ?? U32{0}
+        length: checked(U32{data.len()}) ?? U32{0}
         h1 = h1.bit_xor(length)
         h1 = h1.bit_xor(h1 >> 16)
         h1 = h1 * U32{0x85ebca6b}

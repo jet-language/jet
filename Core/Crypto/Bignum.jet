@@ -189,7 +189,7 @@ get_byte: fn(a: [U64], i: Int) -> U8 Never! {
 core_read_le: fn(x: &[U64], x_limbs: Int, input: [U8]) MpiError! {
     if x_limbs < (input.len() + LIMB_BYTES - 1) /% LIMB_BYTES -> return Err(.BufferTooSmall)
     zero_limbs(x, x_limbs)
-    loop i in 0..<input.len() -> x[i /% LIMB_BYTES] = x[i /% LIMB_BYTES].bit_or(U64.from_u8(input[i]) << ((i % LIMB_BYTES) * 8))
+    loop i in 0..<input.len() -> x[i /% LIMB_BYTES] = x[i /% LIMB_BYTES].bit_or(U64{input[i]} << ((i % LIMB_BYTES) * 8))
 }
 
 /// Big-endian `input` into the `x_limbs` limbs of x.
@@ -197,7 +197,7 @@ core_read_be: fn(x: &[U64], x_limbs: Int, input: [U8]) MpiError! {
     n: input.len()
     if x_limbs < (n + LIMB_BYTES - 1) /% LIMB_BYTES -> return Err(.BufferTooSmall)
     zero_limbs(x, x_limbs)
-    loop i in 0..<n -> x[i /% LIMB_BYTES] = x[i /% LIMB_BYTES].bit_or(U64.from_u8(input[n - 1 - i]) << ((i % LIMB_BYTES) * 8))
+    loop i in 0..<n -> x[i /% LIMB_BYTES] = x[i /% LIMB_BYTES].bit_or(U64{input[n - 1 - i]} << ((i % LIMB_BYTES) * 8))
 }
 
 /// The number in a's first `a_limbs` limbs as `out_len` little-endian bytes.
@@ -840,7 +840,7 @@ lset: fn(x: &Mpi, z: Int) MpiError! {
 }
 
 /// Bit `pos` of |x|.
-get_bit: fn(x: Mpi, pos: Int) -> Int Never! { Int.from_u64(limb_bit(x, pos)) }
+get_bit: fn(x: Mpi, pos: Int) -> Int Never! { Int{limb_bit(x, pos)} }
 
 /// Bit `pos` of |x| as a word, 0 past its limbs: the limb and the shift
 /// come from the position alone, so a secret's bit is read with no test of
@@ -878,7 +878,7 @@ size: fn(x: Mpi) -> Int Never! { (bitlen(x) + 7) >> 3 }
 
 /// The value of digit `c` in `radix`, or InvalidCharacter.
 digit: fn(c: U8, radix: Int) -> U64 MpiError! {
-    v: Int.from_u8(c)
+    v: Int{c}
     d := 255
     if v >= 0x30 && v <= 0x39 -> d = v - 0x30
     if v >= 0x41 && v <= 0x46 -> d = v - 0x37
@@ -909,7 +909,7 @@ read_string: fn(radix: Int, s: String) -> Mpi MpiError! {
         loop i in 0..<slen {
             d: digit(text[start + i], radix) ?? return Err(err)
             t: mul_int(x, U64{radix}) ?? return Err(err)
-            next_x: add_int(t, Int.from_u64(d)) ?? return Err(err)
+            next_x: add_int(t, Int{d}) ?? return Err(err)
             set_mpi(x, next_x) ?? return Err(err)
         }
     }
@@ -944,7 +944,7 @@ write_string: fn(x: Mpi, radix: Int, buflen: Int) -> String MpiError! {
         loop i > 0 {
             j := LIMB_BYTES
             loop j > 0 {
-                c: Int.from_u64((x.p[i - 1] >> ((j - 1) * 8)).bit_and(U64{0xff}))
+                c: Int{(x.p[i - 1] >> ((j - 1) * 8)).bit_and(U64{0xff})}
                 if c != 0 || started || i + j == 2 {
                     out.push(digits[c /% 16])
                     out.push(digits[c % 16])
@@ -963,7 +963,7 @@ write_string: fn(x: Mpi, radix: Int, buflen: Int) -> String MpiError! {
             r: mod_int(t, radix) ?? return Err(err)
             qr: div_int(t, radix) ?? return Err(err)
             set_mpi(t, qr.q) ?? return Err(err)
-            reversed.push(digits[Int.from_u64(r)])
+            reversed.push(digits[Int{r}])
             if cmp_int(t, 0) == 0 -> break
         }
         i := reversed.len()
@@ -1095,7 +1095,7 @@ lt_mpi_ct: fn(x: Mpi, y: Mpi) -> U64 MpiError! {
 
 /// The sign `a` when the condition bit is 1, else `b`, in constant time.
 ct_sign_if: fn(cond: U64, a: Int, b: Int) -> Int Never! {
-    Int.from_u64(ct_select(ct_mask(cond), U64{a + 1}, U64{b + 1})) - 1
+    Int{ct_select(ct_mask(cond), U64{a + 1}, U64{b + 1})} - 1
 }
 
 /// x = y when `assign` is 1, else x unchanged, without revealing which.
@@ -1275,7 +1275,7 @@ div_mpi: fn(a: Mpi, b: Mpi) -> (q: Mpi, r: Mpi) MpiError! {
     t: y.p.len() - 1
     shift_l(y, LIMB_BITS * (n - t)) ?? return Err(err)
     loop cmp_mpi(x, y) >= 0 {
-        z.p[n - t] = z.p[n - t].wrapping_add(U64{1})
+        z.p[n - t] = wrapping(z.p[n - t] + U64{1})
         diff: sub_mpi(x, y) ?? return Err(err)
         set_mpi(x, diff) ?? return Err(err)
     }
@@ -1290,9 +1290,9 @@ div_mpi: fn(a: Mpi, b: Mpi) -> (q: Mpi, r: Mpi) MpiError! {
         t2.p[0] = if i < 2 -> U64{0} else -> x.p[i - 2]
         t2.p[1] = if i < 1 -> U64{0} else -> x.p[i - 1]
         t2.p[2] = x.p[i]
-        z.p[at] = z.p[at].wrapping_add(U64{1})
+        z.p[at] = wrapping(z.p[at] + U64{1})
         loop {
-            z.p[at] = z.p[at].wrapping_sub(U64{1})
+            z.p[at] = wrapping(z.p[at] - U64{1})
             t1 := zeros(2) ?? return Err(err)
             t1.p[0] = if t < 1 -> U64{0} else -> y.p[t - 1]
             t1.p[1] = y.p[t]
@@ -1308,7 +1308,7 @@ div_mpi: fn(a: Mpi, b: Mpi) -> (q: Mpi, r: Mpi) MpiError! {
             shift_l(back, LIMB_BITS * at) ?? return Err(err)
             sum: add_mpi(x, back) ?? return Err(err)
             set_mpi(x, sum) ?? return Err(err)
-            z.p[at] = z.p[at].wrapping_sub(U64{1})
+            z.p[at] = wrapping(z.p[at] - U64{1})
         }
         i -= 1
     }
@@ -1606,7 +1606,7 @@ small_primes_product: fn() -> Mpi Never! {
 check_small_factors: fn(x: Mpi) -> Bool MpiError! {
     if x.p[0].bit_and(U64{1}) == (U64{0}) -> return Err(.NotAcceptable)
     if cmp_int(x, SMALL_PRIMES_LIMIT) <= 0 {
-        v: Int.from_u64(x.p[0])
+        v: Int{x.p[0]}
         d := 2
         loop v % d != 0 -> d += 1
         if v == d -> return Ok(true)

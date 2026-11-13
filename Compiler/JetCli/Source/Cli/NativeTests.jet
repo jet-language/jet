@@ -107,7 +107,7 @@ jet_cli_native_test_records: fn(output: String, incomplete: Bool, contracts: &[J
         if !identity.starts_with("JET_NATIVE_TEST ") -> return Err("native test output contains an unframed identity line")
         id_text: identity.slice("JET_NATIVE_TEST ".len()..<identity.len())
         id_number: Int.parse(id_text) ?? return Err("native test identity is not an unsigned integer")
-        id: U64.from_int(id_number) ?? return Err("native test identity is outside U64")
+        id: checked(U64{id_number}) ?? return Err("native test identity is outside U64")
         start: cursor.at
         header: jet_native_test_line(cursor) ?? {
             if incomplete -> break
@@ -130,8 +130,8 @@ jet_cli_native_test_records: fn(output: String, incomplete: Bool, contracts: &[J
         if cursor.bytes[end] != (U8{10}) -> return Err("native test outcome terminator is absent")
         name_end: cursor.at + name_length
         stdout_end: name_end + stdout_length
-        if name_end < end && (Int.from_u8(cursor.bytes[name_end]).bit_and(192)) == 128 -> return Err("native test name boundary is not UTF-8")
-        if stdout_end < end && (Int.from_u8(cursor.bytes[stdout_end]).bit_and(192)) == 128 -> return Err("native test stdout boundary is not UTF-8")
+        if name_end < end && (Int{cursor.bytes[name_end]}.bit_and(192)) == 128 -> return Err("native test name boundary is not UTF-8")
+        if stdout_end < end && (Int{cursor.bytes[stdout_end]}.bit_and(192)) == 128 -> return Err("native test stdout boundary is not UTF-8")
         wire: String.from_bytes(cursor.bytes.slice(start, end)) ?? return Err("native test outcome payload is not UTF-8")
         records.push(JetNativeTestRecord{function: id, wire: wire})
         jet_native_test_contracts_attribute(contracts, pending, id)
@@ -142,10 +142,10 @@ jet_cli_native_test_records: fn(output: String, incomplete: Bool, contracts: &[J
 }
 
 jet_native_test_shuffle_next: fn(state: &U64) -> U64 Never! {
-    state = state.wrapping_add(U64{0x9E3779B97F4A7C15})
+    state = wrapping(state + U64{0x9E3779B97F4A7C15})
     mixed := state
-    mixed = (mixed.bit_xor((mixed >> 30))).wrapping_mul(U64{0xBF58476D1CE4E5B9})
-    mixed = (mixed.bit_xor((mixed >> 27))).wrapping_mul(U64{0x94D049BB133111EB})
+    mixed = wrapping((mixed.bit_xor((mixed >> 30))) * U64{0xBF58476D1CE4E5B9})
+    mixed = wrapping((mixed.bit_xor((mixed >> 27))) * U64{0x94D049BB133111EB})
     mixed.bit_xor((mixed >> 31))
 }
 
@@ -204,7 +204,7 @@ jet_cli_native_test_selection: fn(tests: [TTestFact], functions: [FnBody], filte
             faults.push("{test.name}: native test selection names an absent checked function")
             next
         }
-        id: U64.from_int(index + 1) ?? panic("test count fits U64")
+        id: checked(U64{index + 1}) ?? panic("test count fits U64")
         row: name_rows_get_text(by_key, test.function.key) ?? -1
         alone: row >= 0 && isolated[row]
         rows.push(JetNativeTestRow{test: JetNativeTestCase{id: id, key: test.function.key, name: test.name, expected_failure: test.expected_failure, faults: test.faults, isolated: alone}, module_name: module_name, start: test.span.start})
@@ -220,12 +220,12 @@ jet_cli_native_test_selection: fn(tests: [TTestFact], functions: [FnBody], filte
     selected := loop row in rows -> row.test
     if shuffle_seed == .Val(text) {
         number: Int.parse(text) ?? return Ok(selected)
-        state := U64.from_int(number) ?? return Ok(selected)
+        state := checked(U64{number}) ?? return Ok(selected)
         index := selected.len()
         loop index > 1 {
             index -= 1
-            bound: U64.from_int(index + 1) ?? panic("test count fits U64")
-            chosen: Int.from_u64(jet_native_test_shuffle_next(state) %% bound)
+            bound: checked(U64{index + 1}) ?? panic("test count fits U64")
+            chosen: Int{jet_native_test_shuffle_next(state) %% bound}
             // copy: a Fisher-Yates swap of two list slots (owners: selected[index] and
             // selected[chosen]); an element cannot be moved out of its list (E0225) and Jet code
             // outside Core has no slot swap.

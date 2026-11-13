@@ -282,7 +282,7 @@ facts: fn(q: WebQuery) -> String Never! {
 valid_key: fn(key: String) -> Bool {
     if key.len() == 0 || key.len() > C_MAX_QUERY_KEY -> return false
     loop b in key.bytes() {
-        n: Int.from_u8(b)
+        n: Int{b}
         if n < 33 || n == 127 -> return false
     }
     true
@@ -292,7 +292,7 @@ esc_json: fn(text: String) -> String {
     out := [U8]{}
     hex: "0123456789abcdef".bytes()
     loop b in text.bytes() {
-        n: Int.from_u8(b)
+        n: Int{b}
         if n == 34 || n == 92 {
             out.push(U8{92})
             out.push(b)

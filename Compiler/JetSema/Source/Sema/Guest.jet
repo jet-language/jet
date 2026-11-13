@@ -50,7 +50,7 @@ sema_function_is_guest_export: fn(function: Func) -> Bool Never! {
 sema_guest_export_native_symbol: fn(name: String) -> String Never! {
     bytes := [U8]{}
     loop byte in name.bytes() {
-        n: Int.from_u8(byte)
+        n: Int{byte}
         if (n >= 48 && n <= 57) || (n >= 65 && n <= 90) || (n >= 97 && n <= 122) || n == 95 {
             bytes.push(byte)
         } else {
@@ -58,7 +58,7 @@ sema_guest_export_native_symbol: fn(name: String) -> String Never! {
         }
     }
     symbol := String.from_bytes(bytes) ?? ""
-    if symbol == "" || (Int.from_u8(bytes[0]) >= 48 && Int.from_u8(bytes[0]) <= 57) -> symbol = "_{symbol}"
+    if symbol == "" || (Int{bytes[0]} >= 48 && Int{bytes[0]} <= 57) -> symbol = "_{symbol}"
     symbol
 }
 

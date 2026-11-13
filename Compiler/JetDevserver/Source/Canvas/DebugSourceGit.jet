@@ -563,7 +563,7 @@ debug_bounded_text: fn(text: String, max_bytes: Int) -> DebugBoundedText Never! 
     marker: " [truncated]"
     bytes: text.bytes()
     end := if max_bytes > marker.len() -> max_bytes - marker.len() else -> 0
-    loop end > 0 && Int.from_u8(bytes[end]) >= 128 && Int.from_u8(bytes[end]) < 192 -> end -= 1
+    loop end > 0 && (Int{bytes[end]}) >= 128 && (Int{bytes[end]}) < 192 -> end -= 1
     prefix: String.from_bytes(bytes[0..<end]) ?? ""
     DebugBoundedText{text: "{prefix}{marker}", truncated: true}
 }
@@ -633,13 +633,13 @@ line_span: fn(src: String, line: Int) -> Span Never! {
             start = i
             break
         }
-        if Int.from_u8(bytes[i]) == 10 {
+        if (Int{bytes[i]}) == 10 {
             current += 1
             if current == line && i + 1 == bytes.len() -> start = bytes.len()
         }
     }
     end := start
-    loop end < bytes.len() && Int.from_u8(bytes[end]) != 10 -> end += 1
+    loop end < bytes.len() && (Int{bytes[end]}) != 10 -> end += 1
     Span{start: start, end: end}
 }
 
@@ -648,7 +648,7 @@ line_of_offset: fn(src: String, offset: Int) -> Int Never! {
     limit: if offset < bytes.len() -> offset else -> bytes.len()
     line := 1
     loop i in 0..<limit {
-        if Int.from_u8(bytes[i]) == 10 -> line += 1
+        if (Int{bytes[i]}) == 10 -> line += 1
     }
     line
 }
@@ -660,7 +660,7 @@ line_from_anchor: fn(src: String, anchor: String) -> Int? Never! {
 
 debug_char_boundary: fn(bytes: [U8], offset: Int) -> Bool Never! {
     if offset == 0 || offset >= bytes.len() -> return offset <= bytes.len()
-    code: Int.from_u8(bytes[offset])
+    code: Int{bytes[offset]}
     code < 128 || code >= 192
 }
 

@@ -44,7 +44,7 @@ poll: fn() -[IO]> UIIMEEvent? UIHostError! {
     if phase == .Cancel -> return Ok(Val(UIIMEEvent{target: target, phase: phase, composition: None}))
     caret := 0
     loop byte in text.bytes() {
-        if Int.from_u8(byte).bit_and(192) != 128 -> caret += 1
+        if (Int{byte}).bit_and(192) != 128 -> caret += 1
     }
     selection: if fields[3].len() == 0 && fields[4].len() == 0 -> UITextRange{start: caret, end: caret} else -> UITextRange{start: ime_offset(fields[3]), end: ime_offset(fields[4])}
     marked: if fields[5].len() == 0 && fields[6].len() == 0 -> UITextRange?{None} else -> Val(UITextRange{start: ime_offset(fields[5]), end: ime_offset(fields[6])})

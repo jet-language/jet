@@ -69,10 +69,10 @@ control_variable_sets: fn(line: String, name: String, script: Bool) -> Bool {
         if start < 0 -> return false
         after: start + width
         if (start == 0 || !decision_id_word(bytes[start - 1])) && after < bytes.len() {
-            following: Int.from_u8(bytes[after])
-            if following == 61 && (after + 1 >= bytes.len() || Int.from_u8(bytes[after + 1]) != 61) -> return true
-            if script && start > 0 && following == 58 && after + 1 < bytes.len() && Int.from_u8(bytes[after + 1]) == 32 {
-                before: Int.from_u8(bytes[start - 1])
+            following: Int{bytes[after]}
+            if following == 61 && (after + 1 >= bytes.len() || Int{bytes[after + 1]} != 61) -> return true
+            if script && start > 0 && following == 58 && after + 1 < bytes.len() && (Int{bytes[after + 1]}) == 32 {
+                before: Int{bytes[start - 1]}
                 if before == 123 || before == 44 || before == 32 -> return true
             }
         }

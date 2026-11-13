@@ -43,10 +43,10 @@ Seeded: struct {
 
 impl Seeded {
     next: fn(&self) -> Int {
-        self.state = self.state.wrapping_add(U32{1831565813})
+        self.state = wrapping(self.state + U32{1831565813})
         t := self.state
-        t = t.bit_xor(t >> 15).wrapping_mul(t.bit_or(U32{1}))
-        t = t.bit_xor(t.wrapping_add(t.bit_xor(t >> 7).wrapping_mul(t.bit_or(U32{61}))))
+        t = wrapping(t.bit_xor(t >> 15) * t.bit_or(U32{1}))
+        t = t.bit_xor(wrapping(t + wrapping(t.bit_xor(t >> 7) * t.bit_or(U32{61}))))
         Int{t.bit_xor(t >> 14)}
     }
 

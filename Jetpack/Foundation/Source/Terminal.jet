@@ -270,11 +270,11 @@ terminal_bytes_text: fn(raw: [U8], start: Int, end: Int) -> String Never! {
 // its final byte, OSC at BEL or ST, and any other escape after one byte.
 terminal_ansi_sequence_end: fn(raw: [U8], start: Int) -> Int Never! {
     if start + 1 >= raw.len() -> return raw.len()
-    kind: Int.from_u8(raw[start + 1])
+    kind: Int{raw[start + 1]}
     if kind == {
         0x5B -> {
             loop index in (start + 2)..<raw.len() {
-                code: Int.from_u8(raw[index])
+                code: Int{raw[index]}
                 if code >= 0x40 && code <= 0x7E -> return index + 1
             }
             raw.len()
@@ -282,9 +282,9 @@ terminal_ansi_sequence_end: fn(raw: [U8], start: Int) -> Int Never! {
         0x5D -> {
             index := start + 2
             loop index < raw.len() {
-                code: Int.from_u8(raw[index])
+                code: Int{raw[index]}
                 if code == 0x07 -> return index + 1
-                if code == 0x1B && index + 1 < raw.len() && Int.from_u8(raw[index + 1]) == 0x5C -> return index + 2
+                if code == 0x1B && index + 1 < raw.len() && (Int{raw[index + 1]}) == 0x5C -> return index + 2
                 index += 1
             }
             raw.len()
@@ -299,11 +299,11 @@ terminal_ansi_visible_width: fn(input: String) -> Int Never! {
     index := 0
     width := 0
     loop index < raw.len() {
-        if Int.from_u8(raw[index]) == 0x1B {
+        if (Int{raw[index]}) == 0x1B {
             index = terminal_ansi_sequence_end(raw, index)
             next
         }
-        end: index + terminal_utf8_length(Int.from_u8(raw[index]))
+        end: index + terminal_utf8_length(Int{raw[index]})
         width += core_text.display_width(terminal_bytes_text(raw, index, end))
         index = end
     }
@@ -321,13 +321,13 @@ terminal_fit_line: fn(input: String, width: Int) -> String Never! {
     visible := 0
     output := [U8]{}
     loop index < raw.len() {
-        if Int.from_u8(raw[index]) == 0x1B {
+        if (Int{raw[index]}) == 0x1B {
             end: terminal_ansi_sequence_end(raw, index)
             loop byte in raw[index..<end] -> output.push(byte)
             index = end
             next
         }
-        end: index + terminal_utf8_length(Int.from_u8(raw[index]))
+        end: index + terminal_utf8_length(Int{raw[index]})
         character_width: core_text.display_width(terminal_bytes_text(raw, index, end))
         if visible + character_width > content_width -> break
         loop byte in raw[index..<end] -> output.push(byte)

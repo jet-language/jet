@@ -182,10 +182,10 @@ core_decl_jet_string_text: fn(content: String, context: String) -> String CoreDe
     out := [U8]{}
     index := 0
     loop index < bytes.len() {
-        code: Int.from_u8(bytes[index])
+        code: Int{bytes[index]}
         index += 1
         if code == 123 || code == 125 {
-            if index >= bytes.len() || Int.from_u8(bytes[index]) != code -> return Err(core_decl_fail("interpolating Jet string in {context}"))
+            if index >= bytes.len() || (Int{bytes[index]}) != code -> return Err(core_decl_fail("interpolating Jet string in {context}"))
             out.push(bytes[index])
             index += 1
             next
@@ -194,7 +194,7 @@ core_decl_jet_string_text: fn(content: String, context: String) -> String CoreDe
             out.push(bytes[index - 1])
             next
         }
-        escape: if index < bytes.len() -> Int.from_u8(bytes[index]) else -> -1
+        escape: if index < bytes.len() -> (Int{bytes[index]}) else -> -1
         index += 1
         simple: if escape == {
             110 -> 10
@@ -222,7 +222,7 @@ core_decl_syntax_constants: fn(syntax: [CoreDeclarationFile]) -> [String: String
             if colon <= 0 || !core_decl_is_constant(core_decl_slice(line, 0, colon)) -> next
             name: core_decl_slice(line, 0, colon)
             open: colon + 2
-            if open < bytes.len() && Int.from_u8(bytes[open]) == 34 {
+            if open < bytes.len() && (Int{bytes[open]}) == 34 {
                 close: core_decl_quote_end(bytes, open)
                 if close < 0 -> next
                 constants[name] = core_decl_jet_string_text(core_decl_slice(line, open + 1, close), "{file.path} {name}") ?? return Err(err)
@@ -252,7 +252,7 @@ core_decl_syntax_constants: fn(syntax: [CoreDeclarationFile]) -> [String: String
 
 // The first byte after the whitespace at byte `at`, or -1 when none is there.
 core_decl_after_space: fn(bytes: [U8], at: Int) -> Int Never! {
-    if at >= bytes.len() || !core_decl_space(Int.from_u8(bytes[at])) -> return -1
+    if at >= bytes.len() || !core_decl_space(Int{bytes[at]}) -> return -1
     core_decl_skip_space(bytes, at)
 }
 
@@ -262,7 +262,7 @@ core_decl_take_word: fn(line: String, at: Int) -> CoreDeclTake? Never! {
     start: core_decl_after_space(bytes, at)
     if start < 0 || start >= bytes.len() -> return None
     end := start
-    loop end < bytes.len() && !core_decl_space(Int.from_u8(bytes[end])) -> end += 1
+    loop end < bytes.len() && !core_decl_space(Int{bytes[end]}) -> end += 1
     Val(CoreDeclTake{text: core_decl_slice(line, start, end), end: end})
 }
 
@@ -271,9 +271,9 @@ core_decl_take_word: fn(line: String, at: Int) -> CoreDeclTake? Never! {
 core_decl_take_block: fn(line: String, at: Int, open: Int, close: Int) -> CoreDeclTake? Never! {
     bytes: line.bytes()
     start: core_decl_after_space(bytes, at)
-    if start < 0 || start >= bytes.len() || Int.from_u8(bytes[start]) != open -> return None
+    if start < 0 || start >= bytes.len() || (Int{bytes[start]}) != open -> return None
     end := start + 1
-    loop end < bytes.len() && Int.from_u8(bytes[end]) != close -> end += 1
+    loop end < bytes.len() && (Int{bytes[end]}) != close -> end += 1
     if end >= bytes.len() -> return None
     Val(CoreDeclTake{text: core_decl_slice(line, start + 1, end), end: end + 1})
 }
@@ -566,7 +566,7 @@ core_decl_constructor_offsets: fn(expression: String) -> [Int] Never! {
         if found < 0 -> return out
         at: start + found
         start = at + 1
-        if at > 0 && core_decl_word(Int.from_u8(bytes[at - 1])) -> next
+        if at > 0 && core_decl_word(Int{bytes[at - 1]}) -> next
         rest := core_decl_tail(expression, at + core_decl_len(head))
         if rest.starts_with("_with_coverage") -> rest = core_decl_tail(rest, core_decl_len("_with_coverage"))
         if rest.trim().starts_with("(") -> out.push(at)
@@ -577,10 +577,10 @@ core_decl_constructor_offsets: fn(expression: String) -> [Int] Never! {
 // after its closing quote; None when none is there.
 core_decl_plain_quoted: fn(text: String, at: Int) -> CoreDeclTake? Never! {
     bytes: text.bytes()
-    if at >= bytes.len() || Int.from_u8(bytes[at]) != 34 -> return None
+    if at >= bytes.len() || (Int{bytes[at]}) != 34 -> return None
     end := at + 1
     loop end < bytes.len() {
-        code: Int.from_u8(bytes[end])
+        code: Int{bytes[end]}
         if code == 92 -> return None
         if code == 34 -> return Val(CoreDeclTake{text: core_decl_slice(text, at + 1, end), end: end + 1})
         end += 1
@@ -600,12 +600,12 @@ core_decl_web_calls: fn(expression: String) -> [[String]] Never! {
         if found < 0 -> return out
         at: start + found
         start = at + 1
-        if at > 0 && core_decl_word(Int.from_u8(bytes[at - 1])) -> next
+        if at > 0 && core_decl_word(Int{bytes[at - 1]}) -> next
         open: core_decl_skip_space(bytes, at + core_decl_len(head))
-        if open >= bytes.len() || Int.from_u8(bytes[open]) != 40 -> next
+        if open >= bytes.len() || (Int{bytes[open]}) != 40 -> next
         module_name: core_decl_plain_quoted(expression, core_decl_skip_space(bytes, open + 1)) ?? next
         comma: core_decl_skip_space(bytes, module_name.end)
-        if comma >= bytes.len() || Int.from_u8(bytes[comma]) != 44 -> next
+        if comma >= bytes.len() || (Int{bytes[comma]}) != 44 -> next
         member: core_decl_plain_quoted(expression, core_decl_skip_space(bytes, comma + 1)) ?? next
         out.push([String]{module_name.text, member.text})
         start = member.end
@@ -616,7 +616,7 @@ core_decl_web_calls: fn(expression: String) -> [[String]] Never! {
 core_decl_public_member: fn(member: String) -> Bool Never! {
     if core_decl_is_name(member, "!?") -> return true
     bytes: member.bytes()
-    if bytes.len() > 0 && Int.from_u8(bytes[0]) == 0 -> return core_decl_is_name(core_decl_tail(member, 1), ".")
+    if bytes.len() > 0 && (Int{bytes[0]}) == 0 -> return core_decl_is_name(core_decl_tail(member, 1), ".")
     member.starts_with("\\0") && core_decl_is_name(core_decl_tail(member, 2), ".")
 }
 
@@ -733,7 +733,7 @@ core_decl_list_body: fn(source: String, anchor: String, path: String) -> String 
     quoted := false
     escaped := false
     loop index in open..<bytes.len() {
-        code: Int.from_u8(bytes[index])
+        code: Int{bytes[index]}
         if quoted {
             if {
                 escaped -> escaped = false
@@ -763,7 +763,7 @@ core_decl_resolve_items: fn(body: String, constants: [String: String]) -> [Strin
     bytes: body.bytes()
     at := 0
     loop at < bytes.len() {
-        if Int.from_u8(bytes[at]) != 34 {
+        if (Int{bytes[at]}) != 34 {
             at += 1
             next
         }
@@ -775,7 +775,7 @@ core_decl_resolve_items: fn(body: String, constants: [String: String]) -> [Strin
     }
     start := -1
     loop index in 0..<bytes.len() + 1 {
-        word: index < bytes.len() && core_decl_word(Int.from_u8(bytes[index]))
+        word: index < bytes.len() && core_decl_word(Int{bytes[index]})
         if word {
             if start < 0 -> start = index
             next
@@ -839,10 +839,10 @@ core_decl_snake_segment: fn(segment: String) -> String Never! {
     parts := [String]{}
     start := 0
     loop index in 1..<bytes.len() {
-        code: Int.from_u8(bytes[index])
+        code: Int{bytes[index]}
         if !core_decl_upper(code) -> next
-        previous: Int.from_u8(bytes[index - 1])
-        acronym_end: core_decl_upper(previous) && index + 1 < bytes.len() && core_decl_lower(Int.from_u8(bytes[index + 1]))
+        previous: Int{bytes[index - 1]}
+        acronym_end: core_decl_upper(previous) && index + 1 < bytes.len() && core_decl_lower(Int{bytes[index + 1]})
         if acronym_end || core_decl_lower(previous) || core_decl_digit(previous) {
             parts.push(core_decl_slice(segment, start, index))
             start = index
@@ -854,9 +854,9 @@ core_decl_snake_segment: fn(segment: String) -> String Never! {
 
 core_decl_unit_segment: fn(segment: String) -> Bool Never! {
     bytes: segment.bytes()
-    if bytes.len() == 0 || !core_decl_lower(Int.from_u8(bytes[0])) -> return false
+    if bytes.len() == 0 || !core_decl_lower(Int{bytes[0]}) -> return false
     loop byte in bytes {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if !(core_decl_lower(code) || core_decl_digit(code) || code == 95) -> return false
     }
     true
@@ -868,7 +868,7 @@ core_decl_port_pending: fn(source: String) -> Bool Never! {
     loop line in source.split("\n") {
         if !line.starts_with(marker) -> next
         if core_decl_len(line) == core_decl_len(marker) -> return true
-        if !core_decl_word(Int.from_u8(line.bytes()[core_decl_len(marker)])) -> return true
+        if !core_decl_word(Int{line.bytes()[core_decl_len(marker)]}) -> return true
     }
     false
 }
@@ -934,7 +934,7 @@ core_declarations_read: fn(core: String, parts: String, syntax: [CoreDeclaration
         context: "Core.rows line {number}"
         bytes: line.bytes()
         head_end := 0
-        loop head_end < bytes.len() && !core_decl_space(Int.from_u8(bytes[head_end])) -> head_end += 1
+        loop head_end < bytes.len() && !core_decl_space(Int{bytes[head_end]}) -> head_end += 1
         head: core_decl_slice(line, 0, head_end)
         if head == {
             "bootstrap" -> {

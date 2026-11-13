@@ -698,7 +698,7 @@ is_identifier: fn(name: String) -> Bool Never! {
     bytes: name.bytes()
     if bytes.len() == 0 -> return false
     loop index in 0..<bytes.len() {
-        code: Int.from_u8(bytes[index])
+        code: Int{bytes[index]}
         if is_letter_byte(code) || code == 95 -> next
         if index == 0 || !is_digit_byte(code) -> return false
     }
@@ -719,8 +719,8 @@ sha_hex: fn(text: String) -> String Never! { crypto.sha256(text).hex() }
 compare_bytes: fn(left: [U8], right: [U8]) -> Ordering Never! {
     common: if left.len() < right.len() -> left.len() else -> right.len()
     loop at in 0..<common {
-        a: Int.from_u8(left[at])
-        b: Int.from_u8(right[at])
+        a: Int{left[at]}
+        b: Int{right[at]}
         if a < b -> return Ordering.Less
         if a > b -> return Ordering.Greater
     }
@@ -904,7 +904,7 @@ normalize: fn(name: String) -> String Never! {
     lowered: name.to_lower()
     out := [U8]{}
     loop byte in lowered.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if code == 95 || code == 33 || code == 63 || code == 46 || code == 45 -> next
         out.push(byte)
     }
@@ -966,7 +966,7 @@ synonyms_for: fn(names: Synonyms, member: String, container: String) -> [String]
 // Jet's method surface against another language's punctuation.
 is_named_operation: fn(name: String) -> Bool Never! {
     if name == "" -> return false
-    last: Int.from_u8(name.bytes()[byte_len(name) - 1])
+    last: Int{name.bytes()[byte_len(name) - 1]}
     if last == 33 || last == 63 || last == 61 -> return is_identifier(byte_slice(name, 0, byte_len(name) - 1))
     is_identifier(name)
 }
@@ -978,7 +978,7 @@ is_named_operation: fn(name: String) -> Bool Never! {
 // every function in PascalCase, so it cannot apply to a competitor surface.
 is_type_item: fn(member: String) -> Bool Never! {
     if member == "" -> return false
-    first: Int.from_u8(member.bytes()[0])
+    first: Int{member.bytes()[0]}
     first >= 65 && first <= 90
 }
 
@@ -1209,15 +1209,15 @@ brace_delta: fn(line: String) -> Int Never! {
     delta := 0
     index := 0
     loop index < bytes.len() {
-        code: Int.from_u8(bytes[index])
+        code: Int{bytes[index]}
         if code == 34 {
             // A closed string is skipped whole; an unclosed quote is a plain character.
             close := -1
             scan := index + 1
             loop scan < bytes.len() {
-                inner: Int.from_u8(bytes[scan])
+                inner: Int{bytes[scan]}
                 if inner == 92 {
-                    if scan + 1 < bytes.len() && Int.from_u8(bytes[scan + 1]) != 10 {
+                    if scan + 1 < bytes.len() && (Int{bytes[scan + 1]}) != 10 {
                         scan += 2
                         next
                     }
@@ -1234,7 +1234,7 @@ brace_delta: fn(line: String) -> Int Never! {
                 next
             }
         }
-        if code == 47 && index + 1 < bytes.len() && Int.from_u8(bytes[index + 1]) == 47 -> break
+        if code == 47 && index + 1 < bytes.len() && (Int{bytes[index + 1]}) == 47 -> break
         if code == 123 -> delta += 1
         if code == 125 -> delta -= 1
         index += 1
@@ -2802,11 +2802,11 @@ Metrics: struct {
 
 // The byte length of the JavaScript `\s` character at `at`, or 0.
 space_len: fn(bytes: [U8], at: Int) -> Int Never! {
-    lead: Int.from_u8(bytes[at])
+    lead: Int{bytes[at]}
     if lead == 32 || (lead >= 9 && lead <= 13) -> return 1
     if lead < 128 -> return 0
-    second: if at + 1 < bytes.len() -> Int.from_u8(bytes[at + 1]) else -> -1
-    third: if at + 2 < bytes.len() -> Int.from_u8(bytes[at + 2]) else -> -1
+    second: if at + 1 < bytes.len() -> (Int{bytes[at + 1]}) else -> -1
+    third: if at + 2 < bytes.len() -> (Int{bytes[at + 2]}) else -> -1
     if lead == 194 && second == 160 -> return 2
     if lead == 225 && second == 154 && third == 128 -> return 3
     if lead == 226 && second == 128 && ((third >= 128 && third <= 138) || third == 168 || third == 169 || third == 175) -> return 3
@@ -2818,10 +2818,10 @@ space_len: fn(bytes: [U8], at: Int) -> Int Never! {
 
 // Whether the character at `at` ends a line for `^` and `.`.
 is_line_break: fn(bytes: [U8], at: Int) -> Bool Never! {
-    lead: Int.from_u8(bytes[at])
+    lead: Int{bytes[at]}
     if lead == 10 || lead == 13 -> return true
     if lead != 226 || at + 2 >= bytes.len() -> return false
-    Int.from_u8(bytes[at + 1]) == 128 && (Int.from_u8(bytes[at + 2]) == 168 || Int.from_u8(bytes[at + 2]) == 169)
+    Int{bytes[at + 1]} == 128 && (Int{bytes[at + 2]} == 168 || Int{bytes[at + 2]} == 169)
 }
 
 char_len: fn(lead: Int) -> Int Never! {
@@ -2836,11 +2836,11 @@ quoted_end: fn(bytes: [U8], at: Int, quote: Int) -> Int Never! {
     probe := at + 1
     loop {
         if probe >= bytes.len() -> return -1
-        code: Int.from_u8(bytes[probe])
+        code: Int{bytes[probe]}
         if code == quote -> return probe + 1
         if code == 92 {
             if probe + 1 >= bytes.len() || is_line_break(bytes, probe + 1) -> return -1
-            probe += 1 + char_len(Int.from_u8(bytes[probe + 1]))
+            probe += 1 + char_len(Int{bytes[probe + 1]})
         } else {
             probe += char_len(code)
         }
@@ -2850,7 +2850,7 @@ quoted_end: fn(bytes: [U8], at: Int, quote: Int) -> Int Never! {
 word_end: fn(bytes: [U8], at: Int) -> Int Never! {
     probe := at
     loop {
-        if probe >= bytes.len() || !is_word_code(Int.from_u8(bytes[probe])) -> return probe
+        if probe >= bytes.len() || !is_word_code(Int{bytes[probe]}) -> return probe
         probe += 1
     }
 }
@@ -2860,7 +2860,7 @@ dollar_word_end: fn(bytes: [U8], at: Int) -> Int Never! {
     probe := at
     loop {
         if probe >= bytes.len() -> return probe
-        code: Int.from_u8(bytes[probe])
+        code: Int{bytes[probe]}
         if !is_word_code(code) && code != 36 -> return probe
         probe += 1
     }
@@ -2869,7 +2869,7 @@ dollar_word_end: fn(bytes: [U8], at: Int) -> Int Never! {
 digits_end: fn(bytes: [U8], at: Int) -> Int Never! {
     probe := at
     loop {
-        if probe >= bytes.len() || !is_digit_byte(Int.from_u8(bytes[probe])) -> return probe
+        if probe >= bytes.len() || !is_digit_byte(Int{bytes[probe]}) -> return probe
         probe += 1
     }
 }
@@ -2888,10 +2888,10 @@ spaces_end: fn(bytes: [U8], at: Int) -> Int Never! {
 // the others, 0 for none.
 operator_len: fn(bytes: [U8], at: Int) -> Int Never! {
     if at + 1 >= bytes.len() -> return 0
-    first: Int.from_u8(bytes[at])
-    second: Int.from_u8(bytes[at + 1])
+    first: Int{bytes[at]}
+    second: Int{bytes[at + 1]}
     if first == 46 && second == 46 {
-        if at + 2 < bytes.len() && Int.from_u8(bytes[at + 2]) == 46 -> return 3
+        if at + 2 < bytes.len() && (Int{bytes[at + 2]}) == 46 -> return 3
         return 2
     }
     if (first == 61 || first == 45) && second == 62 -> return 2
@@ -2906,7 +2906,7 @@ source_tokens: fn(bytes: [U8]) -> Int Never! {
     at := 0
     loop {
         if at >= bytes.len() -> return count
-        code: Int.from_u8(bytes[at])
+        code: Int{bytes[at]}
         space: space_len(bytes, at)
         if space > 0 {
             at += space
@@ -2924,7 +2924,7 @@ source_tokens: fn(bytes: [U8]) -> Int Never! {
         }
         if is_digit_byte(code) {
             at = digits_end(bytes, at)
-            if at + 1 < bytes.len() && Int.from_u8(bytes[at]) == 46 && is_digit_byte(Int.from_u8(bytes[at + 1])) -> at = digits_end(bytes, at + 1)
+            if at + 1 < bytes.len() && (Int{bytes[at]}) == 46 && is_digit_byte(Int{bytes[at + 1]}) -> at = digits_end(bytes, at + 1)
             next
         }
         operator: operator_len(bytes, at)
@@ -2947,7 +2947,7 @@ keyword_at: fn(bytes: [U8], at: Int, word: String) -> Bool Never! {
         if bytes[at + index] != spelled[index] -> return false
     }
     end: at + spelled.len()
-    end >= bytes.len() || !is_word_code(Int.from_u8(bytes[end]))
+    end >= bytes.len() || !is_word_code(Int{bytes[end]})
 }
 
 keyword_prefix_at: fn(bytes: [U8], at: Int, word: String) -> Bool Never! {
@@ -2980,7 +2980,7 @@ source_metrics: fn(source: String) -> Metrics Never! {
     at := 0
     loop {
         if at >= bytes.len() -> break
-        code: Int.from_u8(bytes[at])
+        code: Int{bytes[at]}
         space: space_len(bytes, at)
         if space > 0 {
             if is_line_break(bytes, at) -> line_open = true
@@ -3001,11 +3001,11 @@ source_metrics: fn(source: String) -> Metrics Never! {
     at = 0
     loop {
         if at >= bytes.len() -> break
-        code: Int.from_u8(bytes[at])
-        before: at > 0 && is_word_code(Int.from_u8(bytes[at - 1]))
+        code: Int{bytes[at]}
+        before: at > 0 && is_word_code(Int{bytes[at - 1]})
         if before != is_word_code(code) && (is_letter_byte(code) || code == 95 || code == 36) {
             after: spaces_end(bytes, dollar_word_end(bytes, at + 1))
-            if after < bytes.len() && Int.from_u8(bytes[after]) == 40 {
+            if after < bytes.len() && (Int{bytes[after]}) == 40 {
                 calls += 1
                 at = after + 1
                 next
@@ -3016,8 +3016,8 @@ source_metrics: fn(source: String) -> Metrics Never! {
     at = 0
     loop {
         if at >= bytes.len() -> break
-        code: Int.from_u8(bytes[at])
-        before: at > 0 && is_word_code(Int.from_u8(bytes[at - 1]))
+        code: Int{bytes[at]}
+        before: at > 0 && is_word_code(Int{bytes[at - 1]})
         matched := false
         if !before && is_letter_byte(code) {
             loop word in temporary_words {
@@ -3025,7 +3025,7 @@ source_metrics: fn(source: String) -> Metrics Never! {
                 gap: at + word.bytes().len()
                 name: spaces_end(bytes, gap)
                 if name == gap || name >= bytes.len() -> next
-                first: Int.from_u8(bytes[name])
+                first: Int{bytes[name]}
                 if !is_letter_byte(first) && first != 95 && first != 36 -> next
                 temporaries += 1
                 at = dollar_word_end(bytes, name + 1)
@@ -3514,7 +3514,7 @@ is_hex64: fn(value: String) -> Bool Never! {
     bytes: value.bytes()
     if bytes.len() != 64 -> return false
     loop byte in bytes {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if !is_digit_byte(code) && (code < 97 || code > 102) -> return false
     }
     true
@@ -3841,7 +3841,7 @@ error_line: fn(line: String) -> Bool Never! {
     bytes: line.removesuffix("\r").bytes()
     at := 11
     if at >= bytes.len() -> return false
-    first: Int.from_u8(bytes[at])
+    first: Int{bytes[at]}
     if first < 65 || first > 90 -> return false
     at += 1
     end: word_end(bytes, at)
@@ -3977,7 +3977,7 @@ heading_count: fn(policy: String, heading: String) -> Int Never! {
     loop line in policy.split("\n") {
         if !line.starts_with(heading) -> next
         rest: byte_tail(line, byte_len(heading))
-        if rest == "" || !is_word_code(Int.from_u8(rest.bytes()[0])) -> count += 1
+        if rest == "" || !is_word_code(Int{rest.bytes()[0]}) -> count += 1
     }
     count
 }

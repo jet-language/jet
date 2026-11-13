@@ -10,11 +10,11 @@ use {
 ir_impl_method_leaf: fn(key: String) -> String Never! {
     bytes: key.bytes()
     end := bytes.len()
-    if end > 0 && Int.from_u8(bytes[end - 1]) == 62 {
+    if end > 0 && (Int{bytes[end - 1]}) == 62 {
         depth := 0
         position := end - 1
         loop position >= 0 {
-            byte: Int.from_u8(bytes[position])
+            byte: Int{bytes[position]}
             if byte == 62 -> depth += 1
             if byte == 60 {
                 depth -= 1
@@ -29,7 +29,7 @@ ir_impl_method_leaf: fn(key: String) -> String Never! {
     start := 0
     position := end - 2
     loop position >= 0 {
-        if Int.from_u8(bytes[position]) == 58 && Int.from_u8(bytes[position + 1]) == 58 {
+        if (Int{bytes[position]}) == 58 && (Int{bytes[position + 1]}) == 58 {
             start = position + 2
             break
         }

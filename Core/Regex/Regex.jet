@@ -468,7 +468,7 @@ expand: fn(m: Match, template: String) -> String Never! {
             out.push(b)
             next
         }
-        n: Int.from_u8(raw[i])
+        n: Int{raw[i]}
         if n == 36 {
             out.push(b)
             i = i + 1
@@ -502,7 +502,7 @@ group_by_reference: fn(m: Match, raw: [U8], from: Int, to: Int) -> String Never!
     index := 0
     k := from
     loop k < to {
-        d: Int.from_u8(raw[k])
+        d: Int{raw[k]}
         if d < 48 || d > 57 {
             return m.name(slice(raw, from, to)) ?? ""
         }
@@ -1833,8 +1833,8 @@ assert_holds: fn(re: Regex, text: [U8], kind: Int, pos: Int, hi: Int, looks: [Bo
     if kind == A_LINE_START -> return pos == 0 || (re.flags.multiline && text[pos - 1] == (U8{10}))
     if kind == A_TEXT_START -> return pos == 0
     if kind == A_TEXT_END -> return pos == hi
-    before: pos > 0 && is_group_name_char(Int.from_u8(text[pos - 1]))
-    after: pos < hi && is_group_name_char(Int.from_u8(text[pos]))
+    before: pos > 0 && is_group_name_char(Int{text[pos - 1]})
+    after: pos < hi && is_group_name_char(Int{text[pos]})
     if kind == A_WORD -> return before != after
     before == after
 }
@@ -1942,7 +1942,7 @@ look_pass: fn(re: Regex, text: [U8], look: Int, looks: &[Bool]) -> Int Never! {
 /// ```
 prev_boundary: fn(text: [U8], pos: Int) -> Int Never! {
     at := pos - 1
-    loop at > 0 && Int.from_u8(text[at]).bit_and(192) == 128 -> at = at - 1
+    loop at > 0 && (Int{text[at]}).bit_and(192) == 128 -> at = at - 1
     at
 }
 
@@ -2061,7 +2061,7 @@ literal_runs: fn(re: Regex, text: [U8], capture: Bool, stop_on_match: Bool, limi
     shift := [Int]{}
     if skip {
         shift = filled(256, n)
-        loop k in 0..<n - 1 -> shift[Int.from_u8(re.prefix[k])] = n - 1 - k
+        loop k in 0..<n - 1 -> shift[Int{re.prefix[k]}] = n - 1 - k
     }
     found := if skip -> find_skipping(text, re.prefix, shift, 0) else -> find_bytes(text, re.prefix, 0)
     loop found >= 0 {
@@ -2094,7 +2094,7 @@ find_skipping: fn(text: [U8], needle: [U8], shift: [Int], from: Int) -> Int Neve
             loop k < n - 1 && text[at + k] == needle[k] -> k = k + 1
             if k == n - 1 -> return at
         }
-        at = at + shift[Int.from_u8(b)]
+        at = at + shift[Int{b}]
     }
     -1
 }
@@ -2326,7 +2326,7 @@ scalar_text: fn(cp: Int) -> String Never! {
 
 // UTF-8 width from a lead byte. Jet Strings are valid UTF-8.
 lead_width: fn(lead: U8) -> Int Never! {
-    n: Int.from_u8(lead)
+    n: Int{lead}
     if n < 128 -> return 1
     if n < 224 -> return 2
     if n < 240 -> return 3
@@ -2334,7 +2334,7 @@ lead_width: fn(lead: U8) -> Int Never! {
 }
 
 decode_at: fn(raw: [U8], i: Int) -> Int Never! {
-    first: Int.from_u8(raw[i])
+    first: Int{raw[i]}
     if first < 128 -> return first
     width: lead_width(raw[i])
     cp := first.bit_and(7)
@@ -2342,7 +2342,7 @@ decode_at: fn(raw: [U8], i: Int) -> Int Never! {
     if width == 3 -> cp = first.bit_and(15)
     k := 1
     loop k < width && i + k < raw.len() {
-        cp = (cp << 6).bit_or(Int.from_u8(raw[i + k]).bit_and(63))
+        cp = (cp << 6).bit_or(Int{raw[i + k]}.bit_and(63))
         k = k + 1
     }
     cp
@@ -2369,7 +2369,7 @@ CharCursor: struct {
             self.count = 0
         }
         loop self.byte < byte && self.byte < raw.len() {
-            b: Int.from_u8(raw[self.byte])
+            b: Int{raw[self.byte]}
             if b < 128 || b >= 192 -> self.count = self.count + 1
             self.byte = self.byte + 1
         }
@@ -2421,7 +2421,7 @@ char_count: fn(raw: [U8], from: Int, to: Int) -> Int Never! {
     count := 0
     i := from
     loop i < to {
-        b: Int.from_u8(raw[i])
+        b: Int{raw[i]}
         if b < 128 || b >= 192 -> count = count + 1
         i = i + 1
     }

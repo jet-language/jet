@@ -621,7 +621,7 @@ jet_driver_unit_spellings: fn(source: [U8], tokens: [Token], tables: TokenTables
         // An imaginary literal (`4i`, a number with the suffix `i`) is a
         // core.math Complex, as Sema types it, so it spells `Complex`.
         if kind == TOKEN_UNIT_NUMBER && end - start >= 2 && source[end - 1] == (U8{105}) && source[end - 2] >= (U8{48}) && source[end - 2] <= (U8{57}) {
-            complex: Int.from_u32(name_intern(spellings.table, "Complex").id)
+            complex: Int{name_intern(spellings.table, "Complex").id}
             jet_driver_spell_push(source, start, end, complex, spellings)
             next
         }
@@ -630,7 +630,7 @@ jet_driver_unit_spellings: fn(source: [U8], tokens: [Token], tables: TokenTables
             if kind == TOKEN_STRING || kind == TOKEN_RAW_STRING || kind == TOKEN_CHAR || end - start > 3 -> jet_driver_spell_span(source, start, end, spellings)
             next
         }
-        text: Int.from_u32(token.text.id)
+        text: Int{token.text.id}
         whole := text > 0 && !(first >= (U8{48}) && first <= (U8{57}))
         cursor := start + 1
         loop whole && cursor < end {
@@ -642,7 +642,7 @@ jet_driver_unit_spellings: fn(source: [U8], tokens: [Token], tables: TokenTables
             next
         }
         loop local.len() <= text -> local.push(-1)
-        if local[text] < 0 -> local[text] = Int.from_u32(name_intern_bytes(spellings.table, source, start, end).id)
+        if local[text] < 0 -> local[text] = (Int{name_intern_bytes(spellings.table, source, start, end).id})
         jet_driver_spell_push(source, start, end, local[text], spellings)
     }
     spellings
@@ -660,7 +660,7 @@ jet_driver_spell_span: fn(source: [U8], start: Int, end: Int, spellings: &JetDri
         word_start: cursor
         loop cursor < end && sema_source_word_byte(source[cursor]) -> cursor += 1
         if source[word_start] >= (U8{48}) && source[word_start] <= (U8{57}) -> next
-        word: Int.from_u32(name_intern_bytes(spellings.table, source, word_start, cursor).id)
+        word: Int{name_intern_bytes(spellings.table, source, word_start, cursor).id}
         jet_driver_spell_push(source, word_start, cursor, word, spellings)
     }
 }
@@ -912,11 +912,11 @@ jet_driver_reach_admit: fn(reach: &JetDriverReach, loaded: Int, module_name: Str
         if !reach.items[index].live && reach.impls[at].row.trait_module == module_name -> reach.stack.push(index)
     }
     ids := [Int]{}
-    loop word in words.words -> ids.push(Int.from_u32(name_intern(reach.names, word).id))
+    loop word in words.words -> ids.push(Int{name_intern(reach.names, word).id})
     loop declaration in imports {
         if declaration.kind == .Unqualified(_, _, selected, _, _) {
             loop selected_item in selected {
-                selected_name: Int.from_u32(name_intern(reach.names, selected_item.original).id)
+                selected_name: Int{name_intern(reach.names, selected_item.original).id}
                 jet_driver_reach_global(reach, selected_name)
             }
         }
@@ -928,7 +928,7 @@ jet_driver_reach_admit: fn(reach: &JetDriverReach, loaded: Int, module_name: Str
     }
     base: reach.items.len()
     loop (row, position) in words.items {
-        name: Int.from_u32(name_intern(reach.names, words.names[row]).id)
+        name: Int{name_intern(reach.names, words.names[row]).id}
         spells := [Int]{}
         loop spell in words.spells[row] -> spells.push(ids[spell >> 2] * 4 + spell.bit_and(3))
         index: reach.items.len()
@@ -1026,7 +1026,7 @@ jet_driver_reach_open: fn(reach: &JetDriverReach, module_name: String) {
 
 // Defers `scoped`, an import of the module at `unit`.
 jet_driver_reach_defer: fn(reach: &JetDriverReach, unit: Int, scoped: JetDriverScopedImport) {
-    alias: Int.from_u32(name_intern(reach.names, scoped.declaration.alias).id)
+    alias: Int{name_intern(reach.names, scoped.declaration.alias).id}
     reach.edges.push(JetDriverReachEdge{unit: unit, scoped: scoped, alias: alias, followed: false})
 }
 
@@ -1072,7 +1072,7 @@ jet_driver_reach_core_demands: fn(reach: &JetDriverReach, unit: Int, demand: Jet
 
 // The id of `word` in the reach's name table.
 jet_driver_reach_word: fn(reach: &JetDriverReach, word: String) -> Int {
-    Int.from_u32(name_intern(reach.names, word).id)
+    Int{name_intern(reach.names, word).id}
 }
 
 // Whether reached code of the demanding module now spells the demand's word

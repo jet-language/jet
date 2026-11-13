@@ -2063,7 +2063,7 @@ semindex_normalize_definition: fn(source: String) -> String {
     in_string := false
     index := 0
     loop index < bytes.len() {
-        code: Int.from_u8(bytes[index])
+        code: Int{bytes[index]}
         if in_string {
             output.push(bytes[index])
             if code == 92 && index + 1 < bytes.len() {
@@ -2081,9 +2081,9 @@ semindex_normalize_definition: fn(source: String) -> String {
             index += 1
             next
         }
-        if code == 47 && index + 1 < bytes.len() && Int.from_u8(bytes[index + 1]) == 47 {
+        if code == 47 && index + 1 < bytes.len() && (Int{bytes[index + 1]}) == 47 {
             index += 2
-            loop index < bytes.len() && Int.from_u8(bytes[index]) != 10 -> index += 1
+            loop index < bytes.len() && (Int{bytes[index]}) != 10 -> index += 1
             index += 1
             next
         }
@@ -2166,7 +2166,7 @@ semindex_hex: fn(bytes: [U8]) -> String Never! {
     digits: "0123456789abcdef".bytes()
     output := [U8]{}
     loop byte in bytes {
-        value: Int.from_u8(byte)
+        value: Int{byte}
         output.push(digits[value /% 16])
         output.push(digits[value % 16])
     }

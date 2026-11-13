@@ -39,7 +39,7 @@ pkg_mask_manifest_blocks: fn(bytes: [U8], masked: &[U8]) Never! {
     in_string := false
     escaped := false
     loop i < bytes.len() {
-        code: Int.from_u8(bytes[i])
+        code: Int{bytes[i]}
         if in_string {
             if {
                 escaped -> escaped = false
@@ -57,7 +57,7 @@ pkg_mask_manifest_blocks: fn(bytes: [U8], masked: &[U8]) Never! {
         }
         if code == 47 && pkg_bytes_code(bytes, i + 1) == 47 {
             i += 2
-            loop i < bytes.len() && Int.from_u8(bytes[i]) != 10 -> i += 1
+            loop i < bytes.len() && (Int{bytes[i]}) != 10 -> i += 1
             next
         }
         if brace_depth == 0 && bracket_depth == 0 && paren_depth == 0 {
@@ -112,8 +112,8 @@ pkg_key_at: fn(bytes: [U8], at: Int, key: String) -> Int? Never! {
     word: key.bytes()
     if !pkg_bytes_starts_with(bytes, at, word) -> return None
     end: at + word.len()
-    if at > 0 && pkg_bytes_is_word(Int.from_u8(bytes[at - 1])) -> return None
-    if end < bytes.len() && pkg_bytes_is_word(Int.from_u8(bytes[end])) -> return None
+    if at > 0 && pkg_bytes_is_word(Int{bytes[at - 1]}) -> return None
+    if end < bytes.len() && pkg_bytes_is_word(Int{bytes[end]}) -> return None
     Val(end)
 }
 
@@ -145,7 +145,7 @@ pkg_manifest_scalar_start: fn(bytes: [U8], at: Int) -> EditSpan? Never! {
         quoted := false
         escaped := false
         loop i < bytes.len() {
-            code: Int.from_u8(bytes[i])
+            code: Int{bytes[i]}
             if quoted {
                 if {
                     escaped -> escaped = false
@@ -180,7 +180,7 @@ pkg_balanced_block_end: fn(bytes: [U8], open: Int) -> Int? Never! {
     quote := -1
     triple := false
     loop i < bytes.len() {
-        code: Int.from_u8(bytes[i])
+        code: Int{bytes[i]}
         if quote >= 0 {
             if code == 92 {
                 i += 2
@@ -216,7 +216,7 @@ pkg_balanced_block_end: fn(bytes: [U8], open: Int) -> Int? Never! {
         }
         if code == 47 && pkg_bytes_code(bytes, i + 1) == 47 {
             i += 2
-            loop i < bytes.len() && Int.from_u8(bytes[i]) != 10 -> i += 1
+            loop i < bytes.len() && (Int{bytes[i]}) != 10 -> i += 1
             next
         }
         if code == 47 && pkg_bytes_code(bytes, i + 1) == 42 {
@@ -239,7 +239,7 @@ pkg_balanced_block_end: fn(bytes: [U8], open: Int) -> Int? Never! {
 pkg_blank_range: fn(masked: &[U8], start: Int, end: Int) Never! {
     limit: if end < masked.len() -> end else -> masked.len()
     loop index in start..<limit {
-        code: Int.from_u8(masked[index])
+        code: Int{masked[index]}
         if code != 10 && code != 13 -> masked[index] = U8{32}
     }
 }
@@ -250,7 +250,7 @@ pkg_has_top_level_build_function: fn(bytes: [U8]) -> Bool Never! {
     in_string := false
     escaped := false
     loop i < bytes.len() {
-        code: Int.from_u8(bytes[i])
+        code: Int{bytes[i]}
         if in_string {
             if {
                 escaped -> escaped = false
@@ -268,7 +268,7 @@ pkg_has_top_level_build_function: fn(bytes: [U8]) -> Bool Never! {
         }
         if code == 47 && pkg_bytes_code(bytes, i + 1) == 47 {
             i += 2
-            loop i < bytes.len() && Int.from_u8(bytes[i]) != 10 -> i += 1
+            loop i < bytes.len() && (Int{bytes[i]}) != 10 -> i += 1
             next
         }
         if code == 47 && pkg_bytes_code(bytes, i + 1) == 42 {
@@ -299,10 +299,10 @@ pkg_skip_block_comment: fn(bytes: [U8], start: Int) -> Int Never! {
     depth := 1
     i := start + 2
     loop i < bytes.len() {
-        if Int.from_u8(bytes[i]) == 47 && pkg_bytes_code(bytes, i + 1) == 42 {
+        if (Int{bytes[i]}) == 47 && pkg_bytes_code(bytes, i + 1) == 42 {
             depth += 1
             i += 2
-        } else if Int.from_u8(bytes[i]) == 42 && pkg_bytes_code(bytes, i + 1) == 47 {
+        } else if (Int{bytes[i]}) == 42 && pkg_bytes_code(bytes, i + 1) == 47 {
             depth -= 1
             i += 2
             if depth == 0 -> return i
@@ -442,7 +442,7 @@ pkg_find_top_level_inline_package: fn(bytes: [U8], from: Int) -> EditSpan? Never
     parens := 0
     item_position := true
     loop i < bytes.len() {
-        code: Int.from_u8(bytes[i])
+        code: Int{bytes[i]}
         if code == 34 || code == 39 {
             i = pkg_skip_inline_string(bytes, i)
             next
@@ -518,17 +518,17 @@ pkg_skip_inline_trivia: fn(bytes: [U8], from: Int) -> Int Never! {
 
 pkg_skip_inline_line_comment: fn(bytes: [U8], from: Int) -> Int Never! {
     at := from + 2
-    loop at < bytes.len() && Int.from_u8(bytes[at]) != 10 -> at += 1
+    loop at < bytes.len() && (Int{bytes[at]}) != 10 -> at += 1
     at
 }
 
 pkg_skip_inline_string: fn(bytes: [U8], start: Int) -> Int Never! {
     triple: pkg_bytes_starts_with(bytes, start, "\"\"\"".bytes())
-    quote: Int.from_u8(bytes[start])
+    quote: Int{bytes[start]}
     i := start + (if triple -> 3 else -> 1)
     escaped := false
     loop i < bytes.len() {
-        code: Int.from_u8(bytes[i])
+        code: Int{bytes[i]}
         if escaped {
             escaped = false
             i += 1
@@ -593,7 +593,7 @@ pkg_package_marker_args_end: fn(bytes: [U8], open: Int) -> Int? Never! {
     depth := 0
     i := open
     loop i < bytes.len() {
-        code: Int.from_u8(bytes[i])
+        code: Int{bytes[i]}
         if code == 34 || code == 39 {
             i = pkg_skip_inline_string(bytes, i)
             next

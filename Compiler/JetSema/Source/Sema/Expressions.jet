@@ -1064,7 +1064,7 @@ sema_expr_string_format: fn(format: StrFormat) -> TStrFormat Never! {
 }
 
 sema_expr_byte_text: fn(value: U8) -> String Never! {
-    byte: Int.from_u8(value)
+    byte: Int{value}
     if byte < 128 -> return String.from_bytes([U8]{value}) ?? ""
     first: U8{192 + (byte >> 6)}
     second: U8{128 + ((byte).bit_and(63))}
@@ -1927,9 +1927,9 @@ sema_expr_unit_conversion_method: fn(fact: SemaRegistrationUnitFact) -> String N
     output := [U8]{}
     index := 0
     loop index < bytes.len() {
-        code := Int.from_u8(bytes[index])
-        previous := if index > 0 -> Int.from_u8(bytes[index - 1]) else -> 0
-        next := if index + 1 < bytes.len() -> Int.from_u8(bytes[index + 1]) else -> 0
+        code := Int{bytes[index]}
+        previous := if index > 0 -> (Int{bytes[index - 1]}) else -> 0
+        next := if index + 1 < bytes.len() -> (Int{bytes[index + 1]}) else -> 0
         uppercase := code >= 65 && code <= 90
         boundary := uppercase && index > 0 && ((previous >= 97 && previous <= 122) || (previous >= 65 && previous <= 90 && next >= 97 && next <= 122))
         if boundary -> output.push(U8{95})
@@ -2414,13 +2414,13 @@ sema_expr_exact_integer_literal: fn(value: Int, raw: String?) -> Int Never! {
     bytes: text.bytes()
     i := 0
     negative := false
-    if bytes.len() > 0 && (Int.from_u8(bytes[0]) == 45 || Int.from_u8(bytes[0]) == 43) {
-        negative = Int.from_u8(bytes[0]) == 45
+    if bytes.len() > 0 && (Int{bytes[0]} == 45 || Int{bytes[0]} == 43) {
+        negative = Int{bytes[0]} == 45
         i = 1
     }
     radix := 10
-    if i + 1 < bytes.len() && Int.from_u8(bytes[i]) == 48 {
-        marker: Int.from_u8(bytes[i + 1])
+    if i + 1 < bytes.len() && (Int{bytes[i]}) == 48 {
+        marker: Int{bytes[i + 1]}
         if marker == 120 || marker == 88 -> radix = 16
         if marker == 111 || marker == 79 -> radix = 8
         if marker == 98 || marker == 66 -> radix = 2
@@ -2429,7 +2429,7 @@ sema_expr_exact_integer_literal: fn(value: Int, raw: String?) -> Int Never! {
     exact := 0
     digits := 0
     loop i < bytes.len() {
-        code: Int.from_u8(bytes[i])
+        code: Int{bytes[i]}
         i += 1
         if code == 95 -> next
         digit: if {
@@ -6740,7 +6740,7 @@ sema_expr_repeated_list_head_edit: fn(elements: [Expr], span: Span, head: String
         written: String.from_bytes(raw[head_start..<head_end]) ?? return None
         if written != head -> return None
         if head_start > at {
-            before: Int.from_u8(raw[head_start - 1])
+            before: Int{raw[head_start - 1]}
             if (before >= 48 && before <= 57) || (before >= 65 && before <= 90) || (before >= 97 && before <= 122) || before == 95 || before == 46 -> return None
         }
         kept: String.from_bytes(raw[at..<head_start]) ?? return None

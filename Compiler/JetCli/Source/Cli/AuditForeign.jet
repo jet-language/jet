@@ -58,7 +58,7 @@ JetCLIForeignAudit: struct {
 jet_cli_elf_field: fn(bytes: [U8], at: Int, width: Int) -> Int? Never! {
     if at < 0 || width < 1 || at + width > bytes.len() -> return None
     value := 0
-    loop k in 0..<width -> value = value.bit_or(Int.from_u8(bytes[at + k]) << (8 * k))
+    loop k in 0..<width -> value = value.bit_or(Int{bytes[at + k]} << (8 * k))
     Val(value)
 }
 

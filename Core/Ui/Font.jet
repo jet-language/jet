@@ -230,7 +230,7 @@ Face: struct {
         start := 0
         loop {
             stop := start
-            loop stop < bytes.len() && Int.from_u8(bytes[stop]) != 10 -> stop += 1
+            loop stop < bytes.len() && (Int{bytes[stop]}) != 10 -> stop += 1
             wrap_paragraph(self, bytes, start, stop, size_px, max_width, lines)
             if stop >= bytes.len() -> break
             start = stop + 1
@@ -466,7 +466,7 @@ blend: fn(&pixels: [U8], width: Int, height: Int, stride_bytes: Int, mask: Glyph
     red: (argb >> 16).bit_and(255)
     loop row in row_lo..<row_hi {
         loop col in col_lo..<col_hi {
-            share: (Int.from_u8(mask.coverage[(row - y0) * mask.width + col - x0]) * opacity + 127) /% 255
+            share: (Int{mask.coverage[(row - y0) * mask.width + col - x0]} * opacity + 127) /% 255
             if share == 0 -> next
             i: row * stride_bytes + col * 4
             if share == 255 {
@@ -477,10 +477,10 @@ blend: fn(&pixels: [U8], width: Int, height: Int, stride_bytes: Int, mask: Glyph
                 next
             }
             rest: 255 - share
-            pixels[i] = U8{(blue * share + 127) /% 255 + (Int.from_u8(pixels[i]) * rest + 127) /% 255}
-            pixels[i + 1] = U8{(green * share + 127) /% 255 + (Int.from_u8(pixels[i + 1]) * rest + 127) /% 255}
-            pixels[i + 2] = U8{(red * share + 127) /% 255 + (Int.from_u8(pixels[i + 2]) * rest + 127) /% 255}
-            pixels[i + 3] = U8{share + (Int.from_u8(pixels[i + 3]) * rest + 127) /% 255}
+            pixels[i] = U8{(blue * share + 127) /% 255 + (Int{pixels[i]} * rest + 127) /% 255}
+            pixels[i + 1] = U8{(green * share + 127) /% 255 + (Int{pixels[i + 1]} * rest + 127) /% 255}
+            pixels[i + 2] = U8{(red * share + 127) /% 255 + (Int{pixels[i + 2]} * rest + 127) /% 255}
+            pixels[i + 3] = U8{share + (Int{pixels[i + 3]} * rest + 127) /% 255}
         }
     }
 }
@@ -515,7 +515,7 @@ priv internal: module {
     }
 
     raw16: fn(b: [U8], at: Int) -> Int Never! {
-        (Int.from_u8(b[at]) << 8) + Int.from_u8(b[at + 1])
+        (Int{b[at]} << 8) + Int{b[at + 1]}
     }
 
     raw32: fn(b: [U8], at: Int) -> Int Never! {
@@ -835,12 +835,12 @@ priv internal: module {
         flags := [Int]{}
         loop flags.len() < count {
             if at >= limit -> return Err(font_error("glyf: glyph {id}'s flags pass its end"))
-            flag: Int.from_u8(b[at])
+            flag: Int{b[at]}
             at += 1
             flags.push(flag)
             if flag.bit_and(8) != 0 {
                 if at >= limit -> return Err(font_error("glyf: glyph {id}'s flags pass its end"))
-                repeat: Int.from_u8(b[at])
+                repeat: Int{b[at]}
                 at += 1
                 loop _ in 0..<repeat -> flags.push(flag)
             }
@@ -851,7 +851,7 @@ priv internal: module {
         loop flag in flags {
             if flag.bit_and(2) != 0 {
                 if at >= limit -> return Err(font_error("glyf: glyph {id}'s x coordinates pass its end"))
-                step: Int.from_u8(b[at])
+                step: Int{b[at]}
                 at += 1
                 x = if flag.bit_and(16) != 0 -> x + step else -> x - step
             } else if flag.bit_and(16) == 0 {
@@ -866,7 +866,7 @@ priv internal: module {
             flag: flags[p]
             if flag.bit_and(4) != 0 {
                 if at >= limit -> return Err(font_error("glyf: glyph {id}'s y coordinates pass its end"))
-                step: Int.from_u8(b[at])
+                step: Int{b[at]}
                 at += 1
                 y = if flag.bit_and(32) != 0 -> y + step else -> y - step
             } else if flag.bit_and(32) == 0 {
@@ -908,8 +908,8 @@ priv internal: module {
                 }
                 at += 4
             } else {
-                arg1 = Int.from_u8(b[at])
-                arg2 = Int.from_u8(b[at + 1])
+                arg1 = Int{b[at]}
+                arg2 = Int{b[at + 1]}
                 if xy {
                     if arg1 >= 128 -> arg1 -= 256
                     if arg2 >= 128 -> arg2 -= 256
@@ -1183,11 +1183,11 @@ priv internal: module {
 
     // The scalar at byte `i` of UTF-8 `bytes` and the offset after it.
     decode: fn(bytes: [U8], i: Int) -> Decoded {
-        first: Int.from_u8(bytes[i])
+        first: Int{bytes[i]}
         width: if first < 128 -> 1 else -> if first < 224 -> 2 else -> if first < 240 -> 3 else -> 4
         if i + width > bytes.len() -> return Decoded{scalar: 65533, next: bytes.len()}
         scalar := if width == 1 -> first else -> if width == 2 -> first.bit_and(31) else -> if width == 3 -> first.bit_and(15) else -> first.bit_and(7)
-        loop k in 1..<width -> scalar = (scalar << 6) + Int.from_u8(bytes[i + k]).bit_and(63)
+        loop k in 1..<width -> scalar = (scalar << 6) + (Int{bytes[i + k]}).bit_and(63)
         Decoded{scalar: scalar, next: i + width}
     }
 
@@ -1266,7 +1266,7 @@ priv internal: module {
     // Greedy filling of one paragraph, bytes `start..<stop` without its "\n".
     wrap_paragraph: fn(face: Face, bytes: [U8], start: Int, stop: Int, size_px: Float, max_width: Float, &lines: [TextLine]) {
         line := start
-        loop line < stop && is_space(Int.from_u8(bytes[line])) -> line += 1
+        loop line < stop && is_space(Int{bytes[line]}) -> line += 1
         if line >= stop {
             lines.push(TextLine{start: start, end: start, width: Float{0.0}})
             return
@@ -1278,17 +1278,17 @@ priv internal: module {
             cursor := line
             loop cursor < stop {
                 word_end := cursor
-                loop word_end < stop && !is_space(Int.from_u8(bytes[word_end])) {
-                    hyphen: Int.from_u8(bytes[word_end]) == 45 && word_end > cursor
+                loop word_end < stop && !is_space(Int{bytes[word_end]}) {
+                    hyphen: Int{bytes[word_end]} == 45 && word_end > cursor
                     word_end += 1
-                    if hyphen && word_end < stop && !is_space(Int.from_u8(bytes[word_end])) -> break
+                    if hyphen && word_end < stop && !is_space(Int{bytes[word_end]}) -> break
                 }
                 candidate: span_width(face, bytes, line, word_end, size_px)
                 if candidate > max_width && end > line -> break
                 end = word_end
                 width = candidate
                 cursor = word_end
-                loop cursor < stop && is_space(Int.from_u8(bytes[cursor])) -> cursor += 1
+                loop cursor < stop && is_space(Int{bytes[cursor]}) -> cursor += 1
                 if candidate > max_width -> break
             }
             if width > max_width {
@@ -1310,7 +1310,7 @@ priv internal: module {
             }
             lines.push(TextLine{start: line, end: end, width: width})
             line = cursor
-            loop line < stop && is_space(Int.from_u8(bytes[line])) -> line += 1
+            loop line < stop && is_space(Int{bytes[line]}) -> line += 1
         }
     }
 
@@ -1349,7 +1349,7 @@ priv internal: module {
     // Identifies a font's bytes for the cache.
     fingerprint: fn(bytes: [U8]) -> Int Never! {
         h := bytes.len() % 2147483647
-        loop byte in bytes -> h = (h * 31 + Int.from_u8(byte)) % 2147483647
+        loop byte in bytes -> h = (h * 31 + Int{byte}) % 2147483647
         h
     }
 
@@ -1933,7 +1933,7 @@ priv internal: module {
     assert_eq(advance, 19)
     inked := 0
     loop k in 0..<(64 * 24) {
-        if Int.from_u8(canvas[k * 4 + 3]) != 0 -> inked += 1
+        if (Int{canvas[k * 4 + 3]}) != 0 -> inked += 1
     }
     assert(inked > 40, "only {inked} pixels inked")
     // The first glyph sits at whole pixel 2: its bottom row (clear of the

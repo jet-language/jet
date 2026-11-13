@@ -337,7 +337,7 @@ no_pages: fn(n: Int) -> [Int] Never! {
 // its page into the bytes after it; here those read as zero.
 bb: fn(buf: [U8], at: Int) -> Int Never! {
     if at < 0 || at >= buf.len() -> return 0
-    Int.from_u8(buf[at])
+    Int{buf[at]}
 }
 
 // get2byte and get4byte over bb.
@@ -1317,7 +1317,7 @@ btree_open: fn(bt: &Btree, path: String?, db: BtDB, flags_in: Int, vfs_flags_in:
     bt.cursor_list = [Int]{}
     bt.page1 = cache.NO_PAGE
     if pager.pager_is_readonly(bt.pager) -> bt.bts_flags = bt.bts_flags.bit_or(BTS_READ_ONLY)
-    page_size := (Int.from_u8(header[16]) << 8).bit_or(Int.from_u8(header[17]) << 16)
+    page_size := (Int{header[16]} << 8).bit_or(Int{header[17]} << 16)
     n_reserve := 0
     if page_size < 512 || page_size > pager.MAX_PAGE_SIZE || (page_size - 1).bit_and(page_size) != 0 {
         page_size = 0
@@ -1327,7 +1327,7 @@ btree_open: fn(bt: &Btree, path: String?, db: BtDB, flags_in: Int, vfs_flags_in:
         }
         n_reserve = 0
     } else {
-        n_reserve = Int.from_u8(header[20])
+        n_reserve = Int{header[20]}
         bt.bts_flags = bt.bts_flags.bit_or(BTS_PAGESIZE_FIXED)
         bt.auto_vacuum = util.get4(header, 36 + 4 * 4) != 0
         bt.incr_vacuum = util.get4(header, 36 + 7 * 4) != 0
@@ -1440,7 +1440,7 @@ btree_get_auto_vacuum: fn(bt: Btree) -> Int Never! {
 // page1[at..<at + n] equals want.
 page_bytes_eq: fn(bt: Btree, s: Int, at: Int, want: [U8]) -> Bool Never! {
     loop i in 0..<want.len() {
-        if pb(bt, s, at + i) != Int.from_u8(want[i]) -> return false
+        if pb(bt, s, at + i) != (Int{want[i]}) -> return false
     }
     true
 }

@@ -55,7 +55,7 @@ kit_steps_mask: fn(text: String) -> Int? {
     if text.len() == 2 -> return None
     value := 0
     loop byte in kit_steps_byte_slice(text, 2, text.count_bytes()).bytes() {
-        digit: Int.from_u8(byte) - 48
+        digit: Int{byte} - 48
         if digit < 0 || digit > 7 || value > (9223372036854775807 - digit) /% 8 -> return None
         value = value * 8 + digit
     }

@@ -561,11 +561,11 @@ publication_tuf_atomic_write: fn(root: String, path: String, bytes: [U8]) IOErro
 publication_tuf_append_line: fn(output: &[String], key: String, value: String) -> Bool Never! {
     if key == "" -> return false
     loop byte in key.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if code == 61 || code == 10 || code == 13 -> return false
     }
     loop byte in value.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if code == 10 || code == 13 -> return false
     }
     output.push("{key}={value}\n")

@@ -227,7 +227,7 @@ pkg_java_descriptor_types: fn(value: String) -> JavaDescriptorTypes ForeignBindE
     raw: value.bytes()
     params := [JavaScalar]{}
     loop index in 1..<close {
-        if Int.from_u8(raw[index]) == {
+        if (Int{raw[index]}) == {
             74 -> params.push(JavaScalar.Int)
             68 -> params.push(JavaScalar.Float)
             else -> return Err(ForeignBindError.Source(unsupported))

@@ -308,17 +308,17 @@ link_context: fn(bufs: &&[[U8]], base: Int) -> LinkContext Never! {
 // halves so ordinary values stay small integers.
 
 link_u8: fn(bufs: [[U8]], b: Int, at: Int) -> Int Never! {
-    Int.from_u8(bufs[b][at])
+    Int{bufs[b][at]}
 }
 
 link_u16: fn(bufs: [[U8]], b: Int, at: Int) -> Int Never! {
     row: bufs[b]
-    Int.from_u8(row[at]).bit_or((Int.from_u8(row[at + 1]) << 8))
+    Int{row[at]}.bit_or((Int{row[at + 1]} << 8))
 }
 
 link_u32: fn(bufs: [[U8]], b: Int, at: Int) -> Int Never! {
     row: bufs[b]
-    Int.from_u8(row[at]).bit_or((Int.from_u8(row[at + 1]) << 8)).bit_or((Int.from_u8(row[at + 2]) << 16)).bit_or((Int.from_u8(row[at + 3]) << 24))
+    Int{row[at]}.bit_or((Int{row[at + 1]} << 8)).bit_or((Int{row[at + 2]} << 16)).bit_or((Int{row[at + 3]} << 24))
 }
 
 link_u64: fn(bufs: [[U8]], b: Int, at: Int) -> Int Never! {
@@ -334,7 +334,7 @@ link_s64: fn(bufs: [[U8]], b: Int, at: Int) -> Int Never! {
 link_cstr: fn(bufs: [[U8]], b: Int, at: Int) -> String Never! {
     row: bufs[b]
     end := at
-    loop end < row.len() && Int.from_u8(row[end]) != 0 -> end += 1
+    loop end < row.len() && (Int{row[end]}) != 0 -> end += 1
     String.from_bytes(row[at..<end]) ?? ""
 }
 
@@ -347,7 +347,7 @@ link_name_has: fn(bufs: [[U8]], b: Int, at: Int, prefix: String, whole: Bool) ->
     }
     if !whole -> return true
     end: at + prefix.len()
-    end < row.len() && Int.from_u8(row[end]) == 0
+    end < row.len() && Int{row[end]} == 0
 }
 
 // Little-endian words without a loop (ELF.jet elf64_u16).
@@ -1635,7 +1635,7 @@ link_priority: fn(c: LinkContext, s: Int) -> Int Never! {
     name: link_cstr(c.bufs, c.obj_buffer[obj], link_sec_name(c, obj, s))
     bytes: name.bytes()
     dot := -1
-    loop (k, byte) in bytes { if Int.from_u8(byte) == 46 -> dot = k }
+    loop (k, byte) in bytes { if (Int{byte}) == 46 -> dot = k }
     if dot <= 0 -> return 65536
     Int.parse(String.from_bytes(bytes[dot + 1..<bytes.len()]) ?? "") ?? 65536
 }
@@ -1885,7 +1885,7 @@ link_tpoff: fn(c: LinkContext, addr: Int) -> Int Never! {
 link_byte_is: fn(out: &[U8], at: Int, bytes: [Int]) -> Bool Never! {
     if at < 0 || at + bytes.len() > out.len() -> return false
     loop (k, byte) in bytes {
-        if Int.from_u8(out[at + k]) != byte -> return false
+        if (Int{out[at + k]}) != byte -> return false
     }
     true
 }
@@ -1912,7 +1912,7 @@ link_apply_got: fn(c: LinkContext, errors: &[String], out: &[U8], obj: Int, s: I
     // an undefined weak symbol (address 0, e.g. musl's `_DYNAMIC`) is out of
     // `lea` range there and becomes `mov reg, imm32` as GNU ld does. Neither
     // form takes a GOT slot, so the scan's decision stands.
-    form: if decided == 1 && kind == LINK_R_REX_GOTPCRELX && (Int.from_u8(out[pos - 3]).bit_and(0xf8)) == 0x48 && !link_fits32(target + addend - place) && link_fits32(target) -> 4 else -> decided
+    form: if decided == 1 && kind == LINK_R_REX_GOTPCRELX && (Int{out[pos - 3]}.bit_and(0xf8)) == 0x48 && !link_fits32(target + addend - place) && link_fits32(target) -> 4 else -> decided
     value: if form == 4 -> target else -> target + addend - place
     if !link_fits32(value) -> errors.push(link_reloc_text(c, s, off, "relaxed GOT relocation out of range"))
     if form == 1 {
@@ -1928,8 +1928,8 @@ link_apply_got: fn(c: LinkContext, errors: &[String], out: &[U8], obj: Int, s: I
         out[pos + 3] = U8{0x90}
     } else {
         // REX.W (REX.R becomes REX.B) C7 /0: mov reg, imm32.
-        rex: Int.from_u8(out[pos - 3])
-        reg: (Int.from_u8(out[pos - 1]) >> 3).bit_and(7)
+        rex: Int{out[pos - 3]}
+        reg: (Int{out[pos - 1]} >> 3).bit_and(7)
         out[pos - 3] = U8{(0x48).bit_or(((rex >> 2).bit_and(1)))}
         out[pos - 2] = U8{0xc7}
         out[pos - 1] = U8{(0xc0).bit_or(reg)}
@@ -2031,9 +2031,9 @@ link_apply: fn(c: LinkContext, errors: &[String], out: &[U8], obj: Int, s: Int, 
             errors.push(link_reloc_text(c, s, off, "unrecognized TLS descriptor instruction"))
             return false
         }
-        rex: Int.from_u8(out[pos - 3])
-        modrm: Int.from_u8(out[pos - 1])
-        if (rex != 0x48 && rex != 0x4c) || Int.from_u8(out[pos - 2]) != 0x8d || (modrm.bit_and(0xc7)) != 0x05 {
+        rex: Int{out[pos - 3]}
+        modrm: Int{out[pos - 1]}
+        if (rex != 0x48 && rex != 0x4c) || (Int{out[pos - 2]}) != 0x8d || (modrm.bit_and(0xc7)) != 0x05 {
             errors.push(link_reloc_text(c, s, off, "unrecognized TLS descriptor instruction"))
             return false
         }
@@ -2058,9 +2058,9 @@ link_apply: fn(c: LinkContext, errors: &[String], out: &[U8], obj: Int, s: Int, 
             errors.push(link_reloc_text(c, s, off, "unrecognized TLS initial-exec instruction"))
             return false
         }
-        rex: Int.from_u8(out[pos - 3])
-        opcode: Int.from_u8(out[pos - 2])
-        modrm: Int.from_u8(out[pos - 1])
+        rex: Int{out[pos - 3]}
+        opcode: Int{out[pos - 2]}
+        modrm: Int{out[pos - 1]}
         if (rex != 0x48 && rex != 0x4c) || (opcode != 0x8b && opcode != 0x03) || (modrm.bit_and(0xc7)) != 0x05 {
             errors.push(link_reloc_text(c, s, off, "unrecognized TLS initial-exec instruction"))
             return false
@@ -2168,18 +2168,18 @@ LinkEhCie: struct {
 link_eh_cie: fn(bytes: [U8], at: Int) -> LinkEhCie? Never! {
     end: at + 4 + link_debug_le(bytes, at, 4)
     if end > bytes.len() || at + 12 > end -> return None
-    version: Int.from_u8(bytes[at + 8])
+    version: Int{bytes[at + 8]}
     if version != 1 && version != 3 -> return None
-    z: Int.from_u8(bytes[at + 9]) == 0x7a
-    if z && (Int.from_u8(bytes[at + 10]) != 0x52 || Int.from_u8(bytes[at + 11]) != 0) -> return None
-    if !z && Int.from_u8(bytes[at + 9]) != 0 -> return None
+    z: Int{bytes[at + 9]} == 0x7a
+    if z && (Int{bytes[at + 10]} != 0x52 || Int{bytes[at + 11]} != 0) -> return None
+    if !z && (Int{bytes[at + 9]}) != 0 -> return None
     fields: if z -> at + 12 else -> at + 10
     // Code alignment (uleb), data alignment (sleb), return address column
     // (a byte in version 1, else a uleb).
     ra_at: link_debug_leb_end(bytes, link_debug_leb_end(bytes, fields))
     if ra_at >= end -> return None
     fields_end := ra_at + 1
-    ra := Int.from_u8(bytes[ra_at])
+    ra := Int{bytes[ra_at]}
     if version != 1 {
         fields_end = ra_at
         ra = link_debug_uleb(bytes, fields_end)
@@ -2188,8 +2188,8 @@ link_eh_cie: fn(bytes: [U8], at: Int) -> LinkEhCie? Never! {
     instructions := fields_end
     if z {
         // The augmentation data: one byte, R's FDE pointer encoding.
-        if fields_end + 2 > end || Int.from_u8(bytes[fields_end]) != 1 -> return None
-        encoding = Int.from_u8(bytes[fields_end + 1])
+        if fields_end + 2 > end || (Int{bytes[fields_end]}) != 1 -> return None
+        encoding = Int{bytes[fields_end + 1]}
         instructions = fields_end + 2
     }
     // The application: absolute (0x00) or pc-relative (0x10), not indirect.

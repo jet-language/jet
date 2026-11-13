@@ -995,7 +995,7 @@ pkg_lock_kv_field: fn(inline: String, key: String) -> String? Never! {
     quoted := false
     escaped := false
     loop index in 0..<raw.len() {
-        code: Int.from_u8(raw[index])
+        code: Int{raw[index]}
         if {
             escaped -> escaped = false
             quoted && code == 92 -> escaped = true
@@ -1038,7 +1038,7 @@ pkg_lock_parse_string_array: fn(input: String) -> [String] LockError! {
     index := 0
     loop index < raw.len() {
         byte: raw[index]
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if {
             escaped -> {
                 current.push(if code == {
@@ -1103,7 +1103,7 @@ pkg_lock_unescape: fn(input: String) -> String Never! {
     out := [U8]{}
     escaped := false
     loop byte in raw {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if {
             escaped -> {
                 out.push(if code == {
@@ -1138,7 +1138,7 @@ pkg_lock_parse_unsigned: fn(text: String, max: Int) -> Int? Never! {
     if raw.len() == 0 -> return None
     value := 0
     loop byte in raw {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if code < 48 || code > 57 -> return None
         digit: code - 48
         if value > (max - digit) /% 10 -> return None

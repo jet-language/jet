@@ -41,7 +41,7 @@ sema_expression_unit_literal_type_name: fn(name: String) -> String Never! {
         if piece == "" -> next
         bytes := piece.bytes()
         if bytes.len() == 0 -> next
-        code: Int.from_u8(bytes[0])
+        code: Int{bytes[0]}
         if code >= 97 && code <= 122 -> bytes[0] = U8{code - 32}
         output = "{output}{String.from_bytes(bytes) ?? piece}"
     }
@@ -773,7 +773,7 @@ sema_expression_range: fn(start: Expr, end: Expr, exclusive: Bool, span: Span, e
 sema_expression_char_codepoint: fn(text: String) -> Int? {
     bytes: text.bytes()
     if bytes.len() == 0 -> return None
-    first: Int.from_u8(bytes[0])
+    first: Int{bytes[0]}
     if first < 128 -> return Val(first)
     width: if {
         first >= 192 && first < 224 -> 2
@@ -783,9 +783,9 @@ sema_expression_char_codepoint: fn(text: String) -> Int? {
     }
     if width == 0 || bytes.len() < width -> return None
     value: if width == {
-        2 -> (first - 192) * 64 + (Int.from_u8(bytes[1]) - 128)
-        3 -> (first - 224) * 4096 + (Int.from_u8(bytes[1]) - 128) * 64 + (Int.from_u8(bytes[2]) - 128)
-        4 -> (first - 240) * 262144 + (Int.from_u8(bytes[1]) - 128) * 4096 + (Int.from_u8(bytes[2]) - 128) * 64 + (Int.from_u8(bytes[3]) - 128)
+        2 -> (first - 192) * 64 + (Int{bytes[1]} - 128)
+        3 -> (first - 224) * 4096 + (Int{bytes[1]} - 128) * 64 + (Int{bytes[2]} - 128)
+        4 -> (first - 240) * 262144 + (Int{bytes[1]} - 128) * 4096 + (Int{bytes[2]} - 128) * 64 + (Int{bytes[3]} - 128)
         else -> 0
     }
     Val(value)

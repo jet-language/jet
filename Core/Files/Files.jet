@@ -82,8 +82,8 @@ path_component_encode: fn(component: String) -> String Never! {
             out.push(byte)
         } else {
             out.push(U8{37})
-            out.push(hex[Int.from_u8(byte) >> 4])
-            out.push(hex[Int.from_u8(byte).bit_and(15)])
+            out.push(hex[Int{byte} >> 4])
+            out.push(hex[Int{byte}.bit_and(15)])
         }
     }
     String.from_bytes(out) ?? panic("percent-encoded path text is ASCII")
@@ -3009,7 +3009,7 @@ scoped_read: fn(scope: FileScope, path: String) -[FS.Read]> String IOError! {
 file_utf8_error: fn(bytes: [U8]) -> String Never! {
     at := 0
     loop at < bytes.len() {
-        lead: Int.from_u8(bytes[at])
+        lead: Int{bytes[at]}
         width := if lead < 128 -> 1 else -> 0
         low := 128
         high := 191
@@ -3027,7 +3027,7 @@ file_utf8_error: fn(bytes: [U8]) -> String Never! {
         if width == 0 -> return "invalid utf-8 sequence of 1 bytes from index {at}"
         loop part in 1..<width {
             if at + part >= bytes.len() -> return "incomplete utf-8 byte sequence from index {at}"
-            byte: Int.from_u8(bytes[at + part])
+            byte: Int{bytes[at + part]}
             valid: if part == 1 -> byte >= low && byte <= high else -> byte >= 128 && byte <= 191
             if !valid -> return "invalid utf-8 sequence of {part} bytes from index {at}"
         }

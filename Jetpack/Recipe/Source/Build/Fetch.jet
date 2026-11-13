@@ -93,7 +93,7 @@ recipe_valid_sha256: fn(value: String) -> Bool Never! {
     raw: value.bytes()
     if raw.len() != 64 -> return false
     loop byte in raw {
-        if !recipe_is_hex_digit(Int.from_u8(byte)) -> return false
+        if !recipe_is_hex_digit(Int{byte}) -> return false
     }
     true
 }
@@ -171,16 +171,16 @@ recipe_percent_decode_ascii: fn(value: String) -> String Never! {
     decoded := [U8]{}
     index := 0
     loop index < bytes.len() {
-        if Int.from_u8(bytes[index]) == 37 && index + 2 < bytes.len() {
-            high: recipe_hex_value(Int.from_u8(bytes[index + 1]))
-            low: recipe_hex_value(Int.from_u8(bytes[index + 2]))
+        if (Int{bytes[index]}) == 37 && index + 2 < bytes.len() {
+            high: recipe_hex_value(Int{bytes[index + 1]})
+            low: recipe_hex_value(Int{bytes[index + 2]})
             if high >= 0 && low >= 0 {
                 recipe_push_latin1(decoded, high * 16 + low)
                 index += 3
                 next
             }
         }
-        recipe_push_latin1(decoded, Int.from_u8(bytes[index]))
+        recipe_push_latin1(decoded, Int{bytes[index]})
         index += 1
     }
     String.from_bytes(decoded) ?? panic("Latin-1 scalars always encode as UTF-8")

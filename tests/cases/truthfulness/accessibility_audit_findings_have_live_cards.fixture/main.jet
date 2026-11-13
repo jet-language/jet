@@ -15,13 +15,13 @@ policy_slice_bytes: fn(text: String, start: Int, end: Int) -> String {
     String.from_bytes(raw[start..(end - 1)]) ?? panic("corpus byte span must end on UTF-8 boundaries")
 }
 policy_space_width: fn(bytes: [U8], index: Int) -> Int {
-    first: Int.from_u8(bytes[index])
+    first: Int{bytes[index]}
     if first == 32 || (first >= 9 && first <= 13) -> return 1
     if index + 1 >= bytes.len() -> return 0
-    second: Int.from_u8(bytes[index + 1])
+    second: Int{bytes[index + 1]}
     if first == 194 && (second == 133 || second == 160) -> return 2
     if index + 2 >= bytes.len() -> return 0
-    third: Int.from_u8(bytes[index + 2])
+    third: Int{bytes[index + 2]}
     if first == 225 && second == 154 && third == 128 -> return 3
     if first == 226 && second == 128 && ((third >= 128 && third <= 138) || third == 168 || third == 169 || third == 175) -> return 3
     if first == 226 && second == 129 && third == 159 -> return 3
@@ -75,7 +75,7 @@ audit_card_number: fn(card: String) -> Int {
     number := 0
     raw: card.bytes()
     loop i in 1..<raw.len() {
-        digit: Int.from_u8(raw[i]) - 48
+        digit: Int{raw[i]} - 48
         assert(number <= (9223372036854775807 - digit) /% 10, "audit card reference must contain a numeric card ID")
         number = number * 10 + digit
     }

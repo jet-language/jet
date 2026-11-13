@@ -17,7 +17,7 @@ ir_trait_key: fn(m: &IRModule, p: IRProgram, ty: Type) -> Int Never! {
     bytes: identity.bytes()
     digest: sha256_bytes(bytes[0..<bytes.len()])
     key := 0
-    loop index in 0..<7 -> key = key * 256 + Int.from_u8(digest[index])
+    loop index in 0..<7 -> key = key * 256 + (Int{digest[index]})
     key += 1
     loop (index, given) in m.trait_keys.rows {
         if given == key -> panic("trait payload keys of {m.trait_keys.texts[index]} and {identity} collide")

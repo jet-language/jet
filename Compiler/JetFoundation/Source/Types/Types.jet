@@ -540,11 +540,11 @@ symbol_kind_name: fn(kind: SymbolKind) -> String Never! {
 // equal. It reads variants, names and child types and skips spans, contracts
 // and measures, which only the equality check that follows compares.
 type_shape_hash: fn(ty: Type) -> Int Never! {
-    Int.from_u64(type_shape_hash_into(U64{0xcbf29ce484222325}, ty).bit_and(U64{0x3fffffff}))
+    Int{type_shape_hash_into(U64{0xcbf29ce484222325}, ty).bit_and(U64{0x3fffffff})}
 }
 
 type_hash_mix: fn(hash: U64, value: U64) -> U64 Never! {
-    (hash.bit_xor(value)).wrapping_mul(U64{0x100000001b3})
+    wrapping((hash.bit_xor(value)) * U64{0x100000001b3})
 }
 
 type_shape_hash_list: fn(hash: U64, types: [Type]) -> U64 Never! {
@@ -815,7 +815,7 @@ type_union_member_payload: fn(ty: Type) -> Type Never! {
 type_union_member_tag_name: fn(raw: String) -> String Never! {
     safe := true
     loop byte in raw.bytes() {
-        value := Int.from_u8(byte)
+        value := Int{byte}
         if !((value >= 48 && value <= 57) || (value >= 65 && value <= 90) || (value >= 97 && value <= 122) || value == 95) {
             safe = false
             break
@@ -824,7 +824,7 @@ type_union_member_tag_name: fn(raw: String) -> String Never! {
     if safe && raw.len() > 0 -> return raw.copy()
     bytes := [U8]{77, 95}
     loop byte in raw.bytes() {
-        value := Int.from_u8(byte)
+        value := Int{byte}
         if {
             (value >= 48 && value <= 57) || (value >= 65 && value <= 90) || (value >= 97 && value <= 122) -> bytes.push(byte)
             value < 128 -> bytes.push(U8{95})

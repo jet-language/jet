@@ -30,10 +30,10 @@ provider_json_parse_lenient: fn(input: String) -> ProviderFilteredJSON ProviderE
     start := 0
     loop start < raw.len() {
         newline := start
-        loop newline < raw.len() && Int.from_u8(raw[newline]) != 10 -> newline += 1
+        loop newline < raw.len() && (Int{raw[newline]}) != 10 -> newline += 1
         end: if newline < raw.len() -> newline + 1 else -> raw.len()
         content_end := newline
-        if content_end > start && Int.from_u8(raw[content_end - 1]) == 13 -> content_end -= 1
+        if content_end > start && (Int{raw[content_end - 1]}) == 13 -> content_end -= 1
         content: pkg_bytes_text(raw, start, content_end)
         if trust_json_is_provider_noise(content) {
             noise.push(content)

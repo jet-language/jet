@@ -79,7 +79,7 @@ provider_last_segment: fn(item: String) -> String Never! {
     raw: item.bytes()
     start := raw.len()
     loop start > 0 {
-        code: Int.from_u8(raw[start - 1])
+        code: Int{raw[start - 1]}
         if code == 47 || code == 58 || code == 46 -> break
         start -= 1
     }
@@ -155,7 +155,7 @@ provider_add_fixture_catalog_names: fn(dir: String, names: &[String]) Never! -[F
 provider_is_catalog_name: fn(name: String) -> Bool Never! {
     if name == "" -> return false
     loop byte in name.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         allowed: (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 95 || code == 45 || code == 43
         if !allowed -> return false
     }
@@ -169,7 +169,7 @@ provider_import_package_name: fn(raw: String) -> String? Never! {
     raw_bytes: raw.bytes()
     start := raw_bytes.len()
     loop start > 0 {
-        code: Int.from_u8(raw_bytes[start - 1])
+        code: Int{raw_bytes[start - 1]}
         if code == 47 || code == 58 || code == 46 -> break
         start -= 1
     }
@@ -288,7 +288,7 @@ provider_report_import_gap: fn(file: String, gap: ImportGap) Never! -[IO]> {
 provider_one_line: fn(value: String) -> String Never! {
     out := [U8]{}
     loop byte in value.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if code == 10 || code == 13 {
             out.push(U8{32})
         } else {

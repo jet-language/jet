@@ -261,7 +261,7 @@ deep_checks_scope_valid: fn(scope: String) -> Bool Never! {
         bytes: segment.bytes()
         if bytes.len() == 0 -> return false
         loop byte in bytes {
-            n: Int.from_u8(byte)
+            n: Int{byte}
             letter: (n >= 65 && n <= 90) || (n >= 97 && n <= 122)
             digit: n >= 48 && n <= 57
             if !letter && !digit && n != 95 && n != 45 -> return false
@@ -401,7 +401,7 @@ log_filter_module: fn(path: String) -> Bool Never! {
         bytes: segment.bytes()
         if bytes.len() == 0 -> return false
         loop (index, byte) in bytes {
-            n: Int.from_u8(byte)
+            n: Int{byte}
             letter: (n >= 65 && n <= 90) || (n >= 97 && n <= 122) || n == 95
             digit: n >= 48 && n <= 57
             if !letter && !(digit && index > 0) -> return false

@@ -8,9 +8,9 @@ use jet_foundation.[DiagnosticExplanation]
 jet_cli_ascii_lower: fn(value: String) -> String Never! {
     bytes := [U8]{}
     loop byte in value.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if code >= 65 && code <= 90 {
-            bytes.push(U8.from_int(code + 32) ?? byte)
+            bytes.push(checked(U8{code + 32}) ?? byte)
         } else {
             bytes.push(byte)
         }
@@ -126,18 +126,18 @@ jet_cli_syntax_query: fn(query: String) -> Bool Never! {
     if colon > 0 && colon + 1 < raw.len() {
         prefix := true
         loop index in 0..<colon {
-            code: Int.from_u8(raw[index])
+            code: Int{raw[index]}
             if !jet_cli_syntax_ascii_alphanumeric(code) && code != 95 && code != 45 && code != 46 && code != 47 -> prefix = false
         }
         if prefix {
             loop index in (colon + 1)..<raw.len() {
-                if jet_cli_syntax_ascii_alphanumeric(Int.from_u8(raw[index])) -> return false
+                if jet_cli_syntax_ascii_alphanumeric(Int{raw[index]}) -> return false
             }
         }
     }
     if text.starts_with("@") || text.starts_with("#") || text.starts_with(":") -> return true
     loop byte in raw {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if !jet_cli_syntax_ascii_alphanumeric(code) && code != 95 && code != 46 && code != 45 && code != 47 && code != 64 -> return true
     }
     false

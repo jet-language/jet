@@ -86,7 +86,7 @@ replace_all: fn(text: String, old: String, new: String) -> String {
 ascii_lower: fn(text: String) -> String {
     out := [U8]{}
     loop b in text.bytes() {
-        n: Int.from_u8(b)
+        n: Int{b}
         if n >= 65 && n <= 90 -> out.push(U8{n + 32}) else -> out.push(b)
     }
     String.from_bytes(out) ?? ""
@@ -105,7 +105,7 @@ hex_bytes: fn(digest: String) -> [U8] {
 }
 
 hex_value: fn(digit: U8) -> Int {
-    n: Int.from_u8(digit)
+    n: Int{digit}
     if n >= 97 -> return n - 87
     n - 48
 }
@@ -130,7 +130,7 @@ field: fn(text: String, name: String) -> String {
         return sub(raw, start + 1, if close < 0 -> raw.len() - 1 else -> close)
     }
     end := start
-    loop end < raw.len() && Int.from_u8(raw[end]) >= 48 && Int.from_u8(raw[end]) <= 57 -> end += 1
+    loop end < raw.len() && (Int{raw[end]}) >= 48 && (Int{raw[end]}) <= 57 -> end += 1
     sub(raw, start, end)
 }
 
@@ -256,17 +256,17 @@ accept: fn(peer: &Peer) {
 // Port of read_text_frame.
 read: fn(peer: &Peer) -> String {
     head: take_bytes(peer, 2)
-    if (Int.from_u8(head[0])).bit_and(15) != 1 -> fail("expected text frame")
-    if (Int.from_u8(head[1])).bit_and(128) == 0 -> fail("client frame must be masked")
-    short: (Int.from_u8(head[1])).bit_and(127)
+    if (Int{head[0]}).bit_and(15) != 1 -> fail("expected text frame")
+    if (Int{head[1]}).bit_and(128) == 0 -> fail("client frame must be masked")
+    short: (Int{head[1]}).bit_and(127)
     len := short
     if short == 126 {
         wide: take_bytes(peer, 2)
-        len = Int.from_u8(wide[0]) * 256 + Int.from_u8(wide[1])
+        len = Int{wide[0]} * 256 + Int{wide[1]}
     }
     if short == 127 {
         len = 0
-        loop b in take_bytes(peer, 8) -> len = len * 256 + Int.from_u8(b)
+        loop b in take_bytes(peer, 8) -> len = len * 256 + (Int{b})
     }
     mask: take_bytes(peer, 4)
     payload := take_bytes(peer, len)

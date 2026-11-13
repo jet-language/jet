@@ -624,7 +624,7 @@ store_lifecycle_valid_partial_name: fn(name: String) -> Bool Never! {
 store_lifecycle_valid_transaction_name: fn(name: String) -> Bool Never! {
     raw: name.bytes()
     if !name.ends_with(STORE_LIFECYCLE_TXN_SUFFIX) || raw.len() != 20 + 1 + 16 + 4 -> return false
-    if store_lifecycle_parse_sequence(name) == None || Int.from_u8(raw[20]) != 45 -> return false
+    if store_lifecycle_parse_sequence(name) == None || (Int{raw[20]}) != 45 -> return false
     store_lifecycle_is_lower_hex(pkg_bytes_text(raw, 21, 37), 16)
 }
 

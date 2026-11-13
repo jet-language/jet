@@ -330,7 +330,7 @@ pkg_is_exact_exception_scope: fn(scope: String) -> Bool Never! {
     if parts.before == "" || parts.after == "" || scope.contains("@") || pkg_text_count(scope, "#") != 1 -> return false
     if pkg_text_has_space(parts.before) || pkg_text_has_space(parts.after) -> return false
     loop byte in parts.after.bytes() {
-        if Int.from_u8(byte) == {
+        if (Int{byte}) == {
             42 | 94 | 60 | 62 | 61 | 126 | 124 | 44 -> return false
             else -> {}
         }

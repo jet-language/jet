@@ -1373,7 +1373,7 @@ sema_comptime_reflection_prepared: fn(graph: SemaRegistrationGraph, caller: Int,
         }))
         .Present(inner) -> return sema_comptime_reflection_prepared(graph, caller, inner)
         .Unit -> return TComptimeValue.Enum{type_name: "PreparedValue", variant: "Unit", args: [TComptimeEnumArg]{}}
-        .Bytes(bytes) -> return sema_comptime_reflection_prepared_case("List", TComptimeValue.List{values: loop byte in bytes -> sema_comptime_reflection_prepared_case("Int", TComptimeValue.Int{value: Int.from_u8(byte)})})
+        .Bytes(bytes) -> return sema_comptime_reflection_prepared_case("List", TComptimeValue.List{values: loop byte in bytes -> sema_comptime_reflection_prepared_case("Int", TComptimeValue.Int{value: Int{byte}})})
         .BigInt(_) | .Map(_) | .Failed(_) -> return sema_comptime_reflection_unprepared()
     }
 }

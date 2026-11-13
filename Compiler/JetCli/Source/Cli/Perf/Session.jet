@@ -119,13 +119,13 @@ jet_cli_perf_session: fn(action: String, args: [String], quiet: Bool, color: Boo
         if jet_cli_perf_process_stat(pid) == .Ok(stat) -> alive = Val(stat)
         exited: child.exited() ?? return jet_cli_perf_error("cannot wait for `jet {action}`: {err}", JET_CLI_PERF_FIX, color)
         if exited -> break
-        if parsed.source != None -> jet_cli_perf_session_observe(observed, pid, U64.from_int(started.elapsed().ns) ?? U64{0})
+        if parsed.source != None -> jet_cli_perf_session_observe(observed, pid, checked(U64{started.elapsed().ns}) ?? U64{0})
         perf_time.sleep(25ms)
     }
     receipt: child.wait() ?? return jet_cli_perf_error("cannot wait for `jet {action}`: {err}", JET_CLI_PERF_FIX, color)
     // The session's wall, spawn to exit, on the observations' clock: every
     // observed span ends inside it.
-    wall: U64.from_int(started.elapsed().ns) ?? U64{0}
+    wall: checked(U64{started.elapsed().ns}) ?? U64{0}
     // The child is reaped as it exits, so its runtime's exit publication is
     // read without /proc unless a poll already kept it: every completed run
     // gets its final observation, however short it was.
@@ -349,7 +349,7 @@ jet_cli_perf_session_target: fn() -[Env]> String Never! {
 // record no receipts, so the trace carries no receipt sections.
 jet_cli_perf_session_write: fn(capture: JetCLIPerfCapture, action: String, argv: [String], out: String?) -[FS, Env, Time]> String JetCLIReadError! {
     toolchain: TraceToolchain{jet_version: JET_VERSION, compiler_build_id: jet_cli_compiler_identity() ?? JET_VERSION, stdlib_id: "jet-stdlib", runner_id: "jet-perf"}
-    hardware: TraceHardware{cpu_arch: perf_sys.arch(), logical_cpus: U64.from_int(perf_sys.cpu_count()) ?? U64{1}, os: perf_sys.name(), target: jet_cli_perf_session_target()}
+    hardware: TraceHardware{cpu_arch: perf_sys.arch(), logical_cpus: checked(U64{perf_sys.cpu_count()}) ?? U64{1}, os: perf_sys.name(), target: jet_cli_perf_session_target()}
     bytes: jet_cli_perf_capture_bytes(capture, action, argv, toolchain, hardware)
     cwd: perf_files.cwd() ?? return Err(jet_cli_read_error("cannot resolve the working directory: {jet_cli_io_error_text(err)}"))
     path := ""

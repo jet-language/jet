@@ -12,7 +12,7 @@ NSCD_VERSION: 2
 GETINITGR: 15
 
 word: fn(bytes: [U8], at: Int) -> Int {
-    Int.from_u8(bytes[at]) + Int.from_u8(bytes[at + 1]) * 256 + Int.from_u8(bytes[at + 2]) * 65536 + Int.from_u8(bytes[at + 3]) * 16777216
+    Int{bytes[at]} + Int{bytes[at + 1]} * 256 + Int{bytes[at + 2]} * 65536 + Int{bytes[at + 3]} * 16777216
 }
 
 words: fn(values: [Int]) -> [U8] {
@@ -21,7 +21,7 @@ words: fn(values: [Int]) -> [U8] {
         rest := value
         written := 0
         loop written < 4 {
-            out.push(U8.from_int(rest % 256) ?? U8{0})
+            out.push(checked(U8{rest % 256}) ?? U8{0})
             rest /%= 256
             written += 1
         }

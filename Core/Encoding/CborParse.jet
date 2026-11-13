@@ -36,7 +36,7 @@ bignum_bytes: fn(magnitude: Int) -> [U8] Never! {
 // value, tag 3 (`negative`) minus one minus it.
 bignum_value: fn(bytes: [U8], negative: Bool) -> Int Never! {
     magnitude := 0
-    loop byte in bytes -> magnitude = magnitude * 256 + Int.from_u8(byte)
+    loop byte in bytes -> magnitude = magnitude * 256 + (Int{byte})
     if negative -> -magnitude - 1 else -> magnitude
 }
 
@@ -140,7 +140,7 @@ Parser: struct {
         if width > input.len() - self.cursor -> return Err(failure(.Truncated, input.len(), path, "CBOR length argument is truncated"))
         number := 0
         loop _ in 0..<width {
-            number = (number << 8).bit_or(Int.from_u8(input[self.cursor]))
+            number = (number << 8).bit_or(Int{input[self.cursor]})
             self.cursor += 1
         }
         if self.options.require_canonical && ((additional == 24 && number < 24) || (additional == 25 && number <= 255) || (additional == 26 && number <= 65535) || (additional == 27 && number <= 4294967295)) {
@@ -162,7 +162,7 @@ Parser: struct {
                     break
                 }
                 chunk: self.cursor
-                head: Int.from_u8(input[self.cursor])
+                head: Int{input[self.cursor]}
                 self.cursor += 1
                 self.count(chunk, path) ?? return Err(err)
                 if (head >> 5) != major || (head.bit_and(31)) == 31 -> return Err(failure(.Syntax, chunk, path, "indefinite CBOR string contains a wrong or indefinite chunk"))
@@ -327,7 +327,7 @@ Parser: struct {
         if width > input.len() - self.cursor -> return Err(failure(.Truncated, input.len(), path, "CBOR {name} is truncated"))
         bits := 0
         loop i in 0..<width {
-            byte: Int.from_u8(input[self.cursor])
+            byte: Int{input[self.cursor]}
             if width == 8 && i == 0 && byte >= 128 -> bits = byte - 256
             else -> bits = (bits << 8).bit_or(byte)
             self.cursor += 1
@@ -346,7 +346,7 @@ Parser: struct {
     value: fn(&self, input: [U8], depth: Int, path: String) -> Dyn CBORError! {
         if self.cursor == input.len() -> return Err(failure(.Truncated, input.len(), path, "CBOR value is missing"))
         start: self.cursor
-        head: Int.from_u8(input[self.cursor])
+        head: Int{input[self.cursor]}
         self.cursor += 1
         self.count(start, path) ?? return Err(err)
         major: head >> 5

@@ -374,10 +374,10 @@ envmodel_dotenv_names: fn(value: CtValue) -> [String] EnvironmentFactError! {
 envmodel_valid_env_name: fn(name: String) -> Bool Never! {
     raw: name.bytes()
     if raw.len() == 0 -> return false
-    first: Int.from_u8(raw[0])
+    first: Int{raw[0]}
     if !pkg_bytes_is_word(first) || (first >= 48 && first <= 57) -> return false
     loop byte in raw {
-        if !pkg_bytes_is_word(Int.from_u8(byte)) -> return false
+        if !pkg_bytes_is_word(Int{byte}) -> return false
     }
     true
 }

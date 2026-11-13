@@ -61,11 +61,11 @@ sema_receipt_section_name_valid: fn(name: String) -> Bool Never! {
     bytes: name.bytes()
     if bytes.len() == 0 || bytes.len() > 128 -> return false
     loop index in 0..<bytes.len() {
-        code: Int.from_u8(bytes[index])
+        code: Int{bytes[index]}
         if code < 32 || code == 127 || code == 47 || code == 92 -> return false
         // U+0080..U+009F (C1 controls) encode as C2 80..C2 9F.
         if code == 194 && index + 1 < bytes.len() {
-            following: Int.from_u8(bytes[index + 1])
+            following: Int{bytes[index + 1]}
             if following >= 128 && following <= 159 -> return false
         }
     }

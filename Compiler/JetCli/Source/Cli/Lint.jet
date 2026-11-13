@@ -54,7 +54,7 @@ jet_cli_lint_max: fn(raw: [String], color: Bool) -> JetCLIIntOption Never! {
         if index >= digits.len() -> return JetCLIIntOption.Refused{output: jet_cli_lint_max_error(text, color)}
         value := 0
         loop index < digits.len() {
-            digit: Int.from_u8(digits[index]) - 48
+            digit: Int{digits[index]} - 48
             if digit < 0 || digit > 9 || value > 429496729 || (value == 429496729 && digit > 5) -> return JetCLIIntOption.Refused{output: jet_cli_lint_max_error(text, color)}
             value = value * 10 + digit
             index += 1

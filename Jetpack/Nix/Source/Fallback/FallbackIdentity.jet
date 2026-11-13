@@ -225,9 +225,9 @@ nix_fallback_provenance_attr: fn(fields: [String: Dyn]) -> [String] NixError! {
 
 nix_fallback_validate_version: fn(version: String) NixError! {
     raw: version.bytes()
-    if raw.len() == 0 || !nixeval_is_ascii_digit(Int.from_u8(raw[0])) -> return Err(NixError.Fallback("Nix version is not exact"))
+    if raw.len() == 0 || !nixeval_is_ascii_digit(Int{raw[0]}) -> return Err(NixError.Fallback("Nix version is not exact"))
     loop byte in raw {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         // `.` `-` `+` `_`; a non-ASCII scalar is never alphanumeric ASCII.
         if !nixeval_is_ascii_alphanumeric(code) && code != 46 && code != 45 && code != 43 && code != 95 -> return Err(NixError.Fallback("Nix version is not exact"))
     }

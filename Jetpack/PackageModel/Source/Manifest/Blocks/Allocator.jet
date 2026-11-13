@@ -51,11 +51,11 @@ PKG_MAX_U64_IN_INT: 9223372036854775807
 // `str::parse::<u64>()`: an optional `+`, then one or more ASCII digits.
 pkg_parse_u64: fn(text: String) -> Int? Never! {
     raw: text.bytes()
-    start: if raw.len() > 0 && Int.from_u8(raw[0]) == 43 -> 1 else -> 0
+    start: if raw.len() > 0 && (Int{raw[0]}) == 43 -> 1 else -> 0
     if start >= raw.len() -> return None
     value := 0
     loop index in start..<raw.len() {
-        digit: Int.from_u8(raw[index]) - 48
+        digit: Int{raw[index]} - 48
         if digit < 0 || digit > 9 -> return None
         if value > (PKG_MAX_U64_IN_INT - digit) /% 10 -> return None
         value = value * 10 + digit
@@ -67,11 +67,11 @@ pkg_parse_u64: fn(text: String) -> Int? Never! {
 // within `i64::MIN..=i64::MAX` (a negative magnitude may reach 2^63).
 pkg_parse_i64: fn(text: String) -> Int? Never! {
     raw: text.bytes()
-    if raw.len() == 0 || Int.from_u8(raw[0]) != 45 -> return pkg_parse_u64(text)
+    if raw.len() == 0 || (Int{raw[0]}) != 45 -> return pkg_parse_u64(text)
     if raw.len() == 1 -> return None
     magnitude := 0
     loop index in 1..<raw.len() {
-        digit: Int.from_u8(raw[index]) - 48
+        digit: Int{raw[index]} - 48
         if digit < 0 || digit > 9 -> return None
         if magnitude > (PKG_MAX_U64_IN_INT + 1 - digit) /% 10 -> return None
         magnitude = magnitude * 10 + digit

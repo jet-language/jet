@@ -277,11 +277,11 @@ nixeval_is_store_path: fn(path: String) -> Bool Never! {
     if nixeval_first_byte(bytes, 45) != 32 || bytes.len() <= 33 -> return false
     alphabet: "0123456789abcdfghijklmnpqrsvwxyz".bytes()
     loop index in 0..<32 {
-        if nixeval_first_byte(alphabet, Int.from_u8(bytes[index])) < 0 -> return false
+        if nixeval_first_byte(alphabet, Int{bytes[index]}) < 0 -> return false
     }
     label_marks: "+._?=-".bytes()
     loop index in 33..<bytes.len() {
-        byte: Int.from_u8(bytes[index])
+        byte: Int{bytes[index]}
         if !nixeval_is_ascii_alphanumeric(byte) && nixeval_first_byte(label_marks, byte) < 0 -> return false
     }
     true

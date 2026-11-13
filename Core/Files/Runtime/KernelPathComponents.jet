@@ -27,7 +27,7 @@ drive_at: fn(path: OSPath, start: Int) -> U8? Never! {
     if path.encoded.len() < start + 2 || path.encoded[start + 1] != (U8{58}) -> return None
     byte: path.encoded[start]
     if byte >= (U8{65}) && byte <= (U8{90}) -> return Val(byte)
-    if byte >= (U8{97}) && byte <= (U8{122}) -> return Val(U8{Int.from_u8(byte) - 32})
+    if byte >= (U8{97}) && byte <= (U8{122}) -> return Val(U8{Int{byte} - 32})
     None
 }
 prefix_byte: fn(path: OSPath, at: Int) -> U8 Never! {

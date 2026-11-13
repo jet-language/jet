@@ -231,12 +231,12 @@ NarReader: struct {
     field: fn(&self) -> [U8] StoreError! {
         raw: self.take_bytes(8)
         length := 0
-        loop index in 0..<8 -> length = (length).bit_or((Int.from_u8(raw[index]) << (8 * index)))
+        loop index in 0..<8 -> length = (length).bit_or((Int{raw[index]} << (8 * index)))
         if length < 0 || length > STORE_NAR_MAX_NODE_BYTES -> return Err(store_nar_invalid("NAR field exceeds the 512 MiB limit"))
         value: self.take_bytes(length)
         padding: self.take_bytes((8 - length % 8) % 8)
         loop byte in padding {
-            if Int.from_u8(byte) != 0 -> return Err(store_nar_invalid("NAR padding is not canonical"))
+            if (Int{byte}) != 0 -> return Err(store_nar_invalid("NAR padding is not canonical"))
         }
         Ok(value)
     }
@@ -320,7 +320,7 @@ NarReader: struct {
 store_nar_bytes_less: fn(left: [U8], right: [U8]) -> Bool Never! {
     shorter: if left.len() < right.len() -> left.len() else -> right.len()
     loop index in 0..<shorter {
-        if left[index] != right[index] -> return Int.from_u8(left[index]) < Int.from_u8(right[index])
+        if left[index] != right[index] -> return (Int{left[index]}) < (Int{right[index]})
     }
     left.len() < right.len()
 }
@@ -391,14 +391,14 @@ NarStreamReader: struct {
     u64: fn(&self) -> Int StoreError! {
         raw: self.read_exact(8)
         value := 0
-        loop index in 0..<8 -> value = (value).bit_or((Int.from_u8(raw[index]) << (8 * index)))
+        loop index in 0..<8 -> value = (value).bit_or((Int{raw[index]} << (8 * index)))
         Ok(value)
     }
 
     padding: fn(&self, length: Int) StoreError! {
         padding: self.read_exact((8 - length % 8) % 8)
         loop byte in padding {
-            if Int.from_u8(byte) != 0 -> return Err(store_nar_invalid("NAR stream padding is not canonical"))
+            if (Int{byte}) != 0 -> return Err(store_nar_invalid("NAR stream padding is not canonical"))
         }
     }
 
@@ -507,7 +507,7 @@ NarStreamReader: struct {
 store_nar_ascii_lower: fn(name: [U8]) -> [U8] Never! {
     out := [U8]{}
     loop byte in name {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         out.push(if code >= 65 && code <= 90 -> U8{code + 32} else -> byte)
     }
     out
@@ -577,7 +577,7 @@ store_nar_validate_name: fn(value: [U8], allow_nix_store_symlinks: Bool) StoreEr
     // backslash, no control bytes.
     unsafe_name := value.len() == 0 || value.len() > STORE_NAR_MAX_NAME_BYTES || value == ".".bytes() || value == "..".bytes()
     loop byte in value {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if code == 47 || code == 0 -> unsafe_name = true
         if !allow_nix_store_symlinks && (code == 92 || code < 32 || code == 127) -> unsafe_name = true
     }
@@ -596,7 +596,7 @@ store_nar_validate_link_placement: fn(target: [U8], relative_depth: Int, allow_n
 store_nar_validate_symlink_target: fn(value: [U8], allow_nix_store_symlinks: Bool) StoreError! {
     invalid := value.len() == 0 || value.len() > STORE_NAR_MAX_NAME_BYTES * 4
     loop byte in value {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if code == 0 -> invalid = true
         if !allow_nix_store_symlinks && (code == 92 || code < 32 || code == 127) -> invalid = true
     }
@@ -654,7 +654,7 @@ store_nar_validate_store_path_bytes: fn(value: [U8]) StoreError! {
         if part == "" || part == "." || part == ".." -> safe = false
     }
     loop byte in value {
-        if Int.from_u8(byte) == 0 || Int.from_u8(byte) == 13 -> safe = false
+        if (Int{byte}) == 0 || (Int{byte}) == 13 -> safe = false
     }
     if !safe -> return Err(store_nar_invalid("narinfo has an unsafe store path"))
     loop part in parts {

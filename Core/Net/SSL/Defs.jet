@@ -1422,14 +1422,14 @@ ssl_push_all: fn(out: &[U8], bytes: [U8]) Never! {
     loop b in bytes -> out.push(b)
 }
 
-ssl_u8: fn(buf: [U8], off: Int) -> Int Never! { Int.from_u8(buf[off]) }
+ssl_u8: fn(buf: [U8], off: Int) -> Int Never! { Int{buf[off]} }
 
 ssl_get_u16: fn(buf: [U8], off: Int) -> Int Never! {
-    (Int.from_u8(buf[off]) << 8).bit_or(Int.from_u8(buf[off + 1]))
+    (Int{buf[off]} << 8).bit_or(Int{buf[off + 1]})
 }
 
 ssl_get_u24: fn(buf: [U8], off: Int) -> Int Never! {
-    (Int.from_u8(buf[off]) << 16).bit_or(Int.from_u8(buf[off + 1]) << 8).bit_or(Int.from_u8(buf[off + 2]))
+    (Int{buf[off]} << 16).bit_or(Int{buf[off + 1]} << 8).bit_or(Int{buf[off + 2]})
 }
 
 ssl_get_u32: fn(buf: [U8], off: Int) -> Int Never! {

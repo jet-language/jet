@@ -30,7 +30,7 @@ u32: fn() -[Rand]> U32 CryptoError! {
     b: bytes(4) ?? return Err(.Unavailable)
     n := 0
     loop x in b {
-        n = n * 256 + Int.from_u8(x)
+        n = n * 256 + Int{x}
     }
     Ok(U32{n})
 }
@@ -39,7 +39,7 @@ u64: fn() -[Rand]> U64 CryptoError! {
     b: bytes(8) ?? return Err(.Unavailable)
     n := 0
     loop x in b {
-        n = n * 256 + Int.from_u8(x)
+        n = n * 256 + Int{x}
     }
     Ok(U64{n})
 }
@@ -67,7 +67,7 @@ int_range: fn(lo: Int, hi: Int) -[Rand]> Int CryptoError! {
 random_word64: fn() -[Rand]> Int CryptoError! {
     b: bytes(8) ?? return Err(.Unavailable)
     n := 0
-    loop x in b -> n = n * 256 + Int.from_u8(x)
+    loop x in b -> n = n * 256 + (Int{x})
     n
 }
 
@@ -75,7 +75,7 @@ token_hex: fn(n: Int) -[Rand]> String CryptoError! {
     b: bytes(n)
     s := ""
     loop x in b {
-        d: Int.from_u8(x)
+        d: Int{x}
         hi: d /% 16
         lo: d %% 16
         s = "{s}{hex_nibble(hi)}{hex_nibble(lo)}"
@@ -90,7 +90,7 @@ token_urlsafe: fn(n: Int) -[Rand]> String CryptoError! {
     out := [U8]{}
     i := 0
     loop i + 3 <= b.len() {
-        v: (((Int.from_u8(b[i]) << 16)).bit_or((Int.from_u8(b[i + 1]) << 8))).bit_or(Int.from_u8(b[i + 2]))
+        v: (((Int{b[i]} << 16)).bit_or((Int{b[i + 1]} << 8))).bit_or(Int{b[i + 2]})
         out.push(raw[((v >> 18)).bit_and(63)])
         out.push(raw[((v >> 12)).bit_and(63)])
         out.push(raw[((v >> 6)).bit_and(63)])
@@ -99,12 +99,12 @@ token_urlsafe: fn(n: Int) -[Rand]> String CryptoError! {
     }
     rest: b.len() - i
     if rest == 1 {
-        v: Int.from_u8(b[i]) << 16
+        v: Int{b[i]} << 16
         out.push(raw[((v >> 18)).bit_and(63)])
         out.push(raw[((v >> 12)).bit_and(63)])
     }
     if rest == 2 {
-        v: ((Int.from_u8(b[i]) << 16)).bit_or((Int.from_u8(b[i + 1]) << 8))
+        v: ((Int{b[i]} << 16)).bit_or((Int{b[i + 1]} << 8))
         out.push(raw[((v >> 18)).bit_and(63)])
         out.push(raw[((v >> 12)).bit_and(63)])
         out.push(raw[((v >> 6)).bit_and(63)])
@@ -155,9 +155,9 @@ randbits: fn(k: Int) -[Rand]> Int CryptoError! {
     width: (k + 7) /% 8
     b := bytes(width) ?? return Err(.Unavailable)
     excess: width * 8 - k
-    if excess > 0 -> b[0] = U8{(Int.from_u8(b[0])).bit_and((255 >> excess))}
+    if excess > 0 -> b[0] = (U8{(Int{b[0]}).bit_and((255 >> excess))})
     out := 0
-    loop x in b -> out = ((out << 8)).bit_or(Int.from_u8(x))
+    loop x in b -> out = ((out << 8)).bit_or(Int{x})
     Ok(out)
 }
  

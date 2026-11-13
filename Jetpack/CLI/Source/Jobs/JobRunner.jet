@@ -261,7 +261,7 @@ cli_task_limit_env_name: fn(name: String) -> String Never! {
     loop scalar in name.chars() {
         text: "{scalar}"
         raw: text.bytes()
-        code: if raw.len() == 1 -> Int.from_u8(raw[0]) else -> 0
+        code: if raw.len() == 1 -> (Int{raw[0]}) else -> 0
         alphanumeric: (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122)
         out = if alphanumeric -> "{out}{text.to_ascii_upper()}" else -> "{out}_"
     }

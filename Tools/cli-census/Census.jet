@@ -81,7 +81,7 @@ is_upper: fn(code: Int) -> Bool Never! { code >= 65 && code <= 90 }
 
 digits_value: fn(text: String) -> Int Never! {
     value := 0
-    loop byte in text.bytes() -> value = value * 10 + Int.from_u8(byte) - 48
+    loop byte in text.bytes() -> value = value * 10 + (Int{byte}) - 48
     value
 }
 
@@ -112,7 +112,7 @@ rank_value: fn(line: String) -> Int? Never! {
     digits: byte_slice(line, byte_len(prefix), byte_len(line) - 1)
     if digits == "" -> return None
     loop byte in digits.bytes() {
-        if !is_digit(Int.from_u8(byte)) -> return None
+        if !is_digit(Int{byte}) -> return None
     }
     Val(digits_value(digits))
 }
@@ -129,9 +129,9 @@ row_name: fn(line: String, source: String) -> String? Never! {
         if inner.contains("\"") -> return None
         return Val(inner)
     }
-    if bytes.len() == 0 || !is_upper(Int.from_u8(bytes[0])) -> return None
+    if bytes.len() == 0 || !is_upper(Int{bytes[0]}) -> return None
     loop byte in bytes {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if !is_upper(code) && !is_digit(code) && code != 95 -> return None
     }
     constant: "pub const {value}: &str = \""
@@ -154,8 +154,8 @@ quoted_text: fn(value: String) -> String? Never! {
     out := [U8]{}
     index := 1
     loop index < bytes.len() - 1 {
-        byte: Int.from_u8(bytes[index])
-        next_byte: if index + 1 < bytes.len() - 1 -> Int.from_u8(bytes[index + 1]) else -> -1
+        byte: Int{bytes[index]}
+        next_byte: if index + 1 < bytes.len() - 1 -> (Int{bytes[index + 1]}) else -> -1
         if byte == 92 {
             if next_byte == {
                 34 | 92 -> out.push(bytes[index + 1])

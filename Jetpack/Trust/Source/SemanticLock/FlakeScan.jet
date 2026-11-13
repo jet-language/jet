@@ -35,7 +35,7 @@ trust_nix_strip_comments: fn(text: String) -> String Never! {
     index := 0
     loop index < raw.len() {
         byte: raw[index]
-        code: Int.from_u8(byte)
+        code: Int{byte}
         index += 1
         if quoted {
             out.push(byte)
@@ -70,7 +70,7 @@ trust_nix_skip_quoted: fn(raw: [U8], start: Int) -> Int Never! {
     escaped := false
     index := start + 1
     loop index < raw.len() {
-        code: Int.from_u8(raw[index])
+        code: Int{raw[index]}
         if {
             escaped -> escaped = false
             code == TRUST_BACKSLASH -> escaped = true
@@ -89,7 +89,7 @@ trust_nix_matching: fn(raw: [U8], open: Int, opener: Int, closer: Int) -> Int Ne
     depth := 0
     index := open
     loop index < raw.len() {
-        code: Int.from_u8(raw[index])
+        code: Int{raw[index]}
         if {
             code == TRUST_QUOTE -> index = trust_nix_skip_quoted(raw, index)
             code == opener -> {
@@ -118,7 +118,7 @@ trust_nix_quoted_rhs: fn(value: String) -> String? Never! {
     escaped := false
     loop index in (start + 1)..<raw.len() {
         byte: raw[index]
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if {
             escaped -> {
                 out.push(byte)
@@ -136,7 +136,7 @@ trust_nix_quoted_rhs: fn(value: String) -> String? Never! {
 // run which is empty extends to the end of the text.
 trust_nix_path_end: fn(raw: [U8], start: Int) -> Int Never! {
     index := start
-    loop index < raw.len() && trust_nix_is_name_byte(Int.from_u8(raw[index])) -> index += 1
+    loop index < raw.len() && trust_nix_is_name_byte(Int{raw[index]}) -> index += 1
     if index == start -> return raw.len()
     index
 }
@@ -197,7 +197,7 @@ trust_nix_block_assignments: fn(text: String, parent: String) -> [FlakeAssignmen
     found := [FlakeAssignment]{}
     cursor := 0
     loop cursor < raw.len() {
-        code: Int.from_u8(raw[cursor])
+        code: Int{raw[cursor]}
         if code == TRUST_QUOTE {
             cursor = trust_nix_skip_quoted(raw, cursor)
             next
@@ -207,7 +207,7 @@ trust_nix_block_assignments: fn(text: String, parent: String) -> [FlakeAssignmen
             next
         }
         start: cursor.copy()
-        loop cursor < raw.len() && trust_nix_is_name_byte(Int.from_u8(raw[cursor])) -> cursor += 1
+        loop cursor < raw.len() && trust_nix_is_name_byte(Int{raw[cursor]}) -> cursor += 1
         local: pkg_bytes_text(raw, start, cursor)
         after := trust_text_skip_ascii_space(raw, cursor)
         if pkg_bytes_code(raw, after) != TRUST_EQUALS -> next
@@ -287,7 +287,7 @@ trust_nix_assignment_paths: fn(text: String, prefix: String) -> [String] Never! 
     loop {
         start: trust_text_find(raw, needle, cursor)
         if start < 0 -> break
-        if start > 0 && trust_nix_is_name_byte(Int.from_u8(raw[start - 1])) {
+        if start > 0 && trust_nix_is_name_byte(Int{raw[start - 1]}) {
             cursor = start + needle.len()
             next
         }
@@ -322,8 +322,8 @@ trust_nix_list_assignment_values: fn(text: String, name: String) -> [String] Nev
         start: trust_text_find(raw, needle, cursor)
         if start < 0 -> break
         after_name: start + needle.len()
-        before_ok: start == 0 || !trust_nix_is_name_byte(Int.from_u8(raw[start - 1]))
-        after_ok: after_name >= raw.len() || !trust_nix_is_name_byte(Int.from_u8(raw[after_name]))
+        before_ok: start == 0 || !trust_nix_is_name_byte(Int{raw[start - 1]})
+        after_ok: after_name >= raw.len() || !trust_nix_is_name_byte(Int{raw[after_name]})
         cursor = after_name
         if !before_ok || !after_ok -> next
         equals: trust_text_skip_ascii_space(raw, after_name)

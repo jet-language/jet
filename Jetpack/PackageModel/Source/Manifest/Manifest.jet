@@ -150,7 +150,7 @@ pkg_jet_build: fn() -[FS, Env]> JetBuild Never! {
 pkg_is_commit_hex: fn(text: String) -> Bool Never! {
     if text.count_bytes() != 40 -> return false
     loop byte in text.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if !((code >= 48 && code <= 57) || (code >= 97 && code <= 102)) -> return false
     }
     true
@@ -160,7 +160,7 @@ pkg_is_iso_date: fn(text: String) -> Bool Never! {
     raw: text.bytes()
     if raw.len() != 10 -> return false
     loop (index, byte) in raw {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if index == 4 || index == 7 {
             if code != 45 -> return false
         } else if code < 48 || code > 57 {

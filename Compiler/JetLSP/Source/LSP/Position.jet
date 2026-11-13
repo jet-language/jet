@@ -39,7 +39,7 @@ lsp_line_table_bytes: fn(bytes: [U8]) -> LineTable Never! {
     start := 0
     index := 0
     loop index < bytes.len() {
-        byte: Int.from_u8(bytes[index])
+        byte: Int{bytes[index]}
         if byte == 13 || byte == 10 {
             lines.push(Span{start: start, end: index})
             if byte == 13 && index + 1 < bytes.len() && bytes[index + 1] == (U8{10}) -> index += 1
@@ -108,7 +108,7 @@ lsp_byte_offset_in_table: fn(bytes: [U8], table: LineTable, offset: Int) -> LSPP
     }
     line: table.lines[low]
     end: if bounded < line.end -> bounded else -> line.end
-    if end < bytes.len() && (Int.from_u8(bytes[end]).bit_and(192)) == 128 -> panic("byte offset is not a UTF-8 boundary")
+    if end < bytes.len() && (Int{bytes[end]}.bit_and(192)) == 128 -> panic("byte offset is not a UTF-8 boundary")
     LSPPos{line: low, character: lsp_utf16_length(bytes, line.start, end)}
 }
 

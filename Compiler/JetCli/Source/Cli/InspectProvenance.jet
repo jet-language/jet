@@ -106,7 +106,7 @@ jet_cli_lock_unescape: fn(raw: String) -> String Never! {
     out := [U8]{}
     escaped := false
     loop byte in text.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if escaped {
             if code == {
                 110 -> out.push(U8{10})
@@ -138,7 +138,7 @@ jet_cli_lock_string_array: fn(raw: String) -> [String]? Never! {
     item_started := false
     item_quoted := false
     loop byte in inner.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if escaped {
             if code == {
                 110 -> current.push(U8{10})
@@ -182,7 +182,7 @@ jet_cli_lock_kv_field: fn(inline: String, key: String) -> String? Never! {
     escaped := false
     bytes: inline.bytes()
     loop index in 0..<bytes.len() {
-        code: Int.from_u8(bytes[index])
+        code: Int{bytes[index]}
         if escaped {
             escaped = false
         } else if quoted && code == 92 {
@@ -294,7 +294,7 @@ jet_cli_lock_u32: fn(text: String) -> Int? Never! {
     if start >= bytes.len() -> return None
     value := 0
     loop index in start..<bytes.len() {
-        digit: Int.from_u8(bytes[index]) - 48
+        digit: Int{bytes[index]} - 48
         if digit < 0 || digit > 9 -> return None
         value = value * 10 + digit
         if value > 4294967295 -> return None

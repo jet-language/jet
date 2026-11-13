@@ -655,7 +655,7 @@ pkg_with_default_source: fn(input: String) -> String Never! {
 pkg_ref_valid_target: fn(target: String) -> Bool Never! {
     if target.contains(REF_CHANNEL_MARKER) -> return false
     loop byte in target.bytes() {
-        if Int.from_u8(byte) <= 32 -> return false
+        if (Int{byte}) <= 32 -> return false
     }
     true
 }
@@ -665,7 +665,7 @@ pkg_ref_valid_target: fn(target: String) -> Bool Never! {
 // is a provider-first ref, not a source.
 pkg_ref_valid_source: fn(source: String) -> Bool Never! {
     loop byte in source.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         allowed: (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 45 || code == 95 || code == 46
         if !allowed -> return false
     }
@@ -771,7 +771,7 @@ pkg_is_semver_mask: fn(selector: String) -> Bool Never! {
     digits: series.removesuffix(".x")
     if digits == "" -> return false
     loop byte in digits.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if code < 48 || code > 57 -> return false
     }
     true

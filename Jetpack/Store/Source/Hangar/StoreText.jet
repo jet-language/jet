@@ -12,7 +12,7 @@ store_hex_bytes: fn(bytes: [U8]) -> String Never! {
     digits: "0123456789abcdef".bytes()
     out := [U8]{}
     loop byte in bytes {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         out.push(digits[code >> 4])
         out.push(digits[(code).bit_and(15)])
     }
@@ -43,7 +43,7 @@ store_is_lower_hex: fn(value: String, count: Int) -> Bool Never! {
     bytes: value.bytes()
     if bytes.len() != count -> return false
     loop byte in bytes {
-        if store_lower_hex_value(Int.from_u8(byte)) < 0 -> return false
+        if store_lower_hex_value(Int{byte}) < 0 -> return false
     }
     true
 }
@@ -62,8 +62,8 @@ store_unhex_text: fn(value: String) -> StoreUnhex Never! {
     bytes := [U8]{}
     index := 0
     loop index < raw.len() {
-        high: store_lower_hex_value(Int.from_u8(raw[index]))
-        low: store_lower_hex_value(Int.from_u8(raw[index + 1]))
+        high: store_lower_hex_value(Int{raw[index]})
+        low: store_lower_hex_value(Int{raw[index + 1]})
         if high < 0 || low < 0 -> return StoreUnhex.NotLowerHex
         bytes.push(U8{high * 16 + low})
         index += 2
@@ -82,7 +82,7 @@ store_text_lines: fn(raw: String) -> [String] Never! {
     loop index in 0..<count {
         segment: segments[index]
         bytes: segment.bytes()
-        if bytes.len() > 0 && Int.from_u8(bytes[bytes.len() - 1]) == 13 {
+        if bytes.len() > 0 && (Int{bytes[bytes.len() - 1]}) == 13 {
             lines.push(pkg_bytes_text(bytes, 0, bytes.len() - 1))
             next
         }

@@ -109,9 +109,9 @@ store_archive_recover_quarantine_entries: fn(verification: &StoreVerification, r
         digest_tail: repair_name.removeprefix("sha256-").bytes()
         if digest_tail.len() < 64 -> return Err(StoreError.InvalidData("repair quarantine name is malformed"))
         loop index in 0..<64 {
-            if !store_archive_is_hex_digit(Int.from_u8(digest_tail[index])) -> return Err(StoreError.InvalidData("repair quarantine name is malformed"))
+            if !store_archive_is_hex_digit(Int{digest_tail[index]}) -> return Err(StoreError.InvalidData("repair quarantine name is malformed"))
         }
-        if digest_tail.len() == 64 || Int.from_u8(digest_tail[64]) != 45 -> return Err(StoreError.InvalidData("repair quarantine name is malformed"))
+        if digest_tail.len() == 64 || (Int{digest_tail[64]}) != 45 -> return Err(StoreError.InvalidData("repair quarantine name is malformed"))
         if digest_tail.len() == 65 -> return Err(StoreError.InvalidData("repair quarantine name has no recovery nonce"))
         digest_hex: String.from_bytes(digest_tail[0..<64]) ?? return Err(StoreError.InvalidData("repair quarantine name is malformed"))
         digest: "sha256-{digest_hex}"
@@ -809,7 +809,7 @@ store_archive_write_nodes: fn(root: String, nodes: [HangarArchiveNode], root_mod
 store_archive_separator_count: fn(path: String) -> Int Never! {
     count := 0
     loop byte in path.bytes() {
-        if Int.from_u8(byte) == 47 -> count += 1
+        if (Int{byte}) == 47 -> count += 1
     }
     count
 }
@@ -924,10 +924,10 @@ store_archive_key_path: fn(roots: HangarRoots, requested: String) -> String Neve
 // with one optional trailing newline.
 store_archive_decode_secret: fn(bytes: [U8]) -> [U8] StoreError! {
     trimmed := bytes
-    if trimmed.len() > 0 && Int.from_u8(trimmed[trimmed.len() - 1]) == 10 -> trimmed = trimmed[0..<(trimmed.len() - 1)]
+    if trimmed.len() > 0 && (Int{trimmed[trimmed.len() - 1]}) == 10 -> trimmed = trimmed[0..<(trimmed.len() - 1)]
     hex := trimmed.len() >= 32 && trimmed.len() % 2 == 0
     loop byte in trimmed {
-        if !store_archive_is_hex_digit(Int.from_u8(byte)) -> hex = false
+        if !store_archive_is_hex_digit(Int{byte}) -> hex = false
     }
     if !hex -> return Ok(trimmed)
     out := [U8]{}
@@ -942,7 +942,7 @@ store_archive_decode_secret: fn(bytes: [U8]) -> [U8] StoreError! {
 }
 
 store_archive_hex_value: fn(byte: U8) -> Int? Never! {
-    code: Int.from_u8(byte)
+    code: Int{byte}
     if {
         code >= 48 && code <= 57 -> Val(code - 48)
         code >= 97 && code <= 102 -> Val(code - 87)
@@ -1116,7 +1116,7 @@ store_archive_with_extension: fn(path: String, extension: String) -> String Neve
     raw: name.bytes()
     dot := -1
     loop index in 1..<raw.len() {
-        if Int.from_u8(raw[index]) == 46 -> dot = index
+        if (Int{raw[index]}) == 46 -> dot = index
     }
     stem: if dot > 0 -> String.from_bytes(raw[0..<dot]) ?? name else -> name
     if parent == "" -> return "{stem}.{extension}"

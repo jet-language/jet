@@ -84,7 +84,7 @@ ssl_ser_get_time: fn(buf: [U8], off: Int) -> Int Never! {
 // MBEDTLS_PUT_UINT64_BE of a U64 counter.
 ssl_ser_push_u64: fn(out: &[U8], v: U64) Never! {
     loop i in 0..<8 {
-        out.push(ssldefs.ssl_byte(Int.from_u64((v >> (56 - 8 * i)).bit_and(U64{0xFF}))))
+        out.push(ssldefs.ssl_byte(Int{(v >> (56 - 8 * i)).bit_and(U64{0xFF})}))
     }
 }
 
@@ -92,7 +92,7 @@ ssl_ser_push_u64: fn(out: &[U8], v: U64) Never! {
 ssl_ser_get_u64: fn(buf: [U8], off: Int) -> U64 Never! {
     v := U64{0}
     loop i in 0..<8 {
-        v = (v << 8).bit_or(U64{Int.from_u8(buf[off + i])})
+        v = (v << 8).bit_or(U64{Int{buf[off + i]}})
     }
     v
 }

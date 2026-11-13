@@ -513,7 +513,7 @@ ir_lint_utf8: fn(bytes: [U8]) -> Bool Never! {
     count: bytes.len()
     at := 0
     loop at < count {
-        lead: Int.from_u8(bytes[at])
+        lead: Int{bytes[at]}
         if lead < 128 {
             at += 1
             next
@@ -527,7 +527,7 @@ ir_lint_utf8: fn(bytes: [U8]) -> Bool Never! {
         if width == 0 || at + width > count -> return false
         // The second byte's range rules out overlong forms, surrogates and
         // code points past U+10FFFF.
-        second: Int.from_u8(bytes[at + 1])
+        second: Int{bytes[at + 1]}
         low: if {
             lead == 224 -> 160
             lead == 240 -> 144
@@ -540,7 +540,7 @@ ir_lint_utf8: fn(bytes: [U8]) -> Bool Never! {
         }
         if second < low || second > high -> return false
         loop next_at in (at + 2)..<(at + width) {
-            continuation: Int.from_u8(bytes[next_at])
+            continuation: Int{bytes[next_at]}
             if continuation < 128 || continuation > 191 -> return false
         }
         at += width
@@ -551,10 +551,10 @@ ir_lint_utf8: fn(bytes: [U8]) -> Bool Never! {
 // Whether `text` is a decimal integer: an optional `-`, then digits.
 ir_lint_decimal: fn(text: String) -> Bool Never! {
     bytes: text.bytes()
-    start: if bytes.len() > 0 && Int.from_u8(bytes[0]) == 45 -> 1 else -> 0
+    start: if bytes.len() > 0 && (Int{bytes[0]}) == 45 -> 1 else -> 0
     if start >= bytes.len() -> return false
     loop at in start..<bytes.len() {
-        digit: Int.from_u8(bytes[at])
+        digit: Int{bytes[at]}
         if digit < 48 || digit > 57 -> return false
     }
     true

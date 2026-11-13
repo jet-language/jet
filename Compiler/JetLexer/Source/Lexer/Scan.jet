@@ -10,21 +10,21 @@ use {
 
 // The comment spellings of the syntax registry, as the two bytes each one is,
 // fixed when the lexer is built.
-LINE_COMMENT_FIRST: #run Int.from_u8(COMMENT_PREFIX.bytes()[0])
+LINE_COMMENT_FIRST: #run Int{COMMENT_PREFIX.bytes()[0]}
 
-LINE_COMMENT_SECOND: #run Int.from_u8(COMMENT_PREFIX.bytes()[1])
+LINE_COMMENT_SECOND: #run Int{COMMENT_PREFIX.bytes()[1]}
 
-BLOCK_OPEN_FIRST: #run Int.from_u8(BLOCK_COMMENT_OPEN.bytes()[0])
+BLOCK_OPEN_FIRST: #run Int{BLOCK_COMMENT_OPEN.bytes()[0]}
 
-BLOCK_OPEN_SECOND: #run Int.from_u8(BLOCK_COMMENT_OPEN.bytes()[1])
+BLOCK_OPEN_SECOND: #run Int{BLOCK_COMMENT_OPEN.bytes()[1]}
 
-BLOCK_CLOSE_FIRST: #run Int.from_u8(BLOCK_COMMENT_CLOSE.bytes()[0])
+BLOCK_CLOSE_FIRST: #run Int{BLOCK_COMMENT_CLOSE.bytes()[0]}
 
-BLOCK_CLOSE_SECOND: #run Int.from_u8(BLOCK_COMMENT_CLOSE.bytes()[1])
+BLOCK_CLOSE_SECOND: #run Int{BLOCK_COMMENT_CLOSE.bytes()[1]}
 
 byte_at: fn(source: [U8], index: Int) -> Int Never! {
     if index < 0 || index >= source.len() -> return -1
-    Int.from_u8(source[index])
+    Int{source[index]}
 }
 
 is_continuation: fn(value: Int) -> Bool Never! {
@@ -138,7 +138,7 @@ scan_identifier_end: fn(source: [U8], start: Int) -> Int {
     i := start
     count: source.len()
     loop i < count {
-        value: Int.from_u8(source[i])
+        value: Int{source[i]}
         if value < 128 {
             if value == 95 || (value >= 97 && value <= 122) || (value >= 65 && value <= 90) || (value >= 48 && value <= 57) {
                 i += 1
@@ -289,7 +289,7 @@ scan_plain_string_end: fn(source: [U8], start: Int, raw_head: Bool) -> Int Never
     i := start + 1
     count: source.len()
     loop i < count {
-        value: Int.from_u8(source[i])
+        value: Int{source[i]}
         // Plain ASCII text bytes advance inline.
         if value < 128 && value != 10 && value != 34 && value != 123 && value != 125 && value != 92 {
             i += 1
@@ -581,7 +581,7 @@ raw_token_facts_range: fn(source: [U8], config_surface: Bool, from: Int, to: Int
         // ASCII whitespace and identifier starts (most bytes and tokens) are
         // tested inline before the punctuation chain; a non-ASCII byte keeps
         // the scalar whitespace and identifier tests below.
-        value: Int.from_u8(source[i])
+        value: Int{source[i]}
         if value == 32 || (value >= 9 && value <= 13) {
             i += 1
             next

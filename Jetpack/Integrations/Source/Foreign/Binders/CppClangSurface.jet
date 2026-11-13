@@ -406,10 +406,10 @@ pkg_cpp_snake: fn(value: String) -> String Never! {
     index := 0
     loop scalar in value.chars() {
         loop byte in "{scalar}".bytes() {
-            code: Int.from_u8(byte)
+            code: Int{byte}
             if code >= 65 && code <= 90 {
                 if index > 0 -> out.push(U8{95})
-                out.push(U8.from_int(code + 32) ?? byte)
+                out.push(checked(U8{code + 32}) ?? byte)
             } else {
                 out.push(byte)
             }

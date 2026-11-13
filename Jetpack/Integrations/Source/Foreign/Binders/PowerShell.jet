@@ -214,10 +214,10 @@ pkg_powershell_render_c: fn(lib: String, pwsh: String, worker: String, script: S
 pkg_powershell_ident: fn(value: String) -> Bool Never! {
     raw: value.bytes()
     if raw.len() == 0 -> return false
-    first: Int.from_u8(raw[0])
+    first: Int{raw[0]}
     if !pkg_binder_is_ascii_alpha(first) && first != 95 -> return false
     loop byte in raw {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if !pkg_bytes_is_word(code) && code != 45 -> return false
     }
     true

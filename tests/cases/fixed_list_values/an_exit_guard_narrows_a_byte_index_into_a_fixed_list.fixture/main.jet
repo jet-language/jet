@@ -4,7 +4,7 @@
 tally: fn(frames: [U8]) -> [U64#4]? {
     channels := [U64#4]{0, 0, 0, 0}
     loop raw in frames {
-        channel: Int.from_u8(raw)
+        channel: Int{raw}
         if channel >= channels.len() -> return None
         channels[channel] = channels[channel] + U64{1}
     }
@@ -16,7 +16,7 @@ tally: fn(frames: [U8]) -> [U64#4]? {
 lanes: fn(frames: [U8]) -> Int {
     lane_hits := [Int#3]{0, 0, 0}
     loop raw in frames {
-        lane: Int.from_u8(raw) - 1
+        lane: Int{raw} - 1
         if lane < 0 || 3 <= lane -> next
         lane_hits[lane] = lane_hits[lane] + 1
     }

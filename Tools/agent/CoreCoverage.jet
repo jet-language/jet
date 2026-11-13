@@ -230,13 +230,13 @@ snake_case: fn(part: String) -> String Never! {
     raw: part.bytes()
     out := [U8]{}
     loop at in 0..<raw.len() {
-        byte: Int.from_u8(raw[at])
+        byte: Int{raw[at]}
         if byte < 65 || byte > 90 {
             out.push(raw[at])
             next
         }
-        if at > 0 && is_lower_or_digit(Int.from_u8(raw[at - 1])) -> out.push(U8{95})
-        out.push(U8.from_int(byte + 32) ?? U8{0})
+        if at > 0 && is_lower_or_digit(Int{raw[at - 1]}) -> out.push(U8{95})
+        out.push(checked(U8{byte + 32}) ?? U8{0})
     }
     String.from_bytes_lossy(out)
 }
@@ -251,9 +251,9 @@ is_word: fn(byte: Int) -> Bool Never! { is_word_start(byte) || (byte >= 48 && by
 
 is_identifier: fn(value: String) -> Bool Never! {
     raw: value.bytes()
-    if raw.len() == 0 || !is_word_start(Int.from_u8(raw[0])) -> return false
+    if raw.len() == 0 || !is_word_start(Int{raw[0]}) -> return false
     loop byte in raw {
-        if !is_word(Int.from_u8(byte)) -> return false
+        if !is_word(Int{byte}) -> return false
     }
     true
 }
@@ -261,7 +261,7 @@ is_identifier: fn(value: String) -> Bool Never! {
 // The byte at `index`, or -1 outside `0..<end`.
 byte_at: fn(source: [U8], index: Int, end: Int) -> Int Never! {
     if index < 0 || index >= end -> return -1
-    Int.from_u8(source[index])
+    Int{source[index]}
 }
 
 starts_at: fn(source: [U8], index: Int, end: Int, word: String) -> Bool Never! {
@@ -401,7 +401,7 @@ token: fn(tokens: [Token], index: Int) -> String Never! {
 newlines: fn(source: [U8]) -> [Int] Never! {
     found := [Int]{}
     loop at in 0..<source.len() {
-        if Int.from_u8(source[at]) == NEWLINE -> found.push(at)
+        if (Int{source[at]}) == NEWLINE -> found.push(at)
     }
     found
 }
@@ -454,15 +454,15 @@ declares_body: fn(source: [U8], close: Int) -> Bool Never! { body_kind(source, c
 // "extern" for an extern member (`= "path"`), "" for neither.
 body_kind: fn(source: [U8], close: Int) -> String Never! {
     end := close
-    loop end < source.len() && Int.from_u8(source[end]) != NEWLINE -> end += 1
+    loop end < source.len() && (Int{source[end]}) != NEWLINE -> end += 1
     at := close
     loop at < end {
-        b: Int.from_u8(source[at])
+        b: Int{source[at]}
         if b == SLASH && byte_at(source, at + 1, end) == SLASH -> return ""
         if b == OPEN_BRACE -> return "block"
         if b == EQUALS {
             after := at + 1
-            loop after < end && is_space(Int.from_u8(source[after])) -> after += 1
+            loop after < end && is_space(Int{source[after]}) -> after += 1
             if byte_at(source, after, end) == QUOTE -> return "extern"
         }
         at += 1
@@ -487,9 +487,9 @@ signature_text: fn(raw: [U8]) -> String Never! {
     pending := false
     at := 0
     loop at < raw.len() {
-        b: Int.from_u8(raw[at])
+        b: Int{raw[at]}
         if b == SLASH && byte_at(raw, at + 1, raw.len()) == SLASH {
-            loop at < raw.len() && Int.from_u8(raw[at]) != NEWLINE -> at += 1
+            loop at < raw.len() && (Int{raw[at]}) != NEWLINE -> at += 1
             next
         }
         if is_space(b) {
@@ -505,9 +505,9 @@ signature_text: fn(raw: [U8]) -> String Never! {
     if pending -> collapsed.push(U8{32})
     opened := [U8]{}
     loop index in 0..<collapsed.len() {
-        b: Int.from_u8(collapsed[index])
+        b: Int{collapsed[index]}
         if b == SPACE && index > 0 {
-            before: Int.from_u8(collapsed[index - 1])
+            before: Int{collapsed[index - 1]}
             if before == OPEN_PAREN || before == LESS -> next
         }
         opened.push(collapsed[index])
@@ -515,7 +515,7 @@ signature_text: fn(raw: [U8]) -> String Never! {
     out := [U8]{}
     index := 0
     loop index < opened.len() {
-        b: Int.from_u8(opened[index])
+        b: Int{opened[index]}
         one: byte_at(opened, index + 1, opened.len())
         two: byte_at(opened, index + 2, opened.len())
         if {
@@ -961,9 +961,9 @@ strip_stars: fn(raw: [U8]) -> String Never! {
     out := [U8]{}
     at := 0
     loop at < raw.len() {
-        if at == 0 || Int.from_u8(raw[at - 1]) == NEWLINE || Int.from_u8(raw[at - 1]) == CARRIAGE_RETURN {
+        if at == 0 || (Int{raw[at - 1]}) == NEWLINE || (Int{raw[at - 1]}) == CARRIAGE_RETURN {
             after := at
-            loop after < raw.len() && is_space(Int.from_u8(raw[after])) -> after += 1
+            loop after < raw.len() && is_space(Int{raw[after]}) -> after += 1
             if byte_at(raw, after, raw.len()) == STAR {
                 after += 1
                 if byte_at(raw, after, raw.len()) == SPACE -> after += 1
@@ -1020,7 +1020,7 @@ doctest_programs: fn(source: String) -> [String] Never! {
 quoted_end: fn(raw: [U8], start: Int, quote: Int) -> Int Never! {
     at := start + 1
     loop at < raw.len() {
-        b: Int.from_u8(raw[at])
+        b: Int{raw[at]}
         if b == quote -> return at + 1
         if b == BACKSLASH {
             escaped: byte_at(raw, at + 1, raw.len())
@@ -1042,9 +1042,9 @@ embedded_programs: fn(source: String) -> [String] Never! {
     programs := [String]{}
     at := 0
     loop at < raw.len() {
-        b: Int.from_u8(raw[at])
+        b: Int{raw[at]}
         if b == SLASH && byte_at(raw, at + 1, raw.len()) == SLASH {
-            loop at < raw.len() && Int.from_u8(raw[at]) != NEWLINE -> at += 1
+            loop at < raw.len() && (Int{raw[at]}) != NEWLINE -> at += 1
             next
         }
         if b == SLASH && byte_at(raw, at + 1, raw.len()) == STAR {
@@ -1326,8 +1326,8 @@ entry_key: fn(name: String, signature: String) -> String Never! { "{name}\t{sign
 compare_bytes: fn(left: [U8], right: [U8]) -> Ordering Never! {
     common: if left.len() < right.len() -> left.len() else -> right.len()
     loop at in 0..<common {
-        a: Int.from_u8(left[at])
-        b: Int.from_u8(right[at])
+        a: Int{left[at]}
+        b: Int{right[at]}
         if a < b -> return Ordering.Less
         if a > b -> return Ordering.Greater
     }
@@ -1432,7 +1432,7 @@ keep_row: fn(kept_at: &[String: Int], kept: &[Untested], own: String, row: Untes
 quote: fn(value: String) -> String Never! {
     out := [U8]{34}
     loop byte in value.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if {
             code == QUOTE || code == BACKSLASH -> {
                 out.push(U8{92})

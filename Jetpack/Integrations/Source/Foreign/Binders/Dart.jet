@@ -219,7 +219,7 @@ pkg_dart_parse: fn(source: String) -> [DartFunction] ForeignBindError! {
         if !annotation.contains("'vm:entry-point'") && !annotation.contains("\"vm:entry-point\"") -> next
         boundary: pkg_dart_find_decl_boundary(raw, cursor)
         if boundary < 0 -> return Err(ForeignBindError.Source("an entry-point declaration has no function body"))
-        if Int.from_u8(raw[boundary]) == 59 -> return Err(ForeignBindError.Source("a Dart entry point must have a function body"))
+        if (Int{raw[boundary]}) == 59 -> return Err(ForeignBindError.Source("a Dart entry point must have a function body"))
         header: pkg_bytes_text(raw, cursor, boundary).trim()
         open: pkg_binder_find(header, "(", 0)
         if open < 0 -> return Err(ForeignBindError.Source("an entry-point declaration is not a top-level function"))
@@ -281,7 +281,7 @@ pkg_dart_find_top_level_pragma: fn(raw: [U8], from: Int) -> Int Never! {
     escaped := false
     i := 0
     loop i < raw.len() {
-        code: Int.from_u8(raw[i])
+        code: Int{raw[i]}
         if quote != 0 {
             if triple {
                 if pkg_dart_triple_at(raw, i, quote) {
@@ -324,7 +324,7 @@ pkg_dart_find_annotation_end: fn(raw: [U8], start: Int) -> Int Never! {
     escaped := false
     i := start + 7
     loop i < raw.len() {
-        code: Int.from_u8(raw[i])
+        code: Int{raw[i]}
         if {
             quote != 0 -> {
                 if {
@@ -355,7 +355,7 @@ pkg_dart_find_decl_boundary: fn(raw: [U8], start: Int) -> Int Never! {
     escaped := false
     i := start
     loop i < raw.len() {
-        code: Int.from_u8(raw[i])
+        code: Int{raw[i]}
         if {
             quote != 0 -> {
                 if {
@@ -384,7 +384,7 @@ pkg_dart_matching_close: fn(raw: [U8], open: Int) -> Int Never! {
     quote := 0
     escaped := false
     loop i in open..<raw.len() {
-        code: Int.from_u8(raw[i])
+        code: Int{raw[i]}
         if quote != 0 {
             if {
                 escaped -> escaped = false
@@ -507,7 +507,7 @@ pkg_dart_file_uri: fn(path: String) -> String Never! {
     out := [U8]{}
     loop byte in "file://".bytes() -> out.push(byte)
     loop byte in path.replace("\\", "/").bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if pkg_binder_is_ascii_alpha(code) || pkg_binder_is_ascii_digit(code) || code == 45 || code == 46 || code == 95 || code == 126 || code == 47 || code == 58 {
             out.push(byte)
             next
@@ -558,7 +558,7 @@ pkg_dart_strip_comments: fn(source: String) -> String Never! {
     triple := false
     escaped := false
     loop i < raw.len() {
-        code: Int.from_u8(raw[i])
+        code: Int{raw[i]}
         if quote != 0 {
             if triple {
                 if pkg_dart_triple_at(raw, i, quote) {
@@ -584,7 +584,7 @@ pkg_dart_strip_comments: fn(source: String) -> String Never! {
         }
         if code == 47 && pkg_bytes_code(raw, i + 1) == 47 {
             i += 2
-            loop i < raw.len() && Int.from_u8(raw[i]) != 10 -> i += 1
+            loop i < raw.len() && (Int{raw[i]}) != 10 -> i += 1
             if i < raw.len() {
                 out.push(U8{10})
                 i += 1
@@ -595,12 +595,12 @@ pkg_dart_strip_comments: fn(source: String) -> String Never! {
             i += 2
             out.push(U8{32})
             loop i < raw.len() {
-                if Int.from_u8(raw[i]) == 42 && pkg_bytes_code(raw, i + 1) == 47 {
+                if (Int{raw[i]}) == 42 && pkg_bytes_code(raw, i + 1) == 47 {
                     i += 2
                     out.push(U8{32})
                     break
                 }
-                if Int.from_u8(raw[i]) == 10 -> out.push(U8{10})
+                if (Int{raw[i]}) == 10 -> out.push(U8{10})
                 i += 1
             }
             next

@@ -529,7 +529,7 @@ EditorHostTransport: struct {
                 column: editor_field_u64(params, "column")
                 if line > (U64{4294967295}) -> return Err(EditorHostError.InvalidRequest("editor navigation line is out of range"))
                 if column > (U64{4294967295}) -> return Err(EditorHostError.InvalidRequest("editor navigation column is out of range"))
-                EditorHostResponse.Navigation(self.navigate_source(EditorSourceNavigationRequest.new(host, session, source, path, revision, U32.from_u64(line) ?? panic("checked line"), U32.from_u64(column) ?? panic("checked column"))))
+                EditorHostResponse.Navigation(self.navigate_source(EditorSourceNavigationRequest.new(host, session, source, path, revision, checked(U32{line}) ?? panic("checked line"), checked(U32{column}) ?? panic("checked column"))))
             }
             EDITOR_SELECT_METHOD -> EditorHostResponse.Selection(self.select_panel(EditorPanelSelectionRequest{host, session_id: session, source_id: source, source_path: path, revision, panel_id: editor_field_text(params, "panel_id"), item_key: editor_optional_text(params, "item_key")}))
             else -> {
@@ -564,10 +564,10 @@ editor_saturating_next: fn(value: U64) -> U64 Never! { if value == (U64{18446744
 editor_has_control: fn(value: String) -> Bool Never! {
     bytes: value.bytes()
     loop (index, byte) in bytes {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if code < 32 || code == 127 -> return true
         if code == 194 && index + 1 < bytes.len() {
-            next_code: Int.from_u8(bytes[index + 1])
+            next_code: Int{bytes[index + 1]}
             if next_code >= 128 && next_code <= 159 -> return true
         }
     }
@@ -596,7 +596,7 @@ editor_clean_source_path: fn(value: String) -> String EditorHostError! {
 editor_validate_loopback_url: fn(value: String) EditorHostError! {
     whitespace := false
     loop byte in value.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if code == 32 || (code >= 9 && code <= 13) -> whitespace = true
     }
     if value.bytes().len() == 0 || value.bytes().len() > EDITOR_MAX_TEXT_BYTES || editor_has_control(value) || whitespace -> return Err(EditorHostError.LoopbackViolation("URL must be bounded and contain no whitespace"))
@@ -624,7 +624,7 @@ editor_validate_loopback_url: fn(value: String) EditorHostError! {
     number := 0
     if digits.len() == 0 -> return Err(EditorHostError.LoopbackViolation("URL port must be an integer from 1 to 65535"))
     loop byte in digits.bytes() {
-        digit: Int.from_u8(byte) - 48
+        digit: Int{byte} - 48
         if digit < 0 || digit > 9 || number > 6553 || (number == 6553 && digit > 5) -> return Err(EditorHostError.LoopbackViolation("URL port must be an integer from 1 to 65535"))
         number = number * 10 + digit
     }
@@ -668,7 +668,7 @@ editor_source_url: fn(workbench_url: String, source_id: String, line: U32, colum
 }
 editor_percent_encode: fn(value: String, out: &[U8]) Never! {
     loop byte in value.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 45 || code == 46 || code == 95 || code == 126 {
             out.push(byte)
         } else {
@@ -715,14 +715,14 @@ editor_optional_text: fn(params: Dyn, key: String) -> String? EditorHostError! {
 editor_field_u64: fn(params: Dyn, key: String) -> U64 EditorHostError! {
     if params.field(key) == .Val(value) {
         if foundation_json_integer(value) == .Val(number) {
-            if number >= 0 { if U64.from_int(number) == .Val(result) -> return Ok(result) }
+            if number >= 0 { if checked(U64{number}) == .Val(result) -> return Ok(result) }
         } else if value.decode<Float>() == .Ok(number) {
             if number.is_finite() && number >= (F64{0.0}) && number <= (F64{18446744073709551616.0}) {
                 integer: Int{number}
                 if (F64{integer}) == number {
                     // Rust's float-to-u64 cast saturates at the rounded MAX.
                     if number >= (F64{18446744073709551616.0}) -> return Ok(U64{18446744073709551615})
-                    return Ok(U64.from_int(integer) ?? panic("checked editor unsigned integer"))
+                    return Ok(checked(U64{integer}) ?? panic("checked editor unsigned integer"))
                 }
             }
         }

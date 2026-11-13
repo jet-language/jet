@@ -10,7 +10,7 @@ s5_canvas_token: fn() -> String {
     start: (s5_web_find(bytes, marker) ?? panic("session parameter")) + marker.len()
     end := start
     loop end < bytes.len() {
-        byte: Int.from_u8(bytes[end])
+        byte: Int{bytes[end]}
         if !((byte >= 48 && byte <= 57) || (byte >= 65 && byte <= 70) || (byte >= 97 && byte <= 102)) -> break
         end = end + 1
     }
@@ -28,7 +28,7 @@ s5_canvas_field: fn(body: String, field: String) -> String {
     bytes: body.bytes()
     start: (s5_web_find(bytes, marker) ?? panic("json field")) + marker.len()
     end := start
-    loop end < bytes.len() && Int.from_u8(bytes[end]) != 34 -> end = end + 1
+    loop end < bytes.len() && (Int{bytes[end]}) != 34 -> end = end + 1
     assert(end < bytes.len(), "field terminator")
     String.from_bytes_lossy(s5_web_bytes(bytes, start, end))
 }
@@ -190,7 +190,7 @@ s5_canvas_field: fn(body: String, field: String) -> String {
     app_start: (s5_web_find(session_bytes, app_marker) ?? panic("application port marker")) + app_marker.len()
     app_end := app_start
     loop app_end < session_bytes.len() {
-        byte: Int.from_u8(session_bytes[app_end])
+        byte: Int{session_bytes[app_end]}
         if byte < 48 || byte > 57 -> break
         app_end = app_end + 1
     }

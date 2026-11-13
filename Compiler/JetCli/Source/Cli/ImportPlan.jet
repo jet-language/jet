@@ -207,7 +207,7 @@ jet_cli_import_evidence: fn(boundary: ForeignBoundaryContract, source: String, t
     build: EvidenceBuild{toolchain: derivation_identity.build, target: derivation_identity.target, profile: "source-import"}
     outcome: if omission_count == 0 -> EvidenceOutcome.Generated else -> EvidenceOutcome.Incomplete
     detail: if omission_count == 0 -> "source import generated {file_count} files, {function_count} functions, and {test_count} tests" else -> "source import translated {file_count} files, {function_count} functions, and {test_count} tests with {omission_count} reported omissions"
-    count: U64.from_int(file_count) ?? return Err(jet_cli_import_plan_error("source import file count is too large"))
+    count: checked(U64{file_count}) ?? return Err(jet_cli_import_plan_error("source import file count is too large"))
     identity: evidence_identity_for_record(report_id, "source-import", EvidenceProducerKind.Compile, EvidenceKind.Contract, source_ref, count, detail)
     record := evidence_record_new(identity, EvidenceKind.Contract, EvidenceProducerKind.Compile, outcome, count, source_ref, build, revision)
     record.detail = detail

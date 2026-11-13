@@ -273,10 +273,10 @@ env_overlay_safe_relative_path: fn(raw: String, label: String) -> String Overlay
 env_overlay_has_control: fn(raw: String) -> Bool Never! {
     bytes: raw.bytes()
     loop index in 0..<bytes.len() {
-        code: Int.from_u8(bytes[index])
+        code: Int{bytes[index]}
         if code < 32 || code == 127 -> return true
         if code == 194 && index + 1 < bytes.len() {
-            next_code: Int.from_u8(bytes[index + 1])
+            next_code: Int{bytes[index + 1]}
             if next_code >= 128 && next_code <= 159 -> return true
         }
     }

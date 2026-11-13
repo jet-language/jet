@@ -33,7 +33,7 @@ BULK_BLOCKS: 256
 
 load_be64: fn(b: [U8], off: Int) -> U64 Never! {
     x := U64{0}
-    loop i in 0..<8 -> x = (x << 8).bit_or(U64.from_u8(b[off + i]))
+    loop i in 0..<8 -> x = (x << 8).bit_or(U64{b[off + i]})
     x
 }
 
@@ -449,7 +449,7 @@ with_bit: fn(state: Int, bit: Int) -> Int Never! { if has_bit(state, bit) -> sta
 ccm_advance: fn(ctr: &[U8], q: Int, n: Int) Never! {
     carry := n
     loop i in 0..<q {
-        v: Int.from_u8(ctr[15 - i]) + carry
+        v: Int{ctr[15 - i]} + carry
         ctr[15 - i] = U8{v %% 256}
         carry = v /% 256
     }
@@ -561,7 +561,7 @@ ccm_update: fn<K: ForwardBlock>(k: K, st: &CCM, src: [U8], off: Int, len: Int, o
     loop at < end {
         offset: st.processed %% 16
         if offset == 0 && end - at >= 16 {
-            low: Int.from_u8(st.ctr[14]) * 256 + Int.from_u8(st.ctr[15])
+            low: Int{st.ctr[14]} * 256 + Int{st.ctr[15]}
             room: 65536 - low
             n: min_int(min_int((end - at) /% 16, BULK_BLOCKS), room)
             counter := st.ctr.copy()

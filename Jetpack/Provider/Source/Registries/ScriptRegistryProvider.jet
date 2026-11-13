@@ -438,7 +438,7 @@ provider_script_safe_piece: fn(value: String, punctuation: String) -> Bool Never
     if value == "" || value == "." || value == ".." -> return false
     allowed: punctuation.bytes()
     loop byte in value.bytes() {
-        if !provider_registry_is_ascii_alnum(Int.from_u8(byte)) && !allowed.contains(byte) -> return false
+        if !provider_registry_is_ascii_alnum(Int{byte}) && !allowed.contains(byte) -> return false
     }
     true
 }
@@ -449,7 +449,7 @@ provider_script_safe_filename: fn(value: String) -> String Never! {
     loop scalar in value.chars() {
         text: "{scalar}"
         raw: text.bytes()
-        keep: raw.len() == 1 && (provider_registry_is_ascii_alnum(Int.from_u8(raw[0])) || text == "-" || text == "_" || text == ".")
+        keep: raw.len() == 1 && (provider_registry_is_ascii_alnum(Int{raw[0]}) || text == "-" || text == "_" || text == ".")
         out.push(if keep -> text else -> "-")
     }
     out.join("")
@@ -470,7 +470,7 @@ provider_script_url_piece: fn(value: String) -> String Never! {
     digits: "0123456789ABCDEF".bytes()
     out := [U8]{}
     loop byte in value.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if provider_registry_is_ascii_alnum(code) || code == 45 || code == 95 || code == 46 || code == 126 {
             out.push(byte)
         } else {
@@ -499,7 +499,7 @@ provider_script_trim_slashes: fn(value: String) -> String Never! {
 
 provider_script_has_nul: fn(value: String) -> Bool Never! {
     loop byte in value.bytes() {
-        if Int.from_u8(byte) == 0 -> return true
+        if (Int{byte}) == 0 -> return true
     }
     false
 }

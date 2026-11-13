@@ -319,11 +319,11 @@ nixeval_oracle_compare_identity: fn(system: String, field: String, expected: Str
 nixeval_is_canonical_sha256_sri: fn(value: String) -> Bool Never! {
     encoded: nixeval_strip_prefix(value, "sha256-") ?? return false
     bytes: encoded.bytes()
-    if bytes.len() != 44 || Int.from_u8(bytes[43]) != 61 -> return false
+    if bytes.len() != 44 || (Int{bytes[43]}) != 61 -> return false
     loop index in 0..<43 {
-        if nixeval_base64_value(Int.from_u8(bytes[index])) < 0 -> return false
+        if nixeval_base64_value(Int{bytes[index]}) < 0 -> return false
     }
-    nixeval_base64_value(Int.from_u8(bytes[42])) % 4 == 0
+    nixeval_base64_value(Int{bytes[42]}) % 4 == 0
 }
 
 nixeval_base64_value: fn(byte: Int) -> Int Never! {
@@ -350,7 +350,7 @@ nixeval_debug_string: fn(value: String) -> String Never! {
     nixeval_push_byte(out, 34)
     hex: "0123456789abcdef".bytes()
     loop byte in value.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if code == {
             34 -> nixeval_push_text(out, "\\\"")
             92 -> nixeval_push_text(out, "\\\\")

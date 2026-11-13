@@ -69,7 +69,7 @@ perf_report_hex64: fn(value: CanonicalJSON, name: String) -> String PerfBudgetEr
     bytes: v.bytes()
     if bytes.len() != 64 -> return Err(perf_error("{name} is not lowercase Hex64"))
     loop byte in bytes {
-        n: Int.from_u8(byte)
+        n: Int{byte}
         if !((n >= 48 && n <= 57) || (n >= 97 && n <= 102)) -> return Err(perf_error("{name} is not lowercase Hex64"))
     }
     Ok(v)

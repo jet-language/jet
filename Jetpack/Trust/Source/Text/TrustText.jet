@@ -55,7 +55,7 @@ trust_text_find: fn(raw: [U8], needle: [U8], from: Int) -> Int Never! {
 trust_text_find_byte: fn(raw: [U8], code: Int, from: Int) -> Int Never! {
     index := from
     loop index < raw.len() {
-        if Int.from_u8(raw[index]) == code -> return index
+        if (Int{raw[index]}) == code -> return index
         index += 1
     }
     -1
@@ -65,7 +65,7 @@ trust_text_find_byte: fn(raw: [U8], code: Int, from: Int) -> Int Never! {
 trust_text_rfind_byte: fn(raw: [U8], code: Int) -> Int Never! {
     index := raw.len() - 1
     loop index >= 0 {
-        if Int.from_u8(raw[index]) == code -> return index
+        if (Int{raw[index]}) == code -> return index
         index -= 1
     }
     -1
@@ -119,8 +119,8 @@ trust_text_trim_byte: fn(text: String, code: Int) -> String Never! {
     raw: text.bytes()
     start := 0
     end := raw.len()
-    loop start < end && Int.from_u8(raw[start]) == code -> start += 1
-    loop end > start && Int.from_u8(raw[end - 1]) == code -> end -= 1
+    loop start < end && (Int{raw[start]}) == code -> start += 1
+    loop end > start && (Int{raw[end - 1]}) == code -> end -= 1
     pkg_bytes_text(raw, start, end)
 }
 
@@ -129,8 +129,8 @@ trust_text_trim_bytes: fn(text: String, codes: [Int]) -> String Never! {
     raw: text.bytes()
     start := 0
     end := raw.len()
-    loop start < end && codes.contains(Int.from_u8(raw[start])) -> start += 1
-    loop end > start && codes.contains(Int.from_u8(raw[end - 1])) -> end -= 1
+    loop start < end && codes.contains(Int{raw[start]}) -> start += 1
+    loop end > start && codes.contains(Int{raw[end - 1]}) -> end -= 1
     pkg_bytes_text(raw, start, end)
 }
 
@@ -144,7 +144,7 @@ trust_text_lines: fn(text: String) -> [String] Never! {
         newline: trust_text_find_byte(raw, TRUST_NEWLINE, start)
         end: if newline < 0 -> raw.len() else -> newline
         content_end := end
-        if newline >= 0 && content_end > start && Int.from_u8(raw[content_end - 1]) == TRUST_CARRIAGE_RETURN -> content_end -= 1
+        if newline >= 0 && content_end > start && (Int{raw[content_end - 1]}) == TRUST_CARRIAGE_RETURN -> content_end -= 1
         lines.push(pkg_bytes_text(raw, start, content_end))
         start = end + 1
     }
@@ -193,7 +193,7 @@ trust_text_is_ascii_space: fn(code: Int) -> Bool Never! {
 // The first offset at or after `at` that is not ASCII whitespace.
 trust_text_skip_ascii_space: fn(raw: [U8], at: Int) -> Int Never! {
     index := at
-    loop index < raw.len() && trust_text_is_ascii_space(Int.from_u8(raw[index])) -> index += 1
+    loop index < raw.len() && trust_text_is_ascii_space(Int{raw[index]}) -> index += 1
     index
 }
 

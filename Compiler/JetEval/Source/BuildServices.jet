@@ -52,7 +52,7 @@ jet_eval_build_session_input: fn(data: TComptimeValue) -> BuildSessionValue? Nev
         }
         // A [U8] reads back as its bytes (Values.jet); the session takes its
         // elements, as for any other list.
-        .Bytes(bytes) -> return Val(BuildSessionValue.List{values: loop byte in bytes -> BuildSessionValue.Int{value: Int.from_u8(byte)}})
+        .Bytes(bytes) -> return Val(BuildSessionValue.List{values: loop byte in bytes -> BuildSessionValue.Int{value: Int{byte}}})
         .Present(value) -> return jet_eval_build_session_input(value)
         .Struct(name, _) -> {
             if name == "SourceSpan" {

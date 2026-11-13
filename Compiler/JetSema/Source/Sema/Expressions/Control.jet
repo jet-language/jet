@@ -544,14 +544,14 @@ sema_failure_conversion_name_part: fn(name: String) -> String Never! {
     bytes: name.bytes()
     plain := true
     loop byte in bytes {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if !((code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122)) -> plain = false
     }
     if plain -> return name.copy()
     digits: "0123456789abcdef".bytes()
     encoded := [U8]{}
     loop byte in bytes {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         encoded.push(digits[((code >> 4)).bit_and(15)])
         encoded.push(digits[(code).bit_and(15)])
     }

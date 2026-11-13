@@ -3,7 +3,7 @@ use decision_files: core.files
 // The source scanner in decisions.rs:163-197 is Rust-only and retires.
 // These five real-document tombstone assertions (rs139-148) survive it.
 // Reuse the guard package's byte finder/slicer; Rust find/slice offsets are bytes.
-s3_decision_is_digit: fn(byte: U8) -> Bool { Int.from_u8(byte) >= 48 && Int.from_u8(byte) <= 57 }
+s3_decision_is_digit: fn(byte: U8) -> Bool { Int{byte} >= 48 && Int{byte} <= 57 }
 
 s3_decision_expand: fn(token: String) -> [String] {
     if !token.contains("/") -> return [String]{token}
@@ -96,10 +96,10 @@ DECISION_ID_FREE_ROOTS: [String]{"Compiler", "Core", "Jetpack"}
 DECISION_ID_BACKLOG_ROOTS: [String]{"Examples", "tests", "Tools/agent"}
 DECISION_ID_BACKLOG: 1997
 
-decision_id_upper: fn(byte: U8) -> Bool { Int.from_u8(byte) >= 65 && Int.from_u8(byte) <= 90 }
+decision_id_upper: fn(byte: U8) -> Bool { Int{byte} >= 65 && Int{byte} <= 90 }
 
 decision_id_word: fn(byte: U8) -> Bool {
-    code: Int.from_u8(byte)
+    code: Int{byte}
     s3_decision_is_digit(byte) || decision_id_upper(byte) || (code >= 97 && code <= 122) || code == 95
 }
 
@@ -108,19 +108,19 @@ decision_id_word: fn(byte: U8) -> Bool {
 // word end (`D-SETTING-ORDER1`, `D-PIN2=A`).
 decision_id_at: fn(bytes: [U8], start: Int) -> Bool {
     if start + 2 >= bytes.len() -> return false
-    if Int.from_u8(bytes[start]) != 68 || Int.from_u8(bytes[start + 1]) != 45 -> return false
+    if (Int{bytes[start]}) != 68 || (Int{bytes[start + 1]}) != 45 -> return false
     if start > 0 && decision_id_word(bytes[start - 1]) -> return false
     if !decision_id_upper(bytes[start + 2]) -> return false
     end := start + 3
     loop {
         if end >= bytes.len() -> break
         byte: bytes[end]
-        if !decision_id_upper(byte) && !s3_decision_is_digit(byte) && Int.from_u8(byte) != 45 -> break
+        if !decision_id_upper(byte) && !s3_decision_is_digit(byte) && (Int{byte}) != 45 -> break
         end = end + 1
     }
     last := end - 1
     loop {
-        if Int.from_u8(bytes[last]) != 45 -> break
+        if (Int{bytes[last]}) != 45 -> break
         last = last - 1
     }
     if !s3_decision_is_digit(bytes[last]) -> return false

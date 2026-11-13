@@ -339,13 +339,13 @@ example_prose_density_gaps: fn(label: String, value: Dyn) -> [String] Never! {
 
 is_digit: fn(piece: String) -> Bool Never! {
     bytes: piece.bytes()
-    bytes.len() == 1 && Int.from_u8(bytes[0]) >= 48 && Int.from_u8(bytes[0]) <= 57
+    bytes.len() == 1 && Int{bytes[0]} >= 48 && Int{bytes[0]} <= 57
 }
 
 // U+2028 LINE SEPARATOR or U+2029 PARAGRAPH SEPARATOR.
 unicode_line_break: fn(piece: String) -> Bool Never! {
     bytes: piece.bytes()
-    bytes.len() == 3 && Int.from_u8(bytes[0]) == 226 && Int.from_u8(bytes[1]) == 128 && (Int.from_u8(bytes[2]) == 168 || Int.from_u8(bytes[2]) == 169)
+    bytes.len() == 3 && Int{bytes[0]} == 226 && Int{bytes[1]} == 128 && (Int{bytes[2]} == 168 || Int{bytes[2]} == 169)
 }
 
 line_terminator: fn(piece: String) -> Bool Never! { piece == "\n" || piece == "\r" || unicode_line_break(piece) }
@@ -412,15 +412,15 @@ line_markers: fn(text: String) -> [String] Never! {
 ascii_lower: fn(text: String) -> String Never! {
     bytes := [U8]{}
     loop byte in text.bytes() {
-        code: Int.from_u8(byte)
-        bytes.push(if code >= 65 && code <= 90 -> U8.from_int(code + 32) ?? byte else -> byte)
+        code: Int{byte}
+        bytes.push(if code >= 65 && code <= 90 -> checked(U8{code + 32}) ?? byte else -> byte)
     }
     String.from_bytes(bytes) ?? text.copy()
 }
 
 word_byte: fn(bytes: [U8], at: Int) -> Bool Never! {
     if at < 0 || at >= bytes.len() -> return false
-    code: Int.from_u8(bytes[at])
+    code: Int{bytes[at]}
     (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 95
 }
 

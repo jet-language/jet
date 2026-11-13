@@ -102,7 +102,7 @@ repl_colon_item_head: fn(text: String) -> Bool Never! {
     head: text.slice(0..<colon).trim()
     if head.len() == 0 -> return false
     loop byte in head.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if !((code >= 97 && code <= 122) || (code >= 65 && code <= 90) || (code >= 48 && code <= 57) || code == 95 || code == 46) -> return false
     }
     rest: text.slice(colon + 1..<text.len()).trim_start()
@@ -110,7 +110,7 @@ repl_colon_item_head: fn(text: String) -> Bool Never! {
         if !rest.starts_with(keyword) -> next
         after: rest.slice(keyword.len()..<rest.len())
         if after.len() == 0 -> return true
-        code: Int.from_u8(after.bytes()[0])
+        code: Int{after.bytes()[0]}
         if !((code >= 97 && code <= 122) || (code >= 65 && code <= 90) || (code >= 48 && code <= 57) || code == 95) -> return true
     }
     false
@@ -124,7 +124,7 @@ repl_top_level_colon: fn(text: String) -> Int? Never! {
     quoted := false
     escaped := false
     loop index in 0..<bytes.len() {
-        code: Int.from_u8(bytes[index])
+        code: Int{bytes[index]}
         if quoted {
             if escaped {
                 escaped = false
@@ -139,7 +139,7 @@ repl_top_level_colon: fn(text: String) -> Int? Never! {
         if code == 40 || code == 91 || code == 123 -> depth += 1
         if code == 41 || code == 93 || code == 125 -> depth -= 1
         if code == 58 && depth == 0 {
-            if index + 1 < bytes.len() && Int.from_u8(bytes[index + 1]) == 61 -> return None
+            if index + 1 < bytes.len() && (Int{bytes[index + 1]}) == 61 -> return None
             return Val(index)
         }
     }

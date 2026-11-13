@@ -4,7 +4,7 @@ use cbor: core.encoding.cbor
 wire: fn(values: [Int]) -> [U8] {
     bytes := [U8]{}
     loop value in values {
-        bytes.push(U8.from_int(value) ?? panic("corpus byte outside U8"))
+        bytes.push(checked(U8{value}) ?? panic("corpus byte outside U8"))
     }
     return bytes
 }

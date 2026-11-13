@@ -80,7 +80,7 @@ CBORPull: struct {
 
     discard: fn(&self) Never! {
         nested := 0
-        loop frame in self.frames -> nested += Int.from_u64(frame.keys_heap)
+        loop frame in self.frames -> nested += (Int{frame.keys_heap})
         self.allocation.release(nested)
         release<ReadFrame>(self.allocation, self.frames)
         self.retained = 0
@@ -97,7 +97,7 @@ CBORPull: struct {
         out := "$"
         loop frame in self.frames {
             if !frame.object -> out = "{out}[{frame.index}]"
-            else if !frame.expecting_key && frame.key == .Val(key) -> out = "{out}[{frame.keys[Int.from_u64(key)]:Debug}]"
+            else if !frame.expecting_key && frame.key == .Val(key) -> out = "{out}[{frame.keys[Int{key}]:Debug}]"
         }
         out
     }
@@ -134,7 +134,7 @@ CBORPull: struct {
         value := U64{0}
         loop _ in 0..<width {
             byte: self.required(start, "CBOR argument ended before all bytes were present") ?? return Err(err)
-            value = (value << 8).bit_or(U64{Int.from_u8(byte)})
+            value = (value << 8).bit_or(U64{Int{byte}})
         }
         Ok(Val(value))
     }
@@ -148,11 +148,11 @@ CBORPull: struct {
     }
 
     payload: fn(&self, length: U64, start: Int) -[IO, Time.Wait]> [U8] EncodingError! {
-        if length > (U64{self.limits.max_item_bytes}) || Int.from_u64(length) + self.retained > self.limits.max_item_bytes {
+        if length > (U64{self.limits.max_item_bytes}) || (Int{length}) + self.retained > self.limits.max_item_bytes {
             return Err(error(.Limit, start, self.path(), "max_item_bytes {self.limits.max_item_bytes} exceeded"))
         }
         out := [U8]{}
-        loop _ in 0..<Int.from_u64(length) {
+        loop _ in 0..<(Int{length}) {
             self.grow_payload(out) ?? return Err(err)
             byte: self.required(start, "CBOR payload ended before its declared length") ?? {
                 release<U8>(self.allocation, out)
@@ -176,7 +176,7 @@ CBORPull: struct {
                 return Err(err)
             }
             if head == (U8{255}) -> break
-            byte: Int.from_u8(head)
+            byte: Int{head}
             if (byte >> 5) != major || (byte.bit_and(31)) == 31 {
                 release<U8>(self.allocation, out)
                 return Err(error(.Syntax, chunk, self.path(), "indefinite CBOR string contains a wrong or indefinite chunk"))
@@ -192,11 +192,11 @@ CBORPull: struct {
                 release<U8>(self.allocation, out)
                 return Err(error(.Syntax, chunk, self.path(), "indefinite CBOR string contains a wrong or indefinite chunk"))
             }
-            if Int.from_u64(n) + self.retained + out.len() > self.limits.max_item_bytes {
+            if (Int{n}) + self.retained + out.len() > self.limits.max_item_bytes {
                 release<U8>(self.allocation, out)
                 return Err(error(.Limit, chunk, self.path(), "max_item_bytes {self.limits.max_item_bytes} exceeded"))
             }
-            loop _ in 0..<Int.from_u64(n) {
+            loop _ in 0..<(Int{n}) {
                 self.grow_payload(out) ?? return Err(err)
                 value: self.required(chunk, "CBOR payload ended before its declared length") ?? {
                     release<U8>(self.allocation, out)
@@ -262,7 +262,7 @@ CBORPull: struct {
             bytes := 0
             loop key in frame.keys -> bytes += key.count_bytes()
             self.retained -= bytes
-            self.allocation.release(Int.from_u64(frame.keys_heap))
+            self.allocation.release(Int{frame.keys_heap})
         }
         self.complete_parent()
         if self.frames.len() == 0 -> self.root_done = true
@@ -275,7 +275,7 @@ CBORPull: struct {
         bits := 0
         loop i in 0..<width {
             raw_byte: self.required(start, "truncated CBOR {name}") ?? return Err(err)
-            byte: Int.from_u8(raw_byte)
+            byte: Int{raw_byte}
             if width == 8 && i == 0 && byte >= 128 -> bits = byte - 256
             else -> bits = (bits << 8).bit_or(byte)
         }
@@ -303,7 +303,7 @@ CBORPull: struct {
             }
             return Err(error(.Truncated, self.total, self.path(), "CBOR container ended before all items were present"))
         }
-        head: Int.from_u8(next)
+        head: Int{next}
         if head == 255 -> return Err(error(.Syntax, start, self.path(), "CBOR break outside an indefinite container"))
         major: head >> 5
         additional: head.bit_and(31)
@@ -313,7 +313,7 @@ CBORPull: struct {
         if major == 0 || major == 1 {
             value: self.argument(additional, start)
             n: value ?? return Err(error(.Syntax, start, self.path(), "indefinite CBOR integer"))
-            integer: Int.from_u64(n)
+            integer: Int{n}
             event = DataEvent.Int(if major == 0 -> integer else -> -integer - 1)
         } else if major == 2 || major == 3 {
             bytes: self.string(major, additional, start) ?? return Err(err)

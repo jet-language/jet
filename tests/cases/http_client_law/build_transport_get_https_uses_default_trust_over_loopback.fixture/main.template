@@ -3,7 +3,7 @@ use client: core.http.client
 text: fn(row: [U8]) -> String {
     out := ""
     loop byte in row {
-        n: Int.from_u8(byte)
+        n: Int{byte}
         out = if n >= 32 && n < 127 -> "{out}{String.from_bytes([U8]{byte}) ?? "?"}" else -> "{out}\\x{n}"
     }
     out

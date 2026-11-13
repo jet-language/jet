@@ -10,7 +10,7 @@ nix_is_lower_hex: fn(text: String, length: Int) -> Bool Never! {
     raw: text.bytes()
     if raw.len() != length -> return false
     loop byte in raw {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if !nixeval_is_ascii_digit(code) && !(code >= 97 && code <= 102) -> return false
     }
     true
@@ -43,8 +43,8 @@ nix_text_lines: fn(text: String) -> [String] Never! {
     lines := [String]{}
     start := 0
     loop index in 0..<raw.len() {
-        if Int.from_u8(raw[index]) == 10 {
-            end: if index > start && Int.from_u8(raw[index - 1]) == 13 -> index - 1 else -> index
+        if (Int{raw[index]}) == 10 {
+            end: if index > start && (Int{raw[index - 1]}) == 13 -> index - 1 else -> index
             lines.push(pkg_bytes_text(raw, start, end))
             start = index + 1
         }

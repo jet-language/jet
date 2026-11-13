@@ -1254,7 +1254,7 @@ sema_genmod_nominal_name: fn(item: Item) -> String {
 sema_genmod_value_name: fn(alias: String, name: String) -> String {
     bytes: alias.bytes()
     end := bytes.len()
-    loop end > 0 && Int.from_u8(bytes[end - 1]) == 95 {
+    loop end > 0 && (Int{bytes[end - 1]}) == 95 {
         end -= 1
     }
     trimmed: String.from_bytes(bytes[0..<end]) ?? alias.copy()

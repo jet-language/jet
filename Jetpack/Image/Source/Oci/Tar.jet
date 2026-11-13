@@ -27,7 +27,7 @@ image_write_tar_entry: fn(out: &[U8], file: LayerFile) Never! {
     // digits, a NUL, and a space.
     loop i in 148..<156 -> header[i] = U8{32}
     checksum := 0
-    loop byte in header -> checksum += Int.from_u8(byte)
+    loop byte in header -> checksum += (Int{byte})
     field := image_tar_octal(checksum, 6)
     field.push(U8{32})
     image_tar_set(header, 148, 8, field)

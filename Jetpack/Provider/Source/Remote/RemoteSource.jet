@@ -69,8 +69,8 @@ provider_remote_text_is_safe: fn(value: String) -> Bool Never! {
     if value == "" || pkg_text_has_control(value) -> return false
     raw: value.bytes()
     loop index in 0..<raw.len() {
-        if index + 2 < raw.len() && Int.from_u8(raw[index]) == 226 && Int.from_u8(raw[index + 1]) == 128 {
-            third: Int.from_u8(raw[index + 2])
+        if index + 2 < raw.len() && (Int{raw[index]}) == 226 && (Int{raw[index + 1]}) == 128 {
+            third: Int{raw[index + 2]}
             if third == 168 || third == 169 -> return false
         }
     }

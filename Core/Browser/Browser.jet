@@ -1377,11 +1377,11 @@ browser_id: fn(value: Dyn) -> Int? Never! {
 // text it already holds without the text ever being kept.
 fact_hash: fn(value: String) -> String Never! {
     hash := U64{14695981039346656037}
-    loop byte in value.bytes() -> hash = (hash.bit_xor(U64.from_u8(byte))).wrapping_mul(U64{1099511628211})
+    loop byte in value.bytes() -> hash = wrapping((hash.bit_xor(U64{byte})) * U64{1099511628211})
     digits: "0123456789abcdef".bytes()
     out := [U8]{}
     loop index in 0..<16 {
-        nibble: Int.from_u64((hash >> (60 - index * 4)).bit_and(U64{15}))
+        nibble: Int{(hash >> (60 - index * 4)).bit_and(U64{15})}
         out.push(digits[nibble])
     }
     String.from_bytes(out) ?? ""
@@ -1649,7 +1649,7 @@ selected: fn(config: BrowserTestConfig, name: String) -> Bool Never! {
     value: name.bytes()
     pattern := [U8]{}
     loop b in config.filter.bytes() {
-        n: Int.from_u8(b)
+        n: Int{b}
         if n == 44 || n == 32 || n == 9 || n == 10 || n == 12 || n == 13 {
             if pattern.len() > 0 && glob_match(pattern, value) -> return true
             pattern = [U8]{}

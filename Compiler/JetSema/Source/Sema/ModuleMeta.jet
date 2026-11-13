@@ -317,18 +317,18 @@ sema_module_meta_space: fn(code: Int) -> Bool Never! {
 // `billing<pricing>`).
 sema_module_meta_value_at: fn(bytes: [U8], end: Int) -> Bool Never! {
     at := end
-    loop at < bytes.len() && sema_module_meta_space(Int.from_u8(bytes[at])) -> at += 1
+    loop at < bytes.len() && sema_module_meta_space(Int{bytes[at]}) -> at += 1
     if at >= bytes.len() -> return true
-    following: Int.from_u8(bytes[at])
+    following: Int{bytes[at]}
     if following == 58 || following == 40 -> return false
     if following != 46 -> return true
     member_end := at + 1
-    loop member_end < bytes.len() && sema_module_meta_word_byte(Int.from_u8(bytes[member_end])) -> member_end += 1
+    loop member_end < bytes.len() && sema_module_meta_word_byte(Int{bytes[member_end]}) -> member_end += 1
     member: String.from_bytes(bytes[at + 1..<member_end]) ?? return false
     if !sema_module_meta_compiler_field(member) -> return false
     after := member_end
-    loop after < bytes.len() && sema_module_meta_space(Int.from_u8(bytes[after])) -> after += 1
-    after >= bytes.len() || Int.from_u8(bytes[after]) != 40
+    loop after < bytes.len() && sema_module_meta_space(Int{bytes[after]}) -> after += 1
+    after >= bytes.len() || Int{bytes[after]} != 40
 }
 
 // Each of `modules` that `text` reads as a value (sema_module_meta_value_at)
@@ -338,9 +338,9 @@ sema_module_meta_value_reads: fn(text: String, modules: [String:Bool], reads: &[
     bytes: text.bytes()
     index := 0
     loop index < bytes.len() {
-        code: Int.from_u8(bytes[index])
-        if code == 47 && index + 1 < bytes.len() && Int.from_u8(bytes[index + 1]) == 47 {
-            loop index < bytes.len() && Int.from_u8(bytes[index]) != 10 -> index += 1
+        code: Int{bytes[index]}
+        if code == 47 && index + 1 < bytes.len() && (Int{bytes[index + 1]}) == 47 {
+            loop index < bytes.len() && (Int{bytes[index]}) != 10 -> index += 1
             next
         }
         if !sema_module_meta_word_byte(code) {
@@ -348,7 +348,7 @@ sema_module_meta_value_reads: fn(text: String, modules: [String:Bool], reads: &[
             next
         }
         start: index
-        loop index < bytes.len() && sema_module_meta_word_byte(Int.from_u8(bytes[index])) -> index += 1
+        loop index < bytes.len() && sema_module_meta_word_byte(Int{bytes[index]}) -> index += 1
         word: String.from_bytes(bytes[start..<index]) ?? next
         if modules.get(word) == None || reads.get(word) != None -> next
         if sema_module_meta_value_at(bytes, index) -> reads[word] = true

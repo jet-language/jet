@@ -2839,7 +2839,7 @@ ir_numeric_euclid: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, recei
     result
 }
 
-// `a.wrapping_add(b)` and the other overflow policies, inline at the word's
+// `wrapping(a + b)` and the other overflow policies, inline at the word's
 // own width. An unbounded Int's wrapping or saturating form is its exact
 // operator; a checked form is an Option box (None on overflow); a policy form
 // stops as the trapping operator does, at the call's line.
@@ -5034,7 +5034,7 @@ ir_take_inline: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, handle: Int, parts
                     size: if value.len() - at >= 4 -> 4 else if value.len() - at >= 2 -> 2 else -> 1
                     row: ir_type_row(m, Type.IntN{signed: false, bits: 8 * size}) ?? 0
                     expected := 0
-                    loop k in 0..<size -> expected = expected.bit_or(Int.from_u8(value[at + k]) << (8 * k))
+                    loop k in 0..<size -> expected = expected.bit_or(Int{value[at + k]} << (8 * k))
                     loaded: ir_load_at(m, b, base, offset + at, row)
                     constant: ir_int_constant(m, b, row, expected)
                     differs: ir_bool_op(m, b, IROp.Ne, loaded, constant)
@@ -7884,22 +7884,22 @@ ir_comptime_default_err: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type,
         .Int(_) | .Float(_, _) | .Bool(_) | .Char(_) | .String(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit -> { return ir_fail_slot(b, span, "default Err metadata constant {ir_comptime_name(metadata_value)}") }
     }
     if ir_comptime_field(metadata, "typed_identity") == .Val(.Present(identity)) {
-        ir_comptime_err_text(m, p, b, error, Int.from_i64(ERR_IDENTITY), identity, span)
+        ir_comptime_err_text(m, p, b, error, Int{ERR_IDENTITY}, identity, span)
     }
     frames: ir_comptime_field(metadata, "context_frames") ?? TComptimeValue.List{values: []}
-    ir_comptime_err_rows(m, p, b, error, Int.from_i64(ERR_CONTEXT), Int.from_i64(ERR_CONTEXT_BYTES), frames, [String]{"text", "file"}, Val("line"), span)
+    ir_comptime_err_rows(m, p, b, error, Int{ERR_CONTEXT}, Int{ERR_CONTEXT_BYTES}, frames, [String]{"text", "file"}, Val("line"), span)
     conversions: ir_comptime_field(metadata, "conversion_history") ?? TComptimeValue.List{values: []}
-    ir_comptime_err_rows(m, p, b, error, Int.from_i64(ERR_CONVERSIONS), Int.from_i64(ERR_CONVERSION_BYTES), conversions, [String]{"source", "target"}, None, span)
+    ir_comptime_err_rows(m, p, b, error, Int{ERR_CONVERSIONS}, Int{ERR_CONVERSION_BYTES}, conversions, [String]{"source", "target"}, None, span)
     if ir_comptime_field(metadata, "details") == .Val(.Present(details_value)) {
         details: if details_value == {
             .Struct(_, rows) -> rows
             .Int(_) | .Float(_, _) | .Bool(_) | .Char(_) | .String(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit -> { return ir_fail_slot(b, span, "default Err details constant {ir_comptime_name(details_value)}") }
         }
-        holder: ir_list_buffer_alloc(m, b, Int.from_i64(ERR_DETAILS_BYTES))
+        holder: ir_list_buffer_alloc(m, b, Int{ERR_DETAILS_BYTES})
         variant: ir_comptime_field(details, "variant") ?? absent_text.copy()
-        ir_comptime_err_text(m, p, b, holder, Int.from_i64(ERR_DETAILS_VARIANT), variant, span)
+        ir_comptime_err_text(m, p, b, holder, Int{ERR_DETAILS_VARIANT}, variant, span)
         detail_fields: ir_comptime_field(details, "fields") ?? TComptimeValue.List{values: []}
-        ir_comptime_err_rows(m, p, b, holder, Int.from_i64(ERR_DETAILS_FIELDS), Int.from_i64(ERR_FIELD_BYTES), detail_fields, [String]{"name", "value"}, None, span)
+        ir_comptime_err_rows(m, p, b, holder, Int{ERR_DETAILS_FIELDS}, Int{ERR_FIELD_BYTES}, detail_fields, [String]{"name", "value"}, None, span)
         has_span := 0
         start := 0
         end := 0
@@ -7908,10 +7908,10 @@ ir_comptime_default_err: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type,
             if ir_comptime_field(bounds, "start") == .Val(.Int(number)) -> start = number
             if ir_comptime_field(bounds, "end") == .Val(.Int(number)) -> end = number
         }
-        ir_comptime_err_word(m, p, b, holder, Int.from_i64(ERR_DETAILS_HAS_SPAN), has_span)
-        ir_comptime_err_word(m, p, b, holder, Int.from_i64(ERR_DETAILS_START), start)
-        ir_comptime_err_word(m, p, b, holder, Int.from_i64(ERR_DETAILS_END), end)
-        ir_store_at(m, p, b, error, Int.from_i64(ERR_DETAILS), holder)
+        ir_comptime_err_word(m, p, b, holder, Int{ERR_DETAILS_HAS_SPAN}, has_span)
+        ir_comptime_err_word(m, p, b, holder, Int{ERR_DETAILS_START}, start)
+        ir_comptime_err_word(m, p, b, holder, Int{ERR_DETAILS_END}, end)
+        ir_store_at(m, p, b, error, Int{ERR_DETAILS}, holder)
     }
     if ir_failed(b) -> return -1
     error

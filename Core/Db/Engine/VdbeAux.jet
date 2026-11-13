@@ -1215,7 +1215,7 @@ commit: fn<H: Host>(h: &H, db: &conn.Conn, v: &conn.Vdbe) -[DB]> Int Never! {
         }
         retry += 1
         r: os.os_random_bytes(4)
-        random: Int.from_u8(r[0]) + (Int.from_u8(r[1]) << 8) + (Int.from_u8(r[2]) << 16) + (Int.from_u8(r[3]) << 24)
+        random: Int{r[0]} + (Int{r[1]} << 8) + (Int{r[2]} << 16) + (Int{r[3]} << 24)
         tail: printf.snprintf(13, "-mj%06X9%02X".bytes(), [base.Mem]{base.mem_int((random >> 8).bit_and(16777215)), base.mem_int(random.bit_and(255))})
         super = "{main_file}{String.from_bytes(tail) ?? ""}"
         if !file.file_exists(super) -> break

@@ -198,7 +198,7 @@ new_gen: fn(state: Int) -> Gen Never! {
 // little-endian.
 seed_state: fn(key: String) -> Int Never! {
     bytes: crypto.sha256(key).as_bytes()
-    Int.from_u8(bytes[0]) + Int.from_u8(bytes[1]) * 256 + Int.from_u8(bytes[2]) * 65536 + Int.from_u8(bytes[3]) * 16777216
+    Int{bytes[0]} + Int{bytes[1]} * 256 + Int{bytes[2]} * 65536 + Int{bytes[3]} * 16777216
 }
 
 imul: fn(a: Int, b: Int) -> Int Never! { (a * b).bit_and(MASK) }
@@ -1286,17 +1286,17 @@ no_signal: fn() -> Signal Never! { Signal{k: "", v: int_value(0)} }
 
 reject: fn(reason: String) -> Reject Never! { Reject{reason: reason.copy()} }
 
-checked: fn(v: Value) -> Value Reject! {
+within_limits: fn(v: Value) -> Value Reject! {
     if v.k == "int" && (v.i > I64_MAX || v.i < I64_MIN) -> return Err(reject("overflow"))
     if v.k == "str" && v.s.len() > STRING_LIMIT -> return Err(reject("string size"))
     Ok(v)
 }
 
-checked_int: fn(i: Int) -> Value Reject! { checked(int_value(i)) }
+checked_int: fn(i: Int) -> Value Reject! { within_limits(int_value(i)) }
 
 arith: fn(op: String, a: Value, b: Value) -> Value Reject! {
     if a.k == "str" {
-        if op == "+" -> return checked(str_value("{a.s}{b.s}"))
+        if op == "+" -> return within_limits(str_value("{a.s}{b.s}"))
         return Ok(compared(op, a.s <=> b.s))
     }
     x: a.i
@@ -1386,7 +1386,7 @@ eval: fn(m: &Machine, g: Gen, at: Int) -> Value Reject! {
         "str" -> Ok(str_value(e.s))
         "copy" -> Ok(lookup(m, e.s))
         "var" -> Ok(lookup(m, e.s))
-        "strfmt" -> checked(str_value(format(m, g, e.args) ?? return Err(err)))
+        "strfmt" -> within_limits(str_value(format(m, g, e.args) ?? return Err(err)))
         "neg" -> checked_int(-(eval(m, g, e.l) ?? return Err(err)).i)
         "not" -> Ok(Value{k: "bool", i: 0, b: !(eval(m, g, e.l) ?? return Err(err)).b, s: "", items: [Int]{}})
         "len" -> {
@@ -1686,7 +1686,7 @@ generate_core_case: fn(seed: Int, index: Int) -> Case Never! {
     bytes := [Int]{}
     loop _ in 0..<count -> bytes.push(65 + (draw(rng) * 26) /% WORD)
     statements.push("print(String.from_bytes([U8]{{{bytes.map(fn(b) { "{b}" }).join(", ")}}}) ?? \"bad\")")
-    output.push(String.from_bytes(bytes.map(fn(b) { U8.from_int(b) ?? U8{0} })) ?? "")
+    output.push(String.from_bytes(bytes.map(fn(b) { checked(U8{b}) ?? U8{0} })) ?? "")
     invalid: [[Int]]{[Int]{255}, [Int]{128}, [Int]{226, 130}, [Int]{192, 175}, [Int]{237, 160, 128}, [Int]{244, 144, 128, 128}}
     loop sequence in invalid {
         statements.push("print(String.from_bytes([U8]{{{sequence.map(fn(b) { "{b}" }).join(", ")}}}) ?? \"invalid\")")
@@ -1734,7 +1734,7 @@ slug: fn(stem: String) -> String Never! {
     out := [U8]{}
     open := false
     loop byte in stem.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         word: (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 95 || code == 45
         if word {
             out.push(byte)
@@ -1972,7 +1972,7 @@ golden_cases: fn(repo: String) -[FS]> [Case] Never! {
 json_text: fn(value: String) -> String Never! {
     out := [U8]{U8{34}}
     loop byte in value.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         escape: if code == {
             34 -> "\\\""
             92 -> "\\\\"
@@ -2092,7 +2092,7 @@ run_gate: fn(out: String, artifacts: String, seed: Int, count: Int, mode: String
 
 admitted_head: fn(head: String) -> Bool Never! {
     if head.len() < 7 || head.len() > 40 -> return false
-    head.bytes().all(fn(byte) { (Int.from_u8(byte) >= 48 && Int.from_u8(byte) <= 57) || (Int.from_u8(byte) >= 97 && Int.from_u8(byte) <= 102) })
+    head.bytes().all(fn(byte) { (Int{byte} >= 48 && Int{byte} <= 57) || (Int{byte} >= 97 && Int{byte} <= 102) })
 }
 
 checker_of: fn(manifest: Dyn, native: Dyn, head: String) -> Dyn Never! {

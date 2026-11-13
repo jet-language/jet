@@ -151,7 +151,7 @@ jet_cli_shape_default: fn(value: CtValue) -> JetCLIStatusValue? Never! {
         .Bool(flag) -> Val(jet_cli_status_bool(flag))
         .Char(code) -> Val(jet_cli_status_text("{code}"))
         .Str(text) -> Val(jet_cli_status_text(text))
-        .Bytes(bytes) -> Val(jet_cli_status_array(loop byte in bytes -> jet_cli_status_int(Int.from_u8(byte))))
+        .Bytes(bytes) -> Val(jet_cli_status_array(loop byte in bytes -> jet_cli_status_int(Int{byte})))
         .Present(inner) -> jet_cli_shape_default(inner)
         .BigInt(_) | .List(_) | .Map(_) | .Struct(_, _) | .Enum(_, _, _) | .Failed(_) | .Unit | .Closure(_) -> None
     }
@@ -235,7 +235,7 @@ jet_cli_shape_name_for: fn(names: JetCLIShapeNames, projection: String) -> Strin
 jet_cli_shape_env_name: fn(source: String) -> String Never! {
     bytes := source.replace("-", "_").bytes()
     loop index in 0..<bytes.len() {
-        code: Int.from_u8(bytes[index])
+        code: Int{bytes[index]}
         if code >= 97 && code <= 122 -> bytes[index] = U8{code - 32}
     }
     String.from_bytes(bytes) ?? ""

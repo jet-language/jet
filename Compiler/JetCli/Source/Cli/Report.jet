@@ -207,7 +207,7 @@ jet_cli_json_control_quote: fn(value: String) -> String Never! {
     out := [U8]{U8{34}}
     index := 0
     loop index < bytes.len() {
-        byte: Int.from_u8(bytes[index])
+        byte: Int{bytes[index]}
         escape := if byte == {
             34 -> "\\\""
             92 -> "\\\\"
@@ -220,7 +220,7 @@ jet_cli_json_control_quote: fn(value: String) -> String Never! {
         if escape.len() == 0 {
             if byte < 32 || byte == 127 -> escape = "\\u00{jet_cli_report_hex_digit((byte >> 4).bit_and(15))}{jet_cli_report_hex_digit(byte.bit_and(15))}"
             if byte == 194 && index + 1 < bytes.len() {
-                next_byte: Int.from_u8(bytes[index + 1])
+                next_byte: Int{bytes[index + 1]}
                 if next_byte >= 128 && next_byte <= 159 {
                     escape = "\\u00{jet_cli_report_hex_digit((next_byte >> 4).bit_and(15))}{jet_cli_report_hex_digit(next_byte.bit_and(15))}"
                     width = 2

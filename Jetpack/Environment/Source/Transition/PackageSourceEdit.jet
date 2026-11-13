@@ -53,7 +53,7 @@ env_transition_source_entries: fn(source: String) -> [TransitionSourceEntry] Nev
     escaped := false
     line_comment := false
     loop index in 0..<raw.len() {
-        byte: Int.from_u8(raw[index])
+        byte: Int{raw[index]}
         if line_comment {
             if byte == 10 -> line_comment = false
             next
@@ -99,7 +99,7 @@ env_transition_source_field: fn(raw: String) -> String? Never! {
     quoted := false
     escaped := false
     loop index in 0..<bytes.len() {
-        byte: Int.from_u8(bytes[index])
+        byte: Int{bytes[index]}
         if quoted {
             if escaped {
                 escaped = false
@@ -200,7 +200,7 @@ env_transition_config_body: fn(raw: String) -> String? Never! {
     clean: env_transition_mask_comments(raw).bytes()
     separator: env_transition_find(clean, ":".bytes(), 0)
     if separator < 0 -> return None
-    width: if separator + 1 < clean.len() && Int.from_u8(clean[separator + 1]) == 58 -> 2 else -> 1
+    width: if separator + 1 < clean.len() && (Int{clean[separator + 1]}) == 58 -> 2 else -> 1
     value: pkg_bytes_text(clean, separator + width, clean.len()).trim()
     if !value.starts_with("Config") -> return None
     bytes: raw.bytes()
@@ -221,7 +221,7 @@ env_transition_matching_delimiter: fn(value: [U8], open: Int, left: Int, right: 
     quoted := false
     escaped := false
     loop index in open..<value.len() {
-        byte: Int.from_u8(value[index])
+        byte: Int{value[index]}
         if quoted {
             if escaped {
                 escaped = false
@@ -352,7 +352,7 @@ env_transition_quote: fn(value: String) -> String Never! {
 env_transition_validate_name: fn(name: String, role: String) EnvironmentError! {
     bad := name == "" || name.starts_with(".") || name.contains("..")
     loop byte in name.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if !pkg_bytes_is_word(code) && code != 45 -> bad = true
     }
     if bad -> return Err(env_transition_error("invalid {role} name {name}"))
@@ -367,7 +367,7 @@ env_transition_strip_comments: fn(value: String) -> String Never! {
     index := 0
     loop index < raw.len() {
         byte: raw[index]
-        code: Int.from_u8(byte)
+        code: Int{byte}
         index += 1
         if quoted {
             output.push(byte)
@@ -386,7 +386,7 @@ env_transition_strip_comments: fn(value: String) -> String Never! {
             loop index < raw.len() {
                 comment: raw[index]
                 index += 1
-                if Int.from_u8(comment) == 10 {
+                if (Int{comment}) == 10 {
                     output.push(comment)
                     break
                 }
@@ -409,7 +409,7 @@ env_transition_mask_comments: fn(value: String) -> String Never! {
     block_depth := 0
     index := 0
     loop index < bytes.len() {
-        code: Int.from_u8(bytes[index])
+        code: Int{bytes[index]}
         next_code: pkg_bytes_code(bytes, index + 1)
         if line_comment {
             if code == 10 {

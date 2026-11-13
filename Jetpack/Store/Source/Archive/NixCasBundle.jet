@@ -203,7 +203,7 @@ store_nix_cas_is_sorted_unique: fn(values: [String]) -> Bool Never! {
 
 store_nix_cas_is_lower_hex: fn(raw: [U8], start: Int) -> Bool Never! {
     loop index in start..<raw.len() {
-        code: Int.from_u8(raw[index])
+        code: Int{raw[index]}
         if !((code >= 48 && code <= 57) || (code >= 97 && code <= 102)) -> return false
     }
     true
@@ -228,7 +228,7 @@ store_nix_cas_validate_platform: fn(value: String) StoreError! {
     raw: value.bytes()
     ascii := true
     loop byte in raw {
-        if Int.from_u8(byte) >= 128 -> ascii = false
+        if (Int{byte}) >= 128 -> ascii = false
     }
     if raw.len() == 0 || raw.len() > 128 || !ascii || store_archive_has_ascii_control(raw) || value.contains("/") || value.contains("\\") {
         return Err(StoreError.InvalidData("Nix closure manifest has an unsafe target platform"))

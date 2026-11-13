@@ -442,7 +442,7 @@ int_or: fn(text: String, fallback: Int) -> Int Never! {
     if text == "" -> return fallback
     value := 0
     loop byte in text.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if code < 48 || code > 57 -> return fallback
         value = value * 10 + code - 48
     }
@@ -855,8 +855,8 @@ unescape_mount: fn(text: String) -> String Never! {
     out := [U8]{}
     index := 0
     loop index < bytes.len() {
-        if Int.from_u8(bytes[index]) == 92 && octal3(bytes, index + 1) >= 0 {
-            out.push(U8.from_int(octal3(bytes, index + 1)) ?? U8{63})
+        if (Int{bytes[index]}) == 92 && octal3(bytes, index + 1) >= 0 {
+            out.push(checked(U8{octal3(bytes, index + 1)}) ?? U8{63})
             index += 4
             next
         }
@@ -870,7 +870,7 @@ octal3: fn(bytes: [U8], at: Int) -> Int Never! {
     if at + 3 > bytes.len() -> return -1
     value := 0
     loop index in at..<at + 3 {
-        code: Int.from_u8(bytes[index])
+        code: Int{bytes[index]}
         if code < 48 || code > 55 -> return -1
         value = value * 8 + code - 48
     }

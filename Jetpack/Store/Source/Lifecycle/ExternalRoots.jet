@@ -45,7 +45,7 @@ store_external_root_validate_label: fn(label: String) StoreError! {
     unsafe_label: raw.len() == 0 || raw.len() > 128 || label == "." || label == ".." || label.contains("/") || label.contains("\\")
     if unsafe_label -> return Err(StoreError.InvalidInput("external root label must be one safe path component"))
     loop byte in raw {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if code < 32 || code == 127 -> return Err(StoreError.InvalidInput("external root label must be one safe path component"))
     }
 }

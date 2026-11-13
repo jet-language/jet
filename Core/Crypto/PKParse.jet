@@ -76,7 +76,7 @@ group_id_from_specified: fn(data: [U8], params: asn1.ASN1Buf) -> ecp.GroupID pk.
     g_len: asn1.get_tag(data, p, end, asn1.ASN1_OCTET_STRING) ?? return Err(.KeyInvalidFormat(Val(err)))
     if g_len < 1 || (data[p] != (U8{2}) && data[p] != (U8{3})) || g_len != bn.size(prime) + 1 -> return Err(.KeyInvalidFormat(None))
     gx: bn.read_binary(cipher.bytes_of(data, p + 1, g_len - 1)) ?? return Err(.KeyInvalidFormat(Val(.Mpi(err))))
-    gy_parity: Int.from_u8(data[p]) - 2
+    gy_parity: Int{data[p]} - 2
     p += g_len
     order: asn1.get_mpi(data, p, end) ?? return Err(.KeyInvalidFormat(Val(err)))
     nbits: bn.bitlen(order)
@@ -95,7 +95,7 @@ group_id_from_specified: fn(data: [U8], params: asn1.ASN1Buf) -> ecp.GroupID pk.
 // SEQUENCE, that must end at `end`.
 get_ecparams: fn(data: [U8], p: &Int, end: Int) -> asn1.ASN1Buf pk.PKError! {
     if end - p < 1 -> return Err(.KeyInvalidFormat(Val(.OutOfData)))
-    tag_id: Int.from_u8(asn1.layout_byte(data, p))
+    tag_id: Int{asn1.layout_byte(data, p)}
     if tag_id != asn1.ASN1_OID && tag_id != SEQUENCE -> return Err(.KeyInvalidFormat(Val(.UnexpectedTag)))
     len: asn1.get_tag(data, p, end, tag_id) ?? return Err(.KeyInvalidFormat(Val(err)))
     params: asn1.ASN1Buf{tag_id: tag_id, p: p, len: len}

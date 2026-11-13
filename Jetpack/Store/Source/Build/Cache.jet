@@ -433,7 +433,7 @@ build_hex_encode: fn(bytes: [U8]) -> String Never! {
     digits: "0123456789abcdef".bytes()
     out := [U8]{}
     loop byte in bytes {
-        value: Int.from_u8(byte)
+        value: Int{byte}
         out.push(digits[value >> 4])
         out.push(digits[value.bit_and(15)])
     }
@@ -456,7 +456,7 @@ build_hex_decode: fn(value: String) -> [U8] BuildIOError! {
 }
 
 build_hex_digit: fn(byte: U8) -> Int? Never! {
-    code: Int.from_u8(byte)
+    code: Int{byte}
     if {
         code >= 48 && code <= 57 -> Val(code - 48)
         code >= 97 && code <= 102 -> Val(code - 87)
@@ -489,7 +489,7 @@ build_parse_i32: fn(text: String) -> Int? Never! {
     digits: if text.starts_with("+") || text.starts_with("-") -> text.slice(1, text.len()) else -> text
     if digits == "" -> return None
     loop byte in digits.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if code < 48 || code > 57 -> return None
     }
     if digits.len() > 10 -> return None
@@ -502,7 +502,7 @@ build_parse_i32: fn(text: String) -> Int? Never! {
 build_parse_u64: fn(text: String) -> Int? Never! {
     if text == "" || text.len() > 20 -> return None
     loop byte in text.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if code < 48 || code > 57 -> return None
     }
     value: Int.parse(text) ?? return None
@@ -580,7 +580,7 @@ build_record_lines: fn(text: String) -> [String] Never! {
     loop line in text.split("\n") {
         raw: line.bytes()
         // A CR (13) before the LF belongs to the line ending.
-        if raw.len() > 0 && Int.from_u8(raw[raw.len() - 1]) == 13 -> lines.push(String.from_bytes(raw.slice(0, raw.len() - 1)) ?? line) else -> lines.push(line)
+        if raw.len() > 0 && (Int{raw[raw.len() - 1]}) == 13 -> lines.push(String.from_bytes(raw.slice(0, raw.len() - 1)) ?? line) else -> lines.push(line)
     }
     if lines.len() > 0 && lines[lines.len() - 1] == "" -> _ := lines.pop()
     lines
@@ -859,11 +859,11 @@ build_terminal_text: fn(value: String) -> String Never! {
 // The Unicode scalar value of one UTF-8 encoded scalar.
 build_scalar_code: fn(text: String) -> Int Never! {
     raw: text.bytes()
-    first: Int.from_u8(raw[0])
+    first: Int{raw[0]}
     if raw.len() == 1 -> return first
-    if raw.len() == 2 -> return (first.bit_and(31) << 6) + Int.from_u8(raw[1]).bit_and(63)
-    if raw.len() == 3 -> return (first.bit_and(15) << 12) + (Int.from_u8(raw[1]).bit_and(63) << 6) + Int.from_u8(raw[2]).bit_and(63)
-    (first.bit_and(7) << 18) + (Int.from_u8(raw[1]).bit_and(63) << 12) + (Int.from_u8(raw[2]).bit_and(63) << 6) + Int.from_u8(raw[3]).bit_and(63)
+    if raw.len() == 2 -> return (first.bit_and(31) << 6) + (Int{raw[1]}).bit_and(63)
+    if raw.len() == 3 -> return (first.bit_and(15) << 12) + (Int{raw[1]}.bit_and(63) << 6) + (Int{raw[2]}).bit_and(63)
+    (first.bit_and(7) << 18) + (Int{raw[1]}.bit_and(63) << 12) + (Int{raw[2]}.bit_and(63) << 6) + Int{raw[3]}.bit_and(63)
 }
 
 // Rust `{:04x}`: lowercase hex, at least four digits.

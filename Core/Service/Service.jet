@@ -142,8 +142,8 @@ __authority_signing_key: fn(authority: String) -> [U8] ServiceError! {
     }
     key := [U8]{}
     loop i in 0..<32 {
-        high: authority_hex_digit(Int.from_u8(raw[3 + i * 2])) ?? return Err(ServiceError.Revoked("service authority proof is malformed"))
-        low: authority_hex_digit(Int.from_u8(raw[4 + i * 2])) ?? return Err(ServiceError.Revoked("service authority proof is malformed"))
+        high: authority_hex_digit(Int{raw[3 + i * 2]}) ?? return Err(ServiceError.Revoked("service authority proof is malformed"))
+        low: authority_hex_digit(Int{raw[4 + i * 2]}) ?? return Err(ServiceError.Revoked("service authority proof is malformed"))
         key.push(U8{high * 16 + low})
     }
     key
@@ -263,7 +263,7 @@ valid_authority_token: fn(authority: String) -> Bool Never! {
     raw: authority.bytes()
     if raw.len() != 67 || !authority.starts_with("sa-") -> return false
     loop i in 3..<67 {
-        value: Int.from_u8(raw[i])
+        value: Int{raw[i]}
         if !((value >= 48 && value <= 57) || (value >= 97 && value <= 102)) -> return false
     }
     true
@@ -354,10 +354,10 @@ valid_service_text: fn(text: String, limit: Int) -> Bool Never! {
     raw: text.bytes()
     if raw.len() == 0 || raw.len() > limit -> return false
     loop i in 0..<raw.len() {
-        value: Int.from_u8(raw[i])
+        value: Int{raw[i]}
         if value < 32 || value == 127 -> return false
         if value == 194 && i + 1 < raw.len() {
-            next_byte: Int.from_u8(raw[i + 1])
+            next_byte: Int{raw[i + 1]}
             if next_byte >= 128 && next_byte <= 159 -> return false
         }
     }
@@ -398,7 +398,7 @@ read_state_record: fn(prefix: String, record: String) -> String ServiceError! {
     length := 0
     maximum: service_sys.usize_max()
     loop i in digits_start..<separator {
-        digit: Int.from_u8(raw[i]) - 48
+        digit: Int{raw[i]} - 48
         if digit < 0 || digit > 9 || length > (maximum - digit) /% 10 -> return Err(ServiceError.Policy("state record length is invalid"))
         length = length * 10 + digit
     }
@@ -500,7 +500,7 @@ observe: fn(tree: ServiceTree) -> String Never! {
 #Test("service authority key decodes the existing token, including uppercase hex") {
     key: __authority_signing_key("sa-000102030405060708090A0B0C0D0E0F101112131415161718191A1B1C1D1E1F") ?? panic("key")
     assert(key.len() == 32)
-    loop i in 0..<32 -> assert(Int.from_u8(key[i]) == i)
+    loop i in 0..<32 -> assert(Int{key[i]} == i)
     assert(if __authority_signing_key("bad") == {
         .Err(.Revoked(message)) -> message == "service authority proof is malformed"
         .Ok(_) | .Err(_) -> false
@@ -1537,11 +1537,11 @@ valid_store_text: fn(text: String) -> Bool Never! {
     raw: text.bytes()
     if raw.len() == 0 || raw.len() > 4096 -> return false
     loop i in 0..<raw.len() {
-        value: Int.from_u8(raw[i])
+        value: Int{raw[i]}
         if value < 32 || value == 127 -> return false
         // Rust char::is_control is Unicode Cc, not only ASCII controls.
         if value == 194 && i + 1 < raw.len() {
-            next: Int.from_u8(raw[i + 1])
+            next: Int{raw[i + 1]}
             if next >= 128 && next <= 159 -> return false
         }
     }
@@ -1649,7 +1649,7 @@ state_next_separator: fn(raw: [U8], start: Int, verbatim: Bool) -> Int Never! {
 
 state_drive: fn(raw: [U8], start: Int) -> Bool Never! {
     if start + 1 >= raw.len() || raw[start + 1] != (U8{58}) -> return false
-    value: Int.from_u8(raw[start])
+    value: Int{raw[start]}
     (value >= 65 && value <= 90) || (value >= 97 && value <= 122)
 }
 
@@ -2107,7 +2107,7 @@ rollout_decode: fn(tree_name: String, bytes: [U8]) -> __RolloutState ServiceErro
     checksum: String.from_bytes(bytes.slice(marker + 10, bytes.len() - 1)) ?? return Err(state_error("rollout journal checksum is not valid UTF-8"))
     if checksum.bytes().len() != 64 -> return Err(state_error("rollout journal checksum is invalid"))
     loop byte in checksum.bytes() {
-        if authority_hex_digit(Int.from_u8(byte)) == None -> return Err(state_error("rollout journal checksum is invalid"))
+        if authority_hex_digit(Int{byte}) == None -> return Err(state_error("rollout journal checksum is invalid"))
     }
     content: bytes.slice(0, marker + 1)
     if checksum != service_encoding.bytes_to_hex(service_crypto.sha256(content).bytes) -> return Err(state_error("rollout journal checksum does not match its contents"))
@@ -3022,7 +3022,7 @@ workflow_i64: fn(text: String) -> Int? Never! {
     limit: if negative -> 9223372036854775808 else -> 9223372036854775807
     value := 0
     loop i in start..<raw.len() {
-        digit: Int.from_u8(raw[i]) - 48
+        digit: Int{raw[i]} - 48
         if digit < 0 || digit > 9 || value > (limit - digit) /% 10 -> return None
         value = value * 10 + digit
     }
@@ -3393,8 +3393,8 @@ authority_unhex: fn(text: String) -> [U8]? Never! {
     if count * 2 != raw.len() -> return None
     bytes := [U8]{}
     loop index in 0..<count {
-        high: authority_hex_digit(Int.from_u8(raw[index * 2])) ?? return None
-        low: authority_hex_digit(Int.from_u8(raw[index * 2 + 1])) ?? return None
+        high: authority_hex_digit(Int{raw[index * 2]}) ?? return None
+        low: authority_hex_digit(Int{raw[index * 2 + 1]}) ?? return None
         bytes.push(U8{high * 16 + low})
     }
     Val(bytes)

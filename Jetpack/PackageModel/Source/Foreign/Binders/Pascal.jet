@@ -297,7 +297,7 @@ pkg_pascal_strip_comments: fn(source: String) -> String Never! {
     paren := false
     index := 0
     loop index < raw.len() {
-        code: Int.from_u8(raw[index])
+        code: Int{raw[index]}
         next_code: pkg_bytes_code(raw, index + 1)
         if brace {
             if code == 125 -> brace = false
@@ -326,7 +326,7 @@ pkg_pascal_strip_comments: fn(source: String) -> String Never! {
         if code == 47 && next_code == 47 {
             index += 2
             loop index < raw.len() {
-                if Int.from_u8(raw[index]) == 10 {
+                if (Int{raw[index]}) == 10 {
                     out.push(raw[index])
                     index += 1
                     break
@@ -357,7 +357,7 @@ pkg_pascal_matching_close: fn(text: String, open: Int) -> Int Never! {
     raw: text.bytes()
     depth := 0
     loop index in open..<raw.len() {
-        code: Int.from_u8(raw[index])
+        code: Int{raw[index]}
         if code == 40 -> depth += 1
         if code == 41 {
             depth -= 1

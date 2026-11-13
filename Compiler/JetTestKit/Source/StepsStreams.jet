@@ -162,7 +162,7 @@ kit_steps_stream_assertion: fn(key: String, original: String) -> KitAssertion? {
 kit_steps_ascii_lower: fn(text: String) -> String {
     bytes := text.bytes()
     loop i in 0..<bytes.len() {
-        byte: Int.from_u8(bytes[i])
+        byte: Int{bytes[i]}
         if byte >= 65 && byte <= 90 -> bytes[i] = U8{byte + 32}
     }
     String.from_bytes(bytes) ?? panic("ASCII case conversion changed UTF-8")
@@ -231,8 +231,8 @@ kit_steps_bytes_search: fn(bytes: [U8], needle: [U8], start: Int, end: Int, inse
     loop cursor + needle.len() <= end {
         matches := true
         loop i in 0..<needle.len() {
-            left := Int.from_u8(bytes[cursor + i])
-            right := Int.from_u8(needle[i])
+            left := Int{bytes[cursor + i]}
+            right := Int{needle[i]}
             if insensitive {
                 if left >= 65 && left <= 90 -> left += 32
                 if right >= 65 && right <= 90 -> right += 32

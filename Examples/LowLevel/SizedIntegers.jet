@@ -39,7 +39,7 @@ run: fn() {
     wide := Int{0}
     wide = red
     print(wide)
-    clamped: U8.from_i32(channel) ?? 255
+    clamped: checked(U8{channel}) ?? 255
     print(clamped)
     // Numeric surface: per-type bounds, bit queries, float consts.
     print(U8.MAX)
@@ -71,5 +71,5 @@ run: fn() {
     print(wrapping(hi + lo))
     print(saturating(hi + lo))
     fallback: U8{0}
-    print(hi.checked_add(lo) ?? fallback)
+    print(checked(hi + lo) ?? fallback)
 }

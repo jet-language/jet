@@ -195,16 +195,16 @@ sema_comptime_fold_decimal: fn(text: String) -> TComptimeValue? Never! {
     if bytes.len() == 0 -> return None
     index := 0
     negative := false
-    if Int.from_u8(bytes[0]) == 45 || Int.from_u8(bytes[0]) == 43 {
-        negative = Int.from_u8(bytes[0]) == 45
+    if (Int{bytes[0]}) == 45 || (Int{bytes[0]}) == 43 {
+        negative = Int{bytes[0]} == 45
         index = 1
     }
     magnitude := 0
     digits := 0
     fractional := 0
     point := false
-    loop index < bytes.len() && Int.from_u8(bytes[index]) != 101 && Int.from_u8(bytes[index]) != 69 {
-        code: Int.from_u8(bytes[index])
+    loop index < bytes.len() && (Int{bytes[index]}) != 101 && (Int{bytes[index]}) != 69 {
+        code: Int{bytes[index]}
         if code == 46 {
             if point -> return None
             point = true
@@ -222,13 +222,13 @@ sema_comptime_fold_decimal: fn(text: String) -> TComptimeValue? Never! {
     if index < bytes.len() {
         index += 1
         exponent_negative := false
-        if index < bytes.len() && (Int.from_u8(bytes[index]) == 45 || Int.from_u8(bytes[index]) == 43) {
-            exponent_negative = Int.from_u8(bytes[index]) == 45
+        if index < bytes.len() && (Int{bytes[index]} == 45 || Int{bytes[index]} == 43) {
+            exponent_negative = Int{bytes[index]} == 45
             index += 1
         }
         start: index
         loop index < bytes.len() {
-            code: Int.from_u8(bytes[index])
+            code: Int{bytes[index]}
             if code < 48 || code > 57 -> return None
             exponent = exponent * 10 + code - 48
             if exponent > 4000 -> return None
@@ -302,7 +302,7 @@ sema_comptime_fold_from_bytes: fn(tree: BodyTree, value: Int, values: [SemaCompt
             // copy: `values_bytes` is a payload of `folded`, which keeps the original
             .Bytes(values_bytes) -> bytes = values_bytes.copy()
             .List(items) -> loop item in items {
-                if item == .Int(number) -> bytes.push(U8.from_int(number) ?? return None)
+                if item == .Int(number) -> bytes.push(checked(U8{number}) ?? return None)
                 else -> return None
             }
             .Int(_) | .Float(_, _) | .Bool(_) | .Char(_) | .String(_) | .BigInt(_) | .Map(_) | .Struct(_, _) | .Enum(_, _, _) | .Present(_) | .Failed(_) | .Unit -> return None

@@ -226,16 +226,16 @@ parser_take_pattern_binary_bits: fn(state: &JetParserState, spec: String, span: 
     endian := BinEndian.Unspecified
     end := bytes.len()
     if {
-        bytes.len() >= 2 && Int.from_u8(bytes[end - 2]) == 98 && Int.from_u8(bytes[end - 1]) == 101 -> {
+        bytes.len() >= 2 && (Int{bytes[end - 2]}) == 98 && (Int{bytes[end - 1]}) == 101 -> {
             endian = BinEndian.Big
             end -= 2
         }
-        bytes.len() >= 2 && Int.from_u8(bytes[end - 2]) == 108 && Int.from_u8(bytes[end - 1]) == 101 -> {
+        bytes.len() >= 2 && (Int{bytes[end - 2]}) == 108 && (Int{bytes[end - 1]}) == 101 -> {
             endian = BinEndian.Little
             end -= 2
         }
     }
-    if end < 2 || Int.from_u8(bytes[0]) != 85 {
+    if end < 2 || (Int{bytes[0]}) != 85 {
         parser_add_error_code(state, "E1007", span, "`{spec}` isn't a valid bit width in a binary pattern", "a bit field is `U` followed by a width of 1 to 64 bits, optionally with a `be`/`le` byte order", "write e.g. `U4`, `U8`, `U16be`, or `U32le`")
         return BinSpec.Bits{width: 8, endian: BinEndian.Unspecified}
     }
@@ -243,7 +243,7 @@ parser_take_pattern_binary_bits: fn(state: &JetParserState, spec: String, span: 
     digits := 0
     index := 1
     loop index < end {
-        digit: Int.from_u8(bytes[index])
+        digit: Int{bytes[index]}
         if digit < 48 || digit > 57 -> break
         width = width * 10 + digit - 48
         digits += 1
@@ -613,7 +613,7 @@ parser_parse_pattern_atom: fn(state: &JetParserState, depth: Int, allow_named: B
 
 parser_pascal_name: fn(name: String) -> Bool Never! {
     if name.len() == 0 -> return false
-    first: Int.from_u8(name.bytes()[0])
+    first: Int{name.bytes()[0]}
     first >= 65 && first <= 90
 }
 

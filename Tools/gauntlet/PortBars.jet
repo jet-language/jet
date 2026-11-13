@@ -607,7 +607,7 @@ run_failure: fn(run: Run, case: Case, expected: String) -> String Never! {
 
 byte_at: fn(bytes: [U8], at: Int) -> Int Never! {
     if at < 0 || at >= bytes.len() -> return -1
-    Int.from_u8(bytes[at])
+    Int{bytes[at]}
 }
 
 is_digit: fn(code: Int) -> Bool Never! { code >= 48 && code <= 57 }
@@ -1169,7 +1169,7 @@ declared: fn(text: String) -> [String] Never! {
         bytes: name.bytes()
         word := bytes.len() > 0
         loop byte in bytes {
-            if !is_word_byte(Int.from_u8(byte)) -> word = false
+            if !is_word_byte(Int{byte}) -> word = false
         }
         if word -> out.push(name.copy())
     }
@@ -1962,7 +1962,7 @@ is_date: fn(text: String) -> Bool Never! {
     bytes: text.bytes()
     if bytes.len() != 10 -> return false
     loop index in 0..<10 {
-        code: Int.from_u8(bytes[index])
+        code: Int{bytes[index]}
         dash: index == 4 || index == 7
         if dash && code != 45 -> return false
         if !dash && !is_digit(code) -> return false

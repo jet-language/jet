@@ -44,7 +44,7 @@ CLIRecordCursor: struct {
     u32: fn(&self) -> Int RecordDecodeError! {
         if self.at > self.bytes.len() || self.bytes.len() - self.at < 4 -> return Err(RecordDecodeError.Malformed{why: "truncated payload"})
         value := 0
-        loop index in 0..<4 -> value = value.bit_or((Int.from_u8(self.bytes[self.at + index]) << (8 * index)))
+        loop index in 0..<4 -> value = value.bit_or((Int{self.bytes[self.at + index]} << (8 * index)))
         self.at += 4
         Ok(value)
     }
@@ -74,10 +74,10 @@ cli_schema_bytes_start: fn(bytes: View<U8>, prefix: [U8]) -> Bool Never! {
 }
 decode_record: fn(record: View<U8>) -> CLICommandSchema RecordDecodeError! {
     if record.len() < 46 || !cli_schema_bytes_start(record, CLI_SCHEMA_MAGIC) -> return Err(RecordDecodeError.Malformed{why: "bad record header"})
-    version: U16{Int.from_u8(record[8]).bit_or((Int.from_u8(record[9]) << 8))}
+    version: U16{Int{record[8]}.bit_or((Int{record[9]} << 8))}
     if version != RECORD_VERSION -> return Err(RecordDecodeError.UnsupportedVersion{version: version})
     length := 0
-    loop index in 0..<4 -> length = length.bit_or((Int.from_u8(record[10 + index]) << (8 * index)))
+    loop index in 0..<4 -> length = length.bit_or((Int{record[10 + index]} << (8 * index)))
     if length > CLI_SCHEMA_MAX_RECORD_BYTES || record.len() - 46 != length -> return Err(RecordDecodeError.Malformed{why: "invalid record length"})
     payload: record[46..<record.len()]
     digest: sha256_bytes(payload)
@@ -290,7 +290,7 @@ cli_schema_encode_input: fn(out: &[U8], input: CLIInputSchema) Never! {
         None -> out.push(U8{0})
         .Val(order) -> {
             out.push(U8{1})
-            cli_schema_put_u32(out, Int.from_u16(order))
+            cli_schema_put_u32(out, Int{order})
         }
     }
 }
@@ -371,8 +371,8 @@ encode_record: fn(schema: CLICommandSchema) -> [U8] Never! {
     record := [U8]{}
     record.try_reserve(46 + payload.len()) ?? panic("CLI metadata record allocation failed")
     record.extend(CLI_SCHEMA_MAGIC)
-    record.push(U8{Int.from_u16(RECORD_VERSION).bit_and(255)})
-    record.push(U8{Int.from_u16(RECORD_VERSION) >> 8})
+    record.push(U8{Int{RECORD_VERSION}.bit_and(255)})
+    record.push(U8{Int{RECORD_VERSION} >> 8})
     cli_schema_put_u32(record, payload.len())
     record.extend(sha256_bytes(payload[0..<payload.len()]))
     record.extend(payload)

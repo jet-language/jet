@@ -44,14 +44,14 @@ link_facts: fn() -[FS]> LinkFacts Never! {
 // The `width`-byte little-endian unsigned value at `at`.
 le: fn(b: [U8], at: Int, width: Int) -> Int Never! {
     value := 0
-    loop k in 0..<width -> value = value * 256 + Int.from_u8(b[at + width - 1 - k])
+    loop k in 0..<width -> value = value * 256 + (Int{b[at + width - 1 - k]})
     value
 }
 
 // The NUL-terminated name at `at`.
 c_string: fn(b: [U8], at: Int) -> String Never! {
     end := at
-    loop end < b.len() && Int.from_u8(b[end]) != 0 -> end += 1
+    loop end < b.len() && (Int{b[end]}) != 0 -> end += 1
     String.from_bytes_lossy(b.slice(at, end))
 }
 

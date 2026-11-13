@@ -98,7 +98,7 @@ jet_cli_test_stop: fn(stderr: String) -> JetCLITestStop? Never! {
                     number: Int.parse(jet_cli_test_text(path_bytes, colon + 1, path_bytes.len())) ?? -1
                     if number >= 0 {
                         stop.file = jet_cli_test_text(path_bytes, 0, colon)
-                        stop.line = U32.from_int(number) ?? U32{0}
+                        stop.line = checked(U32{number}) ?? U32{0}
                     }
                 }
             }
@@ -140,9 +140,9 @@ jet_cli_test_claims: fn(tests: [JetNativeTestCase], facts: [TTestFact], doctests
 jet_cli_test_claim: fn(test: JetNativeTestCase, facts: [TTestFact], doctests: [JetCLIDoctestFile], file: String) -> JetCLITestClaim Never! {
     loop doctest_file in doctests {
         doctest: jet_cli_doctest_named(doctest_file, test.name) ?? next
-        return JetCLITestClaim{kind: 4, file: doctest_file.shown.copy(), line: U32.from_int(doctest.line) ?? U32{0}, mismatch: None}
+        return JetCLITestClaim{kind: 4, file: doctest_file.shown.copy(), line: checked(U32{doctest.line}) ?? U32{0}, mismatch: None}
     }
-    index: Int.from_u64(test.id) - 1
+    index: Int{test.id} - 1
     if index >= 0 && index < facts.len() && facts[index].kind == TTestKind.Property {
         return JetCLITestClaim{kind: 3, file: file.copy(), line: U32{0}, mismatch: None, law: facts[index].law.copy()}
     }
@@ -314,7 +314,7 @@ jet_cli_test_outcome: fn(file: String, source: String, build_options: BuildOptio
         }
         // A property's record counts the generated cases that ran where
         // others have a line; the cases its `#Pre` rejected never count.
-        line: if claim.kind == 3 -> U32.from_int(parts.property.map(fn(run) { run.cases }) ?? 0) ?? U32{0} else -> claim.line
+        line: if claim.kind == 3 -> checked(U32{parts.property.map(fn(run) { run.cases }) ?? 0}) ?? (U32{0}) else -> claim.line
         record := evidence_record_from_test_codes(claim.kind, state, parts.name, message, claim.file, line, report_id, build, revision) ?? return Err(err.message)
         if mismatch == .Val(found) -> record.diagnostics = [EvidenceDiagnostic]{EvidenceDiagnostic{code: found.code.copy(), message: found.message.copy(), source: Val(EvidenceSource{path: found.file.copy(), line: found.line, column: U32{1}})}}
         if claim.kind == 3 -> jet_cli_test_law_attachments(record, claim.law, parts.property)
@@ -415,8 +415,8 @@ jet_cli_test_contract_record: fn(contract: JetNativeTestContract, file: String, 
     loop index in 4..<fields.len() -> named = "{named}\t{fields[index]}"
     source: EvidenceSource{
         path: if named == "" -> file.copy() else -> named,
-        line: U32.from_int(line) ?? U32{0},
-        column: U32.from_int(column) ?? U32{1},
+        line: checked(U32{line}) ?? U32{0},
+        column: checked(U32{column}) ?? U32{1},
     }
     detail: if contract.held -> "held" else -> "failed"
     identity: evidence_identity_for_record(report_id, fields[0], EvidenceProducerKind.Test, EvidenceKind.Contract, source, U64{1}, detail)

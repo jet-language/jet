@@ -31,7 +31,7 @@ pkg_overlay_skip_quoted: fn(raw: [U8], at: Int) -> Int Never! {
     cursor := at
     escaped := false
     loop cursor < raw.len() {
-        code: Int.from_u8(raw[cursor])
+        code: Int{raw[cursor]}
         cursor += 1
         if {
             escaped -> escaped = false
@@ -47,7 +47,7 @@ pkg_overlay_skip_quoted: fn(raw: [U8], at: Int) -> Int Never! {
 pkg_overlay_skip_line_comment: fn(raw: [U8], at: Int) -> Int Never! {
     cursor := at
     loop cursor < raw.len() {
-        code: Int.from_u8(raw[cursor])
+        code: Int{raw[cursor]}
         cursor += 1
         if code == OVERLAY_NEWLINE -> return cursor
     }
@@ -59,7 +59,7 @@ pkg_overlay_skip_block_comment: fn(raw: [U8], at: Int) -> Int Never! {
     cursor := at
     previous := -1
     loop cursor < raw.len() {
-        code: Int.from_u8(raw[cursor])
+        code: Int{raw[cursor]}
         cursor += 1
         if previous == OVERLAY_STAR && code == OVERLAY_SLASH -> return cursor
         previous = code
@@ -79,7 +79,7 @@ pkg_overlay_find_word: fn(raw: [U8], word: String, start: Int) -> Int? Never! {
     cursor := start
     loop cursor < raw.len() {
         at: cursor.copy()
-        code: Int.from_u8(raw[at])
+        code: Int{raw[at]}
         peek: pkg_bytes_code(raw, at + 1)
         cursor += 1
         if {
@@ -99,7 +99,7 @@ pkg_overlay_find_char: fn(raw: [U8], start: Int, wanted: Int) -> Int? Never! {
     cursor := start
     loop cursor < raw.len() {
         at: cursor.copy()
-        code: Int.from_u8(raw[at])
+        code: Int{raw[at]}
         peek: pkg_bytes_code(raw, at + 1)
         cursor += 1
         if {
@@ -127,7 +127,7 @@ pkg_overlay_balanced: fn(raw: [U8], start: Int) -> (body: String, consumed: Int)
     cursor := start
     loop cursor < raw.len() {
         byte: raw[cursor]
-        code: Int.from_u8(byte)
+        code: Int{byte}
         peek: pkg_bytes_code(raw, cursor + 1)
         cursor += 1
         if line_comment {
@@ -186,7 +186,7 @@ pkg_overlay_code_depth_at: fn(raw: [U8], stop: Int) -> Int? Never! {
     comment := false
     cursor := 0
     loop cursor < raw.len() && cursor < stop {
-        code: Int.from_u8(raw[cursor])
+        code: Int{raw[cursor]}
         peek: pkg_bytes_code(raw, cursor + 1)
         cursor += 1
         if comment {
@@ -221,7 +221,7 @@ pkg_overlay_split_colon: fn(value: String) -> (before: String, after: String)? N
     quoted := false
     escaped := false
     loop index in 0..<raw.len() {
-        code: Int.from_u8(raw[index])
+        code: Int{raw[index]}
         if quoted {
             if {
                 escaped -> escaped = false
@@ -257,7 +257,7 @@ pkg_overlay_top_level_commas: fn(body: String) -> [String] Never! {
     cursor := 0
     loop cursor < raw.len() {
         byte: raw[cursor]
-        code: Int.from_u8(byte)
+        code: Int{byte}
         peek: pkg_bytes_code(raw, cursor + 1)
         cursor += 1
         if line_comment {
@@ -345,7 +345,7 @@ pkg_overlay_top_level_statements: fn(source: String) -> [String] Never! {
     cursor := 0
     loop cursor < raw.len() {
         byte: raw[cursor]
-        code: Int.from_u8(byte)
+        code: Int{byte}
         peek: pkg_bytes_code(raw, cursor + 1)
         cursor += 1
         if line_comment {
@@ -416,7 +416,7 @@ pkg_overlay_read_ident: fn(raw: [U8], at: Int) -> (ident: String, end: Int)? Nev
     starts: (first >= 65 && first <= 90) || (first >= 97 && first <= 122) || first == 95
     if !starts -> return None
     end := at + 1
-    loop end < raw.len() && (pkg_bytes_is_word(Int.from_u8(raw[end])) || Int.from_u8(raw[end]) == 45) {
+    loop end < raw.len() && (pkg_bytes_is_word(Int{raw[end]}) || Int{raw[end]} == 45) {
         end += 1
     }
     Val((end: end, ident: pkg_bytes_text(raw, at, end)))

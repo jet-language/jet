@@ -75,7 +75,7 @@ store_runtime_export_source: fn(source: String) -> String Never! {
             else -> {}
         }
         loop byte in masked.bytes() {
-            if Int.from_u8(byte) == {
+            if (Int{byte}) == {
                 123 -> {
                     kind: if direct && pending != "" -> store_runtime_scope_for_header(pending) else -> NativeRuntimeScope.Other
                     depth += 1
@@ -104,7 +104,7 @@ store_runtime_split_inclusive: fn(text: String) -> [String] Never! {
     lines := [String]{}
     start := 0
     loop index in 0..<raw.len() {
-        if Int.from_u8(raw[index]) == 10 {
+        if (Int{raw[index]}) == 10 {
             lines.push(pkg_bytes_text(raw, start, index + 1))
             start = index + 1
         }
@@ -237,7 +237,7 @@ store_runtime_looks_like_struct_field: fn(code: String) -> Bool Never! {
     name: pkg_bytes_text(raw, 0, colon).trim()
     if name == "" -> return false
     loop byte in name.bytes() {
-        if !pkg_bytes_is_word(Int.from_u8(byte)) -> return false
+        if !pkg_bytes_is_word(Int{byte}) -> return false
     }
     true
 }
@@ -287,7 +287,7 @@ store_runtime_code_mask: fn(source: String) -> String Never! {
     index := 0
     loop index < bytes.len() {
         byte: bytes[index]
-        code: Int.from_u8(byte)
+        code: Int{byte}
         blank: if code == 10 -> byte else -> U8{32}
         if state == {
             .Code -> {
@@ -392,7 +392,7 @@ store_runtime_push_spaces: fn(out: &[U8], count: Int) Never! {
 store_runtime_all_hashes: fn(bytes: [U8], start: Int, count: Int) -> Bool Never! {
     if start + count > bytes.len() -> return false
     loop offset in 0..<count {
-        if Int.from_u8(bytes[start + offset]) != 35 -> return false
+        if (Int{bytes[start + offset]}) != 35 -> return false
     }
     true
 }
@@ -430,7 +430,7 @@ store_runtime_char_literal_end: fn(bytes: [U8], at: Int) -> Int? Never! {
     escaped := false
     offset := 1
     loop at + offset < bytes.len() {
-        code: Int.from_u8(bytes[at + offset])
+        code: Int{bytes[at + offset]}
         if {
             escaped -> escaped = false
             code == 92 -> escaped = true

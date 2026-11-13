@@ -39,10 +39,10 @@ store_broker_net_error: fn(error: NetError) -> StoreError Never! {
 // within the Int range.
 store_broker_parse_unsigned: fn(text: String) -> Int? Never! {
     raw: text.bytes()
-    start: if raw.len() > 0 && Int.from_u8(raw[0]) == 43 -> 1 else -> 0
+    start: if raw.len() > 0 && (Int{raw[0]}) == 43 -> 1 else -> 0
     if start >= raw.len() || raw.len() - start > 19 -> return None
     loop index in start..<raw.len() {
-        code: Int.from_u8(raw[index])
+        code: Int{raw[index]}
         if code < 48 || code > 57 -> return None
     }
     parsed: Int.parse(pkg_bytes_text(raw, start, raw.len())) ?? return None
@@ -54,7 +54,7 @@ store_broker_decode_hex: fn(value: String) -> [U8] StoreError! {
     raw: value.bytes()
     if raw.len() % 2 != 0 -> return Err(store_broker_invalid("shared-store field is not valid hexadecimal"))
     loop byte in raw {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         digit: (code >= 48 && code <= 57) || (code >= 65 && code <= 70) || (code >= 97 && code <= 102)
         if !digit -> return Err(store_broker_invalid("shared-store field is not valid hexadecimal"))
     }
@@ -192,7 +192,7 @@ BrokerWireReader: struct {
             byte: self.read_exact(1)
             header.push(byte[0])
             count: header.len()
-            if count >= 2 && Int.from_u8(header[count - 1]) == 10 && Int.from_u8(header[count - 2]) == 10 -> break
+            if count >= 2 && (Int{header[count - 1]}) == 10 && (Int{header[count - 2]}) == 10 -> break
             if count > STORE_BROKER_MAX_HEADER_BYTES -> return Err(store_broker_invalid("{label} header is too large"))
         }
         Ok(header)

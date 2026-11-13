@@ -28,7 +28,7 @@ ShardError: struct {
 is_digits: fn(text: String) -> Bool Never! {
     if text == "" -> return false
     loop byte in text.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if code < 48 || code > 57 -> return false
     }
     true
@@ -36,7 +36,7 @@ is_digits: fn(text: String) -> Bool Never! {
 
 digits_value: fn(text: String) -> Int Never! {
     value := 0
-    loop byte in text.bytes() -> value = value * 10 + Int.from_u8(byte) - 48
+    loop byte in text.bytes() -> value = value * 10 + (Int{byte}) - 48
     value
 }
 
@@ -67,7 +67,7 @@ parse_rows: fn(input: String) -> [WeightedRow] ShardError! {
     bytes: input.bytes()
     line_start := 0
     loop at in 0..<bytes.len() {
-        if Int.from_u8(bytes[at]) != 10 -> next
+        if (Int{bytes[at]}) != 10 -> next
         fields: split_row(bytes[line_start..<at])
         line_start = at + 1
         if fields.weight == "" || fields.item == "" -> return Err(ShardError{message: "error: weighted shard input rows must be '<weight>\\t<item>'", code: 65})

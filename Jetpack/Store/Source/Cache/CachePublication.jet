@@ -804,7 +804,7 @@ store_cache_read_receipt_pin: fn(path: String) -> CacheReceiptPin StoreError! {
     digest_text: digest ?? return Err(StoreError.InvalidData("cache trust pin has no digest"))
     hex := digest_text.bytes().len() == 64
     loop byte in digest_text.bytes() {
-        if !store_archive_is_hex_digit(Int.from_u8(byte)) -> hex = false
+        if !store_archive_is_hex_digit(Int{byte}) -> hex = false
     }
     if version_number == 0 || expires_number == 0 || !hex -> return Err(StoreError.InvalidData("cache trust pin has invalid fields"))
     Ok(CacheReceiptPin{version: version_number, expires_unix: expires_number})
@@ -815,7 +815,7 @@ store_cache_parse_u64: fn(text: String) -> Int? Never! {
     digits: text.removeprefix("+")
     if digits == "" -> return None
     loop byte in digits.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if code < 48 || code > 57 -> return None
     }
     parsed: Int.parse(digits) ?? return None

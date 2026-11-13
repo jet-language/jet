@@ -479,14 +479,14 @@ str_vappendf: fn<A: PrintfArgs>(p: &StrAccum, fmt: [U8], args: &A) Never! {
             if need_quote -> out.push(U8{q})
             loop j in 0..<i {
                 out.push(esc[j])
-                if Int.from_u8(esc[j]) == q -> out.push(esc[j])
+                if (Int{esc[j]}) == q -> out.push(esc[j])
             }
             if need_quote -> out.push(U8{q})
         }
         // adjust_width_for_utf8: width counts characters under "!".
         if flag_altform2 && width > 0 && (xtype == ET_CHARX || xtype == ET_STRING || xtype == ET_DYNSTRING || xtype == ET_SQLESCAPE || xtype == ET_SQLESCAPE2 || xtype == ET_SQLESCAPE3) {
             loop k in 0..<out.len() {
-                if Int.from_u8(out[k]).bit_and(192) == 128 -> width += 1
+                if (Int{out[k]}).bit_and(192) == 128 -> width += 1
             }
         }
         width -= out.len()

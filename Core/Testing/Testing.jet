@@ -286,7 +286,7 @@ Fake: struct {
 
     locale: fn(self, locale: String) -> Fake Never! {
         code: if locale == "en" -> 0 else if locale == "de" -> 1 else -> panic("unsupported fake-data locale `{locale}`; supported locales: en, de")
-        Fake{state: self.state.bit_xor(U64{code}.wrapping_mul(U64{15111065706836454659})), locale_code: code}
+        Fake{state: self.state.bit_xor(wrapping(U64{code} * U64{15111065706836454659})), locale_code: code}
     }
 
     name: fn(&self) -> String Never! {
@@ -478,24 +478,24 @@ __HistoryRngState: struct {
 
 // A generator seeded by the low 64 bits of a non-negative seed.
 __history_rng_new: fn(seed: Int) -> HistoryRNG Never! {
-    HistoryRNG{__state: Shared{__HistoryRngState{word: U64.from_int(seed % 18446744073709551616) ?? U64{0}}}}
+    HistoryRNG{__state: Shared{__HistoryRngState{word: checked(U64{seed % 18446744073709551616}) ?? U64{0}}}}
 }
 
 __history_rng_draw: fn(rng: HistoryRNG) -> U64 Never! {
     guard := rng.__state.guard_edit()
-    guard.value.word = guard.value.word.wrapping_add(U64{11400714819323198485})
+    guard.value.word = wrapping(guard.value.word + U64{11400714819323198485})
     value := guard.value.word
-    value = (value.bit_xor(value >> U64{30})).wrapping_mul(U64{13787848793156543929})
-    value = (value.bit_xor(value >> U64{27})).wrapping_mul(U64{10723151780598845931})
+    value = wrapping((value.bit_xor(value >> U64{30})) * U64{13787848793156543929})
+    value = wrapping((value.bit_xor(value >> U64{27})) * U64{10723151780598845931})
     value.bit_xor(value >> U64{31})
 }
 
-__history_rng_next: fn(rng: HistoryRNG) -> Int Never! { Int.from_u64(__history_rng_draw(rng)) }
+__history_rng_next: fn(rng: HistoryRNG) -> Int Never! { Int{__history_rng_draw(rng)} }
 
 __history_rng_below: fn(rng: HistoryRNG, bound: Int) -> Int Never! {
     if bound <= 0 -> return 0
-    limit: U64.from_int(bound) ?? return __history_rng_next(rng)
-    Int.from_u64(__history_rng_draw(rng) % limit)
+    limit: checked(U64{bound}) ?? return __history_rng_next(rng)
+    Int{__history_rng_draw(rng) % limit}
 }
 
 // Expected draws: an independent SplitMix64 model (BigInt, Node) from seed 41.
@@ -1365,7 +1365,7 @@ status: fn(comparison: TestComparison) -> String Never! { comparison.status }
 snapshot_name: fn(name: String) -> String Never! {
     out := [U8]{}
     loop byte in name.bytes() {
-        c: Int.from_u8(byte)
+        c: Int{byte}
         if (c >= 48 && c <= 57) || (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || c == 45 || c == 95 {
             out.push(byte)
         } else if c < 128 || c >= 192 {
@@ -1387,7 +1387,7 @@ snapshot_name: fn(name: String) -> String Never! {
 // UTF-8 boundary choices are made here, not in a host-side diff algorithm.
 testing_byte: fn(text: String, index: Int) -> Int Never! {
     #Unsafe("the caller bounded this byte position by the String storage length") {
-        return Int.from_u8(rt.string_byte(text, U64{index}))
+        return Int{rt.string_byte(text, U64{index})}
     }
 }
 

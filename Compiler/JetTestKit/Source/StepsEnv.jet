@@ -5,7 +5,7 @@ kit_steps_env_token_end: fn(argument: String, start: Int) -> Int? {
     i := start + 5
     depth := 1
     loop i < bytes.len() {
-        byte: Int.from_u8(bytes[i])
+        byte: Int{bytes[i]}
         if byte == 123 -> depth += 1
         if byte == 125 {
             depth -= 1
@@ -19,7 +19,7 @@ kit_steps_env_token_end: fn(argument: String, start: Int) -> Int? {
 kit_steps_env_name: fn(name: String) -> Bool {
     if name == "" -> return false
     loop (index, byte) in name.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if code == 95 || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) -> next
         if index > 0 && code >= 48 && code <= 57 -> next
         return false

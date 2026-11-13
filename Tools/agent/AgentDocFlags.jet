@@ -93,7 +93,7 @@ primary_rank: fn(scalar: String) -> Int Never! {
     at: ROOT_PRIMARY_ORDER.find(folded)
     if at >= 0 && folded.count_bytes() == 1 -> return at
     rank := 0
-    loop byte in folded.bytes() -> rank = rank * 256 + Int.from_u8(byte)
+    loop byte in folded.bytes() -> rank = rank * 256 + (Int{byte})
     ROOT_PRIMARY_ORDER.count_bytes() + rank
 }
 

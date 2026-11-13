@@ -1893,7 +1893,7 @@ sema_expression_typed_literal_byte_text: fn(parts: [ByteTextPart], head: Type, s
         if part == {
             .Lit(text) -> {
                 loop byte in text.bytes() {
-                    if Int.from_u8(byte) >= 128 {
+                    if (Int{byte}) >= 128 {
                         diagnostics.push(sema_error("E0119", span, "this body doesn't match typed-literal head `{type_name(head)}`", "a typed literal body uses the head type's own literal shape", "use ASCII text or numeric elements for a byte list"))
                         return None
                     }
@@ -2147,7 +2147,7 @@ sema_expression_typed_literal: fn(head: Type?, body: TypedLitBody, span: Span, e
                     return sema_expr_expected_owned(constant, expected, environment, program, diagnostics)
                 }
                 // `[U8; N]{"…"}` and other element heads check each byte as an element.
-                elements: loop byte in bytes -> Expr.Int{value: Int.from_u8(byte), span: span, width: None, raw: Val("{Int.from_u8(byte)}"), id: AST_NODE_GENERATED}
+                elements: loop byte in bytes -> Expr.Int{value: (Int{byte}), span: span, width: None, raw: Val("{Int{byte}}"), id: AST_NODE_GENERATED}
                 checked: sema_expression_list(Expr.ListLit{elements: elements, span: span, id: AST_NODE_GENERATED}, elements, span, Val(result_head), environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
                 return sema_expr_expected_owned(checked, expected, environment, program, diagnostics)
             }

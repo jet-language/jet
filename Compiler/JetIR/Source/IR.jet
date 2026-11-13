@@ -552,7 +552,7 @@ ir_hashed_function: fn(name: String, key: String, prefix: String, source_file: S
     rest := hash
     loop _ in 0..<16 {
         rest = rest.rotate_left(4)
-        nibble: Int.from_u64(rest.bit_and(U64{15}))
+        nibble: Int{rest.bit_and(U64{15})}
         symbol.push(if nibble < 10 -> U8{48 + nibble} else -> U8{87 + nibble})
     }
     made := ir_function_new(name, key, String.from_bytes(symbol) ?? panic("symbol bytes are UTF-8"), source_file, line)

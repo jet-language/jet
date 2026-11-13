@@ -26,18 +26,18 @@ EvidenceDecoded: struct {
 
 evidence_get_number: fn(cursor: &EvidenceCursor, width: Int) -> U64 EvidenceCodecError! {
     // read_byte checks only bounds; read_u16/u32/u64 check addition first.
-    end: if width == 1 -> cursor.at + 1 else -> Int.from_u64(evidence_checked_offset(U64{cursor.at}, U64{width}, cursor.usize_max) ?? return Err(evidence_codec_error("evidence report offset overflow")))
+    end: if width == 1 -> cursor.at + 1 else -> (Int{evidence_checked_offset(U64{cursor.at}, U64{width}, cursor.usize_max) ?? return Err(evidence_codec_error("evidence report offset overflow"))})
     if end > cursor.bytes.len() -> return Err(evidence_codec_error("truncated evidence report"))
     value := U64{0}
     loop _ in 0..<width {
-        value = (value << 8).bit_or(U64.from_u8(cursor.bytes[cursor.at]))
+        value = (value << 8).bit_or(U64{cursor.bytes[cursor.at]})
         cursor.at += 1
     }
     Ok(value)
 }
 
 evidence_get_byte: fn(cursor: &EvidenceCursor) -> Int EvidenceCodecError! {
-    Ok(Int.from_u64(evidence_get_number(cursor, 1)))
+    Ok(Int{evidence_get_number(cursor, 1)})
 }
 
 evidence_get_string: fn(cursor: &EvidenceCursor) -> String EvidenceCodecError! {
@@ -48,7 +48,7 @@ evidence_get_string: fn(cursor: &EvidenceCursor) -> String EvidenceCodecError! {
     if length > (U64{1048576}) {
         return Err(evidence_codec_error("evidence report field exceeds the 1 MiB limit"))
     }
-    end: Int.from_u64(evidence_checked_offset(U64{cursor.at}, length, cursor.usize_max) ?? return Err(evidence_codec_error("evidence report field offset overflow")))
+    end: Int{evidence_checked_offset(U64{cursor.at}, length, cursor.usize_max) ?? return Err(evidence_codec_error("evidence report field offset overflow"))}
     if end > cursor.bytes.len() {
         return Err(evidence_codec_error("truncated evidence report field"))
     }
@@ -67,7 +67,7 @@ evidence_get_len: fn(cursor: &EvidenceCursor) -> Int EvidenceCodecError! {
     if raw_length > (U64{10000}) {
         return Err(evidence_codec_error("evidence report collection is too large"))
     }
-    Ok(Int.from_u64(raw_length))
+    Ok(Int{raw_length})
 }
 
 evidence_get_optional: fn(cursor: &EvidenceCursor) -> String? EvidenceCodecError! {
@@ -154,8 +154,8 @@ evidence_decode_record: fn(cursor: &EvidenceCursor) -> EvidenceDecodedRecord Evi
         .Ok(_) -> {}
     }
     count: evidence_get_number(cursor, 8)
-    line: U32{Int.from_u64(evidence_get_number(cursor, 4))}
-    column: U32{Int.from_u64(evidence_get_number(cursor, 4))}
+    line: U32{Int{evidence_get_number(cursor, 4)}}
+    column: U32{Int{evidence_get_number(cursor, 4)}}
     report_id: evidence_get_string(cursor)
     claim_id: evidence_get_string(cursor)
     evidence_id: evidence_get_string(cursor)
@@ -179,8 +179,8 @@ evidence_decode_record: fn(cursor: &EvidenceCursor) -> EvidenceDecodedRecord Evi
             return Err(evidence_codec_error("unknown evidence diagnostic source marker {marker}"))
         }
         diagnostic_source: if marker == 1 -> {
-            diagnostic_line: U32{Int.from_u64(evidence_get_number(cursor, 4))}
-            diagnostic_column: U32{Int.from_u64(evidence_get_number(cursor, 4))}
+            diagnostic_line: U32{Int{evidence_get_number(cursor, 4)}}
+            diagnostic_column: U32{Int{evidence_get_number(cursor, 4)}}
             Val(EvidenceSource{path: evidence_get_string(cursor), line: diagnostic_line, column: diagnostic_column})
         } else -> None
         diagnostics.push(EvidenceDiagnostic{code: code, message: message, source: diagnostic_source})
@@ -223,7 +223,7 @@ evidence_decode_report_bytes: fn(bytes: [U8], usize_max: U64) -> EvidenceDecoded
         }
     }
     cursor := evidence_cursor(bytes, 8, usize_max)
-    version: U16{Int.from_u64(evidence_get_number(cursor, 2))}
+    version: U16{Int{evidence_get_number(cursor, 2)}}
     if version != EVIDENCE_REPORT_VERSION {
         return Err(evidence_codec_error("unsupported evidence report schema version {version}"))
     }

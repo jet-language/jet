@@ -477,7 +477,7 @@ queue_json_text: fn(value: String) -> String Never! {
     output := [U8]{34}
     index := 0
     loop index < raw.len() {
-        code := Int.from_u8(raw[index])
+        code := Int{raw[index]}
         index += 1
         if code == 34 || code == 92 {
             output.push(U8{92})
@@ -497,7 +497,7 @@ queue_json_text: fn(value: String) -> String Never! {
                 next
             }
             if code == 194 && index < raw.len() && raw[index] >= (U8{128}) && raw[index] <= (U8{159}) {
-                code = Int.from_u8(raw[index])
+                code = Int{raw[index]}
                 index += 1
             }
             if (code < 32 || (code >= 127 && code <= 159)) {
@@ -924,8 +924,8 @@ queue_signature: fn(key: [U8], authority: String, id: String, name: String, job_
     alphabet: "0123456789abcdef".bytes()
     out := [U8]{}
     loop byte in bytes {
-        out.push(alphabet[Int.from_u8(byte) /% 16])
-        out.push(alphabet[Int.from_u8(byte) % 16])
+        out.push(alphabet[Int{byte} /% 16])
+        out.push(alphabet[Int{byte} % 16])
     }
     String.from_bytes(out) ?? panic("queue hexadecimal signature must be UTF-8")
 }

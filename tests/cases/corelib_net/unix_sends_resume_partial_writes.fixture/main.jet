@@ -41,7 +41,7 @@ receive_line: fn(&stream: net.UnixStream) -> String {
         message: net.unix_receive(stream, 256) ?? panic("receive: {err}")
         if message.bytes.len() == 0 -> panic("the peer hung up mid-line")
         loop byte in message.bytes {
-            if Int.from_u8(byte) == 10 -> return String.from_bytes(line) ?? ""
+            if (Int{byte}) == 10 -> return String.from_bytes(line) ?? ""
             line.push(byte)
         }
     }

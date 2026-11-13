@@ -638,7 +638,7 @@ jet_cli_replay_net_digest: fn(domain: String, salt: [U8], parts: [[U8]]) -> Stri
             shift: 7 - step
             rest := part.len()
             loop _ in 0..<shift -> rest = rest /% 256
-            out.push(U8.from_int(rest %% 256) ?? panic("replay digest byte"))
+            out.push(checked(U8{rest %% 256}) ?? panic("replay digest byte"))
         }
         out.extend(part.copy())
     }
@@ -813,7 +813,7 @@ jet_cli_replay_header_bytes: fn(artifact_id: String, run: JetCLIReplayRun, salt:
 jet_cli_replay_put_le: fn(out: &[U8], value: Int, width: Int) Never! {
     rest := value
     loop _ in 0..<width {
-        out.push(U8.from_int(rest %% 256) ?? panic("replay wire byte"))
+        out.push(checked(U8{rest %% 256}) ?? panic("replay wire byte"))
         rest /%= 256
     }
 }
@@ -935,7 +935,7 @@ jet_cli_replay_journal_open: fn(run: JetCLIReplayRun, folder: String) -> JetCLIR
     records := [U8]{}
     if run.replayed == .Val(artifact) {
         loop read in artifact.reads {
-            records.push(U8.from_int(read.kind) ?? panic("journal kind"))
+            records.push(checked(U8{read.kind}) ?? panic("journal kind"))
             jet_cli_replay_put_le(records, read.request, 8)
             jet_cli_replay_put_le(records, read.result, 8)
             records.extend(read.bytes)
@@ -964,7 +964,7 @@ jet_cli_replay_journal_reads: fn(journal: JetCLIReplayJournal, run: JetCLIReplay
     frames := 1
     loop at < bytes.len() {
         if at + JET_CLI_REPLAY_JOURNAL_HEAD > bytes.len() -> return Err(jet_cli_replay_unfinalized("the capture journal ends inside a record"))
-        kind: Int.from_u8(bytes[at])
+        kind: Int{bytes[at]}
         request: jet_cli_replay_journal_u64(bytes, at + 1)
         result: jet_cli_replay_journal_u64(bytes, at + 9)
         if kind == JET_CLI_REPLAY_JOURNAL_RAND_FAILED {
@@ -1028,7 +1028,7 @@ jet_cli_replay_journal_stdin: fn(path: String) -> [U8] Never! {
     bytes: cli_files.read_bytes(path) ?? return typed
     at := 0
     loop at + JET_CLI_REPLAY_JOURNAL_HEAD <= bytes.len() {
-        kind: Int.from_u8(bytes[at])
+        kind: Int{bytes[at]}
         result: jet_cli_replay_journal_u64(bytes, at + 9)
         start: at + JET_CLI_REPLAY_JOURNAL_HEAD
         size: if kind < 97 -> result else -> 0
@@ -1051,7 +1051,7 @@ jet_cli_replay_journal_divergence: fn(journal: JetCLIReplayJournal, artifact: Je
     hops := 0
     at := 0
     loop at < trace.len() {
-        mark: Int.from_u8(trace[at])
+        mark: Int{trace[at]}
         if mark == JET_CLI_REPLAY_JOURNAL_REQUEST {
             size: if at + 9 <= trace.len() -> jet_cli_replay_journal_u64(trace, at + 1) else -> -1
             if size < 0 || size > trace.len() - at - 9 -> return Val(jet_cli_replay_diverged("the replay trace ends inside HTTP request {hops + 1}"))
@@ -1122,7 +1122,7 @@ jet_cli_replay_entry_stem: fn(entry: String) -> String Never! {
     stem: jet_cli_file_name(entry).removesuffix(".jet")
     out := [U8]{}
     loop byte in stem.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         keep: (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 45 || code == 95
         out.push(if keep -> byte else -> U8{95})
     }
@@ -1155,7 +1155,7 @@ jet_cli_replay_capture_refusal: fn(root: String, request: JetCLIProveCapture, si
 jet_cli_replay_capture_path_problem: fn(path: String) -> String? Never! {
     if path == "" -> return Val("explicit capture path is empty")
     loop byte in path.bytes() {
-        if Int.from_u8(byte) == 0 -> return Val("capture path contains NUL")
+        if (Int{byte}) == 0 -> return Val("capture path contains NUL")
     }
     if path.contains("\\") -> return Val("capture path must use non-empty forward-slash components")
     parts: path.split("/").to_list()
@@ -1268,7 +1268,7 @@ jet_cli_replay_field_value: fn(fields: [CanonicalJSONField], key: String) -> Str
 jet_cli_replay_input_problem: fn(raw: String) -> String? Never! {
     if raw == "" -> return Val("replay artifact path is empty")
     loop byte in raw.bytes() {
-        if Int.from_u8(byte) == 0 -> return Val("replay artifact path must stay project-relative")
+        if (Int{byte}) == 0 -> return Val("replay artifact path must stay project-relative")
     }
     if raw.contains("\\") || raw.starts_with("/") -> return Val("replay artifact path must stay project-relative")
     parts: raw.split("/").to_list()
@@ -1378,7 +1378,7 @@ jet_cli_replay_verify: fn(bytes: [U8]) -> JetCLIReplayArtifact JetCLIReplayFault
     loop at < jend {
         if at + 15 > jend -> return Err(jet_cli_replay_corrupt("truncated frame header"))
         if frames >= JET_CLI_REPLAY_MAX_FRAMES -> return Err(jet_cli_replay_limit("replay artifact exceeds the {JET_CLI_REPLAY_MAX_FRAMES}-frame limit"))
-        flags: Int.from_u8(bytes[at])
+        flags: Int{bytes[at]}
         kind: jet_cli_replay_le(bytes, at + 1, 2)
         length: jet_cli_replay_le(bytes, at + 11, 4)
         payload_end: at + 15 + length
@@ -1482,7 +1482,7 @@ jet_cli_replay_verify: fn(bytes: [U8]) -> JetCLIReplayArtifact JetCLIReplayFault
     // The content id hashes the prefix, the header with a zeroed id, and the
     // frames. The header is canonical with no unknown key, so `artifact_id`
     // is its first key and the id's 24 bytes sit right after `{"artifact_id":"`.
-    if jet_cli_replay_text_at(bytes, 16, "{{\"artifact_id\":\"") == false || Int.from_u8(bytes[56]) != 34 -> return Err(jet_cli_replay_corrupt("header artifact_id must be its first field"))
+    if jet_cli_replay_text_at(bytes, 16, "{{\"artifact_id\":\"") == false || (Int{bytes[56]}) != 34 -> return Err(jet_cli_replay_corrupt("header artifact_id must be its first field"))
     body := bytes.slice(0, 32)
     loop _ in 0..<24 -> body.push(U8{48})
     body.extend(bytes.slice(56, jend))
@@ -1619,7 +1619,7 @@ jet_cli_replay_u64_value: fn(text: String) -> Int? Never! {
     }
     value := 0
     loop byte in text.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         digit: if code <= 57 -> code - 48 else -> code - 87
         if value > (JET_CLI_REPLAY_MAX_I64 - digit) /% 16 -> return None
         value = value * 16 + digit
@@ -1859,11 +1859,11 @@ jet_cli_replay_array: fn(fields: [CanonicalJSONField], key: String, name: String
 // An address the resolver answered, 4 or 16 network-order octets, as text:
 // dotted decimal, or eight lowercase hex groups without leading zeros.
 jet_cli_replay_ip_text: fn(address: [U8]) -> String Never! {
-    if address.len() == 4 -> return "{Int.from_u8(address[0])}.{Int.from_u8(address[1])}.{Int.from_u8(address[2])}.{Int.from_u8(address[3])}"
+    if address.len() == 4 -> return "{Int{address[0]}}.{Int{address[1]}}.{Int{address[2]}}.{Int{address[3]}}"
     digits: "0123456789abcdef"
     groups := [String]{}
     loop at in 0..<(address.len() /% 2) {
-        rest := Int.from_u8(address[2 * at]) * 256 + Int.from_u8(address[2 * at + 1])
+        rest := Int{address[2 * at]} * 256 + Int{address[2 * at + 1]}
         group := ""
         loop {
             group = "{digits.slice(rest %% 16, rest %% 16 + 1)}{group}"
@@ -1884,7 +1884,7 @@ jet_cli_replay_ip_bytes: fn(text: String) -> [U8]? Never! {
         loop part in parts {
             if !jet_cli_replay_digits(part) || (part.len() > 1 && part.starts_with("0")) -> return None
             value: Int.parse(part) ?? return None
-            out.push(U8.from_int(value) ?? return None)
+            out.push(checked(U8{value}) ?? return None)
         }
         return Val(out)
     }
@@ -1894,11 +1894,11 @@ jet_cli_replay_ip_bytes: fn(text: String) -> [U8]? Never! {
         if part.len() > 4 || (part.len() > 1 && part.starts_with("0")) || !jet_cli_replay_lower_hex(part, part.len()) -> return None
         value := 0
         loop byte in part.bytes() {
-            code: Int.from_u8(byte)
+            code: Int{byte}
             value = value * 16 + (if code <= 57 -> code - 48 else -> code - 87)
         }
-        out.push(U8.from_int(value /% 256) ?? return None)
-        out.push(U8.from_int(value %% 256) ?? return None)
+        out.push(checked(U8{value /% 256}) ?? return None)
+        out.push(checked(U8{value %% 256}) ?? return None)
     }
     Val(out)
 }
@@ -2089,7 +2089,7 @@ jet_cli_replay_roots: fn(capture: [CanonicalJSONField]) -> [String] JetCLIReplay
 jet_cli_replay_lower_hex: fn(text: String, width: Int) -> Bool Never! {
     if text.len() != width -> return false
     loop byte in text.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if !((code >= 48 && code <= 57) || (code >= 97 && code <= 102)) -> return false
     }
     true
@@ -2098,7 +2098,7 @@ jet_cli_replay_lower_hex: fn(text: String, width: Int) -> Bool Never! {
 jet_cli_replay_digits: fn(text: String) -> Bool Never! {
     if text == "" -> return false
     loop byte in text.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if code < 48 || code > 57 -> return false
     }
     true
@@ -2123,7 +2123,7 @@ jet_cli_replay_salt: fn(text: String) -> Bool Never! {
     if text.len() != 43 -> return false
     last := 0
     loop byte in text.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         last = if {
             code >= 65 && code <= 90 -> code - 65
             code >= 97 && code <= 122 -> code - 97 + 26
@@ -2140,7 +2140,7 @@ jet_cli_replay_salt: fn(text: String) -> Bool Never! {
 // A little-endian unsigned field of `width` (at most 4) bytes.
 jet_cli_replay_le: fn(bytes: [U8], at: Int, width: Int) -> Int Never! {
     value := 0
-    loop step in 0..<width -> value = value * 256 + Int.from_u8(bytes[at + width - 1 - step])
+    loop step in 0..<width -> value = value * 256 + (Int{bytes[at + width - 1 - step]})
     value
 }
 
@@ -2159,7 +2159,7 @@ jet_cli_replay_text_at: fn(bytes: [U8], at: Int, text: String) -> Bool Never! {
 }
 
 jet_cli_replay_has_magic: fn(bytes: [U8]) -> Bool Never! {
-    jet_cli_replay_text_at(bytes, 0, "JREPLAY") && Int.from_u8(bytes[7]) == 0
+    jet_cli_replay_text_at(bytes, 0, "JREPLAY") && Int{bytes[7]} == 0
 }
 
 jet_cli_replay_has_jend: fn(bytes: [U8], at: Int) -> Bool Never! {

@@ -328,7 +328,7 @@ sema_pattern_payload: fn(subject_ty: Type, variant: String, env: SemaScopeEnviro
 // but the subject's enum declares a case of it, the leading `.` of `.Red` is
 // missing (E0367), not the name. None when the name is no such case.
 sema_pattern_bare_case: fn(subject_ty: Type, name: String, span: Span, env: SemaScopeEnvironment, program: SemaProgramTables) -> Diagnostic? {
-    if name.len() == 0 || Int.from_u8(name.bytes()[0]) < 65 || Int.from_u8(name.bytes()[0]) > 90 -> return None
+    if name.len() == 0 || (Int{name.bytes()[0]}) < 65 || (Int{name.bytes()[0]}) > 90 -> return None
     probe := [Diagnostic]{}
     payload: sema_pattern_payload(subject_ty, name, env, program, span, probe)
     if !payload.known || payload.group || payload.owner == None -> return None
@@ -753,7 +753,7 @@ sema_pattern_constant_name: fn(name: String) -> Bool Never! {
     if name.len() == 0 -> return false
     letter := false
     loop byte in name.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if code >= 65 && code <= 90 -> letter = true
         if code >= 97 && code <= 122 -> return false
     }

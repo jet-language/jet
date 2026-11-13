@@ -114,7 +114,7 @@ bytes_of: fn(src: [U8], off: Int, count: Int) -> [U8] Never! {
 wipe_words: fn(w: &[U64]) Never! { loop i in 0..<w.len() -> w[i] = U64{0} }
 
 le32: fn(b: [U8], off: Int) -> U64 Never! {
-    U64.from_u8(b[off]).bit_or(U64.from_u8(b[off + 1]) << 8).bit_or(U64.from_u8(b[off + 2]) << 16).bit_or(U64.from_u8(b[off + 3]) << 24)
+    U64{b[off]}.bit_or(U64{b[off + 1]} << 8).bit_or(U64{b[off + 2]} << 16).bit_or(U64{b[off + 3]} << 24)
 }
 
 // The low byte of `x` (wrapping): no test of the value.
@@ -582,7 +582,7 @@ aes_expand: fn(key: [#Secret U8], rounds: Int, decrypt: Bool) -> AESKey Never! {
             // RotWord on a little-endian word, SubWord, then Rcon.
             tmp = ((tmp << 24).bit_or(tmp >> 8)).bit_and(U64{0xffffffff})
             tmp = sub_word(q, tmp).bit_xor(rcon)
-            rcon = U64.from_u8(xtime(low_byte(rcon)))
+            rcon = U64{xtime(low_byte(rcon))}
         } else if nk > 6 && j == 4 {
             tmp = sub_word(q, tmp)
         }
@@ -630,7 +630,7 @@ xor_into: fn(dst: &[U8], at: Int, a: [U8], a_off: Int, b: [U8], b_off: Int, coun
 increment: fn(ctr: &[U8], width: Int) Never! {
     carry := U64{1}
     loop i in 0..<width {
-        n: U64.from_u8(ctr[15 - i]) + carry
+        n: U64{ctr[15 - i]} + carry
         ctr[15 - i] = low_byte(n)
         carry = n >> 8
     }
@@ -644,8 +644,8 @@ xts_double: fn(t: &[U8]) Never! {
     a := U64{0}
     b := U64{0}
     loop i in 0..<8 {
-        a = a.bit_or(U64.from_u8(t[i]) << (8 * i))
-        b = b.bit_or(U64.from_u8(t[8 + i]) << (8 * i))
+        a = a.bit_or(U64{t[i]} << (8 * i))
+        b = b.bit_or(U64{t[8 + i]} << (8 * i))
     }
     ra: (a << 1).bit_xor(U64{0x87}.bit_and(U64{0} - (b >> 63)))
     rb: (a >> 63).bit_or(b << 1)
@@ -1140,25 +1140,25 @@ kw_unwrap: fn(k: AESKey, padded: Bool, wrapped: [U8]) -> [U8] CipherError! {
     diff := U64{0}
     plen := U64{len - 8}
     if padded {
-        loop i in 0..<4 -> diff = diff.bit_or(U64.from_u8(buf[i].bit_xor(KWP_ICV2[i])))
+        loop i in 0..<4 -> diff = diff.bit_or(U64{buf[i].bit_xor(KWP_ICV2[i])})
         mli := U64{0}
-        loop i in 0..<4 -> mli = (mli << 8).bit_or(U64.from_u8(buf[4 + i]))
+        loop i in 0..<4 -> mli = (mli << 8).bit_or(U64{buf[4 + i]})
         // The padding is len - 8 - MLI bytes: 0 to 7, and all zero. An MLI
         // past len - 8 fails, and is capped there, without a branch.
         room: U64{len - 8}
         over: ct_gt(mli, room)
         capped: mli.bit_and(over.bit_not()).bit_or(room.bit_and(over))
-        padding: room.wrapping_sub(capped)
+        padding: wrapping(room - capped)
         diff = diff.bit_or(over).bit_or(ct_gt(padding, U64{7}))
         zeros: padding.bit_and(U64{7})
         loop i in 0..<8 {
             // Byte 8 + (len - 16) + i is padding when i >= 8 - zeros.
-            inside: ct_gt(U64{i + 1}, U64{8}.wrapping_sub(zeros))
-            diff = diff.bit_or(inside.bit_and(U64.from_u8(buf[len - 8 + i])))
+            inside: ct_gt(U64{i + 1}, wrapping(U64{8} - zeros))
+            diff = diff.bit_or(inside.bit_and(U64{buf[len - 8 + i]}))
         }
         plen = capped
     } else {
-        loop i in 0..<8 -> diff = diff.bit_or(U64.from_u8(buf[i].bit_xor(U8{KW_ICV1})))
+        loop i in 0..<8 -> diff = diff.bit_or(U64{buf[i].bit_xor(U8{KW_ICV1})})
     }
     if !kw_unwrap_ok(diff) {
         core.crypto.wipe(buf)
@@ -1244,14 +1244,14 @@ cbc_get_padding: fn(mode: CBCPadding, input: [U8], off: Int, len: Int) -> CBCPad
     if mode == {
         .Unpadded -> CBCPaddingCheck{data_len: total, bad: U64{0}}
         .PKCS7 | .ZerosAndLen -> {
-            n: U64.from_u8(input[off + len - 1])
+            n: U64{input[off + len - 1]}
             bad := ct_gt(n, total).bit_or(ct_nonzero(n).bit_not())
             pad_idx: total - n
             want: if mode == .PKCS7 -> n else -> U64{0}
             checked: if mode == .PKCS7 -> len else -> len - 1
             loop i in 0..<checked {
                 inside: ct_gt(U64{i + 1}, pad_idx)
-                bad = bad.bit_or(inside.bit_and(ct_nonzero(U64.from_u8(input[off + i]).bit_xor(want))))
+                bad = bad.bit_or(inside.bit_and(ct_nonzero(U64{input[off + i]}.bit_xor(want))))
             }
             CBCPaddingCheck{data_len: pad_idx.bit_and(bad.bit_not()), bad: bad}
         }
@@ -1261,7 +1261,7 @@ cbc_get_padding: fn(mode: CBCPadding, input: [U8], off: Int, len: Int) -> CBCPad
             at := U64{0}
             i := len - 1
             loop i >= 0 {
-                b: U64.from_u8(input[off + i])
+                b: U64{input[off + i]}
                 nonzero: ct_nonzero(b)
                 hit: nonzero.bit_and(in_padding)
                 at = U64{i}.bit_and(hit).bit_or(at.bit_and(hit.bit_not()))
@@ -1277,7 +1277,7 @@ cbc_get_padding: fn(mode: CBCPadding, input: [U8], off: Int, len: Int) -> CBCPad
             i := len
             loop i > 0 {
                 was: done
-                done = done.bit_or(ct_nonzero(U64.from_u8(input[off + i - 1])))
+                done = done.bit_or(ct_nonzero(U64{input[off + i - 1]}))
                 turned: done.bit_xor(was)
                 at = U64{i}.bit_and(turned).bit_or(at.bit_and(turned.bit_not()))
                 i -= 1

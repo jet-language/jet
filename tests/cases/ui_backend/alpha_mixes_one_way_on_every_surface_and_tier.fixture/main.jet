@@ -37,7 +37,7 @@ run: fn() {
     // B, G, R, A: #0B0B0D opaque, as a premultiplied ARGB8888 word.
     pixels := [U8]{13, 11, 11, 255}
     font.blend(pixels, 1, 1, 4, font.GlyphMask{width: 1, height: 1, left: 0, top: 1, coverage: [U8]{255}}, 0, 1, 0x14FFFFFF, ui.UIRect{x: 0, y: 0, width: 1, height: 1})
-    print("Font blend: 0x{hex(Int.from_u8(pixels[3]))}{hex(Int.from_u8(pixels[2]))}{hex(Int.from_u8(pixels[1]))}{hex(Int.from_u8(pixels[0]))}")
+    print("Font blend: 0x{hex(Int{pixels[3]})}{hex(Int{pixels[2]})}{hex(Int{pixels[1]})}{hex(Int{pixels[0]})}")
 }
 
 // The text's most covered pixel: the brightest below the top rows, where
@@ -54,7 +54,7 @@ brightest: fn(screen: ui.Image) -> Color {
 }
 
 show: fn(surface: String, color: Color) {
-    print("{surface}: #{hex(Int.from_u8(color.r))}{hex(Int.from_u8(color.g))}{hex(Int.from_u8(color.b))}, alpha {color.a}")
+    print("{surface}: #{hex(Int{color.r})}{hex(Int{color.g})}{hex(Int{color.b})}, alpha {color.a}")
 }
 
 hex: fn(byte: Int) -> String {

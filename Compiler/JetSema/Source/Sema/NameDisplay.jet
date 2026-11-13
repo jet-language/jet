@@ -118,7 +118,7 @@ sema_name_lifted_type_paths: fn(items: [Item], scope: String, display: String, p
             .Func(_) | .UnitFamily(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> next
         }
         if !name.starts_with(type_prefix) || name.bytes().len() == prefix_end -> next
-        first: Int.from_u8(name.bytes()[prefix_end])
+        first: Int{name.bytes()[prefix_end]}
         if first >= 48 && first <= 57 -> next
         paths[name] = "{display}.{sema_name_strip_prefix(name, type_prefix)}"
     }
@@ -189,9 +189,9 @@ sema_name_lifted_function_paths: fn(items: [Item], paths: &[String:String]) Neve
 // generated type name: `M` (after an optional `_`) and a digit.
 sema_name_generated_shape: fn(bytes: [U8], start: Int, end: Int) -> Bool Never! {
     at := start
-    if Int.from_u8(bytes[at]) == 95 -> at += 1
-    if at + 1 >= end || Int.from_u8(bytes[at]) != 77 -> return false
-    digit: Int.from_u8(bytes[at + 1])
+    if (Int{bytes[at]}) == 95 -> at += 1
+    if at + 1 >= end || (Int{bytes[at]}) != 77 -> return false
+    digit: Int{bytes[at + 1]}
     digit >= 48 && digit <= 57
 }
 
@@ -203,16 +203,16 @@ sema_name_display_text: fn(text: String, paths: [String:String]) -> String Never
     copied := 0
     index := 0
     loop index < bytes.len() {
-        code: Int.from_u8(bytes[index])
+        code: Int{bytes[index]}
         if !sema_inline_is_alphanumeric(code) && code != 95 {
             index += 1
             next
         }
         start: index
-        loop index < bytes.len() && (sema_inline_is_alphanumeric(Int.from_u8(bytes[index])) || Int.from_u8(bytes[index]) == 95) -> index += 1
+        loop index < bytes.len() && (sema_inline_is_alphanumeric(Int{bytes[index]}) || Int{bytes[index]} == 95) -> index += 1
         generated: sema_name_generated_shape(bytes, start, index)
         // `__j`: only then can the word be a lifted member (`__jet_…`).
-        lifted: !generated && index - start > 6 && Int.from_u8(bytes[start]) == 95 && Int.from_u8(bytes[start + 1]) == 95 && Int.from_u8(bytes[start + 2]) == 106
+        lifted: !generated && index - start > 6 && Int{bytes[start]} == 95 && Int{bytes[start + 1]} == 95 && Int{bytes[start + 2]} == 106
         if !generated && !lifted -> next
         word: String.from_bytes(bytes[start..<index]) ?? next
         display: paths.get(word) ?? ""

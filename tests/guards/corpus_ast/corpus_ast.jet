@@ -743,7 +743,7 @@ policy_ascii_literal: fn(expression: Expr) -> Int? {
         if parts.len() != 1 -> return None
         if parts[0] == .Lit(text) {
             bytes: text.bytes()
-            if bytes.len() == 1 && bytes[0] <= 127 -> return Val(Int.from_u8(bytes[0]))
+            if bytes.len() == 1 && bytes[0] <= 127 -> return Val(Int{bytes[0]})
         }
     }
     None
@@ -953,8 +953,8 @@ policy_ascii_equal: fn(left: String, right: String) -> Bool {
     r: right.bytes()
     if l.len() != r.len() -> return false
     loop index in 0..<l.len() {
-        a := Int.from_u8(l[index])
-        b := Int.from_u8(r[index])
+        a := Int{l[index]}
+        b := Int{r[index]}
         if a >= 65 && a <= 90 -> a += 32
         if b >= 65 && b <= 90 -> b += 32
         if a != b -> return false
@@ -2062,8 +2062,8 @@ policy_ast_test_unicode_shell_words: fn() {
 policy_planted_ascii_ladder: fn() -> String {
     lower := "\"text\""
     loop index in 0..<26 {
-        from: String.from_bytes([U8]{U8.from_int(65 + index) ?? panic("ASCII uppercase byte")}) ?? panic("ASCII")
-        to: String.from_bytes([U8]{U8.from_int(97 + index) ?? panic("ASCII lowercase byte")}) ?? panic("ASCII")
+        from: String.from_bytes([U8]{checked(U8{65 + index}) ?? panic("ASCII uppercase byte")}) ?? panic("ASCII")
+        to: String.from_bytes([U8]{checked(U8{97 + index}) ?? panic("ASCII lowercase byte")}) ?? panic("ASCII")
         lower += ".replace(\"{from}\", \"{to}\")"
     }
     lower

@@ -330,7 +330,7 @@ pkg_com_is_digest: fn(value: String) -> Bool Never! {
     raw: value.bytes()
     if raw.len() != 64 -> return false
     loop byte in raw {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if !pkg_binder_is_ascii_digit(code) && (code < 97 || code > 102) -> return false
     }
     true
@@ -341,7 +341,7 @@ pkg_com_parse_unsigned: fn(text: String, max: Int) -> Int? Never! {
     digits: text.removeprefix("+")
     if digits == "" -> return None
     loop byte in digits.bytes() {
-        if !pkg_binder_is_ascii_digit(Int.from_u8(byte)) -> return None
+        if !pkg_binder_is_ascii_digit(Int{byte}) -> return None
     }
     value: Int.parse(digits) ?? return None
     if value > max -> return None
@@ -631,9 +631,9 @@ pkg_com_project: fn(value: String) -> String ForeignBindError! {
 pkg_com_validate_guid: fn(value: String) ForeignBindError! {
     raw: value.bytes()
     invalid: ForeignBindError.Source("the registered COM type-library GUID is invalid")
-    if raw.len() != 38 || Int.from_u8(raw[0]) != 123 || Int.from_u8(raw[37]) != 125 -> return Err(invalid)
+    if raw.len() != 38 || (Int{raw[0]}) != 123 || (Int{raw[37]}) != 125 -> return Err(invalid)
     loop index in 1..<37 {
-        code: Int.from_u8(raw[index])
+        code: Int{raw[index]}
         dash: index == 9 || index == 14 || index == 19 || index == 24
         if dash && code != 45 -> return Err(invalid)
         if !dash && !pkg_com_is_hex(code) -> return Err(invalid)

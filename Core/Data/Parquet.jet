@@ -106,7 +106,7 @@ Cursor: struct {
 
     byte: fn(&self, input: [U8]) -> Int ParquetFailure! {
         if self.pos >= self.end -> return Err(decode_failure("Parquet metadata ends early at byte {self.pos}"))
-        value: Int.from_u8(input[self.pos])
+        value: Int{input[self.pos]}
         self.pos += 1
         Ok(value)
     }
@@ -135,7 +135,7 @@ Cursor: struct {
     little: fn(&self, input: [U8], width: Int) -> Int ParquetFailure! {
         if width > self.end - self.pos -> return Err(decode_failure("value at byte {self.pos} needs {width} bytes past the end of its page"))
         value := 0
-        loop index in 0..<width -> value = value.bit_or((Int.from_u8(input[self.pos + index]) << (8 * index)))
+        loop index in 0..<width -> value = value.bit_or((Int{input[self.pos + index]} << (8 * index)))
         self.pos += width
         Ok(value)
     }
@@ -607,7 +607,7 @@ plain_values: fn(page: [U8], cursor: &Cursor, leaf: Leaf, count: Int) -> [Dyn] P
         bytes: (count + 7) >> 3
         if bytes > cursor.end - cursor.pos -> return Err(decode_failure("column `{leaf.name}` holds fewer than {count} booleans"))
         loop index in 0..<count {
-            bit: (Int.from_u8(page[cursor.pos + (index >> 3)]) >> index.bit_and(7)).bit_and(1)
+            bit: (Int{page[cursor.pos + (index >> 3)]} >> index.bit_and(7)).bit_and(1)
             values.push(Dyn.Bool(bit == 1))
         }
         cursor.pos += bytes
@@ -674,7 +674,7 @@ hybrid: fn(data: [U8], cursor: &Cursor, width: Int, count: Int) -> [Int] Parquet
                 value := 0
                 loop offset in 0..<width {
                     at: bit + offset
-                    set: (Int.from_u8(data[cursor.pos + (at >> 3)]) >> at.bit_and(7)).bit_and(1)
+                    set: (Int{data[cursor.pos + (at >> 3)]} >> at.bit_and(7)).bit_and(1)
                     value = value.bit_or((set << offset))
                 }
                 out.push(value)

@@ -447,7 +447,7 @@ cli_import_toml_value_text: fn(value: String) -> String Never! {
     quote := ImportTOMLQuote.Unquoted
     escaped := false
     loop index in 0..<bytes.len() {
-        code: Int.from_u8(bytes[index])
+        code: Int{bytes[index]}
         if {
             quote == ImportTOMLQuote.Double && code == 34 && !escaped -> quote = ImportTOMLQuote.Unquoted
             quote == ImportTOMLQuote.Single && code == 39 -> quote = ImportTOMLQuote.Unquoted
@@ -467,8 +467,8 @@ cli_import_unquote_toml_value: fn(raw: String) -> String Never! {
     value: raw.trim()
     bytes: value.bytes()
     if bytes.len() >= 2 {
-        first: Int.from_u8(bytes[0])
-        last: Int.from_u8(bytes[bytes.len() - 1])
+        first: Int{bytes[0]}
+        last: Int{bytes[bytes.len() - 1]}
         if (first == 34 && last == 34) || (first == 39 && last == 39) -> return String.from_bytes(bytes.slice(1, bytes.len() - 1)) ?? value
     }
     value
@@ -561,7 +561,7 @@ cli_import_exact_npm_version: fn(raw: String) -> String? Never! {
     value: raw.trim()
     if value == "" -> return None
     loop byte in value.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         alphanumeric: (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122)
         if !alphanumeric && code != 46 && code != 45 && code != 43 -> return None
     }
@@ -573,7 +573,7 @@ cli_import_exact_npm_version: fn(raw: String) -> String? Never! {
     loop part in parts {
         if part == "" -> return None
         loop byte in part.bytes() {
-            code: Int.from_u8(byte)
+            code: Int{byte}
             if code < 48 || code > 57 -> return None
         }
     }

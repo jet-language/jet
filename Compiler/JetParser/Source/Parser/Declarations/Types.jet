@@ -495,8 +495,8 @@ parser_unit_decimal_to_ratio: fn(text: String) -> UnitRatio Never! {
     bytes: clean.bytes()
     sign := 1
     index := 0
-    if bytes.len() > 0 && (Int.from_u8(bytes[0]) == 45 || Int.from_u8(bytes[0]) == 43) {
-        if Int.from_u8(bytes[0]) == 45 -> sign = -1
+    if bytes.len() > 0 && (Int{bytes[0]} == 45 || Int{bytes[0]} == 43) {
+        if (Int{bytes[0]}) == 45 -> sign = -1
         index = 1
     }
     whole := 0
@@ -506,15 +506,15 @@ parser_unit_decimal_to_ratio: fn(text: String) -> UnitRatio Never! {
     exponent := 0
     exponent_sign := 1
     loop index < bytes.len() {
-        value: Int.from_u8(bytes[index])
+        value: Int{bytes[index]}
         if value == 101 || value == 69 {
             index += 1
-            if index < bytes.len() && (Int.from_u8(bytes[index]) == 45 || Int.from_u8(bytes[index]) == 43) {
-                if Int.from_u8(bytes[index]) == 45 -> exponent_sign = -1
+            if index < bytes.len() && (Int{bytes[index]} == 45 || Int{bytes[index]} == 43) {
+                if (Int{bytes[index]}) == 45 -> exponent_sign = -1
                 index += 1
             }
             loop index < bytes.len() {
-                digit: Int.from_u8(bytes[index])
+                digit: Int{bytes[index]}
                 if digit >= 48 && digit <= 57 -> exponent = exponent * 10 + digit - 48
                 index += 1
             }

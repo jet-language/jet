@@ -362,7 +362,7 @@ cli_nix_index_required: fn(options: [String: String], name: String) -> String CL
 cli_nix_index_parse_u64: fn(value: String) -> Int? Never! {
     if value == "" -> return None
     loop byte in value.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if code < 48 || code > 57 -> return None
     }
     if Int.parse(value) == {

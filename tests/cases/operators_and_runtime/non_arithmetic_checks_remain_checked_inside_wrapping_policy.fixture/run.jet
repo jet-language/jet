@@ -4,7 +4,7 @@ use env: core.sys
 run: fn() {
     case: Int.parse(env.get("JET_ARITHMETIC_CASE") ?? "0") ?? 0
     raw: Int.parse(env.get("JET_ARITHMETIC_VALUE") ?? "0") ?? 0
-    value: U8.from_int(raw) ?? U8{0}
+    value: checked(U8{raw}) ?? U8{0}
     #Policy(arithmetic: .Wrapping) {
         if case == 0 {
             #Policy(arithmetic: .Checked) {

@@ -69,7 +69,7 @@ jet_cli_find_split_once: fn(text: String, separator: String) -> [String]? Never!
 jet_cli_find_byte: fn(text: String, byte: Int, last: Bool) -> Int Never! {
     found := -1
     loop (index, value) in text.bytes() {
-        if Int.from_u8(value) != byte -> next
+        if (Int{value}) != byte -> next
         found = index
         if !last -> break
     }
@@ -101,7 +101,7 @@ jet_cli_find_split_top: fn(input: String, separator: Int) -> [String] Never! {
     square := 0
     angle := 0
     loop index in 0..<bytes.len() {
-        code: Int.from_u8(bytes[index])
+        code: Int{bytes[index]}
         if {
             code == 40 -> depth += 1
             code == 41 -> depth -= 1
@@ -243,7 +243,7 @@ jet_cli_find_generic_parts: fn(ty: String) -> [String]? Never! {
 // `is_type_variable`: one ASCII capital letter.
 jet_cli_find_is_type_variable: fn(ty: String) -> Bool Never! {
     bytes: ty.bytes()
-    bytes.len() == 1 && Int.from_u8(bytes[0]) >= 65 && Int.from_u8(bytes[0]) <= 90
+    bytes.len() == 1 && Int{bytes[0]} >= 65 && Int{bytes[0]} <= 90
 }
 
 // The last `.`- or `:`-separated segment of a type name.
@@ -251,7 +251,7 @@ jet_cli_find_type_leaf: fn(ty: String) -> String Never! {
     bytes: ty.bytes()
     start := 0
     loop index in 0..<bytes.len() {
-        code: Int.from_u8(bytes[index])
+        code: Int{bytes[index]}
         if code == 46 || code == 58 -> start = index + 1
     }
     semindex_doc_text(bytes, start, bytes.len())

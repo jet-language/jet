@@ -51,7 +51,7 @@ pkg_validate_path_component_with_mode: fn(name: [U8], allow_nix_store_symlinks: 
     if name.contains(U8{92}) {
         return Err(PathLawError{code: "backslash", path: pkg_lossy_text(name), detail: "backslash is not a portable path component outside Nix admission"})
     }
-    last: Int.from_u8(name[name.len() - 1])
+    last: Int{name[name.len() - 1]}
     if last == 46 || last == 32 {
         return Err(PathLawError{code: "trailing-alias", path: pkg_lossy_text(name), detail: "trailing `.` or space is a Windows alias and is rejected"})
     }
@@ -102,7 +102,7 @@ pkg_reject_casefold_collisions: fn(names: [[U8]]) PathLawError! {
 pkg_ascii_fold: fn(bytes: [U8]) -> [U8] Never! {
     out := [U8]{}
     loop byte in bytes {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         out.push(if code >= 65 && code <= 90 -> U8{code + 32} else -> byte)
     }
     out
@@ -111,14 +111,14 @@ pkg_ascii_fold: fn(bytes: [U8]) -> [U8] Never! {
 pkg_path_law_is_windows_reserved: fn(name: [U8]) -> Bool Never! {
     stem_end := name.len()
     loop index in 0..<name.len() {
-        if Int.from_u8(name[index]) == 46 {
+        if (Int{name[index]}) == 46 {
             if index > 0 -> stem_end = index
             break
         }
     }
     upper := [U8]{}
     loop index in 0..<stem_end {
-        code: Int.from_u8(name[index])
+        code: Int{name[index]}
         upper.push(if code >= 97 && code <= 122 -> U8{code - 32} else -> name[index])
     }
     text: String.from_bytes(upper) ?? return false
@@ -131,7 +131,7 @@ pkg_lossy_text: fn(bytes: [U8]) -> String Never! {
         out := [U8]{}
         index := 0
         loop index < bytes.len() {
-            lead: Int.from_u8(bytes[index])
+            lead: Int{bytes[index]}
             width: if {
                 lead < 0x80 -> 1
                 lead >= 0xC2 && lead <= 0xDF -> 2
@@ -159,7 +159,7 @@ pkg_hex_bytes: fn(bytes: [U8]) -> String Never! {
     digits: "0123456789abcdef".bytes()
     out := [U8]{}
     loop byte in bytes {
-        value: Int.from_u8(byte)
+        value: Int{byte}
         out.push(digits[value >> 4])
         out.push(digits[(value).bit_and(15)])
     }

@@ -839,7 +839,7 @@ shell_quote: fn(word: String) -> String {
     if word == "" -> return "''"
     safe := true
     loop b in word.bytes() {
-        code: Int.from_u8(b)
+        code: Int{b}
         letter: (code >= 97 && code <= 122) || (code >= 65 && code <= 90) || (code >= 48 && code <= 57)
         if !letter && !"_-./=:,+@%".bytes().contains(b) -> safe = false
     }
@@ -849,7 +849,7 @@ shell_quote: fn(word: String) -> String {
 plain_name: fn(name: String) -> Bool {
     if name == "" -> return false
     loop b in name.bytes() {
-        code: Int.from_u8(b)
+        code: Int{b}
         if !((code >= 97 && code <= 122) || (code >= 65 && code <= 90) || (code >= 48 && code <= 57) || code == 95 || code == 45) -> return false
     }
     true
@@ -859,7 +859,7 @@ int_or: fn(text: String, fallback: Int) -> Int {
     if text == "" -> return fallback
     value := 0
     loop b in text.bytes() {
-        code: Int.from_u8(b)
+        code: Int{b}
         if code < 48 || code > 57 -> return fallback
         value = value * 10 + code - 48
     }

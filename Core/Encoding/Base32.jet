@@ -30,7 +30,7 @@ decode: fn(text: String) -> [U8] Base32Error! {
     buffer := 0
     bits := 0
     loop i in 0..<raw.len() {
-        n: Int.from_u8(raw[i])
+        n: Int{raw[i]}
         if n == 32 || n == 9 || n == 10 || n == 11 || n == 12 || n == 13 -> return Err(decode_error(i, "ASCII whitespace is not allowed"))
         if n == 61 {
             if pad_start < 0 -> pad_start = i
@@ -87,7 +87,7 @@ b32hexdecode: fn(text: String) -> [U8] Base32Error! {
     standard: "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567".bytes()
     canonical := [U8]{}
     loop b in text.bytes() {
-        n: Int.from_u8(b)
+        n: Int{b}
         if n >= 48 && n <= 57 -> canonical.push(standard[n - 48])
         else if n >= 65 && n <= 86 -> canonical.push(standard[n - 65 + 10])
         else if n == 61 -> canonical.push(b)
@@ -102,7 +102,7 @@ encode_alphabet: fn(data: [U8], alphabet: String) -> String Never! {
     buffer := 0
     bits := 0
     loop b in data {
-        buffer = (buffer << 8).bit_or(Int.from_u8(b))
+        buffer = (buffer << 8).bit_or(Int{b})
         bits += 8
         loop bits >= 5 {
             bits -= 5

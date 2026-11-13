@@ -252,10 +252,10 @@ jet_cli_struct_ambiguous: fn(base: JetCLIStructUnit, side: String, rows: [Int], 
 jet_cli_struct_ident_scalar: fn(bytes: [U8], offset: Int, previous: Bool) -> Bool Never! {
     start := if previous -> offset - 1 else -> offset
     if previous {
-        loop start > 0 && Int.from_u8(bytes[start]) >= 128 && Int.from_u8(bytes[start]) <= 191 -> start -= 1
+        loop start > 0 && (Int{bytes[start]}) >= 128 && (Int{bytes[start]}) <= 191 -> start -= 1
     }
     end := start + 1
-    loop end < bytes.len() && Int.from_u8(bytes[end]) >= 128 && Int.from_u8(bytes[end]) <= 191 -> end += 1
+    loop end < bytes.len() && (Int{bytes[end]}) >= 128 && (Int{bytes[end]}) <= 191 -> end += 1
     scalar: semindex_doc_text(bytes, start, end)
     scalar == "_" || cli_struct_text.is_alphabetic(scalar) || cli_struct_text.is_numeric(scalar)
 }

@@ -116,19 +116,19 @@ wat_int: fn(text: String) -> Int? Never! {
     raw: text.bytes()
     k := 0
     negative := false
-    if raw.len() > 0 && (Int.from_u8(raw[0]) == 0x2d || Int.from_u8(raw[0]) == 0x2b) {
-        negative = Int.from_u8(raw[0]) == 0x2d
+    if raw.len() > 0 && (Int{raw[0]} == 0x2d || Int{raw[0]} == 0x2b) {
+        negative = Int{raw[0]} == 0x2d
         k = 1
     }
     base := 10
-    if raw.len() >= k + 2 && Int.from_u8(raw[k]) == 0x30 && Int.from_u8(raw[k + 1]) == 0x78 {
+    if raw.len() >= k + 2 && (Int{raw[k]}) == 0x30 && (Int{raw[k + 1]}) == 0x78 {
         base = 16
         k += 2
     }
     value := 0
     digits := 0
     loop k < raw.len() {
-        c: Int.from_u8(raw[k])
+        c: Int{raw[k]}
         k += 1
         if c == 0x5f -> next
         d: wat_hex_digit(c)
@@ -149,23 +149,23 @@ wat_parse: fn(text: String) -> WatTree WasmError! {
     n: src.len()
     k := 0
     loop k < n {
-        c: Int.from_u8(src[k])
+        c: Int{src[k]}
         if wat_is_space(c) {
             k += 1
             next
         }
-        if c == 0x3b && k + 1 < n && Int.from_u8(src[k + 1]) == 0x3b {
-            loop k < n && Int.from_u8(src[k]) != 0x0a -> k += 1
+        if c == 0x3b && k + 1 < n && (Int{src[k + 1]}) == 0x3b {
+            loop k < n && (Int{src[k]}) != 0x0a -> k += 1
             next
         }
-        if c == 0x28 && k + 1 < n && Int.from_u8(src[k + 1]) == 0x3b {
+        if c == 0x28 && k + 1 < n && (Int{src[k + 1]}) == 0x3b {
             start: k
             depth := 0
             loop k < n {
-                if k + 1 < n && Int.from_u8(src[k]) == 0x28 && Int.from_u8(src[k + 1]) == 0x3b {
+                if k + 1 < n && (Int{src[k]}) == 0x28 && (Int{src[k + 1]}) == 0x3b {
                     depth += 1
                     k += 2
-                } else if k + 1 < n && Int.from_u8(src[k]) == 0x3b && Int.from_u8(src[k + 1]) == 0x29 {
+                } else if k + 1 < n && (Int{src[k]}) == 0x3b && (Int{src[k + 1]}) == 0x29 {
                     depth -= 1
                     k += 2
                     if depth == 0 -> break
@@ -195,7 +195,7 @@ wat_parse: fn(text: String) -> WatTree WasmError! {
             data := [U8]{}
             closed := false
             loop k < n {
-                b: Int.from_u8(src[k])
+                b: Int{src[k]}
                 if b == 0x22 {
                     closed = true
                     k += 1
@@ -208,7 +208,7 @@ wat_parse: fn(text: String) -> WatTree WasmError! {
                     next
                 }
                 if k + 1 >= n -> return Err(WasmError.new("unterminated string", start))
-                e: Int.from_u8(src[k + 1])
+                e: Int{src[k + 1]}
                 k += 2
                 if e == 0x6e {
                     data.push(U8{0x0a})
@@ -219,11 +219,11 @@ wat_parse: fn(text: String) -> WatTree WasmError! {
                 } else if e == 0x22 || e == 0x27 || e == 0x5c {
                     data.push(U8{e})
                 } else if e == 0x75 {
-                    if k >= n || Int.from_u8(src[k]) != 0x7b -> return Err(WasmError.new("malformed unicode escape", k))
+                    if k >= n || (Int{src[k]}) != 0x7b -> return Err(WasmError.new("malformed unicode escape", k))
                     k += 1
                     code := 0
-                    loop k < n && Int.from_u8(src[k]) != 0x7d {
-                        d: wat_hex_digit(Int.from_u8(src[k]))
+                    loop k < n && (Int{src[k]}) != 0x7d {
+                        d: wat_hex_digit(Int{src[k]})
                         if d < 0 -> return Err(WasmError.new("malformed unicode escape", k))
                         code = code * 16 + d
                         k += 1
@@ -232,7 +232,7 @@ wat_parse: fn(text: String) -> WatTree WasmError! {
                     wat_put_utf8(data, code)
                 } else {
                     high: wat_hex_digit(e)
-                    low: if k < n -> wat_hex_digit(Int.from_u8(src[k])) else -> -1
+                    low: if k < n -> wat_hex_digit(Int{src[k]}) else -> -1
                     if high < 0 || low < 0 -> return Err(WasmError.new("unknown string escape", k - 2))
                     data.push(U8{high * 16 + low})
                     k += 1
@@ -243,7 +243,7 @@ wat_parse: fn(text: String) -> WatTree WasmError! {
             next
         }
         start: k
-        loop k < n && !wat_is_delimiter(Int.from_u8(src[k])) -> k += 1
+        loop k < n && !wat_is_delimiter(Int{src[k]}) -> k += 1
         if k == start -> return Err(WasmError.new("unexpected character", k))
         word: String.from_bytes(src[start..<k]) ?? return Err(WasmError.new("malformed UTF-8 encoding", start))
         _: tree.add(WAT_ATOM, word, [U8]{}, start, parent)
@@ -308,7 +308,7 @@ wasm_text_to_binary: fn(text: String) -> [U8] WasmError! {
 
 // A text or binary artifact, decoded as a component.
 wasm_load_component: fn(bytes: &&[U8]) -> WasmComponent WasmError! {
-    if bytes.len() >= 4 && Int.from_u8(bytes[0]) == 0 && Int.from_u8(bytes[1]) == 0x61 -> return wasm_decode_component(bytes)
+    if bytes.len() >= 4 && (Int{bytes[0]}) == 0 && (Int{bytes[1]}) == 0x61 -> return wasm_decode_component(bytes)
     text: String.from_bytes(bytes) ?? return wasm_decode_component(bytes)
     if !wat_looks_textual(text) -> return wasm_decode_component(bytes)
     binary := wasm_text_to_binary(text)
@@ -320,11 +320,11 @@ wat_looks_textual: fn(text: String) -> Bool Never! {
     raw: text.bytes()
     k := 0
     loop k < raw.len() {
-        c: Int.from_u8(raw[k])
+        c: Int{raw[k]}
         if wat_is_space(c) {
             k += 1
-        } else if c == 0x3b && k + 1 < raw.len() && Int.from_u8(raw[k + 1]) == 0x3b {
-            loop k < raw.len() && Int.from_u8(raw[k]) != 0x0a -> k += 1
+        } else if c == 0x3b && k + 1 < raw.len() && (Int{raw[k + 1]}) == 0x3b {
+            loop k < raw.len() && (Int{raw[k]}) != 0x0a -> k += 1
         } else {
             return c == 0x28
         }

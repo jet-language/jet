@@ -34,22 +34,22 @@ valid_field: fn(bytes: [U8], start: Int, width: Int) -> Bool {
         code := 0
         if first < 128 {
             count = 1
-            code = Int.from_u8(first)
+            code = Int{first}
         } else if first >= 194 && first <= 223 {
             count = 2
-            code = Int.from_u8(first) - 192
+            code = Int{first} - 192
         } else if first >= 224 && first <= 239 {
             count = 3
-            code = Int.from_u8(first) - 224
+            code = Int{first} - 224
         } else if first >= 240 && first <= 244 {
             count = 4
-            code = Int.from_u8(first) - 240
+            code = Int{first} - 240
         } else { return false }
         if i + count > width -> return false
         loop j in 1..<count {
             next_byte: bytes.get(start + i + j) ?? return false
             if next_byte < 128 || next_byte > 191 -> return false
-            code = code * 64 + Int.from_u8(next_byte) - 128
+            code = code * 64 + Int{next_byte} - 128
         }
         if (count == 3 && code < 2048) || (count == 4 && code < 65536) || code > 1114111 || (code >= 55296 && code <= 57343) {
             return false
@@ -62,10 +62,10 @@ valid_field: fn(bytes: [U8], start: Int, width: Int) -> Bool {
 number_field: fn(bytes: [U8], start: Int, width: Int) -> Int {
     first: bytes.get(start) ?? return -1
     if first >= 128 {
-        value := Int.from_u8(first) - 128
+        value := Int{first} - 128
         loop i in 1..<width {
             byte: bytes.get(start + i) ?? return -1
-            value = value * 256 + Int.from_u8(byte)
+            value = value * 256 + Int{byte}
         }
         return value
     }
@@ -79,7 +79,7 @@ number_field: fn(bytes: [U8], start: Int, width: Int) -> Int {
         }
         if byte < 48 || byte > 55 -> return -1
         seen = true
-        value = value * 8 + Int.from_u8(byte) - 48
+        value = value * 8 + Int{byte} - 48
     }
     return value
 }
@@ -90,7 +90,7 @@ checksum_ok: fn(bytes: [U8], offset: Int) -> Bool {
     sum := 0
     loop i in 0..<512 {
         byte: bytes.get(offset + i) ?? return false
-        if i >= 148 && i < 156 -> sum += 32 else -> sum += Int.from_u8(byte)
+        if i >= 148 && i < 156 -> sum += 32 else -> sum += (Int{byte})
     }
     return stored == sum
 }

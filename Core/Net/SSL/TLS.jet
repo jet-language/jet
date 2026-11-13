@@ -2072,7 +2072,7 @@ ssl_write_finished: fn<R: RNG>(ssl: &ssldefs.SSLContext, rng: &R) ssldefs.SSLErr
         ssldefs.ssl_fill(ssl.cur_out_ctr, 2, ssldefs.SSL_SEQUENCE_NUMBER_LEN - 2, U8{0})
         i := 2
         loop i > 0 {
-            v: (Int.from_u8(ssl.cur_out_ctr[i - 1]) + 1).bit_and(0xFF)
+            v: (Int{ssl.cur_out_ctr[i - 1]} + 1).bit_and(0xFF)
             ssl.cur_out_ctr[i - 1] = ssldefs.ssl_byte(v)
             if v != 0 -> break
             i -= 1
@@ -3769,7 +3769,7 @@ ct_aes: fn(key: [U8], block: [U8]) -> Int Never! {
     k: cipher.aes_key(key, false) ?? return 0
     out := ct_take(block, 0, 16)
     cipher.encrypt_block(k, block, 0, out, 0)
-    Int.from_u8(out[0])
+    Int{out[0]}
 }
 
 #Test("dudect: AES key expansion and block encryption take as long on fixed and random keys") {
@@ -3801,8 +3801,8 @@ ct_aes: fn(key: [U8], block: [U8]) -> Int Never! {
     r := CtRand{s: U64{13}}
     data: ct_bytes(r, 64)
     other: data.copy()
-    ct_dudect("HMAC-SHA-256", 4000, 4, ct_bytes(r, 32), fn(x) { Int.from_u8(hashes.hmac(hashes.Md.SHA256, x, data)[0]) })
-    ct_dudect("HMAC-SHA-384", 4000, 4, ct_bytes(r, 48), fn(x) { Int.from_u8(hashes.hmac(hashes.Md.SHA384, x, other)[0]) })
+    ct_dudect("HMAC-SHA-256", 4000, 4, ct_bytes(r, 32), fn(x) { Int{hashes.hmac(hashes.Md.SHA256, x, data)[0]} })
+    ct_dudect("HMAC-SHA-384", 4000, 4, ct_bytes(r, 48), fn(x) { Int{hashes.hmac(hashes.Md.SHA384, x, other)[0]} })
 }
 
 /// A private key for curve `id` from `bytes`: the top bit cleared, so it is
@@ -3865,7 +3865,7 @@ ct_rsa_sign: fn(der: [U8], hash: [U8]) -> Int {
 ct_base64_text: fn(bytes: [U8]) -> [U8] Never! {
     digits: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/".bytes()
     out := [U8]{}
-    loop b in bytes -> out.push(digits[Int.from_u8(b.bit_and(U8{63}))])
+    loop b in bytes -> out.push(digits[Int{b.bit_and(U8{63})}])
     out
 }
 
@@ -3943,7 +3943,7 @@ ct_signed: fn(seed: [U8], msg: [U8]) -> Int {
 /// The first byte of core.crypto's PBKDF2-HMAC-SHA256 of `password`.
 ct_pbkdf2: fn(password: [U8], salt: [U8]) -> Int {
     out: core.crypto.pbkdf2_hmac(password, salt, 2, 32) ?? return 0
-    Int.from_u8(out[0])
+    Int{out[0]}
 }
 
 // Argon2id (core.crypto `password_hash`) is left out: from the second half
@@ -3971,19 +3971,19 @@ ct_pbkdf2: fn(password: [U8], salt: [U8]) -> Int {
         loop wrapped in wraps -> assert_eq(ct_key_unwrapped(holder, wrapped), 32)
         assert_eq(ct_shared(ct_bytes(r, 32), holder_public), 32)
         assert_eq(ct_signed(ct_bytes(r, 32), msg), 64)
-        ct_dudect("core.crypto envelope open, plaintext", 400, 1, ct_bytes(r, 1), fn(x) { ct_envelope_opened(identity, boxes[Int.from_u8(x[0]) %% 32]) })
-        ct_dudect("core.crypto key unwrap, key", 400, 1, ct_bytes(r, 1), fn(x) { ct_key_unwrapped(holder, wraps[Int.from_u8(x[0]) %% 32]) })
+        ct_dudect("core.crypto envelope open, plaintext", 400, 1, ct_bytes(r, 1), fn(x) { ct_envelope_opened(identity, boxes[Int{x[0]} %% 32]) })
+        ct_dudect("core.crypto key unwrap, key", 400, 1, ct_bytes(r, 1), fn(x) { ct_key_unwrapped(holder, wraps[Int{x[0]} %% 32]) })
         ct_dudect("core.crypto X25519, private key", 600, 1, ct_bytes(r, 32), fn(x) { ct_shared(x, holder_public) })
         ct_dudect("core.crypto Ed25519 sign, seed", 400, 1, ct_bytes(r, 32), fn(x) { ct_signed(x, msg) })
     }
-    ct_dudect("core.crypto SHA-1", 3000, 2, ct_bytes(r, 64), fn(x) { Int.from_u8(core.crypto.sha1(x).bytes()[0]) })
-    ct_dudect("core.crypto SHA-224", 3000, 2, ct_bytes(r, 64), fn(x) { Int.from_u8(core.crypto.sha224(x).bytes()[0]) })
-    ct_dudect("core.crypto SHA-384", 3000, 2, ct_bytes(r, 64), fn(x) { Int.from_u8(core.crypto.sha384(x).bytes()[0]) })
-    ct_dudect("core.crypto SHA-512", 3000, 2, ct_bytes(r, 64), fn(x) { Int.from_u8(core.crypto.sha512(x).bytes[0]) })
-    ct_dudect("core.crypto SHA3-256", 3000, 2, ct_bytes(r, 64), fn(x) { Int.from_u8(core.crypto.sha3_256(x).bytes()[0]) })
-    ct_dudect("core.crypto SHA3-512", 3000, 2, ct_bytes(r, 64), fn(x) { Int.from_u8(core.crypto.sha3_512(x).bytes()[0]) })
-    ct_dudect("core.crypto BLAKE3", 3000, 2, ct_bytes(r, 64), fn(x) { Int.from_u8(core.crypto.blake3(x).bytes[0]) })
-    ct_dudect("core.crypto hex", 5000, 8, ct_bytes(r, 32), fn(x) { Int.from_u8(Digest256{bytes: x}.hex().bytes()[0]) })
+    ct_dudect("core.crypto SHA-1", 3000, 2, ct_bytes(r, 64), fn(x) { Int{core.crypto.sha1(x).bytes()[0]} })
+    ct_dudect("core.crypto SHA-224", 3000, 2, ct_bytes(r, 64), fn(x) { Int{core.crypto.sha224(x).bytes()[0]} })
+    ct_dudect("core.crypto SHA-384", 3000, 2, ct_bytes(r, 64), fn(x) { Int{core.crypto.sha384(x).bytes()[0]} })
+    ct_dudect("core.crypto SHA-512", 3000, 2, ct_bytes(r, 64), fn(x) { Int{core.crypto.sha512(x).bytes[0]} })
+    ct_dudect("core.crypto SHA3-256", 3000, 2, ct_bytes(r, 64), fn(x) { Int{core.crypto.sha3_256(x).bytes()[0]} })
+    ct_dudect("core.crypto SHA3-512", 3000, 2, ct_bytes(r, 64), fn(x) { Int{core.crypto.sha3_512(x).bytes()[0]} })
+    ct_dudect("core.crypto BLAKE3", 3000, 2, ct_bytes(r, 64), fn(x) { Int{core.crypto.blake3(x).bytes[0]} })
+    ct_dudect("core.crypto hex", 5000, 8, ct_bytes(r, 32), fn(x) { Int{Digest256{bytes: x}.hex().bytes()[0]} })
     ct_dudect("core.crypto PBKDF2-HMAC-SHA256, password", 2000, 1, ct_bytes(r, 32), fn(x) { ct_pbkdf2(x, salt) })
 }
 
@@ -4064,7 +4064,7 @@ ct_rsa_kx_premaster: fn(ssl: &ssldefs.SSLContext, rng: &drbg.HMACDrbg) -> [U8] {
         }
         servers.push(ssl)
     }
-    ct_dudect("TLS 1.2 RSA premaster, padding", 1000, 1, [U8]{0}, fn(x) { Int.from_u8(ct_rsa_kx_premaster(servers[Int.from_u8(x[0]) %% 32], rng)[2]) })
+    ct_dudect("TLS 1.2 RSA premaster, padding", 1000, 1, [U8]{0}, fn(x) { Int{ct_rsa_kx_premaster(servers[Int{x[0]} %% 32], rng)[2]} })
 }
 
 /// The block a server's private operation gives for a ClientKeyExchange
@@ -4093,7 +4093,7 @@ ct_rsa_kx_after_private: fn<R: RNG>(ssl: &ssldefs.SSLContext, block: [U8], rng: 
     buf := block.copy()
     fixed := rsa.__v15_fixed_of_block(buf, 48)
     srv12.__ssl_srv12_take_premaster(ssl, fixed.out, fixed.bad, 0, rng) ?? panic("premaster: {err}")
-    Int.from_u8(ssl.handshake.premaster[2])
+    Int{ssl.handshake.premaster[2]}
 }
 
 /// The blocks a timing after the private operation takes in turn: 16 good
@@ -4137,7 +4137,7 @@ ct_rsa_kx_block_turn: fn(blocks: &CtKxBlocks, ssl: &ssldefs.SSLContext, x: [U8],
     loop i in 0..<16 {
         good: blocks.good[i].copy()
         kept: ct_rsa_kx_after_private(ssl, good, rng)
-        assert_eq(kept, Int.from_u8(good[key.len - 46]))
+        assert_eq(kept, Int{good[key.len - 46]})
         assert_eq(ssl.handshake.premaster, ssldefs.ssl_bytes_of(good, key.len - 48, 48))
         _ := ct_rsa_kx_after_private(ssl, blocks.bad[i], rng)
         first: ssl.handshake.premaster.copy()
@@ -4191,7 +4191,7 @@ ct_oaep_after_private: fn(block: [U8], label: [U8]) -> Int {
     buf := block.copy()
     lhash: hashes.hash(.SHA256, label)
     decoded: rsa.rsaes_oaep_unpadding(buf, .SHA256, lhash, 32)
-    Int.from_u8(decoded.out[0])
+    Int{decoded.out[0]}
 }
 
 /// The ciphertext of an OAEP block under SHA-256 with the label `label`:
@@ -4244,7 +4244,7 @@ ct_oaep_block_turn: fn(blocks: &CtOaepBlocks, x: [U8]) -> Int {
         sealed: rsa.rsa_public(key, good) ?? panic("public operation")
         opened: rsa.rsa_rsaes_oaep_decrypt(key, rng, label, sealed, 32) ?? panic("decrypt a good block: {err}")
         assert_eq(opened.len(), 32)
-        assert_eq(ct_oaep_after_private(good, label), Int.from_u8(opened[0]))
+        assert_eq(ct_oaep_after_private(good, label), Int{opened[0]})
         bad_sealed: rsa.rsa_public(key, blocks.bad[i]) ?? panic("public operation")
         if i %% 4 == 3 {
             assert(rsa.rsa_rsaes_oaep_decrypt(key, rng, label, bad_sealed, 32) == .Err(.OutputTooLarge))
@@ -4570,11 +4570,11 @@ ct_points: fn(id: ecp.GroupID, size: Int, count: Int) -> [[U8]] {
     p256: ct_points(.Secp256r1, 32, 32)
     p256_key: ct_scalar(ct_bytes(r, 32))
     loop p in p256 -> assert_eq(ct_opened(vec_ecdh(.Secp256r1, p256_key, p)), 32)
-    ct_dudect("P-256 ECDH, peer point", 400, 1, ct_bytes(r, 1), fn(x) { ct_opened(vec_ecdh(.Secp256r1, p256_key, p256[Int.from_u8(x[0]) %% 32])) })
+    ct_dudect("P-256 ECDH, peer point", 400, 1, ct_bytes(r, 1), fn(x) { ct_opened(vec_ecdh(.Secp256r1, p256_key, p256[Int{x[0]} %% 32])) })
     p384: ct_points(.Secp384r1, 48, 32)
     p384_key: ct_scalar(ct_bytes(r, 48))
     loop p in p384 -> assert_eq(ct_opened(vec_ecdh(.Secp384r1, p384_key, p)), 48)
-    ct_dudect("P-384 ECDH, peer point", 200, 1, ct_bytes(r, 1), fn(x) { ct_opened(vec_ecdh(.Secp384r1, p384_key, p384[Int.from_u8(x[0]) %% 32])) })
+    ct_dudect("P-384 ECDH, peer point", 200, 1, ct_bytes(r, 1), fn(x) { ct_opened(vec_ecdh(.Secp384r1, p384_key, p384[Int{x[0]} %% 32])) })
 }
 
 ct_rsa_pss_sign: fn(der: [U8], hash: [U8]) -> Int {
@@ -4616,8 +4616,8 @@ ct_rsa_keys: fn() -[FS, Env, Net, Time.Wait]> [[U8]] {
         assert_eq(ct_rsa_sign(k, hash), 256)
         assert_eq(ct_rsa_pss_sign(k, hash), 256)
     }
-    ct_dudect("RSA-2048 sign, key", 200, 1, ct_bytes(r, 1), fn(x) { ct_rsa_sign(keys[Int.from_u8(x[0]) %% keys.len()], hash) })
-    ct_dudect("RSA-2048 PSS sign, key", 200, 1, ct_bytes(r, 1), fn(x) { ct_rsa_pss_sign(pss_keys[Int.from_u8(x[0]) %% pss_keys.len()], pss_hash) })
+    ct_dudect("RSA-2048 sign, key", 200, 1, ct_bytes(r, 1), fn(x) { ct_rsa_sign(keys[Int{x[0]} %% keys.len()], hash) })
+    ct_dudect("RSA-2048 PSS sign, key", 200, 1, ct_bytes(r, 1), fn(x) { ct_rsa_pss_sign(pss_keys[Int{x[0]} %% pss_keys.len()], pss_hash) })
     ct_dudect("RSA-2048 PSS sign, hash", 200, 1, ct_bytes(r, 32), fn(x) { ct_rsa_pss_sign(pss_hash_keys[0], x) })
 }
 
@@ -4650,10 +4650,10 @@ ct_ghash_portable: fn(key: [U8], data: [U8]) -> [U8] Never! {
     aes_key: ct_bytes(r, 32)
     ghash_data: ct_bytes(r, 64)
     ghash_key: ct_bytes(r, 16)
-    ct_dudect("bitsliced AES-256, key", 3000, 2, ct_bytes(r, 32), fn(x) { Int.from_u8(ct_aes_portable(x, blocks)[0]) })
-    ct_dudect("bitsliced AES-256, data", 3000, 2, ct_bytes(r, 64), fn(x) { Int.from_u8(ct_aes_portable(aes_key, x)[0]) })
-    ct_dudect("portable GHASH, key", 3000, 2, ct_bytes(r, 16), fn(x) { Int.from_u8(ct_ghash_portable(x, ghash_data)[0]) })
-    ct_dudect("portable GHASH, data", 3000, 2, ct_bytes(r, 64), fn(x) { Int.from_u8(ct_ghash_portable(ghash_key, x)[0]) })
+    ct_dudect("bitsliced AES-256, key", 3000, 2, ct_bytes(r, 32), fn(x) { Int{ct_aes_portable(x, blocks)[0]} })
+    ct_dudect("bitsliced AES-256, data", 3000, 2, ct_bytes(r, 64), fn(x) { Int{ct_aes_portable(aes_key, x)[0]} })
+    ct_dudect("portable GHASH, key", 3000, 2, ct_bytes(r, 16), fn(x) { Int{ct_ghash_portable(x, ghash_data)[0]} })
+    ct_dudect("portable GHASH, data", 3000, 2, ct_bytes(r, 64), fn(x) { Int{ct_ghash_portable(ghash_key, x)[0]} })
 }
 
 #Test("dudect: AES-GCM and ChaCha20-Poly1305 key set-up and sealing take as long on fixed and random keys and plaintexts") {
@@ -4710,9 +4710,9 @@ ct_tls13_schedule: fn(early: [U8], shared: [U8], transcript: [U8]) -> [U8] {
     assert_eq(ssl_tls_prf_generic(.SHA256, shared, "extended master secret".bytes(), session_hash, 48).len(), 48)
     ct_dudect("HKDF-SHA-256", 3000, 2, ct_bytes(r, 32), fn(x) { ct_opened(hashes.hkdf(.SHA256, salt, x, info, 32)) })
     ct_dudect("HKDF-SHA-384", 3000, 2, ct_bytes(r, 48), fn(x) { ct_opened(hashes.hkdf(.SHA384, salt2, x, info2, 48)) })
-    ct_dudect("TLS 1.3 key schedule", 2000, 1, ct_bytes(r, 32), fn(x) { Int.from_u8(ct_tls13_schedule(x, shared, transcript)[0]) })
-    ct_dudect("TLS 1.2 PRF, extended master secret", 2000, 1, ct_bytes(r, 32), fn(x) { Int.from_u8(ssl_tls_prf_generic(.SHA256, x, "extended master secret".bytes(), session_hash, 48)[0]) })
-    ct_dudect("TLS 1.2 PRF, Finished", 2000, 1, ct_bytes(r, 48), fn(x) { Int.from_u8(ssl_tls_prf_generic(.SHA384, x, "client finished".bytes(), finished_hash, 12)[0]) })
+    ct_dudect("TLS 1.3 key schedule", 2000, 1, ct_bytes(r, 32), fn(x) { Int{ct_tls13_schedule(x, shared, transcript)[0]} })
+    ct_dudect("TLS 1.2 PRF, extended master secret", 2000, 1, ct_bytes(r, 32), fn(x) { Int{ssl_tls_prf_generic(.SHA256, x, "extended master secret".bytes(), session_hash, 48)[0]} })
+    ct_dudect("TLS 1.2 PRF, Finished", 2000, 1, ct_bytes(r, 48), fn(x) { Int{ssl_tls_prf_generic(.SHA384, x, "client finished".bytes(), finished_hash, 12)[0]} })
 }
 
 /// HMAC_DRBG seeded with `seed`, and the 32 bytes it generates first.
@@ -4726,7 +4726,7 @@ ct_drbg: fn(seed: [U8]) -> [U8] {
 #Test("dudect: HMAC_DRBG seeding and generation take as long on fixed and random seeds") {
     r := CtRand{s: U64{79}}
     assert_eq(ct_drbg(ct_bytes(r, 48)).len(), 32)
-    ct_dudect("HMAC_DRBG-SHA-256", 3000, 2, ct_bytes(r, 48), fn(x) { Int.from_u8(ct_drbg(x)[0]) })
+    ct_dudect("HMAC_DRBG-SHA-256", 3000, 2, ct_bytes(r, 48), fn(x) { Int{ct_drbg(x)[0]} })
 }
 
 /// TLS 1.3 AES-128-GCM traffic keys and IVs drawn from `r`.
@@ -4907,7 +4907,7 @@ ct_modinv: fn(grp: ecp.EcpGroup, a: [U8]) -> Int {
     ct_dudect("P-384 ECDH (soak)", 2000, 1, ct_scalar(ct_bytes(r, 48)), fn(x) { ct_opened(vec_ecdh(.Secp384r1, ct_scalar(x), g384)) })
     p256: ct_points(.Secp256r1, 32, 32)
     p256_key: ct_scalar(ct_bytes(r, 32))
-    ct_dudect("P-256 ECDH, peer point (soak)", 4000, 1, ct_bytes(r, 1), fn(x) { ct_opened(vec_ecdh(.Secp256r1, p256_key, p256[Int.from_u8(x[0]) %% 32])) })
+    ct_dudect("P-256 ECDH, peer point (soak)", 4000, 1, ct_bytes(r, 1), fn(x) { ct_opened(vec_ecdh(.Secp256r1, p256_key, p256[Int{x[0]} %% 32])) })
     h256: ct_bytes(r, 32)
     ct_dudect("P-256 ECDSA sign (soak)", 4000, 1, ct_bytes(r, 32), fn(x) { ct_ecdsa_sign(.Secp256r1, x, h256) })
     h384: ct_bytes(r, 48)
@@ -4919,5 +4919,5 @@ ct_modinv: fn(grp: ecp.EcpGroup, a: [U8]) -> Int {
     first: keys[0].copy()
     rsa_hash: ct_bytes(r, 32)
     ct_dudect("RSA-2048 sign (soak)", 2000, 1, ct_bytes(r, 32), fn(x) { ct_rsa_sign(first, x) })
-    ct_dudect("RSA-2048 sign, key (soak)", 2000, 1, ct_bytes(r, 1), fn(x) { ct_rsa_sign(keys[Int.from_u8(x[0]) %% keys.len()], rsa_hash) })
+    ct_dudect("RSA-2048 sign, key (soak)", 2000, 1, ct_bytes(r, 1), fn(x) { ct_rsa_sign(keys[Int{x[0]} %% keys.len()], rsa_hash) })
 }

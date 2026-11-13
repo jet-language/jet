@@ -1267,15 +1267,13 @@ linalg types; user structs use methods.
 `Float` (f64) are the defaults; sized menu `I8 I16 I32 I64 U8 U16 U32 U64 F32
 F64` for experts/FFI. `Int` uses a machine-word fast path and spills only when
 the value needs it.
-Conversions are destination-owned named methods only (`Float.from_int(n)`,
-`U8.from_int(n)` for fallible narrowing, `Int.parse(s) -> Int !ParseError`);
+Conversions are destination-owned only (`Float.from_int(n)`,
+`checked(U8{n})` for fallible narrowing, `Int.parse(s) -> Int !ParseError`);
 no `as`, cast punctuation, or source-owned `to_*` aliases.
 **D-NUMOPS1/2**: plain arithmetic on a fixed-width integer **traps on
 overflow**; exact default `Int` arithmetic does not overflow. Fixed-width
 code may opt in per operation with `wrapping(…)` / `saturating(…)` /
-`checked(…) -> ?T`, or with receiver methods such as
-`value.wrapping_add(other)`, `value.saturating_add(other)`, and
-`value.checked_add(other)`. Per-type `MIN`/`MAX`, float
+`checked(…) -> ?T`. Per-type `MIN`/`MAX`, float
 `INFINITY`/`NAN`/`EPSILON`, bit ops. **D-FLOATW1**: `core.math` is width-generic.
 A math call whose every argument is `F32` computes at `F32` width on every tier:
 the Float function runs on the exactly widened arguments and its result rounds
@@ -1331,7 +1329,7 @@ and neutral `convert(value)` aliases are not accepted.
 
 ```jet
 id: UserId.from_int(raw_id)
-byte: U8.from_int(count) ?? return
+byte: checked(U8{count}) ?? return
 ratio: byte + 0.0
 parsed: Int.parse(text) ?? return
 ```

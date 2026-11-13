@@ -168,9 +168,9 @@ store_artifact_parse_size: fn(value: String) -> Int ArtifactStoreError! {
 // `u64::from_str` accepts one optional `+` and ASCII digits only.
 store_artifact_all_digits: fn(value: String) -> Bool Never! {
     raw: value.bytes()
-    start: if raw.len() > 1 && Int.from_u8(raw[0]) == 43 -> 1 else -> 0
+    start: if raw.len() > 1 && (Int{raw[0]}) == 43 -> 1 else -> 0
     loop index in start..<raw.len() {
-        code: Int.from_u8(raw[index])
+        code: Int{raw[index]}
         if code < 48 || code > 57 -> return false
     }
     true
@@ -181,7 +181,7 @@ store_artifact_ascii_upper: fn(value: String) -> String Never! {
     raw: value.bytes()
     out := [U8]{}
     loop byte in raw {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         out.push(if code >= 97 && code <= 122 -> U8{code - 32} else -> byte)
     }
     pkg_bytes_text(out, 0, out.len())

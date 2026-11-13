@@ -4,7 +4,7 @@
 # and a local value all keep their bytes, their lengths and their indexes.
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
-write: main.jet = "fill: fn(count: Int) -> [U8] {\n    table := [U8]{}\n    loop n in 0..<count {\n        table.push(U8.from_int(n * 7 % 256) ?? U8{0})\n    }\n    table\n}\n\nPacket: struct {\n    tag: Int\n    body: [U8]\n}\n\npacket: fn() -> Packet {\n    Packet{tag: 3, body: fill(5)}\n}\n\nTABLE: fill(300000)\nEMPTY: fill(0)\nPACKET: packet()\n\nrun: fn() {\n    local: fill(4)\n    print(\"{TABLE.len()} {TABLE[1]} {TABLE[299999]} {EMPTY.len()} {PACKET.tag} {PACKET.body.len()} {PACKET.body[4]} {local[3]}\")\n}\n"
+write: main.jet = "fill: fn(count: Int) -> [U8] {\n    table := [U8]{}\n    loop n in 0..<count {\n        table.push(checked(U8{n * 7 % 256}) ?? U8{0})\n    }\n    table\n}\n\nPacket: struct {\n    tag: Int\n    body: [U8]\n}\n\npacket: fn() -> Packet {\n    Packet{tag: 3, body: fill(5)}\n}\n\nTABLE: fill(300000)\nEMPTY: fill(0)\nPACKET: packet()\n\nrun: fn() {\n    local: fill(4)\n    print(\"{TABLE.len()} {TABLE[1]} {TABLE[299999]} {EMPTY.len()} {PACKET.tag} {PACKET.body.len()} {PACKET.body[4]} {local[3]}\")\n}\n"
 step: jet run --trace main.jet
 exit: 0
 stdout: = "300000 7 25 0 3 5 28 21\n"

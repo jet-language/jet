@@ -38,12 +38,12 @@ new: fn() -> CountMinSketch Never! { CountMinSketch.new() }
 
 hashes: fn(key: String) -> (first: U64, second: U64) Never! {
     seed: U64{14695981039346656037}
-    (first: sketch.__fnv1a64(key, seed), second: sketch.__fnv1a64(key, seed.wrapping_add(U64{3735928559})))
+    (first: sketch.__fnv1a64(key, seed), second: sketch.__fnv1a64(key, wrapping(seed + U64{3735928559})))
 }
 
 counter_index: fn(first: U64, second: U64, row: Int) -> Int Never! {
-    column: first.wrapping_add(second.wrapping_mul(U64{row + 1})).bit_and(U64{255})
-    row * 256 + Int.from_u64(column)
+    column: wrapping(first + wrapping(second * U64{row + 1})).bit_and(U64{255})
+    row * 256 + Int{column}
 }
 
 /// Merge by adding corresponding counters, as the existing source API does.

@@ -286,7 +286,7 @@ nixeval_validate_derivation_output_name: fn(name: String) NixEvalError! {
 
 nixeval_has_ascii_control: fn(text: String) -> Bool Never! {
     loop byte in text.bytes() {
-        value: Int.from_u8(byte)
+        value: Int{byte}
         if value < 32 || value == 127 -> return true
     }
     false
@@ -302,7 +302,7 @@ nixeval_normalize_hash_hex: fn(hash: String) -> String NixEvalError! {
 
 nixeval_all_hex_digits: fn(bytes: [U8]) -> Bool Never! {
     loop byte in bytes {
-        if !nixeval_is_ascii_hexdigit(Int.from_u8(byte)) -> return false
+        if !nixeval_is_ascii_hexdigit(Int{byte}) -> return false
     }
     true
 }

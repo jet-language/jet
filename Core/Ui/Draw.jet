@@ -654,7 +654,7 @@ paint_mask: fn(target: &Image, mask: font.GlyphMask, x: Int, y: Int, rgba: Int) 
         from := (row - y0) * mask.width + left - x0
         at := (row * target.width + left) * 4
         loop _ in left..<right {
-            cover: Int.from_u8(mask.coverage[from])
+            cover: Int{mask.coverage[from]}
             if cover != 0 -> blend_pixel(target.pixels, at, red, green, blue, div255(cover * alpha + 127))
             from += 1
             at += 4
@@ -675,10 +675,10 @@ blend_pixel: fn(pixels: &[U8], at: Int, red: Int, green: Int, blue: Int, alpha: 
         return
     }
     rest: 255 - alpha
-    pixels[at] = U8{over(div255(red * alpha + 127), Int.from_u8(pixels[at]), rest)}
-    pixels[at + 1] = U8{over(div255(green * alpha + 127), Int.from_u8(pixels[at + 1]), rest)}
-    pixels[at + 2] = U8{over(div255(blue * alpha + 127), Int.from_u8(pixels[at + 2]), rest)}
-    pixels[at + 3] = U8{over(alpha, Int.from_u8(pixels[at + 3]), rest)}
+    pixels[at] = U8{over(div255(red * alpha + 127), Int{pixels[at]}, rest)}
+    pixels[at + 1] = U8{over(div255(green * alpha + 127), Int{pixels[at + 1]}, rest)}
+    pixels[at + 2] = U8{over(div255(blue * alpha + 127), Int{pixels[at + 2]}, rest)}
+    pixels[at + 3] = U8{over(alpha, Int{pixels[at + 3]}, rest)}
 }
 
 // A Float rounded to the nearest whole pixel, halves up; past the Int
@@ -1200,10 +1200,10 @@ fill: fn(target: &Image, x: Int, y: Int, width: Int, height: Int, rgba: Int, rep
     loop row in top..<bottom {
         at := (row * target.width + left) * 4
         loop _ in left..<right {
-            r: Int.from_u8(pixels[at]) * rest + 127
-            g: Int.from_u8(pixels[at + 1]) * rest + 127
-            b: Int.from_u8(pixels[at + 2]) * rest + 127
-            a: Int.from_u8(pixels[at + 3]) * rest + 127
+            r: Int{pixels[at]} * rest + 127
+            g: Int{pixels[at + 1]} * rest + 127
+            b: Int{pixels[at + 2]} * rest + 127
+            a: Int{pixels[at + 3]} * rest + 127
             pixels[at] = U8{red + ((r + 1 + (r >> 8)) >> 8)}
             pixels[at + 1] = U8{green + ((g + 1 + (g >> 8)) >> 8)}
             pixels[at + 2] = U8{blue + ((b + 1 + (b >> 8)) >> 8)}
@@ -1243,7 +1243,7 @@ Span: struct {
 }
 
 pack_rgba: fn(color: Color) -> Int {
-    (Int.from_u8(color.r) << 24) + (Int.from_u8(color.g) << 16) + (Int.from_u8(color.b) << 8) + Int.from_u8(color.a)
+    (Int{color.r} << 24) + (Int{color.g} << 16) + (Int{color.b} << 8) + Int{color.a}
 }
 
 min_int: fn(a: Int, b: Int) -> Int {
@@ -1998,7 +1998,7 @@ fit: fn(image: &Image, width: Int, height: Int) {
 }
 
 byte_at: fn(data: [U8], at: Int) -> Int {
-    Int.from_u8(data[at])
+    Int{data[at]}
 }
 
 be32: fn(data: [U8], at: Int) -> Int {
@@ -2386,9 +2386,9 @@ reference_paint: fn(image: &Image, runs: [Run]) {
             loop column in run.x..<(run.x + run.width) {
                 at: (row * image.width + column) * 4
                 loop k in 0..<3 {
-                    image.pixels[at + k] = U8{over(div255((run.rgba >> (24 - 8 * k)).bit_and(255) * alpha + 127), Int.from_u8(image.pixels[at + k]), rest)}
+                    image.pixels[at + k] = U8{over(div255((run.rgba >> (24 - 8 * k)).bit_and(255) * alpha + 127), Int{image.pixels[at + k]}, rest)}
                 }
-                image.pixels[at + 3] = U8{over(alpha, Int.from_u8(image.pixels[at + 3]), rest)}
+                image.pixels[at + 3] = U8{over(alpha, Int{image.pixels[at + 3]}, rest)}
             }
         }
     }
@@ -2848,7 +2848,7 @@ gray: fn(value: Int) -> Int {
     broken := Image{width: 2, height: 2, pixels: [U8]{0, 0, 0, 0}}
     draw_rectangle(broken, 0, 0, 2, 2, color(255, 255, 255, 255))
     assert_eq(broken.pixels.len(), 4)
-    assert_eq(Int.from_u8(broken.pixels[0]), 0)
+    assert_eq(Int{broken.pixels[0]}, 0)
 }
 
 // The pixels that differ between two images of one size, as x, y pairs.

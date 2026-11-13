@@ -209,7 +209,7 @@ hex_nibble: fn(n: Int) -> U8 Never! {
 
 /// Hex alphabet lookup. Accepts `0-9A-Fa-f`. Other bytes are absent.
 hex_value: fn(b: U8) -> Int? Never! {
-    n: Int.from_u8(b)
+    n: Int{b}
     if n >= 48 && n <= 57 -> return Val(n - 48)
     if n >= 97 && n <= 102 -> return Val(n - 87)
     if n >= 65 && n <= 70 -> return Val(n - 55)
@@ -220,7 +220,7 @@ hex_value: fn(b: U8) -> Int? Never! {
 bytes_to_hex: fn(bytes: [U8]) -> String Never! {
     out := [U8]{}
     loop b in bytes {
-        n: Int.from_u8(b)
+        n: Int{b}
         out.push(hex_nibble(n /% 16))
         out.push(hex_nibble(n %% 16))
     }

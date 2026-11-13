@@ -326,7 +326,7 @@ store_lifecycle_validate_identity: fn(label: String, value: String) StoreError! 
     raw: value.bytes()
     if raw.len() == 0 || raw.len() > STORE_LIFECYCLE_MAX_IDENTITY_BYTES -> return Err(StoreError.InvalidData("invalid lifecycle {label}"))
     loop byte in raw {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if code < 32 || code == 127 -> return Err(StoreError.InvalidData("invalid lifecycle {label}"))
     }
 }
@@ -344,7 +344,7 @@ store_lifecycle_is_lower_hex: fn(value: String, length: Int) -> Bool Never! {
     raw: value.bytes()
     if raw.len() != length -> return false
     loop byte in raw {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if !((code >= 48 && code <= 57) || (code >= 97 && code <= 102)) -> return false
     }
     true
@@ -354,11 +354,11 @@ store_lifecycle_is_lower_hex: fn(value: String, length: Int) -> Bool Never! {
 // within the Int range.
 store_lifecycle_parse_u64: fn(text: String) -> Int? Never! {
     raw: text.bytes()
-    start: if raw.len() > 0 && Int.from_u8(raw[0]) == 43 -> 1 else -> 0
+    start: if raw.len() > 0 && (Int{raw[0]}) == 43 -> 1 else -> 0
     if start >= raw.len() -> return None
     value := 0
     loop index in start..<raw.len() {
-        digit: Int.from_u8(raw[index]) - 48
+        digit: Int{raw[index]} - 48
         if digit < 0 || digit > 9 -> return None
         if value > (9223372036854775807 - digit) /% 10 -> return None
         value = value * 10 + digit

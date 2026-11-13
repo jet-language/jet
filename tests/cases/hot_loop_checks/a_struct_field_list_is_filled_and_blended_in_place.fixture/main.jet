@@ -27,12 +27,12 @@ run: fn() {
     print("Blended{show_words(canvas.words)}")
     values: [Int]{-1, 0, 255, 256, 4294967295, 4294967296}
     loop value in values {
-        print("Int {value}: U8 {U8.from_int(value) ?? U8{9}} U32 {U32.from_int(value) ?? U32{9}} U64 {U64.from_int(value) ?? U64{9}}")
+        print("Int {value}: U8 {checked(U8{value}) ?? U8{9}} U32 {checked(U32{value}) ?? U32{9}} U64 {checked(U64{value}) ?? U64{9}}")
     }
     wides: [U64]{U64{0}, U64{4294967295}, U64{4294967296}, U64{18446744073709551615}}
     loop wide in wides {
-        narrow: U32.from_u64(wide) ?? U32{7}
-        reason: U32.from_u64(wide) ?? U32{err.len()}
+        narrow: checked(U32{wide}) ?? U32{7}
+        reason: checked(U32{wide}) ?? U32{err.len()}
         print("U64 {wide}: {narrow} {reason}")
     }
 }
@@ -59,17 +59,17 @@ fill_words: fn(canvas: &Canvas, value: U32) {
 
 #Policy(arithmetic: .Wrapping)
 blend_words: fn(canvas: &Canvas, source: Int, alpha: Int) {
-    sw: U64.from_int(source) ?? U64{0}
-    a: U64.from_int(alpha) ?? U64{0}
+    sw: checked(U64{source}) ?? U64{0}
+    a: checked(U64{alpha}) ?? U64{0}
     inv: U64{255} - a
     src_rb: sw.bit_and(U64{0x00FF00FF}) * a
     src_ag: (sw >> 8).bit_and(U64{0x00FF00FF}) * a
     loop i in 0..<canvas.words.len() {
-        d: U64.from_u32(canvas.words[i])
+        d: U64{canvas.words[i]}
         rb: src_rb + d.bit_and(U64{0x00FF00FF}) * inv + U64{0x00800080}
         ag: src_ag + (d >> 8).bit_and(U64{0x00FF00FF}) * inv + U64{0x00800080}
         rb2: ((rb + (rb >> 8).bit_and(U64{0x00FF00FF})) >> 8).bit_and(U64{0x00FF00FF})
         ag2: ((ag + (ag >> 8).bit_and(U64{0x00FF00FF})) >> 8).bit_and(U64{0x00FF00FF})
-        canvas.words[i] = U32.from_u64(rb2.bit_or(ag2 << 8)) ?? U32{0}
+        canvas.words[i] = checked(U32{rb2.bit_or(ag2 << 8)}) ?? U32{0}
     }
 }

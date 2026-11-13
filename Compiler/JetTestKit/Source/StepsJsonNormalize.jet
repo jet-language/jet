@@ -14,7 +14,7 @@ kit_steps_json_normalizer: fn(value: String) -> KitJSONNormalization? {
 kit_steps_json_space: fn(bytes: [U8], start: Int) -> Int {
     i := start
     loop i < bytes.len() {
-        byte: Int.from_u8(bytes[i])
+        byte: Int{bytes[i]}
         if byte != 32 && byte != 9 && byte != 10 && byte != 13 -> break
         i += 1
     }
@@ -24,12 +24,12 @@ kit_steps_json_space: fn(bytes: [U8], start: Int) -> Int {
 // This scanner only locates spans in a document already validated by Core JSON.
 // It never decodes values, accepts syntax, or re-renders surrounding bytes.
 kit_steps_json_span_end: fn(bytes: [U8], start: Int) -> Int {
-    first: Int.from_u8(bytes[start])
+    first: Int{bytes[start]}
     quoted := first == 34
     containers := if first == 91 || first == 123 -> 1 else -> 0
     i := if quoted || containers > 0 -> start + 1 else -> start
     loop i < bytes.len() {
-        byte: Int.from_u8(bytes[i])
+        byte: Int{bytes[i]}
         if quoted {
             if {
                 byte == 92 -> i += 2

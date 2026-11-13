@@ -1159,11 +1159,11 @@ jet_eval_ir_read_as: fn(s: &JetEvalIRState, pointer: Int, width: Int, signed: Bo
 // top byte down; a signed top byte starts it negative, so a signed word stays
 // in the 64-bit range throughout.
 jet_eval_ir_bytes_value: fn(bytes: [U8], at: Int, width: Int, signed: Bool) -> Int Never! {
-    value := Int.from_u8(bytes[at + width - 1])
+    value := Int{bytes[at + width - 1]}
     if signed && value >= 128 -> value -= 256
     index := width - 2
     loop index >= 0 {
-        value = value * 256 + Int.from_u8(bytes[at + index])
+        value = value * 256 + Int{bytes[at + index]}
         index -= 1
     }
     value
@@ -1258,7 +1258,7 @@ jet_eval_ir_int_value: fn(s: &JetEvalIRState, word: Int) -> Int? {
     value := 0
     at := length - 1
     loop at >= 0 {
-        limb: Int.from_u8(digits[4 * at]) + (Int.from_u8(digits[4 * at + 1]) << 8) + (Int.from_u8(digits[4 * at + 2]) << 16) + (Int.from_u8(digits[4 * at + 3]) << 24)
+        limb: Int{digits[4 * at]} + (Int{digits[4 * at + 1]} << 8) + (Int{digits[4 * at + 2]} << 16) + (Int{digits[4 * at + 3]} << 24)
         value = value * 1000000000 + limb
         at -= 1
     }

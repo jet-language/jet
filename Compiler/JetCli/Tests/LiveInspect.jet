@@ -9,7 +9,7 @@ use {
 // The runtime's record layout (JetRuntime ObserveLive.jet): little-endian
 // words; a text is its byte length (-1 when absent) and its bytes.
 live_inspect_u64: fn(out: &[U8], value: U64) Never! {
-    loop index in 0..<8 -> out.push(U8{Int.from_u64((value >> (index * 8)).bit_and(U64{255}))})
+    loop index in 0..<8 -> out.push(U8{Int{(value >> (index * 8)).bit_and(U64{255})}})
 }
 live_inspect_word: fn(out: &[U8], word: Int) Never! {
     if word < 0 -> live_inspect_u64(out, U64{word + 9223372036854775807 + 1} + U64{9223372036854775808}) else -> live_inspect_u64(out, U64{word})

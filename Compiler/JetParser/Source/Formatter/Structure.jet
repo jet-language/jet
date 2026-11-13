@@ -146,7 +146,7 @@ jfmt_structure_list_close: fn(bytes: [U8], at: Int) -> Int Never! {
     depth := 0
     index := at
     loop index < bytes.len() {
-        if Int.from_u8(bytes[index]) == {
+        if (Int{bytes[index]}) == {
             34 -> index = jfmt_structure_quote_close(bytes, index) - 1
             91 -> depth += 1
             93 -> {
@@ -169,7 +169,7 @@ jfmt_structure_holds: fn(bytes: [U8], at: Int, marker: [U8]) -> Bool Never! {
 }
 
 jfmt_structure_name_byte: fn(byte: U8) -> Bool Never! {
-    code: Int.from_u8(byte)
+    code: Int{byte}
     (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 95
 }
 
@@ -190,7 +190,7 @@ jfmt_structure_pattern_dot_free: fn(bytes: [U8], at: Int) -> Bool Never! {
     depth := 0
     open := at - 1
     loop open >= 0 {
-        code: Int.from_u8(bytes[open])
+        code: Int{bytes[open]}
         if code == 125 || code == 93 -> depth += 1
         if code == 123 || code == 91 {
             if depth == 0 -> break
@@ -244,7 +244,7 @@ jfmt_structure_node: fn(bytes: [U8], at: Int) -> String Never! {
     depth := 0
     open := at - 1
     loop open >= 0 {
-        code: Int.from_u8(bytes[open])
+        code: Int{bytes[open]}
         if code == 125 -> depth += 1
         if code == 123 {
             if depth == 0 -> break

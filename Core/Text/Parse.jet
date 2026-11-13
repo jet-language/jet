@@ -948,7 +948,7 @@ __version_runs_order: fn(a: [U8], a_end: Int, b: [U8], b_end: Int) -> Int Never!
         loop j < b_end && b[j] == (U8{48}) -> j += 1
         first := 0
         loop i < a_end && j < b_end && __version_digit(a[i]) && __version_digit(b[j]) {
-            if first == 0 -> first = Int.from_u8(a[i]) - Int.from_u8(b[j])
+            if first == 0 -> first = (Int{a[i]}) - (Int{b[j]})
             i += 1
             j += 1
         }
@@ -965,9 +965,9 @@ __version_weight: fn(name: [U8], at: Int, end: Int) -> Int Never! {
     if at >= end -> return -1
     byte: name[at]
     if __version_digit(byte) -> return 0
-    if __version_letter(byte) -> return Int.from_u8(byte)
+    if __version_letter(byte) -> return (Int{byte})
     if byte == (U8{126}) -> return -2
-    Int.from_u8(byte) + 256
+    Int{byte} + 256
 }
 
 __version_digit: fn(byte: U8) -> Bool Never! { byte >= (U8{48}) && byte <= (U8{57}) }

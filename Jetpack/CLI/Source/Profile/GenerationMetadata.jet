@@ -209,7 +209,7 @@ cli_validate_bin_name: fn(value: String) CLIError! {
     if raw.len() == 0 || raw.len() > TOOL_PROFILE_MAX_BIN_NAME -> return Err(CLIError.InvalidData("profile bin name has invalid length"))
     if value == "." || value == ".." -> return Err(CLIError.InvalidData("profile bin name is not one normal component"))
     loop byte in raw {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if !(trust_text_is_alphanumeric(code) || code == 95 || code == 45 || code == 46 || code == 43) {
             return Err(CLIError.InvalidData("profile bin name is not one normal component"))
         }
@@ -262,7 +262,7 @@ cli_is_lower_hex64: fn(value: String) -> Bool Never! {
     raw: value.bytes()
     if raw.len() != 64 -> return false
     loop byte in raw {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if !((code >= 48 && code <= 57) || (code >= 97 && code <= 102)) -> return false
     }
     true
@@ -278,7 +278,7 @@ cli_profile_validate_string: fn(value: String) CLIError! {
     raw: value.bytes()
     if raw.len() > TOOL_PROFILE_MAX_STRING -> return Err(CLIError.InvalidData("profile string exceeds bounds"))
     loop byte in raw {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if code < 32 || code == 127 -> return Err(CLIError.InvalidData("profile string exceeds bounds"))
     }
 }
@@ -355,7 +355,7 @@ cli_parse_u64: fn(text: String) -> Int? Never! {
     if raw.len() == 0 -> return None
     value := 0
     loop byte in raw {
-        digit: Int.from_u8(byte) - 48
+        digit: Int{byte} - 48
         if digit < 0 || digit > 9 -> return None
         if value > (CLI_INT_MAX - digit) /% 10 -> return None
         value = value * 10 + digit
@@ -367,7 +367,7 @@ cli_parse_u64: fn(text: String) -> Int? Never! {
 cli_ascii_upper: fn(value: String) -> String Never! {
     out := [U8]{}
     loop byte in value.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         out.push(if code >= 97 && code <= 122 -> U8{code - 32} else -> byte)
     }
     String.from_bytes(out) ?? value

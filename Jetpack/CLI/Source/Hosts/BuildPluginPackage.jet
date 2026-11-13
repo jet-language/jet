@@ -157,7 +157,7 @@ cli_build_plugin_validate_component: fn(bytes: [U8]) BuildPluginPackageError! {
     if bytes.len() < 8 || bytes.slice(0, 8) != preamble -> return Err(cli_build_plugin_error("plugin component is not a valid WebAssembly Component Model binary"))
     offset := 8
     loop offset < bytes.len() {
-        id: Int.from_u8(bytes[offset])
+        id: Int{bytes[offset]}
         offset += 1
         if id > 13 -> return Err(cli_build_plugin_error("plugin component uses unknown section id {id}"))
         length: cli_build_plugin_read_u32_leb(bytes, offset) ?? return Err(err)
@@ -173,7 +173,7 @@ cli_build_plugin_read_u32_leb: fn(bytes: [U8], offset: &Int) -> Int BuildPluginP
     shift := 0
     loop shift < 35 {
         if offset >= bytes.len() -> return Err(cli_build_plugin_error("plugin component section length is truncated"))
-        byte: Int.from_u8(bytes[offset])
+        byte: Int{bytes[offset]}
         offset += 1
         if shift == 28 && byte.bit_and(0xf0) != 0 -> return Err(cli_build_plugin_error("plugin component section length overflows u32"))
         value = value.bit_or(byte.bit_and(0x7f) << shift)

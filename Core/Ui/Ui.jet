@@ -1462,14 +1462,14 @@ priv internal: module {
     // FNV-1a, 32-bit.
     checksum: fn(bytes: [U8]) -> Int {
         hash := 2166136261
-        loop b in bytes -> hash = (hash.bit_xor(Int.from_u8(b)) * 16777619).bit_and(4294967295)
+        loop b in bytes -> hash = (hash.bit_xor(Int{b}) * 16777619).bit_and(4294967295)
         hash
     }
 
     // Whether `text` holds a NUL byte, which a wire string cannot carry.
     has_nul: fn(text: String) -> Bool {
         loop b in text.bytes() {
-            if Int.from_u8(b) == 0 -> return true
+            if (Int{b}) == 0 -> return true
         }
         false
     }
@@ -1683,7 +1683,7 @@ priv internal: module {
             if raw[index] == (U8{45}) {
                 below = true
             } else {
-                exponent = exponent * 10 + Int.from_u8(raw[index]) - 48
+                exponent = exponent * 10 + Int{raw[index]} - 48
             }
         }
         place: if below -> point - exponent else -> point + exponent

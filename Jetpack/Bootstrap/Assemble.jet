@@ -1442,19 +1442,19 @@ referenced: fn(source: String) -> Referenced {
 }
 
 is_upper: fn(byte: U8) -> Bool {
-    code: Int.from_u8(byte)
+    code: Int{byte}
     code >= 65 && code <= 90
 }
 
 is_digit: fn(byte: U8) -> Bool {
-    code: Int.from_u8(byte)
+    code: Int{byte}
     code >= 48 && code <= 57
 }
 
 is_space: fn(b: U8) -> Bool { b == (U8{32}) || b == (U8{9}) || b == (U8{10}) || b == (U8{13}) || b == (U8{11}) || b == (U8{12}) }
 
 is_ident_start: fn(byte: U8) -> Bool {
-    code: Int.from_u8(byte)
+    code: Int{byte}
     (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 95
 }
 
@@ -1512,7 +1512,7 @@ blank: fn(text: String) -> String {
 
 blank_into: fn(out: &[U8], raw: [U8], start: Int, end: Int) {
     loop at in start..<end {
-        code: Int.from_u8(raw[at])
+        code: Int{raw[at]}
         if {
             code == 10 -> out.push(U8{10})
             code < 128 || (code >= 192 && code < 240) -> out.push(U8{32})

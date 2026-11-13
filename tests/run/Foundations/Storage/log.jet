@@ -22,7 +22,7 @@ recover: fn(path: Path) -> Recovery {
 
     length: mapped.len()
     final_byte: mapped.window_len(length - 1, 1) ?? return empty_recovery()
-    complete_tail: Int.from_u8(final_byte[0]) == 10
+    complete_tail: Int{final_byte[0]} == 10
     records := [String]{}
     loop line in mapped.lines() {
         records.push(String.from_bytes(line.copy()) ?? panic("storage log is not UTF-8"))

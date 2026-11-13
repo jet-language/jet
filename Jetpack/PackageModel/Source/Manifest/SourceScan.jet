@@ -242,7 +242,7 @@ pkg_top_level_function_lines: fn(source: String, wanted: String) -> [Int] Never!
     index := 0
     loop index < raw.len() {
         width: pkg_scalar_width(raw, index)
-        code: Int.from_u8(raw[index])
+        code: Int{raw[index]}
         current: index
         index += width
         if line_comment {
@@ -325,7 +325,7 @@ pkg_top_level_function_lines: fn(source: String, wanted: String) -> [Int] Never!
 
 // The byte width of the UTF-8 scalar at `at`.
 pkg_scalar_width: fn(raw: [U8], at: Int) -> Int Never! {
-    lead: Int.from_u8(raw[at])
+    lead: Int{raw[at]}
     if {
         lead >= 240 -> 4
         lead >= 224 -> 3
@@ -366,7 +366,7 @@ pkg_source_line_at: fn(source: String, offset: Int) -> Int Never! {
     raw: source.bytes()
     count := 1
     loop index in 0..<offset {
-        if index < raw.len() && Int.from_u8(raw[index]) == 10 -> count += 1
+        if index < raw.len() && (Int{raw[index]}) == 10 -> count += 1
     }
     count
 }

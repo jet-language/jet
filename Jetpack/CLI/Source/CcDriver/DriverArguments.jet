@@ -512,7 +512,7 @@ cli_cc_parse_response_words: fn(bytes: [U8], source: String) -> [String] CLITool
     quote := CcResponseQuote.Unquoted
     escaped := false
     loop byte in text.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if escaped {
             word.push(byte)
             started = true
@@ -710,7 +710,7 @@ cli_cc_validate_relative_path: fn(path: String, label: String) CLIToolError! {
 // Whether `value` contains a NUL byte.
 cli_cc_has_nul: fn(value: String) -> Bool Never! {
     loop byte in value.bytes() {
-        if Int.from_u8(byte) == 0 -> return true
+        if (Int{byte}) == 0 -> return true
     }
     false
 }

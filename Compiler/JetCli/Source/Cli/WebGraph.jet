@@ -301,7 +301,7 @@ jet_cli_web_pending_boundary_id: fn(path: String, handler: String) -> String {
     bytes: jet_cli_web_identity_key("pending-boundary", path, handler).bytes()
     digest: sha256_bytes(bytes[0..<bytes.len()])
     number := [Int]{}
-    loop index in 0..<8 -> number.push(Int.from_u8(digest[index]))
+    loop index in 0..<8 -> number.push(Int{digest[index]})
     digits := ""
     more := true
     loop more {

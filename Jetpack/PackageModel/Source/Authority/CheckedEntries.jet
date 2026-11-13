@@ -214,7 +214,7 @@ pkg_authority_error_diagnostic: fn(code: String, what: String, why: String, fix:
 pkg_authority_utf8_error: fn(bytes: [U8]) -> String Never! {
     valid := 0
     loop valid < bytes.len() {
-        lead: Int.from_u8(bytes[valid])
+        lead: Int{bytes[valid]}
         width: if {
             lead < 0x80 -> 1
             lead >= 0xC2 && lead <= 0xDF -> 2
@@ -335,7 +335,7 @@ pkg_authority_extension: fn(name: String) -> String? Never! {
     raw: name.bytes()
     index := raw.len() - 1
     loop index > 0 {
-        if Int.from_u8(raw[index]) == 46 -> return Val(String.from_bytes(raw[index + 1..<raw.len()]) ?? "")
+        if (Int{raw[index]}) == 46 -> return Val(String.from_bytes(raw[index + 1..<raw.len()]) ?? "")
         index -= 1
     }
     None

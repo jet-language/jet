@@ -39,7 +39,7 @@ SchemaSnapshot: struct {
                     number := 0
                     if index == bytes.len() -> return Err(SchemaSnapshotError{message: "invalid schema_version: {rest}"})
                     loop index < bytes.len() {
-                        digit: Int.from_u8(bytes[index]) - 48
+                        digit: Int{bytes[index]} - 48
                         if digit < 0 || digit > 9 || number > 429496729 || (number == 429496729 && digit > 5) -> return Err(SchemaSnapshotError{message: "invalid schema_version: {rest}"})
                         number = number * 10 + digit
                         index += 1

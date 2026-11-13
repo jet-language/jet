@@ -28,10 +28,10 @@ C_BASE53_FLOAT: 9007199254740992.0
 // Keep state transitions in explicitly wrapping sized words. Jet's exact Int
 // holds the bounded draw's full 64-by-64 product without a new scalar carrier.
 seeded_next: fn(state: &U64) -> U64 Never! {
-    state = state.wrapping_add(U64{11400714819323198485})
+    state = wrapping(state + U64{11400714819323198485})
     word := U64{state}
-    word = (word.bit_xor((word >> 30))).wrapping_mul(U64{13787848793156543929})
-    word = (word.bit_xor((word >> 27))).wrapping_mul(U64{10723151780598845931})
+    word = wrapping((word.bit_xor((word >> 30))) * U64{13787848793156543929})
+    word = wrapping((word.bit_xor((word >> 27))) * U64{10723151780598845931})
     word.bit_xor((word >> 31))
 }
 
@@ -40,7 +40,7 @@ seeded_next: fn(state: &U64) -> U64 Never! {
 // a different number of words for large bounds.
 seeded_bounded: fn(state: &U64, bound: U64) -> U64 Never! {
     if bound == (U64{0}) -> return seeded_next(state)
-    threshold: U64{0}.wrapping_sub(bound) %% bound
+    threshold: wrapping(U64{0} - bound) %% bound
     loop {
         product: Int{seeded_next(state)} * Int{bound}
         low: U64{product.bit_and(18446744073709551615)}

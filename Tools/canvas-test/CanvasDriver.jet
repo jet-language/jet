@@ -235,7 +235,7 @@ webdriver_key: fn(key: String) -> String {
     if key == "Space" -> return " "
     if code < 0 -> return key.copy()
     // U+E000 + code, as UTF-8.
-    String.from_bytes([U8]{U8{238}, U8{128}, U8.from_int(128 + code) ?? U8{128}}) ?? key.copy()
+    String.from_bytes([U8]{U8{238}, U8{128}, checked(U8{128 + code}) ?? U8{128}}) ?? key.copy()
 }
 
 // Install `function_declaration` before every document's own scripts; its id.

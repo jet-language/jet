@@ -131,7 +131,7 @@ LoaderPlan: struct {
 }
 
 loader_u16: fn(bytes: [U8], at: Int) -> Int Never! {
-    Int.from_u8(bytes[at]).bit_or(Int.from_u8(bytes[at + 1]) << 8)
+    Int{bytes[at]}.bit_or(Int{bytes[at + 1]} << 8)
 }
 
 loader_u32: fn(bytes: [U8], at: Int) -> Int Never! {
@@ -249,7 +249,7 @@ x64_image_segments: fn(bytes: [U8]) -> X64Segments Never! {
 // least its 64 bytes) and the program header table in `table`, the file's
 // bytes from offset `table_at`.
 loader_segments: fn(header: [U8], table: [U8], table_at: Int, size: Int) -> X64Segments Never! {
-    if header.len() < 64 || loader_u32(header, 0) != 0x464c457f || Int.from_u8(header[4]) != 2 || loader_u16(header, 16) != 2 || loader_u16(header, 18) != 62 {
+    if header.len() < 64 || loader_u32(header, 0) != 0x464c457f || (Int{header[4]}) != 2 || loader_u16(header, 16) != 2 || loader_u16(header, 18) != 62 {
         return loader_segments_failed("the image is not a static x86-64 ELF executable")
     }
     phoff: loader_u64(header, 32)
@@ -326,16 +326,16 @@ x64_image_perf_map: fn(bytes: [U8], pid: Int) -> String {
         loop s in 0..<symbols_size /% 24 {
             symbol: symbols + s * 24
             // STT_FUNC
-            if Int.from_u8(bytes[symbol + 4]).bit_and(15) != 2 -> next
+            if (Int{bytes[symbol + 4]}).bit_and(15) != 2 -> next
             value: loader_u64(bytes, symbol + 8)
             length: loader_u64(bytes, symbol + 16)
             name := names + loader_u32(bytes, symbol)
-            if value == 0 || length == 0 || name >= names_end || Int.from_u8(bytes[name]) == 0 -> next
+            if value == 0 || length == 0 || name >= names_end || (Int{bytes[name]}) == 0 -> next
             loader_hex_push(out, value)
             out.push(separators[0])
             loader_hex_push(out, length)
             out.push(separators[0])
-            loop name < names_end && Int.from_u8(bytes[name]) != 0 {
+            loop name < names_end && (Int{bytes[name]}) != 0 {
                 out.push(bytes[name])
                 name += 1
             }
@@ -512,7 +512,7 @@ loader_patch: fn(exe: X64Executable, delta: Int, from: Int, to: Int) {
         loop (j, byte) in exe.patch_bytes[k] {
             if at + j < from || at + j >= to -> next
             #Unsafe("the caller mapped [from, to) + delta private and writable") {
-                os_store_byte(at + j + delta, Int.from_u8(byte))
+                os_store_byte(at + j + delta, Int{byte})
             }
         }
     }
@@ -817,7 +817,7 @@ loader_put_text: fn(at: Int, text: String) -> Int {
     bytes: text.bytes()
     start: at - bytes.len() - 1
     #Unsafe("the caller owns the stack bytes below `at`") {
-        loop (k, byte) in bytes { os_store_byte(start + k, Int.from_u8(byte)) }
+        loop (k, byte) in bytes { os_store_byte(start + k, Int{byte}) }
         os_store_byte(start + bytes.len(), 0)
     }
     start
@@ -827,7 +827,7 @@ loader_put_text: fn(at: Int, text: String) -> Int {
 loader_put_bytes: fn(at: Int, bytes: [U8]) -> Int {
     start: at - bytes.len()
     #Unsafe("the caller owns the stack bytes below `at`") {
-        loop (k, byte) in bytes { os_store_byte(start + k, Int.from_u8(byte)) }
+        loop (k, byte) in bytes { os_store_byte(start + k, Int{byte}) }
     }
     start
 }
@@ -963,7 +963,7 @@ LOADER_TASK_END: 0x7ffffffff000
 loader_hex_parse: fn(text: String) -> Int Never! {
     value := 0
     loop byte in text.bytes() {
-        digit: Int.from_u8(byte)
+        digit: Int{byte}
         nibble := digit - 48
         if digit >= 97 -> nibble = digit - 87
         value = value * 16 + nibble
@@ -1033,7 +1033,7 @@ loader_plan: fn(image: X64LoadedImage, launch: X64Launch, fds: [Int], fork: Bool
         os_store_word(data + LOADER_DATA_ALTSTACK + 8, 2)
         name: launch.name.bytes()
         loop k in 0..<15 {
-            if k < name.len() -> os_store_byte(data + LOADER_DATA_NAME + k, Int.from_u8(name[k]))
+            if k < name.len() -> os_store_byte(data + LOADER_DATA_NAME + k, Int{name[k]})
         }
     }
     executor: os_map(OS_PAGE_SIZE, OS_PROT_READ + OS_PROT_WRITE)

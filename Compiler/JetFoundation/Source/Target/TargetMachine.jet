@@ -216,7 +216,7 @@ jet_target_json_quote: fn(value: String) -> String Never! {
     segment_start := 0
     index := 0
     loop index < bytes.len() {
-        byte: Int.from_u8(bytes[index])
+        byte: Int{bytes[index]}
         escape: if byte == {
             34 -> "\\\""
             92 -> "\\\\"
@@ -750,7 +750,7 @@ jet_target_capabilities_for_core_usage: fn(api: String) -> [TargetCapability] Ne
     bytes: api.bytes()
     separator := 0
     loop separator + 1 < bytes.len() {
-        if Int.from_u8(bytes[separator]) == 58 && Int.from_u8(bytes[separator + 1]) == 58 -> break
+        if (Int{bytes[separator]}) == 58 && (Int{bytes[separator + 1]}) == 58 -> break
         separator += 1
     }
     module_name := api
@@ -810,15 +810,15 @@ jet_target_no_whitespace: fn(value: String) -> Bool Never! {
     // view rather than allocating chars and a one-character String per scalar.
     bytes: value.bytes()
     loop index in 0..<bytes.len() {
-        first: Int.from_u8(bytes[index])
+        first: Int{bytes[index]}
         if first == 32 || (first >= 9 && first <= 13) -> return false
         if index + 1 < bytes.len() && first == 194 {
-            second: Int.from_u8(bytes[index + 1])
+            second: Int{bytes[index + 1]}
             if second == 133 || second == 160 -> return false
         }
         if index + 2 < bytes.len() {
-            second: Int.from_u8(bytes[index + 1])
-            third: Int.from_u8(bytes[index + 2])
+            second: Int{bytes[index + 1]}
+            third: Int{bytes[index + 2]}
             if first == 225 && second == 154 && third == 128 -> return false
             if first == 226 && second == 128 && ((third >= 128 && third <= 138) || third == 168 || third == 169 || third == 175) -> return false
             if first == 226 && second == 129 && third == 159 -> return false

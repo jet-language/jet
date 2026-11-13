@@ -125,7 +125,7 @@ x509_crl_get_ext: fn(data: [U8], p: &Int, end: Int) -> asn1.ASN1Buf x509.X509Err
 // Extension only checked to be a SEQUENCE.
 x509_crl_get_entry_ext: fn(data: [U8], p: &Int, end: Int) -> asn1.ASN1Buf x509.X509Error! {
     if end <= p -> return Ok(asn1.asn1_none())
-    ext := asn1.ASN1Buf{tag_id: Int.from_u8(data[p]), p: p, len: 0}
+    ext := asn1.ASN1Buf{tag_id: Int{data[p]}, p: p, len: 0}
     if asn1.get_tag(data, p, end, X509CRL_SEQUENCE) == {
         .Ok(len) -> ext.len = len
         .Err(e) -> {
@@ -156,7 +156,7 @@ x509_crl_get_entries: fn(data: [U8], p: &Int, end: Int) -> [X509CrlEntry] x509.X
     }
     list_end: p + entry_len
     loop p < list_end {
-        tag_id: Int.from_u8(data[p])
+        tag_id: Int{data[p]}
         len2: asn1.get_tag(data, p, list_end, X509CRL_SEQUENCE) ?? return Err(.Asn1(err))
         raw: asn1.ASN1Buf{tag_id: tag_id, p: p, len: len2}
         end2: p + len2

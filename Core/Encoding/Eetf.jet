@@ -86,7 +86,7 @@ atom_name: fn(tree: Dyn) -> String? Never! {
 scalar_count: fn(text: String) -> Int Never! {
     count := 0
     loop b in text.bytes() {
-        if Int.from_u8(b).bit_and(192) != 128 -> count += 1
+        if (Int{b}).bit_and(192) != 128 -> count += 1
     }
     count
 }
@@ -180,7 +180,7 @@ etf_error: fn(kind: EncodingErrorKind, offset: Int, path: String, reason: String
 }
 
 u32_at: fn(bytes: [U8], at: Int) -> Int Never! {
-    (Int.from_u8(bytes[at]) << 24).bit_or((Int.from_u8(bytes[at + 1]) << 16)).bit_or((Int.from_u8(bytes[at + 2]) << 8)).bit_or(Int.from_u8(bytes[at + 3]))
+    (Int{bytes[at]} << 24).bit_or((Int{bytes[at + 1]} << 16)).bit_or((Int{bytes[at + 2]} << 8)).bit_or(Int{bytes[at + 3]})
 }
 
 slice: fn(bytes: [U8], start: Int, end: Int) -> [U8] Never! {
@@ -195,9 +195,9 @@ read: fn(bytes: [U8], view: Bool, layout: TermLayout, strings: StringEncoding, l
         return Err(etf_error(.Limit, total, "", "max_total_bytes {total} exceeded"))
     }
     if bytes.len() == 0 -> return Err(etf_error(.Truncated, 0, "", "a standalone ETF term starts with version byte 131"))
-    if Int.from_u8(bytes[0]) != ETF_VERSION -> return Err(etf_error(.Syntax, 0, "", "a standalone ETF term starts with version byte 131, not {Int.from_u8(bytes[0])}"))
+    if (Int{bytes[0]}) != ETF_VERSION -> return Err(etf_error(.Syntax, 0, "", "a standalone ETF term starts with version byte 131, not {Int{bytes[0]}}"))
     if bytes.len() < 2 -> return Err(etf_error(.Truncated, 1, "$", "the version byte is not followed by a term"))
-    op: Int.from_u8(bytes[1])
+    op: Int{bytes[1]}
     if op == 80 {
         // COMPRESSED: a four-byte inflated size, then a zlib stream to the end.
         if bytes.len() < 6 -> return Err(etf_error(.Truncated, bytes.len(), "$", "a compressed term needs its four-byte inflated size"))
@@ -255,7 +255,7 @@ TermReader: struct {
     }
 
     byte: fn(&self) -> Int Never! {
-        value: Int.from_u8(self.bytes[self.at])
+        value: Int{self.bytes[self.at]}
         self.at += 1
         value
     }
@@ -308,7 +308,7 @@ TermReader: struct {
             if sign > 1 -> return Err(self.fail(.Syntax, path, "a bignum sign byte is 0 or 1, not {sign}"))
             self.item(count, path, "a bignum") ?? return Err(err)
             magnitude := 0
-            loop i in 0..<count -> magnitude = magnitude * 256 + Int.from_u8(self.bytes[self.at + count - 1 - i])
+            loop i in 0..<count -> magnitude = magnitude * 256 + (Int{self.bytes[self.at + count - 1 - i]})
             self.at += count
             return Ok(Dyn.Int(if sign == 1 -> -magnitude else -> magnitude))
         }
@@ -360,7 +360,7 @@ TermReader: struct {
         if op == 108 {
             self.need(4, path) ?? return Err(err)
             count: self.take_u32()
-            proplist: !self.view && self.layout == .Proplist && count > 0 && self.bytes.len() - self.at >= 2 && Int.from_u8(self.bytes[self.at]) == 104 && Int.from_u8(self.bytes[self.at + 1]) == 2
+            proplist: !self.view && self.layout == .Proplist && count > 0 && self.bytes.len() - self.at >= 2 && Int{self.bytes[self.at]} == 104 && Int{self.bytes[self.at + 1]} == 2
             tree := Dyn.Null
             if proplist {
                 tree = self.pairs(count, path, depth) ?? return Err(err)
@@ -368,7 +368,7 @@ TermReader: struct {
                 tree = self.elements(count, path, depth) ?? return Err(err)
             }
             self.need(1, path) ?? return Err(err)
-            if Int.from_u8(self.bytes[self.at]) != 106 -> return Err(self.fail(.Unsupported, path, "an improper list (its tail is not NIL)"))
+            if (Int{self.bytes[self.at]}) != 106 -> return Err(self.fail(.Unsupported, path, "an improper list (its tail is not NIL)"))
             self.at += 1
             return Ok(tree)
         }
@@ -447,7 +447,7 @@ TermReader: struct {
         self.item(count, path, "an atom") ?? return Err(err)
         raw := [U8]{}
         if op == 100 || op == 115 {
-            loop i in 0..<count -> append_scalar(raw, Int.from_u8(self.bytes[self.at + i]))
+            loop i in 0..<count -> append_scalar(raw, Int{self.bytes[self.at + i]})
         } else {
             raw = slice(self.bytes, self.at, self.at + count)
         }

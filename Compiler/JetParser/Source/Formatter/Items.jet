@@ -350,7 +350,7 @@ jfmt_generated_path: fn(path: String) -> String Never! {
     hex: "0123456789abcdef".bytes()
     out := [U8]{}
     loop byte in path.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) {
             out.push(byte)
             next
@@ -388,14 +388,14 @@ jfmt_decode_generated_suffix: fn(suffix: String) -> String? Never! {
     out := [U8]{}
     index := 0
     loop index < bytes.len() {
-        code: Int.from_u8(bytes[index])
+        code: Int{bytes[index]}
         if (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) {
             out.push(bytes[index])
             index += 1
             next
         }
         if code != 95 || index + 1 >= bytes.len() -> return None
-        escape: Int.from_u8(bytes[index + 1])
+        escape: Int{bytes[index + 1]}
         if {
             escape == 117 -> out.push(U8{95})
             escape == 100 -> out.push(U8{46})
@@ -404,8 +404,8 @@ jfmt_decode_generated_suffix: fn(suffix: String) -> String? Never! {
             escape == 98 -> out.push(U8{92})
             escape == 104 -> out.push(U8{45})
             escape == 120 && index + 3 < bytes.len() -> {
-                high: jfmt_hex_value(Int.from_u8(bytes[index + 2]))
-                low: jfmt_hex_value(Int.from_u8(bytes[index + 3]))
+                high: jfmt_hex_value(Int{bytes[index + 2]})
+                low: jfmt_hex_value(Int{bytes[index + 3]})
                 if high < 0 || low < 0 -> return None
                 out.push(U8{high * 16 + low})
                 index += 2
@@ -1718,7 +1718,7 @@ jfmt_empty_body_inline: fn(f: JetFmt, span: Span) -> Bool Never! {
     if close <= open -> return false
     body: bytes[open + 1..<close].copy()
     loop byte in body {
-        if Int.from_u8(byte) == 10 -> return false
+        if (Int{byte}) == 10 -> return false
     }
     jfmt_items_find(body, "//".bytes(), 0) == None && jfmt_items_find(body, "/*".bytes(), 0) == None
 }

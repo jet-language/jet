@@ -227,7 +227,7 @@ pkg_data_proto_is_octal: fn(scalar: String) -> Bool Never! {
 
 pkg_data_proto_octal: fn(digits: String) -> Int Never! {
     total := 0
-    loop byte in digits.bytes() -> total = total * 8 + (Int.from_u8(byte) - 48)
+    loop byte in digits.bytes() -> total = total * 8 + (Int{byte} - 48)
     total
 }
 
@@ -239,7 +239,7 @@ pkg_data_parse_proto_integer_literal: fn(value: String) -> Int? Never! {
         if raw.len() == 0 -> return None
         total := 0
         loop byte in raw {
-            code: Int.from_u8(byte)
+            code: Int{byte}
             digit: if {
                 code >= 48 && code <= 57 -> code - 48
                 code >= 65 && code <= 70 -> code - 55

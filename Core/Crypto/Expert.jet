@@ -439,7 +439,7 @@ inc32: fn(block: &[U8]) Never! {
     // Four fixed steps; carry depends only on the public counter.
     carry := U64{1}
     loop i in 0..<4 {
-        n: U64.from_u8(block[15 - i]) + carry
+        n: U64{block[15 - i]} + carry
         block[15 - i] = U8{n.bit_and(U64{255})}
         carry = n >> 8
     }
@@ -483,7 +483,7 @@ gcm_tag: fn(h: [U8], ek0: [U8], aad: [U8], ct: [U8], count: Int) -> [U8] Never! 
 
 aes_load_be64: fn(bytes: [U8], off: Int) -> U64 Never! {
     word := U64{0}
-    loop i in 0..<8 -> word = (word << 8).bit_or(U64.from_u8(bytes[off + i]))
+    loop i in 0..<8 -> word = (word << 8).bit_or(U64{bytes[off + i]})
     word
 }
 
@@ -494,7 +494,7 @@ ghash_blocks: fn(y: &[U64], high: U64, low: U64, data: [U8], count: Int) Never! 
         b := U64{0}
         loop i in 0..<16 {
             byte := U64{0}
-            if off + i < count -> byte = U64.from_u8(data[off + i])
+            if off + i < count -> byte = (U64{data[off + i]})
             if i < 8 -> a = (a << 8).bit_or(byte) else -> b = (b << 8).bit_or(byte)
         }
         y[0] = y[0].bit_xor(a)
@@ -583,7 +583,7 @@ add_round: fn(s: &[U8], rk: [U8], round: Int) Never! {
 sub_bytes: fn(s: &[U8], w: &[U64]) Never! {
     loop p in 0..<8 {
         w[p] = U64{0}
-        loop lane in 0..<16 -> w[p] = w[p].bit_or((((U64.from_u8(s[lane]) >> p).bit_and(U64{1})) << lane))
+        loop lane in 0..<16 -> w[p] = w[p].bit_or((((U64{s[lane]} >> p).bit_and(U64{1})) << lane))
     }
     aes_square(w, 0, 8)           // x^2
     aes_multiply(w, 8, 0, 16)     // x^3
@@ -830,7 +830,7 @@ argon2id_raw: fn(password: [U8], salt: [U8], memory_kib: Int, iterations: Int, l
 load_le64: fn(bytes: [U8], off: Int, end: Int) -> U64 Never! {
     n := U64{0}
     loop i in 0..<8 {
-        if off + i < end -> n = (n).bit_or(U64.from_u8(bytes[off + i]) << (i * 8))
+        if off + i < end -> n = (n).bit_or(U64{bytes[off + i]} << (i * 8))
     }
     n
 }
@@ -868,7 +868,7 @@ argon2_random_word: fn(memory: [U64], address_block: [U64], data_independent: Bo
 /// second half of the first pass on, the word is a previous block's: the
 /// data-dependent addressing of Argon2id.
 __argon2_reference_block: fn(memory: [U64], block: &[U64], random_word: U64, pass: Int, slice: Int, index: Int, lane: Int, lanes: Int, segment_length: Int, lane_length: Int) Never! {
-    reference_lane: if pass == 0 && slice == 0 -> lane else -> Int.from_u64((random_word >> 32) %% U64{lanes})
+    reference_lane: if pass == 0 && slice == 0 -> lane else -> (Int{(random_word >> 32) %% U64{lanes}})
     same_lane: reference_lane == lane
     area: if {
         pass == 0 && slice == 0 -> index - 1
@@ -885,7 +885,7 @@ __argon2_reference_block: fn(memory: [U64], block: &[U64], random_word: U64, pas
 
 /// RFC 9106 3.4.2: map J1 (below 2^32) onto the reference area.
 argon2_mapping: fn(j1: U64, area: Int) -> Int Never! {
-    x: Int.from_u64((j1 * j1) >> 32)
+    x: Int{(j1 * j1) >> 32}
     y: (area * x) >> 32
     area - 1 - y
 }

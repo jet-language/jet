@@ -28,7 +28,7 @@ pkg_lock_read_text: fn(path: String) -[FS]> String LockError! {
         offset := 0
         loop offset < chunk.len() {
             end := offset
-            loop end < chunk.len() && Int.from_u8(chunk[end]) != 10 -> end += 1
+            loop end < chunk.len() && (Int{chunk[end]}) != 10 -> end += 1
             has_newline: end < chunk.len()
             content_length: end - offset
             take_length: if has_newline -> content_length + 1 else -> content_length

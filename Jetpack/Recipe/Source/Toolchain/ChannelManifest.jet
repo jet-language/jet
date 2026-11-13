@@ -383,7 +383,7 @@ recipe_update_validate_build: fn(value: String, label: String) RecipeError! {
 
 recipe_update_all_digits: fn(value: String) -> Bool Never! {
     loop byte in value.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if code < 48 || code > 57 -> return false
     }
     true
@@ -392,7 +392,7 @@ recipe_update_all_digits: fn(value: String) -> Bool Never! {
 // ASCII alphanumerics and `-`.
 recipe_update_all_ident: fn(value: String) -> Bool Never! {
     loop byte in value.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         ok: (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 45
         if !ok -> return false
     }
@@ -501,7 +501,7 @@ recipe_update_integer: fn(value: Dyn, label: String) -> Int RecipeError! {
 recipe_update_validate_component: fn(value: String, label: String) RecipeError! {
     if value == "" || value == "." || value == ".." -> return Err(RecipeError.Update("{label} contains unsafe characters"))
     loop byte in value.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         ok: (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 46 || code == 95 || code == 43 || code == 45
         if !ok -> return Err(RecipeError.Update("{label} contains unsafe characters"))
     }
@@ -522,7 +522,7 @@ recipe_update_validate_digest: fn(value: String, label: String) RecipeError! {
     raw: value.bytes()
     if raw.len() != 64 -> return Err(RecipeError.Update("{label} is malformed"))
     loop byte in raw {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if !((code >= 48 && code <= 57) || (code >= 97 && code <= 102)) -> return Err(RecipeError.Update("{label} is malformed"))
     }
 }

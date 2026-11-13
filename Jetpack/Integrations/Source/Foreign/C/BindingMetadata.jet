@@ -200,14 +200,14 @@ pkg_cffi_metadata_unescape: fn(value: String) -> String ForeignBridgeError! {
     out := [U8]{}
     index := 0
     loop index < bytes.len() {
-        if Int.from_u8(bytes[index]) != 37 {
+        if (Int{bytes[index]}) != 37 {
             out.push(bytes[index])
             index += 1
             next
         }
         if index + 2 >= bytes.len() -> return Err(pkg_bridge_error("truncated percent escape"))
-        high: pkg_cffi_hex_value(Int.from_u8(bytes[index + 1])) ?? return Err(pkg_bridge_error("invalid percent escape"))
-        low: pkg_cffi_hex_value(Int.from_u8(bytes[index + 2])) ?? return Err(pkg_bridge_error("invalid percent escape"))
+        high: pkg_cffi_hex_value(Int{bytes[index + 1]}) ?? return Err(pkg_bridge_error("invalid percent escape"))
+        low: pkg_cffi_hex_value(Int{bytes[index + 2]}) ?? return Err(pkg_bridge_error("invalid percent escape"))
         out.push(U8{((high << 4)).bit_or(low)})
         index += 3
     }

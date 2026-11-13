@@ -11,7 +11,7 @@ SemaNameCase: enum {
 sema_casing_ascii_code: fn(scalar: String) -> Int Never! {
     bytes: scalar.bytes()
     if bytes.len() != 1 -> return -1
-    Int.from_u8(bytes[0])
+    Int{bytes[0]}
 }
 
 sema_casing_is_upper: fn(scalar: String) -> Bool {
@@ -61,38 +61,38 @@ sema_casing_ascii_has_case: fn(name: String, case: SemaNameCase) -> Bool? Never!
     bytes: name.bytes()
     count: bytes.len()
     loop index in 0..<count {
-        if Int.from_u8(bytes[index]) >= 128 -> return None
+        if (Int{bytes[index]}) >= 128 -> return None
     }
     if name == "_" -> return Val(true)
     start := 0
-    if count > 0 && Int.from_u8(bytes[0]) == 95 -> start = 1
-    if start >= count || Int.from_u8(bytes[start]) == 95 || Int.from_u8(bytes[count - 1]) == 95 -> return Val(false)
+    if count > 0 && (Int{bytes[0]}) == 95 -> start = 1
+    if start >= count || (Int{bytes[start]}) == 95 || (Int{bytes[count - 1]}) == 95 -> return Val(false)
     rest: start + 1
     loop index in rest..<count {
-        if Int.from_u8(bytes[index]) == 95 && Int.from_u8(bytes[index - 1]) == 95 -> return Val(false)
+        if (Int{bytes[index]}) == 95 && (Int{bytes[index - 1]}) == 95 -> return Val(false)
     }
-    first: Int.from_u8(bytes[start])
+    first: Int{bytes[start]}
     upper: first >= 65 && first <= 90
     lower: first >= 97 && first <= 122
     if case == {
         .Pascal -> {
             if !upper -> return Val(false)
             loop index in rest..<count {
-                code: Int.from_u8(bytes[index])
+                code: Int{bytes[index]}
                 if !((code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122)) -> return Val(false)
             }
         }
         .Snake -> {
             if !lower -> return Val(false)
             loop index in rest..<count {
-                code: Int.from_u8(bytes[index])
+                code: Int{bytes[index]}
                 if !(code == 95 || (code >= 48 && code <= 57) || (code >= 97 && code <= 122)) -> return Val(false)
             }
         }
         .Screaming -> {
             if !upper -> return Val(false)
             loop index in rest..<count {
-                code: Int.from_u8(bytes[index])
+                code: Int{bytes[index]}
                 if !(code == 95 || (code >= 48 && code <= 57) || (code >= 65 && code <= 90)) -> return Val(false)
             }
         }
@@ -270,7 +270,7 @@ sema_casing_acronym_name: fn(name: String) -> String {
     ascii := true
     has_lower := false
     loop index in 0..<bytes.len() {
-        code: Int.from_u8(bytes[index])
+        code: Int{bytes[index]}
         if code >= 128 {
             ascii = false
             break
@@ -278,7 +278,7 @@ sema_casing_acronym_name: fn(name: String) -> String {
         if code >= 97 && code <= 122 -> has_lower = true
     }
     if ascii {
-        if bytes.len() == 0 || Int.from_u8(bytes[0]) < 65 || Int.from_u8(bytes[0]) > 90 || !has_lower -> return name.copy()
+        if bytes.len() == 0 || (Int{bytes[0]}) < 65 || (Int{bytes[0]}) > 90 || !has_lower -> return name.copy()
     } else {
         scalars: unicode.scalars(name)
         if scalars.len() == 0 || !sema_casing_is_upper(scalars[0]) -> return name.copy()

@@ -61,7 +61,7 @@ link_pack_rust_symbol: fn(name: String) -> Bool Never! {
 link_pack_c_abi: fn(name: String) -> Bool Never! {
     if name.starts_with("_R") || name.starts_with("_ZN") || name.len() == 0 -> return false
     loop (k, byte) in name.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         letter: (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 95
         if !letter && (k == 0 || code < 48 || code > 57) -> return false
     }
@@ -730,8 +730,8 @@ x64_executable_add_section: fn(exe: &X64Executable, name: String, payload: [U8])
 // FNV-1a, 32 bits, of a symbol name: the `.jet.exports` hash.
 link_image_export_hash: fn(bytes: [U8]) -> Int Never! {
     hash := U32{0x811c9dc5}
-    loop byte in bytes -> hash = (hash.bit_xor(U32.from_u8(byte))).wrapping_mul(U32{0x01000193})
-    Int.from_u32(hash)
+    loop byte in bytes -> hash = wrapping((hash.bit_xor(U32{byte})) * U32{0x01000193})
+    Int{hash}
 }
 
 // The `.jet.exports` payload of the executable `image`: LINK_IMAGE_EXPORTS_MAGIC,
@@ -765,7 +765,7 @@ link_image_export_index: fn(image: [U8]) -> [U8] Never! {
     loop k in defined {
         at := strtab_at + link_image_u32(image, symtab_at + 24 * k)
         start: at
-        loop at < image.len() && Int.from_u8(image[at]) != 0 -> at += 1
+        loop at < image.len() && (Int{image[at]}) != 0 -> at += 1
         slot := link_image_export_hash(image[start..<at]).bit_and(mask)
         loop table[slot] != 0 -> slot = (slot + 1).bit_and(mask)
         table[slot] = k

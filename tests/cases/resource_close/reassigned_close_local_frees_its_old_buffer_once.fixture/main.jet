@@ -16,7 +16,7 @@ Words: struct {
             p := self.p.move()
             sum := U64{0}
             loop i in 0..<p.len() {
-                sum = sum.wrapping_add(p[i])
+                sum = wrapping(sum + p[i])
                 p[i] = U64{0}
             }
             print("close {self.name} sum {sum}")
@@ -32,7 +32,7 @@ words: fn(name: String, n: Int, v: U64) -> Words {
 
 sub: fn(a: Words, b: Words, name: String) -> Words {
     out := words(name, a.p.len(), U64{0})
-    loop i in 0..<a.p.len() -> out.p[i] = a.p[i].wrapping_sub(b.p[i])
+    loop i in 0..<a.p.len() -> out.p[i] = wrapping(a.p[i] - b.p[i])
     out
 }
 
@@ -72,7 +72,7 @@ run: fn() {
     }
     total := U64{0}
     loop list in lists {
-        loop v in list -> total = total.wrapping_add(v)
+        loop v in list -> total = wrapping(total + v)
     }
     print("reduced {first} total {total}")
     print("boxed {boxed()}")

@@ -8,11 +8,11 @@ foundation_json_escape: fn(value: String) -> String Never! {
     out := [U8]{}
     index := 0
     loop index < bytes.len() {
-        byte: Int.from_u8(bytes[index])
+        byte: Int{bytes[index]}
         // U+0080-U+009F encode as C2 80 .. C2 9F.
         control: if {
             byte < 32 || byte == 127 -> byte
-            byte == 194 && index + 1 < bytes.len() && Int.from_u8(bytes[index + 1]) <= 159 -> Int.from_u8(bytes[index + 1])
+            byte == 194 && index + 1 < bytes.len() && (Int{bytes[index + 1]}) <= 159 -> Int{bytes[index + 1]}
             else -> -1
         }
         if {
@@ -77,7 +77,7 @@ foundation_float_display: fn(value: Float) -> String Never! {
     exponent_start: if exponent_negative -> exponent_at + 2 else -> exponent_at + 1
     exponent := 0
     loop index in exponent_start..<bytes.len() {
-        exponent = exponent * 10 + Int.from_u8(bytes[index]) - 48
+        exponent = exponent * 10 + Int{bytes[index]} - 48
     }
     if exponent_negative {
         point -= exponent
@@ -111,7 +111,7 @@ foundation_debug_quoted: fn(text: String, quote: Int) -> String Never! {
     out := [U8]{}
     out.push(U8{quote})
     loop byte in text.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if {
             code == 92 -> foundation_json_append(out, "\\\\")
             code == quote -> {

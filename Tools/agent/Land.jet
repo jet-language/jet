@@ -389,7 +389,7 @@ nul_fields: fn(text: String) -> [String] Never! {
     fields := [String]{}
     current := [U8]{}
     loop byte in text.bytes() {
-        if Int.from_u8(byte) == 0 {
+        if (Int{byte}) == 0 {
             fields.push(String.from_bytes_lossy(current))
             current = [U8]{}
             next
@@ -711,7 +711,7 @@ tagged_seconds: fn(message: String, marker: String) -> Float? Never! {
         rest: line.remove_prefix(marker).trim_start().remove_prefix("-")
         digits := [U8]{}
         loop byte in rest.bytes() {
-            code: Int.from_u8(byte)
+            code: Int{byte}
             if !((code >= 48 && code <= 57) || code == 46) -> break
             digits.push(byte)
         }
@@ -721,7 +721,7 @@ tagged_seconds: fn(message: String, marker: String) -> Float? Never! {
         if !after.starts_with("s") -> next
         unit_end: after.remove_prefix("s").bytes()
         if unit_end.len() > 0 {
-            code: Int.from_u8(unit_end[0])
+            code: Int{unit_end[0]}
             if (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 95 -> next
         }
         return Val(Float.parse(number) ?? 0.0)
@@ -1664,7 +1664,7 @@ line_at: fn(bytes: [U8], offset: Int) -> Int Never! {
     line := 1
     loop at in 0..<bytes.len() {
         if at >= offset -> break
-        if Int.from_u8(bytes[at]) == 10 -> line += 1
+        if (Int{bytes[at]}) == 10 -> line += 1
     }
     line
 }
@@ -1690,7 +1690,7 @@ span_place: fn(tree: String, package_dirs: [String], span: String) -[FS]> Place 
 is_digits: fn(text: String) -> Bool Never! {
     if text == "" -> return false
     loop byte in text.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if code < 48 || code > 57 -> return false
     }
     true

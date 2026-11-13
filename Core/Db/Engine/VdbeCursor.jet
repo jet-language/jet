@@ -324,7 +324,7 @@ op_affinity: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
     aff: run.p4_text(v, r.pc) ?? [U8]{}
     i := v.mem_base + r.p1
     loop k in 0..<aff.len() {
-        a: Int.from_u8(aff[k])
+        a: Int{aff[k]}
         if a == 0 -> break
         mem.apply_affinity(v.mem[i], a, r.enc)
         if a == base.AFF_REAL && v.mem[i].flags.bit_and(MEM_INT) != 0 -> real_of_int(v.mem[i], true)
@@ -341,7 +341,7 @@ op_make_record: fn(db: conn.Conn, v: &conn.Vdbe, r: &Run) -> Int Never! {
     n_field: r.p2
     if v.ops[r.pc].p4 == .Text(aff) {
         loop k in 0..<aff.len() {
-            a: Int.from_u8(aff[k])
+            a: Int{aff[k]}
             if a == 0 -> break
             i: first + k
             mem.apply_affinity(v.mem[i], a, r.enc)
@@ -1098,7 +1098,7 @@ op_new_rowid: fn(db: &conn.Conn, v: &conn.Vdbe, r: &Run) -[DB]> Int Never! {
         loop going {
             bytes: os.os_random_bytes(8)
             x := 0
-            loop k in 0..<8 -> x = x.bit_or(Int.from_u8(bytes[k]) << (8 * k))
+            loop k in 0..<8 -> x = x.bit_or(Int{bytes[k]} << (8 * k))
             val = x.bit_and(max_rowid >> 1) + 1
             rc = btree.btree_table_moveto(db.btrees[bt], btc, val, false, res)
             cnt += 1

@@ -685,7 +685,7 @@ expr_alloc: fn(a: &AST, op: Int, tok: [U8]?, dequote_it: Bool) -> Int Never! {
         if iv == .Val(v) {
             e.flags = EP_INT_VALUE.bit_or(EP_LEAF).bit_or(if v != 0 -> EP_IS_TRUE else -> EP_IS_FALSE)
             e.ivalue = v
-        } else if dequote_it && t.len() > 0 && is_quote(Int.from_u8(t[0])) {
+        } else if dequote_it && t.len() > 0 && is_quote(Int{t[0]}) {
             e.flags = if t[0] == (U8{34}) -> EP_QUOTED.bit_or(EP_DBL_QUOTED) else -> EP_QUOTED
             e.token = Val(dequote(t))
         } else {
@@ -918,7 +918,7 @@ expr_assign_var_number: fn(a: &AST, e: Int, n: Int) Never! {
     } else {
         add := false
         if z[0] == (U8{63}) {
-            iv: if n == 2 -> Val(Int.from_u8(z[1]) - 48) else -> util.atoi64_ok(z[1..<n].copy(), base.UTF8)
+            iv: if n == 2 -> Val(Int{z[1]} - 48) else -> util.atoi64_ok(z[1..<n].copy(), base.UTF8)
             mx: a.limits[LIMIT_VARIABLE_NUMBER]
             i: iv ?? 0
             if iv == None || i < 1 || i > mx {
@@ -1858,7 +1858,7 @@ select_op_name: fn(op: Int) -> String Never! {
 tok_is: fn(a: AST, t: SQLTok, kw: [U8]) -> Bool Never! {
     if t.n != kw.len() -> return false
     loop i in 0..<t.n {
-        if lower_byte(sql_byte(a.ctx.sql, t.z + i)) != Int.from_u8(kw[i]) -> return false
+        if lower_byte(sql_byte(a.ctx.sql, t.z + i)) != (Int{kw[i]}) -> return false
     }
     true
 }
@@ -2362,7 +2362,7 @@ upsert_delete: fn(a: &AST, u0: Int) Never! {
 trigger_span_dup: fn(a: AST, start: Int, end: Int) -> [U8] Never! {
     z := span_dup(a, start, end)
     loop i in 0..<z.len() {
-        if is_space(Int.from_u8(z[i])) -> z[i] = U8{32}
+        if is_space(Int{z[i]}) -> z[i] = (U8{32})
     }
     z
 }

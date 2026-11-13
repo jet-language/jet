@@ -18,11 +18,11 @@ read_executable: fn(bytes: View<U8>, usize_max: U64) -> CLICommandSchema RecordD
 }
 
 cli_schema_size_add: fn(left: Int, right: Int, maximum: U64) -> Int? Never! {
-    bound: Int.from_u64(maximum)
+    bound: Int{maximum}
     if left < 0 || right < 0 || right > bound || left > bound - right -> None else -> Val(left + right)
 }
 cli_schema_size_mul: fn(left: Int, right: Int, maximum: U64) -> Int? Never! {
-    bound: Int.from_u64(maximum)
+    bound: Int{maximum}
     if left < 0 || right < 0 || left > bound || right > bound -> return None
     if right != 0 && left > bound /% right -> None else -> Val(left * right)
 }
@@ -37,13 +37,13 @@ cli_schema_read_num: fn(bytes: View<U8>, at: Int, width: Int, little: Bool, maxi
     number := U64{0}
     loop index in 0..<width {
         shift: if little -> index * 8 else -> (width - index - 1) * 8
-        number = number.bit_or((U64.from_u8(value[index]) << shift))
+        number = number.bit_or((U64{value[index]} << shift))
     }
     Ok(number)
 }
 cli_schema_usize_num: fn(value: U64, maximum: U64) -> Int RecordDecodeError! {
     if value > maximum -> return Err(RecordDecodeError.Malformed{why: "file offset overflow"})
-    Ok(Int.from_u64(value))
+    Ok(Int{value})
 }
 // Validate and compare a borrowed, NUL-terminated section name. The canonical
 // reader rejects malformed UTF-8 even for an unrelated section. No name string
@@ -59,7 +59,7 @@ cli_schema_c_name_is: fn(bytes: View<U8>, expected: String) -> Bool RecordDecode
     name: bytes[0..<end]
     at := 0
     loop at < end {
-        first: Int.from_u8(name[at])
+        first: Int{name[at]}
         if first < 128 {
             at += 1
             next
@@ -71,11 +71,11 @@ cli_schema_c_name_is: fn(bytes: View<U8>, expected: String) -> Bool RecordDecode
             else -> 0
         }
         if width == 0 || end - at < width -> return Err(RecordDecodeError.Malformed{why: "section name is not UTF-8"})
-        second: Int.from_u8(name[at + 1])
+        second: Int{name[at + 1]}
         if (first == 224 && second < 160) || (first == 237 && second >= 160) || (first == 240 && second < 144) || (first == 244 && second >= 144) ->
             return Err(RecordDecodeError.Malformed{why: "section name is not UTF-8"})
         loop index in 1..<width {
-            byte: Int.from_u8(name[at + index])
+            byte: Int{name[at + index]}
             if byte < 128 || byte >= 192 -> return Err(RecordDecodeError.Malformed{why: "section name is not UTF-8"})
         }
         at += width
@@ -142,7 +142,7 @@ cli_schema_pe_sections: fn(bytes: View<U8>, maximum: U64) -> [View<U8>] RecordDe
         offset: cli_schema_usize_num(cli_schema_read_num(bytes, base + 20, 4, true, maximum), maximum)
         raw: cli_schema_bounds(bytes, offset, size, maximum)
         if raw.len() < 14 -> return Err(RecordDecodeError.Malformed{why: "truncated PE metadata section"})
-        payload_len: Int.from_u64(cli_schema_read_num(raw, 10, 4, true, maximum))
+        payload_len: Int{cli_schema_read_num(raw, 10, 4, true, maximum)}
         record_len: cli_schema_size_add(46, payload_len, maximum) ?? return Err(RecordDecodeError.Malformed{why: "record length overflow"})
         // The record is bounds-checked before the trailing bytes are sliced;
         // the list keeps its own fresh view, which takes nothing from `bytes`.
@@ -246,8 +246,8 @@ cli_schema_wasm_leb: fn(bytes: View<U8>, at: &Int, maximum: U64) -> Int RecordDe
         at += 1
         if shift >= bits -> return Err(RecordDecodeError.Malformed{why: "Wasm LEB overflow"})
         // Rust's usize shift truncates high bits on a 32-bit reader.
-        value = (value.bit_or((U64.from_u8(byte.bit_and(U8{127})) << shift))).bit_and(maximum)
-        if byte.bit_and((U8{128})) == (U8{0}) -> return Ok(Int.from_u64(value))
+        value = (value.bit_or((U64{byte.bit_and(U8{127})} << shift))).bit_and(maximum)
+        if byte.bit_and((U8{128})) == (U8{0}) -> return Ok(Int{value})
         shift += 7
     }
     Err(RecordDecodeError.Malformed{why: "Wasm LEB too long"})
@@ -280,7 +280,7 @@ cli_schema_put_wasm_leb: fn(out: &[U8], input: Int) Never! {
         byte := value.bit_and(127)
         value = value >> 7
         if value != 0 -> byte = byte.bit_or(128)
-        out.push(U8.from_int(byte) ?? panic("a LEB group is one byte"))
+        out.push(checked(U8{byte}) ?? panic("a LEB group is one byte"))
         if value == 0 -> break
     }
 }

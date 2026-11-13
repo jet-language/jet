@@ -229,7 +229,7 @@ pkg_cobol_pic_digits: fn(shape: String) -> Int? Never! {
     if shape == "" -> return Val(0)
     all_nines := true
     loop byte in shape.bytes() {
-        if Int.from_u8(byte) != 57 -> all_nines = false
+        if (Int{byte}) != 57 -> all_nines = false
     }
     if all_nines -> return Val(shape.bytes().len())
     if !shape.starts_with("9(") || !shape.ends_with(")") -> return None
@@ -241,7 +241,7 @@ pkg_cobol_parse_count: fn(text: String) -> Int? Never! {
     digits: text.removeprefix("+")
     if digits == "" -> return None
     loop byte in digits.bytes() {
-        if !pkg_binder_is_ascii_digit(Int.from_u8(byte)) -> return None
+        if !pkg_binder_is_ascii_digit(Int{byte}) -> return None
     }
     if Int.parse(digits) == {
         .Ok(count) -> Val(count)
@@ -256,7 +256,7 @@ pkg_cobol_copybook_line: fn(raw: String) -> String? Never! {
     if trimmed == "" || trimmed.starts_with("*") -> return None
     bytes: raw.bytes()
     if bytes.len() > 6 {
-        indicator: Int.from_u8(bytes[6])
+        indicator: Int{bytes[6]}
         if indicator == 42 || indicator == 47 -> return None
         fixed: pkg_bytes_text(bytes, 6, bytes.len()).trim()
         first: pkg_binder_words(fixed)
@@ -328,7 +328,7 @@ pkg_cobol_parse_program_id: fn(source: String) -> String ForeignBindError! {
         trimmed: raw.trim()
         if trimmed == "" || trimmed.starts_with("*") -> next
         bytes: raw.bytes()
-        if bytes.len() > 6 && (Int.from_u8(bytes[6]) == 42 || Int.from_u8(bytes[6]) == 47) -> next
+        if bytes.len() > 6 && (Int{bytes[6]} == 42 || Int{bytes[6]} == 47) -> next
         code: (trimmed.split_once("*>")?.before ?? trimmed).trim()
         upper: pkg_binder_ascii_upper(code)
         if !upper.starts_with("PROGRAM-ID.") -> next
@@ -344,7 +344,7 @@ pkg_cobol_is_program_name: fn(name: String) -> Bool Never! {
     loop scalar in name.chars() {
         bytes: "{scalar}".bytes()
         if bytes.len() != 1 -> return false
-        code: Int.from_u8(bytes[0])
+        code: Int{bytes[0]}
         if !pkg_bytes_is_word(code) && code != 45 -> return false
     }
     true

@@ -192,7 +192,7 @@ store_cache_extension_stem: fn(name: String, extension: String) -> String? Never
     raw: name.bytes()
     dot := -1
     loop index in 1..<raw.len() {
-        if Int.from_u8(raw[index]) == 46 -> dot = index
+        if (Int{raw[index]}) == 46 -> dot = index
     }
     if dot <= 0 || pkg_bytes_text(raw, dot + 1, raw.len()) != extension -> return None
     Val(pkg_bytes_text(raw, 0, dot))
@@ -277,7 +277,7 @@ store_cache_validate_component: fn(value: String, label: String) StoreError! {
     raw: value.bytes()
     safe := raw.len() > 0 && raw.len() <= 128 && value != "." && value != ".."
     loop byte in raw {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         alphanumeric: (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122)
         if !(alphanumeric || code == 45 || code == 95 || code == 46) -> safe = false
     }
@@ -287,7 +287,7 @@ store_cache_validate_component: fn(value: String, label: String) StoreError! {
 // One-line text: no NUL, LF, or CR.
 store_cache_validate_text: fn(value: String, label: String) StoreError! {
     loop byte in value.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if code == 0 || code == 10 || code == 13 -> return Err(StoreError.InvalidData("{label} contains a line break"))
     }
 }
@@ -387,7 +387,7 @@ store_cache_lines: fn(text: String) -> [String] Never! {
     lines := [String]{}
     loop index in 0..<count {
         raw: parts[index].bytes()
-        end: if raw.len() > 0 && Int.from_u8(raw[raw.len() - 1]) == 13 -> raw.len() - 1 else -> raw.len()
+        end: if raw.len() > 0 && (Int{raw[raw.len() - 1]}) == 13 -> raw.len() - 1 else -> raw.len()
         lines.push(pkg_bytes_text(raw, 0, end))
     }
     lines

@@ -325,7 +325,7 @@ literal_raw: fn(url: URL, skeleton: String) -> String Never! {
     if authority {
         end := colon + 3
         loop end < raw.len() {
-            n: Int.from_u8(raw[end])
+            n: Int{raw[end]}
             if n == 47 || n == 63 || n == 35 -> break
             end += 1
         }
@@ -513,7 +513,7 @@ render_recipe: fn(parts: [URLPart], path: Bool, data: Bool) -> String Never! {
 render_authority_literal: fn(text: String) -> String Never! {
     out := ""
     loop b in text.bytes() {
-        n: Int.from_u8(b)
+        n: Int{b}
         if unreserved(b) || n == 91 || n == 93 || n == 58 -> out = "{out}{slice([U8]{b}, 0, 1)}"
         else -> out = "{out}%{slice([U8]{hex_nibble(n /% 16), hex_nibble(n %% 16)}, 0, 2)}"
     }
@@ -523,7 +523,7 @@ render_authority_literal: fn(text: String) -> String Never! {
 render_data_mime: fn(text: String) -> String Never! {
     out := ""
     loop b in text.bytes() {
-        n: Int.from_u8(b)
+        n: Int{b}
         if (unreserved(b) && n != 126) || n == 33 || n == 35 || n == 36 || n == 38 || n == 43 || n == 47 || n == 59 || n == 61 || n == 94 -> out = "{out}{slice([U8]{b}, 0, 1)}"
         else -> out = "{out}%{slice([U8]{hex_nibble(n /% 16), hex_nibble(n %% 16)}, 0, 2)}"
     }
@@ -552,7 +552,7 @@ parse_recipe: fn(text: String, normalize: Bool) -> URL URLError! {
         rest_i = rest_i + 2
         auth_end := rest_i
         loop auth_end < raw.len() {
-            n: Int.from_u8(raw[auth_end])
+            n: Int{raw[auth_end]}
             if n == 47 || n == 63 || n == 35 -> break
             auth_end = auth_end + 1
         }
@@ -848,7 +848,7 @@ render_host: fn(host: String) -> String Never! {
 escape_query: fn(text: String) -> String Never! {
     out := [U8]{}
     loop b in text.bytes() {
-        n: Int.from_u8(b)
+        n: Int{b}
         if unreserved(b) || n == 37 || n == 33 || n == 36 || (n >= 38 && n <= 44) || n == 47 || n == 58 || n == 59 || n == 61 || n == 63 || n == 64 {
             out.push(b)
         } else {
@@ -867,7 +867,7 @@ host_to_ascii: fn(host: String) -> String Never! {
     raw: host.bytes()
     ascii := true
     loop b in raw {
-        if Int.from_u8(b) >= 128 -> ascii = false
+        if (Int{b}) >= 128 -> ascii = false
     }
     if ascii -> return host.copy()
     out := ""
@@ -893,7 +893,7 @@ utf8_points: fn(raw: [U8]) -> [Int]? {
     out := [Int]{}
     i := 0
     loop i < raw.len() {
-        b: Int.from_u8(raw[i])
+        b: Int{raw[i]}
         width := 1
         cp := b
         if b >= 240 {
@@ -910,7 +910,7 @@ utf8_points: fn(raw: [U8]) -> [Int]? {
         }
         if i + width > raw.len() -> return None
         loop k in 1..<width {
-            next: Int.from_u8(raw[i + k])
+            next: Int{raw[i + k]}
             if next < 128 || next >= 192 -> return None
             cp = cp * 64 + ((next).bit_and(63))
         }
@@ -1047,7 +1047,7 @@ parse_qs: fn(query: String) -> [[String]] URLError! { parse_qsl(query) }
 encode_component: fn(text: String, allow_slash: Bool, plus_space: Bool) -> String Never! {
     out := [U8]{}
     loop b in text.bytes() {
-        n: Int.from_u8(b)
+        n: Int{b}
         if plus_space && n == 32 -> out.push(U8{43})
         else if unreserved(b) || (allow_slash && n == 47) -> out.push(b)
         else {
@@ -1078,7 +1078,7 @@ form_percent_decode: fn(text: String) -> String URLError! {
 }
 
 unreserved: fn(b: U8) -> Bool Never! {
-    n: Int.from_u8(b)
+    n: Int{b}
     if n >= 65 && n <= 90 -> return true
     if n >= 97 && n <= 122 -> return true
     if n >= 48 && n <= 57 -> return true
@@ -1091,7 +1091,7 @@ hex_nibble: fn(n: Int) -> U8 Never! {
 }
 
 hex_value: fn(b: U8) -> Int? {
-    n: Int.from_u8(b)
+    n: Int{b}
     if n >= 48 && n <= 57 -> return Val(n - 48)
     if n >= 65 && n <= 70 -> return Val(n - 55)
     if n >= 97 && n <= 102 -> return Val(n - 87)
@@ -1101,7 +1101,7 @@ hex_value: fn(b: U8) -> Int? {
 ascii_lower: fn(text: String) -> String Never! {
     out := [U8]{}
     loop b in text.bytes() {
-        n: Int.from_u8(b)
+        n: Int{b}
         if n >= 65 && n <= 90 -> out.push(U8{n + 32}) else -> out.push(b)
     }
     String.from_bytes(out) ?? ""
@@ -1110,11 +1110,11 @@ ascii_lower: fn(text: String) -> String Never! {
 valid_scheme: fn(text: String) -> Bool Never! {
     raw: text.bytes()
     if raw.len() == 0 -> return false
-    first: Int.from_u8(raw[0])
+    first: Int{raw[0]}
     if !((first >= 65 && first <= 90) || (first >= 97 && first <= 122)) -> return false
     i := 1
     loop i < raw.len() {
-        n: Int.from_u8(raw[i])
+        n: Int{raw[i]}
         if !((n >= 65 && n <= 90) || (n >= 97 && n <= 122) || (n >= 48 && n <= 57) || n == 43 || n == 45 || n == 46) -> return false
         i = i + 1
     }
@@ -1124,7 +1124,7 @@ valid_scheme: fn(text: String) -> Bool Never! {
 scheme_colon: fn(raw: [U8]) -> Int Never! {
     i := 0
     loop i < raw.len() {
-        n: Int.from_u8(raw[i])
+        n: Int{raw[i]}
         if n == 58 -> return i
         if n == 47 || n == 63 || n == 35 -> return -1
         i = i + 1
@@ -1139,7 +1139,7 @@ parse_port: fn(text: String) -> Int? {
     if raw.len() == 0 -> return None
     n := 0
     loop b in raw {
-        d: Int.from_u8(b)
+        d: Int{b}
         if d < 48 || d > 57 -> return None
         n = n * 10 + d - 48
         if n > 65535 -> return None
@@ -1152,11 +1152,11 @@ trim_ascii: fn(text: String) -> String Never! {
     start := 0
     end := raw.len()
     loop start < end {
-        n: Int.from_u8(raw[start])
+        n: Int{raw[start]}
         if n == 32 || n == 9 || n == 10 || n == 13 -> start = start + 1 else -> break
     }
     loop end > start {
-        n: Int.from_u8(raw[end - 1])
+        n: Int{raw[end - 1]}
         if n == 32 || n == 9 || n == 10 || n == 13 -> end = end - 1 else -> break
     }
     if end <= start -> return ""
@@ -1184,7 +1184,7 @@ valid_url_host: fn(host: String) -> Bool Never! {
     non_dot := false
     i := 0
     loop i < raw.len() {
-        n: Int.from_u8(raw[i])
+        n: Int{raw[i]}
         if n == 46 {
             if label == 0 && i < raw.len() - 1 -> return false
             label = 0
@@ -1202,7 +1202,7 @@ valid_url_host: fn(host: String) -> Bool Never! {
 }
 
 is_hex_byte: fn(b: U8) -> Bool Never! {
-    n: Int.from_u8(b)
+    n: Int{b}
     (n >= 48 && n <= 57) || (n >= 65 && n <= 70) || (n >= 97 && n <= 102)
 }
 
@@ -1251,7 +1251,7 @@ dirname_url: fn(path: String) -> String Never! {
 
 contains_byte: fn(text: String, needle: Int) -> Bool Never! {
     loop b in text.bytes() {
-        if Int.from_u8(b) == needle -> return true
+        if (Int{b}) == needle -> return true
     }
     false
 }
@@ -1268,7 +1268,7 @@ starts: fn(text: String, prefix: String) -> Bool Never! {
 
 index_of: fn(raw: [U8], b: Int) -> Int Never! {
     loop i in 0..<raw.len() {
-        if Int.from_u8(raw[i]) == b -> return i
+        if (Int{raw[i]}) == b -> return i
     }
     -1
 }
@@ -1276,7 +1276,7 @@ index_of: fn(raw: [U8], b: Int) -> Int Never! {
 last_index: fn(raw: [U8], b: Int) -> Int Never! {
     i := raw.len() - 1
     loop i >= 0 {
-        if Int.from_u8(raw[i]) == b -> return i
+        if (Int{raw[i]}) == b -> return i
         i = i - 1
     }
     -1

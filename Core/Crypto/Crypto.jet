@@ -475,7 +475,7 @@ open_sealed: fn(identity: X25519SecretKey, box: Sealed, aad: [U8]) -> [U8] Crypt
     if raw[4] != (U8{1}) || raw[5] != (U8{1}) || raw[6] != (U8{0}) || raw[7] != (U8{0}) {
         return Err(CryptoError.OpenFailed)
     }
-    count: ((Int.from_u8(raw[8]) << 8)).bit_or(Int.from_u8(raw[9]))
+    count: ((Int{raw[8]} << 8)).bit_or(Int{raw[9]})
     if count < 1 || count > 256 -> return Err(CryptoError.OpenFailed)
     len_offset: 82 + count * 80
     if raw.len() < len_offset + 20 -> return Err(CryptoError.OpenFailed)
@@ -551,8 +551,8 @@ key_order: fn(a: [U8], b: [U8]) -> Int Never! {
         return 1
     }
     loop i in 0..<a.len() {
-        x: Int.from_u8(a[i])
-        y: Int.from_u8(b[i])
+        x: Int{a[i]}
+        y: Int{b[i]}
         if x < y -> return -1
         if x > y -> return 1
     }
@@ -999,9 +999,9 @@ bech32_polymod: fn(values: [Int]) -> Int Never! {
 bech32_hrp_expand: fn(hrp: String) -> [Int] Never! {
     raw: hrp.bytes()
     out := [Int]{}
-    loop b in raw -> out.push(Int.from_u8(b) >> 5)
+    loop b in raw -> out.push(Int{b} >> 5)
     out.push(0)
-    loop b in raw -> out.push((Int.from_u8(b)).bit_and(31))
+    loop b in raw -> out.push((Int{b}).bit_and(31))
     out
 }
 
@@ -1023,7 +1023,7 @@ x25519_recipient_encode: fn(key: [U8]) -> String Never! {
     acc := 0
     bits := 0
     loop b in key {
-        acc = ((((acc << 8)).bit_or(Int.from_u8(b)))).bit_and(4095)
+        acc = ((((acc << 8)).bit_or(Int{b}))).bit_and(4095)
         bits += 8
         loop bits >= 5 {
             bits -= 5
@@ -1326,7 +1326,7 @@ phc_b64_value: fn(b: U8) -> Int? {
 
 read_be32: fn(data: [U8], offset: Int) -> Int Never! {
     if offset < 0 || offset + 4 > data.len() -> return 0
-    ((((Int.from_u8(data[offset]) << 24)).bit_or((Int.from_u8(data[offset + 1]) << 16))).bit_or((Int.from_u8(data[offset + 2]) << 8))).bit_or(Int.from_u8(data[offset + 3]))
+    ((((Int{data[offset]} << 24)).bit_or((Int{data[offset + 1]} << 16))).bit_or((Int{data[offset + 2]} << 8))).bit_or(Int{data[offset + 3]})
 }
 
 // Byte-order loads behind ChaCha20, not part of the crypto surface.
@@ -1393,7 +1393,7 @@ parse_int: fn(text: String) -> Int? {
     n := 0
     any := false
     loop b in text.bytes() {
-        d: Int.from_u8(b)
+        d: Int{b}
         if d < 48 || d > 57 -> return None
         n = n * 10 + (d - 48)
         any = true
@@ -1417,7 +1417,7 @@ hex_decode: fn(text: String) -> [U8]? {
 }
 
 hex_val: fn(b: U8) -> Int? {
-    n: Int.from_u8(b)
+    n: Int{b}
     if n >= 48 && n <= 57 -> return Val(n - 48)
     if n >= 97 && n <= 102 -> return Val(n - 87)
     if n >= 65 && n <= 70 -> return Val(n - 55)

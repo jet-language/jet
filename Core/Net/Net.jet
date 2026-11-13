@@ -477,12 +477,12 @@ unix_receive: fn(&stream: UnixStream, max: Int) -[Net, Time.Wait]> UnixMessage N
     if packed.len() == 0 -> return Ok(UnixMessage{bytes: [U8]{}, fds: [sys.Fd]{}})
     // The leaf appends each descriptor's token as eight little-endian bytes
     // and then one byte counting them.
-    count: Int.from_u8(packed[packed.len() - 1])
+    count: Int{packed[packed.len() - 1]}
     end: packed.len() - 1 - count * 8
     fds := [sys.Fd]{}
     loop index in 0..<count {
         token := 0
-        loop byte in 0..<8 { token = token * 256 + Int.from_u8(packed[end + index * 8 + 7 - byte]) }
+        loop byte in 0..<8 { token = token * 256 + (Int{packed[end + index * 8 + 7 - byte]}) }
         fds.push(sys.__fd_adopt(token))
     }
     Ok(UnixMessage{bytes: packed[0..<end].copy(), fds: fds})
@@ -801,7 +801,7 @@ valid_text: fn(text: String) -> Bool Never! {
     raw: text.bytes()
     if raw.len() == 0 -> return false
     loop b in raw {
-        n: Int.from_u8(b)
+        n: Int{b}
         if n <= 31 || n == 127 -> return false
     }
     true
@@ -810,10 +810,10 @@ valid_text: fn(text: String) -> Bool Never! {
 valid_status: fn(status: String) -> Bool Never! {
     raw: status.bytes()
     if raw.len() < 3 -> return false
-    if Int.from_u8(raw[0]) < 48 || Int.from_u8(raw[0]) > 57 || Int.from_u8(raw[1]) < 48 || Int.from_u8(raw[1]) > 57 || Int.from_u8(raw[2]) < 48 || Int.from_u8(raw[2]) > 57 -> return false
+    if (Int{raw[0]}) < 48 || (Int{raw[0]}) > 57 || (Int{raw[1]}) < 48 || (Int{raw[1]}) > 57 || (Int{raw[2]}) < 48 || (Int{raw[2]}) > 57 -> return false
     if raw.len() > 3 && raw[3] != (U8{32}) -> return false
     loop b in raw {
-        n: Int.from_u8(b)
+        n: Int{b}
         if n == 10 || n == 13 -> return false
     }
     true
@@ -825,7 +825,7 @@ valid_host_text: fn(host: String) -> Bool Never! {
     if raw[0] == (U8{91}) && (raw.len() < 3 || raw[raw.len() - 1] != (U8{93})) -> return false
     i := 0
     loop i < raw.len() {
-        n: Int.from_u8(raw[i])
+        n: Int{raw[i]}
         if n <= 32 || n == 127 || n == 47 || n == 63 || n == 35 || n == 64 -> return false
         if n == 91 && i != 0 -> return false
         if n == 93 && (i == 0 || raw[0] != (U8{91}) || i != raw.len() - 1) -> return false
@@ -862,14 +862,14 @@ format_host_port: fn(host: String, port: Int) -> String Never! {
 
 contains_byte: fn(text: String, needle: Int) -> Bool Never! {
     loop b in text.bytes() {
-        if Int.from_u8(b) == needle -> return true
+        if (Int{b}) == needle -> return true
     }
     false
 }
 
 index_of: fn(raw: [U8], b: Int) -> Int Never! {
     loop i in 0..<raw.len() {
-        if Int.from_u8(raw[i]) == b -> return i
+        if (Int{raw[i]}) == b -> return i
     }
     -1
 }
@@ -877,7 +877,7 @@ index_of: fn(raw: [U8], b: Int) -> Int Never! {
 last_index: fn(raw: [U8], b: Int) -> Int Never! {
     i := raw.len() - 1
     loop i >= 0 {
-        if Int.from_u8(raw[i]) == b -> return i
+        if (Int{raw[i]}) == b -> return i
         i = i - 1
     }
     -1
@@ -888,7 +888,7 @@ parse_port: fn(text: String) -> Int? Never! {
     if raw.len() == 0 -> return None
     n := 0
     loop b in raw {
-        d: Int.from_u8(b)
+        d: Int{b}
         if d < 48 || d > 57 -> return None
         n = n * 10 + (d - 48)
         if n > 65535 -> return None
@@ -899,7 +899,7 @@ parse_port: fn(text: String) -> Int? Never! {
 ascii_lower: fn(text: String) -> String Never! {
     out := [U8]{}
     loop b in text.bytes() {
-        n: Int.from_u8(b)
+        n: Int{b}
         if n >= 65 && n <= 90 -> out.push(U8{n + 32}) else -> out.push(b)
     }
     String.from_bytes(out) ?? ""
@@ -1009,7 +1009,7 @@ parse_ipv4_bytes: fn(text: String) -> [U8]? Never! {
         if i - start > 1 && raw[start] == (U8{48}) -> return None
         value := 0
         loop j in start..<i {
-            digit: Int.from_u8(raw[j]) - 48
+            digit: Int{raw[j]} - 48
             if digit < 0 || digit > 9 -> return None
             value = value * 10 + digit
         }
@@ -1047,8 +1047,8 @@ parse_ip_bytes: fn(text: String) -> [U8]? Never! {
         if contains_byte(piece, 46) {
             if position != raw.len() -> return None
             dotted: parse_ipv4_bytes(piece) ?? return None
-            words.push(Int.from_u8(dotted[0]) * 256 + Int.from_u8(dotted[1]))
-            words.push(Int.from_u8(dotted[2]) * 256 + Int.from_u8(dotted[3]))
+            words.push(Int{dotted[0]} * 256 + Int{dotted[1]})
+            words.push(Int{dotted[2]} * 256 + Int{dotted[3]})
         } else {
             if position - start > 4 -> return None
             value := 0
@@ -1090,7 +1090,7 @@ parse_ip_bytes: fn(text: String) -> [U8]? Never! {
 }
 
 net_hex_digit: fn(byte: U8) -> Int Never! {
-    value: Int.from_u8(byte)
+    value: Int{byte}
     if value >= 48 && value <= 57 -> return value - 48
     if value >= 65 && value <= 70 -> return value - 55
     if value >= 97 && value <= 102 -> return value - 87
@@ -1112,12 +1112,12 @@ net_hex_word: fn(word: Int) -> String Never! {
 }
 
 format_ip_bytes: fn(bytes: [U8]) -> String Never! {
-    if bytes.len() == 4 -> return "{Int.from_u8(bytes[0])}.{Int.from_u8(bytes[1])}.{Int.from_u8(bytes[2])}.{Int.from_u8(bytes[3])}"
+    if bytes.len() == 4 -> return "{Int{bytes[0]}}.{Int{bytes[1]}}.{Int{bytes[2]}}.{Int{bytes[3]}}"
     words := [Int]{}
-    loop i in 0..<8 -> words.push(Int.from_u8(bytes[i * 2]) * 256 + Int.from_u8(bytes[i * 2 + 1]))
+    loop i in 0..<8 -> words.push(Int{bytes[i * 2]} * 256 + Int{bytes[i * 2 + 1]})
     // std::net's canonical IPv4-mapped spelling is dotted, not hexadecimal.
     if words[0] == 0 && words[1] == 0 && words[2] == 0 && words[3] == 0 && words[4] == 0 && words[5] == 65535 {
-        return "::ffff:{Int.from_u8(bytes[12])}.{Int.from_u8(bytes[13])}.{Int.from_u8(bytes[14])}.{Int.from_u8(bytes[15])}"
+        return "::ffff:{Int{bytes[12]}}.{Int{bytes[13]}}.{Int{bytes[14]}}.{Int{bytes[15]}}"
     }
     best_start := -1
     best_length := 1
@@ -1188,7 +1188,7 @@ parse_scope: fn(text: String) -> Int? Never! {
     if raw.len() == 0 -> return None
     value := 0
     loop byte in raw {
-        digit: Int.from_u8(byte) - 48
+        digit: Int{byte} - 48
         if digit < 0 || digit > 9 -> return None
         value = value * 10 + digit
         if value > 4294967295 -> return None
@@ -1200,7 +1200,7 @@ decode_utf8_lossy: fn(bytes: [U8]) -> String Never! {
     out := [U8]{}
     i := 0
     loop i < bytes.len() {
-        lead: Int.from_u8(bytes[i])
+        lead: Int{bytes[i]}
         if lead < 128 {
             out.push(bytes[i])
             i = i + 1
@@ -1217,7 +1217,7 @@ decode_utf8_lossy: fn(bytes: [U8]) -> String Never! {
                 valid = false
                 break
             }
-            byte: Int.from_u8(bytes[i + consumed])
+            byte: Int{bytes[i + consumed]}
             if byte < 128 || byte > 191 {
                 valid = false
                 break

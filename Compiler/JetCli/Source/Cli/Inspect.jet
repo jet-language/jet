@@ -91,7 +91,7 @@ jet_cli_inspect_pid: fn(value: String) -> Int? Never! {
     if start >= bytes.len() -> return None
     pid := 0
     loop index in start..<bytes.len() {
-        digit: Int.from_u8(bytes[index]) - 48
+        digit: Int{bytes[index]} - 48
         if digit < 0 || digit > 9 -> return None
         pid = pid * 10 + digit
         if pid > 4294967295 -> return None
@@ -549,7 +549,7 @@ jet_cli_inspect_count: fn(text: String) -> Int? Never! {
     if start >= bytes.len() -> return None
     value := 0
     loop index in start..<bytes.len() {
-        digit: Int.from_u8(bytes[index]) - 48
+        digit: Int{bytes[index]} - 48
         if digit < 0 || digit > 9 -> return None
         value = value * 10 + digit
     }
@@ -876,7 +876,7 @@ jet_cli_compiler_positions: fn(bytes: [U8]) -> JetCLIPositions Never! {
     loop byte in bytes {
         lines.push(line)
         columns.push(column)
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if {
             code == 10 -> {
                 line += 1
@@ -1370,7 +1370,7 @@ jet_cli_replay_fail: fn(job: JetCLIInspectJob, code: String, what: String, why: 
 jet_cli_replay_path_problem: fn(path: String) -> String? Never! {
     if path == "" -> return Val("replay artifact path is empty")
     loop byte in path.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if code == 0 || code == 92 -> return Val("replay artifact path must use forward-slash components")
     }
     absolute: path.starts_with("/")
@@ -1392,7 +1392,7 @@ jet_cli_replay_path_problem: fn(path: String) -> String? Never! {
 jet_cli_replay_name_problem: fn(name: String) -> String? Never! {
     valid := name != ""
     loop byte in name.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if !((code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 45 || code == 95) -> valid = false
     }
     if valid -> return None

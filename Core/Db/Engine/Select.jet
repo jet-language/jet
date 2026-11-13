@@ -847,14 +847,14 @@ columns_from_expr_list: fn(p: &cg.Parse, a: &ast.AST, elist: Int) -[DB]> [conn.C
             n_name := name.len()
             if n_name > 0 {
                 j := n_name - 1
-                loop j > 0 && util.is_digit(Int.from_u8(name[j])) -> j -= 1
-                if Int.from_u8(name[j]) == 58 -> n_name = j
+                loop j > 0 && util.is_digit(Int{name[j]}) -> j -= 1
+                if (Int{name[j]}) == 58 -> n_name = j
             }
             cnt += 1
             name = name_with_counter(name, n_name, cnt)
             if cnt > 3 {
                 r: os.os_random_bytes(4)
-                cnt = Int.from_u8(r[0]) + (Int.from_u8(r[1]) << 8) + (Int.from_u8(r[2]) << 16) + (Int.from_u8(r[3]) << 24)
+                cnt = Int{r[0]} + (Int{r[1]} << 8) + (Int{r[2]} << 16) + (Int{r[3]} << 24)
             }
         }
         if x.no_expand -> col_flags = col_flags.bit_or(conn.COLFLAG_NOEXPAND)

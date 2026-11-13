@@ -74,18 +74,18 @@ environment_literals: fn(path: String, text: String, out: &[String]) {
     at := 0
     loop {
         if at >= bytes.len() -> return
-        if Int.from_u8(bytes[at]) != 34 {
+        if (Int{bytes[at]}) != 34 {
             at += 1
             next
         }
         name := [U8]{}
         end := at + 1
         loop {
-            if end >= bytes.len() || !environment_name_byte(Int.from_u8(bytes[end])) -> break
+            if end >= bytes.len() || !environment_name_byte(Int{bytes[end]}) -> break
             name.push(bytes[end])
             end += 1
         }
-        if end < bytes.len() && Int.from_u8(bytes[end]) == 34 {
+        if end < bytes.len() && (Int{bytes[end]}) == 34 {
             spelled: String.from_bytes(name) ?? ""
             if spelled.starts_with("JET_") || spelled.starts_with("JETPACK_") -> out.push("{path} {spelled}")
             at = end + 1

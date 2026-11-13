@@ -19,7 +19,7 @@ ReservoirSampler: struct {
     }
 
     add: fn(&self, item: String) Never! {
-        self.state.count = self.state.count.wrapping_add(U64{1})
+        self.state.count = wrapping(self.state.count + U64{1})
         if self.state.items.len() < self.state.capacity {
             self.state.items.push(item.copy())
             return
@@ -30,7 +30,7 @@ ReservoirSampler: struct {
         state = state.bit_xor((state << 17))
         self.state.rng = state
         index: state %% self.state.count
-        if index < (U64{self.state.capacity}) -> self.state.items[Int.from_u64(index)] = item
+        if index < (U64{self.state.capacity}) -> self.state.items[Int{index}] = item
     }
 
     sample: fn(self) -> [String] Never! {

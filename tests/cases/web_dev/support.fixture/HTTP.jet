@@ -17,13 +17,13 @@ s5_web_bytes: fn(bytes: [U8], start: Int, end: Int) -> [U8] {
 
 // Reused TestPolicy2's exact Rust Unicode White_Space byte-width algorithm.
 s5_web_space_width: fn(bytes: [U8], index: Int) -> Int {
-    first: Int.from_u8(bytes[index])
+    first: Int{bytes[index]}
     if first == 32 || (first >= 9 && first <= 13) -> return 1
     if index + 1 >= bytes.len() -> return 0
-    second: Int.from_u8(bytes[index + 1])
+    second: Int{bytes[index + 1]}
     if first == 194 && (second == 133 || second == 160) -> return 2
     if index + 2 >= bytes.len() -> return 0
-    third: Int.from_u8(bytes[index + 2])
+    third: Int{bytes[index + 2]}
     if first == 225 && second == 154 && third == 128 -> return 3
     if first == 226 && second == 128 && ((third >= 128 && third <= 138) || third == 168 || third == 169 || third == 175) -> return 3
     if first == 226 && second == 129 && third == 159 -> return 3
@@ -78,8 +78,8 @@ s5_web_ascii_equal: fn(left: String, right: String) -> Bool {
     b: right.bytes()
     if a.len() != b.len() -> return false
     loop index in 0..<a.len() {
-        x := Int.from_u8(a[index])
-        y := Int.from_u8(b[index])
+        x := Int{a[index]}
+        y := Int{b[index]}
         if x >= 65 && x <= 90 -> x = x + 32
         if y >= 65 && y <= 90 -> y = y + 32
         if x != y -> return false
@@ -91,11 +91,11 @@ s5_web_u16: fn(text: String) -> Int? {
     bytes: text.bytes()
     if bytes.len() == 0 -> return None
     index := 0
-    if Int.from_u8(bytes[0]) == 43 -> index = 1
+    if (Int{bytes[0]}) == 43 -> index = 1
     if index == bytes.len() -> return None
     value := 0
     loop index < bytes.len() {
-        digit: Int.from_u8(bytes[index]) - 48
+        digit: Int{bytes[index]} - 48
         if digit < 0 || digit > 9 -> return None
         if value > (65535 - digit) /% 10 -> return None
         value = value * 10 + digit

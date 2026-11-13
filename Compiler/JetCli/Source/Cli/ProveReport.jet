@@ -785,8 +785,8 @@ jet_cli_prove_seed: fn(text: String) -> Int? Never! {
 // first 63 bits of a domain-tagged sha256 of the target's input closure.
 jet_cli_prove_input_seed: fn(input_sha256: String) -> Int Never! {
     digest: prove_crypto.sha256("jet-prove-property-seed-v1\n{input_sha256}").as_bytes()
-    seed := Int.from_u8(digest[0]) %% 128
-    loop index in 1..<8 -> seed = seed * 256 + Int.from_u8(digest[index])
+    seed := Int{digest[0]} %% 128
+    loop index in 1..<8 -> seed = seed * 256 + (Int{digest[index]})
     seed
 }
 
@@ -837,7 +837,7 @@ jet_cli_prove_test_items: fn(identity: JetCLIProveIdentity, members: [JetCLIProv
             code: record.identity.claim_id.copy(),
             message: record.detail.copy(),
             path: jet_cli_prove_record_path(record.source.path, members, entry, cwd),
-            line: Int.from_u32(record.source.line),
+            line: Int{record.source.line},
             caught: caught,
             expected: expected,
             used: false,
@@ -857,8 +857,8 @@ jet_cli_prove_test_items: fn(identity: JetCLIProveIdentity, members: [JetCLIProv
         seen := JetCLIProveObserved{
             marker: marker.copy(),
             path: jet_cli_prove_record_path(record.source.path, members, entry, cwd),
-            line: Int.from_u32(record.source.line),
-            column: Int.from_u32(record.source.column),
+            line: Int{record.source.line},
+            column: Int{record.source.column},
             held: held,
             expected: !held,
             evidence: record.identity.evidence_id.copy(),
@@ -888,7 +888,7 @@ jet_cli_prove_test_items: fn(identity: JetCLIProveIdentity, members: [JetCLIProv
         state := if evidence_outcome_is_incomplete(record.outcome) -> 3 else -> 0
         if known == .Val(found) -> state = found
         path := jet_cli_prove_record_path(record.source.path, members, entry, cwd)
-        line := Int.from_u32(record.source.line)
+        line := Int{record.source.line}
         // A test name declared once in the group places its record there.
         matching: loop site in sites -> if site.name == record.identity.claim_id -> 1 else -> 0
         if line == 0 && matching.sum() == 1 {
@@ -930,7 +930,7 @@ jet_cli_prove_test_items: fn(identity: JetCLIProveIdentity, members: [JetCLIProv
             case_number: Int.parse(jet_cli_prove_attachment(record, "case")) ?? 0
             failure_seed: jet_cli_prove_attachment(record, "seed")
             property = Val(JetCLIProveProperty{
-                cases: Int.from_u64(record.count),
+                cases: Int{record.count},
                 case_index: if case_number > 0 -> case_number - 1 else -> 0,
                 seed: if failure_seed == "" -> seed else -> Int.parse(failure_seed) ?? seed,
                 minimized: jet_cli_prove_attachment(record, "minimized_inputs"),

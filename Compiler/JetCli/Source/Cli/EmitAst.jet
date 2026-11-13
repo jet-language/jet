@@ -600,7 +600,7 @@ jet_cli_emit_ast_str_part: fn(part: StrPart) -> JetCLIEmitNode Never! {
     if part == {
         .Lit(text) -> jet_cli_emit_leaf("text", "text {jet_cli_debug_quote(text)}")
         .Interp(value, format) -> jet_cli_emit_node("interpolation", "interpolation{jet_cli_emit_ast_format(format)}", [JetCLIEmitNode]{jet_cli_emit_ast_expr(value)})
-        .Byte(value) -> jet_cli_emit_leaf("byte", "byte {Int.from_u8(value)}")
+        .Byte(value) -> jet_cli_emit_leaf("byte", "byte {Int{value}}")
     }
 }
 

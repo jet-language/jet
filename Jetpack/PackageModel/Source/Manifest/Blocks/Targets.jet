@@ -51,7 +51,7 @@ TargetProfileIdentity: enum {
         value: input.trim()
         if value == "" -> return Err(TargetProfileError{detail: "target profile identity must not be empty"})
         loop byte in value.bytes() {
-            code: Int.from_u8(byte)
+            code: Int{byte}
             if !(pkg_bytes_is_word(code) || code == 46 || code == 45) {
                 return Err(TargetProfileError{detail: "target profile identity `{value}` contains characters outside `[A-Za-z0-9_.-]`"})
             }

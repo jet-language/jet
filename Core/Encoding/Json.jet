@@ -455,7 +455,7 @@ Parser: struct {
     __ws_scan: fn(&self) -> Bool Never! {
         if self.index < 0 -> return false
         loop self.index < self.bytes.len() {
-            n: Int.from_u8(self.bytes[self.index])
+            n: Int{self.bytes[self.index]}
             if n != 32 && n != 9 && n != 10 && n != 13 -> return true
             self.index += 1
             if n == 10 {
@@ -547,7 +547,7 @@ Parser: struct {
             // in place (no newline inside: control bytes end the run).
             run: self.index
             loop self.index < self.bytes.len() {
-                n: Int.from_u8(self.bytes[self.index])
+                n: Int{self.bytes[self.index]}
                 if n == 34 || n == 92 || n < 32 -> break
                 self.index += 1
             }
@@ -1126,7 +1126,7 @@ Parser: struct {
             digits: at
             value := 0
             loop at < self.bytes.len() && at - digits < 18 {
-                d: Int.from_u8(self.bytes[at])
+                d: Int{self.bytes[at]}
                 if d < 48 || d > 57 -> break
                 value = value * 10 + (d - 48)
                 at += 1
@@ -1134,7 +1134,7 @@ Parser: struct {
             count: at - digits
             plain := count > 0 && (count == 1 || self.bytes[digits] != (U8{48})) && !(negative && value == 0)
             if plain && at < self.bytes.len() {
-                n: Int.from_u8(self.bytes[at])
+                n: Int{self.bytes[at]}
                 if (n >= 48 && n <= 57) || n == 46 || n == 101 || n == 69 -> plain = false
             }
             if !plain -> return self.__cursor_decode<Int>()
@@ -1345,7 +1345,7 @@ hex_digit: fn(b: U8) -> Int? {
     if n >= 65 && n <= 70 -> return Val(n - 55)
     None
 }
-u8_int: fn(b: U8) -> Int Never! { Int.from_u8(b) }
+u8_int: fn(b: U8) -> Int Never! { Int{b} }
 utf8_bytes: fn(cp: Int) -> [U8] Never! {
     out := [U8]{}
     if cp < 128 {
@@ -1621,7 +1621,7 @@ write_json_bytes: fn(out: &[U8], bytes: [U8]) Never! {
     out.push(U8{91})
     loop i in 0..<bytes.len() {
         if i > 0 -> out.push(U8{44})
-        write_ascii(out, "{Int.from_u8(bytes[i])}")
+        write_ascii(out, "{Int{bytes[i]}}")
     }
     out.push(U8{93})
 }
@@ -1678,8 +1678,8 @@ write_json_string: fn(out: &[U8], text: String) Never! {
         }
         if n < 32 {
             write_ascii(out, "\\u00")
-            out.push(nibble(Int.from_u8(n) /% 16))
-            out.push(nibble(Int.from_u8(n) %% 16))
+            out.push(nibble(Int{n} /% 16))
+            out.push(nibble(Int{n} %% 16))
             next
         }
         out.push(b)
@@ -1767,7 +1767,7 @@ pointer_index: fn(segment: String) -> Int? {
     if raw.len() > 1 && raw[0] == (U8{48}) -> return None
     n := 0
     loop b in raw {
-        d: Int.from_u8(b)
+        d: Int{b}
         if d < 48 || d > 57 -> return None
         n = n * 10 + (d - 48)
     }

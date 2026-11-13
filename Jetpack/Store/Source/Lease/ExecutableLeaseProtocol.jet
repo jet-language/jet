@@ -261,7 +261,7 @@ store_lease_is_hex_id: fn(value: String) -> Bool Never! {
 store_lease_validate_scope: fn(value: String) IOError! {
     canonical := value.starts_with(LEASE_OWNER_SCOPE_PREFIX) && value.bytes().len() <= 160
     loop byte in value.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         word: (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 45 || code == 95
         if !word -> canonical = false
     }
@@ -350,7 +350,7 @@ store_lease_decode_hex: fn(value: String, field: String) -> [U8] IOError! {
 }
 
 store_lease_hex_digit: fn(byte: U8) -> Int? Never! {
-    code: Int.from_u8(byte)
+    code: Int{byte}
     if {
         code >= 48 && code <= 57 -> Val(code - 48)
         code >= 97 && code <= 102 -> Val(code - 87)
@@ -370,7 +370,7 @@ store_lease_parse_decimal: fn(text: String, maximum: Int) -> Int? Never! {
     digits: text.removeprefix("+")
     if digits == "" -> return None
     loop byte in digits.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if code < 48 || code > 57 -> return None
     }
     value: Int.parse(digits) ?? return None

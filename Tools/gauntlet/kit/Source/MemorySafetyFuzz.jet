@@ -192,7 +192,7 @@ corpus_shape: fn(spec: Dyn) -> Corpus Err! {
     Ok(Corpus{seed: seed, case_count: case_count, bytes_per_case: bytes_per_case, metadata_bytes: metadata_bytes, payload_bytes: payload_bytes, data: [U8]{}, sha256: ""})
 }
 
-byte_at: fn(data: [U8], offset: Int) -> Int { Int.from_u8(data[offset]) }
+byte_at: fn(data: [U8], offset: Int) -> Int { Int{data[offset]} }
 
 // Fills the records with xorshift32 bytes from the seed, then writes each
 // record's metadata: its kind (the record index cycles through them), the
@@ -259,7 +259,7 @@ record_summary: fn(corpus: Corpus) -> CorpusSummary {
         safe: if requested < payload -> requested else -> payload
         start: offset + corpus.metadata_bytes
         value: if {
-            kind == CASE_VALID || kind == CASE_OOB -> data.slice(start, start + bounded).map(fn(byte) { Int.from_u8(byte) }).sum().bit_and(WORD_MASK)
+            kind == CASE_VALID || kind == CASE_OOB -> data.slice(start, start + bounded).map(fn(byte) { Int{byte} }).sum().bit_and(WORD_MASK)
             requested >= payload -> 0
             kind == CASE_WRONG_OUTPUT -> byte_at(data, start + requested).bit_xor(165)
             else -> byte_at(data, start + requested)
@@ -267,7 +267,7 @@ record_summary: fn(corpus: Corpus) -> CorpusSummary {
         semantic = (semantic + value + (kind + 1) * 257 + bounded + safe).bit_and(WORD_MASK)
         records.push(CaseRecord{index: index, kind: kind, declared_length: declared, requested_index: requested, offset: offset})
     }
-    CorpusSummary{counts: counts, checksum: data.map(fn(byte) { Int.from_u8(byte) }).sum().bit_and(WORD_MASK), semantic: semantic, records: records}
+    CorpusSummary{counts: counts, checksum: data.map(fn(byte) { Int{byte} }).sum().bit_and(WORD_MASK), semantic: semantic, records: records}
 }
 
 expected_output: fn(summary: CorpusSummary, corpus: Corpus) -> String {
@@ -880,7 +880,7 @@ assert_blocked: fn(report: Dyn, stage: String, copied: Dyn) {
 #Test("the corpus is the seeded xorshift32 records and its oracle line their summary") {
     corpus: generate_corpus(member(test_memory_axis(), "corpus") ?? Dyn.Null) ?? panic("corpus: {err.message}")
     assert_eq(corpus.data.len(), 40)
-    assert_eq(corpus.data.slice(0, 8).map(fn(byte) { Int.from_u8(byte) }).slice(0, 4), [0, 1, 0, 160])
+    assert_eq(corpus.data.slice(0, 8).map(fn(byte) { Int{byte} }).slice(0, 4), [0, 1, 0, 160])
     assert_eq(xorshift32(1), 270369)
     summary: record_summary(corpus)
     assert_eq(summary.counts, [1, 1, 1, 1, 1])

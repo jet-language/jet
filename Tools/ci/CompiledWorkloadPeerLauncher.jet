@@ -183,7 +183,7 @@ network_policy: fn(value: String) -> NetworkPolicy LaunchError! {
 valid_task_id: fn(value: String) -> Bool Never! {
     if value == "" -> return false
     loop byte in value.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         alphanumeric: (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122)
         if !alphanumeric && code != 46 && code != 95 && code != 45 -> return false
     }
@@ -210,7 +210,7 @@ contained: fn(root: String, child: String) -> Bool Never! {
 
 has_nul: fn(value: String) -> Bool Never! {
     loop byte in value.bytes() {
-        if Int.from_u8(byte) == 0 -> return true
+        if (Int{byte}) == 0 -> return true
     }
     false
 }
@@ -218,7 +218,7 @@ has_nul: fn(value: String) -> Bool Never! {
 byte_position: fn(value: String, wanted: Int) -> Int Never! {
     raw: value.bytes()
     loop index in 0..<raw.len() {
-        if Int.from_u8(raw[index]) == wanted -> return index
+        if (Int{raw[index]}) == wanted -> return index
     }
     -1
 }
@@ -235,7 +235,7 @@ digits_value: fn(text: String) -> Int? Never! {
     if text == "" -> return None
     value := 0
     loop byte in text.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if code < 48 || code > 57 || value > 100000000 -> return None
         value = value * 10 + code - 48
     }
@@ -248,7 +248,7 @@ path_entries: fn(value: String) -> [String] Never! {
     start := 0
     raw: value.bytes()
     loop index in 0..<raw.len() + 1 {
-        if index == raw.len() || Int.from_u8(raw[index]) == 58 {
+        if index == raw.len() || (Int{raw[index]}) == 58 {
             entries.push(text_range(value, start, index))
             start = index + 1
         }
@@ -304,7 +304,7 @@ launcher_path: fn() -[FS, Env]> String LaunchError! {
 clean_probe_stderr: fn(text: String) -> String Never! {
     out := [U8]{}
     loop byte in text.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if code == 13 || code == 10 || code == 9 -> out.push(U8{32}) else -> out.push(byte)
     }
     cleaned: String.from_bytes_lossy(out).trim()
@@ -499,7 +499,7 @@ read_linux_signal: fn(path: String) -[FS]> Int LaunchError! {
     bytes: files.read_bytes(path) ?? return Err(launch_error("Linux peer isolation signal status cannot be read from `{path}`: {err}"))
     if bytes.len() == 0 -> return Ok(0)
     if bytes.len() == 1 {
-        number: Int.from_u8(bytes[0])
+        number: Int{bytes[0]}
         if number >= 1 && number <= 64 -> return Ok(number)
     }
     Err(launch_error("Linux peer isolation signal status returned invalid data"))
@@ -544,7 +544,7 @@ internal_main: fn(args: [String], loopback: Bool) -[FS, Env, Exec, IO, Time, Tim
     time.sleep(25ms)
     sweep_namespace(9) ?? fail(err.message)
     if status_file != "" && end.signal > 0 {
-        byte: U8.from_int(end.signal) ?? fail("internal runner signal status could not propagate: signal {end.signal} is out of range")
+        byte: checked(U8{end.signal}) ?? fail("internal runner signal status could not propagate: signal {end.signal} is out of range")
         files.write_bytes(status_file, [U8]{byte}) ?? fail("internal runner signal status could not propagate: {err}")
     }
     finish(end)
@@ -625,7 +625,7 @@ finish: fn(end: ChildEnd) -[Env, Exec, Time]> Never {
 #Test("the seccomp program is four sock_filter rows") {
     filter: socket_filter() ?? panic("socket filter: {err}")
     assert_eq(filter.len(), 32)
-    if sys.arch() == "x86_64" -> assert_eq(Int.from_u8(filter[12]), 41)
+    if sys.arch() == "x86_64" -> assert_eq(Int{filter[12]}, 41)
 }
 
 rejection: fn(args: [String]) -[FS]> String Never! {

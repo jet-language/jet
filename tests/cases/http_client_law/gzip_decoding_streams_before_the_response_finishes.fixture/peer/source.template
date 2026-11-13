@@ -15,9 +15,9 @@ contains_bytes: fn(raw: [U8], want: [U8], ascii_casefold: Bool) -> Bool {
     loop start in 0..<(raw.len() - want.len() + 1) {
         same := true
         loop i in 0..<want.len() {
-            n := Int.from_u8(raw[start + i])
+            n := Int{raw[start + i]}
             if ascii_casefold && n >= 65 && n <= 90 -> n += 32
-            if n != Int.from_u8(want[i]) -> same = false
+            if n != (Int{want[i]}) -> same = false
         }
         if same -> return true
     }

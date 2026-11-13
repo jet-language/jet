@@ -304,8 +304,8 @@ record_unzigzag: fn(value: Int) -> Int Never! {
 record_bytes_before: fn(left: [U8], right: [U8]) -> Bool Never! {
     index := 0
     loop index < left.len() && index < right.len() {
-        a: Int.from_u8(left[index])
-        b: Int.from_u8(right[index])
+        a: Int{left[index]}
+        b: Int{right[index]}
         if a != b -> return a < b
         index += 1
     }
@@ -555,7 +555,7 @@ record_read_byte: fn(bytes: [U8], cursor: &RecordCursor) -> Int Never! {
         record_fail(cursor, "record is truncated")
         return 0
     }
-    value: Int.from_u8(bytes[cursor.at])
+    value: Int{bytes[cursor.at]}
     cursor.at += 1
     value
 }
@@ -635,7 +635,7 @@ record_reader_failure: fn(problem: String) -> RecordReaderResult Never! {
 record_open: fn(bytes: [U8]) -> RecordReaderResult Never! {
     if bytes.len() < 4 + RECORD_CHECKSUM_BYTES -> return record_reader_failure("record is truncated")
     body_end: bytes.len() - RECORD_CHECKSUM_BYTES
-    if Int.from_u8(bytes[0]) != 74 || Int.from_u8(bytes[1]) != 69 || Int.from_u8(bytes[2]) != 84 || Int.from_u8(bytes[3]) != 82 {
+    if (Int{bytes[0]}) != 74 || (Int{bytes[1]}) != 69 || (Int{bytes[2]}) != 84 || (Int{bytes[3]}) != 82 {
         return record_reader_failure("record magic is not `JETR`")
     }
     checksum: bytes.slice(body_end, bytes.len())
@@ -824,9 +824,9 @@ record_parse_digest_hex: fn(text: String) -> [U8]? Never! {
     if raw.len() != 64 -> return None
     digest := [U8]{}
     loop index in 0..<32 {
-        high: record_hex_value(Int.from_u8(raw[index * 2])) ?? return None
-        low: record_hex_value(Int.from_u8(raw[index * 2 + 1])) ?? return None
-        digest.push(U8.from_int(high * 16 + low) ?? return None)
+        high: record_hex_value(Int{raw[index * 2]}) ?? return None
+        low: record_hex_value(Int{raw[index * 2 + 1]}) ?? return None
+        digest.push(checked(U8{high * 16 + low}) ?? return None)
     }
     Val(digest)
 }

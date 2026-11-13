@@ -475,10 +475,10 @@ pkg_bundle_require_icon_formats: fn(icons: [BundleIcon], allowed: [IconFormat], 
 pkg_bundle_msix_identifier: fn(identifier: String) -> Bool Never! {
     raw: identifier.bytes()
     if raw.len() == 0 || raw.len() > 50 -> return false
-    first: Int.from_u8(raw[0])
+    first: Int{raw[0]}
     if !pkg_bytes_is_word(first) || first == 95 -> return false
     loop byte in raw {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if code == 95 || (!pkg_bytes_is_word(code) && code != 46 && code != 45) -> return false
     }
     true
@@ -500,7 +500,7 @@ pkg_bundle_validate_component: fn(field: String, value: String) BundleError! {
 
 pkg_bundle_has_path_character: fn(value: String) -> Bool Never! {
     loop byte in value.bytes() {
-        if Int.from_u8(byte) == {
+        if (Int{byte}) == {
             47 | 92 | 58 | 60 | 62 | 34 | 124 | 63 | 42 -> return true
             else -> {}
         }
@@ -528,7 +528,7 @@ pkg_bundle_windows_version: fn(version: String) -> String BundleError! {
         if part == "" -> return Err(BundleError.InvalidWindowsVersion(version))
         value := 0
         loop byte in part.bytes() {
-            code: Int.from_u8(byte)
+            code: Int{byte}
             if code < 48 || code > 57 -> return Err(BundleError.InvalidWindowsVersion(version))
             value = value * 10 + code - 48
             if value > 65535 -> return Err(BundleError.InvalidWindowsVersion(version))

@@ -120,10 +120,10 @@ pkg_binder_launder_first_line: fn(bytes: [U8]) -> String Never! {
 pkg_binder_is_ident: fn(value: String) -> Bool Never! {
     raw: value.bytes()
     if raw.len() == 0 -> return false
-    first: Int.from_u8(raw[0])
+    first: Int{raw[0]}
     if !pkg_binder_is_ascii_alpha(first) && first != 95 -> return false
     loop byte in raw {
-        if !pkg_bytes_is_word(Int.from_u8(byte)) -> return false
+        if !pkg_bytes_is_word(Int{byte}) -> return false
     }
     true
 }
@@ -193,7 +193,7 @@ pkg_binder_lines: fn(text: String) -> [String] Never! {
     loop index in 0..<parts.len() {
         if index == parts.len() - 1 && parts[index] == "" -> break
         raw: parts[index].bytes()
-        cut: if raw.len() > 0 && Int.from_u8(raw[raw.len() - 1]) == 13 -> raw.len() - 1 else -> raw.len()
+        cut: if raw.len() > 0 && (Int{raw[raw.len() - 1]}) == 13 -> raw.len() - 1 else -> raw.len()
         out.push(pkg_bytes_text(raw, 0, cut))
     }
     out
@@ -277,9 +277,9 @@ pkg_binder_trim_matches: fn(text: String, pattern: String) -> String Never! {
 pkg_binder_ascii_upper: fn(value: String) -> String Never! {
     out := [U8]{}
     loop byte in value.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if {
-            code >= 97 && code <= 122 -> out.push(U8.from_int(code - 32) ?? byte)
+            code >= 97 && code <= 122 -> out.push(checked(U8{code - 32}) ?? byte)
             else -> out.push(byte)
         }
     }
@@ -291,7 +291,7 @@ pkg_binder_u64_le: fn(value: Int) -> [U8] Never! {
     out := [U8]{}
     rest := value
     loop index in 0..<8 {
-        out.push(U8.from_int(rest % 256) ?? U8{0})
+        out.push(checked(U8{rest % 256}) ?? U8{0})
         rest = rest /% 256
     }
     out

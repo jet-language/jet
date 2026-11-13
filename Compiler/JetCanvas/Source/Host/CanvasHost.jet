@@ -358,8 +358,8 @@ canvas_host_same_secret: fn(left: String, right: String) -> Bool Never! {
     difference := a.len().bit_xor(b.len())
     longest: if a.len() > b.len() -> a.len() else -> b.len()
     loop index in 0..<longest {
-        x: if index < a.len() -> Int.from_u8(a[index]) else -> 0
-        y: if index < b.len() -> Int.from_u8(b[index]) else -> 0
+        x: if index < a.len() -> Int{a[index]} else -> 0
+        y: if index < b.len() -> Int{b[index]} else -> 0
         difference = difference.bit_or(x.bit_xor(y))
     }
     difference == 0
@@ -402,7 +402,7 @@ canvas_host_note_client: fn(state: Shared<CanvasHostState>, client: String) {
 
 canvas_host_has_control: fn(text: String) -> Bool Never! {
     loop byte in text.bytes() {
-        b: Int.from_u8(byte)
+        b: Int{byte}
         if b < 32 || b == 127 -> return true
     }
     false

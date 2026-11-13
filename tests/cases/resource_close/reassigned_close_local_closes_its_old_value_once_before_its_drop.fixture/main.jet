@@ -15,7 +15,7 @@ Box: struct {
         close: fn(&&self) {
             p := self.p.move()
             sum := U64{0}
-            loop i in 0..<p.len() -> sum = sum.wrapping_add(p[i])
+            loop i in 0..<p.len() -> sum = wrapping(sum + p[i])
             print("close {self.name} len {p.len()} sum {sum}")
             loop i in 0..<p.len() -> p[i] = U64{0}
         }
@@ -31,7 +31,7 @@ make: fn(name: String, n: Int, v: U64) -> Box E! {
 
 sub: fn(a: Box, b: Box, name: String) -> Box E! {
     out := make(name, a.p.len(), U64{0}) ?? return Err(err)
-    loop i in 0..<b.p.len() -> out.p[i] = a.p[i].wrapping_sub(b.p[i])
+    loop i in 0..<b.p.len() -> out.p[i] = wrapping(a.p[i] - b.p[i])
     Ok(out)
 }
 

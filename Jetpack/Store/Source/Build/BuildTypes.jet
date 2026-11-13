@@ -26,7 +26,7 @@ ContentDigest: struct {
         raw: hex.bytes()
         valid := raw.len() == 64
         loop byte in raw {
-            code: Int.from_u8(byte)
+            code: Int{byte}
             if !((code >= 48 && code <= 57) || (code >= 65 && code <= 70) || (code >= 97 && code <= 102)) -> valid = false
         }
         if !valid -> return Err(ContentDigestError{message: "sha256 digest must contain exactly 64 hexadecimal digits"})

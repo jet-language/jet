@@ -116,8 +116,8 @@ x509_attr_descr_from_name: fn(name: [U8]) -> X509AttrDescr? Never! {
 // The byte the two hexadecimal digits at s[at] and s[at + 1] spell, -1 when
 // either is no digit (hexpair_to_int).
 x509_create_hexpair: fn(s: [U8], at: Int) -> Int Never! {
-    hi: x509.x509_hex_value(Int.from_u8(s[at]))
-    lo: x509.x509_hex_value(Int.from_u8(s[at + 1]))
+    hi: x509.x509_hex_value(Int{s[at]})
+    lo: x509.x509_hex_value(Int{s[at + 1]})
     if hi < 0 || lo < 0 -> return -1
     hi * 16 + lo
 }
@@ -166,7 +166,7 @@ x509_create_value_hex_der: fn(s: [U8], from: Int, to: Int) -> (val: [U8], tag_id
         if v < 0 -> return Err(.InvalidName(None))
         der.push(U8{v})
     }
-    tag_id: Int.from_u8(der[0])
+    tag_id: Int{der[0]}
     p := 1
     val_len: asn1.get_len(der, p, der_len) ?? return Err(.InvalidName(None))
     if val_len > x509.X509_MAX_DN_NAME_SIZE -> return Err(.InvalidName(None))

@@ -604,10 +604,10 @@ env_files_unescape: fn(value: String) -> String EnvironmentError! {
     output := [U8]{}
     index := 0
     loop index < bytes.len() {
-        if Int.from_u8(bytes[index]) == 37 {
+        if (Int{bytes[index]}) == 37 {
             if index + 2 >= bytes.len() -> return Err(env_files_error("managed file state has an invalid escape"))
-            high: env_files_hex_value(Int.from_u8(bytes[index + 1]))
-            low: env_files_hex_value(Int.from_u8(bytes[index + 2]))
+            high: env_files_hex_value(Int{bytes[index + 1]})
+            low: env_files_hex_value(Int{bytes[index + 2]})
             if high < 0 || low < 0 -> return Err(env_files_error("managed file state has an invalid escape"))
             output.push(U8{high * 16 + low})
             index += 3

@@ -35,8 +35,8 @@ store_decode_hex_exact: fn(text: String, count: Int) -> [U8]? Never! {
     out := [U8]{}
     index := 0
     loop index < raw.len() {
-        high: store_any_hex_value(Int.from_u8(raw[index]))
-        low: store_any_hex_value(Int.from_u8(raw[index + 1]))
+        high: store_any_hex_value(Int{raw[index]})
+        low: store_any_hex_value(Int{raw[index + 1]})
         if high < 0 || low < 0 -> return None
         out.push(U8{high * 16 + low})
         index += 2

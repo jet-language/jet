@@ -557,7 +557,7 @@ provider_cc_pack_untar: fn(&&file: files.FileReader, destination: String) CcTool
         raw_name: provider_registry_tar_header_name(header) ?? return Err(CcToolchainError.Invalid(err.message()))
         size: provider_registry_tar_number(header[124..<136]) ?? return Err(CcToolchainError.Invalid(err.message()))
         mode: provider_registry_tar_number(header[100..<108]) ?? return Err(CcToolchainError.Invalid(err.message()))
-        kind: provider_registry_tar_kind(Int.from_u8(header[156]), raw_name)
+        kind: provider_registry_tar_kind(Int{header[156]}, raw_name)
         padding: (PROVIDER_TAR_BLOCK - size % PROVIDER_TAR_BLOCK) % PROVIDER_TAR_BLOCK
         name: raw_name.removeprefix("./")
         if name == "" || name == "." {

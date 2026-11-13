@@ -34,11 +34,11 @@ s5_token_u32: fn(text: String) -> Int? {
     bytes: text.bytes()
     if bytes.len() == 0 -> return None
     index := 0
-    if Int.from_u8(bytes[0]) == 43 -> index = 1
+    if (Int{bytes[0]}) == 43 -> index = 1
     if index == bytes.len() -> return None
     value := 0
     loop index < bytes.len() {
-        digit: Int.from_u8(bytes[index]) - 48
+        digit: Int{bytes[index]} - 48
         if digit < 0 || digit > 9 -> return None
         if value > (4294967295 - digit) /% 10 -> return None
         value = value * 10 + digit

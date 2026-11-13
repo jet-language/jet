@@ -22,7 +22,7 @@ Packet: struct {
 
 total: fn(view: View<U8>) -> Int {
     sum := 0
-    loop byte in view -> sum += Int.from_u8(byte)
+    loop byte in view -> sum += (Int{byte})
     sum
 }
 
@@ -80,7 +80,7 @@ run: fn() {
     window[2] = U8{9}
     center: &window[1..<2]
     center[0] = U8{5}
-    loop byte in data -> print(Int.from_u8(byte))
+    loop byte in data -> print(Int{byte})
     // Constant-bound write windows lend their storage to a write view
     // parameter, and a write subrange returned from one still reaches `cells`.
     cells := [U8{0}, U8{0}, U8{0}, U8{0}, U8{0}]
@@ -89,5 +89,5 @@ run: fn() {
     whole: &cells[0..<5]
     rest: tail_mut(whole, 3)
     fill(rest, 9)
-    loop byte in cells -> print(Int.from_u8(byte))
+    loop byte in cells -> print(Int{byte})
 }

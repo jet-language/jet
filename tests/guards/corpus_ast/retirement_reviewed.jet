@@ -43,7 +43,7 @@ s6_retirement_reviewed_walk_law: fn() {
 }
 
 s6_retirement_reviewed_word_byte: fn(byte: U8) -> Bool {
-    value: Int.from_u8(byte)
+    value: Int{byte}
     (value >= 65 && value <= 90) || (value >= 97 && value <= 122) || (value >= 48 && value <= 57) || value == 95
 }
 
@@ -94,7 +94,7 @@ s6_retirement_reviewed_expression_end: fn(token: Token) -> Bool {
 // An identifier's first source byte classifies it; the token span is in source coordinates.
 s6_retirement_reviewed_first_byte: fn(source: String, token: Token) -> Int? {
     if token.kind != TOKEN_IDENT || token.span.end <= token.span.start -> return None
-    Val(Int.from_u8(source.bytes()[token.span.start]))
+    Val(Int{source.bytes()[token.span.start]})
 }
 
 s6_retirement_reviewed_type_name: fn(source: String, token: Token) -> Bool {
@@ -129,7 +129,7 @@ s6_retirement_reviewed_line: fn(source: String, offset: Int) -> Int {
     line := 1
     bytes: source.bytes()
     loop at in 0..<offset {
-        if Int.from_u8(bytes[at]) == 10 -> line += 1
+        if (Int{bytes[at]}) == 10 -> line += 1
     }
     line
 }
@@ -203,8 +203,8 @@ s6_retirement_reviewed_unescape: fn(source: String) -> String {
     cursor := 0
     loop cursor < bytes.len() {
         byte: bytes[cursor]
-        if Int.from_u8(byte) == 92 && cursor + 1 < bytes.len() {
-            escaped: Int.from_u8(bytes[cursor + 1])
+        if (Int{byte}) == 92 && cursor + 1 < bytes.len() {
+            escaped: Int{bytes[cursor + 1]}
             if escaped == 110 -> out.push(U8{10})
             else if escaped == 116 -> out.push(U8{9})
             else if escaped == 34 || escaped == 92 || escaped == 39 -> out.push(bytes[cursor + 1])
@@ -287,9 +287,9 @@ s6_retirement_reviewed_hits: fn(source: String) -> [S6RetirementReviewedHit] {
     rejected := [Int: Bool]{}
     loop candidate in candidates {
         from := candidate.start
-        loop from > 0 && Int.from_u8(bytes[from - 1]) != 10 -> from -= 1
+        loop from > 0 && (Int{bytes[from - 1]}) != 10 -> from -= 1
         to := candidate.end
-        loop to < bytes.len() && Int.from_u8(bytes[to]) != 10 -> to += 1
+        loop to < bytes.len() && (Int{bytes[to]}) != 10 -> to += 1
         line_rejected: rejected.get(from) ?? !s6_retirement_reviewed_line_current(s6_retirement_reviewed_slice_bytes(bytes, from, to).trim().copy())
         rejected[from] = line_rejected
         if line_rejected && s6_retirement_reviewed_rewrites_current(bytes, from, to, candidate) -> hits.push(S6RetirementReviewedHit{line: candidate.line, spelling: candidate.spelling})
@@ -321,10 +321,10 @@ s6_retirement_reviewed_fence: fn(line: String) -> S6RetirementReviewedFence? {
     trimmed: line.trim_start().copy()
     bytes: trimmed.bytes()
     if bytes.len() == 0 -> return None
-    marker: Int.from_u8(bytes[0])
+    marker: Int{bytes[0]}
     if marker != 96 && marker != 126 -> return None
     length := 0
-    loop length < bytes.len() && Int.from_u8(bytes[length]) == marker -> length += 1
+    loop length < bytes.len() && (Int{bytes[length]}) == marker -> length += 1
     if length < 3 -> return None
     Val(S6RetirementReviewedFence{marker: marker, length: length, rest: s6_retirement_reviewed_slice(trimmed, length, bytes.len())})
 }
@@ -334,21 +334,21 @@ s6_retirement_reviewed_inline: fn(line: String) -> [String] {
     fragments := [String]{}
     cursor := 0
     loop cursor < bytes.len() {
-        if Int.from_u8(bytes[cursor]) != 96 {
+        if (Int{bytes[cursor]}) != 96 {
             cursor += 1
             next
         }
         length := 0
-        loop cursor + length < bytes.len() && Int.from_u8(bytes[cursor + length]) == 96 -> length += 1
+        loop cursor + length < bytes.len() && (Int{bytes[cursor + length]}) == 96 -> length += 1
         start: cursor + length
         close := start
         loop close < bytes.len() {
-            if Int.from_u8(bytes[close]) != 96 {
+            if (Int{bytes[close]}) != 96 {
                 close += 1
                 next
             }
             close_length := 0
-            loop close + close_length < bytes.len() && Int.from_u8(bytes[close + close_length]) == 96 -> close_length += 1
+            loop close + close_length < bytes.len() && (Int{bytes[close + close_length]}) == 96 -> close_length += 1
             if close_length == length {
                 fragments.push(s6_retirement_reviewed_slice(line, start, close))
                 cursor = close + close_length
@@ -398,13 +398,13 @@ s6_retirement_reviewed_embedded: fn(text: String) -> [S6RetirementReviewedFragme
     line_cursor := 0
     loop cursor < bytes.len() {
         loop line_cursor < cursor {
-            if Int.from_u8(bytes[line_cursor]) == 10 -> line += 1
+            if (Int{bytes[line_cursor]}) == 10 -> line += 1
             line_cursor += 1
         }
-        if Int.from_u8(bytes[cursor]) == 114 {
+        if (Int{bytes[cursor]}) == 114 {
             quote := cursor + 1
-            loop quote < bytes.len() && Int.from_u8(bytes[quote]) == 35 -> quote += 1
-            if quote < bytes.len() && Int.from_u8(bytes[quote]) == 34 {
+            loop quote < bytes.len() && (Int{bytes[quote]}) == 35 -> quote += 1
+            if quote < bytes.len() && (Int{bytes[quote]}) == 34 {
                 hashes: s6_retirement_reviewed_slice_bytes(bytes, cursor + 1, quote)
                 close: "\"{hashes}"
                 start: quote + 1
@@ -419,12 +419,12 @@ s6_retirement_reviewed_embedded: fn(text: String) -> [S6RetirementReviewedFragme
                 next
             }
         }
-        if Int.from_u8(bytes[cursor]) == 34 {
+        if (Int{bytes[cursor]}) == 34 {
             start: cursor + 1
             end := start
             loop end < bytes.len() {
-                if Int.from_u8(bytes[end]) == 92 -> end += 2
-                else if Int.from_u8(bytes[end]) == 34 -> break
+                if (Int{bytes[end]}) == 92 -> end += 2
+                else if (Int{bytes[end]}) == 34 -> break
                 else -> end += 1
             }
             if end < bytes.len() {

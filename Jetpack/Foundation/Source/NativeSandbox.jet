@@ -626,9 +626,9 @@ foundation_sandbox_sorted_names: fn(env: [String: String]) -> [String] Never! {
 foundation_sandbox_has_control: fn(text: String) -> Bool Never! {
     loop scalar in text.chars() {
         code: "{scalar}".bytes()
-        first: Int.from_u8(code[0])
+        first: Int{code[0]}
         if first < 32 || first == 127 -> return true
-        if code.len() == 2 && first == 194 && Int.from_u8(code[1]) < 160 -> return true
+        if code.len() == 2 && first == 194 && (Int{code[1]}) < 160 -> return true
     }
     false
 }

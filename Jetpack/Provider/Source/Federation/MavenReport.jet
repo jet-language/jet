@@ -293,7 +293,7 @@ provider_find: fn(bytes: [U8], needle: [U8], from: Int, to: Int) -> Int Never! {
 provider_xml_opening_end: fn(bytes: [U8], start: Int, to: Int) -> Int Never! {
     quote := 0
     loop index in start..<to {
-        code: Int.from_u8(bytes[index])
+        code: Int{bytes[index]}
         if {
             quote != 0 && code == quote -> quote = 0
             quote == 0 && (code == 39 || code == 34) -> quote = code
@@ -310,7 +310,7 @@ provider_xml_opening_name: fn(opening: String) -> String Never! {
     loop rest.starts_with("/") -> rest = rest.removeprefix("/")
     bytes: rest.bytes()
     end := 0
-    loop end < bytes.len() && pkg_bytes_space_width(bytes, end) == 0 && Int.from_u8(bytes[end]) != 62 && Int.from_u8(bytes[end]) != 47 -> end += 1
+    loop end < bytes.len() && pkg_bytes_space_width(bytes, end) == 0 && (Int{bytes[end]}) != 62 && (Int{bytes[end]}) != 47 -> end += 1
     pkg_bytes_text(bytes, 0, end)
 }
 

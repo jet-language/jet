@@ -61,7 +61,7 @@ multipart_test: fn() {
     content_length: multipart_length(headers)
     assert(boundary.bytes().len() >= 1 && boundary.bytes().len() <= 70, "original boundary byte-length range")
     loop byte in boundary.bytes() {
-        n: Int.from_u8(byte)
+        n: Int{byte}
         assert((n >= 48 && n <= 57) || (n >= 65 && n <= 90) || (n >= 97 && n <= 122) || n == 45, "original ASCII-alphanumeric-or-hyphen predicate")
     }
     assert(boundary == "jet-http-boundary-000000000000012c", "original exact first collision-free boundary")

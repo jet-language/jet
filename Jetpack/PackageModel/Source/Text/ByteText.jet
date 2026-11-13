@@ -13,7 +13,7 @@ pkg_bytes_text: fn(raw: [U8], start: Int, end: Int) -> String Never! {
 // The byte at `at` as an Int, or -1 past either end.
 pkg_bytes_code: fn(raw: [U8], at: Int) -> Int Never! {
     if at < 0 || at >= raw.len() -> return -1
-    Int.from_u8(raw[at])
+    Int{raw[at]}
 }
 
 // Whether `raw[at..]` begins with `prefix`.
@@ -80,11 +80,11 @@ pkg_bytes_colon_keyword_end: fn(raw: [U8], at: Int, keyword: [U8]) -> Int Never!
 pkg_text_has_control: fn(value: String) -> Bool Never! {
     raw: value.bytes()
     loop index in 0..<raw.len() {
-        code: Int.from_u8(raw[index])
+        code: Int{raw[index]}
         if code < 32 || code == 127 -> return true
         // C1 controls U+0080..U+009F encode as 0xC2 0x80..0x9F.
         if code == 0xC2 && index + 1 < raw.len() {
-            next_code: Int.from_u8(raw[index + 1])
+            next_code: Int{raw[index + 1]}
             if next_code >= 0x80 && next_code <= 0x9F -> return true
         }
     }
@@ -96,7 +96,7 @@ pkg_ascii_lower: fn(value: String) -> String Never! {
     raw: value.bytes()
     out := [U8]{}
     loop byte in raw {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         out.push(if code >= 65 && code <= 90 -> U8{code + 32} else -> byte)
     }
     pkg_bytes_text(out, 0, out.len())

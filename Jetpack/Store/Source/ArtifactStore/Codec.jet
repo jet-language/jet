@@ -52,7 +52,7 @@ store_artifact_push_le64: fn(out: &[U8], value: Int) Never! {
 store_artifact_read_le64: fn(bytes: [U8], start: Int) -> Int Never! {
     value := 0
     loop offset in 0..<8 {
-        value = (value).bit_or((Int.from_u8(bytes[start + offset]) << (offset * 8)))
+        value = (value).bit_or((Int{bytes[start + offset]} << (offset * 8)))
     }
     value
 }
@@ -100,9 +100,9 @@ store_artifact_decode_action: fn(action: ActionHandle, bytes: [U8]) -> [U8] Arti
 store_artifact_is_unsupported_version: fn(bytes: [U8]) -> Bool Never! {
     prefix: "jet.store.v".bytes()
     if !pkg_bytes_starts_with(bytes, 0, prefix) || bytes.len() <= prefix.len() -> return false
-    version: Int.from_u8(bytes[prefix.len()])
+    version: Int{bytes[prefix.len()]}
     if version < 48 || version > 57 || version == 49 -> return false
-    bytes.len() > prefix.len() + 1 && Int.from_u8(bytes[prefix.len() + 1]) == 0
+    bytes.len() > prefix.len() + 1 && Int{bytes[prefix.len() + 1]} == 0
 }
 
 store_artifact_action_for_key: fn(key: String) -> ActionHandle ArtifactStoreError! {
@@ -126,7 +126,7 @@ store_artifact_decode_record: fn(bytes: [U8]) -> (object: ObjectHandle, executab
     digest_start: magic.len()
     digest_end: digest_start + 32
     length: store_artifact_read_le64(bytes, digest_end)
-    flag: Int.from_u8(bytes[digest_end + 8])
+    flag: Int{bytes[digest_end + 8]}
     if flag != 0 && flag != 1 -> return None
     executable: flag == 1
     object: ObjectHandle.new(ArtifactDigest{bytes: store_artifact_slice(bytes, digest_start, digest_end)}, length)
@@ -366,7 +366,7 @@ store_artifact_split_whitespace: fn(text: String) -> [String] Never! {
     fields := [String]{}
     start := -1
     loop index in 0..<raw.len() {
-        code: Int.from_u8(raw[index])
+        code: Int{raw[index]}
         space: code == 32 || (code >= 9 && code <= 13)
         if {
             space && start >= 0 -> {

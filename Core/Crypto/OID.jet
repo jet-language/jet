@@ -421,7 +421,7 @@ numeric_string: fn(data: [U8], buf: asn1.ASN1Buf) -> String asn1.ASN1Error! {
     out := [U8]{}
     value := 0
     loop i in 0..<buf.len {
-        b: Int.from_u8(data[buf.p + i])
+        b: Int{data[buf.p + i]}
         if value > (SUBID_MAX >> 7) -> return Err(.InvalidData)
         if value == 0 && b == 0x80 -> return Err(.InvalidData)
         value = (value << 7).bit_or(b.bit_and(0x7F))
@@ -454,7 +454,7 @@ parse_number: fn(text: [U8], p: &Int) -> Int asn1.ASN1Error! {
     digits := 0
     loop p < text.len() && text[p] >= (U8{48}) && text[p] <= (U8{57}) {
         if num > SUBID_MAX /% 10 -> return Err(.InvalidData)
-        num = num * 10 + Int.from_u8(text[p]) - 48
+        num = num * 10 + Int{text[p]} - 48
         p += 1
         digits += 1
     }

@@ -323,19 +323,19 @@ pkg_cbind_strip_extern_c_wrappers: fn(src: String) -> String Never! {
     loop search < result.len() {
         start: pkg_cbind_find(result, "extern", search)
         if start < 0 -> break
-        if (start > 0 && pkg_bytes_is_word(Int.from_u8(result[start - 1]))) || (start + 6 < result.len() && pkg_bytes_is_word(Int.from_u8(result[start + 6]))) {
+        if (start > 0 && pkg_bytes_is_word(Int{result[start - 1]})) || (start + 6 < result.len() && pkg_bytes_is_word(Int{result[start + 6]})) {
             search = start + 6
             next
         }
         cursor := start + 6
-        loop cursor < result.len() && pkg_cbind_is_ascii_space(Int.from_u8(result[cursor])) -> cursor += 1
+        loop cursor < result.len() && pkg_cbind_is_ascii_space(Int{result[cursor]}) -> cursor += 1
         if !pkg_bytes_starts_with(result, cursor, "\"C\"".bytes()) {
             search = cursor
             next
         }
         cursor += 3
-        loop cursor < result.len() && pkg_cbind_is_ascii_space(Int.from_u8(result[cursor])) -> cursor += 1
-        if cursor >= result.len() || Int.from_u8(result[cursor]) != 123 {
+        loop cursor < result.len() && pkg_cbind_is_ascii_space(Int{result[cursor]}) -> cursor += 1
+        if cursor >= result.len() || (Int{result[cursor]}) != 123 {
             search = cursor
             next
         }
@@ -354,7 +354,7 @@ pkg_cbind_matching_brace: fn(bytes: [U8], open: Int) -> Int? Never! {
     quote := -1
     escaped := false
     loop index in open..<bytes.len() {
-        code: Int.from_u8(bytes[index])
+        code: Int{bytes[index]}
         if quote >= 0 {
             if {
                 escaped -> escaped = false
@@ -393,8 +393,8 @@ pkg_cbind_parse_prototype: fn(decl: String) -> CProto? Never! {
     // earlier is the return type. A non-ASCII separator is not in scope.
     before_bytes: before.bytes()
     name_start := before_bytes.len()
-    loop name_start > 0 && pkg_bytes_is_word(Int.from_u8(before_bytes[name_start - 1])) -> name_start -= 1
-    if name_start > 0 && Int.from_u8(before_bytes[name_start - 1]) >= 128 -> return None
+    loop name_start > 0 && pkg_bytes_is_word(Int{before_bytes[name_start - 1]}) -> name_start -= 1
+    if name_start > 0 && (Int{before_bytes[name_start - 1]}) >= 128 -> return None
     name: pkg_bytes_text(before_bytes, name_start, before_bytes.len())
     if !pkg_cbind_is_ident(name) -> return None
     // No return type at all (a bare K&R `foo(x)`) is not in scope.
@@ -414,7 +414,7 @@ pkg_cbind_split_params: fn(src: String) -> [String]? Never! {
     start := 0
     depth := 0
     loop index in 0..<bytes.len() {
-        code: Int.from_u8(bytes[index])
+        code: Int{bytes[index]}
         if code == {
             40 -> depth += 1
             41 -> {
@@ -443,10 +443,10 @@ pkg_cbind_split_param_type_and_name: fn(input: String, idx: Int) -> (ty: String,
     raw: input.trim()
     bytes: raw.bytes()
     position := bytes.len() - 1
-    loop position >= 0 && pkg_bytes_is_word(Int.from_u8(bytes[position])) -> position -= 1
+    loop position >= 0 && pkg_bytes_is_word(Int{bytes[position]}) -> position -= 1
     if position >= 0 {
         tail: pkg_bytes_text(bytes, position + 1, bytes.len())
-        separator: Int.from_u8(bytes[position])
+        separator: Int{bytes[position]}
         // `int *p` / `int x`: a name follows a `*` or whitespace; `char*`
         // leaves an empty tail and a lone type keyword is not a name.
         if pkg_cbind_is_ident(tail) && (separator == 42 || pkg_cbind_is_ascii_space(separator)) {
@@ -475,7 +475,7 @@ pkg_cbind_pointer_base: fn(c_type: String) -> (base: String, depth: Int) Never! 
     norm: pkg_cbind_normalize_type(c_type)
     depth := 0
     loop byte in norm.bytes() {
-        if Int.from_u8(byte) == 42 -> depth += 1
+        if (Int{byte}) == 42 -> depth += 1
     }
     (base: pkg_cbind_canonical_c_type(norm.replace("*", " ")), depth: depth)
 }
@@ -566,10 +566,10 @@ pkg_cbind_is_length_name: fn(name: String) -> Bool Never! {
 pkg_cbind_is_ident: fn(value: String) -> Bool Never! {
     bytes: value.trim().bytes()
     if bytes.len() == 0 -> return false
-    first: Int.from_u8(bytes[0])
+    first: Int{bytes[0]}
     if first >= 48 && first <= 57 -> return false
     loop byte in bytes {
-        if !pkg_bytes_is_word(Int.from_u8(byte)) -> return false
+        if !pkg_bytes_is_word(Int{byte}) -> return false
     }
     true
 }
@@ -607,8 +607,8 @@ pkg_cbind_trim_non_word: fn(token: String) -> String Never! {
     bytes: token.bytes()
     start := 0
     end := bytes.len()
-    loop start < end && !pkg_bytes_is_word(Int.from_u8(bytes[start])) -> start += 1
-    loop end > start && !pkg_bytes_is_word(Int.from_u8(bytes[end - 1])) -> end -= 1
+    loop start < end && !pkg_bytes_is_word(Int{bytes[start]}) -> start += 1
+    loop end > start && !pkg_bytes_is_word(Int{bytes[end - 1]}) -> end -= 1
     pkg_bytes_text(bytes, start, end)
 }
 
@@ -644,7 +644,7 @@ pkg_cbind_rfind: fn(bytes: [U8], needle: String) -> Int Never! {
 pkg_cbind_rfind_byte: fn(bytes: [U8], code: Int) -> Int Never! {
     index := bytes.len() - 1
     loop index >= 0 {
-        if Int.from_u8(bytes[index]) == code -> return index
+        if (Int{bytes[index]}) == code -> return index
         index -= 1
     }
     -1

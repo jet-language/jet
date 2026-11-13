@@ -342,7 +342,7 @@ pkg_ffi_normalize_ffi_crate_name: fn(line: String) -> String Never! {
 pkg_ffi_hex_prefix_len: fn(text: String) -> Int Never! {
     count := 0
     loop byte in text.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if !((code >= 48 && code <= 57) || (code >= 65 && code <= 70) || (code >= 97 && code <= 102)) -> break
         count += 1
     }
@@ -361,12 +361,12 @@ pkg_ffi_normalize_ffi_cache_path: fn(line: String) -> String Never! {
     // The path begins after the last `(` or space before the last `/`.
     last_slash := -1
     loop index in 0..<bytes.len() {
-        if Int.from_u8(bytes[index]) == 47 -> last_slash = index
+        if (Int{bytes[index]}) == 47 -> last_slash = index
     }
     if last_slash >= 0 {
         path_start = 0
         loop index in 0..<last_slash {
-            code: Int.from_u8(bytes[index])
+            code: Int{bytes[index]}
             if code == 40 || code == 32 -> path_start = index + 1
         }
     }

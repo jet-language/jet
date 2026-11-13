@@ -423,10 +423,10 @@ validate_name: fn(name: String) -> Bool? {
     nfc: unicode.nfc(name) ?? return None
     if same_text(name, nfc) == false -> return None
     loop i in 0..<raw.len() {
-        n: Int.from_u8(raw[i])
+        n: Int{raw[i]}
         if n < 32 || n == 47 || n == 92 || n == 127 -> return None
         if n == 194 && i + 1 < raw.len() {
-            next: Int.from_u8(raw[i + 1])
+            next: Int{raw[i + 1]}
             if next >= 128 && next <= 159 -> return None
         }
     }
@@ -440,14 +440,14 @@ validate_reason: fn(reason: String) -> Bool? {
     normalized: unicode.nfc(reason) ?? return None
     if same_text(reason, normalized) == false -> return None
     loop i in 0..<raw.len() {
-        n: Int.from_u8(raw[i])
+        n: Int{raw[i]}
         if n < 32 || n == 127 -> return None
         if n == 194 && i + 1 < raw.len() {
-            next: Int.from_u8(raw[i + 1])
+            next: Int{raw[i + 1]}
             if next >= 128 && next <= 159 -> return None
         }
-        if n == 226 && i + 2 < raw.len() && Int.from_u8(raw[i + 1]) == 128 {
-            last: Int.from_u8(raw[i + 2])
+        if n == 226 && i + 2 < raw.len() && (Int{raw[i + 1]}) == 128 {
+            last: Int{raw[i + 2]}
             if last == 168 || last == 169 -> return None
         }
     }
@@ -481,7 +481,7 @@ wrapped_uint: fn(bytes: [U8], at: &Int, width: Int) -> Int KeyWrapError! {
     value := 0
     shift := 0
     loop i in 0..<width {
-        value += Int.from_u8(bytes[start + i]) << shift
+        value += Int{bytes[start + i]} << shift
         shift += 8
     }
     Ok(value)
@@ -502,9 +502,9 @@ wrapped_metadata: fn(bytes: [U8]) -> WrappedMetadata KeyWrapError! {
         return Err(wrap_error("invalid wrapped vault key encoding"))
     }
     if bytes[4] != (U8{1}) -> return Err(wrap_error("unsupported wrapped vault key version"))
-    mode: Int.from_u8(bytes[5])
+    mode: Int{bytes[5]}
     if mode != 1 && mode != 2 -> return Err(wrap_error("unsupported wrapped vault key mode"))
-    key_type: Int.from_u8(bytes[6])
+    key_type: Int{bytes[6]}
     if key_type != 1 && key_type != 2 -> return Err(wrap_error("unsupported wrapped vault key type"))
     if bytes[7] != (U8{0}) -> return Err(wrap_error("invalid wrapped vault key encoding"))
     fixed := 8
@@ -541,8 +541,8 @@ wrapped_metadata: fn(bytes: [U8]) -> WrappedMetadata KeyWrapError! {
             if previous >= 0 {
                 order := 0
                 loop i in 0..<32 {
-                    a: Int.from_u8(bytes[previous + i])
-                    b: Int.from_u8(bytes[recipient + i])
+                    a: Int{bytes[previous + i]}
+                    b: Int{bytes[recipient + i]}
                     if a < b {
                         order = -1
                         break

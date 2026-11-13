@@ -51,7 +51,7 @@ shortest: fn(value: Float) -> Shortest Never! {
     in_exponent := false
     point_at := -1
     loop byte in bytes {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if in_exponent {
             if {
                 code == 45 -> exponent_sign = -1
@@ -73,12 +73,12 @@ shortest: fn(value: Float) -> Shortest Never! {
     if point_at < 0 -> point_at = mantissa.len()
     point := point_at + exponent_sign * exponent
     start := 0
-    loop start < mantissa.len() && Int.from_u8(mantissa[start]) == 48 {
+    loop start < mantissa.len() && (Int{mantissa[start]}) == 48 {
         start += 1
         point -= 1
     }
     end := mantissa.len()
-    loop end > start && Int.from_u8(mantissa[end - 1]) == 48 -> end -= 1
+    loop end > start && (Int{mantissa[end - 1]}) == 48 -> end -= 1
     Shortest{digits: String.from_bytes_lossy(mantissa[start..<end]), point: point}
 }
 
@@ -129,12 +129,12 @@ to_fixed: fn(value: Float, digits: Int) -> String Never! {
 // The byte length of the JavaScript white space or line terminator at `at`,
 // or 0.
 js_space_len: fn(bytes: [U8], at: Int) -> Int Never! {
-    first: Int.from_u8(bytes[at])
+    first: Int{bytes[at]}
     if first == 32 || (first >= 9 && first <= 13) -> return 1
-    if first == 194 && at + 1 < bytes.len() && Int.from_u8(bytes[at + 1]) == 160 -> return 2
+    if first == 194 && at + 1 < bytes.len() && (Int{bytes[at + 1]}) == 160 -> return 2
     if at + 2 >= bytes.len() -> return 0
-    second: Int.from_u8(bytes[at + 1])
-    third: Int.from_u8(bytes[at + 2])
+    second: Int{bytes[at + 1]}
+    third: Int{bytes[at + 2]}
     if {
         first == 225 && second == 154 && third == 128 -> 3
         first == 226 && second == 128 && ((third >= 128 && third <= 138) || third == 168 || third == 169 || third == 175) -> 3
@@ -158,7 +158,7 @@ js_trim: fn(text: String) -> String Never! {
     loop end > start {
         // Find the sequence that ends at `end`.
         lead := end - 1
-        loop lead > start && Int.from_u8(bytes[lead]) >= 128 && Int.from_u8(bytes[lead]) < 192 -> lead -= 1
+        loop lead > start && (Int{bytes[lead]}) >= 128 && (Int{bytes[lead]}) < 192 -> lead -= 1
         width: js_space_len(bytes, lead)
         if width == 0 || lead + width != end -> break
         end = lead
@@ -179,7 +179,7 @@ digit_value: fn(code: Int, radix: Int) -> Int Never! {
 // The end of the run of decimal digits that starts at `at`.
 digits_end: fn(bytes: [U8], at: Int) -> Int Never! {
     end := at
-    loop end < bytes.len() && Int.from_u8(bytes[end]) >= 48 && Int.from_u8(bytes[end]) <= 57 -> end += 1
+    loop end < bytes.len() && (Int{bytes[end]}) >= 48 && (Int{bytes[end]}) <= 57 -> end += 1
     end
 }
 
@@ -193,8 +193,8 @@ number_from_text: fn(raw: String) -> Float Never! {
         else -> {}
     }
     bytes: text.bytes()
-    if bytes.len() > 2 && Int.from_u8(bytes[0]) == 48 {
-        marker: Int.from_u8(bytes[1])
+    if bytes.len() > 2 && (Int{bytes[0]}) == 48 {
+        marker: Int{bytes[1]}
         radix: if {
             marker == 120 || marker == 88 -> 16
             marker == 111 || marker == 79 -> 8
@@ -204,7 +204,7 @@ number_from_text: fn(raw: String) -> Float Never! {
         if radix > 0 {
             value := 0
             loop at in 2..<bytes.len() {
-                digit: digit_value(Int.from_u8(bytes[at]), radix)
+                digit: digit_value(Int{bytes[at]}, radix)
                 if digit < 0 -> return math.NAN
                 value = value * radix + digit
             }
@@ -214,26 +214,26 @@ number_from_text: fn(raw: String) -> Float Never! {
     // [+-] (digits [. digits?] | . digits) ([eE] [+-] digits)?
     at := 0
     sign := ""
-    if Int.from_u8(bytes[0]) == 43 || Int.from_u8(bytes[0]) == 45 {
-        if Int.from_u8(bytes[0]) == 45 -> sign = "-"
+    if (Int{bytes[0]}) == 43 || (Int{bytes[0]}) == 45 {
+        if (Int{bytes[0]}) == 45 -> sign = "-"
         at = 1
     }
     whole_end: digits_end(bytes, at)
     whole: String.from_bytes_lossy(bytes[at..<whole_end])
     at = whole_end
     fraction := ""
-    if at < bytes.len() && Int.from_u8(bytes[at]) == 46 {
+    if at < bytes.len() && (Int{bytes[at]}) == 46 {
         fraction_end: digits_end(bytes, at + 1)
         fraction = String.from_bytes_lossy(bytes[at + 1..<fraction_end])
         at = fraction_end
     }
     if whole == "" && fraction == "" -> return math.NAN
     exponent := "0"
-    if at < bytes.len() && (Int.from_u8(bytes[at]) == 101 || Int.from_u8(bytes[at]) == 69) {
+    if at < bytes.len() && (Int{bytes[at]} == 101 || Int{bytes[at]} == 69) {
         at += 1
         exponent_sign := ""
-        if at < bytes.len() && (Int.from_u8(bytes[at]) == 43 || Int.from_u8(bytes[at]) == 45) {
-            if Int.from_u8(bytes[at]) == 45 -> exponent_sign = "-"
+        if at < bytes.len() && (Int{bytes[at]} == 43 || Int{bytes[at]} == 45) {
+            if (Int{bytes[at]}) == 45 -> exponent_sign = "-"
             at += 1
         }
         digits_stop: digits_end(bytes, at)

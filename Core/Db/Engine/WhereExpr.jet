@@ -550,11 +550,11 @@ is_like_or_glob: fn(p: &cg.Parse, a: &ast.AST, e: Int) -[DB]> (ok: Bool, prefix:
     if a.exprs[left].op != tk.TK_COLUMN || ex.expr_affinity(p.db, a, left) != base.AFF_TEXT || (lt >= 0 && ex.is_virtual(p.db, lt)) {
         is_num := util.atof(znew, base.UTF8).kind
         if is_num <= 0 {
-            if i_to == 1 && Int.from_u8(znew[0]) == 45 {
+            if i_to == 1 && (Int{znew[0]}) == 45 {
                 is_num = 1
             } else {
                 bumped := znew.copy()
-                bumped[i_to - 1] = U8{(Int.from_u8(znew[i_to - 1]) + 1).bit_and(255)}
+                bumped[i_to - 1] = U8{(Int{znew[i_to - 1]} + 1).bit_and(255)}
                 is_num = util.atof(bumped, base.UTF8).kind
             }
         }
@@ -1050,7 +1050,7 @@ expr_analyze: fn(p: &cg.Parse, a: &ast.AST, wi: &WhereInfo, src: Int, wc: Int, i
                 up := [U8]{}
                 low := [U8]{}
                 loop c in z1 {
-                    ci: Int.from_u8(c)
+                    ci: Int{c}
                     if ci == 0 -> break
                     up.push(U8{util.upper_byte(ci)})
                     low.push(U8{util.lower_byte(ci)})
@@ -1065,7 +1065,7 @@ expr_analyze: fn(p: &cg.Parse, a: &ast.AST, wi: &WhereInfo, src: Int, wc: Int, i
                 // candidate too.
                 z2 := pg.c_string(a.exprs[str2].token ?? [U8]{})
                 n2: z2.len()
-                c := Int.from_u8(z2[n2 - 1])
+                c := Int{z2[n2 - 1]}
                 if lk.no_case {
                     if c == 64 -> complete = false
                     c = util.lower_byte(c)

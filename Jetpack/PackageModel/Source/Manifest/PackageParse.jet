@@ -349,23 +349,23 @@ pkg_is_float_literal: fn(value: String) -> Bool Never! {
     raw: text.bytes()
     index := 0
     digits := 0
-    loop index < raw.len() && Int.from_u8(raw[index]) >= 48 && Int.from_u8(raw[index]) <= 57 {
+    loop index < raw.len() && (Int{raw[index]}) >= 48 && (Int{raw[index]}) <= 57 {
         index += 1
         digits += 1
     }
-    if index < raw.len() && Int.from_u8(raw[index]) == 46 {
+    if index < raw.len() && (Int{raw[index]}) == 46 {
         index += 1
-        loop index < raw.len() && Int.from_u8(raw[index]) >= 48 && Int.from_u8(raw[index]) <= 57 {
+        loop index < raw.len() && (Int{raw[index]}) >= 48 && (Int{raw[index]}) <= 57 {
             index += 1
             digits += 1
         }
     }
     if digits == 0 -> return false
-    if index < raw.len() && (Int.from_u8(raw[index]) == 101 || Int.from_u8(raw[index]) == 69) {
+    if index < raw.len() && (Int{raw[index]} == 101 || Int{raw[index]} == 69) {
         index += 1
-        if index < raw.len() && (Int.from_u8(raw[index]) == 43 || Int.from_u8(raw[index]) == 45) -> index += 1
+        if index < raw.len() && (Int{raw[index]} == 43 || Int{raw[index]} == 45) -> index += 1
         exponent_digits := 0
-        loop index < raw.len() && Int.from_u8(raw[index]) >= 48 && Int.from_u8(raw[index]) <= 57 {
+        loop index < raw.len() && (Int{raw[index]}) >= 48 && (Int{raw[index]}) <= 57 {
             index += 1
             exponent_digits += 1
         }

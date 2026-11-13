@@ -150,7 +150,7 @@ decode_vlq: fn(segment: String) -> [Int] Failure! {
     result := 0
     shift := 0
     loop (index, byte) in segment.bytes() {
-        digit: vlq_digit(Int.from_u8(byte))
+        digit: vlq_digit(Int{byte})
         if digit < 0 -> return Err(Failure{message: "bad VLQ at {index + 1} in `{segment}`"})
         result += digit.bit_and(31) << shift
         if digit >= 32 {
@@ -168,7 +168,7 @@ decode_vlq: fn(segment: String) -> [Int] Failure! {
 
 vlq_digit: fn(code: Int) -> Int {
     loop (index, byte) in C_VLQ_ALPHABET.bytes() {
-        if Int.from_u8(byte) == code -> return index
+        if (Int{byte}) == code -> return index
     }
     0 - 1
 }
@@ -178,7 +178,7 @@ wasm_source_mapping_url: fn(bytes: [U8]) -> String? {
     offset := 8
     payload := (start: 0, end: 0 - 1)
     loop offset < bytes.len() {
-        id: Int.from_u8(bytes[offset])
+        id: Int{bytes[offset]}
         offset += 1
         size: leb(bytes, offset)
         offset = size.next
@@ -212,7 +212,7 @@ leb: fn(bytes: [U8], at: Int) -> (value: Int, next: Int) {
     shift := 0
     index := at
     loop index < bytes.len() {
-        byte: Int.from_u8(bytes[index])
+        byte: Int{bytes[index]}
         index += 1
         value += byte.bit_and(127) << shift
         if byte < 128 -> break

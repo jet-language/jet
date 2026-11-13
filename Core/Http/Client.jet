@@ -381,7 +381,7 @@ valid_cookie_token: fn(name: String) -> Bool Never! {
     raw: name.bytes()
     if raw.len() == 0 -> return false
     loop b in raw {
-        n: Int.from_u8(b)
+        n: Int{b}
         if n <= 32 || n >= 127 || n == 34 || n == 40 || n == 41 || n == 44 || n == 47 || n == 58 || n == 59 || n == 60 || n == 61 || n == 62 || n == 63 || n == 64 || n == 91 || n == 92 || n == 93 || n == 123 || n == 125 -> return false
     }
     true
@@ -389,7 +389,7 @@ valid_cookie_token: fn(name: String) -> Bool Never! {
 
 valid_cookie_value: fn(value: String) -> Bool Never! {
     loop b in value.bytes() {
-        n: Int.from_u8(b)
+        n: Int{b}
         if n <= 32 || n >= 127 || n == 34 || n == 44 || n == 59 || n == 92 -> return false
     }
     true
@@ -432,7 +432,7 @@ slice_text: fn(text: String, start: Int, end: Int) -> String Never! {
 ascii_upper: fn(text: String) -> String Never! {
     out := [U8]{}
     loop b in text.bytes() {
-        n: Int.from_u8(b)
+        n: Int{b}
         if n >= 97 && n <= 122 -> out.push(U8{n - 32}) else -> out.push(b)
     }
     String.from_bytes(out) ?? text
@@ -440,7 +440,7 @@ ascii_upper: fn(text: String) -> String Never! {
 ascii_lower: fn(text: String) -> String Never! {
     out := [U8]{}
     loop b in text.bytes() {
-        n: Int.from_u8(b)
+        n: Int{b}
         if n >= 65 && n <= 90 -> out.push(U8{n + 32}) else -> out.push(b)
     }
     String.from_bytes(out) ?? text
@@ -451,11 +451,11 @@ trim: fn(text: String) -> String Never! {
     start := 0
     end := raw.len()
     loop start < end {
-        n: Int.from_u8(raw[start])
+        n: Int{raw[start]}
         if n == 32 || n == 9 || n == 13 || n == 10 -> start = start + 1 else -> break
     }
     loop end > start {
-        n: Int.from_u8(raw[end - 1])
+        n: Int{raw[end - 1]}
         if n == 32 || n == 9 || n == 13 || n == 10 -> end = end - 1 else -> break
     }
     if end <= start -> return ""
@@ -464,7 +464,7 @@ trim: fn(text: String) -> String Never! {
 
 index_byte: fn(raw: [U8], target: Int) -> Int Never! {
     loop i in 0..<raw.len() {
-        if Int.from_u8(raw[i]) == target -> return i
+        if (Int{raw[i]}) == target -> return i
     }
     -1
 }
@@ -473,7 +473,7 @@ valid_header_name: fn(name: String) -> Bool Never! {
     raw: name.bytes()
     if raw.len() == 0 -> return false
     loop b in raw {
-        if !token_char(Int.from_u8(b)) -> return false
+        if !token_char(Int{b}) -> return false
     }
     true
 }
@@ -486,14 +486,14 @@ valid_method: fn(method: String) -> Bool Never! {
     raw: method.bytes()
     if raw.len() == 0 -> return false
     loop b in raw {
-        if !token_char(Int.from_u8(b)) -> return false
+        if !token_char(Int{b}) -> return false
     }
     true
 }
 
 has_ctl: fn(raw: [U8]) -> Bool Never! {
     loop b in raw {
-        n: Int.from_u8(b)
+        n: Int{b}
         if (n < 32 && n != 9) || n == 127 -> return true
     }
     false
@@ -512,7 +512,7 @@ valid_url: fn(url: String) -> Bool Never! {
     end := start
     loop end < raw.len() {
         if raw[end] == (U8{47}) || raw[end] == (U8{63}) || raw[end] == (U8{35}) -> break
-        n: Int.from_u8(raw[end])
+        n: Int{raw[end]}
         if n <= 32 || n >= 127 || n == 34 || n == 92 -> return false
         end = end + 1
     }
@@ -521,7 +521,7 @@ valid_url: fn(url: String) -> Bool Never! {
 
 has_url_ctl: fn(raw: [U8]) -> Bool Never! {
     loop b in raw {
-        n: Int.from_u8(b)
+        n: Int{b}
         if n < 32 || n == 127 -> return true
     }
     false
@@ -965,7 +965,7 @@ __build_named: fn(raw: [U8], start: Int, end: Int, literal: String) -> Bool Neve
     name: literal.bytes()
     if end - start != name.len() -> return false
     loop at in 0..<name.len() {
-        if __build_lower(Int.from_u8(raw[start + at])) != Int.from_u8(name[at]) -> return false
+        if __build_lower(Int{raw[start + at]}) != (Int{name[at]}) -> return false
     }
     true
 }
@@ -980,8 +980,8 @@ __build_colon: fn(raw: [U8]) -> Int Never! {
 __build_trim: fn(raw: [U8], start: Int, end: Int) -> __BuildSpan Never! {
     from := start
     to := end
-    loop from < to && __build_space(Int.from_u8(raw[from])) -> from += 1
-    loop to > from && __build_space(Int.from_u8(raw[to - 1])) -> to -= 1
+    loop from < to && __build_space(Int{raw[from]}) -> from += 1
+    loop to > from && __build_space(Int{raw[to - 1]}) -> to -= 1
     __BuildSpan{from: from, to: to}
 }
 
@@ -1013,7 +1013,7 @@ __build_parse_u64: fn(raw: [U8], start: Int, end: Int, radix: Int) -> __BuildNum
     high := 0
     low := 0
     loop at in from..<end {
-        byte: Int.from_u8(raw[at])
+        byte: Int{raw[at]}
         digit: if {
             byte >= 48 && byte <= 57 -> byte - 48
             radix == 16 && byte >= 97 && byte <= 102 -> byte - 87
@@ -1361,7 +1361,7 @@ __client_url: fn(url: String) -> __ClientURL HTTPError! {
 
 __client_has: fn(raw: [U8], byte: Int) -> Bool Never! {
     loop item in raw {
-        if Int.from_u8(item) == byte -> return true
+        if (Int{item}) == byte -> return true
     }
     false
 }

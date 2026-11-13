@@ -15,7 +15,7 @@ use {
 publication_registry_cache_component: fn(name: String) -> String Never! {
     safe := name != "" && name != "." && name != ".."
     loop byte in name.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if !((code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 45 || code == 95 || code == 46) -> safe = false
     }
     if safe -> name.copy() else -> "registry-{pkg_sha256_hex(name.bytes())}"

@@ -75,9 +75,9 @@ sema_job_schedule_duration_float: fn(value: Float, unit: SemaRegistrationUnitFac
 
 sema_job_schedule_wall_clock: fn(text: String) -> SemaJobScheduleResolution Never! {
     bytes := text.bytes()
-    if bytes.len() != 5 || Int.from_u8(bytes[2]) != 58 -> return SemaJobScheduleResolution{schedule: None, error: Val(EveryScheduleError.BadWallClockFormat)}
+    if bytes.len() != 5 || (Int{bytes[2]}) != 58 -> return SemaJobScheduleResolution{schedule: None, error: Val(EveryScheduleError.BadWallClockFormat)}
     loop index in ([Int]{0, 1, 3, 4}) {
-        digit := Int.from_u8(bytes[index])
+        digit := Int{bytes[index]}
         if digit < 48 || digit > 57 -> return SemaJobScheduleResolution{schedule: None, error: Val(EveryScheduleError.BadWallClockFormat)}
     }
     hour_text: String.from_bytes(bytes.slice(0, 2)) ?? return SemaJobScheduleResolution{schedule: None, error: Val(EveryScheduleError.BadWallClockFormat)}

@@ -20,11 +20,11 @@ use {
 // byte array (the SQL text sqlite3_prepare sees, a zero-terminated name).
 sql_byte: fn(z: [U8], at: Int) -> Int Never! {
     if at >= z.len() -> return 0
-    Int.from_u8(z[at])
+    Int{z[at]}
 }
 
 // The unsigned byte at `at`.
-byte: fn(buf: [U8], at: Int) -> Int Never! { Int.from_u8(buf[at]) }
+byte: fn(buf: [U8], at: Int) -> Int Never! { Int{buf[at]} }
 
 // sqlite3Isspace: the 0x01 bit of sqlite3CtypeMap (\t \n \v \f \r and space).
 is_space: fn(c: Int) -> Bool Never! { c == 32 || (c >= 9 && c <= 13) }
@@ -62,7 +62,7 @@ hex_to_blob: fn(z: [U8]) -> [U8] Never! {
     out := [U8]{}
     i := 0
     loop i + 1 < z.len() {
-        out.push(U8{(hex_to_int(Int.from_u8(z[i])) << 4).bit_or(hex_to_int(Int.from_u8(z[i + 1])))})
+        out.push(U8{(hex_to_int(Int{z[i]}) << 4).bit_or(hex_to_int(Int{z[i + 1]}))})
         i += 2
     }
     out
@@ -75,13 +75,13 @@ hex_to_blob: fn(z: [U8]) -> [U8] Never! {
 // collapse its doubled quotes; "[x]" ends at "]". Unquoted input is kept.
 dequote: fn(z: [U8]) -> [U8] Never! {
     if z.len() == 0 -> return z.copy()
-    q0: Int.from_u8(z[0])
+    q0: Int{z[0]}
     if !is_quote(q0) -> return z.copy()
     quote: if q0 == 91 -> 93 else -> q0
     out := [U8]{}
     i := 1
     loop i < z.len() {
-        c: Int.from_u8(z[i])
+        c: Int{z[i]}
         if c == quote {
             if sql_byte(z, i + 1) == quote {
                 out.push(z[i])
@@ -152,7 +152,7 @@ str_cmp: fn(x: [U8], y: [U8]) -> Int Never! {
 str_ihash: fn(z: [U8]) -> Int Never! {
     h := 0
     loop b in z {
-        c: Int.from_u8(b)
+        c: Int{b}
         if c == 0 -> break
         h = (h + lower_byte(c)).bit_and(255)
     }
@@ -216,12 +216,12 @@ abs_int32: fn(x: Int) -> Int Never! {
 
 // A big-endian unsigned 16-bit field.
 get2: fn(buf: [U8], at: Int) -> Int Never! {
-    (Int.from_u8(buf[at]) << 8).bit_or(Int.from_u8(buf[at + 1]))
+    (Int{buf[at]} << 8).bit_or(Int{buf[at + 1]})
 }
 
 // A big-endian unsigned 32-bit field.
 get4: fn(buf: [U8], at: Int) -> Int Never! {
-    (Int.from_u8(buf[at]) << 24).bit_or((Int.from_u8(buf[at + 1]) << 16)).bit_or((Int.from_u8(buf[at + 2]) << 8)).bit_or(Int.from_u8(buf[at + 3]))
+    (Int{buf[at]} << 24).bit_or((Int{buf[at + 1]} << 16)).bit_or((Int{buf[at + 2]} << 8)).bit_or(Int{buf[at + 3]})
 }
 
 put2: fn(buf: &[U8], at: Int, value: Int) Never! {
@@ -246,12 +246,12 @@ Varint: struct {
 // give seven bits each while their high bit is set; a ninth byte gives all
 // eight. The 64 bits are a two's-complement integer.
 get_varint: fn(buf: [U8], at: Int) -> Varint Never! {
-    first: Int.from_u8(buf[at])
+    first: Int{buf[at]}
     if first < 128 -> return Varint{value: first, len: 1}
     value := first.bit_and(127)
     i := 1
     loop i < 8 {
-        b: Int.from_u8(buf[at + i])
+        b: Int{buf[at + i]}
         value = (value << 7).bit_or(b.bit_and(127))
         if b < 128 -> return Varint{value: value, len: i + 1}
         i += 1
@@ -259,14 +259,14 @@ get_varint: fn(buf: [U8], at: Int) -> Varint Never! {
     // Eight continuation bytes carried 56 bits; the ninth adds a full byte.
     // Sign the 56-bit prefix first so the result stays a 64-bit integer.
     if value >= 36028797018963968 -> value -= 72057594037927936
-    Varint{value: (value << 8).bit_or(Int.from_u8(buf[at + 8])), len: 9}
+    Varint{value: (value << 8).bit_or(Int{buf[at + 8]}), len: 9}
 }
 
 // sqlite3GetVarint32 for a value known to be small and non-negative (header
 // sizes, serial types, cell sizes); a corrupt huge value is still returned
 // exactly so callers can bound it.
 get_varint32: fn(buf: [U8], at: Int) -> Varint Never! {
-    first: Int.from_u8(buf[at])
+    first: Int{buf[at]}
     if first < 128 -> return Varint{value: first, len: 1}
     get_varint(buf, at)
 }
@@ -300,7 +300,7 @@ put_varint: fn(out: &[U8], value: Int) Never! {
             groups.push(U8{high.bit_and(127)})
             high >>= 7
         }
-        loop i in 0..<8 -> out.push(U8{Int.from_u8(groups[7 - i]).bit_or(128)})
+        loop i in 0..<8 -> out.push(U8{Int{groups[7 - i]}.bit_or(128)})
         out.push(U8{v.bit_and(255)})
         return
     }
@@ -333,12 +333,12 @@ UTFChar: struct {
 // than `term`. Overlong 7-bit forms, surrogates and U+FFFE/U+FFFF read as
 // U+FFFD; a stray continuation byte reads as itself.
 utf8_read: fn(z: [U8], at: Int, term: Int) -> UTFChar Never! {
-    c := Int.from_u8(z[at])
+    c := Int{z[at]}
     i := at + 1
     if c >= 192 {
         c = UTF8_TRANS1[c - 192]
-        loop i < term && Int.from_u8(z[i]).bit_and(192) == 128 {
-            c = ((c << 6) + Int.from_u8(z[i]).bit_and(63)).bit_and(4294967295)
+        loop i < term && (Int{z[i]}).bit_and(192) == 128 {
+            c = ((c << 6) + Int{z[i]}.bit_and(63)).bit_and(4294967295)
             i += 1
         }
         if c < 128 || c.bit_and(4294965248) == 55296 || c.bit_and(4294967294) == 65534 -> c = 65533
@@ -349,13 +349,13 @@ utf8_read: fn(z: [U8], at: Int, term: Int) -> UTFChar Never! {
 // sqlite3Utf8ReadLimited: the character at z[at] from at most min(n, 4)
 // bytes, with no validity checks.
 utf8_read_limited: fn(z: [U8], at: Int, n_in: Int) -> UTFChar Never! {
-    c := Int.from_u8(z[at])
+    c := Int{z[at]}
     i := 1
     if c >= 192 {
         c = UTF8_TRANS1[c - 192]
         n: if n_in > 4 -> 4 else -> n_in
-        loop i < n && Int.from_u8(z[at + i]).bit_and(192) == 128 {
-            c = (c << 6) + Int.from_u8(z[at + i]).bit_and(63)
+        loop i < n && (Int{z[at + i]}).bit_and(192) == 128 {
+            c = (c << 6) + Int{z[at + i]}.bit_and(63)
             i += 1
         }
     }
@@ -456,8 +456,8 @@ translate: fn(z: [U8], from: Int, to: Int) -> [U8] Never! {
 
 // The 16-bit unit at z[at] in byte order `enc`.
 utf16_unit: fn(z: [U8], at: Int, enc: Int) -> Int Never! {
-    if enc == base.UTF16LE -> return Int.from_u8(z[at]) + (Int.from_u8(z[at + 1]) << 8)
-    (Int.from_u8(z[at]) << 8) + Int.from_u8(z[at + 1])
+    if enc == base.UTF16LE -> return (Int{z[at]}) + (Int{z[at + 1]} << 8)
+    (Int{z[at]} << 8) + Int{z[at + 1]}
 }
 
 // sqlite3Utf8CharLen: the characters in the first n bytes of z (all of it
@@ -468,10 +468,10 @@ utf8_char_len: fn(z: [U8], n: Int) -> Int Never! {
     i := 0
     loop i < term && z[i] != (U8{0}) {
         // SQLITE_SKIP_UTF8.
-        lead: Int.from_u8(z[i])
+        lead: Int{z[i]}
         i += 1
         if lead >= 192 {
-            loop i < z.len() && Int.from_u8(z[i]).bit_and(192) == 128 -> i += 1
+            loop i < z.len() && (Int{z[i]}).bit_and(192) == 128 -> i += 1
         }
         r += 1
     }
@@ -643,7 +643,7 @@ AtoF: struct {
 }
 
 // The digit at z[at] as a byte value.
-zb: fn(z: [U8], at: Int) -> Int Never! { Int.from_u8(z[at]) }
+zb: fn(z: [U8], at: Int) -> Int Never! { Int{z[at]} }
 
 // sqlite3AtoF: the REAL a text of encoding `enc` spells. Leading and trailing
 // whitespace is ignored; a prefix that is a number still sets the value.
@@ -786,7 +786,7 @@ compare2pow63: fn(z: [U8], at: Int, incr: Int) -> Int Never! {
     c := 0
     i := 0
     loop c == 0 && i < 18 {
-        c = (zb(z, at + i * incr) - Int.from_u8(pow63[i])) * 10
+        c = (zb(z, at + i * incr) - Int{pow63[i]}) * 10
         i += 1
     }
     if c == 0 -> c = zb(z, at + 18 * incr) - 56
@@ -884,7 +884,7 @@ dec_or_hex_to_i64: fn(z: [U8]) -> AtoI Never! {
     // strspn(z, "+- \n\t0123456789"), plus the byte after it when present.
     n := 0
     loop n < z.len() {
-        c: Int.from_u8(z[n])
+        c: Int{z[n]}
         if !(is_digit(c) || c == 43 || c == 45 || c == 32 || c == 10 || c == 9) -> break
         n += 1
     }
@@ -1026,7 +1026,7 @@ fp_decode: fn(r_in: Float, round_in: Int, mx_round: Int) -> FpDecode Never! {
     iround := round_in
     if iround < 0 {
         iround = p.i_dp - iround
-        if iround == 0 && Int.from_u8(buf[i + 1]) >= 53 {
+        if iround == 0 && (Int{buf[i + 1]}) >= 53 {
             iround = 1
             buf[i] = U8{48}
             i -= 1
@@ -1038,11 +1038,11 @@ fp_decode: fn(r_in: Float, round_in: Int, mx_round: Int) -> FpDecode Never! {
         zat: i + 1
         if iround > mx_round -> iround = mx_round
         p.n = iround
-        if Int.from_u8(buf[zat + iround]) >= 53 {
+        if (Int{buf[zat + iround]}) >= 53 {
             j := iround - 1
             loop {
-                buf[zat + j] = U8{Int.from_u8(buf[zat + j]) + 1}
-                if Int.from_u8(buf[zat + j]) <= 57 -> break
+                buf[zat + j] = U8{Int{buf[zat + j]} + 1}
+                if (Int{buf[zat + j]}) <= 57 -> break
                 buf[zat + j] = U8{48}
                 if j == 0 {
                     buf[i] = U8{49}

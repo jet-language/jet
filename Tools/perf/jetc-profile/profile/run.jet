@@ -439,7 +439,7 @@ draw: fn(nodes: [Node], at: Int, x: Float, level: Int, height: Int, svg: &[Strin
 // The first UTF-16 unit of one scalar: what `charCodeAt(0)` reads from each
 // character a JavaScript string iterates.
 lead_unit: fn(scalar: String) -> Int Never! {
-    b: scalar.bytes().map(fn(byte) { Int.from_u8(byte) })
+    b: scalar.bytes().map(fn(byte) { Int{byte} })
     if {
         b.len() == 1 -> b[0]
         b.len() == 2 -> (b[0] % 32) * 64 + b[1] % 64

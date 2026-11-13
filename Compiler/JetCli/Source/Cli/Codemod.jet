@@ -538,7 +538,7 @@ jet_cli_codemod_ascii_digit: fn(byte: Int) -> Bool Never! {
 }
 
 jet_cli_codemod_pair: fn(bytes: [U8], at: Int, first: Int, second: Int) -> Bool Never! {
-    at + 1 < bytes.len() && Int.from_u8(bytes[at]) == first && Int.from_u8(bytes[at + 1]) == second
+    at + 1 < bytes.len() && Int{bytes[at]} == first && Int{bytes[at + 1]} == second
 }
 
 jet_cli_codemod_slice: fn(bytes: [U8], start: Int, end: Int) -> String Never! {
@@ -551,13 +551,13 @@ jet_cli_codemod_lex_template: fn(source: String) -> [JetCLICodemodTemplateToken]
     tokens := [JetCLICodemodTemplateToken]{}
     at := 0
     loop at < bytes.len() {
-        byte: Int.from_u8(bytes[at])
+        byte: Int{bytes[at]}
         if byte == 32 || (byte >= 9 && byte <= 13) {
             at += 1
             next
         }
         if jet_cli_codemod_pair(bytes, at, 47, 47) {
-            loop at < bytes.len() && Int.from_u8(bytes[at]) != 10 -> at += 1
+            loop at < bytes.len() && (Int{bytes[at]}) != 10 -> at += 1
             next
         }
         if jet_cli_codemod_pair(bytes, at, 47, 42) {
@@ -582,7 +582,7 @@ jet_cli_codemod_lex_template: fn(source: String) -> [JetCLICodemodTemplateToken]
         if byte == 34 {
             at += 1
             loop at < bytes.len() {
-                current: Int.from_u8(bytes[at])
+                current: Int{bytes[at]}
                 if current == 92 {
                     at += 2
                 } else if current == 34 {
@@ -596,14 +596,14 @@ jet_cli_codemod_lex_template: fn(source: String) -> [JetCLICodemodTemplateToken]
         } else if jet_cli_codemod_ascii_alpha(byte) || byte == 95 || byte >= 128 {
             at += 1
             loop at < bytes.len() {
-                current: Int.from_u8(bytes[at])
+                current: Int{bytes[at]}
                 if !jet_cli_codemod_ascii_alpha(current) && !jet_cli_codemod_ascii_digit(current) && current != 95 && current < 128 -> break
                 at += 1
             }
         } else if jet_cli_codemod_ascii_digit(byte) {
             at += 1
             loop at < bytes.len() {
-                current: Int.from_u8(bytes[at])
+                current: Int{bytes[at]}
                 if !jet_cli_codemod_ascii_alpha(current) && !jet_cli_codemod_ascii_digit(current) && current != 95 && current != 46 -> break
                 at += 1
             }

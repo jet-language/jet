@@ -521,7 +521,7 @@ valid_host: fn(host: String) -> Bool Never! {
     colons := 0
     i := 0
     loop i < raw.len() {
-        n: Int.from_u8(raw[i])
+        n: Int{raw[i]}
         if n <= 32 || n == 127 || n == 47 || n == 63 || n == 35 || n == 64 -> return false
         if n == 58 -> colons = colons + 1
         if n == 91 && i != 0 -> return false
@@ -536,7 +536,7 @@ valid_host: fn(host: String) -> Bool Never! {
 valid_dns_name: fn(raw: [U8]) -> Bool Never! {
     label_start := 0
     loop i in 0..<raw.len() {
-        n: Int.from_u8(raw[i])
+        n: Int{raw[i]}
         if {
             n == 46 -> {
                 label_len := i - label_start
@@ -570,7 +570,7 @@ format_host_port: fn(host: String, port: Int) -> String Never! {
 
 contains_byte: fn(text: String, needle: Int) -> Bool Never! {
     loop b in text.bytes() {
-        if Int.from_u8(b) == needle -> return true
+        if (Int{b}) == needle -> return true
     }
     false
 }
@@ -580,7 +580,7 @@ valid_alpn_list: fn(protocols: [String]) -> Bool Never! {
         raw: protocol.bytes()
         if raw.len() == 0 || raw.len() > 255 -> return false
         loop b in raw {
-            n: Int.from_u8(b)
+            n: Int{b}
             if n <= 32 || n == 127 -> return false
         }
     }
@@ -592,11 +592,11 @@ trim_ascii: fn(text: String) -> String Never! {
     start := 0
     end := raw.len()
     loop start < end {
-        n: Int.from_u8(raw[start])
+        n: Int{raw[start]}
         if n == 32 || n == 9 || n == 13 || n == 10 -> start = start + 1 else -> break
     }
     loop end > start {
-        n: Int.from_u8(raw[end - 1])
+        n: Int{raw[end - 1]}
         if n == 32 || n == 9 || n == 13 || n == 10 -> end = end - 1 else -> break
     }
     if end <= start -> return ""
@@ -606,7 +606,7 @@ trim_ascii: fn(text: String) -> String Never! {
 ascii_lower: fn(text: String) -> String Never! {
     out := [U8]{}
     loop b in text.bytes() {
-        n: Int.from_u8(b)
+        n: Int{b}
         if n >= 65 && n <= 90 -> out.push(U8{n + 32}) else -> out.push(b)
     }
     decoded: String.from_bytes(out) ?? return text.copy()
@@ -952,8 +952,8 @@ __pem_certificates: fn(raw: [U8]) -> Int __TLSFailure! {
 __private_key_check: fn(raw: [U8]) __TLSFailure! {
     first := 0
     last := raw.len()
-    loop first < last && __space(Int.from_u8(raw[first]), true) { first += 1 }
-    loop last > first && __space(Int.from_u8(raw[last - 1]), true) { last -= 1 }
+    loop first < last && __space(Int{raw[first]}, true) { first += 1 }
+    loop last > first && __space(Int{raw[last - 1]}, true) { last -= 1 }
     labels: [String]{"PRIVATE KEY", "RSA PRIVATE KEY", "EC PRIVATE KEY"}
     loop label in labels {
         begin: "-----BEGIN {label}-----".bytes()
@@ -974,7 +974,7 @@ __pem_base64: fn(raw: [U8], start: Int, end: Int) -> Int __TLSFailure! {
     padded := false
     at := start
     loop at < end {
-        byte: Int.from_u8(raw[at])
+        byte: Int{raw[at]}
         at += 1
         if __space(byte, false) -> next
         if padded -> return Err(__fail("TLS custom CA PEM has data after base64 padding"))
@@ -1008,7 +1008,7 @@ __space: fn(byte: Int, trim: Bool) -> Bool Never! {
 }
 
 __blank: fn(raw: [U8], start: Int, end: Int) -> Bool Never! {
-    loop at in start..<end { if !__space(Int.from_u8(raw[at]), true) -> return false }
+    loop at in start..<end { if !__space(Int{raw[at]}, true) -> return false }
     true
 }
 
@@ -1044,13 +1044,13 @@ __valid_server_name: fn(name: String) -> Bool Never! {
     if raw.len() == 0 || raw.len() > 253 -> return false
     colons := 0
     loop byte in raw {
-        n: Int.from_u8(byte)
+        n: Int{byte}
         if n == 58 -> colons += 1
     }
     if colons == 0 -> return valid_dns_name(raw)
     if colons < 2 -> return false
     loop byte in raw {
-        n: Int.from_u8(byte)
+        n: Int{byte}
         if !((n >= 48 && n <= 58) || (n >= 65 && n <= 70) || (n >= 97 && n <= 102) || n == 46) -> return false
     }
     true
@@ -1455,7 +1455,7 @@ __utf8_cut: fn(bytes: [U8]) -> Bool Never! {
 // The width of the UTF-8 character at `at`: 0 when the bytes there are not
 // UTF-8, -1 when they are the start of a character the bytes end inside.
 __utf8_width: fn(bytes: [U8], at: Int) -> Int Never! {
-    lead: Int.from_u8(bytes[at])
+    lead: Int{bytes[at]}
     if lead < 128 -> return 1
     width := 0
     low := 128
@@ -1474,7 +1474,7 @@ __utf8_width: fn(bytes: [U8], at: Int) -> Int Never! {
     if width == 0 -> return 0
     loop part in 1..<width {
         if at + part >= bytes.len() -> return -1
-        byte: Int.from_u8(bytes[at + part])
+        byte: Int{bytes[at + part]}
         valid: if part == 1 -> byte >= low && byte <= high else -> byte >= 128 && byte <= 191
         if !valid -> return 0
     }
@@ -1969,7 +1969,7 @@ __name_text: fn(names: [asn1.NamedData]) -> String Never! {
 
 __name_label: fn(oid: [U8]) -> String Never! {
     if oid.len() != 3 || oid[0] != (U8{85}) || oid[1] != (U8{4}) -> return "OID"
-    if Int.from_u8(oid[2]) == {
+    if (Int{oid[2]}) == {
         3 -> "CN"
         6 -> "C"
         7 -> "L"
@@ -1983,7 +1983,7 @@ __name_label: fn(oid: [U8]) -> String Never! {
 __escaped: fn(bytes: [U8]) -> String Never! {
     out := [U8]{}
     loop byte in bytes {
-        n: Int.from_u8(byte)
+        n: Int{byte}
         if {
             n == 92 || n == 44 || n == 61 -> {
                 out.push(U8{92})

@@ -41,9 +41,9 @@ core_decl_names: fn(list: String) -> [String] Never! {
 core_decl_is_name: fn(text: String, extra: String) -> Bool Never! {
     bytes: text.bytes()
     if bytes.len() == 0 -> return false
-    allowed: loop byte in extra.bytes() -> Int.from_u8(byte)
+    allowed: loop byte in extra.bytes() -> (Int{byte})
     loop index in 0..<bytes.len() {
-        code: Int.from_u8(bytes[index])
+        code: Int{bytes[index]}
         if core_decl_lower(code) || core_decl_upper(code) || code == 95 -> next
         if index == 0 || !(core_decl_digit(code) || allowed.contains(code)) -> return false
     }
@@ -53,9 +53,9 @@ core_decl_is_name: fn(text: String, extra: String) -> Bool Never! {
 // `[A-Z][A-Z0-9_]*`: a Syntax constant's spelling.
 core_decl_is_constant: fn(name: String) -> Bool Never! {
     bytes: name.bytes()
-    if bytes.len() == 0 || !core_decl_upper(Int.from_u8(bytes[0])) -> return false
+    if bytes.len() == 0 || !core_decl_upper(Int{bytes[0]}) -> return false
     loop byte in bytes {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if !core_decl_upper(code) && !core_decl_digit(code) && code != 95 -> return false
     }
     true
@@ -66,7 +66,7 @@ core_decl_is_digits: fn(text: String) -> Bool Never! {
     bytes: text.bytes()
     if bytes.len() == 0 -> return false
     loop byte in bytes {
-        if !core_decl_digit(Int.from_u8(byte)) -> return false
+        if !core_decl_digit(Int{byte}) -> return false
     }
     true
 }
@@ -75,17 +75,17 @@ core_decl_is_digits: fn(text: String) -> Bool Never! {
 // `bytes`, or `start` when no name starts there.
 core_decl_name_end: fn(bytes: [U8], start: Int) -> Int Never! {
     if start >= bytes.len() -> return start
-    first: Int.from_u8(bytes[start])
+    first: Int{bytes[start]}
     if !(core_decl_lower(first) || core_decl_upper(first) || first == 95) -> return start
     end := start + 1
-    loop end < bytes.len() && core_decl_word(Int.from_u8(bytes[end])) -> end += 1
+    loop end < bytes.len() && core_decl_word(Int{bytes[end]}) -> end += 1
     end
 }
 
 // The first byte at or after `start` of `bytes` that is not whitespace.
 core_decl_skip_space: fn(bytes: [U8], start: Int) -> Int Never! {
     at := start
-    loop at < bytes.len() && core_decl_space(Int.from_u8(bytes[at])) -> at += 1
+    loop at < bytes.len() && core_decl_space(Int{bytes[at]}) -> at += 1
     at
 }
 
@@ -94,7 +94,7 @@ core_decl_skip_space: fn(bytes: [U8], start: Int) -> Int Never! {
 core_decl_quote_end: fn(bytes: [U8], open: Int) -> Int Never! {
     at := open + 1
     loop at < bytes.len() {
-        code: Int.from_u8(bytes[at])
+        code: Int{bytes[at]}
         if code == 92 {
             at += 2
             next
@@ -111,7 +111,7 @@ core_decl_line: fn(raw: String) -> String Never! {
     quoted := false
     escaped := false
     loop index in 0..<bytes.len() - 1 {
-        code: Int.from_u8(bytes[index])
+        code: Int{bytes[index]}
         if quoted {
             if {
                 escaped -> escaped = false
@@ -124,7 +124,7 @@ core_decl_line: fn(raw: String) -> String Never! {
             quoted = true
             next
         }
-        if code == 47 && Int.from_u8(bytes[index + 1]) == 47 -> return core_decl_slice(raw, 0, index).trim()
+        if code == 47 && (Int{bytes[index + 1]}) == 47 -> return core_decl_slice(raw, 0, index).trim()
     }
     raw.trim()
 }
@@ -152,8 +152,8 @@ core_decl_walk_before: fn(a: String, b: String) -> Bool Never! {
 core_decl_bytes_before: fn(left: [U8], right: [U8]) -> Bool Never! {
     loop index in 0..<left.len() {
         if index >= right.len() -> return false
-        l: Int.from_u8(left[index])
-        r: Int.from_u8(right[index])
+        l: Int{left[index]}
+        r: Int{right[index]}
         if l != r -> return l < r
     }
     left.len() < right.len()

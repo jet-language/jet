@@ -188,7 +188,7 @@ ProviderSelectorDetails: struct {
             bytes: group.bytes()
             start := 0
             loop offset in 0..<bytes.len() {
-                if Int.from_u8(bytes[offset]) == 44 && pkg_provider_is_selector_assignment(pkg_bytes_text(bytes, offset + 1, bytes.len()).trim_start()) {
+                if (Int{bytes[offset]}) == 44 && pkg_provider_is_selector_assignment(pkg_bytes_text(bytes, offset + 1, bytes.len()).trim_start()) {
                     details.add_part(pkg_bytes_text(bytes, start, offset).trim())
                     start = offset + 1
                 }
@@ -272,7 +272,7 @@ pkg_provider_digest_payload: fn(value: String, algorithm: String) -> String? Nev
 pkg_provider_is_hex: fn(value: String) -> Bool Never! {
     if value == "" -> return false
     loop byte in value.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if !((code >= 48 && code <= 57) || (code >= 65 && code <= 70) || (code >= 97 && code <= 102)) -> return false
     }
     true
@@ -282,7 +282,7 @@ pkg_provider_is_hex: fn(value: String) -> Bool Never! {
 pkg_provider_is_base64: fn(value: String) -> Bool Never! {
     if value == "" -> return false
     loop byte in value.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if !pkg_bytes_is_word(code) && code != 43 && code != 47 && code != 61 && code != 45 -> return false
     }
     true

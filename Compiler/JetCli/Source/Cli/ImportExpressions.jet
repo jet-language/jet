@@ -42,9 +42,9 @@ jet_cli_import_utf8_width: fn(byte: U8) -> Int Never! {
 }
 // Rust char::is_whitespace (used by split_whitespace). No allocation per scalar.
 jet_cli_import_space_at: fn(bytes: [U8], at: Int, width: Int) -> Bool Never! {
-    lead: Int.from_u8(bytes[at])
+    lead: Int{bytes[at]}
     point := if width == 1 -> lead else -> lead.bit_and((1 << (7 - width)) - 1)
-    loop index in 1..<width -> point = point * 64 + Int.from_u8(bytes[at + index]) % 64
+    loop index in 1..<width -> point = point * 64 + (Int{bytes[at + index]}) % 64
     point == 32 || (point >= 9 && point <= 13) || point == 133 || point == 160 || point == 5760 || (point >= 8192 && point <= 8202) || point == 8232 || point == 8233 || point == 8239 || point == 8287 || point == 12288
 }
 // Rust split_whitespace: Unicode whitespace, scanned once without character-index slicing.
@@ -91,7 +91,7 @@ jet_cli_import_canonical_identifier: fn(value: String) -> String Never! {
                 boundary = lower || jet_cli_import_digit(previous) || (previous >= (U8{65}) && previous <= (U8{90}) && next_lower)
             }
             if boundary && (output.is_empty() || output[output.len() - 1] != (U8{95})) -> output.push(U8{95})
-            output.push(U8.from_int(Int.from_u8(byte) + 32) ?? panic("ASCII lower byte"))
+            output.push(checked(U8{Int{byte} + 32}) ?? panic("ASCII lower byte"))
         } else { output.push(byte) }
     }
     String.from_bytes(output) ?? panic("canonical identifier UTF-8")
@@ -575,8 +575,8 @@ jet_cli_import_lex: fn(raw: String) -> [JetCLIImportToken] JetCLIImportTextError
 }
 jet_cli_import_latin1_byte: fn(byte: U8) -> String Never! {
     if byte < (U8{128}) -> return String.from_bytes([U8]{byte}) ?? panic("ASCII token")
-    value: Int.from_u8(byte)
-    String.from_bytes([U8]{U8.from_int(192 + value /% 64) ?? panic("Latin-1 lead"), U8.from_int(128 + value % 64) ?? panic("Latin-1 trail")}) ?? panic("Latin-1 token")
+    value: Int{byte}
+    String.from_bytes([U8]{checked(U8{192 + value /% 64}) ?? panic("Latin-1 lead"), checked(U8{128 + value % 64}) ?? panic("Latin-1 trail")}) ?? panic("Latin-1 token")
 }
 // Rust `push_piece` (2326-2331).
 jet_cli_import_push_piece: fn(output: &[U8], piece: String) Never! {

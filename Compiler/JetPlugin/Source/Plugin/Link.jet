@@ -48,11 +48,11 @@ plug_stem: fn(path: String) -> String Never! {
     raw: path.bytes()
     start := 0
     loop (k, byte) in raw {
-        if Int.from_u8(byte) == 47 -> start = k + 1
+        if (Int{byte}) == 47 -> start = k + 1
     }
     end := raw.len()
     loop k in start..<raw.len() {
-        if Int.from_u8(raw[k]) == 46 -> end = k
+        if (Int{raw[k]}) == 46 -> end = k
     }
     path.slice(start, end)
 }

@@ -8,10 +8,10 @@ stable_id: fn(namespace: String, identity: String) -> U64 Never! {
     // each fit an Int literal: a wider literal is parsed from its decimal
     // text on every call, which dominated this function.
     high: U64{0xcbf29ce4}
-    hash := (high.wrapping_mul(U64{0x100000000})).bit_xor(U64{0x84222325})
-    loop byte in namespace.bytes() -> hash = ((hash).bit_xor(U64.from_u8(byte))).wrapping_mul(prime)
-    hash = hash.wrapping_mul(prime)
-    loop byte in identity.bytes() -> hash = ((hash).bit_xor(U64.from_u8(byte))).wrapping_mul(prime)
+    hash := (wrapping(high * U64{0x100000000})).bit_xor(U64{0x84222325})
+    loop byte in namespace.bytes() -> hash = wrapping(((hash).bit_xor(U64{byte})) * prime)
+    hash = wrapping(hash * prime)
+    loop byte in identity.bytes() -> hash = wrapping(((hash).bit_xor(U64{byte})) * prime)
     if hash == 0 -> return U64{1}
     hash
 }

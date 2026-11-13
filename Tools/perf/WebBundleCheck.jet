@@ -57,7 +57,7 @@ all_digits: fn(text: String) -> Bool Never! {
     bytes: text.bytes()
     if bytes.len() == 0 -> return false
     loop byte in bytes {
-        if !is_digit(Int.from_u8(byte)) -> return false
+        if !is_digit(Int{byte}) -> return false
     }
     true
 }
@@ -73,10 +73,10 @@ number: fn(text: String) -> Int Never! {
 valid_workload: fn(text: String) -> Bool Never! {
     bytes: text.bytes()
     if bytes.len() == 0 -> return false
-    first: Int.from_u8(bytes[0])
+    first: Int{bytes[0]}
     if first < 97 || first > 122 -> return false
     loop byte in bytes {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if !((code >= 97 && code <= 122) || is_digit(code) || code == 45) -> return false
     }
     true
@@ -87,7 +87,7 @@ valid_hash: fn(text: String) -> Bool Never! {
     bytes: text.bytes()
     if bytes.len() != 64 -> return false
     loop byte in bytes {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if !(is_digit(code) || (code >= 97 && code <= 102)) -> return false
     }
     true

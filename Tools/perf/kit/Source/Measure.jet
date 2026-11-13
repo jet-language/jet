@@ -170,7 +170,7 @@ MeasureOptions: struct {
 digits_text: fn(text: String) -> Bool Never! {
     if text == "" -> return false
     loop byte in text.bytes() {
-        if Int.from_u8(byte) < 48 || Int.from_u8(byte) > 57 -> return false
+        if (Int{byte}) < 48 || (Int{byte}) > 57 -> return false
     }
     true
 }
@@ -615,7 +615,7 @@ counter_body: fn(line: String) -> String? Never! {
     rest: line.removeprefix("JET_PHASE_COUNTERS")
     bytes: rest.bytes()
     at := 0
-    colon: bytes.len() > 0 && Int.from_u8(bytes[0]) == 58
+    colon: bytes.len() > 0 && Int{bytes[0]} == 58
     if colon -> at = 1
     spaced := 0
     loop at < bytes.len() {
@@ -630,9 +630,9 @@ counter_body: fn(line: String) -> String? Never! {
     // `.` matches no line terminator: CR, U+2028 or U+2029.
     inner: body.bytes()
     loop i in 0..<inner.len() {
-        byte: Int.from_u8(inner[i])
+        byte: Int{inner[i]}
         if byte == 13 -> return None
-        if byte == 226 && i + 2 < inner.len() && Int.from_u8(inner[i + 1]) == 128 && (Int.from_u8(inner[i + 2]) == 168 || Int.from_u8(inner[i + 2]) == 169) -> return None
+        if byte == 226 && i + 2 < inner.len() && (Int{inner[i + 1]}) == 128 && (Int{inner[i + 2]} == 168 || Int{inner[i + 2]} == 169) -> return None
     }
     Val(body)
 }

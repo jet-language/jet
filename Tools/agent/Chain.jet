@@ -193,7 +193,7 @@ be64: fn(value: Int) -> [U8] Never! {
     loop _ in 0..<8 -> out.push(U8{0})
     rest := value
     loop k in 0..<8 {
-        out[7 - k] = U8.from_int(rest % 256) ?? U8{0}
+        out[7 - k] = checked(U8{rest % 256}) ?? U8{0}
         rest = rest /% 256
     }
     out
@@ -382,7 +382,7 @@ nul_fields: fn(bytes: [U8]) -> [String] Never! {
     out := [String]{}
     start := 0
     loop at in 0..<bytes.len() {
-        if Int.from_u8(bytes[at]) != 0 -> next
+        if (Int{bytes[at]}) != 0 -> next
         if at > start -> out.push(String.from_bytes_lossy(bytes.slice(start, at)))
         start = at + 1
     }
@@ -469,7 +469,7 @@ render_diff: fn(diff: Diff) -> String Never! {
 json_text: fn(text: String) -> String Never! {
     out := [U8]{U8{34}}
     loop letter in text.bytes() {
-        code: Int.from_u8(letter)
+        code: Int{letter}
         if code == 34 || code == 92 {
             out.push(U8{92})
             out.push(letter)
@@ -661,7 +661,7 @@ GIB: 1073741824
 stage_key: fn(name: String) -> Bool Never! {
     if name.count_bytes() != 64 -> return false
     loop letter in name.bytes() {
-        code: Int.from_u8(letter)
+        code: Int{letter}
         if !((code >= 48 && code <= 57) || (code >= 97 && code <= 102)) -> return false
     }
     true
@@ -840,7 +840,7 @@ lane_of: fn(text: String) -> String Never! {
         if rest.sep == "" -> next
         count := 0
         loop letter in rest.tail.bytes() {
-            code: Int.from_u8(letter)
+            code: Int{letter}
             if !((code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122)) -> break
             count += 1
         }
@@ -2066,7 +2066,7 @@ trap_owners: fn(b: [U8]) -> [String]? Never! {
         at := off
         loop at + ent <= off + size {
             // STT_FUNC
-            if Int.from_u8(b[at + 4]) % 16 == 2 {
+            if (Int{b[at + 4]}) % 16 == 2 {
                 name: c_string(b, strings + le(b, at, 4))
                 value: le(b, at + 8, 8)
                 if name == "jet_rt_unreachable" -> unreachable = value
@@ -2116,12 +2116,12 @@ trap_owners: fn(b: [U8]) -> [String]? Never! {
     Val(found)
 }
 
-byte: fn(b: [U8], at: Int) -> Int Never! { Int.from_u8(b[at]) }
+byte: fn(b: [U8], at: Int) -> Int Never! { Int{b[at]} }
 
 // The `width`-byte little-endian unsigned value at `at`.
 le: fn(b: [U8], at: Int, width: Int) -> Int Never! {
     value := 0
-    loop k in 0..<width -> value = value * 256 + Int.from_u8(b[at + width - 1 - k])
+    loop k in 0..<width -> value = value * 256 + (Int{b[at + width - 1 - k]})
     value
 }
 
@@ -2130,7 +2130,7 @@ signed32: fn(value: Int) -> Int Never! { if value >= 2147483648 -> value - 42949
 // The NUL-terminated name at `at`.
 c_string: fn(b: [U8], at: Int) -> String Never! {
     end := at
-    loop end < b.len() && Int.from_u8(b[end]) != 0 -> end += 1
+    loop end < b.len() && (Int{b[end]}) != 0 -> end += 1
     String.from_bytes_lossy(b.slice(at, end))
 }
 
@@ -2162,7 +2162,7 @@ owner: fn(symbols: [Symbol], va: Int) -> String Never! {
 put: fn(b: &[U8], at: Int, width: Int, value: Int) {
     rest := value
     loop k in 0..<width {
-        b[at + k] = U8.from_int(rest % 256) ?? U8{0}
+        b[at + k] = checked(U8{rest % 256}) ?? U8{0}
         rest = rest /% 256
     }
 }
@@ -2251,7 +2251,7 @@ sample_pack: fn(compiler: String, recipe: String, object: String, byte: Int) -> 
     [PackFile]{
         PackFile{path: "provenance.json", bytes: provenance.bytes()},
         PackFile{path: "native.key", bytes: "f2a10ea90b64b2a5df415c5912d5a42da5d3cda2c0cd122c0e42117dea596b33\n".bytes()},
-        PackFile{path: "jet_runtime.pack.o", bytes: [U8]{U8{127}, U8{69}, U8.from_int(byte) ?? U8{0}}},
+        PackFile{path: "jet_runtime.pack.o", bytes: [U8]{U8{127}, U8{69}, checked(U8{byte}) ?? U8{0}}},
     }
 }
 

@@ -50,15 +50,15 @@ byte_tail: fn(text: String, start: Int) -> String Never! {
 // for literal braces. A single brace would interpolate, which no row does.
 quoted_text: fn(text: String, field: String) -> QuotedText LedgerError! {
     bytes: text.bytes()
-    if bytes.len() == 0 || Int.from_u8(bytes[0]) != 34 -> return Err(ledger_fail("{field} is not a quoted string literal: {text}"))
+    if bytes.len() == 0 || (Int{bytes[0]}) != 34 -> return Err(ledger_fail("{field} is not a quoted string literal: {text}"))
     out := [U8]{}
     index := 1
     loop index < bytes.len() {
-        code: Int.from_u8(bytes[index])
+        code: Int{bytes[index]}
         if code == 34 -> return Ok(QuotedText{value: String.from_bytes_lossy(out), rest: byte_tail(text, index + 1)})
         if code == 92 {
             if index + 1 >= bytes.len() -> return Err(ledger_fail("{field} string literal ends inside an escape"))
-            escaped: Int.from_u8(bytes[index + 1])
+            escaped: Int{bytes[index + 1]}
             decoded: if {
                 escaped == 110 -> 10
                 escaped == 116 -> 9
@@ -68,12 +68,12 @@ quoted_text: fn(text: String, field: String) -> QuotedText LedgerError! {
                 else -> -1
             }
             if decoded < 0 -> return Err(ledger_fail("unsupported escape in {field} string literal {text}"))
-            out.push(U8.from_int(decoded) ?? return Err(ledger_fail("unsupported escape in {field} string literal {text}")))
+            out.push(checked(U8{decoded}) ?? return Err(ledger_fail("unsupported escape in {field} string literal {text}")))
             index += 2
             next
         }
         if code == 123 || code == 125 {
-            if index + 1 < bytes.len() && Int.from_u8(bytes[index + 1]) == code {
+            if index + 1 < bytes.len() && (Int{bytes[index + 1]}) == code {
                 out.push(bytes[index])
                 index += 2
                 next
@@ -94,7 +94,7 @@ name_byte: fn(code: Int, at: Int) -> Bool Never! {
 name_len: fn(text: String) -> Int Never! {
     bytes: text.bytes()
     end := 0
-    loop end < bytes.len() && name_byte(Int.from_u8(bytes[end]), end) -> end += 1
+    loop end < bytes.len() && name_byte(Int{bytes[end]}, end) -> end += 1
     end
 }
 
@@ -108,8 +108,8 @@ Declaration: struct {
 declaration: fn(line: String) -> Declaration? Never! {
     end: name_len(line)
     bytes: line.bytes()
-    if end == 0 || end >= bytes.len() || Int.from_u8(bytes[end]) != 58 -> return None
-    if end + 1 < bytes.len() && Int.from_u8(bytes[end + 1]) == 61 -> return None
+    if end == 0 || end >= bytes.len() || (Int{bytes[end]}) != 58 -> return None
+    if end + 1 < bytes.len() && (Int{bytes[end + 1]}) == 61 -> return None
     Val(Declaration{name: String.from_bytes_lossy(bytes[0..<end]), rest: byte_tail(line, end + 1)})
 }
 

@@ -281,7 +281,7 @@ envmodel_normalize_system_name: fn(value: String) -> String Never! {
 envmodel_validate_projection_name: fn(path: String, value: String, kind: String) PackageOutputError! {
     safe := value != "" && value != "." && value != ".."
     loop byte in value.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if !((code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 95 || code == 45 || code == 46) -> safe = false
     }
     if !safe -> return Err(envmodel_output_error(path, "{kind} name `{value}` is not a safe path component"))

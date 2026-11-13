@@ -159,7 +159,7 @@ ssl_parse_inner_plaintext: fn(rec: &ssldefs.SSLRecord, buf: [U8]) -> Bool Never!
         if buf[data + remaining] != (U8{0}) -> break
     }
     rec.data_len = remaining
-    rec.rtype = Int.from_u8(buf[data + remaining])
+    rec.rtype = Int{buf[data + remaining]}
     true
 }
 
@@ -393,28 +393,28 @@ ssl_decrypt_buf: fn(t: &ssldefs.SSLTransform, rec: &ssldefs.SSLRecord, buf: &[U8
             len: U64{cbc_len}
             pad: U64{buf[data + cbc_len - 1]}
             need: U64{if auth_done == 1 -> 1 else -> t.maclen + 1}
-            ge: ctime.uint_ge(len, pad.wrapping_add(need))
+            ge: ctime.uint_ge(len, wrapping(pad + need))
             correct = ctime.bool_and(ge, correct)
-            padlen: ctime.if_else_0(ge, pad).wrapping_add(U64{1})
+            padlen: wrapping(ctime.if_else_0(ge, pad) + U64{1})
             // Always read min(256, plaintext length) bytes at the end of
             // the plaintext, counting only the last padlen for the check.
             pad_count := U64{0}
-            padding_idx: len.wrapping_sub(padlen)
+            padding_idx: wrapping(len - padlen)
             num_checks: if cbc_len <= 256 -> cbc_len else -> 256
             start_idx: cbc_len - num_checks
             loop idx in start_idx..<cbc_len {
                 a: ctime.uint_ge(U64{idx}, padding_idx)
-                b: ctime.uint_eq(U64{buf[data + idx]}, padlen.wrapping_sub(U64{1}))
-                pad_count = pad_count.wrapping_add(ctime.if_else_0(ctime.bool_and(a, b), U64{1}))
+                b: ctime.uint_eq(U64{buf[data + idx]}, wrapping(padlen - U64{1}))
+                pad_count = wrapping(pad_count + ctime.if_else_0(ctime.bool_and(a, b), U64{1}))
             }
             correct = ctime.bool_and(ctime.uint_eq(pad_count, padlen), correct)
-            content_len = len.wrapping_sub(ctime.if_else_0(correct, padlen))
+            content_len = wrapping(len - ctime.if_else_0(correct, padlen))
         }
     }
     if auth_done == 0 {
         // Compute the MAC whatever the padding result (RFC 4346, CBCTIME),
         // over the secret content length.
-        content_len = content_len.wrapping_sub(U64{t.maclen})
+        content_len = wrapping(content_len - U64{t.maclen})
         // The extremes of that length over every padlen, from the public
         // length before the padding came off (mbedtls's data_len + padlen,
         // the same value).
@@ -961,7 +961,7 @@ ssl_write_record: fn<R: RNG>(ssl: &ssldefs.SSLContext, force_flush: Bool, rng: &
     ep: ssl_ep_len(ssl)
     i := 8
     loop i > ep {
-        ssl.cur_out_ctr[i - 1] = ssldefs.ssl_byte(Int.from_u8(ssl.cur_out_ctr[i - 1]) + 1)
+        ssl.cur_out_ctr[i - 1] = ssldefs.ssl_byte(Int{ssl.cur_out_ctr[i - 1]} + 1)
         if ssl.cur_out_ctr[i - 1] != (U8{0}) -> break
         i -= 1
     }
@@ -1114,7 +1114,7 @@ ssl_bitmask_set: fn(buf: &[U8], base: Int, offset0: Int, len0: Int) Never! {
         first_byte_idx: base + offset /% 8
         if len <= start_bits {
             loop len != 0 {
-                buf[first_byte_idx] = ssldefs.ssl_byte(Int.from_u8(buf[first_byte_idx]).bit_or(1 << (start_bits - len)))
+                buf[first_byte_idx] = ssldefs.ssl_byte(Int{buf[first_byte_idx]}.bit_or(1 << (start_bits - len)))
                 len -= 1
             }
             return
@@ -1122,7 +1122,7 @@ ssl_bitmask_set: fn(buf: &[U8], base: Int, offset0: Int, len0: Int) Never! {
         offset += start_bits
         len -= start_bits
         loop start_bits != 0 {
-            buf[first_byte_idx] = ssldefs.ssl_byte(Int.from_u8(buf[first_byte_idx]).bit_or(1 << (start_bits - 1)))
+            buf[first_byte_idx] = ssldefs.ssl_byte(Int{buf[first_byte_idx]}.bit_or(1 << (start_bits - 1)))
             start_bits -= 1
         }
     }
@@ -1131,7 +1131,7 @@ ssl_bitmask_set: fn(buf: &[U8], base: Int, offset0: Int, len0: Int) Never! {
         last_byte_idx: base + (offset + len) /% 8
         len -= end_bits
         loop end_bits != 0 {
-            buf[last_byte_idx] = ssldefs.ssl_byte(Int.from_u8(buf[last_byte_idx]).bit_or(1 << (8 - end_bits)))
+            buf[last_byte_idx] = ssldefs.ssl_byte(Int{buf[last_byte_idx]}.bit_or(1 << (8 - end_bits)))
             end_bits -= 1
         }
     }
@@ -1145,7 +1145,7 @@ ssl_bitmask_check: fn(buf: [U8], base: Int, len: Int) -> Bool Never! {
         if buf[base + i] != (U8{0xFF}) -> return false
     }
     loop i in 0..<(len %% 8) {
-        if Int.from_u8(buf[base + len /% 8]).bit_and(1 << (7 - i)) == 0 -> return false
+        if (Int{buf[base + len /% 8]}).bit_and(1 << (7 - i)) == 0 -> return false
     }
     true
 }
@@ -1272,7 +1272,7 @@ ssl_dtls_replay_check_ctr: fn(ssl: ssldefs.SSLContext, ctr: [U8], off: Int) -> B
     if rec_seqnum > ssl.in_window_top -> return true
     bit: ssl.in_window_top - rec_seqnum
     if bit >= (U64{64}) -> return false
-    if ssl.in_window.bit_and(U64{1} << Int.from_u64(bit)) != (U64{0}) -> return false
+    if ssl.in_window.bit_and(U64{1} << Int{bit}) != (U64{0}) -> return false
     true
 }
 
@@ -1292,12 +1292,12 @@ ssl_dtls_replay_update: fn(ssl: &ssldefs.SSLContext) Never! {
         if shift >= (U64{64}) {
             ssl.in_window = U64{1}
         } else {
-            ssl.in_window = (ssl.in_window << Int.from_u64(shift)).bit_or(U64{1})
+            ssl.in_window = (ssl.in_window << Int{shift}).bit_or(U64{1})
         }
         ssl.in_window_top = rec_seqnum
     } else {
         bit: ssl.in_window_top - rec_seqnum
-        if bit < (U64{64}) -> ssl.in_window = ssl.in_window.bit_or(U64{1} << Int.from_u64(bit))
+        if bit < (U64{64}) -> ssl.in_window = ssl.in_window.bit_or(U64{1} << Int{bit})
     }
 }
 
@@ -1500,7 +1500,7 @@ ssl_prepare_record_content: fn(ssl: &ssldefs.SSLContext, rec: &ssldefs.SSLRecord
             i := ssldefs.SSL_SEQUENCE_NUMBER_LEN
             loop i > ep {
                 at: ssl.in_ctr + i - 1
-                ssl.in_buf[at] = ssldefs.ssl_byte(Int.from_u8(ssl.in_buf[at]) + 1)
+                ssl.in_buf[at] = ssldefs.ssl_byte(Int{ssl.in_buf[at]} + 1)
                 if ssl.in_buf[at] != (U8{0}) -> break
                 i -= 1
             }
@@ -1965,8 +1965,8 @@ ssl_check_record: fn(ssl: &ssldefs.SSLContext, buf: &[U8], buflen: Int) ssldefs.
 // memcmp's sign over a[aoff..<aoff+len] and b[boff..<boff+len].
 ssl_bytes_cmp: fn(a: [U8], aoff: Int, b: [U8], boff: Int, len: Int) -> Int Never! {
     loop i in 0..<len {
-        x: Int.from_u8(a[aoff + i])
-        y: Int.from_u8(b[boff + i])
+        x: Int{a[aoff + i]}
+        y: Int{b[boff + i]}
         if x != y -> return x - y
     }
     0

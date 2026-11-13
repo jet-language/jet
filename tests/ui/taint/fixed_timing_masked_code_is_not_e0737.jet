@@ -4,5 +4,5 @@ select: fn(c: #Key U64, a: U64, b: U64) -> U64 {
     mask: wrapping(U64{0} - c)
     a.bit_and(mask).bit_or(b.bit_and(mask.bit_xor(U64{0xFFFFFFFFFFFFFFFF})))
 }
-mix: fn(a: #Key U64, b: U64) -> U64 { a.wrapping_mul(b).wrapping_add(U64{1}) }
+mix: fn(a: #Key U64, b: U64) -> U64 { wrapping(wrapping(a * b) + U64{1}) }
 count: fn(keys: #Key [U8]) -> Int { keys.len() }

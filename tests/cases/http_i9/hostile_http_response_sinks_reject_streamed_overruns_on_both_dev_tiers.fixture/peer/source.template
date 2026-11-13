@@ -15,9 +15,9 @@ contains_bytes: fn(raw: [U8], want: [U8], ascii_casefold: Bool) -> Bool {
     loop start in 0..<(raw.len() - want.len() + 1) {
         same := true
         loop i in 0..<want.len() {
-            n := Int.from_u8(raw[start + i])
+            n := Int{raw[start + i]}
             if ascii_casefold && n >= 65 && n <= 90 -> n += 32
-            if n != Int.from_u8(want[i]) -> same = false
+            if n != (Int{want[i]}) -> same = false
         }
         if same -> return true
     }
@@ -47,7 +47,7 @@ bit_write: fn(bits: &DeflateBits, value: Int, count: Int) {
         if bits.bit == 0 -> bits.bytes.push(U8{0})
         if value.bit_and(1 << offset) != 0 {
             last: bits.bytes.len() - 1
-            bits.bytes[last] = U8{Int.from_u8(bits.bytes[last]).bit_or(1 << bits.bit)}
+            bits.bytes[last] = U8{Int{bits.bytes[last]}.bit_or(1 << bits.bit)}
         }
         bits.bit = (bits.bit + 1) % 8
     }

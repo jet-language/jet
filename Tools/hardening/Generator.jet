@@ -390,7 +390,7 @@ of_family: fn(rows: [Production], family: String) -> [Production] Never! {
 draw: fn(seed: String, index: Int, what: String, bound: Int) -> Int Never! {
     bytes: crypto.sha256("{seed}|{index}|{what}").bytes
     value := 0
-    loop at in 0..<6 -> value = value * 256 + Int.from_u8(bytes[at])
+    loop at in 0..<6 -> value = value * 256 + (Int{bytes[at]})
     value % bound
 }
 

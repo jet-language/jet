@@ -11,7 +11,7 @@ use {
 build_next_context_id: fn() -[Rand]> Int Never! {
     bytes: random.bytes(6) ?? panic("operating-system randomness is unavailable for a build context id: {err}")
     id := 0
-    loop byte in bytes -> id = id * 256 + Int.from_u8(byte)
+    loop byte in bytes -> id = id * 256 + (Int{byte})
     id + 1
 }
 

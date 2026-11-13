@@ -220,11 +220,11 @@ hot_text_snake: fn(segment: String) -> String Never! {
     bytes: segment.bytes()
     out := [U8]{}
     loop index in 0..<bytes.len() {
-        code: Int.from_u8(bytes[index])
+        code: Int{bytes[index]}
         upper: code >= 65 && code <= 90
         if upper && index > 0 {
-            previous: Int.from_u8(bytes[index - 1])
-            following: if index + 1 < bytes.len() -> Int.from_u8(bytes[index + 1]) else -> 0
+            previous: Int{bytes[index - 1]}
+            following: if index + 1 < bytes.len() -> (Int{bytes[index + 1]}) else -> 0
             acronym_end: previous >= 65 && previous <= 90 && following >= 97 && following <= 122
             if acronym_end || (previous >= 97 && previous <= 122) || (previous >= 48 && previous <= 57) -> out.push(U8{95})
         }

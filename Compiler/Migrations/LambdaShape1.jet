@@ -270,19 +270,19 @@ lambda_shape1_spans: fn(bytes: [U8], start: Int, end: Int, mark: Int, doubled: B
     rewritten := 0
     index := start
     loop index < end {
-        if Int.from_u8(bytes[index]) != mark {
+        if (Int{bytes[index]}) != mark {
             index += 1
             next
         }
         run := index
-        loop run < end && Int.from_u8(bytes[run]) == mark -> run += 1
+        loop run < end && (Int{bytes[run]}) == mark -> run += 1
         if run - index != 1 {
             index = run
             next
         }
         close := index + 1
-        loop close < end && Int.from_u8(bytes[close]) != mark && bytes[close] != 10 -> close += 1
-        if close >= end || Int.from_u8(bytes[close]) != mark {
+        loop close < end && (Int{bytes[close]}) != mark && bytes[close] != 10 -> close += 1
+        if close >= end || (Int{bytes[close]}) != mark {
             index = close
             next
         }
@@ -502,7 +502,7 @@ lambda_shape1_indent: fn(bytes: [U8], offset: Int) -> String {
 lambda_shape1_fence: fn(raw: String, mark: Int) -> Int {
     bytes: raw.bytes()
     count := 0
-    loop count < bytes.len() && Int.from_u8(bytes[count]) == mark -> count += 1
+    loop count < bytes.len() && (Int{bytes[count]}) == mark -> count += 1
     count
 }
 
@@ -514,10 +514,10 @@ lambda_shape1_unquote: fn(raw: String) -> String? {
     out := [U8]{}
     index := 0
     loop index < bytes.len() {
-        byte: Int.from_u8(bytes[index])
+        byte: Int{bytes[index]}
         if byte == 92 {
             if index + 1 >= bytes.len() -> return None
-            escaped: Int.from_u8(bytes[index + 1])
+            escaped: Int{bytes[index + 1]}
             if {
                 escaped == 92 || escaped == 34 -> out.push(bytes[index + 1])
                 escaped == 110 -> out.push(U8{10})
@@ -528,7 +528,7 @@ lambda_shape1_unquote: fn(raw: String) -> String? {
             next
         }
         if byte == 123 || byte == 125 {
-            if index + 1 >= bytes.len() || Int.from_u8(bytes[index + 1]) != byte -> return None
+            if index + 1 >= bytes.len() || (Int{bytes[index + 1]}) != byte -> return None
             out.push(bytes[index])
             index += 2
             next

@@ -855,7 +855,7 @@ NixTestProgress: struct {
 
     zstd_info: store_nix_test_signed_zstd_narinfo(store_path, "negative.nar.zst", valid_nar, [String]{}, key_id, seed)
     corrupted := store_nix_test_encode_zstd(valid_nar)
-    corrupted[0] = U8{(Int.from_u8(corrupted[0])).bit_xor(1)}
+    corrupted[0] = U8{(Int{corrupted[0]}).bit_xor(1)}
     _: store_nix_test_single_failure(verification, "compressed-corruption", store_path, zstd_info, corrupted, seed, NixCacheErrorKind.CompressedCorruption)
 
     nar_error: store_nix_test_single_failure(verification, "nar-corruption", store_path, store_nix_test_signed_narinfo(store_path, "negative.nar", invalid_magic_nar, [String]{}, key_id, seed), invalid_magic_nar, seed, NixCacheErrorKind.NarCorruption)

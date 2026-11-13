@@ -215,7 +215,7 @@ start: fn(&&stream: net.UnixStream, uid: Int, timeout_ns: Int) -[Net, Time]> Dbu
 read_line: fn(&c: DbusConnection, deadline: Int) -[Net, Time]> String DbusError! {
     loop {
         loop i in 1..<c.inbox.len() {
-            if Int.from_u8(c.inbox[i - 1]) == 13 && Int.from_u8(c.inbox[i]) == 10 {
+            if (Int{c.inbox[i - 1]}) == 13 && (Int{c.inbox[i]}) == 10 {
                 line: String.from_bytes(c.inbox[0..<(i - 1)]) ?? return Err(DbusError.Auth("the bus answered with text that is not UTF-8"))
                 c.inbox = c.inbox[(i + 1)..<c.inbox.len()].copy()
                 return Ok(line)
@@ -463,7 +463,7 @@ marshal: fn(&out: [U8], value: DbusValue) {
             length_at: out.len()
             put_word(out, 0, 4)
             element: signature.bytes()
-            pad(out, if element.len() == 0 -> 1 else -> alignment_of(Int.from_u8(element[0])))
+            pad(out, if element.len() == 0 -> 1 else -> alignment_of(Int{element[0]}))
             start: out.len()
             loop item in items -> marshal(out, item)
             length: out.len() - start
@@ -516,10 +516,10 @@ pad: fn(&out: [U8], alignment: Int) {
 decode: fn(bytes: [U8]) -> Decoded DbusError! {
     waiting: Decoded{used: 0, message: None}
     if bytes.len() < 16 -> return Ok(waiting)
-    endian: Int.from_u8(bytes[0])
+    endian: Int{bytes[0]}
     if endian == 66 -> return Err(DbusError.Protocol("a big-endian message arrived; only little-endian ones are read"))
     if endian != 108 -> return Err(DbusError.Protocol("a message starts with byte {endian}, not an endianness mark"))
-    version: Int.from_u8(bytes[3])
+    version: Int{bytes[3]}
     if version != 1 -> return Err(DbusError.Protocol("a message has protocol version {version}, not 1"))
     body_length: word(bytes, 4, 4)
     serial: word(bytes, 8, 4)
@@ -535,7 +535,7 @@ decode: fn(bytes: [U8]) -> Decoded DbusError! {
     header: read_value(r, "a(yv)".bytes(), 0, 0) ?? return Err(err)
     align(r, 8) ?? return Err(err)
     m := blank(DbusKind.Call)
-    m.flags = Int.from_u8(bytes[2])
+    m.flags = Int{bytes[2]}
     m.serial = serial
     if header == .Array(_, fields) {
         loop field in fields {
@@ -551,7 +551,7 @@ decode: fn(bytes: [U8]) -> Decoded DbusError! {
         at = type_end(sig, at, 0, 0)
     }
     if r.at != total -> return Err(DbusError.Protocol("a body is {total - r.at} bytes longer than its signature {m.signature}"))
-    code: Int.from_u8(bytes[1])
+    code: Int{bytes[1]}
     if code < 1 || code > 4 -> return Ok(Decoded{used: total, message: None})
     m.kind = if code == {
         1 -> DbusKind.Call
@@ -649,7 +649,7 @@ kind_name: fn(kind: DbusKind) -> String {
 // containers it sits in.
 read_value: fn(&r: Reader, sig: [U8], at: Int, depth: Int) -> DbusValue DbusError! {
     if depth > NESTING_MAX * 2 -> return Err(DbusError.Protocol("values nest deeper than {NESTING_MAX * 2}"))
-    code: Int.from_u8(sig[at])
+    code: Int{sig[at]}
     if code == {
         121 | 98 | 110 | 113 | 105 | 117 | 120 | 116 | 100 -> read_fixed(r, code)
         115 | 111 -> read_string(r, code)
@@ -712,7 +712,7 @@ read_array: fn(&r: Reader, sig: [U8], at: Int, depth: Int) -> DbusValue DbusErro
     length: word(r.bytes, start, 4)
     if length > ARRAY_MAX -> return Err(DbusError.Protocol("an array of {length} bytes is over the limit"))
     element: at + 1
-    align(r, alignment_of(Int.from_u8(sig[element]))) ?? return Err(err)
+    align(r, alignment_of(Int{sig[element]})) ?? return Err(err)
     if length > r.end - r.at -> return Err(truncated())
     stop: r.at + length
     outer: r.end
@@ -731,7 +731,7 @@ read_struct: fn(&r: Reader, sig: [U8], at: Int, depth: Int) -> DbusValue DbusErr
     align(r, 8) ?? return Err(err)
     fields := [DbusValue]{}
     i := at + 1
-    loop Int.from_u8(sig[i]) != 41 {
+    loop sig[i] != 41 {
         value: read_value(r, sig, i, depth + 1) ?? return Err(err)
         fields.push(value)
         i = type_end(sig, i, 0, 0)
@@ -741,7 +741,7 @@ read_struct: fn(&r: Reader, sig: [U8], at: Int, depth: Int) -> DbusValue DbusErr
 
 // One array element: a dict entry when the element type opens with `{`.
 read_element: fn(&r: Reader, sig: [U8], at: Int, depth: Int) -> DbusValue DbusError! {
-    if Int.from_u8(sig[at]) != 123 -> return read_value(r, sig, at, depth)
+    if (Int{sig[at]}) != 123 -> return read_value(r, sig, at, depth)
     align(r, 8) ?? return Err(err)
     key: read_value(r, sig, at + 1, depth + 1) ?? return Err(err)
     value: read_value(r, sig, at + 2, depth + 1) ?? return Err(err)
@@ -752,7 +752,7 @@ read_element: fn(&r: Reader, sig: [U8], at: Int, depth: Int) -> DbusValue DbusEr
 align: fn(&r: Reader, alignment: Int) DbusError! {
     loop r.at %% alignment != 0 {
         if r.at >= r.end -> return Err(truncated())
-        if Int.from_u8(r.bytes[r.at]) != 0 -> return Err(DbusError.Protocol("padding at byte {r.at} is not zero"))
+        if (Int{r.bytes[r.at]}) != 0 -> return Err(DbusError.Protocol("padding at byte {r.at} is not zero"))
         r.at += 1
     }
     Ok()
@@ -772,9 +772,9 @@ read_text: fn(&r: Reader, length: Int) -> String DbusError! {
     if length >= r.end - r.at -> return Err(truncated())
     start: r.at
     r.at += length + 1
-    if Int.from_u8(r.bytes[start + length]) != 0 -> return Err(DbusError.Protocol("a string does not end in NUL"))
+    if (Int{r.bytes[start + length]}) != 0 -> return Err(DbusError.Protocol("a string does not end in NUL"))
     loop i in start..<(start + length) {
-        if Int.from_u8(r.bytes[i]) == 0 -> return Err(DbusError.Protocol("a string holds a NUL"))
+        if (Int{r.bytes[i]}) == 0 -> return Err(DbusError.Protocol("a string holds a NUL"))
     }
     text: String.from_bytes(r.bytes[start..<(start + length)]) ?? return Err(DbusError.Protocol("a string is not UTF-8"))
     Ok(text)
@@ -782,7 +782,7 @@ read_text: fn(&r: Reader, length: Int) -> String DbusError! {
 
 read_signature: fn(&r: Reader) -> String DbusError! {
     start: field(r, 1) ?? return Err(err)
-    length: Int.from_u8(r.bytes[start])
+    length: Int{r.bytes[start]}
     text: read_text(r, length) ?? return Err(err)
     if !valid_signature(text) -> return Err(DbusError.Protocol("{text} is not a signature"))
     Ok(text)
@@ -793,7 +793,7 @@ truncated: fn() -> DbusError { DbusError.Protocol("a value runs past the end of 
 // `size` little-endian bytes at `at`, unsigned.
 word: fn(bytes: [U8], at: Int, size: Int) -> Int {
     n := 0
-    loop i in 0..<size -> n += Int.from_u8(bytes[at + i]) << (8 * i)
+    loop i in 0..<size -> n += (Int{bytes[at + i]}) << (8 * i)
     n
 }
 
@@ -816,14 +816,14 @@ valid_signature: fn(text: String) -> Bool {
 // included) around it.
 type_end: fn(sig: [U8], at: Int, arrays: Int, structs: Int) -> Int {
     if at >= sig.len() -> return -1
-    code: Int.from_u8(sig[at])
+    code: Int{sig[at]}
     if basic(code) || code == 118 -> return at + 1
     if code == 97 {
         if arrays >= NESTING_MAX -> return -1
-        if at + 1 < sig.len() && Int.from_u8(sig[at + 1]) == 123 {
-            if structs >= NESTING_MAX || at + 2 >= sig.len() || !basic(Int.from_u8(sig[at + 2])) -> return -1
+        if at + 1 < sig.len() && (Int{sig[at + 1]}) == 123 {
+            if structs >= NESTING_MAX || at + 2 >= sig.len() || !basic(Int{sig[at + 2]}) -> return -1
             value_end: type_end(sig, at + 3, arrays + 1, structs + 1)
-            if value_end < 0 || value_end >= sig.len() || Int.from_u8(sig[value_end]) != 125 -> return -1
+            if value_end < 0 || value_end >= sig.len() || (Int{sig[value_end]}) != 125 -> return -1
             return value_end + 1
         }
         return type_end(sig, at + 1, arrays + 1, structs)
@@ -831,8 +831,8 @@ type_end: fn(sig: [U8], at: Int, arrays: Int, structs: Int) -> Int {
     if code == 40 {
         if structs >= NESTING_MAX -> return -1
         i := at + 1
-        if i < sig.len() && Int.from_u8(sig[i]) == 41 -> return -1
-        loop i < sig.len() && Int.from_u8(sig[i]) != 41 {
+        if i < sig.len() && (Int{sig[i]}) == 41 -> return -1
+        loop i < sig.len() && (Int{sig[i]}) != 41 {
             i = type_end(sig, i, arrays, structs + 1)
             if i < 0 -> return -1
         }
@@ -859,13 +859,13 @@ alignment_of: fn(code: Int) -> Int {
 // `/`, or `/`-separated non-empty runs of [A-Za-z0-9_].
 valid_path: fn(text: String) -> Bool {
     bytes: text.bytes()
-    if bytes.len() == 0 || Int.from_u8(bytes[0]) != 47 -> return false
+    if bytes.len() == 0 || (Int{bytes[0]}) != 47 -> return false
     if bytes.len() == 1 -> return true
-    if Int.from_u8(bytes[bytes.len() - 1]) == 47 -> return false
+    if (Int{bytes[bytes.len() - 1]}) == 47 -> return false
     loop i in 1..<bytes.len() {
-        b: Int.from_u8(bytes[i])
+        b: Int{bytes[i]}
         if b == 47 {
-            if Int.from_u8(bytes[i - 1]) == 47 -> return false
+            if (Int{bytes[i - 1]}) == 47 -> return false
             next
         }
         word_byte: (b >= 48 && b <= 57) || (b >= 65 && b <= 90) || (b >= 97 && b <= 122) || b == 95
@@ -890,7 +890,7 @@ hex_text: fn(text: String) -> String {
     digits: "0123456789abcdef".bytes()
     out := [U8]{}
     loop b in text.bytes() {
-        n: Int.from_u8(b)
+        n: Int{b}
         out.push(digits[n >> 4])
         out.push(digits[n.bit_and(15)])
     }
@@ -903,14 +903,14 @@ unescape: fn(text: String) -> String? {
     out := [U8]{}
     i := 0
     loop i < bytes.len() {
-        if Int.from_u8(bytes[i]) != 37 {
+        if (Int{bytes[i]}) != 37 {
             out.push(bytes[i])
             i += 1
             next
         }
         if i + 2 >= bytes.len() -> return None
-        high: hex_digit(Int.from_u8(bytes[i + 1]))
-        low: hex_digit(Int.from_u8(bytes[i + 2]))
+        high: hex_digit(Int{bytes[i + 1]})
+        low: hex_digit(Int{bytes[i + 2]})
         if high < 0 || low < 0 -> return None
         out.push(U8{high * 16 + low})
         i += 3
@@ -1132,7 +1132,7 @@ wire: fn(m: DbusMessage, serial: Int) -> [U8] { encode(m, serial) ?? panic("enco
 hex_bytes: fn(hex: String) -> [U8] {
     digits: hex.bytes()
     out := [U8]{}
-    loop i in 0..<(digits.len() /% 2) -> out.push(U8{hex_digit(Int.from_u8(digits[2 * i])) * 16 + hex_digit(Int.from_u8(digits[2 * i + 1]))})
+    loop i in 0..<(digits.len() /% 2) -> out.push(U8{hex_digit(Int{digits[2 * i]}) * 16 + hex_digit(Int{digits[2 * i + 1]})})
     out
 }
 

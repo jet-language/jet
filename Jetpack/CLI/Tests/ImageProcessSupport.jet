@@ -91,7 +91,7 @@ cli_test_image_layer: fn(root: String) -[FS]> [U8] {
     magic: "ustar".bytes()
     blobs: cli_test_image_blobs(root)
     loop blob in blobs {
-        if blob.len() >= 263 && blob.slice(257, 262) == magic && Int.from_u8(blob[262]) == 0 -> return blob
+        if blob.len() >= 263 && blob.slice(257, 262) == magic && (Int{blob[262]}) == 0 -> return blob
     }
     panic("image has no ustar layer blob")
 }

@@ -278,7 +278,7 @@ provider_nix_path_identity: fn(path: String) -> NixPathIdentity? Never! {
     payload: halves.after.removesuffix("-bin")
     bytes: payload.bytes()
     loop index in 0..<bytes.len() {
-        if Int.from_u8(bytes[index]) != 45 -> next
+        if (Int{bytes[index]}) != 45 -> next
         next_code: pkg_bytes_code(bytes, index + 1)
         if next_code >= 48 && next_code <= 57 {
             return Val(NixPathIdentity{name: pkg_bytes_text(bytes, 0, index), version: pkg_bytes_text(bytes, index + 1, bytes.len())})

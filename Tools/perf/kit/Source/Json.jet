@@ -10,7 +10,7 @@ json_quote: fn(text: String) -> String Never! {
     out := [U8]{}
     out.push(34)
     loop byte in text.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         escaped: if {
             code == 34 -> "\\\""
             code == 92 -> "\\\\"
@@ -33,10 +33,10 @@ json_quote: fn(text: String) -> String Never! {
 // before every other key.
 array_index: fn(key: String) -> Int? Never! {
     bytes: key.bytes()
-    if bytes.len() == 0 || bytes.len() > 10 || (bytes.len() > 1 && Int.from_u8(bytes[0]) == 48) -> return None
+    if bytes.len() == 0 || bytes.len() > 10 || (bytes.len() > 1 && Int{bytes[0]} == 48) -> return None
     value := 0
     loop byte in bytes {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if code < 48 || code > 57 -> return None
         value = value * 10 + code - 48
     }

@@ -710,7 +710,7 @@ window_code_init: fn(p: &cg.Parse, a: &ast.AST, s: Int) Never! {
             a.windows[win].reg_app = reg_app
             p.f.n_mem += 3
             // max() orders its index descending: "min" has an 'i' second.
-            if Int.from_u8(d.name[1]) == 105 -> key.sort_flags[0] = base.KEYINFO_ORDER_DESC
+            if (Int{d.name[1]}) == 105 -> key.sort_flags[0] = base.KEYINFO_ORDER_DESC
             _: cg.op2(p, opc.OP_OPEN_EPHEMERAL, csr_app, 2)
             cg.v_append_p4(p, conn.P4.KeyInfo(key))
             _: cg.op2(p, opc.OP_INTEGER, 0, reg_app + 1)

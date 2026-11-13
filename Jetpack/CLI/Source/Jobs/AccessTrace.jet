@@ -144,7 +144,7 @@ cli_strace_argument_tokens: fn(text: String) -> [String] Never! {
     quoted := false
     escaped := false
     loop index in 0..<raw.len() {
-        code: Int.from_u8(raw[index])
+        code: Int{raw[index]}
         if quoted {
             if {
                 escaped -> escaped = false
@@ -177,10 +177,10 @@ cli_strace_argument_tokens: fn(text: String) -> [String] Never! {
 // The contents of a leading quoted argument, still escaped.
 cli_strace_quoted_argument: fn(argument: String) -> String? Never! {
     raw: argument.trim().bytes()
-    if raw.len() == 0 || Int.from_u8(raw[0]) != 34 -> return None
+    if raw.len() == 0 || (Int{raw[0]}) != 34 -> return None
     escaped := false
     loop index in 1..<raw.len() {
-        code: Int.from_u8(raw[index])
+        code: Int{raw[index]}
         if {
             escaped -> escaped = false
             code == 92 -> escaped = true
@@ -201,14 +201,14 @@ cli_decode_strace_string: fn(text: String) -> [U8]? Never! {
     decoded := [U8]{}
     index := 0
     loop index < raw.len() {
-        if Int.from_u8(raw[index]) != 92 {
+        if (Int{raw[index]}) != 92 {
             decoded.push(raw[index])
             index += 1
             next
         }
         index += 1
         if index >= raw.len() -> return None
-        escaped: Int.from_u8(raw[index])
+        escaped: Int{raw[index]}
         if {
             escaped == 97 -> decoded.push(U8{7})
             escaped == 98 -> decoded.push(U8{8})
@@ -219,8 +219,8 @@ cli_decode_strace_string: fn(text: String) -> [U8]? Never! {
             escaped == 118 -> decoded.push(U8{11})
             escaped == 120 -> {
                 if index + 2 >= raw.len() -> return None
-                high: cli_hex_digit(Int.from_u8(raw[index + 1])) ?? return None
-                low: cli_hex_digit(Int.from_u8(raw[index + 2])) ?? return None
+                high: cli_hex_digit(Int{raw[index + 1]}) ?? return None
+                low: cli_hex_digit(Int{raw[index + 2]}) ?? return None
                 decoded.push(U8{high * 16 + low})
                 index += 2
             }
@@ -228,7 +228,7 @@ cli_decode_strace_string: fn(text: String) -> [U8]? Never! {
                 value := escaped - 48
                 consumed := 1
                 loop consumed < 3 && index + consumed < raw.len() {
-                    next_code: Int.from_u8(raw[index + consumed])
+                    next_code: Int{raw[index + consumed]}
                     if next_code < 48 || next_code > 55 -> break
                     value = (value * 8 + next_code - 48) %% 256
                     consumed += 1

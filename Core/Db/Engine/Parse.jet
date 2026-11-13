@@ -278,7 +278,7 @@ token_expr: fn(a: &ast.AST, op: Int, t: ast.SQLTok) -> Int Never! {
     e := ast.zero_expr(op)
     e.flags = ast.EP_LEAF
     e.w = t.z
-    if z.len() > 0 && is_quote(Int.from_u8(z[0])) {
+    if z.len() > 0 && is_quote(Int{z[0]}) {
         e.flags = e.flags.bit_or(if z[0] == (U8{34}) -> ast.EP_QUOTED.bit_or(ast.EP_DBL_QUOTED) else -> ast.EP_QUOTED)
         e.token = Val(dequote(z))
     } else {

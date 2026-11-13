@@ -160,20 +160,20 @@ capability_dimension: fn(text: String?, fallback: Int, maximum: U64) -> Int Neve
     loop at < raw.len() {
         byte: raw[at]
         if byte < (U8{48}) || byte > (U8{57}) -> return fallback
-        digit: U64{Int.from_u8(byte) - 48}
+        digit: U64{Int{byte} - 48}
         if parsed > (maximum - digit) / (U64{10}) -> return fallback
         parsed = parsed * U64{10} + digit
         at += 1
     }
     if parsed == (U64{0}) -> return fallback
-    Int.from_u64(parsed)
+    Int{parsed}
 }
 
 capability_ascii_lower: fn(text: String) -> String Never! {
     raw: text.bytes()
     out := [U8]{}
     loop byte in raw {
-        if byte >= (U8{65}) && byte <= (U8{90}) -> out.push(U8{Int.from_u8(byte) + 32})
+        if byte >= (U8{65}) && byte <= (U8{90}) -> out.push(U8{Int{byte} + 32})
         else -> out.push(byte)
     }
     String.from_bytes(out) ?? panic("ASCII case conversion preserves UTF-8")
@@ -407,7 +407,7 @@ color_words: fn(color: TUIColor?) -> ColorWords Never! {
             .ANSI256(index) -> return ColorWords{kind: 2, word: clamp_int(index, 255)}
             .RGB(rgb) -> return ColorWords{
                 kind: 3,
-                word: (Int.from_u8(rgb.r) << 16).bit_or((Int.from_u8(rgb.g) << 8)).bit_or(Int.from_u8(rgb.b)),
+                word: (Int{rgb.r} << 16).bit_or((Int{rgb.g} << 8)).bit_or(Int{rgb.b}),
             }
         }
     }
@@ -510,9 +510,9 @@ color_code: fn(color: TUIColor, profile: TUIColorProfile, background: Bool) -> S
     if profile == .ASCII -> return ""
     if color == {
         .RGB(rgb) -> {
-            red: Int.from_u8(rgb.r)
-            green: Int.from_u8(rgb.g)
-            blue: Int.from_u8(rgb.b)
+            red: Int{rgb.r}
+            green: Int{rgb.g}
+            blue: Int{rgb.b}
             if profile == .TrueColor -> return "{base};2;{red};{green};{blue}"
             if profile == .ANSI256 {
                 index: 16 + 36 * rgb_cube(red) + 6 * rgb_cube(green) + rgb_cube(blue)
@@ -537,7 +537,7 @@ color_code: fn(color: TUIColor, profile: TUIColorProfile, background: Bool) -> S
 
 
 utf8_width: fn(byte: U8) -> Int Never! {
-    n: Int.from_u8(byte)
+    n: Int{byte}
     if n < 128 -> return 1
     if n < 224 -> return 2
     if n < 240 -> return 3
@@ -545,12 +545,12 @@ utf8_width: fn(byte: U8) -> Int Never! {
 }
 
 scalar_at: fn(raw: [U8], offset: Int, width: Int) -> Int Never! {
-    value := Int.from_u8(raw[offset])
+    value := Int{raw[offset]}
     if width == 1 -> return value
     value = value.bit_and(((1 << (7 - width)) - 1))
     i := 1
     loop i < width {
-        value = (value << 6).bit_or((Int.from_u8(raw[offset + i]).bit_and(63)))
+        value = (value << 6).bit_or((Int{raw[offset + i]}.bit_and(63)))
         i += 1
     }
     value

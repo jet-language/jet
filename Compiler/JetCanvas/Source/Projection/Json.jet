@@ -56,7 +56,7 @@ attr_string: fn(text: String, key: String) -> String? Never! {
     }
     bytes: rest.bytes()
     end := 0
-    loop end < bytes.len() && !is_space_byte(Int.from_u8(bytes[end])) -> end += 1
+    loop end < bytes.len() && !is_space_byte(Int{bytes[end]}) -> end += 1
     Val(rest.slice(0, end))
 }
 
@@ -80,11 +80,11 @@ attr_bounds: fn(text: String, key: String) -> CanvasBounds? Never! {
 // The JSON string literal at the front of `text`, decoded.
 parse_json_string: fn(text: String) -> JSONText? Never! {
     bytes: text.bytes()
-    if bytes.len() == 0 || Int.from_u8(bytes[0]) != 34 -> return None
+    if bytes.len() == 0 || (Int{bytes[0]}) != 34 -> return None
     out := [U8]{}
     escaped := false
     loop i in 1..<bytes.len() {
-        byte: Int.from_u8(bytes[i])
+        byte: Int{bytes[i]}
         if escaped {
             escaped = false
             if {

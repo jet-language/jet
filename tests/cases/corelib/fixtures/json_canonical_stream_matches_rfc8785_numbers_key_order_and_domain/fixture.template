@@ -31,7 +31,7 @@ run: fn() {
 
     bytes_output: files.create("{work}/bytes.json") ?? panic("create bytes")
     bytes_writer := json.writer(bytes_output, encoding.EncodingLimits.safe(), true) ?? panic("bytes writer")
-    bytes: [U8]{ U8.from_int(1) ?? panic("byte") }
+    bytes: [U8]{ U8{1} }
     if bytes_writer.write(encoding.DataEvent.Bytes(bytes)) == {
         .Ok(_) -> print("bytes accepted")
         .Err(error) -> print(error.reason)

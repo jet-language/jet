@@ -210,7 +210,7 @@ X509SigAlg: struct {
 /// (mbedtls_x509_get_serial).
 x509_get_serial: fn(data: [U8], p: &Int, end: Int) -> asn1.ASN1Buf X509Error! {
     if end - p < 1 -> return Err(.InvalidSerial(Val(.OutOfData)))
-    tag_id: Int.from_u8(data[p])
+    tag_id: Int{data[p]}
     if tag_id != asn1.ASN1_CONTEXT_SPECIFIC.bit_or(2) && tag_id != asn1.ASN1_INTEGER -> return Err(.InvalidSerial(Val(.UnexpectedTag)))
     p += 1
     len: asn1.get_len(data, p, end) ?? return Err(.InvalidSerial(Val(err)))
@@ -326,7 +326,7 @@ x509_get_attr_type_value: fn(data: [U8], p: &Int, end: Int) -> asn1.NamedData X5
     oid: cipher.bytes_of(data, p, oid_len)
     p += oid_len
     if item_end - p < 1 -> return Err(.InvalidName(Val(.OutOfData)))
-    val_tag: Int.from_u8(data[p])
+    val_tag: Int{data[p]}
     if !asn1.is_string_tag(val_tag) && val_tag != asn1.ASN1_BIT_STRING -> return Err(.InvalidName(Val(.UnexpectedTag)))
     p += 1
     val_len: asn1.get_len(data, p, item_end) ?? return Err(.InvalidName(Val(err)))
@@ -373,8 +373,8 @@ x509_date_is_valid: fn(t: X509Time) -> Bool Never! {
 
 // x509_parse2_int: two decimal digits, or -1.
 x509_parse2_int: fn(data: [U8], at: Int) -> Int Never! {
-    d1: Int.from_u8(data[at]) - 48
-    d2: Int.from_u8(data[at + 1]) - 48
+    d1: Int{data[at]} - 48
+    d2: Int{data[at + 1]} - 48
     if d1 < 0 || d1 > 9 || d2 < 0 || d2 > 9 -> return -1
     d1 * 10 + d2
 }
@@ -411,7 +411,7 @@ X509_ZULU: U8{90}
 /// trailing Z (mbedtls_x509_get_time).
 x509_get_time: fn(data: [U8], p: &Int, end: Int) -> X509Time X509Error! {
     if end - p < 1 -> return Err(.InvalidDate(Val(.OutOfData)))
-    tag_id: Int.from_u8(data[p])
+    tag_id: Int{data[p]}
     year_len: if {
         tag_id == asn1.ASN1_UTC_TIME -> 2
         tag_id == asn1.ASN1_GENERALIZED_TIME -> 4
@@ -428,7 +428,7 @@ x509_get_time: fn(data: [U8], p: &Int, end: Int) -> X509Time X509Error! {
 /// must be zero (mbedtls_x509_get_sig).
 x509_get_sig: fn(data: [U8], p: &Int, end: Int) -> asn1.ASN1Buf X509Error! {
     if end - p < 1 -> return Err(.InvalidSignature(Val(.OutOfData)))
-    tag_id: Int.from_u8(data[p])
+    tag_id: Int{data[p]}
     len: asn1.get_bitstring_null(data, p, end) ?? return Err(.InvalidSignature(Val(err)))
     sig: asn1.ASN1Buf{tag_id: tag_id, p: p, len: len}
     p += len
@@ -519,7 +519,7 @@ x509_dn_value: fn(entry: asn1.NamedData, print_hex: Bool) -> [U8] X509Error! {
         encoded.extend(entry.val)
         loop c in encoded {
             if s.len() + 1 >= limit -> return Err(.BufferTooSmall)
-            x509_push_hex2(s, Int.from_u8(c))
+            x509_push_hex2(s, Int{c})
         }
         return Ok(s)
     }
@@ -533,7 +533,7 @@ x509_dn_value: fn(entry: asn1.NamedData, print_hex: Bool) -> [U8] X509Error! {
             if s.len() + 1 >= limit -> return Err(.BufferTooSmall)
             s.push(X509_BACKSLASH)
         }
-        code: Int.from_u8(c)
+        code: Int{c}
         if {
             code < 32 || code >= 127 -> {
                 if s.len() + 3 >= limit -> return Err(.BufferTooSmall)
@@ -601,7 +601,7 @@ x509_serial_gets: fn(data: [U8], serial: asn1.ASN1Buf) -> [U8] Never! {
     out := [U8]{}
     nr: if serial.len <= 32 -> serial.len else -> 28
     loop i in 0..<nr {
-        b: Int.from_u8(data[serial.p + i])
+        b: Int{data[serial.p + i]}
         if i == 0 && nr > 1 && b == 0 -> next
         x509_push_hex2(out, b)
         if i < nr - 1 -> out.extend(":".bytes())
@@ -728,7 +728,7 @@ x509_parse_subject_alt_name: fn(data: [U8], san: asn1.ASN1Buf) -> SubjectAltName
 x509_get_subject_alt_name_ext: fn(data: [U8], p: &Int, end: Int) -> [asn1.ASN1Buf] X509Error! {
     names := [asn1.ASN1Buf]{}
     loop p < end {
-        tag_id: Int.from_u8(data[p])
+        tag_id: Int{data[p]}
         p += 1
         len: asn1.get_len(data, p, end) ?? return Err(.InvalidExtensions(Val(err)))
         item: asn1.ASN1Buf{tag_id: tag_id, p: p, len: len}
@@ -760,7 +760,7 @@ x509_get_ns_cert_type: fn(data: [U8], p: &Int, end: Int) -> Int X509Error! {
     bs: asn1.get_bitstring(data, p, end) ?? return Err(.InvalidExtensions(Val(err)))
     if bs.len == 0 -> return Ok(0)
     if bs.len != 1 -> return Err(.InvalidExtensions(Val(.InvalidLength)))
-    Ok(Int.from_u8(data[bs.p]))
+    Ok(Int{data[bs.p]})
 }
 
 /// The keyUsage flags, the first content byte lowest and at most four bytes
@@ -770,7 +770,7 @@ x509_get_key_usage: fn(data: [U8], p: &Int, end: Int) -> Int X509Error! {
     usage := 0
     loop i in 0..<bs.len {
         if i >= 4 -> break
-        usage = usage.bit_or(Int.from_u8(data[bs.p + i]) << (8 * i))
+        usage = usage.bit_or(Int{data[bs.p + i]} << (8 * i))
     }
     Ok(usage)
 }
@@ -799,7 +799,7 @@ x509_info_one_san: fn(out: &[U8], data: [U8], san: SubjectAltName, prefix: Strin
                 hw_type: oids.numeric_string(data, other.hw_type) ?? return Err(.BufferTooSmall)
                 out.extend(hw_type.bytes())
                 out.extend("\n{prefix}            hardware serial number : ".bytes())
-                loop i in 0..<other.hw_serial.len -> x509_push_hex2(out, Int.from_u8(data[other.hw_serial.p + i]))
+                loop i in 0..<other.hw_serial.len -> x509_push_hex2(out, Int{data[other.hw_serial.p + i]})
             }
         }
         .UniformResourceIdentifier(item) -> {
@@ -818,12 +818,12 @@ x509_info_one_san: fn(out: &[U8], data: [U8], san: SubjectAltName, prefix: Strin
             out.extend("\n{prefix}    iPAddress : ".bytes())
             ip: cipher.bytes_of(data, item.p, item.len)
             if item.len == 4 {
-                out.extend("{Int.from_u8(ip[0])}.{Int.from_u8(ip[1])}.{Int.from_u8(ip[2])}.{Int.from_u8(ip[3])}".bytes())
+                out.extend("{Int{ip[0]}}.{Int{ip[1]}}.{Int{ip[2]}}.{Int{ip[3]}}".bytes())
                 return
             }
             loop i in 0..<16 {
                 if i > 0 && i %% 2 == 0 -> out.extend(":".bytes())
-                out.extend(x509_hex_text(Int.from_u8(ip[i]), 1))
+                out.extend(x509_hex_text(Int{ip[i]}, 1))
             }
         }
         .DirectoryName(names) -> {

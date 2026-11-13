@@ -410,7 +410,7 @@ priv internal: module {
         if path.len() == 0 -> return false
         start := true
         loop b in path.bytes() {
-            n: Int.from_u8(b)
+            n: Int{b}
             if n == 46 {
                 if start -> return false
                 start = true
@@ -458,7 +458,7 @@ canon_mode: fn(mode: String) -> String {
 escape: fn(text: String) -> String {
     out := [U8]{}
     loop b in text.bytes() {
-        n: Int.from_u8(b)
+        n: Int{b}
         if n == 92 {
             out.push(U8{92})
             out.push(U8{92})

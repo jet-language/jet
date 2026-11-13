@@ -83,7 +83,7 @@ image_parse_registry_reference: fn(reference: String) -> RegistryReference Image
     raw: reference.bytes()
     if raw.len() == 0 -> return Err(image_invalid("OCI registry reference contains unsafe characters"))
     loop byte in raw {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if image_is_ascii_control(code) || trust_text_is_ascii_space(code) || code == 63 || code == 35 || code == 37 {
             return Err(image_invalid("OCI registry reference contains unsafe characters"))
         }
@@ -133,7 +133,7 @@ image_registry_leaf: fn(leaf: String) -> RegistryLeaf ImageError! {
 image_registry_authority_is_safe: fn(authority: String) -> Bool Never! {
     if authority == "" || authority.contains("@") || authority.starts_with("-") -> return false
     loop byte in authority.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if !trust_text_is_alphanumeric(code) && code != 46 && code != 58 && code != 45 && code != 91 && code != 93 -> return false
     }
     true
@@ -143,7 +143,7 @@ image_validate_registry_component: fn(value: String, label: String) ImageError! 
     raw: value.bytes()
     if raw.len() == 0 || value == "." || value == ".." || raw.len() > 255 -> return Err(image_invalid("{label} is unsafe"))
     loop byte in raw {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if !trust_text_is_alphanumeric(code) && code != 46 && code != 95 && code != 45 -> return Err(image_invalid("{label} is unsafe"))
     }
 }
@@ -152,7 +152,7 @@ image_validate_oci_tag: fn(value: String) ImageError! {
     raw: value.bytes()
     if raw.len() == 0 || raw.len() > 128 -> return Err(image_invalid("OCI registry tag is unsafe"))
     loop index in 0..<raw.len() {
-        code: Int.from_u8(raw[index])
+        code: Int{raw[index]}
         allowed: trust_text_is_alphanumeric(code) || code == 95 || (index > 0 && (code == 46 || code == 45))
         if !allowed -> return Err(image_invalid("OCI registry tag is unsafe"))
     }
@@ -277,7 +277,7 @@ image_registry_request: fn(request: RegistryRequest) -[Env, Exec, Time.Wait]> Re
     stderr: image_bounded_bytes_text(receipt.errors.bytes())
     if !receipt.success && stdout.len() == 0 -> return Ok(RegistryResponse{status: 0, headers: [U8]{}, stderr})
     separator := stdout.len() - 1
-    loop separator >= 0 && Int.from_u8(stdout[separator]) != 10 -> separator -= 1
+    loop separator >= 0 && (Int{stdout[separator]}) != 10 -> separator -= 1
     if separator < 0 -> return Err(image_invalid("OCI registry response has no HTTP status"))
     status_text: String.from_bytes(stdout[(separator + 1)..<stdout.len()]) ?? return Err(image_invalid("OCI registry response has an invalid HTTP status"))
     status: Int.parse(status_text.trim()) ?? return Err(image_invalid("OCI registry response has an invalid HTTP status"))
@@ -302,11 +302,11 @@ image_header_value: fn(headers: [U8], wanted: String) -> String? Never! {
     wanted_lower: pkg_ascii_lower(wanted)
     start := 0
     loop index in 0..<(headers.len() + 1) {
-        if index < headers.len() && Int.from_u8(headers[index]) != 10 -> next
+        if index < headers.len() && (Int{headers[index]}) != 10 -> next
         line: headers[start..<index]
         start = index + 1
         colon := 0
-        loop colon < line.len() && Int.from_u8(line[colon]) != 58 -> colon += 1
+        loop colon < line.len() && (Int{line[colon]}) != 58 -> colon += 1
         if colon >= line.len() -> next
         name: String.from_bytes(line[0..<colon].copy()) ?? next
         if pkg_ascii_lower(name.trim()) != wanted_lower -> next
@@ -321,7 +321,7 @@ image_resolve_registry_location: fn(origin: String, location: String) -> String 
     raw: location.bytes()
     if raw.len() == 0 -> return Err(image_invalid("registry upload Location is unsafe"))
     loop byte in raw {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if image_is_ascii_control(code) || trust_text_is_ascii_space(code) || code == 39 || code == 34 || code == 37 || code == 35 {
             return Err(image_invalid("registry upload Location is unsafe"))
         }

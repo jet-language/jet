@@ -400,7 +400,7 @@ provider_cc_is_target_token: fn(target: String) -> Bool Never! {
     raw: target.bytes()
     if raw.len() == 0 || raw.len() > CC_TOOLCHAIN_MAX_TARGET_BYTES -> return false
     loop byte in raw {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if !provider_cc_is_ascii_alnum(code) && code != 46 && code != 95 && code != 45 -> return false
     }
     true
@@ -440,7 +440,7 @@ provider_cc_is_relative_path: fn(path: String) -> Bool Never! {
     if path == "" || path.starts_with("/") -> return false
     raw: path.bytes()
     loop byte in raw {
-        if Int.from_u8(byte) == 0 -> return false
+        if (Int{byte}) == 0 -> return false
     }
     segments: path.split("/").to_list()
     if segments[0] == "." -> return false
@@ -456,7 +456,7 @@ provider_cc_validate_text_field: fn(value: String, label: String) CcToolchainErr
     if value.trim() == "" -> return Err(CcToolchainError.Invalid("{label}: value is empty"))
     raw: value.bytes()
     loop byte in raw {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if code < 32 || code == 127 || code == 47 || code == 92 {
             return Err(CcToolchainError.Invalid("{label}: value contains a control character or path separator"))
         }
@@ -467,7 +467,7 @@ provider_cc_validate_sha256: fn(value: String, label: String) CcToolchainError! 
     raw: value.bytes()
     if raw.len() != 64 -> return Err(CcToolchainError.Invalid("{label} is not a lowercase SHA-256 digest"))
     loop byte in raw {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if !((code >= 48 && code <= 57) || (code >= 97 && code <= 102)) {
             return Err(CcToolchainError.Invalid("{label} is not a lowercase SHA-256 digest"))
         }

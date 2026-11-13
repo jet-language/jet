@@ -1410,7 +1410,7 @@ open_pipe: fn() -[Env]> [Fd] IOError! {
     ends := [Fd]{}
     loop end in 0..<2 {
         token := 0
-        loop byte in 0..<8 { token = token * 256 + Int.from_u8(packed[end * 8 + 7 - byte]) }
+        loop byte in 0..<8 { token = token * 256 + (Int{packed[end * 8 + 7 - byte]}) }
         ends.push(Fd{token: token})
     }
     Ok(ends)
@@ -2184,7 +2184,7 @@ ConfigTree: enum {
 ascii_upper: fn(value: String) -> String Never! {
     out := [U8]{}
     loop byte in value.bytes() {
-        if byte >= (U8{97}) && byte <= (U8{122}) -> out.push(U8{Int.from_u8(byte) - 32}) else -> out.push(byte)
+        if byte >= (U8{97}) && byte <= (U8{122}) -> out.push(U8{Int{byte} - 32}) else -> out.push(byte)
     }
     String.from_bytes(out) ?? panic("ASCII fold preserves UTF-8")
 }

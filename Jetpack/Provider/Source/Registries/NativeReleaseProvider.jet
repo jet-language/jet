@@ -305,7 +305,7 @@ provider_native_valid_tag: fn(release_tag: String) -> Bool Never! {
     raw: release_tag.bytes()
     if raw.len() == 0 || raw.len() > 128 -> return false
     loop byte in raw {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if !provider_registry_is_ascii_alnum(code) && code != 46 && code != 95 && code != 45 -> return false
     }
     true

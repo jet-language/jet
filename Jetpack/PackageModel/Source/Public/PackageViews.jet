@@ -347,7 +347,7 @@ pkg_redact_repository_url: fn(value: String) -> String Never! {
     raw: value.bytes()
     end := raw.len()
     loop index in 0..<raw.len() {
-        code: Int.from_u8(raw[index])
+        code: Int{raw[index]}
         if code == 63 || code == 35 {
             end = index
             break
@@ -366,7 +366,7 @@ pkg_redact_repository_url: fn(value: String) -> String Never! {
     authority_start: separator + 3
     authority_end := bytes.len()
     loop index in authority_start..<bytes.len() {
-        code: Int.from_u8(bytes[index])
+        code: Int{bytes[index]}
         if code == 47 || code == 63 || code == 35 {
             authority_end = index
             break
@@ -374,7 +374,7 @@ pkg_redact_repository_url: fn(value: String) -> String Never! {
     }
     at := -1
     loop index in authority_start..<authority_end {
-        if Int.from_u8(bytes[index]) == 64 -> at = index
+        if (Int{bytes[index]}) == 64 -> at = index
     }
     if at < 0 -> return base
     "{pkg_bytes_text(bytes, 0, authority_start)}{pkg_bytes_text(bytes, at + 1, authority_end)}{pkg_bytes_text(bytes, authority_end, bytes.len())}"

@@ -49,7 +49,7 @@ trust_pin_strip_line_comments: fn(text: String) -> String Never! {
         in_string := false
         cut := raw.len()
         loop index in 0..<raw.len() {
-            code: Int.from_u8(raw[index])
+            code: Int{raw[index]}
             if code == TRUST_QUOTE {
                 in_string = !in_string
                 next
@@ -75,7 +75,7 @@ trust_pin_is_ident_char: fn(code: Int) -> Bool Never! {
 // The end of the identifier starting at `start`.
 trust_pin_ident_end: fn(raw: [U8], start: Int) -> Int Never! {
     index := start
-    loop index < raw.len() && trust_pin_is_ident_char(Int.from_u8(raw[index])) -> index += 1
+    loop index < raw.len() && trust_pin_is_ident_char(Int{raw[index]}) -> index += 1
     index
 }
 
@@ -87,7 +87,7 @@ trust_pin_top_block_body: fn(text: String, key: String) -> String? Never! {
     in_string := false
     index := 0
     loop index < raw.len() {
-        code: Int.from_u8(raw[index])
+        code: Int{raw[index]}
         if in_string {
             if code == TRUST_QUOTE -> in_string = false
             index += 1
@@ -130,7 +130,7 @@ trust_pin_matching_brace: fn(raw: [U8], open: Int) -> Int Never! {
     depth := 0
     in_string := false
     loop index in open..<raw.len() {
-        code: Int.from_u8(raw[index])
+        code: Int{raw[index]}
         if {
             in_string -> {
                 if code == TRUST_QUOTE -> in_string = false
@@ -155,7 +155,7 @@ trust_pin_simple_field: fn(body: String, key: String) -> String? Never! {
     in_string := false
     index := 0
     loop index < raw.len() {
-        code: Int.from_u8(raw[index])
+        code: Int{raw[index]}
         if in_string {
             if code == TRUST_QUOTE -> in_string = false
             index += 1
@@ -188,7 +188,7 @@ trust_pin_simple_field: fn(body: String, key: String) -> String? Never! {
         end := value_start
         quoted := false
         loop end < raw.len() {
-            value_code: Int.from_u8(raw[end])
+            value_code: Int{raw[end]}
             if {
                 quoted -> {
                     if value_code == TRUST_QUOTE -> quoted = false
@@ -213,9 +213,9 @@ trust_pin_top_level_simple_field: fn(text: String, key: String) -> String? Never
     in_string := false
     index := 0
     loop index < raw.len() {
-        code: Int.from_u8(raw[index])
+        code: Int{raw[index]}
         if in_string {
-            if code == TRUST_QUOTE && (index == 0 || Int.from_u8(raw[index - 1]) != TRUST_BACKSLASH) -> in_string = false
+            if code == TRUST_QUOTE && (index == 0 || Int{raw[index - 1]} != TRUST_BACKSLASH) -> in_string = false
             index += 1
             next
         }
@@ -247,8 +247,8 @@ trust_pin_top_level_simple_field: fn(text: String, key: String) -> String? Never
         end := value_start
         quoted := false
         loop end < raw.len() {
-            value_code: Int.from_u8(raw[end])
-            escaped: end > value_start && Int.from_u8(raw[end - 1]) == TRUST_BACKSLASH
+            value_code: Int{raw[end]}
+            escaped: end > value_start && Int{raw[end - 1]} == TRUST_BACKSLASH
             if {
                 value_code == TRUST_QUOTE && (end == value_start || !escaped) -> quoted = !quoted
                 !quoted && (value_code == TRUST_COMMA || value_code == TRUST_NEWLINE) -> break

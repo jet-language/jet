@@ -157,7 +157,7 @@ digits_value: fn(text: String) -> Int? Never! {
     if text == "" -> return None
     value := 0
     loop byte in text.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if code < 48 || code > 57 -> return None
         value = value * 10 + code - 48
     }
@@ -231,7 +231,7 @@ eligible: fn(comm: String, cmdline: String) -> Bool Never! {
 
 lower_alnum_dash: fn(text: String) -> Bool Never! {
     loop byte in text.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if !((code >= 97 && code <= 122) || (code >= 48 && code <= 57) || code == 45) -> return false
     }
     true
@@ -239,7 +239,7 @@ lower_alnum_dash: fn(text: String) -> Bool Never! {
 
 digits_dots: fn(text: String) -> Bool Never! {
     loop byte in text.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if !((code >= 48 && code <= 57) || code == 46) -> return false
     }
     true
@@ -250,7 +250,7 @@ deps_jet_hash: fn(cmdline: String) -> Bool Never! {
     parts := cmdline.partition(marker)
     loop parts.sep != "" {
         if parts.tail.len() > 0 {
-            code: Int.from_u8(parts.tail.bytes()[0])
+            code: Int{parts.tail.bytes()[0]}
             if (code >= 48 && code <= 57) || (code >= 97 && code <= 102) -> return true
         }
         parts = parts.tail.partition(marker)

@@ -295,7 +295,7 @@ pkg_ada_gnat_runtime_dir: fn() -[FS, Env, Exec, Time.Wait]> String ForeignBindEr
 
 pkg_ada_run: fn(argv: [String], cwd: String?, tool: String) ForeignBindError! -[Exec, Time.Wait]> {
     output: pkg_ada_capture(argv, cwd, tool)
-    if Int.from_u8(output[0]) == 0 -> return
+    if (Int{output[0]}) == 0 -> return
     return Err(ForeignBindError.ToolFailed{tool: tool, action: ADA_TOOL_ACTION, detail: pkg_ada_launder(output[1..<output.len()])})
 }
 
@@ -340,7 +340,7 @@ pkg_ada_statements: fn(text: String) -> [String] Never! {
     start := 0
     depth := 0
     loop index in 0..<raw.len() {
-        code: Int.from_u8(raw[index])
+        code: Int{raw[index]}
         if code == {
             40 -> depth += 1
             41 -> depth -= 1
@@ -362,7 +362,7 @@ pkg_ada_matching_close: fn(text: String, open: Int) -> Int Never! {
     raw: text.bytes()
     depth := 0
     loop index in open..<raw.len() {
-        code: Int.from_u8(raw[index])
+        code: Int{raw[index]}
         if code == 40 -> depth += 1
         if code == 41 {
             depth -= 1

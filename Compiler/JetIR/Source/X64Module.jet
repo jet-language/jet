@@ -94,7 +94,7 @@ ir_x64_add_text: fn(tables: &IRX64Tables, text: String) -> Int Never! {
 ir_x64_static_int: fn(tables: &IRX64Tables, text: String) Never! {
     if tables.ints.get(text) != None -> return
     bytes := [Int]{}
-    loop byte in text.bytes() -> bytes.push(Int.from_u8(byte))
+    loop byte in text.bytes() -> bytes.push(Int{byte})
     negative: bytes.len() > 0 && bytes[0] == 45
     first: if negative -> 1 else -> 0
     digits: bytes.len() - first
@@ -106,10 +106,10 @@ ir_x64_static_int: fn(tables: &IRX64Tables, text: String) Never! {
     if digits == 19 {
         bound: (if negative -> "4611686018427387904" else -> "4611686018427387903").bytes()
         at := 0
-        loop at < 19 && bytes[first + at] == Int.from_u8(bound[at]) {
+        loop at < 19 && bytes[first + at] == (Int{bound[at]}) {
             at += 1
         }
-        if at == 19 || bytes[first + at] < Int.from_u8(bound[at]) -> return
+        if at == 19 || bytes[first + at] < (Int{bound[at]}) -> return
     }
     limbs := [U8]{}
     count := 0

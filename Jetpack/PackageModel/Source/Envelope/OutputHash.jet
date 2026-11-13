@@ -420,7 +420,7 @@ pkg_validate_nix_store_symlink_target: fn(target: String) EnvelopeError! {
     bytes: target.bytes()
     has_control := false
     loop byte in bytes {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if code < 32 || code == 127 -> has_control = true
     }
     if bytes.len() == 0 || target.contains("//") || bytes.contains(U8{92}) || has_control {

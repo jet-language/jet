@@ -432,11 +432,11 @@ trim_json: fn(text: String) -> String Never! {
     start := 0
     end := raw.len()
     loop start < end {
-        n: Int.from_u8(raw[start])
+        n: Int{raw[start]}
         if n == 32 || n == 9 || n == 10 || n == 13 -> start = start + 1 else -> break
     }
     loop end > start {
-        n: Int.from_u8(raw[end - 1])
+        n: Int{raw[end - 1]}
         if n == 32 || n == 9 || n == 10 || n == 13 -> end = end - 1 else -> break
     }
     slice_text(text, start, end)
@@ -476,7 +476,7 @@ valid_router_name: fn(name: String) -> Bool Never! {
     raw := name.bytes()
     if raw.len() == 0 || raw.len() > 128 -> return false
     loop i in 0..<raw.len() {
-        b: Int.from_u8(raw[i])
+        b: Int{raw[i]}
         if i == 0 && !((b >= 65 && b <= 90) || (b >= 97 && b <= 122) || b == 95) -> return false
         if !((b >= 65 && b <= 90) || (b >= 97 && b <= 122) || (b >= 48 && b <= 57) || b == 95 || b == 45) -> return false
     }
@@ -491,7 +491,7 @@ contains_text: fn(items: [String], value: String) -> Bool Never! {
 }
 has_control_text: fn(text: String) -> Bool Never! {
     loop b in text.bytes() {
-        n: Int.from_u8(b)
+        n: Int{b}
         if n < 32 || n == 127 -> return true
     }
     false
@@ -557,7 +557,7 @@ percent_decode: fn(text: String, plus_as_space: Bool) -> String? {
 }
 
 hex_value: fn(b: U8) -> Int Never! {
-    n: Int.from_u8(b)
+    n: Int{b}
     if n >= 48 && n <= 57 -> return n - 48
     if n >= 65 && n <= 70 -> return n - 55
     if n >= 97 && n <= 102 -> return n - 87
@@ -670,7 +670,7 @@ map_has: fn(m: [String:String], key: String) -> Bool Never! {
 percent_encode: fn(text: String) -> String Never! {
     out := ""
     loop b in text.bytes() {
-        n: Int.from_u8(b)
+        n: Int{b}
         if (n >= 48 && n <= 57) || (n >= 65 && n <= 90) || (n >= 97 && n <= 122) || n == 45 || n == 46 || n == 95 || n == 126 {
             ch := String.from_bytes([U8]{b}) ?? ""
             out = "{out}{ch}"

@@ -197,7 +197,7 @@ env_shell_validate_projection_path: fn(logical: String) EnvironmentError! {
         return Err(EnvironmentError.InvalidData("invalid canonical Nix output path `{logical}`"))
     }
     loop byte in name.bytes() {
-        if Int.from_u8(byte) == {
+        if (Int{byte}) == {
             32 | 9 | 10 | 13 | 92 | 35 -> return Err(EnvironmentError.InvalidData("invalid canonical Nix output path `{logical}`"))
             else -> {}
         }

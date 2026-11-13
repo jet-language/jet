@@ -14083,8 +14083,8 @@ __from_bits_f32: fn(bits: Int) -> F32 Never! { core.math.__from_bits_f32(bits) }
 /// The binary32 bits of `value`, and the F32 whose bits are `word`: one bit
 /// copy each, so NaN payloads, signaling NaNs and the sign of zero cross
 /// unchanged, with no allocation and no failure.
-f32_to_bits: fn(value: F32) -> U32 Never! { U32.from_int(__to_bits_f32(value)) ?? panic("binary32 bits fit a U32") }
-f32_from_bits: fn(word: U32) -> F32 Never! { __from_bits_f32(Int.from_u32(word)) }
+f32_to_bits: fn(value: F32) -> U32 Never! { checked(U32{__to_bits_f32(value)}) ?? panic("binary32 bits fit a U32") }
+f32_from_bits: fn(word: U32) -> F32 Never! { __from_bits_f32(Int{word}) }
 from_bits: fn(bits: Int) -> Float Never! { core.math.from_bits(bits) }
 // The bits of n as an I64, and the Float of `bits`: one bit copy each, as
 // to_bits and from_bits, without the Int those box past +-2^62. The
@@ -16055,7 +16055,7 @@ __unit_ratio_part: fn(text: String) -> Int Never! {
     negative := false
     total := 0
     loop byte in text.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if code == 45 -> negative = true
         else -> total = total * 10 + (code - 48)
     }

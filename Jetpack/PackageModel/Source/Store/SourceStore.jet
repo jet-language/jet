@@ -49,9 +49,9 @@ pkg_source_store_component: fn(value: String) PackageSourceStoreError! {
     // Unicode C0/C1 controls, exactly char::is_control in the reference.
     bytes: value.bytes()
     loop index in 0..<bytes.len() {
-        code: Int.from_u8(bytes[index])
+        code: Int{bytes[index]}
         // C1 controls encode as C2 80..9F in UTF-8.
-        if code < 32 || code == 127 || (code == 194 && index + 1 < bytes.len() && Int.from_u8(bytes[index + 1]) >= 128 && Int.from_u8(bytes[index + 1]) <= 159) -> invalid = true
+        if code < 32 || code == 127 || (code == 194 && index + 1 < bytes.len() && Int{bytes[index + 1]} >= 128 && Int{bytes[index + 1]} <= 159) -> invalid = true
     }
     if invalid -> return Err(PackageSourceStoreError{diagnostic: diagnostic_from_registry("E1299", None,
         "package store path component `{value}` is not allowed",

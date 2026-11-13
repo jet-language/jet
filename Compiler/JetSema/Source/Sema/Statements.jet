@@ -451,7 +451,7 @@ sema_stmt_single_byte_literal: fn(arg: CallArg) -> Int? Never! {
     if sema_registration_cli_without_parens(arg.expr) == .Str(parts, _, _) {
         if parts.len() == 1 && parts[0] == .Lit(text) {
             bytes: text.bytes()
-            if bytes.len() == 1 -> return Val(Int.from_u8(bytes[0]))
+            if bytes.len() == 1 -> return Val(Int{bytes[0]})
         }
     }
     None
@@ -7587,7 +7587,7 @@ sema_stmt_check_projected_assignment: fn(target: LValue, op: BinOp?, op_span: Sp
 sema_stmt_swizzle_member: fn(member: String) -> Bool Never! {
     if member.len() == 0 || member.len() > 4 -> return false
     loop byte in member.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if code != 120 && code != 121 && code != 122 && code != 119 -> return false
     }
     true

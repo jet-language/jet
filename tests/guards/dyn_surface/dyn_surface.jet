@@ -37,7 +37,7 @@ dyn_surface_slice: fn(bytes: [U8], start: Int, end: Int) -> String {
 // A segment of a file path (`Core/Data/Plot.jet`) lexes as an identifier too;
 // an identifier touching `/` names a directory or file, never the type.
 dyn_surface_path_segment: fn(bytes: [U8], start: Int, end: Int) -> Bool {
-    (start > 0 && Int.from_u8(bytes[start - 1]) == 47) || (end < bytes.len() && Int.from_u8(bytes[end]) == 47)
+    (start > 0 && Int{bytes[start - 1]} == 47) || (end < bytes.len() && Int{bytes[end]} == 47)
 }
 
 dyn_surface_collect: fn(bytes: [U8], tables: TokenTables, tokens: [Token], identifier: String, offsets: &[Int]) {
@@ -64,7 +64,7 @@ dyn_surface_line_of: fn(source: String, offset: Int) -> Int {
     bytes: source.bytes()
     line := 1
     loop index in 0..<offset {
-        if Int.from_u8(bytes[index]) == 10 -> line += 1
+        if (Int{bytes[index]}) == 10 -> line += 1
     }
     line
 }
@@ -72,12 +72,12 @@ dyn_surface_line_of: fn(source: String, offset: Int) -> Int {
 dyn_surface_fence: fn(line: String) -> DynSurfaceFence? {
     bytes: line.bytes()
     at := 0
-    loop at < bytes.len() && (Int.from_u8(bytes[at]) == 32 || Int.from_u8(bytes[at]) == 9) -> at += 1
+    loop at < bytes.len() && (Int{bytes[at]} == 32 || Int{bytes[at]} == 9) -> at += 1
     if at == bytes.len() -> return None
-    marker: Int.from_u8(bytes[at])
+    marker: Int{bytes[at]}
     if marker != 96 && marker != 126 -> return None
     end := at
-    loop end < bytes.len() && Int.from_u8(bytes[end]) == marker -> end += 1
+    loop end < bytes.len() && (Int{bytes[end]}) == marker -> end += 1
     if end - at < 3 -> return None
     Val(DynSurfaceFence{marker: marker, width: end - at, rest: dyn_surface_slice(bytes, end, bytes.len())})
 }
@@ -86,22 +86,22 @@ dyn_surface_inline_code_has: fn(line: String, identifier: String) -> Bool {
     bytes: line.bytes()
     at := 0
     loop at < bytes.len() {
-        if Int.from_u8(bytes[at]) != 96 {
+        if (Int{bytes[at]}) != 96 {
             at += 1
             next
         }
         delimiter := 0
-        loop at + delimiter < bytes.len() && Int.from_u8(bytes[at + delimiter]) == 96 -> delimiter += 1
+        loop at + delimiter < bytes.len() && (Int{bytes[at + delimiter]}) == 96 -> delimiter += 1
         content_start: at + delimiter
         close := content_start
         matched := false
         loop close < bytes.len() {
-            if Int.from_u8(bytes[close]) != 96 {
+            if (Int{bytes[close]}) != 96 {
                 close += 1
                 next
             }
             run := 0
-            loop close + run < bytes.len() && Int.from_u8(bytes[close + run]) == 96 -> run += 1
+            loop close + run < bytes.len() && (Int{bytes[close + run]}) == 96 -> run += 1
             if run == delimiter {
                 if dyn_surface_source_offsets(dyn_surface_slice(bytes, content_start, close), identifier).len() > 0 -> return true
                 at = close + run

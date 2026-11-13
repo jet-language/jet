@@ -70,11 +70,11 @@ trim_ascii: fn(text: String) -> String Never! {
     start := 0
     end := raw.len()
     loop start < end {
-        n: Int.from_u8(raw[start])
+        n: Int{raw[start]}
         if n == 32 || n == 9 || n == 10 || n == 13 -> start = start + 1 else -> break
     }
     loop end > start {
-        n: Int.from_u8(raw[end - 1])
+        n: Int{raw[end - 1]}
         if n == 32 || n == 9 || n == 10 || n == 13 -> end = end - 1 else -> break
     }
     if end <= start -> return ""
@@ -84,7 +84,7 @@ trim_ascii: fn(text: String) -> String Never! {
 ascii_lower: fn(text: String) -> String Never! {
     out := [U8]{}
     loop b in text.bytes() {
-        n: Int.from_u8(b)
+        n: Int{b}
         if n >= 65 && n <= 90 -> out.push(U8{n + 32}) else -> out.push(b)
     }
     String.from_bytes(out) ?? ""

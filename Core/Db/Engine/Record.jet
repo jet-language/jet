@@ -28,9 +28,9 @@ serial_len: fn(t: Int) -> Int Never! {
 // A big-endian two's-complement integer of `n` bytes (1..8): ONE_BYTE_INT
 // to FOUR_BYTE_INT and the 6- and 8-byte forms.
 get_signed: fn(buf: [U8], at: Int, n: Int) -> Int Never! {
-    value := Int.from_u8(buf[at])
+    value := Int{buf[at]}
     if value >= 128 -> value -= 256
-    loop i in 1..<n -> value = (value << 8).bit_or(Int.from_u8(buf[at + i]))
+    loop i in 1..<n -> value = (value << 8).bit_or(Int{buf[at + i]})
     value
 }
 
@@ -188,13 +188,13 @@ compare_text: fn(a: [U8], b: [U8], coll: Int) -> Int Never! {
     na := a.len()
     nb := b.len()
     if coll == COLL_RTRIM {
-        loop na > 0 && Int.from_u8(a[na - 1]) == 32 -> na -= 1
-        loop nb > 0 && Int.from_u8(b[nb - 1]) == 32 -> nb -= 1
+        loop na > 0 && (Int{a[na - 1]}) == 32 -> na -= 1
+        loop nb > 0 && (Int{b[nb - 1]}) == 32 -> nb -= 1
     }
     n: if na < nb -> na else -> nb
     loop i in 0..<n {
-        x := Int.from_u8(a[i])
-        y := Int.from_u8(b[i])
+        x := Int{a[i]}
+        y := Int{b[i]}
         if coll == COLL_NOCASE {
             x = lower_byte(x)
             y = lower_byte(y)
@@ -236,8 +236,8 @@ blob_compare: fn(a: Mem, b: Mem) -> Int Never! {
     }
     n: if a.z.len() < b.z.len() -> a.z.len() else -> b.z.len()
     loop k in 0..<n {
-        x: Int.from_u8(a.z[k])
-        y: Int.from_u8(b.z[k])
+        x: Int{a.z[k]}
+        y: Int{b.z[k]}
         if x != y -> return x - y
     }
     a.z.len() - b.z.len()
@@ -357,7 +357,7 @@ unpacked_record_alloc: fn(info: KeyInfo) -> UnpackedRecord Never! {
 // past a corrupt record's end are the page's or the buffer's padding.
 key_byte: fn(buf: [U8], at: Int) -> Int Never! {
     if at < 0 || at >= buf.len() -> return 0
-    Int.from_u8(buf[at])
+    Int{buf[at]}
 }
 
 // getVarint32 at buf[at], reading zero bytes past the end.
@@ -428,7 +428,7 @@ decode_real: fn(buf: [U8], at: Int) -> Float Never! { math.from_bits(key_signed(
 key_memcmp: fn(buf: [U8], at: Int, z: [U8], n: Int) -> Int Never! {
     loop i in 0..<n {
         x: key_byte(buf, at + i)
-        y: Int.from_u8(z[i])
+        y: Int{z[i]}
         if x != y -> return x - y
     }
     0

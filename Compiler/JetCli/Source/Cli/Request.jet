@@ -2469,7 +2469,7 @@ jet_cli_trace_uptime_ms: fn() -> Int Never! {
     // The first three fraction digits, zero-padded: `.67` is 670 ms.
     millis := 0
     loop index in 0..<3 {
-        digit: if point + 1 + index < end -> Int.from_u8(bytes[point + 1 + index]) - 48 else -> 0
+        digit: if point + 1 + index < end -> (Int{bytes[point + 1 + index]}) - 48 else -> 0
         millis = millis * 10 + digit
     }
     seconds * 1000 + millis
@@ -2481,7 +2481,7 @@ jet_cli_trace_number: fn(bytes: [U8], from: Int, to: Int) -> Int Never! {
     if from >= to -> return -1
     value := 0
     loop index in from..<to {
-        code: Int.from_u8(bytes[index])
+        code: Int{bytes[index]}
         if code < 48 || code > 57 -> return -1
         value = value * 10 + code - 48
     }

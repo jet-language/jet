@@ -91,7 +91,7 @@ arrow_surface_row_opener: fn(tokens: [Token], close: Int) -> Int {
 
 // The `@` of `break @name` lexes on its own or as the head of a fact read.
 arrow_surface_at_sign: fn(bytes: [U8], token: Token) -> Bool {
-    token.span.start < bytes.len() && Int.from_u8(bytes[token.span.start]) == 64
+    token.span.start < bytes.len() && Int{bytes[token.span.start]} == 64
 }
 
 arrow_surface_scan: fn(bytes: [U8], tables: TokenTables, raw: [Token], hits: &[ArrowSurfaceHit]) {
@@ -170,7 +170,7 @@ arrow_surface_mention: fn(source: String) -> Bool {
 arrow_surface_line_of: fn(bytes: [U8], offset: Int) -> Int {
     line := 1
     loop index in 0..<offset {
-        if Int.from_u8(bytes[index]) == 10 -> line += 1
+        if (Int{bytes[index]}) == 10 -> line += 1
     }
     line
 }
@@ -189,12 +189,12 @@ arrow_surface_source_lines: fn(source: String) -> [ArrowSurfaceLine] {
 arrow_surface_fence: fn(line: String) -> ArrowSurfaceFence? {
     bytes: line.bytes()
     at := 0
-    loop at < bytes.len() && (Int.from_u8(bytes[at]) == 32 || Int.from_u8(bytes[at]) == 9) -> at += 1
+    loop at < bytes.len() && (Int{bytes[at]} == 32 || Int{bytes[at]} == 9) -> at += 1
     if at == bytes.len() -> return None
-    marker: Int.from_u8(bytes[at])
+    marker: Int{bytes[at]}
     if marker != 96 && marker != 126 -> return None
     end := at
-    loop end < bytes.len() && Int.from_u8(bytes[end]) == marker -> end += 1
+    loop end < bytes.len() && (Int{bytes[end]}) == marker -> end += 1
     if end - at < 3 -> return None
     Val(ArrowSurfaceFence{marker: marker, width: end - at, rest: arrow_surface_slice(bytes, end, bytes.len())})
 }
@@ -211,22 +211,22 @@ arrow_surface_inline_hits: fn(line: String) -> [String] {
     found := [String]{}
     at := 0
     loop at < bytes.len() {
-        if Int.from_u8(bytes[at]) != 96 {
+        if (Int{bytes[at]}) != 96 {
             at += 1
             next
         }
         delimiter := 0
-        loop at + delimiter < bytes.len() && Int.from_u8(bytes[at + delimiter]) == 96 -> delimiter += 1
+        loop at + delimiter < bytes.len() && (Int{bytes[at + delimiter]}) == 96 -> delimiter += 1
         content_start: at + delimiter
         close := content_start
         matched := false
         loop close < bytes.len() {
-            if Int.from_u8(bytes[close]) != 96 {
+            if (Int{bytes[close]}) != 96 {
                 close += 1
                 next
             }
             run := 0
-            loop close + run < bytes.len() && Int.from_u8(bytes[close + run]) == 96 -> run += 1
+            loop close + run < bytes.len() && (Int{bytes[close + run]}) == 96 -> run += 1
             if run == delimiter {
                 code: arrow_surface_slice(bytes, content_start, close)
                 if !arrow_surface_mention(code) {
@@ -305,11 +305,11 @@ arrow_surface_dated: fn(path: String) -> Bool {
     loop at + stamp.len() <= name.len() {
         matched := true
         loop offset in 0..<stamp.len() {
-            byte: Int.from_u8(name[at + offset])
-            if Int.from_u8(stamp[offset]) == 48 {
+            byte: Int{name[at + offset]}
+            if (Int{stamp[offset]}) == 48 {
                 if byte < 48 || byte > 57 -> matched = false
             } else {
-                if byte != Int.from_u8(stamp[offset]) -> matched = false
+                if byte != (Int{stamp[offset]}) -> matched = false
             }
         }
         if matched -> return true

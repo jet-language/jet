@@ -42,13 +42,13 @@ image_test_build: fn(spec: OCIBuildSpec, prefix: String) -> OCIBuiltImage {
     // counts as ASCII spaces, and the sum must equal the encoded octal value.
     encoded := 0
     loop index in 148..<154 {
-        code: Int.from_u8(header[index])
+        code: Int{header[index]}
         if code == 0 || code == 32 -> break
         encoded = encoded * 8 + (code - 48)
     }
     recomputed := 0
     loop index in 0..<512 {
-        recomputed += if index >= 148 && index < 156 -> 32 else -> Int.from_u8(header[index])
+        recomputed += if index >= 148 && index < 156 -> 32 else -> (Int{header[index]})
     }
     assert_eq(encoded, recomputed)
 }

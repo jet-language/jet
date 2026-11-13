@@ -517,7 +517,7 @@ evidence_record_from_test_codes: fn(kind_code: Int, state: Int, name: String, me
     kind: evidence_kind_from_code(kind_code) ?? return Err(evidence_codec_error("unknown evidence kind {kind_code}"))
     outcome: if kind == EvidenceKind.Property && state == 0 -> EvidenceOutcome.Generated else -> evidence_outcome_from_test_state(state) ?? return Err(evidence_codec_error("unknown evidence state {state}"))
     source: EvidenceSource{path: file, line: if kind == EvidenceKind.Property -> U32{0} else -> line, column: U32{1}}
-    count: if kind == EvidenceKind.Property -> U64{Int.from_u32(line)} else -> U64{1}
+    count: if kind == EvidenceKind.Property -> (U64{Int{line}}) else -> (U64{1})
     identity: evidence_identity_for_record(report_id, if name == "" -> "<anonymous>" else -> name, EvidenceProducerKind.Test, kind, source, count, message)
     record := evidence_record_new(identity, kind, EvidenceProducerKind.Test, outcome, count, source, build, revision)
     record.detail = message

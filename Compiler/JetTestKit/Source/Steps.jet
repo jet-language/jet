@@ -1281,7 +1281,7 @@ kit_steps_manifest_tokens: fn(text: String) -> [String] {
     tokens := [String]{}
     i := 0
     loop i < bytes.len() {
-        c: Int.from_u8(bytes[i])
+        c: Int{bytes[i]}
         if c == 47 && i + 1 < bytes.len() && bytes[i + 1] == (U8{47}) {
             loop i < bytes.len() && bytes[i] != (U8{10}) {
                 i += 1
@@ -1304,7 +1304,7 @@ kit_steps_manifest_tokens: fn(text: String) -> [String] {
             tokens.push(kit_steps_byte_slice(text, start, i))
             next
         }
-        loop i < bytes.len() && kit_steps_manifest_word_byte(Int.from_u8(bytes[i])) {
+        loop i < bytes.len() && kit_steps_manifest_word_byte(Int{bytes[i]}) {
             i += 1
         }
         if i == start {

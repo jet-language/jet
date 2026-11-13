@@ -15,7 +15,7 @@ kit_steps_transform_parts: fn(text: String) -> [String]? {
     quote := 0
     escaped := false
     loop (index, byte) in text.bytes() {
-        c: Int.from_u8(byte)
+        c: Int{byte}
         if quote != 0 {
             if escaped -> escaped = false
             else if c == 92 -> escaped = true
@@ -101,7 +101,7 @@ kit_steps_strip_ansi: fn(text: String) -> String {
             if cursor < bytes.len() && bytes[cursor] == (U8{91}) {
                 cursor += 1
                 loop cursor < bytes.len() {
-                    c: Int.from_u8(bytes[cursor])
+                    c: Int{bytes[cursor]}
                     cursor += 1
                     if (c >= 65 && c <= 90) || (c >= 97 && c <= 122) -> break
                 }

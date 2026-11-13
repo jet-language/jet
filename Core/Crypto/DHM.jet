@@ -112,7 +112,7 @@ dhm_get_value: fn(ctx: DHMContext, param: DHMParam) -> bn.Mpi Never! {
 // One ServerKeyExchange number: a 2-byte big-endian length and its bytes.
 read_bignum: fn(data: [U8], p: &Int, end: Int) -> bn.Mpi DHMError! {
     if end - p < 2 -> return Err(.BadInput)
-    n: (Int.from_u8(data[p]) << 8).bit_or(Int.from_u8(data[p + 1]))
+    n: (Int{data[p]} << 8).bit_or(Int{data[p + 1]})
     p += 2
     if end - p < n -> return Err(.BadInput)
     x: bn.read_binary(cipher.bytes_of(data, p, n)) ?? return Err(.ReadParamsFailed(err))

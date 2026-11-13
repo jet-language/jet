@@ -21,7 +21,7 @@ pkg_top_level_commas: fn(body: String) -> [String] Never! {
     quoted := false
     escaped := false
     loop index in 0..<raw.len() {
-        code: Int.from_u8(raw[index])
+        code: Int{raw[index]}
         if quoted {
             if {
                 escaped -> escaped = false
@@ -89,7 +89,7 @@ pkg_trim_start_matches: fn(text: String, pattern: String) -> String Never! {
 pkg_text_find_byte: fn(text: String, code: Int) -> Int? Never! {
     raw: text.bytes()
     loop index in 0..<raw.len() {
-        if Int.from_u8(raw[index]) == code -> return Val(index)
+        if (Int{raw[index]}) == code -> return Val(index)
     }
     None
 }
@@ -99,7 +99,7 @@ pkg_text_rfind_byte: fn(text: String, code: Int) -> Int? Never! {
     raw: text.bytes()
     index := raw.len() - 1
     loop index >= 0 {
-        if Int.from_u8(raw[index]) == code -> return Val(index)
+        if (Int{raw[index]}) == code -> return Val(index)
         index -= 1
     }
     None
@@ -134,7 +134,7 @@ pkg_comment_spans: fn(value: String) -> [EditSpan] Never! {
     escaped := false
     index := 0
     loop index < raw.len() {
-        code: Int.from_u8(raw[index])
+        code: Int{raw[index]}
         if quoted {
             if {
                 escaped -> escaped = false
@@ -152,7 +152,7 @@ pkg_comment_spans: fn(value: String) -> [EditSpan] Never! {
         }
         if code == 47 && pkg_bytes_code(raw, index + 1) == 47 {
             start: index
-            loop index < raw.len() && Int.from_u8(raw[index]) != 10 -> index += 1
+            loop index < raw.len() && (Int{raw[index]}) != 10 -> index += 1
             spans.push(EditSpan{start: start, end: index})
             next
         }
@@ -213,7 +213,7 @@ pkg_split_field: fn(value: String) -> ManifestEntry? Never! {
     quoted := false
     escaped := false
     loop index in 0..<raw.len() {
-        code: Int.from_u8(raw[index])
+        code: Int{raw[index]}
         if quoted {
             if {
                 escaped -> escaped = false
@@ -250,7 +250,7 @@ pkg_split_package_binding: fn(entry: String) -> ManifestBinding? Never! {
     escaped := false
     index := 0
     loop index < raw.len() {
-        code: Int.from_u8(raw[index])
+        code: Int{raw[index]}
         if quoted {
             if {
                 escaped -> escaped = false
@@ -293,7 +293,7 @@ pkg_top_level_entry_spans: fn(value: String) -> [EditSpan] Never! {
     escaped := false
     index := 0
     loop index < raw.len() {
-        code: Int.from_u8(raw[index])
+        code: Int{raw[index]}
         if quoted {
             if {
                 escaped -> escaped = false
@@ -345,7 +345,7 @@ pkg_implicit_field_start: fn(raw: [U8], index: Int, current: String) -> Bool Nev
     if pkg_split_field(current) == None -> return false
     trimmed: current.trim_end().bytes()
     if trimmed.len() == 0 -> return false
-    last: Int.from_u8(trimmed[trimmed.len() - 1])
+    last: Int{trimmed[trimmed.len() - 1]}
     if !((pkg_bytes_is_word(last) && last != 95) || last == 125 || last == 93 || last == 41 || last == 34) -> return false
     cursor := pkg_bytes_skip_space(raw, index)
     first: pkg_bytes_code(raw, cursor)
@@ -365,7 +365,7 @@ pkg_top_level_lines_or_commas: fn(body: String) -> [String] Never! {
     quoted := false
     escaped := false
     loop index in 0..<raw.len() {
-        code: Int.from_u8(raw[index])
+        code: Int{raw[index]}
         if quoted {
             if {
                 escaped -> escaped = false
@@ -434,10 +434,10 @@ pkg_parse_string_list: fn(value: String) -> [String]? Never! {
 pkg_is_ascii_identifier: fn(value: String) -> Bool Never! {
     raw: value.bytes()
     if raw.len() == 0 -> return false
-    first: Int.from_u8(raw[0])
+    first: Int{raw[0]}
     if !((first >= 65 && first <= 90) || (first >= 97 && first <= 122) || first == 95) -> return false
     loop index in 1..<raw.len() {
-        if !pkg_bytes_is_word(Int.from_u8(raw[index])) -> return false
+        if !pkg_bytes_is_word(Int{raw[index]}) -> return false
     }
     true
 }

@@ -196,7 +196,7 @@ sema_registration_unit_type_name: fn(name: String) -> String Never! {
             next
         }
         if {
-            piece_start && byte >= (U8{97}) && byte <= (U8{122}) -> output.push(U8{Int.from_u8(byte) - 32})
+            piece_start && byte >= (U8{97}) && byte <= (U8{122}) -> output.push(U8{Int{byte} - 32})
             else -> output.push(byte)
         }
         piece_start = false
@@ -3478,7 +3478,7 @@ sema_registration_cli_short_name: fn(field: Field, seen: &[String:String], diagn
     bytes: short.bytes()
     letter := false
     if bytes.len() == 1 {
-        code: Int.from_u8(bytes[0])
+        code: Int{bytes[0]}
         letter = (code >= 65 && code <= 90) || (code >= 97 && code <= 122)
     }
     if !letter {
@@ -4906,7 +4906,7 @@ sema_source_wanted_words: fn(bytes: [U8], wanted: NameTable, seen: &[String:Bool
             cursor += 1
         }
         name: name_find_bytes(wanted, bytes, word_start, cursor) ?? next
-        id: Int.from_u32(name.id)
+        id: Int{name.id}
         if met[id] -> next
         met[id] = true
         // The table interned this spelling from a String, so it is its text.
@@ -4918,7 +4918,7 @@ sema_source_wanted_words: fn(bytes: [U8], wanted: NameTable, seen: &[String:Bool
 }
 
 sema_source_word_byte: fn(byte: U8) -> Bool Never! {
-    n: Int.from_u8(byte)
+    n: Int{byte}
     n >= 128 || n == 95 || (n >= 48 && n <= 57) || (n >= 65 && n <= 90) || (n >= 97 && n <= 122)
 }
 

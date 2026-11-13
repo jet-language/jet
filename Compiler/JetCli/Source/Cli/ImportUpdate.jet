@@ -71,7 +71,7 @@ jet_cli_import_validate_import_binding: fn(record: EvidenceRecord, boundary: For
 // `EvidenceReport::read`.
 jet_cli_import_read_evidence: fn(path: String) -[FS.Read]> EvidenceReport JetCLIImportPlanError! {
     bytes: import_update_files.read_bytes(path) ?? return Err(jet_cli_import_update_error(jet_cli_io_error_text(err)))
-    evidence_report_from_bytes(bytes, U64.from_int(9223372036854775807) ?? U64{0}) ?? return Err(jet_cli_import_update_error(err.message))
+    evidence_report_from_bytes(bytes, U64{9223372036854775807}) ?? return Err(jet_cli_import_update_error(err.message))
 }
 
 JetCLIImportIndexedEvidence: struct { record: EvidenceRecord, derivation: DerivationRecord }

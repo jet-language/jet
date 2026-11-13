@@ -453,7 +453,7 @@ trap_native_index_range_root: fn() {
 // This ABI-preserving index seam is permitted until the L4a numeric cutover;
 // no Int arithmetic or asm reinterpretation occurs here.
 #Export(c) jet_rt_panic_list_bounds: fn(len: I64, index: Int) {
-    native: I64.from_int(index) ?? {
+    native: checked(I64{index}) ?? {
         trap_native_index_range_stop()
         if (jet_scheduler_native_propagate() != I64{0}) -> return
         return
@@ -816,8 +816,8 @@ trap_debug_escaped: fn(code: I64) -> Bool Never! {
     loop low < high {
         // Both bounds are nonnegative interval-table indices.
         middle: low + (high - low) /% I64{2}
-        first: ranges[Int.from_i64(middle * I64{2})]
-        last: ranges[Int.from_i64(middle * I64{2} + I64{1})]
+        first: ranges[Int{middle * I64{2}}]
+        last: ranges[Int{middle * I64{2} + I64{1}}]
         if {
             code < first -> high = middle
             code > last -> low = middle + I64{1}

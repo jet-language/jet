@@ -244,7 +244,7 @@ provider_cran_has_dependency: fn(dependencies: [CranDependency], name: String) -
 provider_cran_valid_component: fn(value: String) -> Bool Never! {
     if value == "" || value == "." || value == ".." -> return false
     loop byte in value.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if !provider_registry_is_ascii_alnum(code) && code != 46 && code != 45 -> return false
     }
     true

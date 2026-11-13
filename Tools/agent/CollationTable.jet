@@ -42,7 +42,7 @@ hex_value: fn(text: String) -> Int TableError! {
     if text.len() == 0 -> return Err(fail("empty hex field"))
     value := 0
     loop byte in text.bytes() {
-        digit: Int.from_u8(byte)
+        digit: Int{byte}
         is_decimal: digit >= 48 && digit <= 57
         if !is_decimal && (digit < 65 || digit > 70) -> return Err(fail("bad hex field '{text}'"))
         value = value * 16 + digit - (if is_decimal -> 48 else -> 55)
@@ -198,7 +198,7 @@ byte_literal: fn(bytes: [U8]) -> String {
     digits: HEX_DIGITS.bytes()
     out := [U8]{}
     loop byte in bytes {
-        value: Int.from_u8(byte)
+        value: Int{byte}
         out.push(U8{92})
         out.push(U8{120})
         out.push(digits[value >> 4])

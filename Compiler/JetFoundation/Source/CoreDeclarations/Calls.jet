@@ -35,7 +35,7 @@ core_decl_call_end: fn(source: String, open: Int, context: String) -> Int CoreDe
     quoted := false
     escaped := false
     loop index in open..<bytes.len() {
-        code: Int.from_u8(bytes[index])
+        code: Int{bytes[index]}
         if quoted {
             if {
                 escaped -> escaped = false
@@ -76,8 +76,8 @@ core_decl_split_top_level: fn(source: String, context: String) -> [String] CoreD
             skip = false
             next
         }
-        code: Int.from_u8(bytes[index])
-        following: if index + 1 < bytes.len() -> Int.from_u8(bytes[index + 1]) else -> -1
+        code: Int{bytes[index]}
+        following: if index + 1 < bytes.len() -> (Int{bytes[index + 1]}) else -> -1
         if line_comment {
             if code == 10 -> line_comment = false
             next
@@ -137,13 +137,13 @@ core_decl_read_call: fn(source: String, start: Int, context: String) -> CoreDecl
     bytes: source.bytes()
     end := core_decl_name_end(bytes, start)
     if end == start -> return Err(core_decl_fail("unsupported Rust call in {context}: {source.trim()}"))
-    loop end + 2 < bytes.len() && Int.from_u8(bytes[end]) == 58 && Int.from_u8(bytes[end + 1]) == 58 {
+    loop end + 2 < bytes.len() && (Int{bytes[end]}) == 58 && (Int{bytes[end + 1]}) == 58 {
         segment_end: core_decl_name_end(bytes, end + 2)
         if segment_end == end + 2 -> break
         end = segment_end
     }
     open: core_decl_skip_space(bytes, end)
-    if open >= bytes.len() || Int.from_u8(bytes[open]) != 40 -> return Err(core_decl_fail("unsupported Rust call in {context}: {source.trim()}"))
+    if open >= bytes.len() || (Int{bytes[open]}) != 40 -> return Err(core_decl_fail("unsupported Rust call in {context}: {source.trim()}"))
     close: core_decl_call_end(source, open, context) ?? return Err(err)
     args: core_decl_split_top_level(core_decl_slice(source, open + 1, close), context) ?? return Err(err)
     Ok(CoreDeclRustCall{name: core_decl_slice(source, start, end), args: args, end: close + 1})
@@ -176,7 +176,7 @@ core_decl_hex_number: fn(text: String) -> Int Never! {
     if text == "" -> return -1
     value := 0
     loop byte in text.bytes() {
-        digit: core_decl_hex_value(Int.from_u8(byte))
+        digit: core_decl_hex_value(Int{byte})
         if digit < 0 || value > 1114111 -> return -1
         value = value * 16 + digit
     }
@@ -197,14 +197,14 @@ core_decl_rust_string_text: fn(content: String, context: String) -> String CoreD
     out := [U8]{}
     index := 0
     loop index < bytes.len() {
-        code: Int.from_u8(bytes[index])
+        code: Int{bytes[index]}
         index += 1
         if code != 92 {
             out.push(bytes[index - 1])
             next
         }
         if index >= bytes.len() -> return Err(core_decl_fail("unterminated Rust string escape in {context}"))
-        escape: Int.from_u8(bytes[index])
+        escape: Int{bytes[index]}
         index += 1
         simple: if escape == {
             110 -> 10
@@ -228,7 +228,7 @@ core_decl_rust_string_text: fn(content: String, context: String) -> String CoreD
             index += 2
             next
         }
-        if escape != 117 || index >= bytes.len() || Int.from_u8(bytes[index]) != 123 -> return Err(core_decl_fail("unsupported Rust string escape `\\{core_decl_slice(content, index - 1, index)}` in {context}"))
+        if escape != 117 || index >= bytes.len() || (Int{bytes[index]}) != 123 -> return Err(core_decl_fail("unsupported Rust string escape `\\{core_decl_slice(content, index - 1, index)}` in {context}"))
         close: core_decl_tail(content, index + 1).find("}}")
         if close < 0 -> return Err(core_decl_fail("unterminated Rust Unicode escape in {context}"))
         value: core_decl_hex_number(core_decl_slice(content, index + 1, index + 1 + close).replace("_", ""))
@@ -243,7 +243,7 @@ core_decl_rust_string_text: fn(content: String, context: String) -> String CoreD
 // The content of `value` when the whole of it is one `"…"` literal.
 core_decl_quoted: fn(value: String) -> String? Never! {
     bytes: value.bytes()
-    if bytes.len() < 2 || Int.from_u8(bytes[0]) != 34 -> return None
+    if bytes.len() < 2 || (Int{bytes[0]}) != 34 -> return None
     if core_decl_quote_end(bytes, 0) != bytes.len() - 1 -> return None
     Val(core_decl_slice(value, 1, bytes.len() - 1))
 }
@@ -795,7 +795,7 @@ core_decl_call_record: fn(expression: String, context: String, constants: [Strin
     loop position < bytes.len() {
         position = core_decl_skip_space(bytes, position)
         if position >= bytes.len() -> break
-        if Int.from_u8(bytes[position]) != 46 -> return Err(core_decl_fail("unsupported CoreCallRecord expression in {context}: {value}"))
+        if (Int{bytes[position]}) != 46 -> return Err(core_decl_fail("unsupported CoreCallRecord expression in {context}: {value}"))
         builder: core_decl_read_call(value, position + 1, context) ?? return Err(err)
         record = core_decl_apply_builder(record, builder, context, constants) ?? return Err(err)
         position = builder.end

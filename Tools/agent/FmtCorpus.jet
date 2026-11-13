@@ -459,14 +459,14 @@ is_blank: fn(code: Int) -> Bool Never! { code == 32 || code == 9 || code == 10 |
 // Where the run of digits in `bytes` from `start` ends.
 digits_end: fn(bytes: [U8], start: Int) -> Int Never! {
     end := start
-    loop end < bytes.len() && is_digit(Int.from_u8(bytes[end])) -> end += 1
+    loop end < bytes.len() && is_digit(Int{bytes[end]}) -> end += 1
     end
 }
 
 // The number the digits of `bytes` from `start` to `end` spell.
 number_at: fn(bytes: [U8], start: Int, end: Int) -> Int Never! {
     value := 0
-    loop at in start..<end -> value = value * 10 + Int.from_u8(bytes[at]) - 48
+    loop at in start..<end -> value = value * 10 + (Int{bytes[at]}) - 48
     value
 }
 
@@ -487,16 +487,16 @@ pin_spots: fn(text: String) -> [PinSpot] Never! {
     at := 0
     loop at < bytes.len() {
         line_start: at + marker.len()
-        if !holds_at(bytes, at, marker) || line_start >= bytes.len() || !is_digit(Int.from_u8(bytes[line_start])) {
+        if !holds_at(bytes, at, marker) || line_start >= bytes.len() || !is_digit(Int{bytes[line_start]}) {
             at += 1
             next
         }
         start := at
-        loop start > 0 && is_name_byte(Int.from_u8(bytes[start - 1])) -> start -= 1
+        loop start > 0 && is_name_byte(Int{bytes[start - 1]}) -> start -= 1
         line_end: digits_end(bytes, line_start)
         column_start := line_end
         column_end := line_end
-        if line_end + 1 < bytes.len() && Int.from_u8(bytes[line_end]) == 58 && is_digit(Int.from_u8(bytes[line_end + 1])) {
+        if line_end + 1 < bytes.len() && (Int{bytes[line_end]}) == 58 && is_digit(Int{bytes[line_end + 1]}) {
             column_start = line_end + 1
             column_end = digits_end(bytes, column_start)
         }
@@ -551,7 +551,7 @@ pin_targets: fn(name: String, scopes: [String], known: [String:Bool]) -> [String
 ink: fn(bytes: [U8]) -> [U8] Never! {
     out := [U8]{}
     loop byte in bytes {
-        if !is_blank(Int.from_u8(byte)) -> out.push(byte)
+        if !is_blank(Int{byte}) -> out.push(byte)
     }
     out
 }
@@ -624,7 +624,7 @@ ink_before: fn(bytes: [U8], at: Position) -> Int Never! {
     column := 1
     count := 0
     loop byte in bytes {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         lead: code < 128 || code >= 192
         if lead && (line > at.line || (line == at.line && column >= at.column)) -> return count
         if code == 10 {
@@ -644,7 +644,7 @@ ink_position: fn(bytes: [U8], index: Int) -> Position? Never! {
     column := 1
     count := 0
     loop byte in bytes {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if code == 10 {
             line += 1
             column = 1

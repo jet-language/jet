@@ -130,7 +130,7 @@ jet_cli_record_integer: fn(value: JetCLIStatusValue, field: String) -> Int JetCL
 
 jet_cli_record_unsigned: fn(value: JetCLIStatusValue, field: String) -> U64 JetCLIReadError! {
     number: jet_cli_record_integer(value, field)
-    Ok(U64.from_int(number) ?? return Err(jet_cli_read_error("record index field `{field}` must be non-negative")))
+    Ok(checked(U64{number}) ?? return Err(jet_cli_read_error("record index field `{field}` must be non-negative")))
 }
 
 jet_cli_record_boolean: fn(value: JetCLIStatusValue, field: String) -> Bool JetCLIReadError! {

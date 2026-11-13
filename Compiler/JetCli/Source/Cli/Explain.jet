@@ -43,14 +43,14 @@ jet_cli_is_diagnostic_type_path: fn(value: String) -> Bool Never! {
     loop (index, part) in parts {
         bytes: part.bytes()
         if bytes.len() == 0 -> return false
-        first: Int.from_u8(bytes[0])
+        first: Int{bytes[0]}
         if index == parts.len() - 1 {
             if first < 65 || first > 90 -> return false
         } else if first < 97 || first > 122 {
             return false
         }
         loop byte in bytes {
-            code: Int.from_u8(byte)
+            code: Int{byte}
             word: (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 95
             if !word -> return false
         }

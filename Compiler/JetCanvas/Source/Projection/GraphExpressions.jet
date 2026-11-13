@@ -33,7 +33,7 @@ expr_source_end: fn(expr: Expr) -> Int {
 binding_source_span: fn(src: String, binding: Binding) -> Span {
     bytes: src.bytes()
     init_end := expr_source_end(binding.init)
-    loop init_end < bytes.len() && is_space_byte(Int.from_u8(bytes[init_end])) -> init_end += 1
+    loop init_end < bytes.len() && is_space_byte(Int{bytes[init_end]}) -> init_end += 1
     if init_end < bytes.len() && bytes[init_end] == 40 -> init_end += 1
     init_span: span_through_closing_parens(src, Span{start: expr_span(binding.init).start, end: init_end})
     Span{start: binding.name_span.start, end: init_span.end}
@@ -43,7 +43,7 @@ binding_init_span: fn(src: String, binding: Binding) -> Span {
     end: expr_source_end(binding.init)
     start := if binding.sigil_span == .Val(sigil) -> sigil.end else -> expr_span(binding.init).start
     bytes: src.bytes()
-    loop start < end && start < bytes.len() && is_space_byte(Int.from_u8(bytes[start])) -> start += 1
+    loop start < end && start < bytes.len() && is_space_byte(Int{bytes[start]}) -> start += 1
     Span{start: start, end: end}
 }
 

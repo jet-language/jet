@@ -9,10 +9,10 @@ canonical_json_error: fn(message: String) -> CanonicalJSONError Never! {
 canonical_json_valid_integer: fn(value: String) -> Bool Never! {
     if value == "0" -> return true
     bytes: value.bytes()
-    start: if bytes.len() > 0 && Int.from_u8(bytes[0]) == 45 -> 1 else -> 0
-    if start == bytes.len() || Int.from_u8(bytes[start]) == 48 -> return false
+    start: if bytes.len() > 0 && (Int{bytes[0]}) == 45 -> 1 else -> 0
+    if start == bytes.len() || (Int{bytes[start]}) == 48 -> return false
     loop index in start..<bytes.len() {
-        if Int.from_u8(bytes[index]) < 48 || Int.from_u8(bytes[index]) > 57 -> return false
+        if (Int{bytes[index]}) < 48 || (Int{bytes[index]}) > 57 -> return false
     }
     true
 }
@@ -31,7 +31,7 @@ CanonicalJSONParser: struct {
 
 canonical_json_peek: fn(parser: CanonicalJSONParser) -> Int Never! {
     if parser.at >= parser.bytes.len() -> return -1
-    Int.from_u8(parser.bytes[parser.at])
+    Int{parser.bytes[parser.at]}
 }
 
 canonical_json_take: fn(parser: &CanonicalJSONParser) -> Int Never! {
@@ -42,13 +42,13 @@ canonical_json_take: fn(parser: &CanonicalJSONParser) -> Int Never! {
 
 canonical_json_parse: fn(bytes: [U8]) -> CanonicalJSON CanonicalJSONError! {
     _: String.from_bytes(bytes) ?? return Err(canonical_json_error("canonical JSON is not UTF-8"))
-    if bytes.len() >= 3 && Int.from_u8(bytes[0]) == 239 && Int.from_u8(bytes[1]) == 187 && Int.from_u8(bytes[2]) == 191 {
+    if bytes.len() >= 3 && (Int{bytes[0]}) == 239 && (Int{bytes[1]}) == 187 && (Int{bytes[2]}) == 191 {
         return Err(canonical_json_error("canonical JSON has a BOM"))
     }
     if bytes.len() == 0 {
         return Err(canonical_json_error("canonical JSON must end in exactly one LF"))
     }
-    if Int.from_u8(bytes[bytes.len() - 1]) != 10 || (bytes.len() > 1 && Int.from_u8(bytes[bytes.len() - 2]) == 10) {
+    if (Int{bytes[bytes.len() - 1]}) != 10 || (bytes.len() > 1 && Int{bytes[bytes.len() - 2]} == 10) {
         return Err(canonical_json_error("canonical JSON must end in exactly one LF"))
     }
     parser := CanonicalJSONParser{bytes: bytes.slice(0, bytes.len() - 1), at: 0}
@@ -123,9 +123,9 @@ canonical_json_string: fn(parser: &CanonicalJSONParser) -> String CanonicalJSONE
                 }
                 scalar := 0
                 index := parser.at
-                if Int.from_u8(parser.bytes[index]) == 43 -> index += 1
+                if (Int{parser.bytes[index]}) == 43 -> index += 1
                 loop index < parser.at + 4 {
-                    hex: Int.from_u8(parser.bytes[index])
+                    hex: Int{parser.bytes[index]}
                     digit: if {
                         hex >= 48 && hex <= 57 -> hex - 48
                         hex >= 65 && hex <= 70 -> hex - 55

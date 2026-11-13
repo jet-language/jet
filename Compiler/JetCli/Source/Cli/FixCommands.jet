@@ -151,7 +151,7 @@ jet_cli_fix_starts_value: fn(bytes: [U8], tokens: [Token], previous: Int, start:
     before: tokens[previous]
     if before.kind == TOKEN_COLON || before.kind == TOKEN_COLON_EQ || before.kind == TOKEN_EQ || before.kind == TOKEN_LBRACE || before.kind == TOKEN_RBRACE || before.kind == TOKEN_SEMI -> return true
     loop at in before.span.end..<start {
-        if Int.from_u8(bytes[at]) == 10 -> return true
+        if (Int{bytes[at]}) == 10 -> return true
     }
     false
 }

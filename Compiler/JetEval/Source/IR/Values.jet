@@ -281,21 +281,21 @@ jet_eval_ir_err_data: fn(s: &JetEvalIRState, p: IRProgram, ty: Type, error: Int)
     }
     message: jet_eval_ir_err_text(s, error, ERR_MESSAGE) ?? return None
     code: jet_eval_ir_err_optional_text(s, error, ERR_CODE) ?? return None
-    cause_word: jet_eval_ir_read_word(s, error + Int.from_i64(ERR_CAUSE)) ?? return None
+    cause_word: jet_eval_ir_read_word(s, error + Int{ERR_CAUSE}) ?? return None
     cause: if cause_word == 0 -> TComptimeValue.Failed{report: TComptimeReport.Clean{ty: ty.copy()}} else -> TComptimeValue.Present{value: jet_eval_ir_err_data(s, p, ty, cause_word) ?? return None}
     identity: jet_eval_ir_err_optional_text(s, error, ERR_IDENTITY) ?? return None
-    frames: jet_eval_ir_err_rows(s, error + Int.from_i64(ERR_CONTEXT), Int.from_i64(ERR_CONTEXT_BYTES), "__jet_ErrorContextFrame", [String]{"text", "file"}, Val("line")) ?? return None
-    conversions: jet_eval_ir_err_rows(s, error + Int.from_i64(ERR_CONVERSIONS), Int.from_i64(ERR_CONVERSION_BYTES), "__jet_ErrorConversion", [String]{"source", "target"}, None) ?? return None
-    details_word: jet_eval_ir_read_word(s, error + Int.from_i64(ERR_DETAILS)) ?? return None
+    frames: jet_eval_ir_err_rows(s, error + Int{ERR_CONTEXT}, Int{ERR_CONTEXT_BYTES}, "__jet_ErrorContextFrame", [String]{"text", "file"}, Val("line")) ?? return None
+    conversions: jet_eval_ir_err_rows(s, error + Int{ERR_CONVERSIONS}, Int{ERR_CONVERSION_BYTES}, "__jet_ErrorConversion", [String]{"source", "target"}, None) ?? return None
+    details_word: jet_eval_ir_read_word(s, error + Int{ERR_DETAILS}) ?? return None
     details := TComptimeValue.Failed{report: TComptimeReport.Clean{ty: Type.Named{name: "__jet_ErrorDetails"}}}
     if details_word != 0 {
         variant: jet_eval_ir_err_text(s, details_word, ERR_DETAILS_VARIANT) ?? return None
-        fields: jet_eval_ir_err_rows(s, details_word + Int.from_i64(ERR_DETAILS_FIELDS), Int.from_i64(ERR_FIELD_BYTES), "__jet_ErrorField", [String]{"name", "value"}, None) ?? return None
-        has_span: jet_eval_ir_read_word(s, details_word + Int.from_i64(ERR_DETAILS_HAS_SPAN)) ?? return None
+        fields: jet_eval_ir_err_rows(s, details_word + Int{ERR_DETAILS_FIELDS}, Int{ERR_FIELD_BYTES}, "__jet_ErrorField", [String]{"name", "value"}, None) ?? return None
+        has_span: jet_eval_ir_read_word(s, details_word + Int{ERR_DETAILS_HAS_SPAN}) ?? return None
         source_span := TComptimeValue.Failed{report: TComptimeReport.Clean{ty: Type.Named{name: "__jet_ErrorSpan"}}}
         if has_span != 0 {
-            start: jet_eval_ir_read_word(s, details_word + Int.from_i64(ERR_DETAILS_START)) ?? return None
-            end: jet_eval_ir_read_word(s, details_word + Int.from_i64(ERR_DETAILS_END)) ?? return None
+            start: jet_eval_ir_read_word(s, details_word + Int{ERR_DETAILS_START}) ?? return None
+            end: jet_eval_ir_read_word(s, details_word + Int{ERR_DETAILS_END}) ?? return None
             source_span = TComptimeValue.Present{value: TComptimeValue.Struct{type_name: "__jet_ErrorSpan", fields: [TComptimeField]{
                 {name: "start", value: TComptimeValue.Int{value: start}},
                 {name: "end", value: TComptimeValue.Int{value: end}},
@@ -323,14 +323,14 @@ jet_eval_ir_err_data: fn(s: &JetEvalIRState, p: IRProgram, ty: Type, error: Int)
 
 // The String whose header word is at byte `offset` of `base`.
 jet_eval_ir_err_text: fn(s: &JetEvalIRState, base: Int, offset: I64) -> TComptimeValue? {
-    header: jet_eval_ir_read_word(s, base + Int.from_i64(offset)) ?? return None
+    header: jet_eval_ir_read_word(s, base + Int{offset}) ?? return None
     text: jet_eval_ir_text(s, header) ?? return None
     Val(TComptimeValue.String{value: text})
 }
 
 // The `String?` whose header word (0: none) is at byte `offset` of `base`.
 jet_eval_ir_err_optional_text: fn(s: &JetEvalIRState, base: Int, offset: I64) -> TComptimeValue? {
-    header: jet_eval_ir_read_word(s, base + Int.from_i64(offset)) ?? return None
+    header: jet_eval_ir_read_word(s, base + Int{offset}) ?? return None
     if header == 0 -> return Val(TComptimeValue.Failed{report: TComptimeReport.Clean{ty: Type.String}})
     text: jet_eval_ir_text(s, header) ?? return None
     Val(TComptimeValue.Present{value: TComptimeValue.String{value: text}})
@@ -370,28 +370,28 @@ jet_eval_ir_err_word: fn(s: &JetEvalIRState, p: IRProgram, ty: Type, value: TCom
         return None
     }
     fields: jet_eval_ir_err_record(s, value) ?? return None
-    error: jet_eval_ir_err_zeroed(s, Int.from_i64(ERR_BYTES)) ?? return None
+    error: jet_eval_ir_err_zeroed(s, Int{ERR_BYTES}) ?? return None
     message: jet_eval_ir_err_member(s, fields, "message") ?? return None
-    if !jet_eval_ir_err_put_text(s, error + Int.from_i64(ERR_MESSAGE), message) -> return None
+    if !jet_eval_ir_err_put_text(s, error + Int{ERR_MESSAGE}, message) -> return None
     code: jet_eval_ir_err_member(s, fields, "code") ?? return None
-    if !jet_eval_ir_err_put_optional_text(s, error + Int.from_i64(ERR_CODE), code) -> return None
+    if !jet_eval_ir_err_put_optional_text(s, error + Int{ERR_CODE}, code) -> return None
     cause: jet_eval_ir_err_member(s, fields, "cause") ?? return None
     if cause == .Present(inner) {
         cause_word: jet_eval_ir_err_word(s, p, ty, inner) ?? return None
-        if !jet_eval_ir_write(s, error + Int.from_i64(ERR_CAUSE), 8, cause_word) -> return None
+        if !jet_eval_ir_write(s, error + Int{ERR_CAUSE}, 8, cause_word) -> return None
     }
     metadata_value: jet_eval_ir_err_member(s, fields, "__jet___memo_error_metadata") ?? return None
     metadata: jet_eval_ir_err_record(s, metadata_value) ?? return None
     identity: jet_eval_ir_err_member(s, metadata, "typed_identity") ?? return None
-    if !jet_eval_ir_err_put_optional_text(s, error + Int.from_i64(ERR_IDENTITY), identity) -> return None
+    if !jet_eval_ir_err_put_optional_text(s, error + Int{ERR_IDENTITY}, identity) -> return None
     frames: jet_eval_ir_err_member(s, metadata, "context_frames") ?? return None
-    if !jet_eval_ir_err_put_rows(s, error + Int.from_i64(ERR_CONTEXT), Int.from_i64(ERR_CONTEXT_BYTES), frames, [String]{"text", "file"}, Val("line")) -> return None
+    if !jet_eval_ir_err_put_rows(s, error + Int{ERR_CONTEXT}, Int{ERR_CONTEXT_BYTES}, frames, [String]{"text", "file"}, Val("line")) -> return None
     conversions: jet_eval_ir_err_member(s, metadata, "conversion_history") ?? return None
-    if !jet_eval_ir_err_put_rows(s, error + Int.from_i64(ERR_CONVERSIONS), Int.from_i64(ERR_CONVERSION_BYTES), conversions, [String]{"source", "target"}, None) -> return None
+    if !jet_eval_ir_err_put_rows(s, error + Int{ERR_CONVERSIONS}, Int{ERR_CONVERSION_BYTES}, conversions, [String]{"source", "target"}, None) -> return None
     details: jet_eval_ir_err_member(s, metadata, "details") ?? return None
     if details == .Failed(_) -> return Val(error)
     holder: jet_eval_ir_err_details(s, details) ?? return None
-    if !jet_eval_ir_write(s, error + Int.from_i64(ERR_DETAILS), 8, holder) -> return None
+    if !jet_eval_ir_write(s, error + Int{ERR_DETAILS}, 8, holder) -> return None
     Val(error)
 }
 
@@ -399,18 +399,18 @@ jet_eval_ir_err_word: fn(s: &JetEvalIRState, p: IRProgram, ty: Type, value: TCom
 jet_eval_ir_err_details: fn(s: &JetEvalIRState, value: TComptimeValue) -> Int? {
     record: if value == .Present(inner) -> inner else -> value
     details: jet_eval_ir_err_record(s, record) ?? return None
-    holder: jet_eval_ir_err_zeroed(s, Int.from_i64(ERR_DETAILS_BYTES)) ?? return None
+    holder: jet_eval_ir_err_zeroed(s, Int{ERR_DETAILS_BYTES}) ?? return None
     variant: jet_eval_ir_err_member(s, details, "variant") ?? return None
-    if !jet_eval_ir_err_put_text(s, holder + Int.from_i64(ERR_DETAILS_VARIANT), variant) -> return None
+    if !jet_eval_ir_err_put_text(s, holder + Int{ERR_DETAILS_VARIANT}, variant) -> return None
     rows: jet_eval_ir_err_member(s, details, "fields") ?? return None
-    if !jet_eval_ir_err_put_rows(s, holder + Int.from_i64(ERR_DETAILS_FIELDS), Int.from_i64(ERR_FIELD_BYTES), rows, [String]{"name", "value"}, None) -> return None
+    if !jet_eval_ir_err_put_rows(s, holder + Int{ERR_DETAILS_FIELDS}, Int{ERR_FIELD_BYTES}, rows, [String]{"name", "value"}, None) -> return None
     located: jet_eval_ir_err_member(s, details, "source_span") ?? return None
     if located == .Failed(_) -> return Val(holder)
     bounds_value: if located == .Present(inner) -> inner else -> located
     bounds: jet_eval_ir_err_record(s, bounds_value) ?? return None
     start: jet_eval_ir_err_int(s, bounds, "start") ?? return None
     end: jet_eval_ir_err_int(s, bounds, "end") ?? return None
-    if !jet_eval_ir_write(s, holder + Int.from_i64(ERR_DETAILS_HAS_SPAN), 8, 1) || !jet_eval_ir_write(s, holder + Int.from_i64(ERR_DETAILS_START), 8, start) || !jet_eval_ir_write(s, holder + Int.from_i64(ERR_DETAILS_END), 8, end) -> return None
+    if !jet_eval_ir_write(s, holder + Int{ERR_DETAILS_HAS_SPAN}, 8, 1) || !jet_eval_ir_write(s, holder + Int{ERR_DETAILS_START}, 8, start) || !jet_eval_ir_write(s, holder + Int{ERR_DETAILS_END}, 8, end) -> return None
     Val(holder)
 }
 

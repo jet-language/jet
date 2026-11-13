@@ -53,7 +53,7 @@ build_validate_toolchain: fn(name: String, spec: ToolchainSpec) HermeticBuildErr
 
 build_has_nul: fn(text: String) -> Bool Never! {
     loop byte in text.bytes() {
-        if Int.from_u8(byte) == 0 -> return true
+        if (Int{byte}) == 0 -> return true
     }
     false
 }
@@ -98,7 +98,7 @@ build_valid_header_name: fn(header: String) -> Bool Never! {
     if header == "" -> return false
     loop byte in header.bytes() {
         // NUL, LF, CR, `"`, `<`, `>`.
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if code == 0 || code == 10 || code == 13 || code == 34 || code == 60 || code == 62 -> return false
     }
     if header.starts_with("/") -> return false

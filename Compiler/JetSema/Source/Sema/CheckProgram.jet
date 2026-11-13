@@ -5651,7 +5651,7 @@ sema_check_soft_public_uses: fn(program: SemaProgramTables, module_index: Int, g
         module_identity: graph.modules[module_index].module_identity
         if module_identity.starts_with("<corelib>") -> return
         raw: graph.modules[module_index].source.bytes()
-        codes: loop byte in raw -> Int.from_u8(byte)
+        codes: loop byte in raw -> (Int{byte})
         seen := [Int:Bool]{}
         skipped := 0
         loop (index, reference) in module_result.name_references {
@@ -5793,7 +5793,7 @@ sema_module_value_failed_read: fn(reads: [SemaModuleValueRead], raw: [U8], segme
     if location.origin == SemaSourceOrigin.CompilerGenerated || diagnostic.source_path != Val(location.source_path) || diagnostic.source_offset != Val(location.aggregate_start) -> return None
     loop (index, read) in reads {
         if at.start == read.span.start && at.end == read.span.end -> return Val(index)
-        if at.start == read.span.end + 1 && read.span.end < raw.len() && Int.from_u8(raw[read.span.end]) == 46 -> return Val(index)
+        if at.start == read.span.end + 1 && read.span.end < raw.len() && (Int{raw[read.span.end]}) == 46 -> return Val(index)
     }
     None
 }
@@ -6110,7 +6110,7 @@ sema_name_reference_keys: fn() -> SemaNameReferenceKeys Never! {
 // themselves, so a negative span bound folds onto its positive twin's slot.
 sema_name_reference_hash_mix: fn(hash: U64, part: Int) -> U64 Never! {
     magnitude: if part < 0 -> 0 - part else -> part
-    (hash.bit_xor(U64{magnitude})).wrapping_mul(U64{0x100000001b3})
+    wrapping((hash.bit_xor(U64{magnitude})) * U64{0x100000001b3})
 }
 
 // FNV-1a over the six key parts, as a slot index under `mask`.
@@ -6122,7 +6122,7 @@ sema_name_reference_slot: fn(mask: Int, path: Int, kind: Int, start: Int, end: I
     hash = sema_name_reference_hash_mix(hash, end)
     hash = sema_name_reference_hash_mix(hash, identity)
     hash = sema_name_reference_hash_mix(hash, member)
-    Int.from_u64(hash.bit_and(U64{mask}))
+    Int{hash.bit_and(U64{mask})}
 }
 
 sema_name_reference_keys_grow: fn(keys: &SemaNameReferenceKeys) Never! {

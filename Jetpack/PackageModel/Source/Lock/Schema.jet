@@ -576,7 +576,7 @@ LockFile: struct {
 // non-ASCII byte, NUL, an ASCII control, or a path separator.
 pkg_lock_has_unsafe_path_byte: fn(value: String) -> Bool Never! {
     loop byte in value.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if code >= 128 || code < 32 || code == 127 || code == 47 || code == 92 -> return true
     }
     false
@@ -587,7 +587,7 @@ pkg_lock_is_lower_hex: fn(value: String, digits: Int) -> Bool Never! {
     raw: value.bytes()
     if raw.len() != digits -> return false
     loop byte in raw {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if !((code >= 48 && code <= 57) || (code >= 97 && code <= 102)) -> return false
     }
     true

@@ -719,7 +719,7 @@ build_session_package_dir: fn(package: String) -> String {
 build_session_safe_name: fn(name: String) -> String {
     bytes := [U8]{}
     loop byte in name.bytes() {
-        n: Int.from_u8(byte)
+        n: Int{byte}
         if (n >= 48 && n <= 57) || (n >= 65 && n <= 90) || (n >= 97 && n <= 122) || n == 95 || n == 45 -> bytes.push(byte)
         else if n < 128 || n >= 192 -> bytes.push(U8{95})
     }
@@ -957,7 +957,7 @@ build_session_error_json_text: fn(value: String) -> String Never! {
     bytes := [U8]{U8{34}}
     digits: "0123456789abcdef".bytes()
     loop byte in value.bytes() {
-        number: Int.from_u8(byte)
+        number: Int{byte}
         escaped := ""
         if number == 34 -> escaped = "\\\""
         else if number == 92 -> escaped = "\\\\"

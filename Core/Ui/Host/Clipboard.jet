@@ -18,7 +18,7 @@ write_text: fn(text: String) -[IO]> UIClipboardWrite UIHostError! {
     if !core.ui.host.__clipboard_set(text) -> return Err(UIHostError.HostFailure{service: "Clipboard", message: "the provider could not write the clipboard"})
     characters := 0
     loop byte in text.bytes() {
-        if Int.from_u8(byte).bit_and(192) != 128 -> characters += 1
+        if (Int{byte}).bit_and(192) != 128 -> characters += 1
     }
     Ok(UIClipboardWrite{characters: characters})
 }

@@ -681,7 +681,7 @@ sema_serde_items_ct_expr: fn(value: CtValue, span: Span) -> Expr? Never! {
         .BigInt(decimal) -> Val(Expr.Int{value: 0, span: span, width: None, raw: Val(decimal), id: AST_NODE_GENERATED})
         .Bytes(bytes) -> {
             elements := [Expr]{}
-            loop byte in bytes -> elements.push(Expr.Int{value: Int.from_u8(byte), span: span, width: None, raw: None, id: AST_NODE_GENERATED})
+            loop byte in bytes -> elements.push(Expr.Int{value: Int{byte}, span: span, width: None, raw: None, id: AST_NODE_GENERATED})
             Val(Expr.ListLit{elements: elements, span: span, id: AST_NODE_GENERATED})
         }
         .List(values) -> {

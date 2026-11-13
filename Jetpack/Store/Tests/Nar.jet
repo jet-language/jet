@@ -38,7 +38,7 @@ store_test_nar_root: fn(label: String) -> String Never! {
     parsed.verify(key) ?? panic("verify parsed")
     tampered := signed
     first_digit: tampered.signatures[0].sig_hex.bytes()[0]
-    replacement: if Int.from_u8(first_digit) == 48 -> "1" else -> "0"
+    replacement: if (Int{first_digit}) == 48 -> "1" else -> "0"
     tampered.signatures[0].sig_hex = "{replacement}{pkg_bytes_text(tampered.signatures[0].sig_hex.bytes(), 1, 64)}"
     assert(tampered.verify(key) == .Err(_))
 }

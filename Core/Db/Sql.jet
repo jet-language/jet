@@ -167,7 +167,7 @@ sql_tokens: fn(sql: String) -> [String] Err! {
 unquote: fn(value: String) -> String Never! {
     raw: sql_text.utf8_bytes(value)
     if raw.len() < 2 -> return value.copy()
-    first: Int.from_u8(raw[0])
+    first: Int{raw[0]}
     if (first != 39 && first != 34) || raw[raw.len() - 1] != raw[0] -> return value.copy()
     out := [U8]{}
     at := 1
@@ -368,7 +368,7 @@ __validate_query_fields: fn(query: JetSQLQuery, fields: [String], label: String)
 // Rust sql_aggregate_value:794–889. Numeric nonfinite inputs are skipped even
 // for MIN/MAX; COUNT(column) counts every present non-Null value instead.
 sql_aggregate_value: fn(group: [U64], function: JetSQLAggregate, field: String?, cell: fn(U64, String) -> JetSQLValue?) -> JetSQLValue Never! {
-    if function == .Count && field == None -> return .Int(count_cast(U64.from_int(group.len()) ?? panic("SQL group length")))
+    if function == .Count && field == None -> return .Int(count_cast(checked(U64{group.len()}) ?? panic("SQL group length")))
     count := I64{0}
     integer_sum := sql_fixed.JetFixedWide{high: I64{0}, low: U64{0}}
     float_sum := Float{0.0}
@@ -429,8 +429,8 @@ sql_aggregate_value: fn(group: [U64], function: JetSQLAggregate, field: String?,
 // back to searching a column named with the numeric token.
 sql_output_value: fn(row: JetSQLResultRow, field: String) -> JetSQLValue? Never! {
     if parse_usize(field) == .Val(ordinal) {
-        if ordinal == (U64{0}) || ordinal > (U64.from_int(row.fields.len()) ?? panic("SQL output length")) -> return None
-        return Val(row.fields[Int.from_u64(ordinal - U64{1})].value.copy())
+        if ordinal == (U64{0}) || ordinal > (checked(U64{row.fields.len()}) ?? panic("SQL output length")) -> return None
+        return Val(row.fields[Int{ordinal - U64{1}}].value.copy())
     }
     loop entry in row.fields {
         if entry.field == field -> return Val(entry.value.copy())
@@ -513,7 +513,7 @@ execute_sql_rows: fn(fields: [String], row_count: U64, query: JetSQLQuery, cell:
         })
     }
     if query.limit == .Val(limit) {
-        loop limit < (U64.from_int(projected.len()) ?? panic("SQL result length")) -> _: projected.pop()
+        loop limit < (checked(U64{projected.len()}) ?? panic("SQL result length")) -> _: projected.pop()
     }
     rows := [JetSQLResultRow]{}
     // copy: each result row stays in its `projected` element (an element has no hole to leave); one row per result.
@@ -764,7 +764,7 @@ decimal_magnitude: fn(text: String, signed: Bool, positive_max: U64, negative_ma
     loop at < bytes.len() {
         byte: bytes[at]
         if byte < (U8{48}) || byte > (U8{57}) -> return None
-        digit: U64.from_u8(byte - U8{48})
+        digit: U64{byte - U8{48}}
         if value > quotient || (value == quotient && digit > remainder) -> return None
         value = value * U64{10} + digit
         at += 1
@@ -779,9 +779,9 @@ parse_i64: fn(text: String) -> I64? Never! {
     value: decimal_magnitude(text, true, U64{9223372036854775807}, U64{9223372036854775808}) ?? return None
     if value.negative {
         if value.magnitude == (U64{9223372036854775808}) -> return Val(I64{-9223372036854775807} - I64{1})
-        return Val(-(I64.from_u64(value.magnitude) ?? panic("bounded SQL integer magnitude")))
+        return Val(-(checked(I64{value.magnitude}) ?? panic("bounded SQL integer magnitude")))
     }
-    Val(I64.from_u64(value.magnitude) ?? panic("bounded SQL positive integer"))
+    Val(checked(I64{value.magnitude}) ?? panic("bounded SQL positive integer"))
 }
 parse_float: fn(text: String) -> Float? Never! {
     trimmed := sql_text.trim(text) // #4303: compare view without copying.
@@ -795,8 +795,8 @@ group_field: fn(query: JetSQLQuery, key: JetSQLGroupKey) -> String Err! {
     if key == {
         .Field(field) -> field.copy()
         .Ordinal(ordinal) -> {
-            if ordinal == (U64{0}) || ordinal > (U64.from_int(query.projection.len()) ?? panic("SQL projection length")) -> return Err("SQL GROUP BY ordinal {ordinal} is outside the SELECT list")
-            item: query.projection[Int.from_u64(ordinal - U64{1})] // #4500: retaining loan.
+            if ordinal == (U64{0}) || ordinal > (checked(U64{query.projection.len()}) ?? panic("SQL projection length")) -> return Err("SQL GROUP BY ordinal {ordinal} is outside the SELECT list")
+            item: query.projection[Int{ordinal - U64{1}}] // #4500: retaining loan.
             if item == {
                 .Field(field, _) -> field.copy()
                 .Wildcard -> return Err("SQL GROUP BY ordinal cannot reference a wildcard projection")
@@ -871,8 +871,8 @@ sql_group_key: fn(group: View<U64>, query: JetSQLQuery, key: JetSQLGroupKey, cel
 // Only I64 additions occur; sign extension plus low-word carry changes high
 // by at most one. Every primitive operation is bounded or explicitly wrapping.
 sum_add: fn(sum: sql_fixed.JetFixedWide, value: I64) -> sql_fixed.JetFixedWide Never! {
-    word: if value >= (I64{0}) -> U64.from_i64(value) ?? panic("SQL sum word") else -> U64{0}.wrapping_sub((U64.from_i64(-(value + I64{1})) ?? panic("SQL sum magnitude")) + U64{1})
-    low: sum.low.wrapping_add(word)
+    word: if value >= (I64{0}) -> checked(U64{value}) ?? panic("SQL sum word") else -> wrapping(U64{0} - ((checked(U64{-(value + I64{1})}) ?? panic("SQL sum magnitude")) + U64{1}))
+    low: wrapping(sum.low + word)
     carry: low < sum.low
     high := sum.high
     if value >= (I64{0}) && carry {
@@ -886,17 +886,17 @@ sum_add: fn(sum: sql_fixed.JetFixedWide, value: I64) -> sql_fixed.JetFixedWide N
     sql_fixed.JetFixedWide{high: high, low: low}
 }
 sum_i64: fn(sum: sql_fixed.JetFixedWide) -> I64? Never! {
-    if sum.high == (I64{0}) -> return Val(I64.from_u64(sum.low) ?? return None)
+    if sum.high == (I64{0}) -> return Val(checked(I64{sum.low}) ?? return None)
     if sum.high != (I64{-1}) || sum.low < (U64{9223372036854775808}) -> return None
-    magnitude: I64.from_u64(sum.low - U64{9223372036854775808}) ?? panic("SQL signed sum word")
+    magnitude: checked(I64{sum.low - U64{9223372036854775808}}) ?? panic("SQL signed sum word")
     Val((I64{-9223372036854775807} - I64{1}) + magnitude)
 }
 count_increment: fn(count: I64) -> I64 Never! {
     if count == (I64{9223372036854775807}) -> count else -> count + I64{1}
 }
 count_cast: fn(length: U64) -> I64 Never! {
-    if length < (U64{9223372036854775808}) -> return I64.from_u64(length) ?? panic("SQL row count")
-    (I64{-9223372036854775807} - I64{1}) + (I64.from_u64(length - U64{9223372036854775808}) ?? panic("SQL row count low word"))
+    if length < (U64{9223372036854775808}) -> return checked(I64{length}) ?? panic("SQL row count")
+    (I64{-9223372036854775807} - I64{1}) + (checked(I64{length - U64{9223372036854775808}}) ?? panic("SQL row count low word"))
 }
 // Rust sql_project_group:891–941. Transfer the consumed grouping positions
 // into the result rather than cloning the otherwise dead Rust group Vec.

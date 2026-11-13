@@ -204,7 +204,7 @@ pkg_lua_lex: fn(source: String) -> [LuaToken] ForeignBindError! {
     out := [LuaToken]{}
     index := 0
     loop index < bytes.len() {
-        code: Int.from_u8(bytes[index])
+        code: Int{bytes[index]}
         if code == 32 || code == 9 || code == 10 || code == 12 || code == 13 {
             index += 1
             next
@@ -213,18 +213,18 @@ pkg_lua_lex: fn(source: String) -> [LuaToken] ForeignBindError! {
             index += 2
             if pkg_bytes_code(bytes, index) == 91 && pkg_bytes_code(bytes, index + 1) == 91 {
                 index += 2
-                loop index + 1 < bytes.len() && (Int.from_u8(bytes[index]) != 93 || Int.from_u8(bytes[index + 1]) != 93) -> index += 1
+                loop index + 1 < bytes.len() && (Int{bytes[index]} != 93 || Int{bytes[index + 1]} != 93) -> index += 1
                 if index + 1 >= bytes.len() -> return Err(ForeignBindError.Source("unterminated Lua block comment"))
                 index += 2
             } else {
-                loop index < bytes.len() && Int.from_u8(bytes[index]) != 10 -> index += 1
+                loop index < bytes.len() && (Int{bytes[index]}) != 10 -> index += 1
             }
             next
         }
         if code == 39 || code == 34 {
             index += 1
             loop index < bytes.len() {
-                current: Int.from_u8(bytes[index])
+                current: Int{bytes[index]}
                 if current == 92 {
                     index += 2
                     next
@@ -238,7 +238,7 @@ pkg_lua_lex: fn(source: String) -> [LuaToken] ForeignBindError! {
         }
         if code == 91 && pkg_bytes_code(bytes, index + 1) == 91 {
             index += 2
-            loop index + 1 < bytes.len() && (Int.from_u8(bytes[index]) != 93 || Int.from_u8(bytes[index + 1]) != 93) -> index += 1
+            loop index + 1 < bytes.len() && (Int{bytes[index]} != 93 || Int{bytes[index + 1]} != 93) -> index += 1
             if index + 1 >= bytes.len() -> return Err(ForeignBindError.Source("unterminated Lua long string"))
             index += 2
             next
@@ -246,7 +246,7 @@ pkg_lua_lex: fn(source: String) -> [LuaToken] ForeignBindError! {
         if pkg_binder_is_ascii_alpha(code) || code == 95 {
             start: index
             index += 1
-            loop index < bytes.len() && pkg_bytes_is_word(Int.from_u8(bytes[index])) -> index += 1
+            loop index < bytes.len() && pkg_bytes_is_word(Int{bytes[index]}) -> index += 1
             out.push(LuaToken.Word(pkg_bytes_text(bytes, start, index)))
             next
         }

@@ -83,16 +83,16 @@ cs_line_count: fn(line: String) -> Int Never! {
     count := 0
     at := 0
     loop at < bytes.len() {
-        code: Int.from_u8(bytes[at])
-        if code == 47 && at + 1 < bytes.len() && Int.from_u8(bytes[at + 1]) == 47 -> break
+        code: Int{bytes[at]}
+        if code == 47 && at + 1 < bytes.len() && (Int{bytes[at + 1]}) == 47 -> break
         if code != 34 {
             at += 1
             next
         }
         start: at + 1
         at = start
-        loop at < bytes.len() && Int.from_u8(bytes[at]) != 34 {
-            at += if Int.from_u8(bytes[at]) == 92 -> 2 else -> 1
+        loop at < bytes.len() && (Int{bytes[at]}) != 34 {
+            at += if (Int{bytes[at]}) == 92 -> 2 else -> 1
         }
         end: if at < bytes.len() -> at else -> bytes.len()
         if cs_spells_comment(String.from_bytes(bytes[start..<end]) ?? "") -> count += 1

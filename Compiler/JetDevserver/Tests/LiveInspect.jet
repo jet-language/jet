@@ -13,7 +13,7 @@ use {
 // The runtime's record layout (JetRuntime ObserveLive.jet): little-endian
 // words; a text is its byte length (all ones when absent) and its bytes.
 live_view_u64: fn(out: &[U8], value: U64) Never! {
-    loop index in 0..<8 -> out.push(U8{Int.from_u64((value >> (index * 8)).bit_and(U64{255}))})
+    loop index in 0..<8 -> out.push(U8{Int{(value >> (index * 8)).bit_and(U64{255})}})
 }
 live_view_words: fn(out: &[U8], words: [U64]) Never! {
     loop word in words -> live_view_u64(out, word)

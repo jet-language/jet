@@ -142,7 +142,7 @@ bytes_slice: fn(raw: [U8], start: Int, end: Int) -> [U8] Never! {
 strip_underscores: fn(text: String) -> String Never! {
     out := [U8]{}
     loop byte in text.bytes() {
-        if Int.from_u8(byte) != 95 -> out.push(byte)
+        if (Int{byte}) != 95 -> out.push(byte)
     }
     String.from_bytes(out) ?? ""
 }
@@ -152,7 +152,7 @@ strip_underscores: fn(text: String) -> String Never! {
 decimal_number_spelling: fn(text: String) -> String Never! {
     out := [U8]{}
     loop byte in text.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if code == 95 -> next
         out.push(if code == 69 -> U8{101} else -> byte)
     }
@@ -179,8 +179,8 @@ parse_integer_literal: fn(text: String) -> Int? {
     limit := 922337203685477580
     rest := 7
     i := 0
-    if raw.len() > 1 && Int.from_u8(raw[0]) == 48 {
-        marker: Int.from_u8(raw[1])
+    if raw.len() > 1 && (Int{raw[0]}) == 48 {
+        marker: Int{raw[1]}
         if marker == {
             120 | 88 -> {
                 radix = 16
@@ -206,7 +206,7 @@ parse_integer_literal: fn(text: String) -> Int? {
     if i >= raw.len() -> return None
     value := 0
     loop i < raw.len() {
-        digit: digit_value(Int.from_u8(raw[i]))
+        digit: digit_value(Int{raw[i]})
         if digit < 0 || digit >= radix -> return None
         if value > limit || (value == limit && digit > rest) -> return None
         value = value * radix + digit
@@ -739,7 +739,7 @@ decode_string_content: fn(source: [U8], start: Int, end: Int, triple: Bool, inde
         }
         // A `\$` template payload (`\${…}`) is downstream text, copied byte
         // for byte as Rust's lexer keeps it.
-        if value == 123 && literal.len() >= 2 && Int.from_u8(literal[literal.len() - 2]) == 92 && Int.from_u8(literal[literal.len() - 1]) == 36 {
+        if value == 123 && literal.len() >= 2 && (Int{literal[literal.len() - 2]}) == 92 && (Int{literal[literal.len() - 1]}) == 36 {
             literal.push(U8{123})
             decoded.push(U8{123})
             cursor += 1
@@ -812,15 +812,15 @@ decode_raw_string: fn(text: String, source_start: Int, tables: &TokenTables) -> 
     raw: text.bytes()
     if raw.len() == 0 -> return (decoded: "", parts: [StringPart]{})
     fence := 0
-    loop fence < raw.len() && Int.from_u8(raw[fence]) == 96 -> fence += 1
+    loop fence < raw.len() && (Int{raw[fence]}) == 96 -> fence += 1
     if fence == 0 || raw.len() < fence * 2 -> return (decoded: "", parts: [StringPart]{})
     begin := fence
     finish := raw.len() - fence
     padded := false
-    if finish > begin + 1 && Int.from_u8(raw[begin]) == 32 && Int.from_u8(raw[finish - 1]) == 32 {
+    if finish > begin + 1 && (Int{raw[begin]}) == 32 && (Int{raw[finish - 1]}) == 32 {
         cursor := begin
         loop cursor < finish {
-            if Int.from_u8(raw[cursor]) != 32 {
+            if (Int{raw[cursor]}) != 32 {
                 padded = true
                 break
             }
@@ -886,7 +886,7 @@ decode_string: fn(source: [U8], start: Int, end: Int, raw_head: Bool, byte_head:
 decode_char: fn(text: String, source_start: Int, diagnostics: &[Diagnostic]) -> String {
     raw: text.bytes()
     if raw.len() < 2 -> return ""
-    if Int.from_u8(raw[1]) != 92 {
+    if (Int{raw[1]}) != 92 {
         width: utf8_width(raw, 1)
         if byte_at(raw, 1 + width) != 39 {
             span_end := source_start + 1 + width
@@ -900,7 +900,7 @@ decode_char: fn(text: String, source_start: Int, diagnostics: &[Diagnostic]) -> 
     escape_end := 2 + escape_width
     escaped := -1
     if escape_width > 0 {
-        escaped = if Int.from_u8(raw[2]) == 39 -> 39 else -> escape_value(Int.from_u8(raw[2]))
+        escaped = if (Int{raw[2]}) == 39 -> 39 else -> escape_value(Int{raw[2]})
     }
     if escaped < 0 {
         escape_text: bytes_text(raw, 2, escape_end)

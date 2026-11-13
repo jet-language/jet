@@ -106,8 +106,8 @@ name_byte: fn(code: Int, at: Int) -> Bool Never! {
 declared_name: fn(line: String) -> String Never! {
     bytes: line.bytes()
     end := 0
-    loop end < bytes.len() && name_byte(Int.from_u8(bytes[end]), end) -> end += 1
-    if end == 0 || end + 1 >= bytes.len() || Int.from_u8(bytes[end]) != 58 || Int.from_u8(bytes[end + 1]) != 32 -> return ""
+    loop end < bytes.len() && name_byte(Int{bytes[end]}, end) -> end += 1
+    if end == 0 || end + 1 >= bytes.len() || (Int{bytes[end]}) != 58 || (Int{bytes[end + 1]}) != 32 -> return ""
     String.from_bytes_lossy(bytes[0..<end])
 }
 
@@ -115,7 +115,7 @@ declared_name: fn(line: String) -> String Never! {
 constant_name: fn(name: String) -> Bool Never! {
     if name == "" -> return false
     loop byte in name.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if !((code >= 65 && code <= 90) || (code >= 48 && code <= 57) || code == 95) -> return false
     }
     true
@@ -170,7 +170,7 @@ declared_names: fn(source: String) -> [String] Never! {
 // How many bytes equal to `code` run from `at`.
 run_len: fn(bytes: [U8], at: Int, code: Int) -> Int Never! {
     end := at
-    loop end < bytes.len() && Int.from_u8(bytes[end]) == code -> end += 1
+    loop end < bytes.len() && (Int{bytes[end]}) == code -> end += 1
     end - at
 }
 
@@ -189,8 +189,8 @@ code_names: fn(source: String) -> [String] Never! {
     depth := 0
     at := 0
     loop at < bytes.len() {
-        code: Int.from_u8(bytes[at])
-        next_code: if at + 1 < bytes.len() -> Int.from_u8(bytes[at + 1]) else -> 0
+        code: Int{bytes[at]}
+        next_code: if at + 1 < bytes.len() -> (Int{bytes[at + 1]}) else -> 0
         if quotes > 0 {
             if {
                 code == 92 -> at += 2
@@ -213,7 +213,7 @@ code_names: fn(source: String) -> [String] Never! {
         }
         if {
             code == 47 && next_code == 47 -> {
-                loop at < bytes.len() && Int.from_u8(bytes[at]) != 10 -> at += 1
+                loop at < bytes.len() && (Int{bytes[at]}) != 10 -> at += 1
             }
             code == 34 -> {
                 quotes = if run_len(bytes, at, 34) >= 3 -> 3 else -> 1
@@ -223,7 +223,7 @@ code_names: fn(source: String) -> [String] Never! {
                 ticks: run_len(bytes, at, 96)
                 at += ticks
                 loop at < bytes.len() {
-                    if Int.from_u8(bytes[at]) == 96 {
+                    if (Int{bytes[at]}) == 96 {
                         closing: run_len(bytes, at, 96)
                         at += closing
                         if closing == ticks -> break
@@ -234,8 +234,8 @@ code_names: fn(source: String) -> [String] Never! {
             }
             code == 39 -> {
                 at += 1
-                loop at < bytes.len() && Int.from_u8(bytes[at]) != 39 {
-                    step: if Int.from_u8(bytes[at]) == 92 -> 2 else -> 1
+                loop at < bytes.len() && (Int{bytes[at]}) != 39 {
+                    step: if (Int{bytes[at]}) == 92 -> 2 else -> 1
                     at += step
                 }
                 at += 1
@@ -257,12 +257,12 @@ code_names: fn(source: String) -> [String] Never! {
             }
             name_byte(code, 0) -> {
                 start: at
-                loop at < bytes.len() && name_byte(Int.from_u8(bytes[at]), at - start) -> at += 1
+                loop at < bytes.len() && name_byte(Int{bytes[at]}, at - start) -> at += 1
                 name: String.from_bytes_lossy(bytes[start..<at])
                 if constant_name(name) -> names.push(name)
             }
             code >= 48 && code <= 57 -> {
-                loop at < bytes.len() && name_byte(Int.from_u8(bytes[at]), 1) -> at += 1
+                loop at < bytes.len() && name_byte(Int{bytes[at]}, 1) -> at += 1
             }
             else -> at += 1
         }
@@ -283,7 +283,7 @@ standalone_value: fn(constant: RegistryConstant) -> Bool Never! {
         if value.starts_with(start) -> return true
     }
     head: value.partition(" ").head.trim()
-    first: if head.bytes().len() > 0 -> Int.from_u8(head.bytes()[0]) else -> 0
+    first: if head.bytes().len() > 0 -> (Int{head.bytes()[0]}) else -> 0
     (first >= 48 && first <= 57) || head == "true" || head == "false" || constant_name(head)
 }
 

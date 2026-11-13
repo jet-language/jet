@@ -1355,7 +1355,7 @@ civil_two_digits: fn(raw: [U8], at: Int) -> Int Never! {
     high: raw[at]
     low: raw[at + 1]
     if high < (U8{48}) || high > (U8{57}) || low < (U8{48}) || low > (U8{57}) -> return -1
-    Int.from_u8(high) * 10 + Int.from_u8(low) - 528
+    Int{high} * 10 + Int{low} - 528
 }
 // `YYYY-MM-DDTHH:MM:SS[.F{1,9}](Z|±HH:MM)` with every field in range and no
 // leap second, read from one byte copy. That is exactly the set of values
@@ -1385,7 +1385,7 @@ civil_rfc3339_fixed: fn(value: String) -> DateTime Never! {
         digits := 0
         loop at < n && raw[at] >= (U8{48}) && raw[at] <= (U8{57}) {
             if digits == 9 -> return civil_rfc3339_miss()
-            nanos = nanos * 10 + Int.from_u8(raw[at]) - 48
+            nanos = nanos * 10 + Int{raw[at]} - 48
             digits += 1
             at += 1
         }
@@ -1630,7 +1630,7 @@ __civil_tz_number: fn(raw: [U8], at: Int) -> (value: Int, end: Int) TimeError! {
     end := at
     loop __civil_tz_digit(raw, end) {
         if end - at == 3 -> return Err(__civil_tz_error(raw))
-        value = value * 10 + Int.from_u8(raw[end]) - 48
+        value = value * 10 + Int{raw[end]} - 48
         end += 1
     }
     Ok((value: value, end: end))

@@ -541,7 +541,7 @@ nix_index_valid_native_token: fn(text: String, label: String) NixIndexError! {
     raw: text.bytes()
     if raw.len() == 0 || raw.len() > 128 -> return Err(NixIndexError.Invalid("{label} is malformed"))
     loop byte in raw {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if !nixeval_is_ascii_alphanumeric(code) && code != 46 && code != 95 && code != 45 -> return Err(NixIndexError.Invalid("{label} is malformed"))
     }
 }

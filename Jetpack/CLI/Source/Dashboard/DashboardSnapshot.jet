@@ -100,7 +100,7 @@ DashboardKeyReader: struct {
             if self.position >= bytes.len() -> return DashboardKey.EOF
             byte: bytes[self.position]
             self.position += 1
-            return cli_dashboard_key_for_byte(Int.from_u8(byte))
+            return cli_dashboard_key_for_byte(Int{byte})
         }
         if self.keys == .Val(keys) {
             if keys.try_receive() == .Val(key) -> return key
@@ -131,7 +131,7 @@ cli_dashboard_forward_keys: fn(sender: Sender<DashboardKey>) -[IO, Time.Wait]> {
 // Ctrl-D), anything wider is a character key.
 cli_dashboard_key_for_text: fn(text: String) -> DashboardKey Never! {
     bytes: text.bytes()
-    if bytes.len() == 1 -> return cli_dashboard_key_for_byte(Int.from_u8(bytes[0]))
+    if bytes.len() == 1 -> return cli_dashboard_key_for_byte(Int{bytes[0]})
     DashboardKey.Char(text)
 }
 

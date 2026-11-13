@@ -132,7 +132,7 @@ publication_io_error: fn(kind: PublicationIOKind, write: Bool, path: String, cau
 publication_validate_index_component: fn(value: String, label: String) IOError! {
     if value == "" || value == "." || value == ".." || value.contains("/") || value.contains("\\") -> return Err(publication_index_error(.InvalidInput, value, "registry {label} is not one safe path component"))
     loop byte in value.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if code < 32 || code == 127 -> return Err(publication_index_error(.InvalidInput, value, "registry {label} is not one safe path component"))
     }
 }

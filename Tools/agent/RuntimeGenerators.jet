@@ -249,7 +249,7 @@ packed_word: fn(bytes: [U8], start: Int, end: Int) -> Int Never! {
     word := 0
     scale := 1
     loop index in start..<end {
-        byte: Int.from_u8(bytes[index])
+        byte: Int{bytes[index]}
         if index - start == 7 && byte >= 128 {
             word += (byte - 256) * scale
         } else {
@@ -299,20 +299,20 @@ QuotedLiteral: struct {
 
 quoted_literal: fn(text: String) -> QuotedLiteral? Never! {
     bytes: text.bytes()
-    if bytes.len() == 0 || Int.from_u8(bytes[0]) != 34 -> return None
+    if bytes.len() == 0 || (Int{bytes[0]}) != 34 -> return None
     out := [U8]{}
     index := 1
     loop index < bytes.len() {
-        code: Int.from_u8(bytes[index])
+        code: Int{bytes[index]}
         if code == 34 -> return Val(QuotedLiteral{value: String.from_bytes_lossy(out), spelling_len: index + 1})
         if code == 92 {
             if index + 1 >= bytes.len() -> return None
-            escaped: Int.from_u8(bytes[index + 1])
+            escaped: Int{bytes[index + 1]}
             if {
                 escaped == 34 || escaped == 92 -> out.push(bytes[index + 1])
-                escaped == 110 -> out.push(U8.from_int(10) ?? return None)
-                escaped == 116 -> out.push(U8.from_int(9) ?? return None)
-                escaped == 114 -> out.push(U8.from_int(13) ?? return None)
+                escaped == 110 -> out.push(U8{10})
+                escaped == 116 -> out.push(U8{9})
+                escaped == 114 -> out.push(U8{13})
                 else -> return None
             }
             index += 2
@@ -381,7 +381,7 @@ static_text_worthy: fn(text: String) -> Bool Never! { byte_len(text) > 16 }
 // `text` as an `rt_static_text("…")` literal of the runtime source.
 static_text: fn(text: String) -> String GeneratorError! {
     loop byte in text.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if code <= 9 || (code >= 11 && code <= 31) || code == 127 -> return Err(generator_fail("control byte in runtime static text {text}"))
     }
     body: text.replace("\\", "\\\\").replace("\"", "\\\"").replace("{{", "{{{{").replace("}}", "}}}}").replace("\n", "\\n")
@@ -571,7 +571,7 @@ render_test_messages: fn() -> String GeneratorError! {
     loop literal in test_key_literals() {
         bytes: literal.text.bytes()
         source = "{source}test_key_{literal.name}: fn() -> I64 {{\n    text: test_text_new(I64{{{bytes.len()}}})\n    data: trap_word(text)\n"
-        loop index in 0..<bytes.len() -> source = "{source}    trap_put(wrapping(data + I64{{{index}}}), I64{{{Int.from_u8(bytes[index])}}})\n"
+        loop index in 0..<bytes.len() -> source = "{source}    trap_put(wrapping(data + I64{{{index}}}), I64{{{Int{bytes[index]}}}})\n"
         source = "{source}    text\n}}\n\n"
     }
     loop literal in test_scope_literals() {
@@ -580,7 +580,7 @@ render_test_messages: fn() -> String GeneratorError! {
     }
     ordinary: TEST_ORDINARY_FAILURE.bytes()
     source = "{source}test_scope_ordinary: fn(text: I64) -> Bool {{\n    if (text == I64{{0}}) {{ return false }}\n    if (trap_word(wrapping(text + I64{{8}})) != I64{{{ordinary.len()}}}) {{ return false }}\n    data: trap_word(text)\n"
-    loop index in 0..<ordinary.len() -> source = "{source}    if (trap_byte(wrapping(data + I64{{{index}}})) != I64{{{Int.from_u8(ordinary[index])}}}) {{ return false }}\n"
+    loop index in 0..<ordinary.len() -> source = "{source}    if (trap_byte(wrapping(data + I64{{{index}}})) != I64{{{Int{ordinary[index]}}}}) {{ return false }}\n"
     Ok("{source}    true\n}}\n\n")
 }
 
@@ -684,7 +684,7 @@ native_tls_refusal: fn(routes: String) -> String GeneratorError! {
     if !String.from_bytes_lossy(rest.bytes()[literal.spelling_len..<rest.bytes().len()]).starts_with("\n}}") -> return Err(generator_fail("missing RouteCarriers.jet ir_tls_transport_message literal"))
     if literal.value == "" -> return Err(generator_fail("native TLS refusal must be printable ASCII for word projection"))
     loop byte in literal.value.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if code < 32 || code > 126 -> return Err(generator_fail("native TLS refusal must be printable ASCII for word projection"))
     }
     Ok(literal.value)
@@ -733,7 +733,7 @@ debug_intervals: fn(debug: String) -> [Int] GeneratorError! {
     values := [Int]{}
     current := -1
     loop byte in byte_slice(rest, 0, body_end).bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if code >= 48 && code <= 57 {
             current = if current < 0 -> code - 48 else -> current * 10 + code - 48
         } else if current >= 0 {
@@ -805,7 +805,7 @@ render_trap_messages: fn(registry: String, routes: String, debug: String) -> Tra
         word := 0
         scale := 1
         loop byte in code.bytes() {
-            word += Int.from_u8(byte) * scale
+            word += Int{byte} * scale
             scale *= 256
         }
         registered.push("code == I64{{{word}}}")
@@ -1026,14 +1026,14 @@ bytes_at: fn(bytes: [U8], at: Int, word: String) -> Bool Never! {
     expected: word.bytes()
     if at + expected.len() > bytes.len() -> return false
     loop index in 0..<expected.len() {
-        if Int.from_u8(bytes[at + index]) != Int.from_u8(expected[index]) -> return false
+        if (Int{bytes[at + index]}) != (Int{expected[index]}) -> return false
     }
     true
 }
 
 skip_spaces: fn(bytes: [U8], at: Int) -> Int Never! {
     end := at
-    loop end < bytes.len() && is_space_byte(Int.from_u8(bytes[end])) -> end += 1
+    loop end < bytes.len() && is_space_byte(Int{bytes[end]}) -> end += 1
     end
 }
 
@@ -1053,9 +1053,9 @@ export_head: fn(source: String, bytes: [U8], start: Int) -> ExportHead? Never! {
     if spaced == at -> return None
     at = spaced
     if bytes_at(bytes, at, "pub") && is_space_byte(code_at(bytes, at + 3)) -> at = skip_spaces(bytes, at + 3)
-    if at >= bytes.len() || !is_name_start_byte(Int.from_u8(bytes[at])) -> return None
+    if at >= bytes.len() || !is_name_start_byte(Int{bytes[at]}) -> return None
     name_start: at
-    loop at < bytes.len() && is_name_byte(Int.from_u8(bytes[at])) -> at += 1
+    loop at < bytes.len() && is_name_byte(Int{bytes[at]}) -> at += 1
     name: byte_slice(source, name_start, at)
     if code_at(bytes, at) != 58 -> return None
     at = skip_spaces(bytes, at + 1)
@@ -1063,7 +1063,7 @@ export_head: fn(source: String, bytes: [U8], start: Int) -> ExportHead? Never! {
     at = skip_spaces(bytes, at + 2)
     signature_start: at
     loop at < bytes.len() {
-        code: Int.from_u8(bytes[at])
+        code: Int{bytes[at]}
         if code == 123 -> return Val(ExportHead{name: name, signature: byte_slice(source, signature_start, at), body: at + 1})
         if code == 125 -> return None
         at += 1
@@ -1094,7 +1094,7 @@ lifecycle_hook: fn(line: String) -> LifecycleHook? Never! {
     digits: fields[0]
     if digits == "" -> return None
     loop byte in digits.bytes() {
-        if !is_digit_byte(Int.from_u8(byte)) -> return None
+        if !is_digit_byte(Int{byte}) -> return None
     }
     guards: if fields.len() == 3 -> fields[2] else -> ""
     if fields.len() == 3 {
@@ -1102,7 +1102,7 @@ lifecycle_hook: fn(line: String) -> LifecycleHook? Never! {
             if guard == "" -> return None
             bytes: guard.bytes()
             loop at in 0..<bytes.len() {
-                code: Int.from_u8(bytes[at])
+                code: Int{bytes[at]}
                 word: code == 95 || (code >= 97 && code <= 122) || (code >= 65 && code <= 90)
                 if !word && (at == 0 || !is_digit_byte(code)) -> return None
             }
@@ -1138,7 +1138,7 @@ masked_word_parameters: fn() -> [MaskedParameter] Never! {
 signature_parameters: fn(signature: String) -> [String] Never! {
     bytes: signature.bytes()
     close := bytes.len() - 1
-    loop close > 0 && Int.from_u8(bytes[close]) != 41 -> close -= 1
+    loop close > 0 && (Int{bytes[close]}) != 41 -> close -= 1
     items := [String]{}
     if close <= 0 -> return items
     loop item in byte_slice(signature, 1, close).split(",") {
@@ -1151,9 +1151,9 @@ signature_parameters: fn(signature: String) -> [String] Never! {
 // The name of an `name: I64` parameter item, or "" for any other item.
 i64_parameter_name: fn(item: String) -> String Never! {
     bytes: item.bytes()
-    if bytes.len() == 0 || !is_name_start_byte(Int.from_u8(bytes[0])) -> return ""
+    if bytes.len() == 0 || !is_name_start_byte(Int{bytes[0]}) -> return ""
     at := 0
-    loop at < bytes.len() && is_name_byte(Int.from_u8(bytes[at])) -> at += 1
+    loop at < bytes.len() && is_name_byte(Int{bytes[at]}) -> at += 1
     name: byte_slice(item, 0, at)
     at = skip_spaces(bytes, at)
     if code_at(bytes, at) != 58 -> return ""
@@ -1167,7 +1167,7 @@ i64_parameter_name: fn(item: String) -> String Never! {
 has_mask: fn(code: [U8], from: Int, to: Int, name: String, mask: Int) -> Bool Never! {
     words: [String]{".", "bit_and", "(", "I64", "{{", "{mask}", "}}", ")"}
     loop start in from..<to {
-        if start > from && is_name_byte(Int.from_u8(code[start - 1])) -> next
+        if start > from && is_name_byte(Int{code[start - 1]}) -> next
         if !bytes_at(code, start, name) -> next
         at := start + byte_len(name)
         matched := true
@@ -1226,7 +1226,7 @@ runtime_exports: fn(source: String, path: String) -> ParsedExports Never! {
     line_start := 0
     loop line_start <= bytes.len() {
         line_end := line_start
-        loop line_end < bytes.len() && Int.from_u8(bytes[line_end]) != 10 -> line_end += 1
+        loop line_end < bytes.len() && (Int{bytes[line_end]}) != 10 -> line_end += 1
         if bytes_at(bytes, line_start, EXPORT_MARK) {
             if export_head(source, bytes, line_start) == {
                 .Val(head) -> {
@@ -1483,7 +1483,7 @@ parse_hex: fn(text: String) -> Int? Never! {
     if bytes.len() == 0 -> return None
     value := 0
     loop byte in bytes {
-        digit: hex_digit_value(Int.from_u8(byte))
+        digit: hex_digit_value(Int{byte})
         if digit < 0 -> return None
         value = value * 16 + digit
     }
@@ -1679,13 +1679,13 @@ PANIC_PUBLICATION_ROOT: "scheduler_panic_publish_record"
 BUILD_LIBRARY_PATH: "Compiler/JetIR/Source/BuildLibrary.jet"
 
 code_at: fn(code: [U8], at: Int) -> Int Never! {
-    if at >= 0 && at < code.len() -> Int.from_u8(code[at]) else -> 0 - 1
+    if at >= 0 && at < code.len() -> (Int{code[at]}) else -> 0 - 1
 }
 
 // Spaces over bytes `start..<end` of `code`, keeping line breaks.
 blank_range: fn(source: [U8], code: &[U8], start: Int, end: Int) {
     loop at in start..<end {
-        byte: Int.from_u8(source[at])
+        byte: Int{source[at]}
         if byte != 10 && byte != 13 -> code[at] = U8{32}
     }
 }
@@ -1700,10 +1700,10 @@ mask_scan: fn(source: [U8], code: &[U8], start: Int, interpolation: Bool) -> Int
     braces := 0
     length: source.len()
     loop at < length {
-        byte: Int.from_u8(source[at])
+        byte: Int{source[at]}
         if byte == 47 && code_at(source, at + 1) == 47 {
             end := at
-            loop end < length && Int.from_u8(source[end]) != 10 -> end += 1
+            loop end < length && (Int{source[end]}) != 10 -> end += 1
             blank_range(source, code, at, end)
             at = end
         } else if byte == 47 && code_at(source, at + 1) == 42 {
@@ -1727,15 +1727,15 @@ mask_scan: fn(source: [U8], code: &[U8], start: Int, interpolation: Bool) -> Int
             // A run of N backticks opens raw text; the next run of exactly N
             // closes it.
             begin: at
-            loop at < length && Int.from_u8(source[at]) == 96 -> at += 1
+            loop at < length && (Int{source[at]}) == 96 -> at += 1
             opening: at - begin
             closed := false
             loop at < length && !closed {
-                if Int.from_u8(source[at]) != 96 {
+                if (Int{source[at]}) != 96 {
                     at += 1
                 } else {
                     run: at
-                    loop at < length && Int.from_u8(source[at]) == 96 -> at += 1
+                    loop at < length && (Int{source[at]}) == 96 -> at += 1
                     closed = at - run == opening
                 }
             }
@@ -1747,7 +1747,7 @@ mask_scan: fn(source: [U8], code: &[U8], start: Int, interpolation: Bool) -> Int
             literal := at
             at += delimiter_len
             loop at < length && !(code_at(source, at) == byte && (!triple || (code_at(source, at + 1) == 34 && code_at(source, at + 2) == 34))) {
-                current: Int.from_u8(source[at])
+                current: Int{source[at]}
                 if current == 92 {
                     at += 2
                 } else if byte == 34 && current == 123 && code_at(source, at + 1) == 123 {
@@ -1757,7 +1757,7 @@ mask_scan: fn(source: [U8], code: &[U8], start: Int, interpolation: Bool) -> Int
                     expression: at + 1
                     at = mask_scan(source, code, expression, true) ?? return Err(err)
                     loop cursor in expression..<at {
-                        if Int.from_u8(code[cursor]) == 10 -> code[cursor] = U8{32}
+                        if (Int{code[cursor]}) == 10 -> code[cursor] = (U8{32})
                     }
                     literal = at - 1
                 } else {
@@ -1794,8 +1794,8 @@ code_only: fn(source: String) -> String GeneratorError! {
 // the word there does not start with a letter or `_`.
 identifier_start: fn(code: [U8], floor: Int, end: Int) -> Int Never! {
     start := end
-    loop start > floor && is_name_byte(Int.from_u8(code[start - 1])) -> start -= 1
-    if start == end || !is_name_start_byte(Int.from_u8(code[start])) -> return 0 - 1
+    loop start > floor && is_name_byte(Int{code[start - 1]}) -> start -= 1
+    if start == end || !is_name_start_byte(Int{code[start]}) -> return 0 - 1
     start
 }
 
@@ -1805,7 +1805,7 @@ identifier_start: fn(code: [U8], floor: Int, end: Int) -> Int Never! {
 unsupported_calls: fn(code: [U8], path: String) -> [String] Never! {
     problems := [String]{}
     loop at in 0..<code.len() {
-        if Int.from_u8(code[at]) != 60 -> next
+        if (Int{code[at]}) != 60 -> next
         start: identifier_start(code, 0, at)
         if start < 0 -> next
         after: code_at(code, at + 1)
@@ -1813,7 +1813,7 @@ unsupported_calls: fn(code: [U8], path: String) -> [String] Never! {
         cursor := at + 1
         depth := 1
         loop cursor < code.len() && depth > 0 {
-            current: Int.from_u8(code[cursor])
+            current: Int{code[cursor]}
             if current == 123 || current == 125 || current == 59 -> break
             if current == 60 -> depth += 1
             else if current == 62 -> depth -= 1
@@ -1822,10 +1822,10 @@ unsupported_calls: fn(code: [U8], path: String) -> [String] Never! {
         if depth == 0 && code_at(code, cursor) == 40 -> problems.push("{path}: unsupported generic call {byte_slice(String.from_bytes_lossy(code), start, at)}")
     }
     loop at in 0..<code.len() {
-        closer: Int.from_u8(code[at])
+        closer: Int{code[at]}
         if closer != 41 && closer != 93 -> next
         cursor := at + 1
-        loop cursor < code.len() && Int.from_u8(code[cursor]) != 10 && is_space_byte(Int.from_u8(code[cursor])) -> cursor += 1
+        loop cursor < code.len() && (Int{code[cursor]}) != 10 && is_space_byte(Int{code[cursor]}) -> cursor += 1
         if code_at(code, cursor) == 40 {
             problems.push("{path}: unsupported computed call")
             break
@@ -1857,7 +1857,7 @@ colon_function_head: fn(text: String, code: [U8], line: Int) -> FunctionHead? Ne
     loop code_at(code, at) == 35 {
         marker := at + 1
         if !is_name_start_byte(code_at(code, marker)) -> return None
-        loop marker < code.len() && is_name_byte(Int.from_u8(code[marker])) -> marker += 1
+        loop marker < code.len() && is_name_byte(Int{code[marker]}) -> marker += 1
         if code_at(code, marker) == 40 {
             loop marker < code.len() && code_at(code, marker) != 41 && code_at(code, marker) != 10 -> marker += 1
             if code_at(code, marker) != 41 -> return None
@@ -1869,7 +1869,7 @@ colon_function_head: fn(text: String, code: [U8], line: Int) -> FunctionHead? Ne
     }
     if !is_name_start_byte(code_at(code, at)) -> return None
     name_start: at
-    loop at < code.len() && is_name_byte(Int.from_u8(code[at])) -> at += 1
+    loop at < code.len() && is_name_byte(Int{code[at]}) -> at += 1
     name_end: at
     if code_at(code, at) != 58 -> return None
     at = skip_spaces(code, at + 1)
@@ -1883,7 +1883,7 @@ function_heads: fn(text: String, code: [U8]) -> [FunctionHead] Never! {
     heads := [FunctionHead]{}
     at := 0
     loop at + 1 < code.len() {
-        if at == 0 || Int.from_u8(code[at - 1]) == 10 {
+        if at == 0 || (Int{code[at - 1]}) == 10 {
             if colon_function_head(text, code, at) == {
                 .Val(head) -> {
                     heads.push(head.copy())
@@ -1893,17 +1893,17 @@ function_heads: fn(text: String, code: [U8]) -> [FunctionHead] Never! {
                 .None -> {}
             }
         }
-        if Int.from_u8(code[at]) != 102 || Int.from_u8(code[at + 1]) != 110 || (at > 0 && is_name_byte(Int.from_u8(code[at - 1]))) {
+        if (Int{code[at]}) != 102 || (Int{code[at + 1]}) != 110 || (at > 0 && is_name_byte(Int{code[at - 1]})) {
             at += 1
             next
         }
         spaced: skip_spaces(code, at + 2)
-        if spaced == at + 2 || spaced >= code.len() || !is_name_start_byte(Int.from_u8(code[spaced])) {
+        if spaced == at + 2 || spaced >= code.len() || !is_name_start_byte(Int{code[spaced]}) {
             at += 1
             next
         }
         name_end := spaced
-        loop name_end < code.len() && is_name_byte(Int.from_u8(code[name_end])) -> name_end += 1
+        loop name_end < code.len() && is_name_byte(Int{code[name_end]}) -> name_end += 1
         end: skip_spaces(code, name_end)
         heads.push(FunctionHead{start: at, name: byte_slice(text, spaced, name_end), end: end})
         at = end
@@ -1918,13 +1918,13 @@ bound_names: fn(text: String, code: [U8], from: Int, to: Int, assign: Bool) -> [
     names := [String]{}
     at := from
     loop at < to {
-        if !is_name_byte(Int.from_u8(code[at])) {
+        if !is_name_byte(Int{code[at]}) {
             at += 1
             next
         }
         start: at
-        loop at < to && is_name_byte(Int.from_u8(code[at])) -> at += 1
-        if !is_name_start_byte(Int.from_u8(code[start])) -> next
+        loop at < to && is_name_byte(Int{code[at]}) -> at += 1
+        if !is_name_start_byte(Int{code[start]}) -> next
         cursor := at
         if assign {
             before := start
@@ -1932,9 +1932,9 @@ bound_names: fn(text: String, code: [U8], from: Int, to: Int, assign: Bool) -> [
             if before > from && code_at(code, before - 1) != 10 -> next
             loop cursor < to && (code_at(code, cursor) == 32 || code_at(code, cursor) == 9) -> cursor += 1
         } else {
-            loop cursor < to && is_space_byte(Int.from_u8(code[cursor])) -> cursor += 1
+            loop cursor < to && is_space_byte(Int{code[cursor]}) -> cursor += 1
         }
-        if cursor >= to || Int.from_u8(code[cursor]) != 58 -> next
+        if cursor >= to || (Int{code[cursor]}) != 58 -> next
         names.push(byte_slice(text, start, at))
     }
     names
@@ -1951,19 +1951,19 @@ named_calls: fn(text: String, code: [U8], from: Int, to: Int) -> [NamedCall] Nev
     calls := [NamedCall]{}
     at := from
     loop at < to {
-        if !is_name_byte(Int.from_u8(code[at])) {
+        if !is_name_byte(Int{code[at]}) {
             at += 1
             next
         }
         start: at
-        loop at < to && is_name_byte(Int.from_u8(code[at])) -> at += 1
-        if !is_name_start_byte(Int.from_u8(code[start])) -> next
+        loop at < to && is_name_byte(Int{code[at]}) -> at += 1
+        if !is_name_start_byte(Int{code[start]}) -> next
         cursor := at
-        loop cursor < to && Int.from_u8(code[cursor]) != 10 && is_space_byte(Int.from_u8(code[cursor])) -> cursor += 1
-        if cursor >= to || Int.from_u8(code[cursor]) != 40 -> next
+        loop cursor < to && (Int{code[cursor]}) != 10 && is_space_byte(Int{code[cursor]}) -> cursor += 1
+        if cursor >= to || (Int{code[cursor]}) != 40 -> next
         before := start
-        loop before > from && is_space_byte(Int.from_u8(code[before - 1])) -> before -= 1
-        if before > from && Int.from_u8(code[before - 1]) == 46 -> next
+        loop before > from && is_space_byte(Int{code[before - 1]}) -> before -= 1
+        if before > from && (Int{code[before - 1]}) == 46 -> next
         calls.push(NamedCall{name: byte_slice(text, start, at), open: cursor + 1})
     }
     calls
@@ -1973,9 +1973,9 @@ named_calls: fn(text: String, code: [U8], from: Int, to: Int) -> [NamedCall] Nev
 // "" when none does.
 word_after: fn(text: String, code: [U8], at: Int, to: Int) -> String Never! {
     start: skip_spaces(code, at)
-    if start >= to || !is_name_start_byte(Int.from_u8(code[start])) -> return ""
+    if start >= to || !is_name_start_byte(Int{code[start]}) -> return ""
     end := start
-    loop end < to && is_name_byte(Int.from_u8(code[end])) -> end += 1
+    loop end < to && is_name_byte(Int{code[end]}) -> end += 1
     byte_slice(text, start, end)
 }
 
@@ -1995,13 +1995,13 @@ rail_installs: fn(text: String, code: [U8]) -> [RailInstall] Never! {
     installs := [RailInstall]{}
     at := 0
     loop at < code.len() {
-        if !is_name_byte(Int.from_u8(code[at])) {
+        if !is_name_byte(Int{code[at]}) {
             at += 1
             next
         }
         start: at
-        loop at < code.len() && is_name_byte(Int.from_u8(code[at])) -> at += 1
-        if !is_name_start_byte(Int.from_u8(code[start])) -> next
+        loop at < code.len() && is_name_byte(Int{code[at]}) -> at += 1
+        if !is_name_start_byte(Int{code[start]}) -> next
         word: byte_slice(text, start, at)
         if !word.ends_with("_rail_code") -> next
         equals: skip_spaces(code, at)
@@ -2021,13 +2021,13 @@ rail_installs: fn(text: String, code: [U8]) -> [RailInstall] Never! {
 rail_binding: fn(text: String, code: [U8], from: Int, to: Int, name: String) -> String Never! {
     at := from
     loop at < to {
-        if !is_name_byte(Int.from_u8(code[at])) {
+        if !is_name_byte(Int{code[at]}) {
             at += 1
             next
         }
         start: at
-        loop at < to && is_name_byte(Int.from_u8(code[at])) -> at += 1
-        if !is_name_start_byte(Int.from_u8(code[start])) || byte_slice(text, start, at) != name -> next
+        loop at < to && is_name_byte(Int{code[at]}) -> at += 1
+        if !is_name_start_byte(Int{code[start]}) || byte_slice(text, start, at) != name -> next
         colon: skip_spaces(code, at)
         if colon + 1 >= to || code_at(code, colon) != 58 -> next
         value_at: if code_at(code, colon + 1) == 61 -> colon + 2 else -> colon + 1
@@ -2064,7 +2064,7 @@ group_end: fn(code: [U8], from: Int, limit: Int, open: Int, close: Int) -> Int N
     at := from
     depth := 1
     loop at < limit && depth > 0 {
-        current: Int.from_u8(code[at])
+        current: Int{code[at]}
         if current == open -> depth += 1
         else if current == close -> depth -= 1
         at += 1
@@ -2128,7 +2128,7 @@ runtime_stop_exports: fn(sources: [RuntimeSource], addresses: [String:String]) -
                 next
             }
             at := parameters_end
-            loop at < limit && Int.from_u8(code[at]) != 123 && Int.from_u8(code[at]) != 61 -> at += 1
+            loop at < limit && (Int{code[at]}) != 123 && (Int{code[at]}) != 61 -> at += 1
             if code_at(code, at) == 61 && at < limit -> next
             if at >= limit {
                 problems.push("{path}: missing {head.name} body")
@@ -2391,7 +2391,7 @@ ErrnoMessage: struct {
 is_word: fn(text: String) -> Bool Never! {
     if text == "" -> return false
     loop byte in text.bytes() {
-        if !is_name_byte(Int.from_u8(byte)) -> return false
+        if !is_name_byte(Int{byte}) -> return false
     }
     true
 }
@@ -2399,7 +2399,7 @@ is_word: fn(text: String) -> Bool Never! {
 is_decimal: fn(text: String) -> Bool Never! {
     if text == "" -> return false
     loop byte in text.bytes() {
-        if !is_digit_byte(Int.from_u8(byte)) -> return false
+        if !is_digit_byte(Int{byte}) -> return false
     }
     true
 }
@@ -2413,7 +2413,7 @@ line_words: fn(line: String) -> [String] Never! {
         at = skip_spaces(bytes, at)
         if at >= bytes.len() -> break
         start: at
-        loop at < bytes.len() && !is_space_byte(Int.from_u8(bytes[at])) -> at += 1
+        loop at < bytes.len() && !is_space_byte(Int{bytes[at]}) -> at += 1
         words.push(byte_slice(line, start, at))
     }
     words
@@ -2489,7 +2489,7 @@ errno_messages: fn(table: String, definitions: [ErrnoDefinition]) -> [ErrnoMessa
 leading_name: fn(text: String) -> String Never! {
     bytes: text.bytes()
     end := 0
-    loop end < bytes.len() && is_name_byte(Int.from_u8(bytes[end])) -> end += 1
+    loop end < bytes.len() && is_name_byte(Int{bytes[end]}) -> end += 1
     byte_slice(text, 0, end)
 }
 
@@ -2509,7 +2509,7 @@ render_host_errors: fn(messages: [ErrnoMessage]) -> String GeneratorError! {
     loop lines.len() <= highest -> lines.push("")
     loop message in messages {
         loop byte in message.text.bytes() {
-            code: Int.from_u8(byte)
+            code: Int{byte}
             if code < 32 || code > 126 || code == 34 || code == 92 || code == 123 || code == 125 -> return Err(generator_fail("errno {message.number}: message is not plain printable ASCII"))
         }
         lines[message.number] = message.text
@@ -2659,10 +2659,10 @@ constant_case: fn(name: String) -> String Never! {
     bytes: name.bytes()
     out := [U8]{}
     loop index in 0..<bytes.len() {
-        code: Int.from_u8(bytes[index])
+        code: Int{bytes[index]}
         lower: code >= 97 && code <= 122
         if code >= 65 && code <= 90 && index > 0 {
-            previous: Int.from_u8(bytes[index - 1])
+            previous: Int{bytes[index - 1]}
             if previous >= 97 && previous <= 122 -> out.push(U8{95})
         }
         out.push(U8{if lower -> code - 32 else -> code})
@@ -2676,15 +2676,15 @@ runtime_abi_atom: fn(name: String) -> String Never! {
     bytes: name.bytes()
     out := [U8]{}
     loop index in 0..<bytes.len() {
-        code: Int.from_u8(bytes[index])
+        code: Int{bytes[index]}
         if code == 46 || code == 95 {
             if out.len() > 0 && out[out.len() - 1] != (U8{95}) -> out.push(U8{95})
             next
         }
         upper: code >= 65 && code <= 90
         if upper && index > 0 && out.len() > 0 && out[out.len() - 1] != (U8{95}) {
-            previous: Int.from_u8(bytes[index - 1])
-            next_code: if index + 1 < bytes.len() -> Int.from_u8(bytes[index + 1]) else -> 0
+            previous: Int{bytes[index - 1]}
+            next_code: if index + 1 < bytes.len() -> (Int{bytes[index + 1]}) else -> 0
             previous_upper: previous >= 65 && previous <= 90
             next_lower: next_code >= 97 && next_code <= 122
             if !previous_upper || next_lower -> out.push(U8{95})
@@ -2868,7 +2868,7 @@ dyn_kind_rows: fn(source: String) -> [DynKind] GeneratorError! {
         if variant == "" || leading_name(variant) != variant || literal.spelling_len != byte_len(spelling) -> return Err(generator_fail("unsupported __dyn_kind arm: {arm}"))
         // The word lands in a Jet and a JS string literal as written.
         loop byte in literal.value.bytes() {
-            code: Int.from_u8(byte)
+            code: Int{byte}
             if code < 32 || code > 126 || code == 34 || code == 92 || code == 123 || code == 125 -> return Err(generator_fail("__dyn_kind word for {variant} is not plain printable ASCII"))
         }
         rows.push(DynKind{variant: variant, word: literal.value})
@@ -2983,7 +2983,7 @@ le_field: fn(bytes: [U8], at: Int, count: Int) -> Int Never! {
     value := 0
     scale := 1
     loop index in at..<at + count {
-        value += Int.from_u8(bytes[index]) * scale
+        value += Int{bytes[index]} * scale
         if index - at < count - 1 -> scale *= 256
     }
     value
@@ -3003,7 +3003,7 @@ fault_report_text: fn(path: String, object: [U8]) -> [U8] GeneratorError! {
         header: shoff + index * shentsize
         name_at: names_at + le_field(object, header, 4)
         name_end := name_at
-        loop name_end < object.len() && Int.from_u8(object[name_end]) != 0 -> name_end += 1
+        loop name_end < object.len() && (Int{object[name_end]}) != 0 -> name_end += 1
         name: String.from_bytes_lossy(object[name_at..<name_end])
         offset: le_field(object, header + 24, 8)
         size: le_field(object, header + 32, 8)
@@ -3027,7 +3027,7 @@ render_fault_report_table: fn(report: FaultReportSource, bytes: [U8]) -> String 
     loop at < bytes.len() {
         end: if at + 16 < bytes.len() -> at + 16 else -> bytes.len()
         cells := [String]{}
-        loop index in at..<end -> cells.push("{Int.from_u8(bytes[index])}")
+        loop index in at..<end -> cells.push("{Int{bytes[index]}}")
         rows.push("    {cells.join(", ")},")
         at += 16
     }
@@ -3078,7 +3078,7 @@ render_fault_reports: fn() -[Exec, FS]> String GeneratorError! {
 #Test("a fault report table holds sixteen bytes per row") {
     report: FaultReportSource{path: "r.S", name: "R", doc: "// Doc."}
     bytes := [U8]{}
-    loop value in 0..<18 -> bytes.push(U8.from_int(value) ?? panic("byte"))
+    loop value in 0..<18 -> bytes.push(checked(U8{value}) ?? panic("byte"))
     assert_eq(render_fault_report_table(report, bytes), "\n// Doc.\nR: [U8]{{\n    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,\n    16, 17,\n}}\n")
     assert_eq(le_field([U8]{U8{1}, U8{2}, U8{0}}, 0, 3), 513)
     if fault_report_text("r.S", [U8]{U8{0}}) == {
@@ -3130,7 +3130,7 @@ exit_code_rows: fn(source: String) -> [ExitCode] GeneratorError! {
         colon: line.find(": ")
         name: if colon > 0 -> byte_slice(line, 0, colon) else -> ""
         value: if colon > 0 -> byte_tail(line, colon + 2) else -> ""
-        if !name.starts_with("EXIT_") || leading_name(name) != name || value == "" || !value.bytes().all(fn(byte) { is_digit_byte(Int.from_u8(byte)) }) -> return Err(generator_fail("{EXIT_CODES_SOURCE_PATH}: unsupported line `{line}`"))
+        if !name.starts_with("EXIT_") || leading_name(name) != name || value == "" || !value.bytes().all(fn(byte) { is_digit_byte(Int{byte}) }) -> return Err(generator_fail("{EXIT_CODES_SOURCE_PATH}: unsupported line `{line}`"))
         rows.push(ExitCode{name: name, value: value, doc: doc.copy()})
         doc = [String]{}
     }
@@ -3178,7 +3178,7 @@ open_paren: fn(text: String) -> Int Never! {
     at := bytes.len()
     loop at > 0 {
         at -= 1
-        byte: Int.from_u8(bytes[at])
+        byte: Int{bytes[at]}
         if byte == 41 {
             depth += 1
         } else if byte == 40 {
@@ -3195,9 +3195,9 @@ left_operand: fn(text: String) -> String Never! {
     bytes: text.bytes()
     at := bytes.len()
     loop at > 0 {
-        byte: Int.from_u8(bytes[at - 1])
+        byte: Int{bytes[at - 1]}
         if byte == 40 || byte == 44 || byte == 123 -> return byte_tail(text, at)
-        if at >= 2 && (byte == 38 || byte == 124) && Int.from_u8(bytes[at - 2]) == byte -> return byte_tail(text, at)
+        if at >= 2 && (byte == 38 || byte == 124) && (Int{bytes[at - 2]}) == byte -> return byte_tail(text, at)
         at -= 1
     }
     text.copy()
@@ -3231,7 +3231,7 @@ exit_position: fn(line: String, start: Int, end: Int) -> Bool Never! {
     if open < 0 -> return false
     bytes: before.bytes()
     callee := open
-    loop callee > 0 && (is_name_byte(Int.from_u8(bytes[callee - 1])) || Int.from_u8(bytes[callee - 1]) == 46) -> callee -= 1
+    loop callee > 0 && (is_name_byte(Int{bytes[callee - 1]}) || Int{bytes[callee - 1]} == 46) -> callee -= 1
     if callee == open -> return false
     names_exit(byte_slice(before, callee, open), true) || names_exit(byte_tail(before, open + 1), false)
 }
@@ -3251,12 +3251,12 @@ exit_literal_problems: fn(path: String, source: String) -> [String] GeneratorErr
         bytes: line.bytes()
         at := 0
         loop at < bytes.len() {
-            if !is_digit_byte(Int.from_u8(bytes[at])) || (at > 0 && (is_name_byte(Int.from_u8(bytes[at - 1])) || Int.from_u8(bytes[at - 1]) == 46)) {
+            if !is_digit_byte(Int{bytes[at]}) || (at > 0 && (is_name_byte(Int{bytes[at - 1]}) || Int{bytes[at - 1]} == 46)) {
                 at += 1
                 next
             }
             end := at
-            loop end < bytes.len() && is_digit_byte(Int.from_u8(bytes[end])) -> end += 1
+            loop end < bytes.len() && is_digit_byte(Int{bytes[end]}) -> end += 1
             number: byte_slice(line, at, end)
             following: code_at(bytes, end)
             if EXIT_GUARDED.contains(number) && following != 46 && !is_name_byte(following) {
@@ -3343,8 +3343,8 @@ grant_text_field: fn(row: String, key: String) -> String? Never! {
     bytes: row.bytes()
     start: at + byte_len(key) + 3
     end := start
-    loop end < bytes.len() && Int.from_u8(bytes[end]) != 34 {
-        if Int.from_u8(bytes[end]) == 92 {
+    loop end < bytes.len() && (Int{bytes[end]}) != 34 {
+        if (Int{bytes[end]}) == 92 {
             end += 2
         } else {
             end += 1

@@ -515,11 +515,11 @@ deserialize: fn(payload: String) -> Tensor ComputeError! {
 // The FNV-1a 64 hash of `body`'s bytes as 16 lowercase hex digits.
 wire_checksum: fn(body: String) -> String Never! {
     hash := U64{14695981039346656037}
-    loop byte in body.bytes() -> hash = (hash.bit_xor(U64.from_u8(byte))).wrapping_mul(U64{1099511628211})
+    loop byte in body.bytes() -> hash = wrapping((hash.bit_xor(U64{byte})) * U64{1099511628211})
     digits: "0123456789abcdef".bytes()
     out := [U8]{}
     loop index in 0..<16 {
-        nibble: Int.from_u64((hash >> (60 - index * 4)).bit_and(U64{15}))
+        nibble: Int{(hash >> (60 - index * 4)).bit_and(U64{15})}
         out.push(digits[nibble])
     }
     String.from_bytes(out) ?? ""

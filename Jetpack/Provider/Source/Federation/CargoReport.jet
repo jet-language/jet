@@ -247,7 +247,7 @@ provider_toml_value_without_comment: fn(value: String) -> String Never! {
     quote := 0
     escaped := false
     loop index in 0..<bytes.len() {
-        code: Int.from_u8(bytes[index])
+        code: Int{bytes[index]}
         if {
             quote == 34 && code == 34 && !escaped -> quote = 0
             quote == 39 && code == 39 -> quote = 0
@@ -263,8 +263,8 @@ provider_toml_value_without_comment: fn(value: String) -> String Never! {
 provider_toml_quoted: fn(value: String) -> Bool Never! {
     bytes: value.bytes()
     if bytes.len() < 2 -> return false
-    first: Int.from_u8(bytes[0])
-    last: Int.from_u8(bytes[bytes.len() - 1])
+    first: Int{bytes[0]}
+    last: Int{bytes[bytes.len() - 1]}
     (first == 34 && last == 34) || (first == 39 && last == 39)
 }
 

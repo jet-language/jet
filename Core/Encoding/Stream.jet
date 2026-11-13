@@ -443,13 +443,13 @@ JSONPull: struct {
     // number at the buffer's end or one that meets a limit) takes `number`.
     small_int: fn(&self, first: U8) -> Int? Never! {
         negative: first == (U8{45})
-        value := if negative -> 0 else -> Int.from_u8(first) - 48
+        value := if negative -> 0 else -> (Int{first}) - 48
         digits := if negative -> 0 else -> 1
         leading := if negative -> -1 else -> value
         start: self.buffered
         at := start
         loop at < self.buffer.len() {
-            n: Int.from_u8(self.buffer[at])
+            n: Int{self.buffer[at]}
             if n < 48 || n > 57 {
                 if n == 46 || n == 101 || n == 69 || n == 43 || n == 45 -> return None
                 break
@@ -517,7 +517,7 @@ JSONPull: struct {
             byte: self.fill()
             if byte == None -> return
             got: byte
-            n: Int.from_u8(got)
+            n: Int{got}
             if !((n >= 48 && n <= 57) || n == 45 || n == 43 || n == 46 || n == 101 || n == 69) -> return
             self.append(bytes, got, "number")
             _: self.consume()
@@ -805,7 +805,7 @@ valid_number: fn(bytes: [U8]) -> Bool Never! {
 }
 
 debug_byte: fn(byte: U8) -> String Never! {
-    n: Int.from_u8(byte)
+    n: Int{byte}
     if n == 39 -> return "'\\''"
     if n == 34 -> return "'\"'"
     bytes := [U8]{}
@@ -920,13 +920,13 @@ jcs_shortest: fn(magnitude: Float) -> String Never! {
     index := end - 1
     loop index >= 0 && (bytes[index] < (U8{48}) || bytes[index] > (U8{57})) -> index -= 1
     if index < 0 -> return shortest
-    digit: Int.from_u8(bytes[index]) - 48
+    digit: Int{bytes[index]} - 48
     bits: math.to_bits(magnitude)
     candidates := [String]{}
     loop replacement in [digit - 1, digit + 1] {
         if replacement < 0 || replacement > 9 -> next
         candidate := bytes.copy()
-        candidate[index] = U8.from_int(48 + replacement) ?? panic("ASCII digit")
+        candidate[index] = checked(U8{48 + replacement}) ?? panic("ASCII digit")
         text: String.from_bytes(candidate) ?? panic("ASCII float candidate")
         if Float.parse(text) == .Ok(parsed) && math.to_bits(parsed) == bits -> candidates.push(text)
     }
@@ -942,7 +942,7 @@ jcs_shortest: fn(magnitude: Float) -> String Never! {
     best_odd := digit %% 2 == 1
     loop candidate in candidates {
         distance: jcs_distance(candidate, significand, power)
-        odd: (Int.from_u8(candidate.bytes()[index]) - 48) %% 2 == 1
+        odd: (Int{candidate.bytes()[index]} - 48) %% 2 == 1
         if distance < best_distance || (distance == best_distance && best_odd && !odd) {
             best = candidate.copy()
             best_distance = distance
@@ -973,7 +973,7 @@ jcs_distance: fn(text: String, significand: Int, power: Int) -> Int Never! {
             seen_point = true
             next
         }
-        digits = digits * 10 + (Int.from_u8(b) - 48)
+        digits = digits * 10 + (Int{b} - 48)
         if seen_point -> fraction_digits += 1
     }
     exponent := 0
@@ -999,19 +999,19 @@ utf16_units: fn(text: String) -> [Int] Never! {
     length: bytes.len()
     i := 0
     loop i < length {
-        b: Int.from_u8(bytes[i])
+        b: Int{bytes[i]}
         cp := b
         width := 1
         if b >= 240 {
-            cp = ((b.bit_and(7)) << 18).bit_or(((Int.from_u8(bytes[i + 1]).bit_and(63)) << 12)).bit_or(((Int.from_u8(bytes[i + 2]).bit_and(63)) << 6)).bit_or((Int.from_u8(bytes[i + 3]).bit_and(63)))
+            cp = ((b.bit_and(7)) << 18).bit_or(((Int{bytes[i + 1]}.bit_and(63)) << 12)).bit_or(((Int{bytes[i + 2]}.bit_and(63)) << 6)).bit_or((Int{bytes[i + 3]}.bit_and(63)))
             width = 4
         }
         if b >= 224 && b < 240 {
-            cp = ((b.bit_and(15)) << 12).bit_or(((Int.from_u8(bytes[i + 1]).bit_and(63)) << 6)).bit_or((Int.from_u8(bytes[i + 2]).bit_and(63)))
+            cp = ((b.bit_and(15)) << 12).bit_or(((Int{bytes[i + 1]}.bit_and(63)) << 6)).bit_or((Int{bytes[i + 2]}.bit_and(63)))
             width = 3
         }
         if b >= 192 && b < 224 {
-            cp = ((b.bit_and(31)) << 6).bit_or((Int.from_u8(bytes[i + 1]).bit_and(63)))
+            cp = ((b.bit_and(31)) << 6).bit_or((Int{bytes[i + 1]}.bit_and(63)))
             width = 2
         }
         if cp >= 65536 {
@@ -1172,7 +1172,7 @@ JSONPush: struct {
     quoted_len: fn(self, text: String) -> Int EncodingError! {
         size := 0
         loop i in 0..<text.count_bytes() {
-            byte: Int.from_u8(byte_at(text, i))
+            byte: Int{byte_at(text, i)}
             size += if byte == 34 || byte == 92 || byte == 10 || byte == 13 || byte == 9 || byte == 8 || byte == 12 -> 2 else if byte < 32 -> 6 else -> 1
         }
         if size > self.limits.max_item_bytes -> return Err(self.error(.Limit, "max_item_bytes {self.limits.max_item_bytes} exceeded"))
@@ -1418,7 +1418,7 @@ JSONPush: struct {
         })
         loop i in 1..<frame.entries.len() {
             if frame.entries[i - 1].key == frame.entries[i].key {
-                self.canonical_retained -= Int.from_u64(frame.retained)
+                self.canonical_retained -= Int{frame.retained}
                 return Err(self.error(.Syntax, "JCS requires unique object keys"))
             }
         }
@@ -1430,12 +1430,12 @@ JSONPush: struct {
             quoted.push(text)
         }
         if size > self.limits.max_item_bytes {
-            self.canonical_retained -= Int.from_u64(frame.retained)
+            self.canonical_retained -= Int{frame.retained}
             return Err(self.error(.Limit, "max_item_bytes {self.limits.max_item_bytes} exceeded by canonical object"))
         }
         out := [U8]{}
         if !mem.__list_reserve_exact<U8>(out, size) {
-            self.canonical_retained -= Int.from_u64(frame.retained)
+            self.canonical_retained -= Int{frame.retained}
             return Err(self.error(.Limit, "canonical JSON object allocation failed within configured bounds"))
         }
         out.push(U8{123})
@@ -1446,7 +1446,7 @@ JSONPush: struct {
             loop byte in frame.entries[i].value -> out.push(byte)
         }
         out.push(U8{125})
-        self.canonical_retained -= Int.from_u64(frame.retained)
+        self.canonical_retained -= Int{frame.retained}
         Ok(out)
     }
 
@@ -1551,7 +1551,7 @@ scalar_width: fn(byte: U8) -> Int Never! {
 
 escaped_unit: fn(text: String, at: Int, out: &[U8#6]) -> Int Never! {
     byte: byte_at(text, at)
-    n: Int.from_u8(byte)
+    n: Int{byte}
     if n == 34 || n == 92 || n == 10 || n == 13 || n == 9 || n == 8 || n == 12 {
         out[0] = U8{92}
         out[1] = if n == 10 -> U8{110} else if n == 13 -> U8{114} else if n == 9 -> U8{116} else if n == 8 -> U8{98} else if n == 12 -> U8{102} else -> byte
@@ -1581,12 +1581,12 @@ canonical_frame: fn(is_object: Bool) -> CanonicalFrame Never! {
 }
 
 next_text_unit: fn(text: String, at: Int) -> (unit: Int, position: Int, pending: Int) Never! {
-    first: Int.from_u8(byte_at(text, at))
+    first: Int{byte_at(text, at)}
     width: scalar_width(U8{first})
     codepoint := first
-    if width == 2 -> codepoint = ((first.bit_and(31)) << 6).bit_or((Int.from_u8(byte_at(text, at + 1)).bit_and(63)))
-    else if width == 3 -> codepoint = ((first.bit_and(15)) << 12).bit_or(((Int.from_u8(byte_at(text, at + 1)).bit_and(63)) << 6)).bit_or((Int.from_u8(byte_at(text, at + 2)).bit_and(63)))
-    else if width == 4 -> codepoint = ((first.bit_and(7)) << 18).bit_or(((Int.from_u8(byte_at(text, at + 1)).bit_and(63)) << 12)).bit_or(((Int.from_u8(byte_at(text, at + 2)).bit_and(63)) << 6)).bit_or((Int.from_u8(byte_at(text, at + 3)).bit_and(63)))
+    if width == 2 -> codepoint = ((first.bit_and(31)) << 6).bit_or((Int{byte_at(text, at + 1)}.bit_and(63)))
+    else if width == 3 -> codepoint = ((first.bit_and(15)) << 12).bit_or(((Int{byte_at(text, at + 1)}.bit_and(63)) << 6)).bit_or((Int{byte_at(text, at + 2)}.bit_and(63)))
+    else if width == 4 -> codepoint = ((first.bit_and(7)) << 18).bit_or(((Int{byte_at(text, at + 1)}.bit_and(63)) << 12)).bit_or(((Int{byte_at(text, at + 2)}.bit_and(63)) << 6)).bit_or((Int{byte_at(text, at + 3)}.bit_and(63)))
     if codepoint < 65536 -> return (unit: codepoint, position: at + width, pending: -1)
     (unit: 55296 + ((codepoint - 65536) >> 10), position: at + width, pending: 56320 + ((codepoint - 65536).bit_and(1023)))
 }
@@ -1631,7 +1631,7 @@ parse_int64: fn(text: String) -> Int? Never! {
     if at == length -> return None
     magnitude := U64{0}
     loop at < length {
-        byte: Int.from_u8(byte_at(text, at))
+        byte: Int{byte_at(text, at)}
         if byte < 48 || byte > 57 -> return None
         digit: U64{byte - 48}
         if magnitude > (U64{922337203685477580}) -> return None
@@ -1641,9 +1641,9 @@ parse_int64: fn(text: String) -> Int? Never! {
     }
     if negative {
         if magnitude == (U64{9223372036854775808}) -> return Val(-9223372036854775808)
-        return Val(-Int.from_u64(magnitude))
+        return Val(-Int{magnitude})
     }
-    Val(Int.from_u64(magnitude))
+    Val(Int{magnitude})
 }
 
 ascii_text: fn(bytes: &&[U8]) -> String Never! {
@@ -1662,7 +1662,7 @@ plain_quoted: fn(bytes: [U8], open: Int) -> String? Never! {
     if open < 0 || open >= bytes.len() || bytes[open] != (U8{34}) -> return None
     at := open + 1
     loop at < bytes.len() {
-        n: Int.from_u8(bytes[at])
+        n: Int{bytes[at]}
         if n == 34 {
             #Unsafe("every byte before the closing quote is printable ASCII, so it is whole UTF-8") {
                 return Val(rt.bytes_into_text(bytes[open + 1..<at]))
@@ -1700,7 +1700,7 @@ wire_float: fn(value: Float) -> String Never! {
             at += 1
         }
         loop at < bytes.len() {
-            exponent = exponent * 10 + Int.from_u8(bytes[at]) - 48
+            exponent = exponent * 10 + Int{bytes[at]} - 48
             at += 1
         }
         if exponent_negative -> exponent = -exponent

@@ -110,7 +110,7 @@ LEXER_CHUNK_HEAD_WORDS: [String]{"fn", "pub", "priv", "struct", "enum", "impl", 
 lexer_chunk_head_at: fn(source: [U8], at: Int) -> Bool Never! {
     if at < 3 || at >= source.len() -> return false
     if source[at - 1] != (U8{10}) || source[at - 2] != (U8{125}) || source[at - 3] != (U8{10}) -> return false
-    first: Int.from_u8(source[at])
+    first: Int{source[at]}
     if first == 35 -> return true
     lower: first >= 97 && first <= 122
     if !lower && !(first >= 65 && first <= 90) && first != 95 -> return false

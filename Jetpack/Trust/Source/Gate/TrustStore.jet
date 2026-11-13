@@ -105,7 +105,7 @@ TrustRecord: enum {
 trust_escape_component: fn(text: String) -> String Never! {
     out := [U8]{}
     loop byte in text.bytes() {
-        if Int.from_u8(byte) == {
+        if (Int{byte}) == {
             37 -> loop escaped in "%25".bytes() -> out.push(escaped)
             58 -> loop escaped in "%3A".bytes() -> out.push(escaped)
             TRUST_NEWLINE | TRUST_CARRIAGE_RETURN -> {}
@@ -121,9 +121,9 @@ trust_unescape_component: fn(text: String) -> String Never! {
     out := [U8]{}
     index := 0
     loop index < raw.len() {
-        if Int.from_u8(raw[index]) == 37 && index + 2 < raw.len() {
-            high: trust_hex_value(Int.from_u8(raw[index + 1]))
-            low: trust_hex_value(Int.from_u8(raw[index + 2]))
+        if (Int{raw[index]}) == 37 && index + 2 < raw.len() {
+            high: trust_hex_value(Int{raw[index + 1]})
+            low: trust_hex_value(Int{raw[index + 2]})
             if high >= 0 && low >= 0 {
                 out.push(U8{high * 16 + low})
                 index += 3

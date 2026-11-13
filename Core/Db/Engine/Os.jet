@@ -1025,7 +1025,7 @@ os_get_tempname: fn() -[DB]> String SQLError! {
         digits: "0123456789abcdef".bytes()
         hex := [U8]{}
         loop i in 0..<8 {
-            b: Int.from_u8(r[7 - i])
+            b: Int{r[7 - i]}
             loop half in 0..<2 {
                 digit: if half == 0 -> b >> 4 else -> b.bit_and(15)
                 if digit != 0 || hex.len() > 0 || (i == 7 && half == 1) -> hex.push(digits[digit])
@@ -1075,7 +1075,7 @@ os_random_bytes: fn(n: Int) -[DB]> [U8] Never! {
         guard.value.s[3] = 1797285236
         loop w in 0..<11 {
             at: w * 4
-            guard.value.s[4 + w] = Int.from_u8(seed[at]).bit_or(Int.from_u8(seed[at + 1]) << 8).bit_or(Int.from_u8(seed[at + 2]) << 16).bit_or(Int.from_u8(seed[at + 3]) << 24)
+            guard.value.s[4 + w] = Int{seed[at]}.bit_or(Int{seed[at + 1]} << 8).bit_or(Int{seed[at + 2]} << 16).bit_or(Int{seed[at + 3]} << 24)
         }
         guard.value.s[15] = guard.value.s[12]
         guard.value.s[12] = 0

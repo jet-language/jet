@@ -114,7 +114,7 @@ dec_bits: fn(c: U8) -> U8 Never! {
 
 /// The value of Base64 digit c ('A'..'Z', 'a'..'z', '0'..'9', '+', '/'), or
 /// -1, in constant time (mbedtls_ct_base64_dec_value).
-base64_dec_value: fn(c: U8) -> Int Never! { Int.from_u8(dec_bits(c)) - 1 }
+base64_dec_value: fn(c: U8) -> Int Never! { Int{dec_bits(c)} - 1 }
 
 LAYOUT_SPACE: U8{1}
 LAYOUT_CR: U8{2}
@@ -242,7 +242,7 @@ nul_at: fn(data: [U8]) -> U64 Never! {
 
 // The text of data: up to its first NUL byte, as C's string functions see
 // it.
-text_len: fn(data: [U8]) -> Int Never! { Int.from_u64(nul_at(data)) }
+text_len: fn(data: [U8]) -> Int Never! { Int{nul_at(data)} }
 
 // data[i] within the text, else the NUL that ends it: a byte of a block's
 // header lines (a line end, the DEK-Info IV's hex) or of the line end after
@@ -384,11 +384,11 @@ decrypt: fn(alg: PEMCipher, iv: &[U8], body: [U8], pwd: [U8]) -> [U8] PEMError! 
 // (pem_check_pkcs_padding). A zero pad byte passes, as in mbedtls.
 unpadded_len: fn(input: [U8]) -> Int PEMError! {
     if input.len() < 1 -> return Err(.InvalidData(None))
-    pad: Int.from_u8(input[input.len() - 1])
+    pad: Int{input[input.len() - 1]}
     if pad > input.len() -> return Err(.PasswordMismatch)
     keep: input.len() - pad
     loop i in keep..<input.len() {
-        if Int.from_u8(input[i]) != pad -> return Err(.PasswordMismatch)
+        if (Int{input[i]}) != pad -> return Err(.PasswordMismatch)
     }
     Ok(keep)
 }

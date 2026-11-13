@@ -73,7 +73,7 @@ jet_driver_run_receipt_section_marker: fn(name: String) -> [U8] Never! {
 jet_driver_run_receipt_is_digest: fn(value: String) -> Bool Never! {
     if value.bytes().len() != 64 -> return false
     loop byte in value.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if !((code >= 48 && code <= 57) || (code >= 97 && code <= 102)) -> return false
     }
     true
@@ -198,7 +198,7 @@ jet_driver_run_receipt_uint: fn(out: &[U8], number: Int, width: Int) Never! {
     value := number
     digits := [U8]{}
     loop _ in 0..<width {
-        digits.push(U8.from_int(value % 256) ?? panic("unsigned wire byte"))
+        digits.push(checked(U8{value % 256}) ?? panic("unsigned wire byte"))
         value /%= 256
     }
     loop index in 0..<width -> out.push(digits[width - index - 1])
@@ -215,7 +215,7 @@ jet_driver_run_receipt_take: fn(cursor: &JetDriverRunReceiptCursor) -> [U8] JetD
     if cursor.at > cursor.bytes.len() - 8 -> return Err(jet_driver_run_receipt_error("{cursor.prefix} frame length is truncated"))
     length := 0
     loop _ in 0..<8 {
-        byte: Int.from_u8(cursor.bytes[cursor.at])
+        byte: Int{cursor.bytes[cursor.at]}
         if length > (cursor.maximum - byte) /% 256 {
             return Err(jet_driver_run_receipt_error("{cursor.prefix} frame is too large"))
         }
@@ -237,7 +237,7 @@ jet_driver_run_receipt_number: fn(bytes: [U8], width: Int, label: String, maximu
     if bytes.len() != width -> return Err(jet_driver_run_receipt_error("receipt {label} is malformed"))
     value := 0
     loop byte in bytes {
-        digit: Int.from_u8(byte)
+        digit: Int{byte}
         if value > (maximum - digit) /% 256 || digit > maximum -> return Err(jet_driver_run_receipt_error(too_large))
         value = value * 256 + digit
     }
@@ -300,7 +300,7 @@ jet_driver_run_receipt_decode: fn(bytes: [U8]) -> JetDriverRunReceipt JetDriverR
         version: jet_driver_run_receipt_take(cursor)
         if version.len() != 8 -> return Err(jet_driver_run_receipt_error("receipt links version is malformed"))
         version_number := U64{0}
-        loop byte in version -> version_number = (version_number << 8).bit_or(U64.from_u8(byte))
+        loop byte in version -> version_number = (version_number << 8).bit_or(U64{byte})
         if version_number != 1 -> return Err(jet_driver_run_receipt_error("unsupported receipt links version {version_number}"))
         consumed = jet_driver_run_receipt_decode_links(cursor, "consumed")
         produced = jet_driver_run_receipt_decode_links(cursor, "produced")

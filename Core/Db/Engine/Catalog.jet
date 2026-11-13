@@ -468,7 +468,7 @@ find_or_create_function: fn(db: &conn.Conn, name: [U8], n_arg: Int, enc: Int) ->
         i = db.func_next[i]
     }
     lower := [U8]{}
-    loop c in name -> lower.push(U8{util.lower_byte(Int.from_u8(c))})
+    loop c in name -> lower.push(U8{util.lower_byte(Int{c})})
     slot: db.funcs.len()
     db.funcs.push(conn.FuncDef{n_arg: n_arg, flags: enc, user_data: 0, name: lower, impl_id: 0, has_sfunc: false, has_step: false, has_finalize: false, has_value: false, has_inverse: false})
     db.func_next.push(first)
@@ -706,7 +706,7 @@ affinity_type: fn(z: [U8]) -> (aff: Int, sz_est: Int) Never! {
     z_char := -1
     i := 0
     loop i < z.len() {
-        c: Int.from_u8(z[i])
+        c: Int{z[i]}
         if c == 0 -> break
         h = (h * 256 + util.lower_byte(c)).bit_and(4294967295)
         i += 1
@@ -720,7 +720,7 @@ affinity_type: fn(z: [U8]) -> (aff: Int, sz_est: Int) Never! {
         } else if h == 1651273570 && (aff == base.AFF_NUMERIC || aff == base.AFF_REAL) {
             // BLOB
             aff = base.AFF_BLOB
-            if i < z.len() && Int.from_u8(z[i]) == 40 -> z_char = i
+            if i < z.len() && (Int{z[i]}) == 40 -> z_char = i
         } else if (h == 1919246700 || h == 1718382433 || h == 1685026146) && aff == base.AFF_NUMERIC {
             // REAL, FLOA, DOUB
             aff = base.AFF_REAL
@@ -734,8 +734,8 @@ affinity_type: fn(z: [U8]) -> (aff: Int, sz_est: Int) Never! {
     if aff < base.AFF_NUMERIC {
         if z_char >= 0 {
             k := z_char
-            loop k < z.len() && Int.from_u8(z[k]) != 0 {
-                if util.is_digit(Int.from_u8(z[k])) {
+            loop k < z.len() && (Int{z[k]}) != 0 {
+                if util.is_digit(Int{z[k]}) {
                     v = util.get_int32(z.slice(k, z.len())) ?? 0
                     break
                 }

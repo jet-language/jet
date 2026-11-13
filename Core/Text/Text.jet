@@ -433,7 +433,7 @@ decode_indexed: fn(text: String) -> [IndexedCp] Never! {
     loop {
         if i >= raw.len() -> return out
         start: i
-        first: Int.from_u8(raw[i])
+        first: Int{raw[i]}
         width: text_unicode_string.utf8_width_at(raw, i)
         if width == 1 {
             if first < 128 {
@@ -451,7 +451,7 @@ decode_indexed: fn(text: String) -> [IndexedCp] Never! {
         valid := true
         k := 1
         loop k < width {
-            byte: Int.from_u8(raw[i + k])
+            byte: Int{raw[i + k]}
             if byte < 128 || byte >= 192 {
                 valid = false
                 break
@@ -518,7 +518,7 @@ is_digit_cp: fn(cp: Int, table: View<U8>) -> Bool Never! {
 // Callers pass bytes of a valid UTF-8 String and an offset at a scalar start.
 // Read one scalar in place instead of materializing both decoder vectors.
 unicode_scalar_at: fn(raw: View<U8>, at: Int) -> (cp: Int, end: Int) Never! {
-    first: Int.from_u8(raw[at])
+    first: Int{raw[at]}
     if first < 128 -> return (cp: first, end: at + 1)
     width := 2
     cp := first.bit_and(31)
@@ -530,7 +530,7 @@ unicode_scalar_at: fn(raw: View<U8>, at: Int) -> (cp: Int, end: Int) Never! {
         cp = first.bit_and(15)
     }
     loop offset in 1..<width {
-        cp = (cp << 6).bit_or((Int.from_u8(raw[at + offset]).bit_and(63)))
+        cp = (cp << 6).bit_or((Int{raw[at + offset]}.bit_and(63)))
     }
     (cp: cp, end: at + width)
 }
@@ -936,7 +936,7 @@ SB_CLOSE: 14
 // Tables are checksum-verified and round-tripped by the generator, not decoded
 // into another allocation at startup. Header size is 40 bytes.
 segment_uint: fn(table: View<U8>, at: Int) -> Int Never! {
-    Int.from_u8(table[at]).bit_or((Int.from_u8(table[at + 1]) << 8)).bit_or((Int.from_u8(table[at + 2]) << 16))
+    Int{table[at]}.bit_or((Int{table[at + 1]} << 8)).bit_or((Int{table[at + 2]} << 16))
 }
 segment_row: fn(table: View<U8>, cp: Int, stride: Int) -> Int Never! {
     low := 0
@@ -953,7 +953,7 @@ segment_row: fn(table: View<U8>, cp: Int, stride: Int) -> Int Never! {
 segment_tag: fn(table: View<U8>, cp: Int) -> Int Never! {
     row: segment_row(table, cp, 7)
     if row < 0 -> return 0
-    Int.from_u8(table[row + 6])
+    Int{table[row + 6]}
 }
 segment_contains: fn(table: View<U8>, cp: Int) -> Bool Never! { segment_row(table, cp, 6) >= 0 }
 

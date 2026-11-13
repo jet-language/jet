@@ -26,7 +26,7 @@ fixture_u16: fn(out: &[U8], n: Int) {
 fixture_question_end: fn(query: [U8]) -> Int {
     pos := 12
     loop pos < query.len() && query[pos] != (U8{0}) {
-        pos += Int.from_u8(query[pos]) + 1
+        pos += Int{query[pos]} + 1
     }
     pos + 5
 }
@@ -94,7 +94,7 @@ fixture_send: fn(socket: net.UDPSocket, packet: net.UDPPacket, bytes: [U8]) {
             response := [U8]{}
             if i == 0 {
                 response = fixture_cname(packet.data)
-                response[3] = U8{Int.from_u8(response[3]).bit_or(0x40)}
+                response[3] = U8{Int{response[3]}.bit_or(0x40)}
             } else if i == 1 {
                 response = fixture_pointer(packet.data, 6)
             } else {

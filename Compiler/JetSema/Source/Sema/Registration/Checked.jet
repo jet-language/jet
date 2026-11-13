@@ -300,7 +300,7 @@ sema_checked_has_name: fn(names: [String], expected: String) -> Bool Never! {
 sema_checked_ascii_upper: fn(text: String) -> String Never! {
     bytes := text.bytes()
     loop index in 0..<bytes.len() {
-        code: Int.from_u8(bytes[index])
+        code: Int{bytes[index]}
         if code >= 97 && code <= 122 -> bytes[index] = U8{code - 32}
     }
     String.from_bytes(bytes) ?? text
@@ -2001,7 +2001,7 @@ sema_checked_variant_field: fn(field: VariantField, ty: Type) -> TField Never! {
 sema_checked_ascii_lower: fn(text: String) -> String Never! {
     bytes := text.bytes()
     loop index in 0..<bytes.len() {
-        code: Int.from_u8(bytes[index])
+        code: Int{bytes[index]}
         if code >= 65 && code <= 90 -> bytes[index] = U8{code + 32}
     }
     String.from_bytes(bytes) ?? text
@@ -2014,12 +2014,12 @@ sema_checked_wire_words: fn(name: String) -> [String] Never! {
         bytes: segment.bytes()
         start := 0
         loop index in 0..<bytes.len() {
-            code: Int.from_u8(bytes[index])
+            code: Int{bytes[index]}
             if code >= 65 && code <= 90 && index > start {
-                previous: Int.from_u8(bytes[index - 1])
+                previous: Int{bytes[index - 1]}
                 next_lower := false
                 if index + 1 < bytes.len() {
-                    next_code: Int.from_u8(bytes[index + 1])
+                    next_code: Int{bytes[index + 1]}
                     next_lower = next_code >= 97 && next_code <= 122
                 }
                 if (previous >= 97 && previous <= 122) || next_lower {
@@ -2084,7 +2084,7 @@ sema_checked_restore_wire_word: fn(word: String) -> String Never! {
         else -> {
             bytes := word.bytes()
             if bytes.len() == 0 -> return word.copy()
-            code: Int.from_u8(bytes[0])
+            code: Int{bytes[0]}
             if code >= 97 && code <= 122 -> bytes[0] = U8{code - 32}
             rest: String.from_bytes(bytes.slice(1, bytes.len())) ?? ""
             "{String.from_bytes(bytes.slice(0, 1)) ?? ""}{sema_checked_ascii_lower(rest)}"
@@ -3661,7 +3661,7 @@ sema_checked_nested_impl_row: fn(graph: SemaRegistrationGraph, module_row: SemaR
 sema_checked_const_char: fn(text: String) -> Int? Never! {
     bytes: text.bytes()
     if bytes.len() == 0 -> return None
-    first: Int.from_u8(bytes[0])
+    first: Int{bytes[0]}
     if first < 128 -> return Val(first)
     width: if {
         first >= 192 && first < 224 -> 2
@@ -3671,9 +3671,9 @@ sema_checked_const_char: fn(text: String) -> Int? Never! {
     }
     if width == 0 || bytes.len() < width -> return None
     value: if width == {
-        2 -> (first - 192) * 64 + (Int.from_u8(bytes[1]) - 128)
-        3 -> (first - 224) * 4096 + (Int.from_u8(bytes[1]) - 128) * 64 + (Int.from_u8(bytes[2]) - 128)
-        else -> (first - 240) * 262144 + (Int.from_u8(bytes[1]) - 128) * 4096 + (Int.from_u8(bytes[2]) - 128) * 64 + (Int.from_u8(bytes[3]) - 128)
+        2 -> (first - 192) * 64 + (Int{bytes[1]} - 128)
+        3 -> (first - 224) * 4096 + (Int{bytes[1]} - 128) * 64 + (Int{bytes[2]} - 128)
+        else -> (first - 240) * 262144 + (Int{bytes[1]} - 128) * 4096 + (Int{bytes[2]} - 128) * 64 + (Int{bytes[3]} - 128)
     }
     Val(value)
 }
@@ -3980,7 +3980,7 @@ sema_checked_module_type_path: fn(value: Expr) -> Bool Never! {
 sema_checked_module_uppercase: fn(name: String) -> Bool Never! {
     bytes: name.bytes()
     if bytes.len() == 0 -> return false
-    first: Int.from_u8(bytes[0])
+    first: Int{bytes[0]}
     first >= 65 && first <= 90
 }
 

@@ -148,7 +148,7 @@ jfmt_bin_op_is_comparison: fn(op: BinOp) -> Bool Never! {
 }
 
 jfmt_is_ascii_space: fn(byte: U8) -> Bool Never! {
-    code: Int.from_u8(byte)
+    code: Int{byte}
     code == 32 || code == 9 || code == 10 || code == 13 || code == 11 || code == 12
 }
 
@@ -298,20 +298,20 @@ jfmt_uses_classic_if_spelling: fn(bytes: [U8], if_span: Span, first_condition: S
     index := if_span.end
     end: first_condition.start
     loop index < end {
-        code: Int.from_u8(bytes[index])
-        next_code: if index + 1 < end -> Int.from_u8(bytes[index + 1]) else -> -1
+        code: Int{bytes[index]}
+        next_code: if index + 1 < end -> (Int{bytes[index + 1]}) else -> -1
         if {
             jfmt_is_ascii_space(bytes[index]) -> index += 1
             code == 47 && next_code == 47 -> {
                 index += 2
-                loop index < end && Int.from_u8(bytes[index]) != 10 -> index += 1
+                loop index < end && (Int{bytes[index]}) != 10 -> index += 1
             }
             code == 47 && next_code == 42 -> {
                 index += 2
                 depth := 1
                 loop index < end && depth > 0 {
-                    here: Int.from_u8(bytes[index])
-                    after: if index + 1 < end -> Int.from_u8(bytes[index + 1]) else -> -1
+                    here: Int{bytes[index]}
+                    after: if index + 1 < end -> (Int{bytes[index + 1]}) else -> -1
                     if {
                         here == 47 && after == 42 -> {
                             depth += 1
@@ -349,7 +349,7 @@ jfmt_expr_without_parens: fn(expr: Expr) -> Expr Never! {
 jfmt_out_trimmed_ends_with_close: fn(f: JetFmt) -> Bool Never! {
     index := f.out.len() - 1
     loop index >= 0 && jfmt_is_ascii_space(f.out[index]) -> index -= 1
-    index >= 0 && Int.from_u8(f.out[index]) == 125
+    index >= 0 && Int{f.out[index]} == 125
 }
 
 // Rust `src.get(start..end).is_some()`.
@@ -733,7 +733,7 @@ jfmt_source_has_blank_line: fn(bytes: [U8], start: Int, end: Int) -> Bool Never!
     only_space_since_newline := true
     loop index in start..<end {
         byte: bytes[index]
-        if Int.from_u8(byte) == 10 {
+        if (Int{byte}) == 10 {
             if saw_newline && only_space_since_newline -> return true
             saw_newline = true
             only_space_since_newline = true
@@ -1301,7 +1301,7 @@ jfmt_value_block_inlineable: fn(f: JetFmt, stmts: [Stmt], value: Expr) -> Bool {
     if jfmt_span_has_comment(f, braces.open, braces.close) -> return false
     if !jfmt_src_range_valid(f, braces.open, braces.close) -> return false
     loop index in braces.open..<braces.close {
-        if Int.from_u8(f.src_bytes[index]) == 10 -> return false
+        if (Int{f.src_bytes[index]}) == 10 -> return false
     }
     true
 }
@@ -1542,14 +1542,14 @@ jfmt_parse_decimal_i64: fn(text: String) -> Int? Never! {
     bytes: text.bytes()
     index := 0
     negative := false
-    if bytes.len() > 0 && (Int.from_u8(bytes[0]) == 43 || Int.from_u8(bytes[0]) == 45) {
-        negative = Int.from_u8(bytes[0]) == 45
+    if bytes.len() > 0 && (Int{bytes[0]} == 43 || Int{bytes[0]} == 45) {
+        negative = Int{bytes[0]} == 45
         index = 1
     }
     if index >= bytes.len() -> return None
     value := 0
     loop index < bytes.len() {
-        code: Int.from_u8(bytes[index])
+        code: Int{bytes[index]}
         if code < 48 || code > 57 -> return None
         value = value * 10 + (code - 48)
         index += 1
@@ -1699,11 +1699,11 @@ jfmt_arm_body_is_written_exit: fn(f: JetFmt, body: [Stmt]) -> Bool {
     if start < 2 || start > f.src_bytes.len() -> return false
     at := start - 1
     loop at >= 0 {
-        code: Int.from_u8(f.src_bytes[at])
+        code: Int{f.src_bytes[at]}
         if code != 32 && code != 9 && code != 10 && code != 13 -> break
         at -= 1
     }
-    at >= 1 && Int.from_u8(f.src_bytes[at]) == 62 && Int.from_u8(f.src_bytes[at - 1]) == 45
+    at >= 1 && Int{f.src_bytes[at]} == 62 && Int{f.src_bytes[at - 1]} == 45
 }
 
 jfmt_stmt_is_direct_exit: fn(statement: Stmt) -> Bool Never! {
@@ -1762,17 +1762,17 @@ jfmt_arm_body_was_braceless: fn(f: JetFmt, body: [Stmt]) -> Bool {
     if start < 0 || start > f.src_bytes.len() -> return false
     // Rust `prefix.rfind("->")` over `src[..start]`.
     arrow := start - 2
-    loop arrow >= 0 && !(Int.from_u8(f.src_bytes[arrow]) == 45 && Int.from_u8(f.src_bytes[arrow + 1]) == 62) -> arrow -= 1
+    loop arrow >= 0 && !(Int{f.src_bytes[arrow]} == 45 && Int{f.src_bytes[arrow + 1]} == 62) -> arrow -= 1
     if arrow < 0 -> return false
     between_start: arrow + 2
     loop index in between_start..<start {
-        code: Int.from_u8(f.src_bytes[index])
+        code: Int{f.src_bytes[index]}
         if code == 123 || code == 10 -> return false
     }
     source_end: jfmt_statement_source_end(f, body[0])
     if !jfmt_src_range_valid(f, start, source_end) -> return false
     loop index in start..<source_end {
-        if Int.from_u8(f.src_bytes[index]) == 10 -> return false
+        if (Int{f.src_bytes[index]}) == 10 -> return false
     }
     !jfmt_span_has_comment(f, between_start, source_end)
 }

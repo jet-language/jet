@@ -46,7 +46,7 @@ table_affinity_str: fn(db: conn.Conn, t: Int) -> [U8] Never! {
     loop i in 0..<db.tables[t].cols.len() {
         if db.tables[t].cols[i].col_flags.bit_and(conn.COLFLAG_VIRTUAL) == 0 -> z.push(U8{db.tables[t].cols[i].affinity})
     }
-    loop z.len() > 0 && Int.from_u8(z[z.len() - 1]) <= base.AFF_BLOB -> _: z.pop()
+    loop z.len() > 0 && (Int{z[z.len() - 1]}) <= base.AFF_BLOB -> _: z.pop()
     z
 }
 

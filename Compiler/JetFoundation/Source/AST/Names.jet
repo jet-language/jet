@@ -43,11 +43,11 @@ name_empty: fn() -> Name Never! {
 }
 
 name_index: fn(name: Name) -> Int Never! {
-    Int.from_u32(name.id)
+    Int{name.id}
 }
 
 name_text: fn(table: NameTable, name: Name) -> String Never! {
-    table.texts[Int.from_u32(name.id)]
+    table.texts[Int{name.id}]
 }
 
 name_count: fn(table: NameTable) -> Int Never! {
@@ -60,8 +60,8 @@ name_start: fn(table: NameTable, id: Int) -> Int Never! {
 
 name_hash: fn(bytes: [U8], start: Int, end: Int) -> Int Never! {
     hash := U32{0x811c9dc5}
-    loop index in start..<end -> hash = (hash.bit_xor(U32.from_u8(bytes[index]))).wrapping_mul(U32{0x01000193})
-    Int.from_u32(hash)
+    loop index in start..<end -> hash = wrapping((hash.bit_xor(U32{bytes[index]})) * U32{0x01000193})
+    Int{hash}
 }
 
 // Whether id `id` spells `bytes[start..<end]`, whose `name_hash` is `hash`.
@@ -137,7 +137,7 @@ name_table_grow: fn(table: &NameTable) Never! {
 // A lookup computes it once (in place, no byte copy) and passes it with the
 // spelling to every `NameRows` it visits.
 name_rows_hash: fn(text: String) -> Int Never! {
-    Int.from_u64(text.hash().bit_and(U64{0x3fffffff}))
+    Int{text.hash().bit_and(U64{0x3fffffff})}
 }
 
 // A String -> Int map (A1): open addressing over each key's `s.hash()`.

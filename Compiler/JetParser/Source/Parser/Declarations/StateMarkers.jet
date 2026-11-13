@@ -188,12 +188,12 @@ parser_state_marker_param_edit: fn(function: Func, owner: String, state: String,
         end: param.name_span.end
         if param.name != "self" || end < 4 || parser_state_marker_text(source, end - 4, end) != "self" -> return None
         start := end - 4
-        loop start > 0 && Int.from_u8(source[start - 1]) == 38 -> start -= 1
+        loop start > 0 && (Int{source[start - 1]}) == 38 -> start -= 1
         caps: parser_state_marker_text(source, start, end - 4)
         return Val(TextEdit{span: Span{start: start, end: end}, new_text: "self: {caps}{owner}.{state}"})
     }
     start := param.ty_span.start
-    loop start < param.ty_span.end && (Int.from_u8(source[start]) == 38 || parser_state_marker_blank(source[start])) -> start += 1
+    loop start < param.ty_span.end && (Int{source[start]} == 38 || parser_state_marker_blank(source[start])) -> start += 1
     written: parser_state_marker_text(source, start, param.ty_span.end)
     if written != owner && written != "Self" -> return None
     Val(TextEdit{span: Span{start: start, end: param.ty_span.end}, new_text: "{owner}.{state}"})
@@ -217,7 +217,7 @@ parser_state_marker_result_edit: fn(function: Func, owner: String, state: String
 // state with moves, closed at the indentation of the line it starts on.
 parser_state_marker_list: fn(state: StateDecl, moves: [String:[String]], source: [U8]) -> String Never! {
     line_start := state.span.start
-    loop line_start > 0 && Int.from_u8(source[line_start - 1]) != 10 -> line_start -= 1
+    loop line_start > 0 && (Int{source[line_start - 1]}) != 10 -> line_start -= 1
     indent_end := line_start
     loop indent_end < state.span.start && parser_state_marker_blank(source[indent_end]) -> indent_end += 1
     indent: parser_state_marker_text(source, line_start, indent_end)
@@ -269,16 +269,16 @@ parser_state_marker_text_is: fn(source: [U8], at: Int, word: String) -> Bool Nev
 
 parser_state_marker_skip_space: fn(source: [U8], at: Int) -> Int Never! {
     end := at
-    loop end < source.len() && (parser_state_marker_blank(source[end]) || Int.from_u8(source[end]) == 10 || Int.from_u8(source[end]) == 13) -> end += 1
+    loop end < source.len() && (parser_state_marker_blank(source[end]) || Int{source[end]} == 10 || Int{source[end]} == 13) -> end += 1
     end
 }
 
 parser_state_marker_blank: fn(byte: U8) -> Bool Never! {
-    value: Int.from_u8(byte)
+    value: Int{byte}
     value == 32 || value == 9
 }
 
 parser_state_marker_ident_byte: fn(byte: U8) -> Bool Never! {
-    value: Int.from_u8(byte)
+    value: Int{byte}
     (value >= 48 && value <= 57) || (value >= 65 && value <= 90) || (value >= 97 && value <= 122) || value == 95
 }

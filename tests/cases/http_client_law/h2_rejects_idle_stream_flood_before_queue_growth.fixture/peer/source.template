@@ -15,9 +15,9 @@ contains_bytes: fn(raw: [U8], want: [U8], ascii_casefold: Bool) -> Bool {
     loop start in 0..<(raw.len() - want.len() + 1) {
         same := true
         loop i in 0..<want.len() {
-            n := Int.from_u8(raw[start + i])
+            n := Int{raw[start + i]}
             if ascii_casefold && n >= 65 && n <= 90 -> n += 32
-            if n != Int.from_u8(want[i]) -> same = false
+            if n != (Int{want[i]}) -> same = false
         }
         if same -> return true
     }
@@ -56,9 +56,9 @@ read_exact: fn(stream: TCPStream, size: Int) -> [U8] {
 }
 read_frame: fn(stream: TCPStream) -> Frame {
     head: read_exact(stream, 9)
-    size: (Int.from_u8(head[0]) << 16).bit_or(Int.from_u8(head[1]) << 8).bit_or(Int.from_u8(head[2]))
-    id: (Int.from_u8(head[5]) << 24).bit_or(Int.from_u8(head[6]) << 16).bit_or(Int.from_u8(head[7]) << 8).bit_or(Int.from_u8(head[8])).bit_and(2147483647)
-    return Frame{kind: Int.from_u8(head[3]), flags: Int.from_u8(head[4]), id: id, payload: read_exact(stream, size)}
+    size: (Int{head[0]} << 16).bit_or(Int{head[1]} << 8).bit_or(Int{head[2]})
+    id: (Int{head[5]} << 24).bit_or(Int{head[6]} << 16).bit_or(Int{head[7]} << 8).bit_or(Int{head[8]}).bit_and(2147483647)
+    return Frame{kind: Int{head[3]}, flags: Int{head[4]}, id: id, payload: read_exact(stream, size)}
 }
 write_frame: fn(stream: TCPStream, kind: Int, flags: Int, id: Int, payload: [U8]) {
     size: payload.len()

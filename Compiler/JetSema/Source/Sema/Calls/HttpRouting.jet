@@ -289,14 +289,14 @@ sema_http_route_static_segment_error: fn(segment: String) -> String? {
     decoded := [U8]{}
     index := 0
     loop index < input.len() {
-        code := Int.from_u8(input[index])
+        code := Int{input[index]}
         if code != 37 {
             decoded.push(input[index])
             index = index + 1
             next
         }
-        high := if index + 1 < input.len() -> sema_http_route_hex_value(Int.from_u8(input[index + 1])) else -> -1
-        low := if index + 2 < input.len() -> sema_http_route_hex_value(Int.from_u8(input[index + 2])) else -> -1
+        high := if index + 1 < input.len() -> sema_http_route_hex_value(Int{input[index + 1]}) else -> -1
+        low := if index + 2 < input.len() -> sema_http_route_hex_value(Int{input[index + 2]}) else -> -1
         if high < 0 || low < 0 -> return Val("invalid percent escape")
         decoded_byte := high * 16 + low
         if decoded_byte == 47 -> return Val("encoded slash is ambiguous")
@@ -311,10 +311,10 @@ sema_http_route_static_segment_error: fn(segment: String) -> String? {
 sema_http_route_name_is_valid: fn(name: String) -> Bool Never! {
     bytes := name.bytes()
     if bytes.len() == 0 -> return false
-    first := Int.from_u8(bytes[0])
+    first := Int{bytes[0]}
     if !(first == 95 || (first >= 65 && first <= 90) || (first >= 97 && first <= 122)) -> return false
     loop index in 1..<bytes.len() {
-        code := Int.from_u8(bytes[index])
+        code := Int{bytes[index]}
         if !(code == 95 || (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122)) -> return false
     }
     true
@@ -456,7 +456,7 @@ sema_http_route_path_value: fn(argument: CallArg, environment: SemaScopeEnvironm
 sema_http_route_json_quote: fn(value: String) -> String Never! {
     output := [U8]{U8{34}}
     loop byte in value.bytes() {
-        code := Int.from_u8(byte)
+        code := Int{byte}
         if {
             code == 34 -> {
                 output.push(U8{92})
@@ -1019,7 +1019,7 @@ sema_http_route_operation_method: fn(method: String, wire: String) -> String Nev
 sema_http_route_operation_id: fn(method: String, path: String) -> String Never! {
     output := "jet_{method}_"
     loop byte in path.bytes() {
-        code := Int.from_u8(byte)
+        code := Int{byte}
         if {
             code >= 65 && code <= 90 -> {
                 output = "{output}{String.from_bytes([U8]{U8{code + 32}}) ?? "_"}"

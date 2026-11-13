@@ -26,7 +26,7 @@ fixture_u16: fn(out: &[U8], n: Int) {
 fixture_question_end: fn(query: [U8]) -> Int {
     pos := 12
     loop pos < query.len() && query[pos] != (U8{0}) {
-        pos += Int.from_u8(query[pos]) + 1
+        pos += Int{query[pos]} + 1
     }
     pos + 5
 }
@@ -52,7 +52,7 @@ fixture_header: fn(query: [U8], flags: Int, answers: Int, authorities: Int, addi
 }
 fixture_response: fn(query: [U8]) -> [U8] {
     end: fixture_question_end(query)
-    qtype: Int.from_u8(query[end - 4]) * 256 + Int.from_u8(query[end - 3])
+    qtype: Int{query[end - 4]} * 256 + Int{query[end - 3]}
     out := fixture_header(query, 0x8180, 1, 0, 0)
     out.push(U8{0xc0})
     out.push(U8{0x0c})
@@ -85,7 +85,7 @@ fixture_send: fn(socket: net.UDPSocket, packet: net.UDPPacket, bytes: [U8]) {
         ids := [Int]{}
         loop _i in 0..<9 {
             packet: net.udp_recv_from(socket, 512) ?? panic("receive query")
-            id: Int.from_u8(packet.data[0]) * 256 + Int.from_u8(packet.data[1])
+            id: Int{packet.data[0]} * 256 + Int{packet.data[1]}
             if !ids.contains(id) -> ids.push(id)
             fixture_send(socket, packet, fixture_response(packet.data))
         }

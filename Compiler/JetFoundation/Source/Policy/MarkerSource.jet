@@ -74,7 +74,7 @@ marker_source_split_top_level: fn(text: String) -> [String] Never! {
     start := 0
     scan := MarkerSourceScan{depth: 0, in_string: false, escaped: false}
     loop (index, byte) in text.bytes() {
-        value: Int.from_u8(byte)
+        value: Int{byte}
         if marker_source_scan_step(scan, value) && value == 44 {
             entries.push(marker_source_slice(text, start, index).trim())
             start = index + 1
@@ -91,11 +91,11 @@ marker_source_split_default: fn(value: String) -> MarkerSourceDefault? Never! {
     bytes: value.bytes()
     scan := MarkerSourceScan{depth: 0, in_string: false, escaped: false}
     loop (index, byte) in bytes {
-        current: Int.from_u8(byte)
+        current: Int{byte}
         if scan.depth == 0 && !scan.in_string && current == 123 {
             default_scan := MarkerSourceScan{depth: 0, in_string: false, escaped: false}
             loop end in index..<bytes.len() {
-                inner: Int.from_u8(bytes[end])
+                inner: Int{bytes[end]}
                 marker_source_scan_step(default_scan, inner)
                 if inner == 125 && default_scan.depth == 0 && !default_scan.in_string {
                     if marker_source_slice(value, end + 1, bytes.len()).trim().len() == 0 {
@@ -173,7 +173,7 @@ marker_source_arg_type: fn(source_type: String) -> TAppliedRuleArgKind Never! {
 
 marker_source_byte_index: fn(text: String, byte: Int) -> Int? Never! {
     loop (index, value) in text.bytes() {
-        if Int.from_u8(value) == byte -> return Val(index)
+        if (Int{value}) == byte -> return Val(index)
     }
     None
 }
@@ -181,7 +181,7 @@ marker_source_byte_index: fn(text: String, byte: Int) -> Int? Never! {
 marker_source_last_byte_index: fn(text: String, byte: Int) -> Int? Never! {
     found := Int?{None}
     loop (index, value) in text.bytes() {
-        if Int.from_u8(value) == byte -> found = Val(index)
+        if (Int{value}) == byte -> found = Val(index)
     }
     found
 }
@@ -195,8 +195,8 @@ marker_source_strip_comments: fn(source: String) -> String Never! {
     escaped := false
     index := 0
     loop index < bytes.len() {
-        byte: Int.from_u8(bytes[index])
-        following: if index + 1 < bytes.len() -> Int.from_u8(bytes[index + 1]) else -> 0
+        byte: Int{bytes[index]}
+        following: if index + 1 < bytes.len() -> (Int{bytes[index + 1]}) else -> 0
         if in_string {
             if {
                 escaped -> escaped = false
@@ -209,12 +209,12 @@ marker_source_strip_comments: fn(source: String) -> String Never! {
             next
         }
         if byte == 47 && following == 47 {
-            loop index < bytes.len() && Int.from_u8(bytes[index]) != 10 -> index += 1
+            loop index < bytes.len() && (Int{bytes[index]}) != 10 -> index += 1
             next
         }
         if byte == 47 && following == 42 {
             index += 2
-            loop index + 1 < bytes.len() && !(Int.from_u8(bytes[index]) == 42 && Int.from_u8(bytes[index + 1]) == 47) -> index += 1
+            loop index + 1 < bytes.len() && !(Int{bytes[index]} == 42 && Int{bytes[index + 1]} == 47) -> index += 1
             index += 2
             next
         }
@@ -232,7 +232,7 @@ marker_source_members: fn(text: String) -> [String] Never! {
     start := 0
     scan := MarkerSourceScan{depth: 0, in_string: false, escaped: false}
     loop (index, byte) in text.bytes() {
-        value: Int.from_u8(byte)
+        value: Int{byte}
         if marker_source_scan_step(scan, value) && (value == 10 || value == 44 || value == 59) {
             entry: marker_source_slice(text, start, index).trim()
             if entry.len() > 0 -> entries.push(entry)

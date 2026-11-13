@@ -44,9 +44,9 @@ trust_pin_is_version_channel: fn(channel: String) -> Bool Never! {
         // The major carries the stage letter.
         start: if index == 0 -> 1 else -> 0
         if raw.len() <= start -> return false
-        if index == 0 && (Int.from_u8(raw[0]) < 97 || Int.from_u8(raw[0]) > 122) -> return false
+        if index == 0 && (Int{raw[0]} < 97 || Int{raw[0]} > 122) -> return false
         loop offset in start..<raw.len() {
-            code: Int.from_u8(raw[offset])
+            code: Int{raw[offset]}
             if code < 48 || code > 57 -> return false
         }
     }
@@ -64,10 +64,10 @@ trust_pin_is_range_pin: fn(value: String) -> Bool Never! {
 trust_pin_is_named_channel: fn(channel: String) -> Bool Never! {
     raw: channel.bytes()
     if raw.len() == 0 -> return false
-    first: Int.from_u8(raw[0])
+    first: Int{raw[0]}
     if first < 97 || first > 122 -> return false
     loop byte in raw {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if !((code >= 97 && code <= 122) || (code >= 48 && code <= 57) || code == TRUST_DASH) -> return false
     }
     true

@@ -4,7 +4,7 @@
 
 nixeval_byte: fn(bytes: [U8], index: Int) -> Int Never! {
     if index < 0 || index >= bytes.len() -> return -1
-    Int.from_u8(bytes[index])
+    Int{bytes[index]}
 }
 
 nixeval_slice: fn(bytes: [U8], start: Int, end: Int) -> String Never! {
@@ -14,7 +14,7 @@ nixeval_slice: fn(bytes: [U8], start: Int, end: Int) -> String Never! {
 
 // Push one byte value in 0..=255 (always in range by construction).
 nixeval_push_byte: fn(out: &[U8], value: Int) Never! {
-    out.push(U8.from_int(value) ?? U8{0})
+    out.push(checked(U8{value}) ?? U8{0})
 }
 
 nixeval_push_text: fn(out: &[U8], text: String) Never! {
@@ -117,7 +117,7 @@ nixeval_is_blank: fn(text: String) -> Bool Never! {
 nixeval_scalar_count: fn(text: String) -> Int Never! {
     count := 0
     loop byte in text.bytes() {
-        value: Int.from_u8(byte)
+        value: Int{byte}
         if value < 128 || value >= 192 -> count += 1
     }
     count
@@ -144,7 +144,7 @@ nixeval_matches_at: fn(bytes: [U8], needle: [U8], at: Int) -> Bool Never! {
 
 nixeval_contains_byte: fn(text: String, byte: Int) -> Bool Never! {
     loop value in text.bytes() {
-        if Int.from_u8(value) == byte -> return true
+        if (Int{value}) == byte -> return true
     }
     false
 }
@@ -164,7 +164,7 @@ nixeval_strip_prefix: fn(text: String, prefix: String) -> String? Never! {
 // Byte offset of the first `byte`, or -1.
 nixeval_first_byte: fn(bytes: [U8], byte: Int) -> Int Never! {
     loop index in 0..<bytes.len() {
-        if Int.from_u8(bytes[index]) == byte -> return index
+        if (Int{bytes[index]}) == byte -> return index
     }
     -1
 }
@@ -173,7 +173,7 @@ nixeval_first_byte: fn(bytes: [U8], byte: Int) -> Int Never! {
 nixeval_last_byte: fn(bytes: [U8], byte: Int) -> Int Never! {
     index := bytes.len() - 1
     loop index >= 0 {
-        if Int.from_u8(bytes[index]) == byte -> return index
+        if (Int{bytes[index]}) == byte -> return index
         index -= 1
     }
     -1
@@ -196,7 +196,7 @@ nixeval_last_segment: fn(text: String, separators: String) -> String Never! {
 nixeval_lowercase_ascii: fn(text: String) -> String Never! {
     out := [U8]{}
     loop byte in text.bytes() {
-        value: Int.from_u8(byte)
+        value: Int{byte}
         if {
             value >= 65 && value <= 90 -> nixeval_push_byte(out, value + 32)
             else -> out.push(byte)

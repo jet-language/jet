@@ -102,7 +102,7 @@ jet_receipt_is_content_address: fn(value: String) -> Bool Never! {
     digits: value.removeprefix("sha256-").bytes()
     if digits.len() != 64 -> return false
     loop byte in digits {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if !((code >= 48 && code <= 57) || (code >= 97 && code <= 102)) -> return false
     }
     true
@@ -124,7 +124,7 @@ jet_receipt_hex: fn(value: String) -> String Never! {
     digits: "0123456789abcdef".bytes()
     out := [U8]{}
     loop byte in value.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         out.push(digits[code >> 4])
         out.push(digits[(code).bit_and(15)])
     }

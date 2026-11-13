@@ -291,12 +291,12 @@ is_word: fn(text: String) -> Bool Never! {
 }
 
 is_ident_start: fn(byte: U8) -> Bool Never! {
-    code: Int.from_u8(byte)
+    code: Int{byte}
     (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 95
 }
 
 is_ident_byte: fn(byte: U8) -> Bool Never! {
-    code: Int.from_u8(byte)
+    code: Int{byte}
     is_ident_start(byte) || (code >= 48 && code <= 57)
 }
 
@@ -419,7 +419,7 @@ push_u64: fn(out: &[U8], value: Int) {
     digits := [U8]{}
     rest := value
     loop _ in 0..<8 {
-        digits.push(U8.from_int(rest % 256) ?? U8{0})
+        digits.push(checked(U8{rest % 256}) ?? U8{0})
         rest /%= 256
     }
     loop at in 0..<8 -> out.push(digits[7 - at])
@@ -600,7 +600,7 @@ blank: fn(text: String) -> String Never! {
 
 blank_into: fn(out: &[U8], raw: [U8], start: Int, end: Int) Never! {
     loop at in start..<end {
-        code: Int.from_u8(raw[at])
+        code: Int{raw[at]}
         if {
             code == 10 -> out.push(U8{10})
             code < 128 || (code >= 192 && code < 240) -> out.push(U8{32})

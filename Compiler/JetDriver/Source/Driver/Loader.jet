@@ -652,7 +652,7 @@ jet_driver_parse_allocator_bytes: fn(value: String, span: Span, diagnostics: &[D
     value_bytes: value.bytes()
     dot := -1
     loop (index, byte) in value_bytes {
-        if Int.from_u8(byte) == 46 -> dot = index
+        if (Int{byte}) == 46 -> dot = index
     }
     // copy: `digits_text` is trimmed in place to its digits, while `value` is the caller's manifest
     // field (a read parameter) and stays intact.
@@ -680,7 +680,7 @@ jet_driver_parse_allocator_bytes: fn(value: String, span: Span, diagnostics: &[D
     }
     count := 0
     loop byte in digits.bytes() {
-        digit := Int.from_u8(byte)
+        digit := Int{byte}
         if digit < 48 || digit > 57 {
             diagnostics.push(jet_driver_diagnostic("E1222", span, "invalid hosted program allocator", "`cap:` must be a positive whole-byte quantity such as `2.gb`", "use a positive whole-byte quantity that fits in 64 bits"))
             return None
@@ -709,7 +709,7 @@ jet_driver_top_level_commas: fn(body: String) -> [String] Never! {
     quoted := false
     escaped := false
     loop byte in body.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if quoted {
             current.push(byte)
             if {
@@ -784,7 +784,7 @@ jet_driver_parse_decimal: fn(value: String) -> Int? {
     if value.len() == 0 -> return None
     result := 0
     loop byte in value.bytes() {
-        digit := Int.from_u8(byte)
+        digit := Int{byte}
         if digit < 48 || digit > 57 -> return None
         digit -= 48
         if result > 214748364 -> return None
@@ -825,7 +825,7 @@ jet_driver_version_selector_matches: fn(selector: String, version: String) -> Bo
     core := selector
     bytes: selector.bytes()
     if bytes.len() > 0 {
-        first: Int.from_u8(bytes[0])
+        first: Int{bytes[0]}
         if first == 94 || first == 126 || first == 61 {
             mode = String.from_bytes([bytes[0]]) ?? ""
             core = String.from_bytes(bytes.slice(1, bytes.len())) ?? ""
@@ -1641,7 +1641,7 @@ jet_driver_default_module_alias: fn(relative_path: String) -> String Never! {
     alias := ""
     index := 0
     loop index < raw_bytes.len() {
-        byte: Int.from_u8(raw_bytes[index])
+        byte: Int{raw_bytes[index]}
         if {
             (byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122) || (byte >= 48 && byte <= 57) || byte == 95 -> {
                 alias = "{alias}{String.from_bytes([raw_bytes[index]]) ?? "_"}"
@@ -1664,7 +1664,7 @@ jet_driver_default_module_alias: fn(relative_path: String) -> String Never! {
         }
     }
     if alias.len() == 0 -> alias = "module"
-    first: Int.from_u8(alias.bytes()[0])
+    first: Int{alias.bytes()[0]}
     if first >= 48 && first <= 57 -> alias = "_{alias}"
     alias
 }
@@ -3076,7 +3076,7 @@ JetDriverInlinePackage: struct {
 
 jet_driver_inline_byte: fn(bytes: [U8], at: Int) -> Int Never! {
     if at < 0 || at >= bytes.len() -> return -1
-    Int.from_u8(bytes[at])
+    Int{bytes[at]}
 }
 
 jet_driver_inline_space: fn(byte: Int) -> Bool Never! {
@@ -3743,7 +3743,7 @@ jet_driver_collect_core_identifier_demand_ids: fn(tokens: [Token], tables: Token
             // whether `Dest` is a unit type.
             if index > from + 1 && tokens[index - 1].kind == TOKEN_DOT && tokens[index - 2].kind == TOKEN_IDENT && index + 1 < to && tokens[index + 1].kind == TOKEN_LPAREN && token_decoded(tables, tokens[index]).starts_with("from_") {
                 receiver: token_decoded(tables, tokens[index - 2])
-                first: Int.from_u8(receiver.bytes()[0])
+                first: Int{receiver.bytes()[0]}
                 if first >= 65 && first <= 90 {
                     demand.unit_family = true
                     if token_decoded(tables, tokens[index]).ends_with("_rounded") -> demand.rounded_conversion = true

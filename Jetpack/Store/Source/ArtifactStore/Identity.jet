@@ -86,7 +86,7 @@ store_artifact_sha256: fn(bytes: [U8]) -> [U8] Never! {
 }
 
 store_artifact_hex_value: fn(byte: U8) -> Int? Never! {
-    code: Int.from_u8(byte)
+    code: Int{byte}
     if {
         code >= 48 && code <= 57 -> Val(code - 48)
         code >= 97 && code <= 102 -> Val(code - 87)
@@ -315,7 +315,7 @@ store_artifact_validate_component: fn(value: String, label: String) ArtifactStor
         return Err(ArtifactStoreError.InvalidKey("invalid {label} `{value}`"))
     }
     loop byte in raw {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if !pkg_bytes_is_word(code) && code != 46 && code != 45 {
             return Err(ArtifactStoreError.InvalidKey("invalid {label} `{value}`"))
         }

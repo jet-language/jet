@@ -7,7 +7,7 @@ Key: tag { deny: [Exec], timing: .Fixed }
 reveal: fn(value: #Key U64) -> U64 { value }
 
 mix: fn(k: U64, salt: U64) -> U64 {
-    k.bit_xor(salt).wrapping_mul(U64{3}).wrapping_add(U64{1})
+    wrapping(wrapping(k.bit_xor(salt) * U64{3}) + U64{1})
 }
 
 forward: fn(k: #Key U64) -> #Key U64 { mix(k, U64{5}) }

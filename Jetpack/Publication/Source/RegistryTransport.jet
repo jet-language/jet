@@ -24,7 +24,7 @@ publication_parse_registry_port: fn(port: String?) -> Int? PublicationRegistryAu
     digits: raw.removeprefix("+")
     if digits == "" -> return Err(PublicationRegistryAuthorityError{detail: "port is malformed"})
     loop byte in digits.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if code < 48 || code > 57 -> return Err(PublicationRegistryAuthorityError{detail: "port is malformed"})
     }
     number: Int.parse(digits) ?? return Err(PublicationRegistryAuthorityError{detail: "port is malformed"})
@@ -112,7 +112,7 @@ PublicationRegistryTransport: enum {
 // The shared formatter is both Rust registry_ip and registry_curl_address.
 // Their IPv6 bracket semantics are identical, so neither needs a second body.
 publication_address_text: fn(address: [U8]) -> String Never! {
-    if address.len() == 4 -> return "{Int.from_u8(address[0])}.{Int.from_u8(address[1])}.{Int.from_u8(address[2])}.{Int.from_u8(address[3])}"
+    if address.len() == 4 -> return "{Int{address[0]}}.{Int{address[1]}}.{Int{address[2]}}.{Int{address[3]}}"
     groups := [String]{}
     loop index in 0..<8 -> groups.push(pkg_hex_bytes([U8]{address[index * 2], address[index * 2 + 1]}))
     groups.join(":")
@@ -127,7 +127,7 @@ publication_registry_remote: fn(url: String, scheme: String, port: Int, explicit
     rest: pair.after.bytes()
     authority_end := rest.len()
     loop index in 0..<rest.len() {
-        code: Int.from_u8(rest[index])
+        code: Int{rest[index]}
         if code == 47 || code == 63 || code == 35 {
             authority_end = index
             break
@@ -159,9 +159,9 @@ publication_addresses_public: fn(addresses: [[U8]]) -> Bool Never! {
     if addresses.len() == 0 -> return false
     loop address in addresses {
         if address.len() == 4 {
-            if !ip.is_public_destination(IPv4{a: Int.from_u8(address[0]), b: Int.from_u8(address[1]), c: Int.from_u8(address[2]), d: Int.from_u8(address[3])}) -> return false
+            if !ip.is_public_destination(IPv4{a: Int{address[0]}, b: Int{address[1]}, c: Int{address[2]}, d: Int{address[3]}}) -> return false
         } else if address.len() == 16 {
-            words: loop index in 0..<8 -> Int.from_u8(address[index * 2]) * 256 + Int.from_u8(address[index * 2 + 1])
+            words: loop index in 0..<8 -> (Int{address[index * 2]}) * 256 + (Int{address[index * 2 + 1]})
             if !ip.ipv6_is_public_destination(IPv6{words: words}) -> return false
         } else {
             return false

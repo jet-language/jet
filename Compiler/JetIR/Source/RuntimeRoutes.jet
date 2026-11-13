@@ -11,15 +11,15 @@ runtime_abi_atom: fn(name: String) -> String Never! {
     bytes: name.bytes()
     out := [U8]{}
     loop index in 0..<bytes.len() {
-        code: Int.from_u8(bytes[index])
+        code: Int{bytes[index]}
         if code == 46 || code == 95 {
             if out.len() > 0 && out[out.len() - 1] != (U8{95}) -> out.push(U8{95})
             next
         }
         upper: code >= 65 && code <= 90
         if upper && index > 0 && out.len() > 0 && out[out.len() - 1] != (U8{95}) {
-            previous: Int.from_u8(bytes[index - 1])
-            next_code: if index + 1 < bytes.len() -> Int.from_u8(bytes[index + 1]) else -> 0
+            previous: Int{bytes[index - 1]}
+            next_code: if index + 1 < bytes.len() -> (Int{bytes[index + 1]}) else -> 0
             previous_upper: previous >= 65 && previous <= 90
             next_lower: next_code >= 97 && next_code <= 122
             if !previous_upper || next_lower -> out.push(U8{95})

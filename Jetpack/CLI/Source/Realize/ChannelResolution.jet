@@ -81,7 +81,7 @@ cli_nixpkgs_channel: fn(raw: String) -> String? Never! {
 
 cli_is_lower_hex: fn(text: String) -> Bool Never! {
     loop byte in text.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if !((code >= 48 && code <= 57) || (code >= 97 && code <= 102)) -> return false
     }
     true
@@ -324,7 +324,7 @@ cli_semver_nums: fn(text: String) -> [Int]? Never! {
     loop part in rest.split(".") {
         digits := ""
         loop byte in part.bytes() {
-            code: Int.from_u8(byte)
+            code: Int{byte}
             if code < 48 || code > 57 -> break
             digits = "{digits}{code - 48}"
         }

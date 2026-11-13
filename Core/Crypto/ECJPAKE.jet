@@ -115,7 +115,7 @@ zkp_read: fn(md: hashes.Md, grp: ecp.EcpGroup, format: ecp.PointFormat, g: ecp.P
     v: ecp.tls_read_point(grp, cipher.bytes_of(buf, p, end - p))
     p += v.used
     if end - p < 1 -> return Err(.BadInput)
-    r_len: Int.from_u8(buf[p])
+    r_len: Int{buf[p]}
     p += 1
     if end - p < r_len || r_len == 0 -> return Err(.BadInput)
     r: bn.read_binary(cipher.bytes_of(buf, p, r_len)) ?? return Err(.Mpi(err))

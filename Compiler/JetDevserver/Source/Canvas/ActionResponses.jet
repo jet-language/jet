@@ -30,7 +30,7 @@ function_signature_span: fn(src: String, name_span: Span) -> Span String! {
     brace_rel: src.slice(from, src.len()).index_of("{{") ?? return Err(edit_error("not_found", "Canvas function signature no longer has a body"))
     bytes: src.bytes()
     end := from + brace_rel
-    loop end > start && is_space_byte(Int.from_u8(bytes[end - 1])) -> end -= 1
+    loop end > start && is_space_byte(Int{bytes[end - 1]}) -> end -= 1
     Ok(Span{start: start, end: end})
 }
 

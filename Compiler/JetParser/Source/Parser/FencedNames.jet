@@ -517,14 +517,14 @@ parser_fence_numbered_name: fn(name: String) -> ParserFenceNumberedName? {
     bytes: name.bytes()
     split := bytes.len()
     loop split > 0 {
-        value: Int.from_u8(bytes[split - 1])
+        value: Int{bytes[split - 1]}
         if value < 48 || value > 57 -> break
         split -= 1
     }
     if split == bytes.len() -> return None
     number := 0
     loop index in split..<bytes.len() {
-        digit: Int.from_u8(bytes[index]) - 48
+        digit: Int{bytes[index]} - 48
         if number > (PARSER_FENCE_INT_MAX - digit) /% 10 -> return None
         number = number * 10 + digit
     }

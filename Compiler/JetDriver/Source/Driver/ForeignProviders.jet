@@ -557,8 +557,8 @@ jet_driver_foreign_unescape: fn(value: String) -> String? {
             next
         }
         if index + 2 >= bytes.len() -> return None
-        high: jet_driver_foreign_hex_digit(Int.from_u8(bytes[index + 1]))
-        low: jet_driver_foreign_hex_digit(Int.from_u8(bytes[index + 2]))
+        high: jet_driver_foreign_hex_digit(Int{bytes[index + 1]})
+        low: jet_driver_foreign_hex_digit(Int{bytes[index + 2]})
         if high < 0 || low < 0 -> return None
         output.push(U8{high * 16 + low})
         index += 3

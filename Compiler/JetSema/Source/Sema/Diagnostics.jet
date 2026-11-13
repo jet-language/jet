@@ -403,23 +403,19 @@ sema_slot_holds_mismatch: fn(slot: String, holder: String, required: Type, offer
 }
 
 // The repair for a whole number where a narrower fixed width is required
-// (`Int` or `I64` into `U8`): narrowing is never implicit, and the
-// destination-owned conversion is fallible.
+// (`Int` or `I64` into `U8`): narrowing is never implicit, and `checked(T{x})`
+// is the fallible conversion.
 sema_integer_narrowing_fix: fn(want: Type, got: Type) -> String? {
     fixed: if want == {
         .IntN(_, _) -> true
         .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
     }
     if !fixed -> return None
-    source := "int"
-    if got == .IntN(signed, bits) {
-        prefix: if signed -> "i" else -> "u"
-        source = "{prefix}{bits}"
-    } else if got != Type.Int {
-        return None
-    }
     target: type_name(want)
-    Val("convert it with `{target}.from_{source}(value) ?? fallback`; the conversion is `None` when the value doesn't fit in {target}")
+    fix: "convert it with `checked({target}{{value}}) ?? fallback`; the conversion is `None` when the value doesn't fit in {target}"
+    if got == .IntN(_, _) -> return Val(fix)
+    if got == Type.Int -> return Val(fix)
+    None
 }
 
 // (Rust `typed_text_mismatch`): a runtime `String` never becomes a checked
@@ -552,10 +548,7 @@ sema_type_fix_hint: fn(want: Type, got: Type) -> String Never! {
         }
         .Int -> {
             if got == Type.Float -> return "drop the decimal part, like `2`"
-            if got == .IntN(signed, bits) {
-                prefix: if signed -> "i" else -> "u"
-                return "widen it explicitly with `Int.from_{prefix}{bits}(value)`"
-            }
+            if got == .IntN(_, _) -> return "widen it explicitly with `Int{{value}}`"
         }
         .String -> return "put the value in text with interpolation: \"{{x}}\""
         .Named(name) -> {

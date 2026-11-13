@@ -54,7 +54,7 @@ trust_test_boot: fn(now: Int) -> TrustTestBoot {
 // Flip the first hex digit of a signature.
 trust_test_tamper: fn(sig_hex: String) -> String {
     raw: sig_hex.bytes()
-    replacement: if Int.from_u8(raw[0]) == 48 -> "1" else -> "0"
+    replacement: if (Int{raw[0]}) == 48 -> "1" else -> "0"
     "{replacement}{String.from_bytes(raw[1..<raw.len()]) ?? ""}"
 }
 

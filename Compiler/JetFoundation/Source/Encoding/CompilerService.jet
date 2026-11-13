@@ -218,7 +218,7 @@ compiler_service_value_wire: fn(value: CtValue) -> Dyn? Never! {
         .Str(text) -> Val(compiler_service_tag("Str", Dyn.Text(text)))
         .BigInt(decimal) -> Val(compiler_service_tag("BigInt", Dyn.Text(decimal)))
         .Bytes(bytes) -> {
-            items: loop byte in bytes -> Dyn.Int(Int.from_u8(byte))
+            items: loop byte in bytes -> Dyn.Int(Int{byte})
             Val(compiler_service_tag("Bytes", Dyn.Array(items)))
         }
         .List(values) -> {

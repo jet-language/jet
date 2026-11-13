@@ -79,9 +79,9 @@ EXAMPLE_NAME_KEPT: [ExampleNameKept]{
     ExampleNameKept{path: "Tooling/DevLoop/JobRunner.seed_data.out", why: "the golden stream of the `seed_data` job is labelled by the job's function name (Examples/Tooling/DevLoop/JobRunner.jet:13), which is snake_case (Compiler/JetFoundation/Data/Syntax/Spellings.jet:305)"},
 }
 
-example_name_upper: fn(byte: U8) -> Bool Never! { Int.from_u8(byte) >= 65 && Int.from_u8(byte) <= 90 }
-example_name_lower: fn(byte: U8) -> Bool Never! { Int.from_u8(byte) >= 97 && Int.from_u8(byte) <= 122 }
-example_name_digit: fn(byte: U8) -> Bool Never! { Int.from_u8(byte) >= 48 && Int.from_u8(byte) <= 57 }
+example_name_upper: fn(byte: U8) -> Bool Never! { Int{byte} >= 65 && Int{byte} <= 90 }
+example_name_lower: fn(byte: U8) -> Bool Never! { Int{byte} >= 97 && Int{byte} <= 122 }
+example_name_digit: fn(byte: U8) -> Bool Never! { Int{byte} >= 48 && Int{byte} <= 57 }
 
 // `[A-Z][A-Za-z0-9]*`
 example_name_title: fn(word: String) -> Bool Never! {
@@ -118,8 +118,8 @@ example_name_suffix: fn(word: String) -> Bool Never! {
 example_name_acronym_at: fn(word: [U8], at: Int, acronym: [U8]) -> Bool Never! {
     if at + acronym.len() > word.len() || word[at] != acronym[0] -> return false
     loop index in 1..<acronym.len() {
-        expected: Int.from_u8(acronym[index])
-        actual: Int.from_u8(word[at + index])
+        expected: Int{acronym[index]}
+        actual: Int{word[at + index]}
         if example_name_upper(acronym[index]) {
             if actual != expected + 32 -> return false
         } else if actual != expected {

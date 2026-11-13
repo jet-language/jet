@@ -300,7 +300,7 @@ LanguagePackCatalog: struct {
 envmodel_language_key: fn(name: String) -> String Never! {
     out := [U8]{}
     loop byte in name.bytes() {
-        if pkg_bytes_is_word(Int.from_u8(byte)) && Int.from_u8(byte) != 95 -> out.push(byte)
+        if pkg_bytes_is_word(Int{byte}) && (Int{byte}) != 95 -> out.push(byte)
     }
     pkg_ascii_lower(String.from_bytes(out) ?? "")
 }

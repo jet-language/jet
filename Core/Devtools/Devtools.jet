@@ -29,11 +29,11 @@ json_escape: fn(text: String) -> String Never! {
     index := 0
     loop {
         if index == bytes.len() -> break
-        byte: Int.from_u8(bytes[index])
+        byte: Int{bytes[index]}
         control := byte < 32 || byte == 127
         scalar := byte
         if byte == 194 && index + 1 < bytes.len() {
-            next: Int.from_u8(bytes[index + 1])
+            next: Int{bytes[index + 1]}
             if next >= 128 && next <= 159 {
                 control = true
                 scalar = next

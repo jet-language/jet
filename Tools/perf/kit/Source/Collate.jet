@@ -22,7 +22,7 @@ collate_weight: fn(byte: Int) -> Weight Never! {
     order: COLLATE_ORDER.bytes()
     base: COLLATE_SPACES.len() + 1
     loop at in 0..<order.len() {
-        if Int.from_u8(order[at]) == folded -> return Weight{primary: base + at, upper: upper}
+        if (Int{order[at]}) == folded -> return Weight{primary: base + at, upper: upper}
     }
     if byte < 32 || byte == 127 -> return Weight{primary: 0, upper: false}
     Weight{primary: base + order.len() + byte, upper: false}
@@ -31,7 +31,7 @@ collate_weight: fn(byte: Int) -> Weight Never! {
 collate_weights: fn(text: String) -> [Weight] Never! {
     weights := [Weight]{}
     loop byte in text.bytes() {
-        weight: collate_weight(Int.from_u8(byte))
+        weight: collate_weight(Int{byte})
         if weight.primary > 0 -> weights.push(weight)
     }
     weights

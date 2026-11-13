@@ -145,7 +145,7 @@ store_test_remote_expectation: fn() -> CacheExpectation Never! {
     entry.envelope.signature = "ed25519:{store_hex_bytes(signature.bytes)}"
     assert(store_verify_configured_signature(roots, entry, expectation))
     raw: entry.envelope.signature.bytes()
-    replacement: if Int.from_u8(raw[9]) == 48 -> "1" else -> "0"
+    replacement: if (Int{raw[9]}) == 48 -> "1" else -> "0"
     entry.envelope.signature = "{pkg_bytes_text(raw, 0, 9)}{replacement}{pkg_bytes_text(raw, 10, raw.len())}"
     assert(!store_verify_configured_signature(roots, entry, expectation))
     store_test_drop_roots(roots)

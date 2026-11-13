@@ -245,7 +245,7 @@ publication_required_metadata_string: fn(object: [String: Dyn], key: String) -> 
 publication_validate_registry_dependency_name: fn(name: String) IOError! {
     if name == "" || name == "." || name == ".." || name.contains("/") || name.contains("\\") -> return Err(publication_invalid_registry_metadata("registry dependency name is not a safe package name"))
     loop byte in name.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if code < 32 || code == 127 -> return Err(publication_invalid_registry_metadata("registry dependency name is not a safe package name"))
     }
 }

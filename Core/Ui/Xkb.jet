@@ -348,11 +348,11 @@ priv internal: module {
 
     // A number word's value: decimal, or hex after `0x`; -1 when not a number.
     number_value: fn(word: [U8]) -> Int {
-        if word.len() > 2 && Int.from_u8(word[0]) == 48 && (Int.from_u8(word[1]) == 120 || Int.from_u8(word[1]) == 88) {
+        if word.len() > 2 && (Int{word[0]}) == 48 && (Int{word[1]} == 120 || Int{word[1]} == 88) {
             if word.len() > 10 -> return -1
             value := 0
             loop i in 2..<word.len() {
-                digit: hex_digit(Int.from_u8(word[i]))
+                digit: hex_digit(Int{word[i]})
                 if digit < 0 -> return -1
                 value = value * 16 + digit
             }
@@ -361,7 +361,7 @@ priv internal: module {
         if word.len() > 12 -> return -1
         value := 0
         loop b in word {
-            c: Int.from_u8(b)
+            c: Int{b}
             if c < 48 || c > 57 -> return -1
             value = value * 10 + c - 48
         }
@@ -374,23 +374,23 @@ priv internal: module {
         i := 0
         line := 1
         loop i < n {
-            c: Int.from_u8(source[i])
+            c: Int{source[i]}
             if c == 10 {
                 line += 1
                 i += 1
             } else if c == 32 || c == 9 || c == 13 || c == 12 || c == 0 {
                 i += 1
-            } else if c == 35 || (c == 47 && i + 1 < n && Int.from_u8(source[i + 1]) == 47) {
-                loop i < n && Int.from_u8(source[i]) != 10 {
+            } else if c == 35 || (c == 47 && i + 1 < n && Int{source[i + 1]} == 47) {
+                loop i < n && (Int{source[i]}) != 10 {
                     i += 1
                 }
             } else if c == 34 {
                 start_line: line
                 text := [U8]{}
                 i += 1
-                loop i < n && Int.from_u8(source[i]) != 34 {
-                    if Int.from_u8(source[i]) == 92 && i + 1 < n -> i += 1
-                    if Int.from_u8(source[i]) == 10 -> line += 1
+                loop i < n && (Int{source[i]}) != 34 {
+                    if (Int{source[i]}) == 92 && i + 1 < n -> i += 1
+                    if (Int{source[i]}) == 10 -> line += 1
                     text.push(source[i])
                     i += 1
                 }
@@ -400,16 +400,16 @@ priv internal: module {
             } else if c == 60 {
                 start: i + 1
                 i += 1
-                loop i < n && Int.from_u8(source[i]) != 62 && Int.from_u8(source[i]) != 10 {
+                loop i < n && (Int{source[i]}) != 62 && (Int{source[i]}) != 10 {
                     i += 1
                 }
-                if i >= n || Int.from_u8(source[i]) != 62 -> return Err(syntax(line, "unterminated key name"))
+                if i >= n || (Int{source[i]}) != 62 -> return Err(syntax(line, "unterminated key name"))
                 name: String.from_bytes(source[start..<i]) ?? return Err(syntax(line, "a key name is not UTF-8"))
                 i += 1
                 out.push(Token{kind: T_KEY, text: name, value: 0, line: line})
             } else if is_word_byte(c) {
                 start: i
-                loop i < n && is_word_byte(Int.from_u8(source[i])) {
+                loop i < n && is_word_byte(Int{source[i]}) {
                     i += 1
                 }
                 word: source[start..<i]
@@ -620,7 +620,7 @@ priv internal: module {
 
     be: fn(bytes: [U8], at: Int, width: Int) -> Int {
         value := 0
-        loop k in 0..<width -> value = (value << 8) + Int.from_u8(bytes[at + k])
+        loop k in 0..<width -> value = (value << 8) + (Int{bytes[at + k]})
         value
     }
 
@@ -707,11 +707,11 @@ priv internal: module {
         bytes: text.bytes()
         i := 0
         loop i < bytes.len() {
-            b: Int.from_u8(bytes[i])
+            b: Int{bytes[i]}
             width: if b < 128 -> 1 else if b < 224 -> 2 else if b < 240 -> 3 else -> 4
             value := if b < 128 -> b else if b < 224 -> b.bit_and(31) else if b < 240 -> b.bit_and(15) else -> b.bit_and(7)
             loop k in 1..<width {
-                if i + k < bytes.len() -> value = (value << 6) + Int.from_u8(bytes[i + k]).bit_and(63)
+                if i + k < bytes.len() -> value = (value << 6) + (Int{bytes[i + k]}).bit_and(63)
             }
             out.push(value)
             i += width

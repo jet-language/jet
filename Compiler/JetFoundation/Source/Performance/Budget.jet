@@ -14,11 +14,11 @@ perf_integer_parse: fn(text: String) -> Int PerfBudgetError! {
 // Rust BigInt::parse_source.
 perf_integer_parse_source: fn(text: String) -> Int PerfBudgetError! {
     bytes: text.bytes()
-    negative: bytes.len() > 0 && Int.from_u8(bytes[0]) == 45
+    negative: bytes.len() > 0 && Int{bytes[0]} == 45
     start := if { negative -> 1 else -> 0 }
     radix := 10
-    if bytes.len() >= start + 2 && Int.from_u8(bytes[start]) == 48 {
-        prefix: Int.from_u8(bytes[start + 1])
+    if bytes.len() >= start + 2 && (Int{bytes[start]}) == 48 {
+        prefix: Int{bytes[start + 1]}
         if prefix == 120 {
             radix = 16
             start += 2
@@ -37,7 +37,7 @@ perf_integer_parse_source: fn(text: String) -> Int PerfBudgetError! {
     // Syntax::DIGIT_SEPARATOR (`_`).
     separator: 95
     loop index in start..<bytes.len() {
-        byte: Int.from_u8(bytes[index])
+        byte: Int{bytes[index]}
         if byte == separator -> next
         digit: if {
             byte >= 48 && byte <= 57 -> byte - 48
@@ -273,7 +273,7 @@ perf_sha_stream_word: fn(stream: &PerfSHAStream) -> Int Never! {
         digest: sha256_bytes(input[0..<input.len()])
         loop chunk in 0..<4 {
             word := 0
-            loop offset in 0..<8 -> word = word * 256 + Int.from_u8(digest[(3 - chunk) * 8 + offset])
+            loop offset in 0..<8 -> word = word * 256 + (Int{digest[(3 - chunk) * 8 + offset]})
             stream.words.push(word)
         }
     }

@@ -74,7 +74,7 @@ jetos_parse_i64: fn(text: String) -> Int? Never! {
     start: if raw[0] == 43 || raw[0] == 45 -> 1 else -> 0
     if start == raw.len() -> return None
     loop index in start..<raw.len() {
-        code: Int.from_u8(raw[index])
+        code: Int{raw[index]}
         if code < 48 || code > 57 -> return None
     }
     number: Int.parse(text) ?? return None
@@ -273,7 +273,7 @@ jetos_clean_symbol: fn(value: String) -> String Never! {
 jetos_ascii_alphanumeric: fn(text: String) -> Bool Never! {
     raw: text.bytes()
     if raw.len() != 1 -> return false
-    code: Int.from_u8(raw[0])
+    code: Int{raw[0]}
     (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122)
 }
 
@@ -294,7 +294,7 @@ jetos_safe_identifier: fn(value: String) -> String Never! {
     }
     out: parts.join("")
     if out == "" -> return "_"
-    first: Int.from_u8(out.bytes()[0])
+    first: Int{out.bytes()[0]}
     if first >= 48 && first <= 57 -> return "_{out}"
     out
 }

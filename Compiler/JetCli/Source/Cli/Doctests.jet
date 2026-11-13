@@ -203,7 +203,7 @@ jet_cli_doctest_settle: fn(wire: String, doctests: JetCLIDoctestFile, test: JetC
             next
         }
         message: "Doctest output mismatch. Expected: `{expectation.expected}` Got: `{actual}`"
-        mismatches.push(JetCLITestStop{code: row.code.copy(), message: message.copy(), file: doctests.shown.copy(), line: U32.from_int(expectation.line) ?? U32{0}})
+        mismatches.push(JetCLITestStop{code: row.code.copy(), message: message.copy(), file: doctests.shown.copy(), line: checked(U32{expectation.line}) ?? U32{0}})
         diagnostics.push(diagnostic_from_registry(row.code, Val(jet_cli_doctest_line_span(doctests.source, expectation.line)), message, row.why, row.fix))
     }
     if diagnostics.len() > 0 {

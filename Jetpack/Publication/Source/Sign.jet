@@ -165,7 +165,7 @@ publication_sign_hex_decode: fn(text: String) -> [U8] PublicationSigningEncoding
 publication_sign_base64_decode: fn(text: String) -> [U8] PublicationSigningEncodingError! {
     if text.bytes().len() %% 4 != 0 -> return Err(PublicationSigningEncodingError{message: "base64 length not a multiple of 4"})
     loop byte in text.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if !((code >= 65 && code <= 90) || (code >= 97 && code <= 122) || (code >= 48 && code <= 57) || code == 43 || code == 47 || code == 61) -> return Err(PublicationSigningEncodingError{message: "invalid base64 character"})
     }
     bytes: base64.decode(text) ?? return Err(PublicationSigningEncodingError{message: "non-canonical base64 encoding"})

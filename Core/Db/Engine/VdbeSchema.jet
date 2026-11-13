@@ -912,7 +912,7 @@ op_filter_add: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
     i: v.mem_base + r.p1
     b: filter_bit(v, r, i)
     at: b >> 3
-    v.mem[i].z[at] = U8{Int.from_u8(v.mem[i].z[at]).bit_or(1 << b.bit_and(7))}
+    v.mem[i].z[at] = U8{Int{v.mem[i].z[at]}.bit_or(1 << b.bit_and(7))}
     GO_NEXT
 }
 
@@ -921,7 +921,7 @@ op_filter_add: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
 op_filter: fn(v: &conn.Vdbe, r: &Run) -> Int Never! {
     i: v.mem_base + r.p1
     b: filter_bit(v, r, i)
-    if Int.from_u8(v.mem[i].z[b >> 3]).bit_and(1 << b.bit_and(7)) == 0 {
+    if (Int{v.mem[i].z[b >> 3]}).bit_and(1 << b.bit_and(7)) == 0 {
         v.counters[conn.STMTSTATUS_FILTER_HIT] = v.counters[conn.STMTSTATUS_FILTER_HIT] + 1
         return GO_JUMP
     }

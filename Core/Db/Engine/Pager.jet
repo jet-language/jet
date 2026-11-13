@@ -202,7 +202,7 @@ copy_into: fn(dst: &[U8], at: Int, src: [U8], from: Int, n: Int) Never! {
 // The NUL-terminated prefix of b.
 c_string: fn(b: [U8]) -> [U8] Never! {
     n := 0
-    loop n < b.len() && Int.from_u8(b[n]) != 0 -> n += 1
+    loop n < b.len() && (Int{b[n]}) != 0 -> n += 1
     b.slice(0, n)
 }
 
@@ -288,7 +288,7 @@ read_super_journal: fn(f: &file.SQLFile, out: &[U8], n_super: Int) -[DB]> Int Ne
     name := zeros(len)
     rc = file.file_read(f, name, len, sz - 16 - len)
     if rc != base.OK -> return rc
-    loop b in name -> cksum = (cksum - Int.from_u8(b)).bit_and(os.U32_MASK)
+    loop b in name -> cksum = (cksum - Int{b}).bit_and(os.U32_MASK)
     if cksum != 0 -> return base.OK
     out = c_string(name)
     base.OK
@@ -340,7 +340,7 @@ write_journal_hdr: fn(p: &Pager) -[DB]> Int Never! {
     if p.journal_mode != JOURNALMODE_MEMORY {
         // sqlite3_randomness(sizeof(cksumInit), &cksumInit), little-endian.
         r: os.os_random_bytes(4)
-        p.cksum_init = Int.from_u8(r[0]) + (Int.from_u8(r[1]) << 8) + (Int.from_u8(r[2]) << 16) + (Int.from_u8(r[3]) << 24)
+        p.cksum_init = Int{r[0]} + (Int{r[1]} << 8) + (Int{r[2]} << 16) + (Int{r[3]} << 24)
     }
     util.put4(p.tmp, 12, p.cksum_init)
     util.put4(p.tmp, 16, p.db_orig_size)
@@ -401,7 +401,7 @@ write_super_journal: fn(p: &Pager, super: String?) -[DB]> Int Never! {
     z: name.bytes()
     n: z.len()
     cksum := 0
-    loop b in z -> cksum = (cksum + Int.from_u8(b)).bit_and(os.U32_MASK)
+    loop b in z -> cksum = (cksum + Int{b}).bit_and(os.U32_MASK)
     if p.full_sync -> p.journal_off = journal_hdr_offset(p)
     hdr: p.journal_off
     lck: p.lck_pgno
@@ -564,7 +564,7 @@ pager_cksum: fn(p: Pager, data: [U8]) -> Int Never! {
     cksum := p.cksum_init
     i := p.page_size - 200
     loop i > 0 {
-        cksum += Int.from_u8(data[i])
+        cksum += Int{data[i]}
         i -= 200
     }
     cksum.bit_and(os.U32_MASK)
@@ -597,7 +597,7 @@ pager_playback_one_page: fn(p: &Pager, offset: &Int, done: &cache.Bitvec, is_mai
         if !is_savepoint && pager_cksum(p, p.tmp) != cksum -> return base.DONE
     }
     cache.bitvec_set(done, pgno)
-    if pgno == 1 && p.n_reserve != Int.from_u8(p.tmp[20]) -> p.n_reserve = Int.from_u8(p.tmp[20])
+    if pgno == 1 && p.n_reserve != (Int{p.tmp[20]}) -> p.n_reserve = (Int{p.tmp[20]})
     s := if p.wal.open -> cache.NO_PAGE else -> pager_lookup(p, pgno)
     synced: if is_main -> p.no_sync || offset <= p.journal_hdr else -> s == cache.NO_PAGE || p.pcache.pages[s].flags.bit_and(cache.PGHDR_NEED_SYNC) == 0
     if file.file_is_open(p.fd) && (p.state >= PAGER_WRITER_DBMOD || p.state == PAGER_OPEN) && synced {
@@ -1350,7 +1350,7 @@ has_hot_journal: fn(p: &Pager, exists: &Bool) -[DB]> Int Never! {
                         rc = file.file_read(p.jfd, first, 1, 0)
                         if rc == base.IOERR_SHORT_READ -> rc = base.OK
                         if !jrnl_open -> file.file_close(p.jfd)
-                        exists = Int.from_u8(first[0]) != 0
+                        exists = Int{first[0]} != 0
                     } else if rc == base.CANTOPEN {
                         exists = true
                         rc = base.OK

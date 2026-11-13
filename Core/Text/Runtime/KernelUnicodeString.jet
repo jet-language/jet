@@ -72,11 +72,11 @@ final_sigma: fn(chars: [Int], at: Int, cased: [U8], ignorable: [U8]) -> Bool Nev
 // Decode only the current UTF-8 scalar. String's checked owner guarantees UTF-8.
 scalar_at: fn(raw: [U8], at: Int) -> Int Never! {
     width: utf8_width_at(raw, at)
-    cp := Int.from_u8(raw[at])
+    cp := Int{raw[at]}
     if width == 2 -> cp = cp.bit_and(31)
     if width == 3 -> cp = cp.bit_and(15)
     if width == 4 -> cp = cp.bit_and(7)
-    loop k in 1..<width -> cp = (cp << 6).bit_or((Int.from_u8(raw[at + k]).bit_and(63)))
+    loop k in 1..<width -> cp = (cp << 6).bit_or((Int{raw[at + k]}.bit_and(63)))
     cp
 }
 

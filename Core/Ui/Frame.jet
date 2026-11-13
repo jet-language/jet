@@ -400,7 +400,7 @@ kit_row: fn(kit: Kit, y: Int, width: Int, height: Int, x0: Int, x1: Int) -> KitR
         right = kit.pixels[at..<(at + (x1 - right_start) * 4)].copy()
     }
     middle: kit_offset(kit, half, y, width, height)
-    fill: Int.from_u8(kit.pixels[middle]) + (Int.from_u8(kit.pixels[middle + 1]) << 8) + (Int.from_u8(kit.pixels[middle + 2]) << 16) + (Int.from_u8(kit.pixels[middle + 3]) << 24)
+    fill: Int{kit.pixels[middle]} + (Int{kit.pixels[middle + 1]} << 8) + (Int{kit.pixels[middle + 2]} << 16) + (Int{kit.pixels[middle + 3]} << 24)
     count: min_int(x1, right_from) - max_int(x0, half)
     KitRow{left: left, fill: fill, fill_count: max_int(count, 0), right: right}
 }
@@ -911,7 +911,7 @@ ink_box: fn(bar: [U8], width: Int, area: UIRect, base: Int, rise: Int) -> UIRect
     y1 := area.y
     loop row in area.y..<(area.y + area.height) {
         loop col in area.x..<(area.x + area.width) {
-            if Int.from_u8(bar[(row * width + col) * 4 + 1]) - base >= rise {
+            if (Int{bar[(row * width + col) * 4 + 1]}) - base >= rise {
                 x0 = min_int(x0, col)
                 y0 = min_int(y0, row)
                 x1 = max_int(x1, col + 1)
@@ -952,7 +952,7 @@ ink_cover: fn(bar: [U8], width: Int, area: UIRect, base: Int, ink: Int) -> Float
     total := Float{0.0}
     loop row in area.y..<(area.y + area.height) {
         loop col in area.x..<(area.x + area.width) {
-            g: Int.from_u8(bar[(row * width + col) * 4 + 1])
+            g: Int{bar[(row * width + col) * 4 + 1]}
             if g > base -> total += Float{g - base} / Float{ink - base}
         }
     }
@@ -1086,10 +1086,10 @@ icon_pixel: fn(pixels: [U8], side: Int, x: Int, y: Int) -> [U8] {
     assert_eq(ring.pixels[inside + 3], U8{0})
     near: kit_offset(ring, 200, 302, 400, 300)
     far: kit_offset(ring, 200, 360, 400, 300)
-    assert(Int.from_u8(ring.pixels[near + 3]) > Int.from_u8(ring.pixels[far + 3]), "the shadow fades away from the window")
+    assert(Int{ring.pixels[near + 3]} > Int{ring.pixels[far + 3]}, "the shadow fades away from the window")
     row: kit_row(ring, 302, 400, 300, -64, 464)
     assert_eq(row.left.len() + row.fill_count * 4 + row.right.len(), 528 * 4)
-    assert_eq(row.fill >> 24, Int.from_u8(ring.pixels[near + 3]))
+    assert_eq(row.fill >> 24, Int{ring.pixels[near + 3]})
     // A side strip's row is all kit bytes, no fill.
     side: kit_row(ring, 150, 400, 300, -64, 0)
     assert_eq([Int]{side.left.len(), side.fill_count, side.right.len()}, [Int]{256, 0, 0})
@@ -1128,7 +1128,7 @@ icon_pixel: fn(pixels: [U8], side: Int, x: Int, y: Int) -> [U8] {
     look.hover = FrameButton.Close
     bar: header(p, look, 300, 120)
     assert_eq(bar.len(), 300 * 34 * 4)
-    assert(Int.from_u8(bar[3]) < 255, "the top-left corner is rounded")
+    assert(Int{bar[3]} < 255, "the top-left corner is rounded")
     middle: (17 * 300 + 150) * 4
     assert_eq(bar[middle + 3], U8{255})
     // Dark by default, and no mark of Jet's: left of the title the header
@@ -1139,7 +1139,7 @@ icon_pixel: fn(pixels: [U8], side: Int, x: Int, y: Int) -> [U8] {
     // (8 in from the right edge, 18 across, centered at 283), and 8 units
     // left of its center is clear of the glyph.
     close: (17 * 300 + 275) * 4
-    assert(Int.from_u8(bar[close + 2]) > 200 && Int.from_u8(bar[close + 1]) < 60, "the hovered close button is red")
+    assert(Int{bar[close + 2]} > 200 && Int{bar[close + 1]} < 60, "the hovered close button is red")
     // A hovered maximize button is a quiet square one step above Jet
     // black, 0x1D1D21 as B, G, R, A: the square runs from 246 to 264 and
     // its glyph from 250 to 260, so pixel (247, 17) is the fill alone.
@@ -1177,7 +1177,7 @@ icon_pixel: fn(pixels: [U8], side: Int, x: Int, y: Int) -> [U8] {
     assert_eq([U8]{pale_soft[lit], pale_soft[lit + 1], pale_soft[lit + 2], pale_soft[lit + 3]}, [U8]{U8{0xEC}, U8{0xE8}, U8{0xE8}, U8{255}})
     light.hover = FrameButton.Close
     pale_close: header(p, light, 300, 120)
-    assert(Int.from_u8(pale_close[close + 2]) > 200 && Int.from_u8(pale_close[close + 1]) < 60, "the hovered close button is red in the light theme")
+    assert(Int{pale_close[close + 2]} > 200 && Int{pale_close[close + 1]} < 60, "the hovered close button is red in the light theme")
     light_kit: kit(p, light, 120)
     dark_kit: kit(p, plain_look(""), 120)
     assert(light_kit != dark_kit && p.kits[light_kit].dark == false && p.kits[dark_kit].dark, "each theme has its own shadow ring")
@@ -1236,7 +1236,7 @@ icon_pixel: fn(pixels: [U8], side: Int, x: Int, y: Int) -> [U8] {
     loop col in 10..<310 {
         loop row in 6..<28 {
             // Blue byte of B, G, R, A: the header's is 0x0D, the ink's 0xA4.
-            if first < 0 && Int.from_u8(bar[(row * 400 + col) * 4]) > 100 -> first = col
+            if first < 0 && (Int{bar[(row * 400 + col) * 4]}) > 100 -> first = col
         }
     }
     centered: Int{math.round((400.0 - advance) / 2.0)}
@@ -1265,7 +1265,7 @@ icon_pixel: fn(pixels: [U8], side: Int, x: Int, y: Int) -> [U8] {
     ringed: header(p, focused, 300, 120)
     on_ring: (17 * 300 + 294) * 4
     assert_eq(plain[on_ring + 2], U8{0x0B})
-    assert(Int.from_u8(ringed[on_ring]) > 0xC0 && Int.from_u8(ringed[on_ring + 1]) > 0xC0 && Int.from_u8(ringed[on_ring + 2]) > 0xC0, "the ring is drawn in the focus ink")
+    assert(Int{ringed[on_ring]} > 0xC0 && Int{ringed[on_ring + 1]} > 0xC0 && Int{ringed[on_ring + 2]} > 0xC0, "the ring is drawn in the focus ink")
     // In the gap, pixel (293, 17), 10 to 11 out, past the square, the
     // header shows untouched.
     in_gap: (17 * 300 + 293) * 4
@@ -1310,7 +1310,7 @@ icon_pixel: fn(pixels: [U8], side: Int, x: Int, y: Int) -> [U8] {
             // the dash, one stroke tall.
             bars: [[U8]]{rest, lit}
             loop bar in bars {
-                base: Int.from_u8(bar[((square.y + square.height /% 2) * width + square.x) * 4 + 1])
+                base: Int{bar[((square.y + square.height /% 2) * width + square.x) * 4 + 1]}
                 glyph: ink_box(bar, width, square, base, 24)
                 assert(within_half(twice_center_x(glyph), twice_center_x(square)) && within_half(twice_center_y(glyph), twice_center_y(square)), "button {k} at {scale}: ink at {glyph.x}, {glyph.y}, {glyph.width} x {glyph.height}, square at {square.x}, {square.y}")
                 tall: if k == 2 -> strokes[at] else -> glyphs[at]

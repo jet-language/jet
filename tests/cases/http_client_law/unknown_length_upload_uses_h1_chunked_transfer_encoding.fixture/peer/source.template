@@ -15,9 +15,9 @@ contains_bytes: fn(raw: [U8], want: [U8], ascii_casefold: Bool) -> Bool {
     loop start in 0..<(raw.len() - want.len() + 1) {
         same := true
         loop i in 0..<want.len() {
-            n := Int.from_u8(raw[start + i])
+            n := Int{raw[start + i]}
             if ascii_casefold && n >= 65 && n <= 90 -> n += 32
-            if n != Int.from_u8(want[i]) -> same = false
+            if n != (Int{want[i]}) -> same = false
         }
         if same -> return true
     }
@@ -44,7 +44,7 @@ hex_size: fn(raw: [U8]) -> Int {
     assert(bytes.len() > 0)
     value := 0
     loop byte in bytes {
-        n: Int.from_u8(byte)
+        n: Int{byte}
         digit := -1
         if n >= 48 && n <= 57 -> digit = n - 48
         if n >= 97 && n <= 102 -> digit = n - 87

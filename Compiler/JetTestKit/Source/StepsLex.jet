@@ -12,7 +12,7 @@ kit_steps_tokens: fn(text: String) -> [KitWord]? {
             next
         }
         start: i
-        first: Int.from_u8(bytes[i])
+        first: Int{bytes[i]}
         if (first == 40 || first == 41) && (i + 1 == bytes.len() || bytes[i + 1] == (U8{32}) || bytes[i + 1] == (U8{9})) {
             result.push(KitWord{text: kit_steps_byte_slice(text, i, i + 1), start: i, end: i + 1})
             i += 1
@@ -25,7 +25,7 @@ kit_steps_tokens: fn(text: String) -> [KitWord]? {
         path_depth := 0
         if quoted -> i += 1
         loop i < bytes.len() {
-            c: Int.from_u8(bytes[i])
+            c: Int{bytes[i]}
             if quote != 0 {
                 if escape -> escape = false
                 else if c == 92 -> escape = true
@@ -89,7 +89,7 @@ kit_steps_unquoted: fn(text: String) -> String? {
     escape := false
     i := 0
     loop i < bytes.len() {
-        c: Int.from_u8(bytes[i])
+        c: Int{bytes[i]}
         if quote == 0 && c == 92 {
             i += 1
             if i == bytes.len() -> return None
@@ -113,7 +113,7 @@ kit_steps_comment: fn(text: String) -> Int {
     quote := 0
     escape := false
     loop (i, byte) in bytes {
-        c: Int.from_u8(byte)
+        c: Int{byte}
         if quote != 0 {
             if escape -> escape = false
             else if c == 92 -> escape = true

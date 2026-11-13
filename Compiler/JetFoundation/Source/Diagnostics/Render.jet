@@ -128,7 +128,7 @@ diagnostic_column_at: fn(source: String, offset: Int) -> Int Never! {
     limit: diagnostic_clamp_offset(bytes, offset)
     column := 1
     loop index in diagnostic_line_start(bytes, limit)..<limit {
-        if !diagnostic_is_continuation(Int.from_u8(bytes[index])) -> column += 1
+        if !diagnostic_is_continuation(Int{bytes[index]}) -> column += 1
     }
     column
 }
@@ -175,7 +175,7 @@ diagnostic_source_column: fn(text: DiagnosticSourceText, offset: Int) -> Int Nev
     limit: diagnostic_clamp_offset(text.bytes, offset)
     column := 1
     loop index in text.line_starts[diagnostic_source_line_index(text, limit)]..<limit {
-        if !diagnostic_is_continuation(Int.from_u8(text.bytes[index])) -> column += 1
+        if !diagnostic_is_continuation(Int{text.bytes[index]}) -> column += 1
     }
     column
 }
@@ -228,7 +228,7 @@ diagnostic_prefix_chars: fn(text: String, count: Int) -> String Never! {
 diagnostic_is_char_boundary: fn(bytes: [U8], index: Int) -> Bool Never! {
     if index == bytes.len() -> return true
     if index < 0 || index > bytes.len() -> return false
-    !diagnostic_is_continuation(Int.from_u8(bytes[index]))
+    !diagnostic_is_continuation(Int{bytes[index]})
 }
 
 // Rust `src.get(start..end)` up to its first newline; an invalid range is "".
@@ -294,7 +294,7 @@ diagnostic_has_structured_detail_key: fn(detail: String) -> Bool Never! {
     }
     if colon <= 0 || colon + 1 >= end -> return false
     loop index in 0..<colon {
-        value: Int.from_u8(bytes[index])
+        value: Int{bytes[index]}
         is_key_byte: (value >= 48 && value <= 57) || (value >= 65 && value <= 90) || (value >= 97 && value <= 122) || value == 95 || value == 45
         if !is_key_byte -> return false
     }

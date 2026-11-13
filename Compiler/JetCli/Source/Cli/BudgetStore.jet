@@ -463,7 +463,7 @@ jet_cli_budget_store_seconds: fn(value: String) -> Int JetCLIBudgetFailure! {
     bytes: value.bytes()
     if bytes.len() != 30 -> return Err(jet_cli_budget_failure("accepted_at is not RFC3339UTC with nine fractional digits"))
     loop index in 0..<30 {
-        code: Int.from_u8(bytes[index])
+        code: Int{bytes[index]}
         mark: if index == {
             4 | 7 -> 45
             10 -> 84
@@ -498,7 +498,7 @@ jet_cli_budget_store_seconds: fn(value: String) -> Int JetCLIBudgetFailure! {
 
 jet_cli_budget_store_digits: fn(bytes: [U8], start: Int, end: Int) -> Int Never! {
     value := 0
-    loop index in start..<end -> value = value * 10 + Int.from_u8(bytes[index]) - 48
+    loop index in start..<end -> value = value * 10 + (Int{bytes[index]}) - 48
     value
 }
 
@@ -506,7 +506,7 @@ jet_cli_budget_store_hex64: fn(value: String) -> Bool Never! {
     bytes: value.bytes()
     if bytes.len() != 64 -> return false
     loop byte in bytes {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if !((code >= 48 && code <= 57) || (code >= 97 && code <= 102)) -> return false
     }
     true

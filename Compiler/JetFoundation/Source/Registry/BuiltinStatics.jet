@@ -1,5 +1,5 @@
 // Built-in type-owned static calls such as `Int.parse(text)`,
-// `U8.from_int(value)`, `Atomic<Int>.new(0)`, and `crypto.Hasher.new()`.
+// `checked(U8{value})`, `Atomic<Int>.new(0)`, and `crypto.Hasher.new()`.
 //
 // The fixed rows mirror the bootstrap's `Collections::builtin_static_return`,
 // its `builtin_method_arg_types` entries, and the lowered node each static lowers
@@ -200,7 +200,11 @@ BUILTIN_NUMERIC_KINDS: #run { [BuiltinNumericKind]{
 } }
 
 // Destination-owned `from_<source>` spellings (`NUMERIC_CONVERSION_SOURCES`;
-// the semantic symbol catalog reads it too).
+// the semantic symbol catalog reads it too). A built-in owner keeps only the
+// rows that cross into or out of a non-integer type (`Int.from_float`,
+// `F32.from_int`): between two whole-number types `T{x}` is the one
+// conversion. A distinct numeric type keeps every row of its base
+// (`UserID.from_int`).
 BUILTIN_NUMERIC_SOURCES: #run { [BuiltinNumericSource]{
     {method: "from_i8", source: "I8"},
     {method: "from_i64", source: "I64"},
@@ -270,7 +274,7 @@ builtin_numeric_operation: fn(source: BuiltinNumericKind, target: BuiltinNumeric
         }
         return TNumericOp.CastAs{dst_rust: target.rust}
     }
-    // `U64` rides an i64 word; `Int.from_u64` stays on the exact CastAs adapter.
+    // `U64` into `Int` rides an i64 word on the exact CastAs adapter.
     if target.name == "Int" && source.integer && !source.signed -> return TNumericOp.CastAs{dst_rust: target.rust}
     if source.name == "Int" && target.name != "Int" -> return TNumericOp.TryFrom{host_kind: builtin_numeric_host_kind(target)}
     if source.integer {
@@ -280,6 +284,8 @@ builtin_numeric_operation: fn(source: BuiltinNumericKind, target: BuiltinNumeric
     TNumericOp.FloatToInt{host_kind: builtin_numeric_host_kind(target)}
 }
 
+// Every `from_<source>` row of a numeric owner; distinct numeric types reach
+// it through their base.
 builtin_static_numeric_row: fn(owner: String, method: String) -> BuiltinStaticRow? {
     target: builtin_numeric_kind(owner) ?? return None
     source_name: builtin_numeric_source(method) ?? return None
@@ -287,11 +293,20 @@ builtin_static_numeric_row: fn(owner: String, method: String) -> BuiltinStaticRo
     Val(builtin_static(owner, method, [Type]{source.ty}, builtin_numeric_return(source, target), BuiltinStaticLowering.Numeric{operation: builtin_numeric_operation(source, target)}))
 }
 
+// The built-in owner's own `from_<source>` row: none between two whole-number
+// types, which convert by `T{x}`.
+builtin_static_owner_numeric_row: fn(owner: String, method: String) -> BuiltinStaticRow? {
+    target: builtin_numeric_kind(owner) ?? return None
+    source: builtin_numeric_kind(builtin_numeric_source(method) ?? return None) ?? return None
+    if target.integer && source.integer -> return None
+    builtin_static_numeric_row(owner, method)
+}
+
 // Every row for `owner.method`, across modules; the caller admits the one
 // whose module matches how the owner was named.
 builtin_static_rows: fn(owner: String, method: String) -> [BuiltinStaticRow] Never! {
     rows := builtin_static_rows_in(BUILTIN_STATIC_ROWS, owner, method)
-    if builtin_static_numeric_row(owner, method) == .Val(row) -> rows.push(row)
+    if builtin_static_owner_numeric_row(owner, method) == .Val(row) -> rows.push(row)
     rows
 }
 

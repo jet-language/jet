@@ -978,7 +978,7 @@ roundtrip: fn(&c: Connection) -[Env, Net, Time]> {
 }
 
 u32_at: fn(bytes: [U8], at: Int) -> Int {
-    Int.from_u8(bytes[at]) + (Int.from_u8(bytes[at + 1]) << 8) + (Int.from_u8(bytes[at + 2]) << 16) + (Int.from_u8(bytes[at + 3]) << 24)
+    Int{bytes[at]} + (Int{bytes[at + 1]} << 8) + (Int{bytes[at + 2]} << 16) + (Int{bytes[at + 3]} << 24)
 }
 
 i32_at: fn(bytes: [U8], at: Int) -> Int {
@@ -1416,7 +1416,7 @@ load_keymap: fn(&c: Connection, fd: sys.Fd, format: Int, size: Int) -[Env]> {
         fail(c, UIError.Protocol("reading the keymap failed: {err}"))
         return
     }
-    loop bytes.len() > 0 && Int.from_u8(bytes[bytes.len() - 1]) == 0 {
+    loop bytes.len() > 0 && (Int{bytes[bytes.len() - 1]}) == 0 {
         _: bytes.pop()
     }
     map: xkb.keymap(bytes) ?? return
@@ -1844,7 +1844,7 @@ preedit_composition: fn(text: String, begin: Int, end: Int) -> UIIMEComposition 
 characters: fn(bytes: [U8], count: Int) -> Int {
     total := 0
     loop index in 0..<count {
-        if Int.from_u8(bytes[index]).bit_and(192) != 128 -> total += 1
+        if (Int{bytes[index]}).bit_and(192) != 128 -> total += 1
     }
     total
 }
@@ -2004,10 +2004,10 @@ premultiplied_argb: fn(rgba: [U8]) -> [U8] {
     out := [U8]{}
     at := 0
     loop at + 4 <= rgba.len() {
-        alpha: Int.from_u8(rgba[at + 3])
-        out.push(U8{(Int.from_u8(rgba[at + 2]) * alpha + 127) /% 255})
-        out.push(U8{(Int.from_u8(rgba[at + 1]) * alpha + 127) /% 255})
-        out.push(U8{(Int.from_u8(rgba[at]) * alpha + 127) /% 255})
+        alpha: Int{rgba[at + 3]}
+        out.push(U8{(Int{rgba[at + 2]} * alpha + 127) /% 255})
+        out.push(U8{(Int{rgba[at + 1]} * alpha + 127) /% 255})
+        out.push(U8{(Int{rgba[at]} * alpha + 127) /% 255})
         out.push(U8{alpha})
         at += 4
     }
@@ -2429,9 +2429,9 @@ cover_run: fn(&c: Connection, offset: Int, y: Int, from: Int, to: Int, start: In
         return
     }
     loop x in from..<to {
-        cover: Int.from_u8(c.corner_cover[start + step * x])
+        cover: Int{c.corner_cover[start + step * x]}
         k: (x - from) * 4
-        loop b in k..<(k + 4) -> pixels[b] = U8{(Int.from_u8(pixels[b]) * cover + 127) /% 255}
+        loop b in k..<(k + 4) -> pixels[b] = (U8{(Int{pixels[b]} * cover + 127) /% 255})
     }
     shm_write(c.memory, at, pixels, "rounding the frame's corners") ?? fail(c, err)
 }

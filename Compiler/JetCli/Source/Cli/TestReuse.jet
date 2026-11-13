@@ -106,7 +106,7 @@ jet_cli_test_reuse_lookup: fn(reuse: JetCLITestReuse) -> JetNativeTestOutcomes? 
         test_id := U64?{None}
         if id != "-" {
             number: Int.parse(id) ?? return None
-            test_id = Val(U64.from_int(number) ?? return None)
+            test_id = Val(checked(U64{number}) ?? return None)
         }
         contracts.push(JetNativeTestContract{held: held == "1", site: site, test_id: test_id, test: test, last: last == "1"})
     }

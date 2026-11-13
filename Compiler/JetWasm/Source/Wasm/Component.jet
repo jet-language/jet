@@ -236,8 +236,8 @@ WasmComponent: struct {
 }
 
 wasm_is_component: fn(bytes: [U8]) -> Bool Never! {
-    bytes.len() >= 8 && Int.from_u8(bytes[0]) == 0 && Int.from_u8(bytes[1]) == 0x61 && Int.from_u8(bytes[2]) == 0x73
-        && Int.from_u8(bytes[3]) == 0x6d && Int.from_u8(bytes[4]) == 0x0d && Int.from_u8(bytes[6]) == 0x01
+    bytes.len() >= 8 && Int{bytes[0]} == 0 && Int{bytes[1]} == 0x61 && Int{bytes[2]} == 0x73
+        && (Int{bytes[3]}) == 0x6d && (Int{bytes[4]}) == 0x0d && (Int{bytes[6]}) == 0x01
 }
 
 wasm_decode_component: fn(bytes: &&[U8]) -> WasmComponent WasmError! {

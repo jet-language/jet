@@ -1213,7 +1213,7 @@ sema_taint_e0738: fn(state: &SemaTaintFlowState, tag_value: String, holder: Stri
 }
 
 sema_taint_e0739: fn(state: &SemaTaintFlowState, tag_value: String, what: String, span: Span) {
-    state.diagnostics.push(sema_error("E0739", span, "{what} of a `{tag_value}` value could stop the program", "`{tag_value}` is `timing: .Fixed`, and checked arithmetic stops when its result does not fit, so whether the program stops would depend on the value", "use `wrapping_add`, `wrapping_sub`, `wrapping_mul` or `wrapping(...)`, or mask the value into range first"))
+    state.diagnostics.push(sema_error("E0739", span, "{what} of a `{tag_value}` value could stop the program", "`{tag_value}` is `timing: .Fixed`, and checked arithmetic stops when its result does not fit, so whether the program stops would depend on the value", "use `wrapping(...)`, or mask the value into range first"))
 }
 
 // E0737 when `value` carries a fixed tag.
@@ -1384,10 +1384,7 @@ sema_taint_total_method: fn(method: String, count: Int) -> Bool Never! {
                 if operation == .BitAnd || operation == .BitOr || operation == .BitXor -> return true
             }
             .BitNot -> return true
-            .Overflow(prefix, _) -> {
-                if prefix == "wrapping" -> return true
-            }
-            .Builtin(_) | .StringSlice | .StringRangeSlice | .StringSplitOnce | .StringCutLast | .IntToRadix | .Show | .Predicate | .BitCount | .Euclidean(_) | .Atomic | .CoreSource(_, _) -> {}
+            .Builtin(_) | .StringSlice | .StringRangeSlice | .StringSplitOnce | .StringCutLast | .IntToRadix | .Show | .Predicate | .BitCount | .Euclidean(_) | .Overflow(_, _) | .Atomic | .CoreSource(_, _) -> {}
         }
     }
     false
@@ -1798,6 +1795,14 @@ sema_taint_check_wide_from: fn(state: &SemaTaintFlowState, receiver: Expr, metho
     }
 }
 
+// E0738 for `Int{x}` or `Float{x}` of a fixed value.
+sema_taint_check_wide_literal: fn(state: &SemaTaintFlowState, head: Type?, value: Expr, span: Span) {
+    holder: type_name(head ?? return)
+    if holder != "Int" && holder != "Float" -> return
+    tag_value: sema_taint_fixed_in(state, value) ?? return
+    sema_taint_e0738(state, tag_value, holder, span)
+}
+
 // E0737 when the size an allocating method takes first carries a fixed tag.
 sema_taint_check_size: fn(state: &SemaTaintFlowState, method: String, args: [CallArg]) {
     if args.len() == 0 -> return
@@ -1863,8 +1868,8 @@ sema_taint_body_of: fn(graph: SemaRegistrationGraph, module_identity: String, ow
 sema_taint_clause: fn(what: String) -> String Never! {
     bytes: what.bytes()
     if bytes.len() < 2 -> return what.copy()
-    first: Int.from_u8(bytes[0])
-    second: Int.from_u8(bytes[1])
+    first: Int{bytes[0]}
+    second: Int{bytes[1]}
     if first < 65 || first > 90 || (second >= 65 && second <= 90) -> return what.copy()
     "{what.slice(0, 1).lower()}{what.slice(1, what.len())}"
 }
@@ -2202,7 +2207,7 @@ sema_taint_check_expr: fn(graph: SemaRegistrationGraph, state: &SemaTaintFlowSta
         }
         .TupleLit(fields, _, _, _) -> loop field in fields -> sema_taint_check_expr(graph, state, field.value)
         .StructLit(_, _, _, _, fields, _, _, _) -> loop field in fields -> sema_taint_check_expr(graph, state, field.value)
-        .TypedLit(_, body, _, _) -> {
+        .TypedLit(head, body, span, _) -> {
             if body == {
                 .Fields(fields) -> loop field in fields -> sema_taint_check_expr(graph, state, field.value)
                 .Elements(elements) -> loop value in elements -> sema_taint_check_expr(graph, state, value)
@@ -2210,7 +2215,10 @@ sema_taint_check_expr: fn(graph: SemaRegistrationGraph, state: &SemaTaintFlowSta
                     sema_taint_check_expr(graph, state, entry.key)
                     sema_taint_check_expr(graph, state, entry.value)
                 }
-                .Value(value) -> sema_taint_check_expr(graph, state, value)
+                .Value(value) -> {
+                    sema_taint_check_wide_literal(state, head, value, span)
+                    sema_taint_check_expr(graph, state, value)
+                }
                 .ByteText(_) | .Empty -> {}
             }
         }

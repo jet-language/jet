@@ -1094,7 +1094,7 @@ reason_phrase: fn(code: Int) -> String Never! {
 ascii_upper: fn(text: String) -> String Never! {
     out := [U8]{}
     loop b in text.bytes() {
-        n: Int.from_u8(b)
+        n: Int{b}
         if n >= 97 && n <= 122 -> out.push(U8{n - 32}) else -> out.push(b)
     }
     String.from_bytes(out) ?? text
@@ -1103,7 +1103,7 @@ ascii_upper: fn(text: String) -> String Never! {
 ascii_lower: fn(text: String) -> String Never! {
     out := [U8]{}
     loop b in text.bytes() {
-        n: Int.from_u8(b)
+        n: Int{b}
         if n >= 65 && n <= 90 -> out.push(U8{n + 32}) else -> out.push(b)
     }
     String.from_bytes(out) ?? text
@@ -1114,11 +1114,11 @@ trim: fn(text: String) -> String Never! {
     start := 0
     end := raw.len()
     loop start < end {
-        n: Int.from_u8(raw[start])
+        n: Int{raw[start]}
         if n == 32 || n == 9 || n == 13 || n == 10 -> start = start + 1 else -> break
     }
     loop end > start {
-        n: Int.from_u8(raw[end - 1])
+        n: Int{raw[end - 1]}
         if n == 32 || n == 9 || n == 13 || n == 10 -> end = end - 1 else -> break
     }
     if end <= start -> return ""
@@ -1303,7 +1303,7 @@ split_space_line: fn(text: String) -> [String] Never! {
     start := 0
     i := 0
     loop i < raw.len() {
-        n: Int.from_u8(raw[i])
+        n: Int{raw[i]}
         if n == 32 {
             if i == start -> return [String]{}
             out.push(String.from_bytes(slice_b(raw, start, i)) ?? "")
@@ -1530,7 +1530,7 @@ __utf8_replacing: fn(bytes: [U8]) -> String Never! {
     out := [U8]{}
     at := 0
     loop at < bytes.len() {
-        lead: Int.from_u8(bytes[at])
+        lead: Int{bytes[at]}
         width := if lead < 128 -> 1 else -> 0
         low := 128
         high := 191
@@ -1547,7 +1547,7 @@ __utf8_replacing: fn(bytes: [U8]) -> String Never! {
         }
         good := 1
         loop good < width && at + good < bytes.len() {
-            byte: Int.from_u8(bytes[at + good])
+            byte: Int{bytes[at + good]}
             valid: if good == 1 -> byte >= low && byte <= high else -> byte >= 128 && byte <= 191
             if !valid -> break
             good = good + 1
@@ -1764,7 +1764,7 @@ valid_url: fn(url: String) -> Bool Never! {
     end := start
     loop end < raw.len() {
         if raw[end] == (U8{47}) || raw[end] == (U8{63}) || raw[end] == (U8{35}) -> break
-        n: Int.from_u8(raw[end])
+        n: Int{raw[end]}
         if n <= 32 || n >= 127 || n == 34 || n == 92 -> return false
         end = end + 1
     }
@@ -1793,7 +1793,7 @@ parse_content_length_value: fn(text: String) -> Int? {
 
 has_url_ctl: fn(bytes: [U8]) -> Bool Never! {
     loop b in bytes {
-        n: Int.from_u8(b)
+        n: Int{b}
         if n < 32 || n == 127 -> return true
     }
     false
@@ -1801,7 +1801,7 @@ has_url_ctl: fn(bytes: [U8]) -> Bool Never! {
 
 has_line_ctl: fn(bytes: [U8]) -> Bool Never! {
     loop b in bytes {
-        n: Int.from_u8(b)
+        n: Int{b}
         if n < 32 || n == 127 -> return true
     }
     false
@@ -1820,7 +1820,7 @@ valid_method: fn(method: String) -> Bool Never! {
     raw: method.bytes()
     if raw.len() == 0 -> return false
     loop b in raw {
-        if !token_char(Int.from_u8(b)) -> return false
+        if !token_char(Int{b}) -> return false
     }
     true
 }
@@ -1830,7 +1830,7 @@ valid_target: fn(target: String) -> Bool Never! {
     if raw.len() == 0 -> return false
     if target != "*" && raw[0] != (U8{47}) -> return false
     loop b in raw {
-        n: Int.from_u8(b)
+        n: Int{b}
         if n <= 32 || n == 127 || n == 35 -> return false
     }
     true
@@ -1840,7 +1840,7 @@ valid_connect_target: fn(target: String) -> Bool Never! {
     raw: target.bytes()
     if raw.len() == 0 || has_url_ctl(raw) || index_byte(raw, 58) <= 0 -> return false
     loop b in raw {
-        n: Int.from_u8(b)
+        n: Int{b}
         if n >= 127 || n == 34 || n == 92 -> return false
     }
     parsed: http_url.parse("http://{target}") ?? return false
@@ -1851,7 +1851,7 @@ valid_host_value: fn(value: String) -> Bool Never! {
     raw: trim(value)
     if raw.bytes().len() == 0 || has_url_ctl(raw.bytes()) -> return false
     loop b in raw.bytes() {
-        n: Int.from_u8(b)
+        n: Int{b}
         if n >= 127 || n == 34 || n == 92 -> return false
     }
     parsed: http_url.parse("http://{raw}") ?? return false
@@ -1916,13 +1916,13 @@ valid_header_name: fn(name: String) -> Bool Never! {
     raw: name.bytes()
     if raw.len() == 0 -> return false
     loop b in raw {
-        if !token_char(Int.from_u8(b)) -> return false
+        if !token_char(Int{b}) -> return false
     }
     true
 }
 has_ctl: fn(bytes: [U8]) -> Bool Never! {
     loop b in bytes {
-        n: Int.from_u8(b)
+        n: Int{b}
         if n < 32 && n != 9 -> return true
         if n == 127 -> return true
     }
@@ -1933,7 +1933,7 @@ valid_cookie_token: fn(name: String) -> Bool {
     raw: name.bytes()
     if raw.len() == 0 -> return false
     loop b in raw {
-        n: Int.from_u8(b)
+        n: Int{b}
         if n <= 32 || n >= 127 || n == 34 || n == 40 || n == 41 || n == 44 || n == 47 || n == 58 || n == 59 || n == 60 || n == 61 || n == 62 || n == 63 || n == 64 || n == 91 || n == 92 || n == 93 || n == 123 || n == 125 -> return false
     }
     true
@@ -1941,7 +1941,7 @@ valid_cookie_token: fn(name: String) -> Bool {
 
 valid_cookie_value: fn(value: String) -> Bool {
     loop b in value.bytes() {
-        n: Int.from_u8(b)
+        n: Int{b}
         if n <= 32 || n >= 127 || n == 34 || n == 44 || n == 59 || n == 92 -> return false
     }
     true
@@ -1949,7 +1949,7 @@ valid_cookie_value: fn(value: String) -> Bool {
 
 valid_cookie_attribute: fn(value: String) -> Bool {
     loop b in value.bytes() {
-        n: Int.from_u8(b)
+        n: Int{b}
         if n <= 32 || n >= 127 || n == 59 -> return false
     }
     true
@@ -1960,7 +1960,7 @@ parse_decimal: fn(text: String) -> Int? {
     if raw.len() == 0 || raw.len() > 10 -> return None
     n := 0
     loop b in raw {
-        d: Int.from_u8(b)
+        d: Int{b}
         if d < 48 || d > 57 -> return None
         n = n * 10 + d - 48
     }
@@ -1970,7 +1970,7 @@ parse_decimal: fn(text: String) -> Int? {
 percent_encode: fn(text: String) -> String {
     out := [U8]{}
     loop b in text.bytes() {
-        n: Int.from_u8(b)
+        n: Int{b}
         unreserved := (n >= 48 && n <= 57) || (n >= 65 && n <= 90) || (n >= 97 && n <= 122) || n == 45 || n == 46 || n == 95 || n == 126
         if unreserved -> out.push(b)
         else if n == 32 -> out.push(U8{43})
@@ -1988,13 +1988,13 @@ base64_encode: fn(bytes: [U8]) -> String Never! {
     out := [U8]{}
     i := 0
     loop i < bytes.len() {
-        a: Int.from_u8(bytes[i])
+        a: Int{bytes[i]}
         b := 0
         c := 0
         have_b := i + 1 < bytes.len()
         have_c := i + 2 < bytes.len()
-        if have_b -> b = Int.from_u8(bytes[i + 1])
-        if have_c -> c = Int.from_u8(bytes[i + 2])
+        if have_b -> b = (Int{bytes[i + 1]})
+        if have_c -> c = (Int{bytes[i + 2]})
         block: (a * 65536) + (b * 256) + c
         out.push(alphabet[(block /% 262144) %% 64])
         out.push(alphabet[(block /% 4096) %% 64])
@@ -2011,7 +2011,7 @@ hex_digit: fn(n: Int) -> U8 {
 }
 
 from_hex: fn(b: U8) -> Int {
-    n: Int.from_u8(b)
+    n: Int{b}
     if n >= 48 && n <= 57 -> return n - 48
     if n >= 65 && n <= 70 -> return n - 55
     if n >= 97 && n <= 102 -> return n - 87
@@ -2020,7 +2020,7 @@ from_hex: fn(b: U8) -> Int {
 
 index_byte: fn(text: [U8], code: Int) -> Int Never! {
     loop i in 0..<text.len() {
-        if Int.from_u8(text[i]) == code -> return i
+        if (Int{text[i]}) == code -> return i
     }
     -1
 }
@@ -2030,7 +2030,7 @@ index_byte_str: fn(text: String, code: Int) -> Int { index_byte(text.bytes(), co
 last_index: fn(raw: [U8], code: Int) -> Int {
     i := raw.len() - 1
     loop i >= 0 {
-        if Int.from_u8(raw[i]) == code -> return i
+        if (Int{raw[i]}) == code -> return i
         i = i - 1
     }
     -1

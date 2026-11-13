@@ -6,7 +6,7 @@ use zstd: core.archive.zstd
 // The type of a frame's first block (0 raw, 1 RLE, 2 compressed): its header
 // follows the magic, the descriptor and the 8-byte content size.
 first_block: fn(frame: [U8]) -> Int {
-    (Int.from_u8(frame[13]) >> 1).bit_and(3)
+    (Int{frame[13]} >> 1).bit_and(3)
 }
 
 report: fn(name: String, data: [U8]) {

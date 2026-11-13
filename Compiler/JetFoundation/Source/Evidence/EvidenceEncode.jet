@@ -4,7 +4,7 @@
 
 evidence_put_number: fn(out: &[U8], value: U64, width: Int) Never! {
     loop index in 0..<width {
-        out.push(U8{Int.from_u64((value >> ((width - index - 1) * 8)).bit_and(U64{255}))})
+        out.push(U8{Int{(value >> ((width - index - 1) * 8)).bit_and(U64{255})}})
     }
 }
 
@@ -67,8 +67,8 @@ evidence_encode_record_body: fn(record: EvidenceRecord, out: &[U8]) EvidenceCode
     out.push(U8{evidence_outcome_code(record.outcome).bit_or((evidence_expectation_code(record.expectation) * 128))})
     out.push(U8{evidence_completeness_code(record.completeness)})
     evidence_put_number(out, record.count, 8)
-    evidence_put_number(out, U64{Int.from_u32(record.source.line)}, 4)
-    evidence_put_number(out, U64{Int.from_u32(record.source.column)}, 4)
+    evidence_put_number(out, U64{Int{record.source.line}}, 4)
+    evidence_put_number(out, U64{Int{record.source.column}}, 4)
     evidence_put_string(out, record.identity.report_id)
     evidence_put_string(out, record.identity.claim_id)
     evidence_put_string(out, record.identity.evidence_id)
@@ -95,8 +95,8 @@ evidence_encode_record_body: fn(record: EvidenceRecord, out: &[U8]) EvidenceCode
             .None -> { out.push(U8{0}) }
             .Val(source) -> {
                 out.push(U8{1})
-                evidence_put_number(out, U64{Int.from_u32(source.line)}, 4)
-                evidence_put_number(out, U64{Int.from_u32(source.column)}, 4)
+                evidence_put_number(out, U64{Int{source.line}}, 4)
+                evidence_put_number(out, U64{Int{source.column}}, 4)
                 evidence_put_string(out, source.path)
             }
         }
@@ -178,7 +178,7 @@ evidence_encode_derivation: fn(value: DerivationRecord, out: &[U8]) EvidenceCode
 
 evidence_report_encode: fn(report: EvidenceReport) -> [U8] EvidenceCodecError! {
     out := EVIDENCE_REPORT_MAGIC.bytes()
-    evidence_put_number(out, U64.from_u16(EVIDENCE_REPORT_VERSION), 2)
+    evidence_put_number(out, U64{EVIDENCE_REPORT_VERSION}, 2)
     loop record in report.records {
         if record.derivation == {
             .None -> { evidence_encode_record(record, out) }

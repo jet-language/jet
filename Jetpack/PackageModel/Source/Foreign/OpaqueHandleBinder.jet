@@ -312,11 +312,11 @@ pkg_opaque_camel_to_snake: fn(raw: String) -> String Never! {
     out := [U8]{}
     previous_lower := false
     loop byte in raw.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         upper: code >= 65 && code <= 90
         lower: code >= 97 && code <= 122
         digit: code >= 48 && code <= 57
-        ends_underscore: out.len() > 0 && Int.from_u8(out[out.len() - 1]) == 95
+        ends_underscore: out.len() > 0 && Int{out[out.len() - 1]} == 95
         if upper && previous_lower && !ends_underscore -> out.push(U8{95})
         if {
             upper || lower || digit -> {
@@ -324,13 +324,13 @@ pkg_opaque_camel_to_snake: fn(raw: String) -> String Never! {
                 previous_lower = lower || digit
             }
             else -> {
-                if !(out.len() > 0 && Int.from_u8(out[out.len() - 1]) == 95) -> out.push(U8{95})
+                if !(out.len() > 0 && Int{out[out.len() - 1]} == 95) -> out.push(U8{95})
                 previous_lower = false
             }
         }
     }
     end := out.len()
-    loop end > 0 && Int.from_u8(out[end - 1]) == 95 -> end -= 1
+    loop end > 0 && (Int{out[end - 1]}) == 95 -> end -= 1
     pkg_bytes_text(out, 0, end)
 }
 
@@ -359,10 +359,10 @@ pkg_opaque_parameter_type: fn(input: String) -> String Never! {
     raw: input.trim()
     bytes: raw.bytes()
     position := bytes.len() - 1
-    loop position >= 0 && pkg_bytes_is_word(Int.from_u8(bytes[position])) -> position -= 1
+    loop position >= 0 && pkg_bytes_is_word(Int{bytes[position]}) -> position -= 1
     if position < 0 -> return raw
     tail: pkg_bytes_text(bytes, position + 1, bytes.len())
-    separator: Int.from_u8(bytes[position])
+    separator: Int{bytes[position]}
     separates: separator == 42 || separator == 32 || (separator >= 9 && separator <= 13)
     if pkg_opaque_is_ident(tail) && separates {
         declared: pkg_bytes_text(bytes, 0, position + 1).trim()
@@ -458,7 +458,7 @@ pkg_opaque_parse_prototype: fn(declaration: String) -> OpaqueCPrototype? Never! 
     open := -1
     close := -1
     loop index in 0..<bytes.len() {
-        code: Int.from_u8(bytes[index])
+        code: Int{bytes[index]}
         if code == 40 && open < 0 -> open = index
         if code == 41 -> close = index
     }
@@ -468,7 +468,7 @@ pkg_opaque_parse_prototype: fn(declaration: String) -> OpaqueCPrototype? Never! 
     if before.contains("(") -> return None
     before_bytes: before.bytes()
     name_start := before_bytes.len()
-    loop name_start > 0 && pkg_bytes_is_word(Int.from_u8(before_bytes[name_start - 1])) -> name_start -= 1
+    loop name_start > 0 && pkg_bytes_is_word(Int{before_bytes[name_start - 1]}) -> name_start -= 1
     name: pkg_bytes_text(before_bytes, name_start, before_bytes.len())
     if !pkg_opaque_is_ident(name) -> return None
     if pkg_bytes_text(before_bytes, 0, name_start).trim() == "" -> return None
@@ -485,7 +485,7 @@ pkg_opaque_split_params: fn(text: String) -> [String]? Never! {
     start := 0
     depth := 0
     loop index in 0..<bytes.len() {
-        code: Int.from_u8(bytes[index])
+        code: Int{bytes[index]}
         if code == {
             40 | 91 -> depth += 1
             41 | 93 -> {
@@ -539,7 +539,7 @@ pkg_opaque_tokenize: fn(text: String) -> [String] Never! {
     tokens := [String]{}
     start := -1
     loop index in 0..<bytes.len() {
-        code: Int.from_u8(bytes[index])
+        code: Int{bytes[index]}
         if pkg_bytes_is_word(code) {
             if start < 0 -> start = index
             next
@@ -565,7 +565,7 @@ pkg_opaque_split_declarations: fn(text: String) -> [String] Never! {
     start := 0
     depth := 0
     loop index in 0..<bytes.len() {
-        code: Int.from_u8(bytes[index])
+        code: Int{bytes[index]}
         if code == {
             123 -> depth += 1
             125 -> depth -= 1
@@ -589,18 +589,18 @@ pkg_opaque_strip_comments_and_directives: fn(text: String) -> String Never! {
     kept := [U8]{}
     index := 0
     loop index < bytes.len() {
-        code: Int.from_u8(bytes[index])
+        code: Int{bytes[index]}
         next_code: pkg_bytes_code(bytes, index + 1)
         if {
             code == 47 && next_code == 42 -> {
                 index += 2
-                loop index + 1 < bytes.len() && !(Int.from_u8(bytes[index]) == 42 && Int.from_u8(bytes[index + 1]) == 47) -> index += 1
+                loop index + 1 < bytes.len() && !(Int{bytes[index]} == 42 && Int{bytes[index + 1]} == 47) -> index += 1
                 index = if index + 2 < bytes.len() -> index + 2 else -> bytes.len()
                 kept.push(U8{32})
             }
             code == 47 && next_code == 47 -> {
                 index += 2
-                loop index < bytes.len() && Int.from_u8(bytes[index]) != 10 -> index += 1
+                loop index < bytes.len() && (Int{bytes[index]}) != 10 -> index += 1
             }
             else -> {
                 kept.push(bytes[index])
@@ -629,7 +629,7 @@ pkg_opaque_strip_comments_and_directives: fn(text: String) -> String Never! {
 
 pkg_opaque_without_trailing_cr: fn(line: String) -> String Never! {
     bytes: line.bytes()
-    if bytes.len() > 0 && Int.from_u8(bytes[bytes.len() - 1]) == 13 -> return pkg_bytes_text(bytes, 0, bytes.len() - 1)
+    if bytes.len() > 0 && (Int{bytes[bytes.len() - 1]}) == 13 -> return pkg_bytes_text(bytes, 0, bytes.len() - 1)
     line.copy()
 }
 
@@ -654,10 +654,10 @@ pkg_opaque_unique_name: fn(used: &[String], preferred: String) -> String Never! 
 pkg_opaque_is_ident: fn(value: String) -> Bool Never! {
     bytes: value.bytes()
     if bytes.len() == 0 -> return false
-    first: Int.from_u8(bytes[0])
+    first: Int{bytes[0]}
     if first >= 48 && first <= 57 -> return false
     loop byte in bytes {
-        if !pkg_bytes_is_word(Int.from_u8(byte)) -> return false
+        if !pkg_bytes_is_word(Int{byte}) -> return false
     }
     true
 }

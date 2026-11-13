@@ -103,7 +103,7 @@ parser_module_namespace: fn(name: String) -> Namespace? {
 
 parser_module_is_dashed: fn(name: String) -> Bool Never! {
     loop byte in name.bytes() {
-        if Int.from_u8(byte) == 45 -> return true
+        if (Int{byte}) == 45 -> return true
     }
     false
 }
@@ -998,7 +998,7 @@ parser_module_perf_workload_entry: fn(state: &JetParserState, name: Token) -> Co
 
 parser_module_name_starts_with_underscore: fn(name: String) -> Bool Never! {
     bytes: name.bytes()
-    bytes.len() > 0 && Int.from_u8(bytes[0]) == 95
+    bytes.len() > 0 && Int{bytes[0]} == 95
 }
 
 parser_module_sources: fn(state: &JetParserState) -> [SourceDecl] {

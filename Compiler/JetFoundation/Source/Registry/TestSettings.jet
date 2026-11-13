@@ -283,7 +283,7 @@ TEST_SETTING_SIZE_UNITS: #run { [TestSettingSizeUnit]{
 test_setting_whole: fn(text: String) -> Int? Never! {
     if text == "" || text.bytes().len() > 9 -> return None
     loop byte in text.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if code < 48 || code > 57 -> return None
     }
     Val(Int.parse(text) ?? return None)

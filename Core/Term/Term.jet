@@ -452,7 +452,7 @@ progress: fn(label: String) IOError! -[IO, Time.Wait]> {
 decode_key: fn(raw: [U8], platform: Int) -> Key Never! {
     if platform == 0 || raw.len() == 0 -> return .Unknown
     if raw.len() == 1 {
-        b: Int.from_u8(raw[0])
+        b: Int{raw[0]}
         if b == 13 || b == 10 -> return .Enter
         if b == 27 -> return .Escape
         if b == 127 || b == 8 -> return .Backspace
@@ -590,7 +590,7 @@ choose_index: fn(answer: String) -> Int? Never! {
     if start >= raw.len() -> return None
     n := 0
     loop i in start..<raw.len() {
-        d: Int.from_u8(raw[i]) - 48
+        d: Int{raw[i]} - 48
         if d < 0 || d > 9 -> return None
         // Values above Int::MAX cannot select any source array entry.
         if n > 922337203685477580 || (n == 922337203685477580 && d > 7) -> return None

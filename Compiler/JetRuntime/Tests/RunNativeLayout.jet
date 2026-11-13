@@ -53,7 +53,7 @@ field: fn(tree: Dyn, name: String) -> String {
     ""
 }
 
-byte: fn(value: Int) -> U8 { U8.from_int(value) ?? U8{0} }
+byte: fn(value: Int) -> U8 { checked(U8{value}) ?? U8{0} }
 
 // The literal block as NativeLayoutText.jet fills it: each
 // `layout_put(wrapping(root + I64{at}), I64{value})` stores value as a
@@ -75,7 +75,7 @@ literal_block: fn(source: String) -> [U8] {
 
 word: fn(block: [U8], at: Int) -> Int {
     value := 0
-    loop k in 0..<8 -> value = value * 256 + Int.from_u8(block[at + 7 - k])
+    loop k in 0..<8 -> value = value * 256 + (Int{block[at + 7 - k]})
     value
 }
 

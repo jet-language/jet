@@ -1807,7 +1807,7 @@ jfmt_is_and_operand: fn(expr: Expr) -> Bool Never! {
 jfmt_grouping_is_redundant: fn(f: JetFmt, inner: Expr, span: Span, prec: Int) -> Bool Never! {
     if !jfmt_src_range_valid(f, span.start, span.end) -> return false
     loop index in span.start..<span.end {
-        if Int.from_u8(f.src_bytes[index]) == 10 -> return false
+        if (Int{f.src_bytes[index]}) == 10 -> return false
     }
     // A brace at the group's own depth would open an `if` or `loop` body once
     // the parens go, and an interpolated string right of `==` would become a
@@ -1837,7 +1837,7 @@ jfmt_grouping_has_open_brace: fn(f: JetFmt, span: Span) -> Bool Never! {
     in_string := false
     escaped := false
     loop index in span.start + 1..<span.end - 1 {
-        byte: Int.from_u8(f.src_bytes[index])
+        byte: Int{f.src_bytes[index]}
         if byte == 123 && depth == 0 -> return true
         if in_string {
             if byte == 34 && !escaped -> in_string = false
@@ -2339,7 +2339,7 @@ jfmt_fmt_byte_text_parts: fn(f: &JetFmt, parts: [ByteTextPart]) Never! {
     loop part in parts {
         if part == {
             .Lit(text) -> jfmt_write(f, jfmt_escape_str_lit(text))
-            .Byte(value) -> jfmt_write(f, "\\x{jfmt_hex2(Int.from_u8(value))}")
+            .Byte(value) -> jfmt_write(f, "\\x{jfmt_hex2(Int{value})}")
         }
     }
     jfmt_write(f, "\"")
@@ -2371,7 +2371,7 @@ jfmt_escape_binary_lit: fn(bytes: [U8]) -> String Never! {
             }
             byte >= 32 && byte <= 126 -> out.push(byte)
             else -> {
-                loop escaped in "\\x{jfmt_hex2(Int.from_u8(byte))}".bytes() -> out.push(escaped)
+                loop escaped in "\\x{jfmt_hex2(Int{byte})}".bytes() -> out.push(escaped)
             }
         }
     }
@@ -2778,7 +2778,7 @@ jfmt_fmt_str: fn(f: &JetFmt, parts: [StrPart]) {
         if parts[index] == {
             .Lit(text) -> jfmt_write(f, jfmt_escape_str_lit(text))
             .Interp(value, format) -> if format != .Count -> jfmt_fmt_interp(f, value, format, parts, index + 1)
-            .Byte(value) -> jfmt_write(f, "\\x{jfmt_hex2(Int.from_u8(value))}")
+            .Byte(value) -> jfmt_write(f, "\\x{jfmt_hex2(Int{value})}")
         }
         index += 1
     }
@@ -2808,7 +2808,7 @@ jfmt_fmt_typed_head_str_parts: fn(f: &JetFmt, parts: [StrPart]) {
         if parts[index] == {
             .Lit(text) -> jfmt_write(f, jfmt_escape_typed_head_single_line(text))
             .Interp(value, format) -> if format != .Count -> jfmt_fmt_interp(f, value, format, parts, index + 1)
-            .Byte(value) -> jfmt_write(f, "\\x{jfmt_hex2(Int.from_u8(value))}")
+            .Byte(value) -> jfmt_write(f, "\\x{jfmt_hex2(Int{value})}")
         }
         index += 1
     }
@@ -2831,7 +2831,7 @@ jfmt_fmt_typed_head_str_multiline: fn(f: &JetFmt, parts: [StrPart]) {
                 }
             }
             .Interp(value, format) -> if format != .Count -> jfmt_fmt_interp(f, value, format, parts, index + 1)
-            .Byte(value) -> jfmt_write(f, "\\x{jfmt_hex2(Int.from_u8(value))}")
+            .Byte(value) -> jfmt_write(f, "\\x{jfmt_hex2(Int{value})}")
         }
         index += 1
     }
@@ -2907,7 +2907,7 @@ jfmt_fmt_str_multiline: fn(f: &JetFmt, parts: [StrPart]) {
                 }
             }
             .Interp(value, format) -> if format != .Count -> jfmt_fmt_interp(f, value, format, parts, index + 1)
-            .Byte(value) -> jfmt_write(f, "\\x{jfmt_hex2(Int.from_u8(value))}")
+            .Byte(value) -> jfmt_write(f, "\\x{jfmt_hex2(Int{value})}")
         }
         index += 1
     }

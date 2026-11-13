@@ -919,13 +919,13 @@ jet_cli_picker_keys: fn(bytes: [U8], rest: &[U8]) -> [JetCLIPickerKey] Never! {
     rest = [U8]{}
     at := 0
     loop at < bytes.len() {
-        byte: Int.from_u8(bytes[at])
+        byte: Int{bytes[at]}
         if byte == 27 {
-            follow: if at + 1 < bytes.len() -> Int.from_u8(bytes[at + 1]) else -> -1
+            follow: if at + 1 < bytes.len() -> (Int{bytes[at + 1]}) else -> -1
             // CSI (ESC [) and SS3 (ESC O) run to a final byte in 64..126.
             if follow == 91 || follow == 79 {
                 end := at + 2
-                loop end < bytes.len() && (Int.from_u8(bytes[end]) < 64 || Int.from_u8(bytes[end]) > 126) -> end += 1
+                loop end < bytes.len() && (Int{bytes[end]} < 64 || Int{bytes[end]} > 126) -> end += 1
                 if end >= bytes.len() {
                     loop index in at..<bytes.len() -> rest.push(bytes[index])
                     return keys
@@ -976,7 +976,7 @@ jet_cli_picker_keys: fn(bytes: [U8], rest: &[U8]) -> [JetCLIPickerKey] Never! {
 // The key a CSI (`introducer` 91) or SS3 (79) sequence names: its parameter
 // bytes are `bytes[from..<final]`.
 jet_cli_picker_sequence: fn(introducer: Int, bytes: [U8], from: Int, final: Int) -> JetCLIPickerKey Never! {
-    last: Int.from_u8(bytes[final])
+    last: Int{bytes[final]}
     if last == 65 -> return JetCLIPickerKey.Up
     if last == 66 -> return JetCLIPickerKey.Down
     if last == 67 -> return JetCLIPickerKey.Right

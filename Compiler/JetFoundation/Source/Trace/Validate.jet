@@ -61,9 +61,9 @@ jettrace_unsigned: fn(value: CanonicalJSON, label: String) -> U64 JetTraceError!
     if at == raw.len() -> return Err(jettrace_error("{label} is not an unsigned integer"))
     result := U64{0}
     loop at < raw.len() {
-        byte: Int.from_u8(raw[at])
+        byte: Int{raw[at]}
         if byte < 48 || byte > 57 -> return Err(jettrace_error("{label} is not an unsigned integer"))
-        digit: U64.from_u8(raw[at]) - U64{48}
+        digit: U64{raw[at]} - U64{48}
         if result > (U64{18446744073709551615} - digit) /% (U64{10}) -> return Err(jettrace_error("{label} is not an unsigned integer"))
         result = result * U64{10} + digit
         at += 1
@@ -74,7 +74,7 @@ jettrace_hex64: fn(text: String) -> Bool Never! {
     raw: text.bytes()
     if raw.len() != 64 -> return false
     loop byte in raw {
-        number: Int.from_u8(byte)
+        number: Int{byte}
         if !(number >= 48 && number <= 57) && !(number >= 97 && number <= 102) -> return false
     }
     true
@@ -237,10 +237,10 @@ jettrace_validate_allocations: fn(value: CanonicalJSON) JetTraceError! {
 jettrace_has_control: fn(text: String) -> Bool Never! {
     bytes: text.bytes()
     loop index in 0..<bytes.len() {
-        byte: Int.from_u8(bytes[index])
+        byte: Int{bytes[index]}
         if byte <= 31 || byte == 127 -> return true
         if byte == 194 && index + 1 < bytes.len() {
-            continuation: Int.from_u8(bytes[index + 1])
+            continuation: Int{bytes[index + 1]}
             if continuation >= 128 && continuation <= 159 -> return true
         }
     }

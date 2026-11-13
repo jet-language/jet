@@ -348,7 +348,7 @@ services_unit_safe_name: fn(name: String) -> String Never! {
     loop scalar in name.chars() {
         text: "{scalar}"
         bytes: text.bytes()
-        keep: bytes.len() == 1 && (trust_text_is_alphanumeric(Int.from_u8(bytes[0])) || Int.from_u8(bytes[0]) == 95 || Int.from_u8(bytes[0]) == 45)
+        keep: bytes.len() == 1 && (trust_text_is_alphanumeric(Int{bytes[0]}) || Int{bytes[0]} == 95 || Int{bytes[0]} == 45)
         out.push(if keep -> text else -> "-")
     }
     out.join("")

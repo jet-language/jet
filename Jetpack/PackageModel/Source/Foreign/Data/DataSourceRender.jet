@@ -148,11 +148,11 @@ pkg_data_type_name: fn(raw: String) -> String Never! {
 pkg_data_input_stem_type_name: fn(input_path: String) -> String Never! {
     bytes: input_path.bytes()
     start := bytes.len()
-    loop start > 0 && Int.from_u8(bytes[start - 1]) != 47 && Int.from_u8(bytes[start - 1]) != 92 -> start -= 1
+    loop start > 0 && (Int{bytes[start - 1]}) != 47 && (Int{bytes[start - 1]}) != 92 -> start -= 1
     base: pkg_bytes_text(bytes, start, bytes.len())
     base_bytes: base.bytes()
     dot := base_bytes.len() - 1
-    loop dot >= 0 && Int.from_u8(base_bytes[dot]) != 46 -> dot -= 1
+    loop dot >= 0 && (Int{base_bytes[dot]}) != 46 -> dot -= 1
     stem: if dot >= 0 -> pkg_bytes_text(base_bytes, 0, dot) else -> base
     pkg_data_type_name(stem)
 }
@@ -255,7 +255,7 @@ pkg_data_scalars: fn(text: String) -> [String] Never! {
 pkg_data_code: fn(scalar: String) -> Int Never! {
     raw: scalar.bytes()
     if raw.len() == 0 -> return -1
-    lead: Int.from_u8(raw[0])
+    lead: Int{raw[0]}
     if lead < 0x80 -> return lead
     if lead < 0xE0 -> return ((lead - 0xC0) << 6) + pkg_data_continuation(raw, 1)
     if lead < 0xF0 -> return ((lead - 0xE0) << 12) + (pkg_data_continuation(raw, 1) << 6) + pkg_data_continuation(raw, 2)
@@ -264,7 +264,7 @@ pkg_data_code: fn(scalar: String) -> Int Never! {
 
 pkg_data_continuation: fn(raw: [U8], at: Int) -> Int Never! {
     if at >= raw.len() -> return 0
-    Int.from_u8(raw[at]) - 0x80
+    Int{raw[at]} - 0x80
 }
 
 // Scalar-list access that reads past either end as the empty string.
@@ -319,7 +319,7 @@ pkg_data_eq_ignore_case: fn(left: String, right: String) -> Bool Never! {
 pkg_data_ascii_upper: fn(value: String) -> String Never! {
     out := [U8]{}
     loop byte in value.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         out.push(if code >= 97 && code <= 122 -> U8{code - 32} else -> byte)
     }
     pkg_bytes_text(out, 0, out.len())
@@ -330,11 +330,11 @@ pkg_data_ascii_upper: fn(value: String) -> String Never! {
 pkg_data_parse_digits: fn(value: String) -> Int? Never! {
     raw: value.bytes()
     if raw.len() == 0 -> return None
-    start: if Int.from_u8(raw[0]) == 43 -> 1 else -> 0
+    start: if (Int{raw[0]}) == 43 -> 1 else -> 0
     if start == raw.len() -> return None
     total := 0
     loop index in start..<raw.len() {
-        code: Int.from_u8(raw[index])
+        code: Int{raw[index]}
         if code < 48 || code > 57 -> return None
         if total > (9223372036854775807 - (code - 48)) /% 10 -> return None
         total = total * 10 + (code - 48)

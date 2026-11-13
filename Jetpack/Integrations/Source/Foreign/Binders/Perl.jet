@@ -130,11 +130,11 @@ pkg_perl_parse_function_names: fn(bytes: [U8]) -> [PerlBoundFunction] ForeignBin
         if !line.starts_with("sub") -> next
         after: line.removeprefix("sub")
         after_bytes: after.bytes()
-        if after_bytes.len() == 0 || pkg_bytes_space_width(after_bytes, 0) == 0 || Int.from_u8(after_bytes[0]) > 127 -> next
+        if after_bytes.len() == 0 || pkg_bytes_space_width(after_bytes, 0) == 0 || (Int{after_bytes[0]}) > 127 -> next
         rest: after.trim_start()
         rest_bytes: rest.bytes()
         name_len := 0
-        loop name_len < rest_bytes.len() && pkg_bytes_is_word(Int.from_u8(rest_bytes[name_len])) -> name_len += 1
+        loop name_len < rest_bytes.len() && pkg_bytes_is_word(Int{rest_bytes[name_len]}) -> name_len += 1
         name: pkg_bytes_text(rest_bytes, 0, name_len)
         if name == "" -> return Err(ForeignBindError.Source("a Perl sub declaration needs a named function"))
         tail: pkg_bytes_text(rest_bytes, name_len, rest_bytes.len()).trim_start().bytes()
@@ -159,7 +159,7 @@ pkg_perl_validate_structure: fn(source: String) ForeignBindError! {
     escaped := false
     comment := false
     loop byte in source.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if comment {
             if code == 10 -> comment = false
             next

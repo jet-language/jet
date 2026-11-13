@@ -1096,39 +1096,39 @@ ZHash: struct {
     value: fn(self) -> U64 Never! {
         h := xxh_p5()
         if self.total >= 32 {
-            h = rotl64(self.v1, 1).wrapping_add(rotl64(self.v2, 7)).wrapping_add(rotl64(self.v3, 12)).wrapping_add(rotl64(self.v4, 18))
+            h = wrapping(wrapping(wrapping(rotl64(self.v1, 1) + rotl64(self.v2, 7)) + rotl64(self.v3, 12)) + rotl64(self.v4, 18))
             h = xxh_merge_round(h, self.v1)
             h = xxh_merge_round(h, self.v2)
             h = xxh_merge_round(h, self.v3)
             h = xxh_merge_round(h, self.v4)
         }
-        h = h.wrapping_add(U64.from_int(self.total) ?? U64{0})
+        h = wrapping(h + (checked(U64{self.total}) ?? U64{0}))
         data: self.pending
         n: data.len()
         i := 0
         loop i + 8 <= n {
-            h = rotl64((h).bit_xor(xxh_round(U64{0}, read_u64le(data, i))), 27).wrapping_mul(xxh_p1()).wrapping_add(xxh_p4())
+            h = wrapping(wrapping(rotl64((h).bit_xor(xxh_round(U64{0}, read_u64le(data, i))), 27) * xxh_p1()) + xxh_p4())
             i = i + 8
         }
         if i + 4 <= n {
-            lane: U64.from_int(read_u32le(data, i)) ?? U64{0}
-            h = rotl64((h).bit_xor(lane.wrapping_mul(xxh_p1())), 23).wrapping_mul(xxh_p2()).wrapping_add(xxh_p3())
+            lane: checked(U64{read_u32le(data, i)}) ?? U64{0}
+            h = wrapping(wrapping(rotl64((h).bit_xor(wrapping(lane * xxh_p1())), 23) * xxh_p2()) + xxh_p3())
             i = i + 4
         }
         loop i < n {
-            h = rotl64((h).bit_xor(U64.from_u8(data[i]).wrapping_mul(xxh_p5())), 11).wrapping_mul(xxh_p1())
+            h = wrapping(rotl64((h).bit_xor(wrapping(U64{data[i]} * xxh_p5())), 11) * xxh_p1())
             i = i + 1
         }
         h = (h).bit_xor((h >> 33))
-        h = h.wrapping_mul(xxh_p2())
+        h = wrapping(h * xxh_p2())
         h = (h).bit_xor((h >> 29))
-        h = h.wrapping_mul(xxh_p3())
+        h = wrapping(h * xxh_p3())
         (h).bit_xor((h >> 32))
     }
 
     // The low 32 bits Zstandard stores.
     digest: fn(self) -> Int Never! {
-        Int.from_u64((self.value()).bit_and(U64{4294967295}))
+        Int{(self.value()).bit_and(U64{4294967295})}
     }
 }
 
@@ -1145,7 +1145,7 @@ xxh64: fn(data: [U8]) -> U64 Never! {
 }
 
 xxh64_low32: fn(data: [U8]) -> Int Never! {
-    Int.from_u64((xxh64(data)).bit_and(U64{4294967295}))
+    Int{(xxh64(data)).bit_and(U64{4294967295})}
 }
 
 put32: fn(out: &[U8], n: Int) Never! {
@@ -1155,7 +1155,7 @@ put32: fn(out: &[U8], n: Int) Never! {
     out.push(wrapping(U8{n >> 24}))
 }
 
-u8_int: fn(b: U8) -> Int Never! { Int.from_u8(b) }
+u8_int: fn(b: U8) -> Int Never! { Int{b} }
 
 read_u16le: fn(data: [U8], i: Int) -> Int Never! {
     (u8_int(data[i])).bit_or((u8_int(data[i + 1]) << 8))
@@ -1169,24 +1169,24 @@ read_u64le: fn(data: [U8], i: Int) -> U64 Never! {
     n := U64{0}
     k := 7
     loop k >= 0 {
-        n = n.wrapping_mul(U64{256}).wrapping_add(U64.from_u8(data[i + k]))
+        n = wrapping(wrapping(n * U64{256}) + U64{data[i + k]})
         k = k - 1
     }
     n
 }
 
-// Rotation as wrapping multiply plus shift: `x.wrapping_mul(2^r)` drops the
+// Rotation as wrapping multiply plus shift: `wrapping(x * 2^r)` drops the
 // high bits exactly like a 64-bit left shift, so no step can overflow.
 rotl64: fn(x: U64, r: Int) -> U64 Never! {
-    (x.wrapping_mul(U64{1} << r)).bit_or((x >> (64 - r)))
+    (wrapping(x * (U64{1} << r))).bit_or((x >> (64 - r)))
 }
 
 xxh_round: fn(acc: U64, input: U64) -> U64 Never! {
-    rotl64(acc.wrapping_add(input.wrapping_mul(xxh_p2())), 31).wrapping_mul(xxh_p1())
+    wrapping(rotl64(wrapping(acc + wrapping(input * xxh_p2())), 31) * xxh_p1())
 }
 
 xxh_merge_round: fn(acc: U64, value: U64) -> U64 Never! {
-    ((acc).bit_xor(xxh_round(U64{0}, value))).wrapping_mul(xxh_p1()).wrapping_add(xxh_p4())
+    wrapping(wrapping(((acc).bit_xor(xxh_round(U64{0}, value))) * xxh_p1()) + xxh_p4())
 }
 
 is_zstd: fn(data: [U8]) -> Bool Never! {

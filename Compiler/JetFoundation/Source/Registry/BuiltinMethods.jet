@@ -54,7 +54,7 @@ BuiltinMethodLowering: enum {
     BitNot
     // Exact Int Euclidean quotient and remainder (NumericBinaryMethod).
     Euclidean(remainder: Bool)
-    // Fixed-width overflow policy (`checked_add`, `wrapping_mul`, `rotate_left`, …).
+    // Fixed-width rotation (`rotate_left`, `rotate_right`) on the overflow-word seam.
     Overflow(prefix: String, operation: String)
     Atomic
     // A call of the Core source helper `owner.member(receiver, args…)`: the
@@ -303,18 +303,7 @@ BUILTIN_METHOD_ROWS: #run { [BuiltinMethodRow]{
     {receiver: BuiltinMethodReceiver.ExactInt, name: "div_euclid", parameters: [Type]{Type.Int}, result: Type.Int, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Euclidean{remainder: false}},
     {receiver: BuiltinMethodReceiver.ExactInt, name: "rem_euclid", parameters: [Type]{Type.Int}, result: Type.Int, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Euclidean{remainder: true}},
     {receiver: BuiltinMethodReceiver.ExactInt, name: "to_radix", parameters: [Type]{Type.Int}, result: Type.String, access: AccessConvention.Read, lowering: BuiltinMethodLowering.IntToRadix},
-    {receiver: BuiltinMethodReceiver.FixedInt, name: "checked_add", parameters: [Type]{Type.Named{name: "Self"}}, result: Type.Option{inner: Type.Named{name: "Self"}}, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Overflow{prefix: "checked", operation: "add"}},
-    {receiver: BuiltinMethodReceiver.FixedInt, name: "checked_sub", parameters: [Type]{Type.Named{name: "Self"}}, result: Type.Option{inner: Type.Named{name: "Self"}}, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Overflow{prefix: "checked", operation: "sub"}},
-    {receiver: BuiltinMethodReceiver.FixedInt, name: "checked_mul", parameters: [Type]{Type.Named{name: "Self"}}, result: Type.Option{inner: Type.Named{name: "Self"}}, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Overflow{prefix: "checked", operation: "mul"}},
-    {receiver: BuiltinMethodReceiver.FixedInt, name: "checked_div", parameters: [Type]{Type.Named{name: "Self"}}, result: Type.Option{inner: Type.Named{name: "Self"}}, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Overflow{prefix: "checked", operation: "div"}},
-    {receiver: BuiltinMethodReceiver.FixedInt, name: "checked_rem", parameters: [Type]{Type.Named{name: "Self"}}, result: Type.Option{inner: Type.Named{name: "Self"}}, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Overflow{prefix: "checked", operation: "rem"}},
-    {receiver: BuiltinMethodReceiver.FixedInt, name: "wrapping_add", parameters: [Type]{Type.Named{name: "Self"}}, result: Type.Named{name: "Self"}, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Overflow{prefix: "wrapping", operation: "add"}},
-    {receiver: BuiltinMethodReceiver.FixedInt, name: "wrapping_sub", parameters: [Type]{Type.Named{name: "Self"}}, result: Type.Named{name: "Self"}, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Overflow{prefix: "wrapping", operation: "sub"}},
-    {receiver: BuiltinMethodReceiver.FixedInt, name: "wrapping_mul", parameters: [Type]{Type.Named{name: "Self"}}, result: Type.Named{name: "Self"}, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Overflow{prefix: "wrapping", operation: "mul"}},
-    {receiver: BuiltinMethodReceiver.FixedInt, name: "saturating_add", parameters: [Type]{Type.Named{name: "Self"}}, result: Type.Named{name: "Self"}, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Overflow{prefix: "saturating", operation: "add"}},
-    {receiver: BuiltinMethodReceiver.FixedInt, name: "saturating_sub", parameters: [Type]{Type.Named{name: "Self"}}, result: Type.Named{name: "Self"}, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Overflow{prefix: "saturating", operation: "sub"}},
-    {receiver: BuiltinMethodReceiver.FixedInt, name: "saturating_mul", parameters: [Type]{Type.Named{name: "Self"}}, result: Type.Named{name: "Self"}, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Overflow{prefix: "saturating", operation: "mul"}},
-    // Rotations ride the same overflow-policy seam.
+    // Rotations lower through the overflow-word seam that `wrapping(a + b)` uses.
     {receiver: BuiltinMethodReceiver.FixedInt, name: "rotate_left", parameters: [Type]{Type.Named{name: "Self"}}, result: Type.Named{name: "Self"}, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Overflow{prefix: "rotate_left", operation: "rotate"}},
     {receiver: BuiltinMethodReceiver.FixedInt, name: "rotate_right", parameters: [Type]{Type.Named{name: "Self"}}, result: Type.Named{name: "Self"}, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Overflow{prefix: "rotate_right", operation: "rotate"}},
 

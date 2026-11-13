@@ -896,7 +896,7 @@ rsaes_oaep_unpadding: fn(buf: &[U8], md: hashes.Md, lhash: [U8], output_max_len:
     max_size: U64{plaintext_max_size}
     // 0x00 || seed || lHash' || PS || 0x01 || M with lHash' = lHash and PS
     // all zeros.
-    bad := ctime.cond_of(U64.from_u8(buf[0]))
+    bad := ctime.cond_of(U64{buf[0]})
     bad = ctime.bool_or(bad, ctime.mem_ne(lhash, 0, buf, 1 + hlen, hlen))
     // Read the whole of PS || 0x01 || M: pad_count counts the zeros before
     // the first nonzero byte, which must be 0x01.
@@ -905,7 +905,7 @@ rsaes_oaep_unpadding: fn(buf: &[U8], md: hashes.Md, lhash: [U8], output_max_len:
     one_found := ctime.ct_false()
     pad_count := U64{0}
     loop i in start..<ilen {
-        byte: U64.from_u8(buf[i])
+        byte: U64{buf[i]}
         first: ctime.bool_and(ctime.bool_not(pad_done), ctime.uint_ne(byte, U64{0}))
         one_found = ctime.bool_or(one_found, ctime.bool_and(first, ctime.uint_eq(byte, U64{1})))
         pad_done = ctime.bool_or(pad_done, first)
@@ -978,13 +978,13 @@ rsaes_pkcs1_v15_unpadding: fn(input: &[U8], output_max_len: Int) -> V15Unpadded 
     plaintext_max_size: if output_max_len > ilen - 11 -> ilen - 11 else -> output_max_len
     max_size: U64{plaintext_max_size}
     // 0x00 || 0x02 || PS || 0x00 with at least 8 nonzero bytes of PS.
-    bad := ctime.cond_of(U64.from_u8(input[0]))
-    bad = ctime.bool_or(bad, ctime.uint_ne(U64.from_u8(input[1]), U64{RSA_CRYPT}))
+    bad := ctime.cond_of(U64{input[0]})
+    bad = ctime.bool_or(bad, ctime.uint_ne(U64{input[1]}, U64{RSA_CRYPT}))
     // Read the whole buffer; pad_count counts the bytes before the first 0.
     pad_done := ctime.ct_false()
     pad_count := U64{0}
     loop i in 2..<ilen {
-        found: ctime.uint_eq(U64.from_u8(input[i]), U64{0})
+        found: ctime.uint_eq(U64{input[i]}, U64{0})
         pad_done = ctime.bool_or(pad_done, found)
         pad_count += ctime.if_else_0(ctime.bool_not(pad_done), U64{1})
     }
@@ -1244,7 +1244,7 @@ rsa_rsassa_pss_verify_ext: fn(ctx: &RSAContext, md: hashes.Md?, hash: [U8], mgf1
     hlen: hashes.md_size(mgf)
     // EMSA-PSS decodes from bitlen(n) - 1 bits: the bits above are zero.
     msb: bn.bitlen(ctx.n) - 1
-    if Int.from_u8(buf[0]) >> (8 - siglen * 8 + msb) != 0 -> return Err(.BadInput(None))
+    if (Int{buf[0]}) >> (8 - siglen * 8 + msb) != 0 -> return Err(.BadInput(None))
     p := 0
     if msb %% 8 == 0 {
         p = 1

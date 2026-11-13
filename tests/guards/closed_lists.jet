@@ -50,7 +50,7 @@ ClosedListFinding: struct {
 
 closed_list_ident_byte: fn(byte: U8) -> Bool { s3_truth_ascii_word_byte(byte) }
 
-closed_list_upper_byte: fn(byte: U8) -> Bool { Int.from_u8(byte) >= 65 && Int.from_u8(byte) <= 90 }
+closed_list_upper_byte: fn(byte: U8) -> Bool { Int{byte} >= 65 && Int{byte} <= 90 }
 
 // The identifier that starts `text`, or "" when it does not start with one.
 closed_list_ident_prefix: fn(text: String) -> String {
@@ -71,12 +71,12 @@ closed_list_enum_line_members: fn(line: String, out: &[String]) {
         ident: closed_list_ident_prefix(word)
         if ident == "" || !closed_list_upper_byte(ident.bytes()[0]) -> return
         if ident != word {
-            next_byte: Int.from_u8(word.bytes()[ident.bytes().len()])
+            next_byte: Int{word.bytes()[ident.bytes().len()]}
             // `(` payload, `{` record payload, `,` separator.
             if next_byte != 40 && next_byte != 123 && next_byte != 44 -> return
         }
         out.push(ident.to_lower())
-        if ident != word && Int.from_u8(word.bytes()[ident.bytes().len()]) != 44 -> return
+        if ident != word && (Int{word.bytes()[ident.bytes().len()]}) != 44 -> return
     }
 }
 
@@ -86,8 +86,8 @@ closed_list_string_members: fn(line: String, out: &[String]) {
     index := 0
     loop {
         if index >= bytes.len() -> break
-        if Int.from_u8(bytes[index]) == 47 && index + 1 < bytes.len() && Int.from_u8(bytes[index + 1]) == 47 -> break
-        if Int.from_u8(bytes[index]) != 34 {
+        if (Int{bytes[index]}) == 47 && index + 1 < bytes.len() && (Int{bytes[index + 1]}) == 47 -> break
+        if (Int{bytes[index]}) != 34 {
             index += 1
             next
         }
@@ -95,11 +95,11 @@ closed_list_string_members: fn(line: String, out: &[String]) {
         end := start
         loop {
             if end >= bytes.len() -> break
-            if Int.from_u8(bytes[end]) == 92 {
+            if (Int{bytes[end]}) == 92 {
                 end += 2
                 next
             }
-            if Int.from_u8(bytes[end]) == 34 -> break
+            if (Int{bytes[end]}) == 34 -> break
             end += 1
         }
         if end > bytes.len() -> break
@@ -139,7 +139,7 @@ closed_list_header: fn(path: String) -> String {
     cut := 0
     lines := 0
     loop index in 0..<bytes.len() {
-        if Int.from_u8(bytes[index]) != 10 -> next
+        if (Int{bytes[index]}) != 10 -> next
         cut = index
         lines += 1
         if lines == 5 -> break
@@ -216,7 +216,7 @@ closed_list_findings_in: fn(path: String, text: String, out: &[ClosedListFinding
         if ident == "" -> next
         bytes: line.bytes()
         width: ident.bytes().len()
-        if width + 1 >= bytes.len() || Int.from_u8(bytes[width]) != 58 -> next
+        if width + 1 >= bytes.len() || (Int{bytes[width]}) != 58 -> next
         rest: policy_slice_bytes(line, width + 1, bytes.len()).trim()
         opened: closed_list_opener(rest)
         if opened == "" -> next
@@ -721,15 +721,15 @@ ClosedListSpelling: struct {
 // None when it doesn't close on the line.
 closed_list_literal_at: fn(text: String, start: Int) -> String? {
     bytes: text.bytes()
-    if start >= bytes.len() || Int.from_u8(bytes[start]) != 34 -> return None
+    if start >= bytes.len() || (Int{bytes[start]}) != 34 -> return None
     end := start + 1
     loop {
         if end >= bytes.len() -> return None
-        if Int.from_u8(bytes[end]) == 92 {
+        if (Int{bytes[end]}) == 92 {
             end += 2
             next
         }
-        if Int.from_u8(bytes[end]) == 34 -> return Val(policy_slice_bytes(text, start + 1, end))
+        if (Int{bytes[end]}) == 34 -> return Val(policy_slice_bytes(text, start + 1, end))
         end += 1
     }
 }

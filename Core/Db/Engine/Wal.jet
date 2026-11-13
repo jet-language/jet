@@ -196,7 +196,7 @@ wal_zeros: fn(n: Int) -> [U8] Never! {
 
 // A little-endian (native) 32-bit word.
 le_get4: fn(b: [U8], at: Int) -> Int Never! {
-    Int.from_u8(b[at]).bit_or(Int.from_u8(b[at + 1]) << 8).bit_or(Int.from_u8(b[at + 2]) << 16).bit_or(Int.from_u8(b[at + 3]) << 24)
+    Int{b[at]}.bit_or(Int{b[at + 1]} << 8).bit_or(Int{b[at + 2]} << 16).bit_or(Int{b[at + 3]} << 24)
 }
 
 le_put4: fn(b: &[U8], at: Int, v: Int) Never! {
@@ -207,7 +207,7 @@ le_put4: fn(b: &[U8], at: Int, v: Int) Never! {
 }
 
 // A little-endian (native) 16-bit word.
-le_get2: fn(b: [U8], at: Int) -> Int Never! { Int.from_u8(b[at]).bit_or(Int.from_u8(b[at + 1]) << 8) }
+le_get2: fn(b: [U8], at: Int) -> Int Never! { Int{b[at]}.bit_or(Int{b[at + 1]} << 8) }
 
 le_put2: fn(b: &[U8], at: Int, v: Int) Never! {
     b[at] = U8{v.bit_and(255)}
@@ -470,7 +470,7 @@ wal_encode_frame: fn(w: &Wal, pgno: Int, n_truncate: Int, data: [U8], at: Int, f
     util.put4(frame, 4, n_truncate)
     if w.re_cksum == 0 {
         loop k in 0..<8 -> frame[8 + k] = w.hdr[HDR_SALT + k]
-        native: Int.from_u8(w.hdr[HDR_BIGEND]) == 0
+        native: Int{w.hdr[HDR_BIGEND]} == 0
         c0: wal_checksum(native, frame, 0, 8, hdr_get(w, HDR_FRAME_CKSUM), hdr_get(w, HDR_FRAME_CKSUM + 4))
         c1: wal_checksum(native, data, at, w.sz_page, c0.s1, c0.s2)
         hdr_set(w, HDR_FRAME_CKSUM, c1.s1)
@@ -490,7 +490,7 @@ wal_decode_frame: fn(w: &Wal, frame: [U8], pgno: &Int, n_truncate: &Int) -> Bool
     }
     pg: util.get4(frame, 0)
     if pg == 0 -> return false
-    native: Int.from_u8(w.hdr[HDR_BIGEND]) == 0
+    native: Int{w.hdr[HDR_BIGEND]} == 0
     c0: wal_checksum(native, frame, 0, 8, hdr_get(w, HDR_FRAME_CKSUM), hdr_get(w, HDR_FRAME_CKSUM + 4))
     c1: wal_checksum(native, frame, WAL_FRAME_HDRSIZE, w.sz_page, c0.s1, c0.s2)
     hdr_set(w, HDR_FRAME_CKSUM, c1.s1)
@@ -954,7 +954,7 @@ wal_index_try_hdr: fn(w: &Wal, db: &file.SQLFile, changed: &Bool) -[DB]> Bool Ne
     wi_read(w, db, 0, h1, 0, HDR_SIZE)
     wi_read(w, db, HDR_SIZE, h2, 0, HDR_SIZE)
     if h1 != h2 -> return true
-    if Int.from_u8(h1[HDR_ISINIT]) == 0 -> return true
+    if (Int{h1[HDR_ISINIT]}) == 0 -> return true
     ck: wal_checksum(true, h1, 0, HDR_CKSUM, 0, 0)
     if ck.s1 != le_get4(h1, HDR_CKSUM) || ck.s2 != le_get4(h1, HDR_CKSUM + 4) -> return true
     if w.hdr != h1 {
@@ -1620,7 +1620,7 @@ wal_heap_memory: fn(w: Wal) -> Bool Never! { w.open && w.exclusive_mode == WAL_H
     assert(pgno == 5 && n_truncate == 9)
     assert(hdr_get(r, HDR_FRAME_CKSUM) == after[0] && hdr_get(r, HDR_FRAME_CKSUM + 4) == after[1])
     // A changed byte or another salt is not a frame of this log.
-    whole[100] = U8{Int.from_u8(whole[100]).bit_xor(1)}
+    whole[100] = U8{Int{whole[100]}.bit_xor(1)}
     r2 := wal_closed()
     r2.sz_page = 512
     loop k in 0..<8 -> r2.hdr[HDR_SALT + k] = salt[k]

@@ -398,7 +398,7 @@ live_fields: fn(raw: [U8]) -> [String]? {
         length := 0
         loop {
             if at >= raw.len() -> return None
-            n: Int.from_u8(raw[at])
+            n: Int{raw[at]}
             at += 1
             if n == 58 -> break
             if n < 48 || n > 57 -> return None
@@ -659,7 +659,7 @@ sync_count_parse: fn(text: String, sign: String) -> Int? {
     if !text.starts_with(sign) || text.len() == 1 -> return None
     digits: text.slice(1, text.len())
     loop byte in digits.bytes() {
-        n: Int.from_u8(byte)
+        n: Int{byte}
         if n < 48 || n > 57 -> return None
     }
     Val(Int.parse(digits) ?? return None)
@@ -754,7 +754,7 @@ sync_split_once: fn(value: String, separator: String) -> SyncPair? {
 valid_provider: fn(value: String) -> Bool {
     if value == "" || value.len() > 64 -> return false
     loop byte in value.bytes() {
-        n: Int.from_u8(byte)
+        n: Int{byte}
         allowed:
             (n >= 48 && n <= 57) ||
             (n >= 65 && n <= 90) ||
@@ -769,7 +769,7 @@ valid_identifier: fn(value: String) -> Bool {
     trimmed: value.trim()
     if trimmed == "" || trimmed.len() > 128 || value != trimmed -> return false
     loop byte in value.bytes() {
-        n: Int.from_u8(byte)
+        n: Int{byte}
         allowed:
             (n >= 48 && n <= 57) ||
             (n >= 65 && n <= 90) ||

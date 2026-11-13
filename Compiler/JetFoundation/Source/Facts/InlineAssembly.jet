@@ -15,7 +15,7 @@ inline_assembly_normalize_register: fn(register: String) -> String Never! {
     bytes := raw.bytes()
     index := 0
     loop index < bytes.len() {
-        code := Int.from_u8(bytes[index])
+        code := Int{bytes[index]}
         if code >= 65 && code <= 90 -> bytes[index] = U8{code + 32}
         index += 1
     }
@@ -29,7 +29,7 @@ inline_assembly_register_number: fn(register: String, prefix: String, lo: Int, h
     if bytes.len() <= prefix_len -> return false
     index := prefix_len
     loop index < bytes.len() {
-        code := Int.from_u8(bytes[index])
+        code := Int{bytes[index]}
         if code < 48 || code > 57 -> return false
         index += 1
     }
@@ -135,7 +135,7 @@ inline_assembly_contract: fn(function: Func, target: String) -> InlineAsmContrac
             open := -1
             index := 0
             loop index < bytes.len() {
-                if Int.from_u8(bytes[index]) == 123 {
+                if (Int{bytes[index]}) == 123 {
                     open = index
                     break
                 }
@@ -145,7 +145,7 @@ inline_assembly_contract: fn(function: Func, target: String) -> InlineAsmContrac
             close := -1
             index = open + 1
             loop index < bytes.len() {
-                if Int.from_u8(bytes[index]) == 125 {
+                if (Int{bytes[index]}) == 125 {
                     close = index
                     break
                 }
@@ -215,7 +215,7 @@ inline_assembly_contract: fn(function: Func, target: String) -> InlineAsmContrac
 }
 
 inline_assembly_ascii_whitespace: fn(byte: U8) -> Bool Never! {
-    code := Int.from_u8(byte)
+    code := Int{byte}
     code == 32 || (code >= 9 && code <= 13)
 }
 
@@ -225,7 +225,7 @@ inline_assembly_clobber_tokens: fn(text: String) -> [String] Never! {
     start := 0
     index := 0
     loop index < bytes.len() {
-        if Int.from_u8(bytes[index]) == 44 || inline_assembly_ascii_whitespace(bytes[index]) {
+        if (Int{bytes[index]}) == 44 || inline_assembly_ascii_whitespace(bytes[index]) {
             if index > start -> tokens.push(String.from_bytes(bytes.slice(start, index)) ?? "")
             start = index + 1
         }
@@ -315,12 +315,12 @@ inline_assembly_x64_unencoded: fn(body: String) -> [InlineAsmUnencoded] Never! {
         }
         start := index
         loop index < bytes.len() {
-            if Int.from_u8(bytes[index]) == 59 || inline_assembly_ascii_whitespace(bytes[index]) -> break
+            if (Int{bytes[index]}) == 59 || inline_assembly_ascii_whitespace(bytes[index]) -> break
             index += 1
         }
         end := index
         loop index < bytes.len() {
-            if Int.from_u8(bytes[index]) == 10 -> break
+            if (Int{bytes[index]}) == 10 -> break
             index += 1
         }
         if end == start || inline_assembly_x64_label(bytes, start, end) -> next
@@ -333,10 +333,10 @@ inline_assembly_x64_unencoded: fn(body: String) -> [InlineAsmUnencoded] Never! {
 
 // Whether `bytes[start..<end]` is a numeric label: digits, then one `:`.
 inline_assembly_x64_label: fn(bytes: [U8], start: Int, end: Int) -> Bool Never! {
-    if end - start < 2 || Int.from_u8(bytes[end - 1]) != 58 -> return false
+    if end - start < 2 || (Int{bytes[end - 1]}) != 58 -> return false
     index := start
     loop index < end - 1 {
-        code := Int.from_u8(bytes[index])
+        code := Int{bytes[index]}
         if code < 48 || code > 57 -> return false
         index += 1
     }

@@ -46,16 +46,16 @@ s2_syntax_forbidden: fn(line: String, needle: String) -> Bool {
     offset := 0
     raw: line.bytes()
     width: needle.bytes().len()
-    last: Int.from_u8(needle.bytes()[width - 1])
+    last: Int{needle.bytes()[width - 1]}
     marker: needle.starts_with("#") || needle.starts_with("@")
     loop {
         index: s2_syntax_parse.find_from(line, needle, offset)
         if index < 0 -> return false
         offset = index + width
-        if index > 0 && s2_syntax_ident_byte(Int.from_u8(raw[index - 1])) -> next
+        if index > 0 && s2_syntax_ident_byte(Int{raw[index - 1]}) -> next
         if index >= 16 && policy_slice_bytes(line, index - 16, index) == "display_query: \"" -> next
         if offset < raw.len() {
-            after: Int.from_u8(raw[offset])
+            after: Int{raw[offset]}
             if s2_syntax_ident_byte(last) && (s2_syntax_ident_byte(after) || after == 45) -> next
             if marker && after == 46 -> next
         }

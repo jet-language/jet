@@ -97,7 +97,7 @@ DecodePair: struct {
 
 decode_cp: fn(raw: [U8], i: Int) -> DecodePair {
     if i >= raw.len() -> return DecodePair{cp: 0, next: i}
-    first: Int.from_u8(raw[i])
+    first: Int{raw[i]}
     if first < 128 -> return DecodePair{cp: first, next: i + 1}
 
     width := 0
@@ -116,7 +116,7 @@ decode_cp: fn(raw: [U8], i: Int) -> DecodePair {
     }
     if width == 0 || i + width > raw.len() -> return DecodePair{cp: 65533, next: i + 1}
 
-    second: Int.from_u8(raw[i + 1])
+    second: Int{raw[i + 1]}
     // Reject overlong encodings and UTF-16 surrogate prefixes before the
     // continuation loop so malformed bytes consume one byte at a time.
     if (first == 224 && second < 160) || (first == 237 && second >= 160) {
@@ -128,7 +128,7 @@ decode_cp: fn(raw: [U8], i: Int) -> DecodePair {
 
     k := 1
     loop k < width {
-        byte: Int.from_u8(raw[i + k])
+        byte: Int{raw[i + k]}
         if byte < 128 || byte >= 192 -> return DecodePair{cp: 65533, next: i + 1}
         cp = ((cp << 6)).bit_or(((byte).bit_and(63)))
         k += 1

@@ -34,7 +34,7 @@ publication_validate_oci_digest: fn(value: String) IOError! {
     digest_hex: value.removeprefix("sha256-")
     if digest_hex.bytes().len() != 64 -> return Err(publication_invalid_oci("OCI referrer subject is not a complete sha256- digest"))
     loop byte in digest_hex.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if !((code >= 48 && code <= 57) || (code >= 65 && code <= 70) || (code >= 97 && code <= 102)) -> return Err(publication_invalid_oci("OCI referrer subject is not a complete sha256- digest"))
     }
 }
@@ -135,7 +135,7 @@ publication_oci_sbom_bound: fn(sbom: String, entry: PublicationIndexEntry) -> Bo
 }
 publication_validate_evidence_value: fn(value: String, label: String) IOError! {
     loop byte in value.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if code == 10 || code == 13 -> return Err(publication_invalid_oci("registry {label} contains a line break"))
     }
 }

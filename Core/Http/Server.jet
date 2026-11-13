@@ -812,7 +812,7 @@ __valid_request_id: fn(id: String) -> Bool Never! {
     raw: id.bytes()
     if raw.len() == 0 || raw.len() > C_MAX_REQUEST_ID_BYTES -> return false
     loop b in raw {
-        n: Int.from_u8(b)
+        n: Int{b}
         if n < 33 || n > 126 -> return false
     }
     true
@@ -911,7 +911,7 @@ __text_less: fn(left: String, right: String) -> Bool Never! {
     b: right.bytes()
     i := 0
     loop i < a.len() && i < b.len() {
-        if a[i] != b[i] -> return Int.from_u8(a[i]) < Int.from_u8(b[i])
+        if a[i] != b[i] -> return (Int{a[i]}) < (Int{b[i]})
         i = i + 1
     }
     a.len() < b.len()
@@ -959,7 +959,7 @@ __route_problem: fn(problem: String) -> __HTTPParsedRoute Never! {
 __route_name_ok: fn(name: [U8]) -> Bool Never! {
     if name.len() == 0 -> return false
     loop i in 0..<name.len() {
-        n: Int.from_u8(name[i])
+        n: Int{name[i]}
         letter: (n >= 65 && n <= 90) || (n >= 97 && n <= 122) || n == 95
         digit: n >= 48 && n <= 57
         if !letter && (i == 0 || !digit) -> return false
@@ -982,7 +982,7 @@ __route_parse: fn(pattern: String) -> __HTTPParsedRoute Never! {
             if piece.len() == 0 -> return __route_problem("empty path segment")
             if closed -> return __route_problem("a catch-all must be the last segment")
             if http.index_byte(piece, 123) >= 0 || http.index_byte(piece, 125) >= 0 -> return __route_problem("braces are not route syntax; write `:name`")
-            first: Int.from_u8(piece[0])
+            first: Int{piece[0]}
             if first == 58 || first == 42 {
                 name_bytes: piece.slice(1, piece.len())
                 if !__route_name_ok(name_bytes) -> return __route_problem("a parameter needs a name of letters, digits and `_`")
@@ -1443,7 +1443,7 @@ __forbidden_trailer: fn(lower: String) -> Bool Never! {
 // One `name: value` field line, or `None` when it is malformed.
 __field_line: fn(raw: [U8]) -> Header? Never! {
     if raw.len() == 0 -> return None
-    first: Int.from_u8(raw[0])
+    first: Int{raw[0]}
     if first == 32 || first == 9 -> return None
     col: http.index_byte(raw, 58)
     if col <= 0 -> return None

@@ -5006,11 +5006,11 @@ ir_x64_test_sha_line: fn(line: String) -> [U8] Never! {
 ir_x64_test_jcc_target: fn(code: [U8], at: Int) -> Int Never! {
     if code[at] == 0x0f {
         rel := 0
-        loop k in 0..<4 -> rel = rel.bit_or(Int.from_u8(code[at + 2 + k]) << (8 * k))
+        loop k in 0..<4 -> rel = rel.bit_or(Int{code[at + 2 + k]} << (8 * k))
         if rel >= 2147483648 -> rel -= 4294967296
         return at + 6 + rel
     }
-    rel: Int.from_u8(code[at + 1])
+    rel: Int{code[at + 1]}
     at + 2 + (if rel >= 128 -> rel - 256 else -> rel)
 }
 
@@ -5331,7 +5331,7 @@ ir_x64_test_jcc_target: fn(code: [U8], at: Int) -> Int Never! {
     assert_eq(limbs.len(), 16)
     loop (index, limb) in expected {
         value := 0
-        loop k in 0..<4 -> value = value.bit_or(Int.from_u8(limbs[4 * index + k]) << (8 * k))
+        loop k in 0..<4 -> value = value.bit_or(Int{limbs[4 * index + k]} << (8 * k))
         assert_eq(value, limb)
     }
 }

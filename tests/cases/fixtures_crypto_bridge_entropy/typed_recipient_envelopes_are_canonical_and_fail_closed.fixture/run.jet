@@ -19,8 +19,8 @@ hex: fn(text: String) -> [U8] {
     raw: text.bytes()
     out := [U8]{}
     loop i in 0..<(raw.len() /% 2) {
-        a: Int.from_u8(raw[2 * i])
-        b: Int.from_u8(raw[2 * i + 1])
+        a: Int{raw[2 * i]}
+        b: Int{raw[2 * i + 1]}
         high: if a <= 57 -> a - 48 else -> a - 87
         low: if b <= 57 -> b - 48 else -> b - 87
         out.push((U8{high * 16 + low}))
@@ -29,7 +29,7 @@ hex: fn(text: String) -> [U8] {
 }
 little: fn(bytes: [U8], at: Int, width: Int) -> Int {
     out := 0
-    loop i in 0..<width -> out = out.bit_or(Int.from_u8(bytes[at + i]) << (8 * i))
+    loop i in 0..<width -> out = out.bit_or(Int{bytes[at + i]} << (8 * i))
     out
 }
 store_little: fn(bytes: &[U8], at: Int, width: Int, value: Int) {
@@ -56,7 +56,7 @@ store_little: fn(bytes: &[U8], at: Int, width: Int, value: Int) {
     }
     tampered := bytes.copy()
     last: tampered.len() - 1
-    tampered[last] = (U8{Int.from_u8(tampered[last]).bit_xor(1)})
+    tampered[last] = (U8{Int{tampered[last]}.bit_xor(1)})
     if crypto.open(alice, crypto.Sealed{bytes: tampered}, aad) == {
         .Ok(_) -> panic("tampered envelope opened")
         .Err(error) -> assert_eq(error, crypto.CryptoError.OpenFailed)

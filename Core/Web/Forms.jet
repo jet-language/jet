@@ -670,7 +670,7 @@ wire_index: fn(fields: [WebFormFieldSpec], wire_name: String) -> Int Never! {
 find_byte: fn(text: String, wanted: Int) -> Int Never! {
     raw := text.bytes()
     loop i in 0..<raw.len() {
-        if Int.from_u8(raw[i]) == wanted -> return i
+        if (Int{raw[i]}) == wanted -> return i
     }
     -1
 }
@@ -692,7 +692,7 @@ split_amp: fn(text: String) -> [String] Never! {
 url_encode: fn(text: String) -> String Never! {
     out := ""
     loop b in text.bytes() {
-        n: Int.from_u8(b)
+        n: Int{b}
         if (n >= 65 && n <= 90) || (n >= 97 && n <= 122) || (n >= 48 && n <= 57) || n == 45 || n == 46 || n == 95 || n == 126 {
             ch := String.from_bytes([U8]{b}) ?? ""
             out = "{out}{ch}"
@@ -764,7 +764,7 @@ valid_name: fn(text: String) -> Bool Never! {
     raw := text.bytes()
     if raw.len() == 0 || raw.len() > 128 -> return false
     loop b in raw {
-        n: Int.from_u8(b)
+        n: Int{b}
         if n < 33 || n == 127 || n == 38 || n == 61 -> return false
     }
     true
@@ -779,7 +779,7 @@ contains_name: fn(names: [String], value: String) -> Bool Never! {
 
 has_control_text: fn(text: String) -> Bool Never! {
     loop b in text.bytes() {
-        n: Int.from_u8(b)
+        n: Int{b}
         if n < 32 || n == 127 -> return true
     }
     false
@@ -791,7 +791,7 @@ hex: fn(n: Int) -> String Never! {
 }
 
 hex_value: fn(b: U8) -> Int Never! {
-    n: Int.from_u8(b)
+    n: Int{b}
     if n >= 48 && n <= 57 -> return n - 48
     if n >= 65 && n <= 70 -> return n - 55
     if n >= 97 && n <= 102 -> return n - 87

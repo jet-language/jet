@@ -82,7 +82,7 @@ store_quota_configured_limit: fn(roots: HangarRoots) -> Int StoreError! {
     trimmed: value.trim()
     digits: trimmed.removeprefix("+")
     loop byte in digits.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if code < 48 || code > 57 -> return Err(StoreError.InvalidInput(message))
     }
     limit: Int.parse(digits) ?? return Err(StoreError.InvalidInput(message))

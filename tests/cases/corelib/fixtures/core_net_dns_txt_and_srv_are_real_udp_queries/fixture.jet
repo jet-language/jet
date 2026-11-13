@@ -26,7 +26,7 @@ fixture_u16: fn(out: &[U8], n: Int) {
 fixture_question_end: fn(query: [U8]) -> Int {
     pos := 12
     loop pos < query.len() && query[pos] != (U8{0}) {
-        pos += Int.from_u8(query[pos]) + 1
+        pos += Int{query[pos]} + 1
     }
     pos + 5
 }
@@ -52,7 +52,7 @@ fixture_header: fn(query: [U8], flags: Int, answers: Int, authorities: Int, addi
 }
 fixture_response: fn(query: [U8]) -> [U8] {
     end: fixture_question_end(query)
-    qtype: Int.from_u8(query[end - 4]) * 256 + Int.from_u8(query[end - 3])
+    qtype: Int{query[end - 4]} * 256 + Int{query[end - 3]}
     out := fixture_header(query, 0x8180, 1, 0, 0)
     out.push(U8{0xc0})
     out.push(U8{0x0c})

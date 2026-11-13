@@ -73,7 +73,7 @@ env_lock_sanitize_scope: fn(scope: String) -> String Never! {
     loop scalar in scope.chars() {
         text: "{scalar}"
         bytes: text.bytes()
-        keep: bytes.len() == 1 && env_lock_scope_byte(Int.from_u8(bytes[0]))
+        keep: bytes.len() == 1 && env_lock_scope_byte(Int{bytes[0]})
         out.push(if keep -> text else -> "_")
     }
     if out.len() == 0 -> return "global"

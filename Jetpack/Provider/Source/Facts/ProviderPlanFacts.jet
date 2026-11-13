@@ -78,7 +78,7 @@ provider_lines: fn(raw: String) -> [String] Never! {
         segment: segments[index]
         bytes: segment.bytes()
         before_newline: index < segments.len() - 1
-        if before_newline && bytes.len() > 0 && Int.from_u8(bytes[bytes.len() - 1]) == 13 {
+        if before_newline && bytes.len() > 0 && (Int{bytes[bytes.len() - 1]}) == 13 {
             lines.push(pkg_bytes_text(bytes, 0, bytes.len() - 1))
             next
         }
@@ -92,7 +92,7 @@ provider_plan_hex: fn(value: String) -> String Never! {
     digits: "0123456789abcdef".bytes()
     out := [U8]{}
     loop byte in value.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         out.push(digits[code >> 4])
         out.push(digits[(code).bit_and(15)])
     }
@@ -105,8 +105,8 @@ provider_plan_unhex: fn(value: String) -> String ProviderPlanFactsError! {
     bytes := [U8]{}
     index := 0
     loop index < raw.len() {
-        high: provider_plan_nibble(Int.from_u8(raw[index]))
-        low: provider_plan_nibble(Int.from_u8(raw[index + 1]))
+        high: provider_plan_nibble(Int{raw[index]})
+        low: provider_plan_nibble(Int{raw[index + 1]})
         bytes.push(U8{high * 16 + low})
         index += 2
     }

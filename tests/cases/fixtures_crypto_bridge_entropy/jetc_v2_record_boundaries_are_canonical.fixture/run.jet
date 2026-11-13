@@ -10,7 +10,7 @@ use {
 Record: struct { length: Int, flags: Int }
 little: fn(bytes: [U8], start: Int, count: Int) -> Int {
     value := 0
-    loop i in 0..<count -> value = value.bit_or(Int.from_u8(bytes[start + i]) << (8 * i))
+    loop i in 0..<count -> value = value.bit_or(Int{bytes[start + i]} << (8 * i))
     value
 }
 plain_length: fn(body: Int) -> Int? {
@@ -41,7 +41,7 @@ plain_length: fn(body: Int) -> Int? {
         records := [Record]{}
         loop at < encoded.len() {
             length: little(encoded, at, 4)
-            flags: Int.from_u8(encoded[at + 4])
+            flags: Int{encoded[at + 4]}
             assert((flags == 0 && length == 1048576) || (flags == 1 && length < 1048576))
             records.push(Record{length: length, flags: flags})
             at += 5 + length + 16

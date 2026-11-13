@@ -77,7 +77,7 @@ run: fn() {
     print("reader: equal {from_file == expected}")
 
     corrupt := big.copy()
-    corrupt[corrupt.len() - 2] = U8{(Int.from_u8(corrupt[corrupt.len() - 2]) + 1) % 256}
+    corrupt[corrupt.len() - 2] = U8{(Int{corrupt[corrupt.len() - 2]} + 1) % 256}
     if zstd.decompress(corrupt) == {
         .Ok(_) -> print("corrupt checksum: accepted")
         .Err(error) -> print("corrupt checksum: {error == .Checksum}")

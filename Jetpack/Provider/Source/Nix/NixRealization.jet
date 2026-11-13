@@ -463,7 +463,7 @@ provider_parse_u64: fn(text: String) -> Int? Never! {
     raw: digits.bytes()
     if raw.len() == 0 -> return None
     loop byte in raw {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if code < 48 || code > 57 -> return None
     }
     parsed: Int.parse(digits) ?? return None
@@ -475,7 +475,7 @@ provider_is_lower_hex: fn(value: String, count: Int) -> Bool Never! {
     raw: value.bytes()
     if raw.len() != count -> return false
     loop byte in raw {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if !((code >= 48 && code <= 57) || (code >= 97 && code <= 102)) -> return false
     }
     true
@@ -797,6 +797,6 @@ provider_nix_store_version: fn(out: String, name: String) -> String Never! {
         }
     }
     bytes: version.bytes()
-    if bytes.len() > 0 && Int.from_u8(bytes[0]) >= 48 && Int.from_u8(bytes[0]) <= 57 -> return version
+    if bytes.len() > 0 && (Int{bytes[0]}) >= 48 && (Int{bytes[0]}) <= 57 -> return version
     ""
 }

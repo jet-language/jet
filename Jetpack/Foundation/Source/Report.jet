@@ -35,10 +35,10 @@ ReportError: struct {
 foundation_text_has_control: fn(value: String) -> Bool Never! {
     raw: value.bytes()
     loop index in 0..<raw.len() {
-        code: Int.from_u8(raw[index])
+        code: Int{raw[index]}
         if code < 32 || code == 127 -> return true
         if code == 0xC2 && index + 1 < raw.len() {
-            next_code: Int.from_u8(raw[index + 1])
+            next_code: Int{raw[index + 1]}
             if next_code >= 0x80 && next_code <= 0x9F -> return true
         }
     }

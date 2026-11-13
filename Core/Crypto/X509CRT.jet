@@ -156,7 +156,7 @@ x509_crt_get_dates: fn(data: [U8], p: &Int, end: Int) -> (from: x509.X509Time, t
 // when absent.
 x509_crt_get_uid: fn(data: [U8], p: &Int, end: Int, n: Int) -> asn1.ASN1Buf x509.X509Error! {
     if p == end -> return Ok(asn1.asn1_none())
-    tag_id: Int.from_u8(data[p])
+    tag_id: Int{data[p]}
     if asn1.get_tag(data, p, end, x509.x509_explicit(n)) == {
         .Ok(len) -> {
             uid: asn1.ASN1Buf{tag_id: tag_id, p: p, len: len}
@@ -698,9 +698,9 @@ x509_profile_check_key: fn(profile: X509CrtProfile, key: pk.PKContext) -> Bool N
 x509_memcasecmp: fn(a: [U8], a_at: Int, b: [U8], b_at: Int, len: Int) -> Bool Never! {
     loop i in 0..<len {
         x: a[a_at + i]
-        diff: Int.from_u8(x.bit_xor(b[b_at + i]))
+        diff: Int{x.bit_xor(b[b_at + i])}
         if diff == 0 -> next
-        c: Int.from_u8(x)
+        c: Int{x}
         letter: (c >= 97 && c <= 122) || (c >= 65 && c <= 90)
         if diff != 32 || !letter -> return false
     }
@@ -794,7 +794,7 @@ x509_crt_check_cn: fn(name: [U8], cn: [U8]) -> Bool Never! {
 // The byte at src[p], 0 past the end, as the NUL that ends a C string.
 x509_cn_byte: fn(src: [U8], p: Int) -> Int Never! {
     if p >= src.len() -> return 0
-    Int.from_u8(src[p])
+    Int{src[p]}
 }
 
 // x509_inet_pton_ipv4: a dotted-quad IPv4 address from src[start..] to its
@@ -855,8 +855,8 @@ x509_inet_pton_ipv6: fn(src: [U8]) -> [U8]? Never! {
                 p += 1
                 nonzero_groups -= 1
                 v4: x509_inet_pton_ipv4(src, p) ?? break
-                groups[nonzero_groups] = Int.from_u8(v4[0]) * 256 + Int.from_u8(v4[1])
-                groups[nonzero_groups + 1] = Int.from_u8(v4[2]) * 256 + Int.from_u8(v4[3])
+                groups[nonzero_groups] = Int{v4[0]} * 256 + Int{v4[1]}
+                groups[nonzero_groups + 1] = Int{v4[2]} * 256 + Int{v4[3]}
                 nonzero_groups += 2
                 p = src.len()
                 break

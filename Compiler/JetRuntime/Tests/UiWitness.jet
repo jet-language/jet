@@ -121,7 +121,7 @@ same_bytes: fn(left: [U8], right: [U8]) -> Bool Never! {
 json_text: fn(text: String) -> String Never! {
     out := ""
     loop byte in text.bytes() {
-        code: Int.from_u8(byte)
+        code: Int{byte}
         if code == 34 -> out = "{out}\\\""
         else if code == 92 -> out = "{out}\\\\"
         else -> out = "{out}{String.from_bytes_lossy([U8]{byte})}"
@@ -169,12 +169,12 @@ write_file: fn(path: String, bytes: [U8]) -[FS, IO]> Bool Never! {
     }
 }
 
-byte: fn(value: Int) -> U8 Never! { U8.from_int(value) ?? U8{0} }
+byte: fn(value: Int) -> U8 Never! { checked(U8{value}) ?? U8{0} }
 
 hex_value: fn(text: String) -> Int Never! {
     value := 0
     loop digit in text.bytes() {
-        code: Int.from_u8(digit)
+        code: Int{digit}
         value = value * 16 + (if code >= 97 -> code - 87 else if code >= 65 -> code - 55 else -> code - 48)
     }
     value

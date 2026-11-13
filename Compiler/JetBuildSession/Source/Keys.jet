@@ -110,7 +110,7 @@ build_key_debug_text: fn(value: String) -> String Never! {
     position := 0
     loop position < raw.len() {
         start: position
-        first: Int.from_u8(raw[position])
+        first: Int{raw[position]}
         position += 1
         scalar := first
         remaining := 0
@@ -125,7 +125,7 @@ build_key_debug_text: fn(value: String) -> String Never! {
             remaining = 1
         }
         loop remaining > 0 {
-            scalar = scalar * 64 + (Int.from_u8(raw[position]).bit_and(63))
+            scalar = scalar * 64 + (Int{raw[position]}.bit_and(63))
             position += 1
             remaining -= 1
         }
